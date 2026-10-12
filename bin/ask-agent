@@ -1,0 +1,3 @@
+#!/bin/sh
+if [ -n "$JWIC_NODE" ]; then ELECTRON_RUN_AS_NODE=1 exec "$JWIC_NODE" "$(dirname "$0")/ask-agent.js" "$@"; fi
+exec node "$(dirname "$0")/ask-agent.js" "$@"

@@ -1,0 +1,48 @@
+# Dependências do Node.js
+node_modules/
+package-lock.json.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Sistema Operacional & Arquivos Temporários
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.temp
+$RECYCLE.BIN/
+
+# Atalhos locais do Windows (gerados dinamicamente via 'npm run shortcut')
+*.lnk
+
+# Modelos neurais do Whisper (grandes arquivos binários baixados sob demanda)
+# O modelo ggml-large-v3-turbo.bin possui ~1.6 GB e é baixado na 1ª execução
+whisper/models/*.bin
+!whisper/models/README.md
+!whisper/models/.gitkeep
+
+# Arquivos temporários e binários pesados de GPU baixados pelo app
+whisper/*.zip
+whisper/bin-cuda/
+
+# Código-fonte externo do whisper.cpp e pastas de compilação intermediária
+whisper/src/
+
+# Dados de execução local e retenção do usuário (anexos efêmeros, prints, sessões)
+dados/anexos/*
+!dados/anexos/.gitkeep
+dados/prompts/*
+!dados/prompts/.gitkeep
+dados/sessions.json
+!dados/README.md
+
+# Logs e variáveis de ambiente locais
+*.log
+.env
+.env.local
+
+# Ambientes de desenvolvimento e IDEs
+.vscode/
+.idea/
+.gemini/

@@ -1,0 +1,36 @@
+{
+  "name": "commanddeck",
+  "productName": "CommandDeck Terminal",
+  "version": "0.1.0",
+  "description": "CommandDeck Terminal: terminal que roda os CLIs oficiais do Claude Code e do Antigravity lado a lado e permite que conversem entre si.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "shortcut": "powershell -ExecutionPolicy Bypass -File scripts/create-shortcut.ps1"
+  },
+  "keywords": [
+    "electron",
+    "terminal",
+    "claude-code",
+    "antigravity",
+    "ai-agents",
+    "multi-agent",
+    "conpty",
+    "xterm",
+    "whisper",
+    "voice-to-text"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@lydell/node-pty": "1.1.0",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0"
+  },
+  "devDependencies": {
+    "electron": "33.2.1"
+  },
+  "allowScripts": {
+    "electron@33.2.1": true
+  }
+}
