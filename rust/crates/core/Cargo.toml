@@ -22,6 +22,14 @@ notify.workspace = true
 which.workspace = true
 dirs.workspace = true
 log.workspace = true
+getrandom = "0.4"
+png = "0.18"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+open = "5"
+unicode-normalization = "0.1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
