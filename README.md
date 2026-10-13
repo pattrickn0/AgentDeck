@@ -15,6 +15,8 @@
 
 </div>
 
+> **Versão nativa em Rust (winit):** em desenvolvimento na pasta [`rust/`](rust/README.md), com as mesmas funções e o mesmo visual, sem Electron/Node.
+
 ---
 
 ## 💡 O Que é o CommandDeck?
