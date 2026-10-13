@@ -6,7 +6,7 @@ Este diretório serve como o **espaço de trabalho de desenvolvimento (sandbox) 
 
 ## 🛡️ Princípio de Isolamento
 
-Para evitar que os agentes executem alterações acidentais nos arquivos de infraestrutura da própria aplicação CommandDeck (`main.js`, `preload.js`, `renderer/`), todas as instâncias de terminal dos agentes são inicializadas por padrão com o diretório de trabalho apontado para esta pasta (`workspace/`).
+Para evitar que os agentes executem alterações acidentais nos arquivos de infraestrutura da própria aplicação CommandDeck (`crates/`, `Cargo.toml`), todas as instâncias de terminal dos agentes são inicializadas por padrão com o diretório de trabalho apontado para esta pasta (`workspace/`).
 
 - Qualquer arquivo, script, repositório ou código gerado pelas IAs durante seus testes ou tarefas será criado aqui.
 - O workspace pode ser alterado a qualquer momento nas configurações do CommandDeck para apontar para qualquer projeto do seu disco rígido.

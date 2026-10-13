@@ -1,7 +1,6 @@
-# CommandDeck Terminal — versão nativa em Rust (winit)
+# Arquitetura do CommandDeck Terminal
 
-Reescrita da aplicação Electron (`../main.js`, `../ollamaAgent.js`, `../renderer/`, `../bin/`)
-com **as mesmas funções e o mesmo visual**, em Rust nativo.
+Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com as mesmas funções e o mesmo visual.)
 
 ## Stack (decisões do Lead)
 
@@ -13,38 +12,42 @@ com **as mesmas funções e o mesmo visual**, em Rust nativo.
 | Ponte HTTP | **tiny_http** (thread por requisição) | mesma API `/agents` e `/ask`, token + validação de Host |
 | Cliente HTTP | **ureq** (Ollama `/api/chat`, `/api/tags`, downloads) | bloqueante e simples, roda em threads |
 | Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
-| Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários existentes em `../whisper`) | |
+| Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
 
 Sem Node/Electron em runtime: `ask-agent` e `ollama-agent` viram binários Rust ao lado do app.
 
 ## Crates
 
 ```
-rust/
-├── crates/core   commanddeck-core   backend sem GUI (main.js + ollamaAgent.js)
-├── crates/app    commanddeck        UI winit+egui (renderer/ + preload.js)
-└── crates/cli    commanddeck-cli    bins ask-agent e ollama-agent (bin/)
+(raiz)
+├── crates/core   commanddeck-core   backend sem GUI
+├── crates/app    commanddeck        UI winit+egui
+└── crates/cli    commanddeck-cli    bins ask-agent e ollama-agent
 ```
 
 A UI fala com o backend apenas via `commanddeck_core::Core` (métodos ≈ canais IPC) e recebe
 `CoreEvent` por um `crossbeam_channel::Receiver`, com um `Waker` que acorda o loop do winit
 (`EventLoopProxy`). Operações bloqueantes (listar agentes, mesa, transcrição) rodam em threads.
 
-### Mapa IPC (Electron) → Rust
-
-| Electron | Rust |
-| :-- | :-- |
-| `pty:spawn/write/resize/kill/submit` | `Core::spawn_spec(kind)` + PTY gerenciado na UI (`app/src/terminal`) |
-| `feed`, `workspace:changed` | `CoreEvent::Feed`, `CoreEvent::WorkspaceChanged` |
-| `table:run` / `table:stop` | `Core::run_table` / `Core::stop_table` |
-| `attach:*` | `Core::attach_files`, `attach_bytes`, `attach_rgba_png` |
-| `audio:engine` / `audio:transcribe` | `Core::transcribe_engine`, `Core::transcribe_pcm16k` |
-| `agents:list` | `Core::list_agents` |
-| `workspace:get/pick/readDir/openPath` | `Core::workspace`, `set_workspace`, `read_dir`, `open_path` |
-| `config:get/save` | `Core::config`, `Core::update_config` |
-
 ## Ponto de extensão para RAG (futuro)
 
 `core::context::ContextProvider` — hoje vazio. O motor Ollama e o executor headless
 consultam os provedores registrados antes de enviar o prompt; plugar RAG local/remoto
 não exige alterar o resto do sistema.
+
+## Protocolo entre agentes (`ask-agent`)
+
+Cada aba recebe no ambiente: `JWIC_PORT` (porta da ponte), `JWIC_TOKEN` (token de 128 bits por sessão),
+`JWIC_AGENT` (nome do agente da aba), `JWIC_DEPTH` (profundidade de chamadas) e a pasta dos
+executáveis no início do `PATH`.
+
+| Rota | Descrição |
+| :-- | :-- |
+| `GET /agents` | `{"agents": [...]}` com os agentes instalados |
+| `POST /ask` | `{"from","to","message","depth"}` → `{"answer"}`; 400 para agente desconhecido, auto-pergunta ou `depth >= 2`; 403 para token/Host inválido; 500 em erro/timeout (10 min) |
+
+Toda requisição exige o cabeçalho `x-jwic-token`. Pedidos ao mesmo par `de->para` são
+serializados, e o histórico de cada par é mantido entre chamadas: `--session-id`/`--resume` no
+Claude, `--conversation` no Antigravity, e memória em processo no Ollama.
+
+`ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do CommandDeck).

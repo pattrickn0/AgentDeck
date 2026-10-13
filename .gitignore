@@ -1,9 +1,5 @@
-# Dependências do Node.js
-node_modules/
-package-lock.json.bak
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Build do Rust
+target/
 
 # Sistema Operacional & Arquivos Temporários
 .DS_Store
@@ -13,8 +9,6 @@ desktop.ini
 *.temp
 $RECYCLE.BIN/
 
-# Atalhos locais do Windows (gerados dinamicamente via 'npm run shortcut')
-*.lnk
 
 # Modelos neurais do Whisper (grandes arquivos binários baixados sob demanda)
 # O modelo ggml-large-v3-turbo.bin possui ~1.6 GB e é baixado na 1ª execução

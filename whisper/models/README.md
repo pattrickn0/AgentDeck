@@ -15,7 +15,7 @@ Este diretório armazena os pesos pré-treinados dos modelos neurais Whisper no 
 ## ⚡ Como Obter o Modelo
 
 ### 1. Download Automático (Recomendado)
-Você não precisa baixar o modelo manualmente! Ao iniciar o CommandDeck Terminal pela primeira vez (`npm start`), a aplicação verifica a existência de `whisper/models/ggml-large-v3-turbo.bin`. Se não o encontrar, ela inicia o download em segundo plano automaticamente exibindo o progresso em tempo real na interface gráfica.
+Você não precisa baixar o modelo manualmente! Ao iniciar o CommandDeck Terminal pela primeira vez (`commanddeck.exe`), a aplicação verifica a existência de `whisper/models/ggml-large-v3-turbo.bin`. Se não o encontrar, ela inicia o download em segundo plano automaticamente exibindo o progresso em tempo real na interface gráfica.
 
 ### 2. Download Manual (Ambientes Offline / Conexões Lentas)
 Caso prefira baixar previamente:
