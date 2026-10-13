@@ -26,15 +26,18 @@ flowchart TD
         PTYMgr["Gerenciador de Pseudo-Terminais (node-pty + Throttle)"]
         HTTPBridge["Servidor HTTP Local (Bridge com Fila Serial)"]
         HeadlessRunner["Executor Headless (spawn -p com Timeout de 10m)"]
+        OllamaAgent["Motor de Agente Ollama com Tool Calling (ollamaAgent.js)"]
         WhisperSub["Subsistema Whisper.cpp (CUDA/Vulkan/CPU + Purge de WAV)"]
         FSWatcher["Monitor de Arquivos (fs.watch)"]
         ConfigMgr["Gerenciador de Configuração (config.json)"]
         SessionMgr["Gerenciador de Retenção de 5 Sessões"]
     end
 
-    subgraph External ["Processos do Sistema Operacional"]
+    subgraph External ["Processos e Serviços"]
         ClaudeCLI["Claude Code CLI (claude.exe)"]
         AgyCLI["Antigravity CLI (agy.exe)"]
+        OllamaCLI["CLI Interativo bin/ollama-agent.js"]
+        OllamaAPI["Ollama Local API (127.0.0.1:11434)"]
         ShellCLI["PowerShell (powershell.exe)"]
         AskAgent["Utilitário CLI ask-agent"]
         WhisperBinary["whisper-cli.exe + DLLs"]
@@ -48,14 +51,19 @@ flowchart TD
 
     PTYMgr -->|ConPTY / Win32| ClaudeCLI
     PTYMgr -->|ConPTY / Win32| AgyCLI
+    PTYMgr -->|ConPTY / Win32| OllamaCLI
     PTYMgr -->|ConPTY / Win32| ShellCLI
 
     ClaudeCLI -.->|Executa no Shell| AskAgent
     AgyCLI -.->|Executa no Shell| AskAgent
+    OllamaCLI -.->|Executa no Shell| AskAgent
     AskAgent -->|HTTP POST /ask| HTTPBridge
     HTTPBridge --> HeadlessRunner
     HeadlessRunner -->|Spawn -p| ClaudeCLI
     HeadlessRunner -->|Spawn -p| AgyCLI
+    HeadlessRunner -->|Tool Calling HTTP| OllamaAgent
+    OllamaAgent -->|/api/chat| OllamaAPI
+    OllamaCLI -->|Tool Calling Loop| OllamaAgent
 
     WhisperSub -->|Executa| WhisperBinary
 ```
@@ -91,6 +99,15 @@ Quando um agente consulta outro via `ask-agent` ou durante mesas colaborativas:
 - **Workspace Padrão Isolado:** Por padrão, os agentes operam na pasta `workspace/` interna ao diretório da aplicação, impedindo a criação de arquivos fora da pasta do projeto.
 - **Proteção do Diretório Home:** O CommandDeck **nunca cria arquivos `AGENTS.md` na raiz da pasta do usuário (`os.homedir()`)** nem em diretórios de sistema. A injeção de contexto ocorre apenas na pasta de trabalho isolada ou em repositórios onde o arquivo `AGENTS.md` já exista previamente.
 - **Retenção de até 5 Sessões:** Áudios `.wav` são excluídos imediatamente após a transcrição. Prompts e anexos/capturas são retidos para as últimas 5 sessões ativas; resíduos de sessões anteriores são limpos automaticamente na inicialização.
+
+### 5. Motor do Agente Autônomo Ollama (`ollamaAgent.js`)
+Para equipar modelos locais com capacidade de agência equivalente aos CLIs oficiais:
+- **API com Tool Calling:** Conecta-se diretamente a `http://127.0.0.1:11434/api/chat` utilizando o protocolo nativo de Function Calling.
+- **Ferramentas de Workspace:** Fornece um conjunto completo de operações no filesystem (`read_file`, `write_file`, `edit_file`, `list_directory`, `delete_file`) e no terminal PowerShell (`run_command`), com sandbox estrito no diretório do workspace (`resolveWorkspacePath`).
+- **Suporte Multimodal:** Anexos visuais (prints de tela, imagens) são convertidos em base64 e despachados para modelos locais que suportam visão (`qwen3.5:9b`).
+- **Execução Híbrida (Terminal e Headless):**
+  - No terminal interativo (`pty:spawn`), o script `bin/ollama-agent.js` gerencia o loop com saída colorida em tempo real;
+  - No modo headless (`runHeadless`), a função `runOllamaWithTools` resolve a tarefa assincronamente e emite eventos de progresso de ferramentas diretamente para o painel de feed da interface.
 
 ---
 

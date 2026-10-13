@@ -2,16 +2,16 @@
 
 # ⚡ CommandDeck Terminal
 
-**O Terminal Desktop Colaborativo para Claude Code e Google Antigravity**
+**O Terminal Desktop Colaborativo para Claude Code, Google Antigravity e Modelos Locais (Ollama)**
 
-*Execute os CLIs oficiais de inteligência artificial lado a lado em abas interativas reais (ConPTY), permita que conversem e debatam de forma autônoma entre si, dite comandos com Whisper neural 100% local e componha prompts multimodais com arquivos e prints.*
+*Execute os CLIs oficiais de inteligência artificial lado a lado em abas interativas reais (ConPTY), integre modelos locais (Ollama) com execução autônoma de ferramentas, permita que conversem e debatam de forma autônoma entre si, dite comandos com Whisper neural 100% local e componha prompts multimodais.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%20x64-0078D6.svg?logo=windows)](https://microsoft.com/windows)
 [![Electron: 33.2.1](https://img.shields.io/badge/Electron-33.2.1-47848F.svg?logo=electron)](https://www.electronjs.org/)
 [![Terminal: xterm.js](https://img.shields.io/badge/Terminal-xterm.js%205.5-orange.svg)](https://xtermjs.org/)
 [![Whisper: large--v3--turbo](https://img.shields.io/badge/Whisper-large--v3--turbo%20(Local)-green.svg)](https://huggingface.co/ggerganov/whisper.cpp)
-[![Multi-Agent: Claude + Antigravity](https://img.shields.io/badge/Multi--Agent-Claude%20%E2%86%94%20Antigravity-purple.svg)](./bin/README.md)
+[![Multi-Agent: Claude + Antigravity + Ollama](https://img.shields.io/badge/Multi--Agent-Claude%20%E2%86%94%20Antigravity%20%E2%86%94%20Ollama-purple.svg)](./bin/README.md)
 
 </div>
 
@@ -19,28 +19,46 @@
 
 ## 💡 O Que é o CommandDeck?
 
-No desenvolvimento moderno orientado a agentes, desenvolvedores frequentemente utilizam o **Claude Code** (`claude`) para raciocínio analítico, planejamento e refatoração, e o **Google Antigravity** (`agy`) para execução profunda, pesquisa e automação de código. No entanto, esses agentes costumavam operar isolados em janelas separadas de prompt, forçando o desenvolvedor a agir como "copia-e-cola humano" entre eles.
+No desenvolvimento moderno orientado a agentes, desenvolvedores frequentemente utilizam o **Claude Code** (`claude`) para raciocínio analítico e refatoração, o **Google Antigravity** (`agy`) para pesquisa e automação profunda de código, e modelos locais do **Ollama** (`qwen3.5:9b`, `qwen2.5-coder`, `llama3`) para privacidade total e execução offline. No entanto, esses agentes operavam isolados em janelas separadas de prompt, forçando o desenvolvedor a agir como "copia-e-cola humano" entre eles.
 
-O **CommandDeck Terminal** unifica ambos os ecossistemas em uma aplicação desktop nativa construída com Electron, xterm.js e ConPTY. Mais do que apenas colocar terminais lado a lado, o CommandDeck equipa os agentes com um **protocolo de comunicação inter-agente nativo** (`ask-agent`), permitindo que tirem dúvidas, solicitem revisões de código cruzadas e realizem **debates multirrodadas automatizados** para resolver problemas complexos com consenso.
+O **CommandDeck Terminal** unifica esses ecossistemas em uma aplicação desktop nativa construída com Electron, xterm.js e ConPTY. Mais do que apenas colocar terminais lado a lado, o CommandDeck equipa todos os agentes com um **protocolo de comunicação inter-agente nativo** (`ask-agent`), um **motor autônomo de ferramentas para modelos locais** e recursos para realizar **debates multirrodadas automatizados** com acompanhamento em tempo real.
 
 ---
 
 ## 🌟 Principais Recursos
 
 ### 🖥️ Terminais Interativos ConPTY Reais
-- Sessões completas via Windows Pseudo Console (`node-pty` + `xterm.js`) para **Claude Code**, **Antigravity** e **PowerShell Shell**.
+- Sessões completas via Windows Pseudo Console (`node-pty` + `xterm.js`) para **Claude Code**, **Antigravity**, **Ollama** e **PowerShell**.
 - Suporte total a cores ANSI de 24-bit, caracteres interativos de teclado, cursores e redimensionamento fluido com debounce de 60 ms.
-- Gerenciamento intuitivo por abas (`Ctrl+T` para nova aba, `Ctrl+Tab` para alternar).
+- Gerenciamento intuitivo por abas com truncamento inteligente de títulos (`Ctrl+T` para nova aba, `Ctrl+Tab` para alternar).
+- **Persistência de Sessão:** Suas abas abertas e a aba ativa são salvas automaticamente e restauradas ao reabrir a aplicação.
+- **Tela de Início Rápido (Empty State):** Ao fechar todas as abas, um card interativo permite reabrir qualquer agente ou PowerShell com um clique.
+
+### 🦙 Motor de Agente Autônomo Ollama (Modelos Locais com Ferramentas)
+- Conexão nativa com a API local do Ollama (`127.0.0.1:11434/api/chat`) utilizando protocolo de Function Calling.
+- Ferramentas nativas com sandbox estrito no workspace (`resolveWorkspacePath`):
+  - `read_file`: leitura de arquivos com truncamento seguro;
+  - `write_file`: criação e sobrescrita de arquivos e pastas pai;
+  - `edit_file`: edição cirúrgica de trechos de código;
+  - `list_directory`: listagem de arquivos com filtro de ruídos;
+  - `run_command`: execução de comandos PowerShell dentro do projeto;
+  - `delete_file`: exclusão controlada de arquivos.
+- **Suporte Multimodal Local:** Anexos visuais (capturas de tela, imagens) são convertidos em base64 e despachados para modelos com capacidade de visão (`qwen3.5:9b`).
+- **CLI Interativo (`bin/ollama-agent`):** Terminal REPL dedicado com saída colorida em tempo real, memória de sessão e comandos rápidos `/models` e `/switch <modelo>`.
+- **Detecção Instantânea:** Leitura imediata de manifests do disco em ~1ms combinada com sincronização assíncrona da API HTTP (TTL de 15s).
 
 ### 🤖 Colaboração Autônoma Agente ↔ Agente (`ask-agent`)
 - Utilitário de linha de comando nativo (`ask-agent <agente> "mensagem"`) disponível no `PATH` de cada terminal.
-- Claude pode consultar o Antigravity, Antigravity pode consultar o Claude, e o usuário pode consultar qualquer um deles via shell.
-- Suporte a leitura via pipeline de terminal (`cat diff.patch | ask-agent claude -`).
+- Suporta Claude, Antigravity e modelos Ollama (`ask-agent ollama "mensagem"` ou `ask-agent qwen3.5:9b "mensagem"`).
+- Limpeza automática de tags de raciocínio de LLMs (`<think>...</think>`) e formatação ANSI para respostas puras e legíveis.
 - Fila de exclusão mútua assíncrona (mutex) por par de agentes, evitando colisões de estado.
 - Memória contextual preservada por par entre chamadas consecutivas e proteção estrita contra recursão infinita (`MAX_DEPTH = 2`).
+- Protocolo de colaboração contínua: agentes iteram de ponta a ponta sem interrupções desnecessárias ao usuário, que acompanha todo o feed na interface.
 
 ### 🏛️ Mesas de Orquestração e Debates Automatizados
-- Conduza debates estruturados em $N$ rodadas entre Claude Code e Antigravity sobre qualquer tema de arquitetura, refatoração ou depuração.
+- Conduza debates estruturados em $N$ rodadas entre quaisquer agentes (Claude ↔ Antigravity, Claude ↔ Ollama, Antigravity ↔ Ollama ou debates locais).
+- Suporte a envio de anexos multimodais nas mesas de discussão.
+- Seletor de alvos estruturado com grupos (`Destinatários Diretos` vs `Mesas de Orquestração`).
 - Acompanhamento do diálogo em tempo real com stream de eventos na área "Conversa integrada".
 - Síntese executiva final consolidada automaticamente pelo agente moderador ao término das rodadas.
 
@@ -53,7 +71,7 @@ O **CommandDeck Terminal** unifica ambos os ecossistemas em uma aplicação desk
   3. ⚪ **CPU AVX2:** Fallback multithread universal com OpenMP.
 - **Privacidade Absoluta e Retenção Zero:** Nenhum dado sai do seu computador. O arquivo `.wav` de áudio é **excluído imediatamente do disco** no milissegundo em que o texto é transcrito.
 - **Botão de Cancelamento de Gravação:** Botão integrado com ícone `×` ao lado do microfone para abortar instantaneamente falas incorretas sem processamento.
-- **Normalização Fonética:** Prompt contextual customizado para garantir acurácia em termos técnicos ("Claude", "Antigravity", "Vulkan", "CLI", "ConPTY").
+- **Normalização Fonética:** Prompt contextual customizado para garantir acurácia em termos técnicos ("Claude", "Antigravity", "Ollama", "Vulkan", "CLI", "ConPTY").
 
 ### 📎 Compositor Multimodal Avançado
 - Anexação de arquivos via botão de clipe com cópia assíncrona não bloqueante.
@@ -62,7 +80,7 @@ O **CommandDeck Terminal** unifica ambos os ecossistemas em uma aplicação desk
 - Retenção inteligente limitada às 5 últimas sessões, com purga automática de arquivos legados.
 
 ### 📂 Explorador de Arquivos Integrado
-- Painel lateral retrátil (`Ctrl+B`) exibindo a árvore de diretórios do workspace em tempo real.
+- Painel lateral retrátil (`Ctrl+B`) exibindo a árvore de diretórios do workspace em tempo real com monitoramento inteligente (`fs.watch` com debounce e filtros).
 - Badges visuais coloridos por extensão de arquivo (`.js`, `.ts`, `.py`, `.md`, `.json`, etc.).
 - Debounce anti-duplicação de cliques no mouse:
   - **1 clique:** Insere `@caminho/do/arquivo` diretamente na caixa de composição.
@@ -86,6 +104,11 @@ Certifique-se de ter os seguintes componentes instalados:
      ```powershell
      irm https://antigravity.google/cli/install.ps1 | iex
      agy login
+     ```
+   - **Ollama (Opcional — para modelos 100% locais):**
+     Baixe e instale em [ollama.com](https://ollama.com/download), em seguida baixe o modelo desejado:
+     ```powershell
+     ollama pull qwen3.5:9b
      ```
 
 ### Instalação e Execução
@@ -133,11 +156,14 @@ flowchart TD
         BridgeServer["Servidor HTTP Bridge (127.0.0.1:JWIC_PORT)"]
         WhisperSubsystem["Subsistema de Inferência Whisper.cpp"]
         FSManager["Gerenciador de Workspace e Sessões"]
+        OllamaAgent["Motor do Agente Ollama (Tool Calling)"]
     end
 
-    subgraph Agents ["Agentes Oficiais & CLIs"]
+    subgraph Agents ["Agentes & Serviços"]
         ClaudeCLI["Claude Code CLI (claude)"]
         AgyCLI["Antigravity CLI (agy)"]
+        OllamaCLI["CLI Interativo bin/ollama-agent"]
+        OllamaAPI["Ollama Local API (127.0.0.1:11434)"]
         AskAgent["bin/ask-agent (CLI Bridge)"]
     end
 
@@ -148,10 +174,15 @@ flowchart TD
 
     ConPTY --> ClaudeCLI
     ConPTY --> AgyCLI
+    ConPTY --> OllamaCLI
     ClaudeCLI -.->|invoca no shell| AskAgent
     AgyCLI -.->|invoca no shell| AskAgent
+    OllamaCLI -.->|invoca no shell| AskAgent
     AskAgent -->|POST /ask| BridgeServer
     BridgeServer --> ConPTY
+    BridgeServer -->|Executa com Ferramentas| OllamaAgent
+    OllamaAgent -->|/api/chat| OllamaAPI
+    OllamaCLI -->|Tool Calling Loop| OllamaAgent
     WhisperSubsystem -->|Large-v3-turbo| Composer
 ```
 
@@ -177,10 +208,10 @@ flowchart TD
 Para aprofundamento em cada subsistema de engenharia, consulte os manuais dedicados na pasta [`documentation/`](./documentation/README.md):
 
 1. **[Guia de Instalação e Solução de Problemas (`documentation/setup-and-troubleshooting.md`)](./documentation/setup-and-troubleshooting.md)** — Pré-requisitos, login nos CLIs oficiais, compilação Vulkan e troubleshooting detalhado.
-2. **[Arquitetura Técnica do Sistema (`documentation/architecture.md`)](./documentation/architecture.md)** — Estrutura de processos (Main, Preload, Renderer), ConPTY e isolamento de segurança.
-3. **[Protocolo de Comunicação Agente ↔ Agente (`documentation/agents-protocol.md`)](./documentation/agents-protocol.md)** — Mecânica do `ask-agent`, bridge HTTP efêmero, mutex de fila e debates multirrodadas.
+2. **[Arquitetura Técnica do Sistema (`documentation/architecture.md`)](./documentation/architecture.md)** — Estrutura de processos (Main, Preload, Renderer), ConPTY, motor Ollama com tool-calling e segurança.
+3. **[Protocolo de Comunicação Agente ↔ Agente (`documentation/agents-protocol.md`)](./documentation/agents-protocol.md)** — Mecânica do `ask-agent`, bridge HTTP, sandbox de ferramentas do Ollama e debates multirrodadas.
 4. **[Subsistema de Transcrição Whisper Local (`documentation/whisper-transcription.md`)](./documentation/whisper-transcription.md)** — Engenharia Web Audio API, inferência neural, GPUs suportadas e descarte imediato.
-5. **[Manual do Usuário (`documentation/user-manual.md`)](./documentation/user-manual.md)** — Guia operacional detalhado, compositor multimodal e fluxos de uso.
+5. **[Manual do Usuário (`documentation/user-manual.md`)](./documentation/user-manual.md)** — Guia operacional detalhado, terminal interativo do Ollama, compositor multimodal e fluxos de uso.
 6. **[Limitações Técnicas e Roadmap (`documentation/limitations-and-roadmap.md`)](./documentation/limitations-and-roadmap.md)** — Auditoria técnica completa, matriz de riscos e plano de evolução.
 
 ---
@@ -189,11 +220,14 @@ Para aprofundamento em cada subsistema de engenharia, consulte os manuais dedica
 
 ```
 commanddeck/
-├── bin/                       # Utilitário CLI ask-agent para colaboração entre agentes
-│   ├── ask-agent              # Wrapper shell POSIX
-│   ├── ask-agent.cmd          # Wrapper batch para Windows CMD/PowerShell
+├── bin/                       # Utilitários CLI de colaboração e agentes
+│   ├── ask-agent              # Wrapper shell POSIX para consulta entre agentes
+│   ├── ask-agent.cmd          # Wrapper batch para Windows CMD/PowerShell (UTF-8)
 │   ├── ask-agent.js           # Mecanismo HTTP bridge
-│   └── README.md              # Documentação do binário
+│   ├── ollama-agent           # Wrapper shell POSIX para REPL do agente Ollama
+│   ├── ollama-agent.cmd       # Wrapper batch para Windows do agente Ollama (UTF-8)
+│   ├── ollama-agent.js        # Terminal REPL interativo com ferramentas e cores xterm
+│   └── README.md              # Documentação dos binários CLI
 ├── dados/                     # Diretório de execução temporária (ignorado no Git)
 │   ├── anexos/                # Armazenamento efêmero de prints e anexos (5 sessões)
 │   └── README.md              # Política de dados e privacidade
@@ -224,6 +258,7 @@ commanddeck/
 ├── CONTRIBUTING.md            # Guia de contribuição e convenções de código
 ├── LICENSE                    # Licença MIT
 ├── main.js                    # Processo principal do Electron, ConPTY e Bridge
+├── ollamaAgent.js             # Motor autônomo do Ollama com Function Calling & Sandbox
 ├── package.json               # Configuração do projeto e dependências
 ├── preload.js                 # Bridge IPC isolado com contextIsolation
 └── README.md                  # Este documento principal

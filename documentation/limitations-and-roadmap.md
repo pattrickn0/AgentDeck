@@ -18,7 +18,8 @@ Durante a última revisão de engenharia, melhorias substanciais foram implement
 - ✅ **Cópia Assíncrona de Anexos:** Migração de `copyFileSync` para `copyFile` assíncrono;
 - ✅ **Política de Retenção de 5 Sessões:** Prompts e capturas de sessões anteriores são limpos automaticamente;
 - ✅ **Proteção de Workspace:** Não criação de arquivos `AGENTS.md` fora da pasta do projeto e workspace isolado padrão;
-- ✅ **Debounce na Árvore de Arquivos:** Eliminação do conflito entre clique simples e duplo.
+- ✅ **Debounce na Árvore de Arquivos:** Eliminação do conflito entre clique simples e duplo;
+- ✅ **Agente Autônomo Ollama com Ferramentas:** Motor de agência local com Function Calling nativo (`ollamaAgent.js`) permitindo que modelos locais leiam, criem, editem arquivos e executem comandos PowerShell com sandbox no workspace configurado.
 
 ---
 

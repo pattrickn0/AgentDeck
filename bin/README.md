@@ -70,3 +70,24 @@ Ao instanciar cada terminal, o processo principal do Electron injeta no ambiente
 - **Auto-Chamada Bloqueada:** Um agente é terminantemente impedido de consultar a si mesmo.
 - **Fila de Exclusão Mútua (Mutex):** Consultas concorrentes ao mesmo agente de destino são enfileiradas sequencialmente para não corromper o estado do CLI.
 - **Preservação de Contexto por Par:** Conversas contínuas entre o mesmo par de agentes reutilizam o mesmo identificador de sessão (`sessionId`), garantindo coerência e memória entre turnos.
+
+---
+
+## 🦙 CLI Interativo do Agente Ollama (`bin/ollama-agent`)
+
+O executável `ollama-agent` (com wrappers `ollama-agent.cmd` no Windows e `ollama-agent` em Unix) provê um console REPL interativo com ferramentas de workspace ativas para modelos locais do Ollama (como `qwen3.5:9b`).
+
+### Uso Manual no Terminal
+```bash
+# Iniciar com o modelo padrão configurado:
+ollama-agent
+
+# Iniciar especificando um modelo específico do Ollama:
+ollama-agent qwen3.5:9b
+ollama-agent qwen2.5-coder:7b
+```
+
+### Recursos Ativos no REPL
+- **Feedback Visual de Ferramentas:** Toda chamada de ferramenta (`read_file`, `write_file`, `edit_file`, `list_directory`, `run_command`, `delete_file`) é impressa com destaque colorido no terminal.
+- **Memória de Sessão:** O histórico do diálogo é preservado entre mensagens sucessivas durante a execução do REPL.
+- **Integração com Abas:** Instanciado automaticamente pelo CommandDeck ao abrir uma aba de terminal do Ollama.

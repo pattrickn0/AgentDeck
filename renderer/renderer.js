@@ -5,6 +5,7 @@ const $ = (sel) => document.querySelector(sel);
 const COLORS = {};
 const NAMES = {};
 const termsEl = $('#terminals');
+const terminalsEmptyEl = $('#terminals-empty');
 const tabsEl = $('#tabs');
 const input = $('#input');
 const target = $('#target');
@@ -65,6 +66,28 @@ const tabs = new Map(); // ptyId → tab
 const early = new Map(); // dados que chegaram antes da aba ser registrada
 const order = []; // abas na ordem da barra
 let active = null;
+let isRestoring = false;
+let persistTimer = null;
+
+function persistTabs() {
+  if (isRestoring) return;
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(persistTabsNow, 120);
+}
+
+function persistTabsNow() {
+  if (isRestoring) return;
+  if (persistTimer) clearTimeout(persistTimer);
+  const openTabs = order.map((t) => t.kind);
+  const activeTabIndex = active ? order.indexOf(active) : -1;
+  api.saveConfig({ openTabs, activeTabIndex });
+}
+
+function updateEmptyState() {
+  if (terminalsEmptyEl) {
+    terminalsEmptyEl.hidden = order.length > 0;
+  }
+}
 
 function makeTerminal() {
   const term = new Terminal({
@@ -80,7 +103,12 @@ function makeTerminal() {
   return { term, fit };
 }
 
-async function openTab(kind) {
+async function openTab(kind, opts = {}) {
+  if (!COLORS[kind] && (kind.startsWith('ollama:') || kind === 'ollama')) {
+    COLORS[kind] = '#f59e0b';
+    NAMES[kind] = kind.startsWith('ollama:') ? `Ollama (${kind.slice(7)})` : 'Ollama';
+  }
+
   const el = document.createElement('div');
   el.className = 'term';
   termsEl.append(el);
@@ -91,10 +119,12 @@ async function openTab(kind) {
   tab.btn = document.createElement('button');
   tab.btn.className = 'tab';
   tab.btn.setAttribute('role', 'tab');
-  tab.btn.style.setProperty('--tab-color', COLORS[kind]);
+  tab.btn.style.setProperty('--tab-color', COLORS[kind] || '#9aa0a6');
   const sameKind = [...tabs.values()].filter((t) => t.kind === kind).length;
-  tab.btn.innerHTML = `<span class="dot" style="background:${COLORS[kind]}"></span><span class="label"></span><span class="close" title="Fechar">×</span>`;
-  tab.btn.querySelector('.label').textContent = NAMES[kind] + (sameKind ? ` ${sameKind + 1}` : '');
+  const labelText = (NAMES[kind] || kind) + (sameKind ? ` ${sameKind + 1}` : '');
+  tab.btn.innerHTML = `<span class="dot" style="background:${COLORS[kind] || '#9aa0a6'}"></span><span class="label"></span><span class="close" title="Fechar">×</span>`;
+  tab.btn.querySelector('.label').textContent = labelText;
+  tab.btn.title = labelText;
   tab.btn.addEventListener('click', (e) => (e.target.classList.contains('close') ? closeTab(tab) : activate(tab)));
   tabsEl.append(tab.btn);
   order.push(tab);
@@ -130,6 +160,8 @@ async function openTab(kind) {
   });
 
   activate(tab);
+  updateEmptyState();
+  if (!opts.restoring) persistTabs();
   await start(tab);
   return tab;
 }
@@ -185,7 +217,7 @@ function activate(tab) {
     t.btn.classList.toggle('active', t === tab);
   }
   active = tab;
-  const activeColor = (tab && COLORS[tab.kind]) ? COLORS[tab.kind] : (tab?.kind === 'claude' ? '#d97757' : (tab?.kind === 'antigravity' ? '#4f8cf7' : '#9aa0a6'));
+  const activeColor = (tab && COLORS[tab.kind]) ? COLORS[tab.kind] : '#9aa0a6';
   if (activeColor) {
     document.documentElement.style.setProperty('--active-agent-color', activeColor);
   } else {
@@ -194,6 +226,7 @@ function activate(tab) {
   updateSendBtn();
   fitTab(tab);
   tab.term.focus();
+  persistTabs();
 }
 
 function allTabs() { return order; }
@@ -215,6 +248,8 @@ function closeTab(tab) {
     }
   }
   updateSendBtn();
+  updateEmptyState();
+  persistTabsNow();
 }
 
 api.onData(({ id, data }) => {
@@ -256,32 +291,149 @@ new ResizeObserver(() => {
 
 // Menu de nova aba
 const menu = $('#new-tab-menu');
-$('#new-tab').addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
-function buildMenus(agents) {
-  for (const a of agents) { COLORS[a.id] = a.color; NAMES[a.id] = a.label; }
-  for (const a of agents) {
+$('#new-tab').addEventListener('click', (e) => {
+  e.stopPropagation();
+  menu.hidden = !menu.hidden;
+  if (!menu.hidden) {
+    api.listAgents().then((agents) => {
+      buildMenus(agents);
+    }).catch(() => {});
+  }
+});
+
+let availableAgents = [];
+
+function renderNewTabMenu(agents) {
+  menu.innerHTML = '';
+
+  const aiAgents = agents.filter((a) => a.id !== 'shell' && (a.installed || a.id === 'claude' || a.id === 'antigravity'));
+  const shellAgent = agents.find((a) => a.id === 'shell') || { id: 'shell', label: 'PowerShell', color: '#9aa0a6', installed: true };
+  const list = [...aiAgents, shellAgent];
+
+  for (const a of list) {
     const b = document.createElement('button');
     b.dataset.kind = a.id;
     b.innerHTML = `<span class="dot" style="background:${a.color}"></span>`;
-    b.append(a.id === 'shell' ? 'PowerShell' : a.label + (a.installed ? '' : ' (não instalado)'));
+    const label = a.id === 'shell' ? 'PowerShell' : (a.label + (a.installed ? '' : ' (não instalado)'));
+    b.append(label);
     menu.append(b);
   }
-  // Mesas entre cada par de agentes instalados, nas duas ordens.
-  const peers = agents.filter((a) => a.peer && a.installed);
-  for (const a of peers) for (const b of peers) {
-    if (a !== b) target.append(new Option(`Mesa: ${a.label} → ${b.label}`, `table:${a.id},${b.id}`));
-  }
-  if (peers.length > 2) target.append(new Option(`Mesa: todos (${peers.map((p) => p.label).join(' → ')})`, `table:${peers.map((p) => p.id).join(',')}`));
 }
 
+function renderEmptyStateActions(agents) {
+  const emptyActions = $('#empty-state-actions');
+  if (!emptyActions) return;
+  emptyActions.innerHTML = '';
+
+  const aiAgents = agents.filter((a) => a.id !== 'shell' && (a.installed || a.id === 'claude' || a.id === 'antigravity'));
+  const shellAgent = agents.find((a) => a.id === 'shell') || { id: 'shell', label: 'PowerShell', color: '#9aa0a6' };
+  const list = [...aiAgents, shellAgent];
+
+  for (const a of list) {
+    const b = document.createElement('button');
+    b.className = 'empty-agent-btn';
+    b.style.setProperty('--btn-agent-color', a.color);
+    b.innerHTML = `<span class="dot" style="background:${a.color}"></span>Abrir ${a.id === 'shell' ? 'PowerShell' : a.label}`;
+    b.addEventListener('click', () => openTab(a.id));
+    emptyActions.append(b);
+  }
+}
+
+function renderTargetDropdown(agents, mainAgents, ollamaModels) {
+  const currentVal = target.value;
+  target.innerHTML = '';
+
+  const groupDirect = document.createElement('optgroup');
+  groupDirect.label = 'Destinatários Diretos';
+  groupDirect.append(new Option('Aba ativa', 'active'));
+  groupDirect.append(new Option('Todos os agentes abertos', 'all'));
+  target.append(groupDirect);
+
+  const installedMainPeers = mainAgents.filter((a) => a.peer && a.installed);
+  const installedOllamaPeers = ollamaModels.filter((a) => a.peer && a.installed);
+
+  const groupTables = document.createElement('optgroup');
+  groupTables.label = 'Mesas de Orquestração';
+
+  // 1. Mesas entre agentes principais de nuvem/CLI (ex: Claude ↔ Antigravity)
+  for (const a of installedMainPeers) {
+    for (const b of installedMainPeers) {
+      if (a !== b) {
+        groupTables.append(new Option(`Mesa: ${a.label} → ${b.label}`, `table:${a.id},${b.id}`));
+      }
+    }
+  }
+
+  // 2. Mesas com Ollama: utiliza o modelo local preferencial (ex: 9b > 4b)
+  const primaryOllama = installedOllamaPeers.find((o) => /(9b|7b|14b|32b)/i.test(o.id)) || installedOllamaPeers[0];
+  if (primaryOllama) {
+    const oName = primaryOllama.model || 'Local';
+    for (const m of installedMainPeers) {
+      groupTables.append(new Option(`Mesa: ${m.label} ↔ Ollama (${oName})`, `table:${m.id},${primaryOllama.id}`));
+    }
+  }
+
+  // 3. Se houver apenas modelos locais sem agentes de nuvem: mesa entre os 2 primeiros modelos
+  if (installedMainPeers.length === 0 && installedOllamaPeers.length >= 2) {
+    const o1 = installedOllamaPeers[0];
+    const o2 = installedOllamaPeers[1];
+    groupTables.append(new Option(`Mesa: Ollama (${o1.model}) ↔ Ollama (${o2.model})`, `table:${o1.id},${o2.id}`));
+  }
+
+  // 4. Mesa Geral (todos os agentes principais + Ollama)
+  const allPeers = primaryOllama ? [...installedMainPeers, primaryOllama] : [...installedMainPeers];
+  if (allPeers.length > 2) {
+    const labelsSummary = installedMainPeers.map((p) => p.label).join(' + ') + (primaryOllama ? ' + Ollama' : '');
+    groupTables.append(new Option(`Mesa Geral (${labelsSummary})`, `table:${allPeers.map((p) => p.id).join(',')}`));
+  }
+
+  if (groupTables.children.length > 0) {
+    target.append(groupTables);
+  }
+
+  if (Array.from(target.options).some((opt) => opt.value === currentVal)) {
+    target.value = currentVal;
+  } else {
+    target.value = 'active';
+  }
+}
+
+function buildMenus(agents) {
+  for (const a of agents) {
+    COLORS[a.id] = a.color;
+    NAMES[a.id] = a.id === 'shell' ? 'PowerShell' : a.label;
+    if (a.id.startsWith('ollama:')) {
+      if (!COLORS['ollama']) COLORS['ollama'] = a.color;
+      if (!NAMES['ollama']) NAMES['ollama'] = 'Ollama';
+    }
+  }
+  if (!COLORS['shell']) COLORS['shell'] = '#9aa0a6';
+  NAMES['shell'] = 'PowerShell';
+
+  availableAgents = agents.filter((a) => a.installed || a.id === 'shell' || a.id === 'claude' || a.id === 'antigravity');
+  const mainAgents = availableAgents.filter((a) => !a.id.startsWith('ollama:') && a.id !== 'ollama');
+  const ollamaModels = availableAgents.filter((a) => a.id.startsWith('ollama:') || a.id === 'ollama');
+
+  renderNewTabMenu(availableAgents);
+  renderEmptyStateActions(availableAgents);
+  renderTargetDropdown(agents, mainAgents, ollamaModels);
+}
+
+window.addEventListener('beforeunload', () => persistTabsNow());
+
 menu.addEventListener('click', (e) => {
+  e.stopPropagation();
   const kind = e.target.closest('button')?.dataset.kind;
   if (kind) { menu.hidden = true; openTab(kind); }
 });
 document.addEventListener('click', () => (menu.hidden = true));
 
 document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.key === 't') { e.preventDefault(); openTab(active?.kind || 'claude'); }
+  if (e.ctrlKey && e.key === 't') {
+    e.preventDefault();
+    const fallback = (availableAgents.find((a) => a.id !== 'shell') || availableAgents[0])?.id || 'shell';
+    openTab(active?.kind || fallback);
+  }
   if (e.ctrlKey && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
   if (e.ctrlKey && e.key === 'Tab') {
     e.preventDefault();
@@ -1053,11 +1205,28 @@ window.addEventListener('drop', async (e) => {
 // ---------- Início ----------
 
 (async () => {
-  const agents = await api.listAgents();
+  const [agents, cfg] = await Promise.all([api.listAgents(), api.getConfig()]);
   buildMenus(agents);
-  const first = await openTab('claude');
-  await openTab('antigravity'); // sem o agy instalado, a aba mostra como instalar
-  activate(first);
+
+  const savedTabs = Array.isArray(cfg?.openTabs) && cfg.openTabs.length > 0 ? cfg.openTabs : [];
+  if (savedTabs.length) {
+    isRestoring = true;
+    for (const kind of savedTabs) {
+      if (COLORS[kind]) {
+        await openTab(kind, { restoring: true });
+      }
+    }
+    const targetIdx = typeof cfg?.activeTabIndex === 'number' && cfg.activeTabIndex >= 0 && cfg.activeTabIndex < order.length
+      ? cfg.activeTabIndex
+      : 0;
+    if (order.length) activate(order[targetIdx]);
+    isRestoring = false;
+  } else {
+    const first = await openTab('claude');
+    await openTab('antigravity');
+    if (first) activate(first);
+  }
+
   refreshFileTree();
   updateSidebarToggleBtn();
 })();

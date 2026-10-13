@@ -44,7 +44,18 @@
         </div>
       </header>
 
-      <main id="terminals"></main>
+      <main id="terminals">
+        <div id="terminals-empty" class="terminals-empty" hidden>
+          <div class="empty-state-card">
+            <div class="empty-state-icon">
+              <svg viewBox="0 0 24 24" width="32" height="32"><path fill="currentColor" d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10zm-2-1h-4v-2h4v2zm-6.29-2.71a.996.996 0 0 0 0-1.41L9.42 11.6l2.3-2.3a.996.996 0 1 0-1.41-1.41L7.59 10.6c-.39.39-.39 1.02 0 1.41l2.71 2.71c.39.39 1.02.39 1.41-.01z"/></svg>
+            </div>
+            <h3>Nenhum agente aberto</h3>
+            <p>Selecione um agente abaixo ou clique no <strong>+</strong> acima para iniciar uma sessão:</p>
+            <div class="empty-state-actions" id="empty-state-actions"></div>
+          </div>
+        </div>
+      </main>
 
       <div id="splitter" title="Arraste para redimensionar"></div>
 

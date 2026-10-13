@@ -10,6 +10,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const pty = require('@lydell/node-pty');
+const { runOllamaWithTools } = require('./ollamaAgent');
 
 const BIN_DIR = path.join(__dirname, 'bin');
 // Tudo o que é do CommandDeck (anexos, prompts longos) fica na pasta do app.
@@ -67,28 +68,318 @@ function resolveAgy() {
   return which('agy.cmd') ? { file: 'cmd.exe', pre: ['/d', '/c', 'agy'] } : null;
 }
 
+// Ollama (Modelos Locais)
+let cachedOllamaModels = [];
+let cachedOllamaExe = undefined;
+let lastOllamaModelsFetch = 0;
+const OLLAMA_CACHE_TTL_MS = 15000;
+
+function getOllamaModelsFromDisk() {
+  const found = new Set();
+  const searchDirs = [
+    process.env.OLLAMA_MODELS,
+    path.join(os.homedir(), '.ollama', 'models'),
+  ].filter(Boolean);
+
+  for (const base of searchDirs) {
+    const manifestDirs = [
+      path.join(base, 'manifests'),
+      path.join(base, 'manifests-v2'),
+    ];
+    for (const mdir of manifestDirs) {
+      if (!fs.existsSync(mdir)) continue;
+      try {
+        function scanDir(dir, relParts = []) {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const ent of entries) {
+            if (ent.isDirectory()) {
+              scanDir(path.join(dir, ent.name), [...relParts, ent.name]);
+            } else if (ent.isFile()) {
+              const libIdx = relParts.indexOf('library');
+              if (libIdx !== -1 && libIdx + 1 < relParts.length) {
+                const modelName = relParts.slice(libIdx + 1).join('/');
+                found.add(`${modelName}:${ent.name}`);
+              } else if (relParts.length >= 2) {
+                const modelName = relParts.slice(1).join('/');
+                found.add(`${modelName}:${ent.name}`);
+              }
+            }
+          }
+        }
+        scanDir(mdir);
+      } catch {}
+    }
+  }
+  return Array.from(found);
+}
+
+// Inicializa o cache imediatamente a partir do disco (leva ~1ms e não bloqueia nada)
+try {
+  cachedOllamaModels = getOllamaModelsFromDisk();
+  lastOllamaModelsFetch = Date.now();
+} catch {}
+
+function getOllamaModelsAsync() {
+  return new Promise((resolve) => {
+    const host = process.env.OLLAMA_HOST || '127.0.0.1:11434';
+    const parsed = host.replace(/^https?:\/\//, '').split(':');
+    const hostname = parsed[0] || '127.0.0.1';
+    const port = parseInt(parsed[1] || '11434', 10);
+    const req = http.request(
+      { host: hostname, port, path: '/api/tags', method: 'GET', timeout: 1500 },
+      (res) => {
+        let data = '';
+        res.on('data', (d) => (data += d));
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            if (Array.isArray(json?.models)) {
+              return resolve(json.models.map((m) => m.name || m.model).filter(Boolean));
+            }
+          } catch {}
+          resolve([]);
+        });
+      }
+    );
+    req.on('error', () => resolve([]));
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+    req.end();
+  });
+}
+
+function getOllamaModels() {
+  if (cachedOllamaModels.length > 0) return cachedOllamaModels;
+  try {
+    cachedOllamaModels = getOllamaModelsFromDisk();
+  } catch {}
+  return cachedOllamaModels;
+}
+
+async function refreshOllamaModelsAsync() {
+  const now = Date.now();
+  if (cachedOllamaModels.length > 0 && (now - lastOllamaModelsFetch) < OLLAMA_CACHE_TTL_MS) {
+    return cachedOllamaModels;
+  }
+
+  const modelSet = new Set();
+  const httpModels = await getOllamaModelsAsync();
+  for (const m of httpModels) modelSet.add(m);
+
+  if (modelSet.size === 0) {
+    for (const m of getOllamaModelsFromDisk()) modelSet.add(m);
+  }
+
+  const list = Array.from(modelSet);
+  if (list.length > 0) {
+    cachedOllamaModels = list;
+    lastOllamaModelsFetch = Date.now();
+  }
+  return cachedOllamaModels;
+}
+
+// Dispara refresh assíncrono em segundo plano imediatamente
+setTimeout(() => { refreshOllamaModelsAsync().catch(() => {}); }, 100);
+
+function resolveOllama(specificModel) {
+  if (cachedOllamaExe === undefined) {
+    const local = process.env.LOCALAPPDATA || '';
+    const candidates = [
+      path.join(local, 'Programs', 'Ollama', 'ollama.exe'),
+      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Ollama', 'ollama.exe'),
+      path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Ollama', 'ollama.exe'),
+      which('ollama.exe'),
+      which('ollama'),
+    ].filter(Boolean);
+    cachedOllamaExe = candidates.find((p) => fs.existsSync(p)) || null;
+  }
+
+  const exe = cachedOllamaExe;
+  const models = getOllamaModels();
+  const model = specificModel || (models.length > 0 ? models[0] : 'qwen3.5:9b');
+
+  if (exe || models.length > 0) {
+    return { file: exe || 'ollama', pre: ['run', model], model, models };
+  }
+  return null;
+}
+
+// Gemini CLI (Google)
+function resolveGemini() {
+  const candidates = [
+    which('gemini.exe'),
+  ].filter(Boolean);
+  const exe = candidates.find((p) => fs.existsSync(p));
+  if (exe) return { file: exe, pre: [] };
+  const cmd = which('gemini.cmd') || which('gemini');
+  if (cmd) return { file: 'cmd.exe', pre: ['/d', '/c', 'gemini'] };
+  return null;
+}
+
+// Aider (AI Pair Programming)
+function resolveAider() {
+  const candidates = [
+    which('aider.exe'),
+    path.join(process.env.APPDATA || '', 'Python', 'Python311', 'Scripts', 'aider.exe'),
+    path.join(process.env.APPDATA || '', 'Python', 'Python312', 'Scripts', 'aider.exe'),
+    path.join(os.homedir(), '.local', 'bin', 'aider.exe'),
+  ].filter(Boolean);
+  const exe = candidates.find((p) => fs.existsSync(p));
+  if (exe) return { file: exe, pre: [] };
+  const cmd = which('aider.cmd') || which('aider');
+  if (cmd) return { file: 'cmd.exe', pre: ['/d', '/c', 'aider'] };
+  return null;
+}
+
+// Goose CLI (Block)
+function resolveGoose() {
+  const candidates = [
+    which('goose.exe'),
+    path.join(os.homedir(), '.local', 'bin', 'goose.exe'),
+  ].filter(Boolean);
+  const exe = candidates.find((p) => fs.existsSync(p));
+  if (exe) return { file: exe, pre: [] };
+  const cmd = which('goose.cmd') || which('goose');
+  if (cmd) return { file: 'cmd.exe', pre: ['/d', '/c', 'goose'] };
+  return null;
+}
+
+// GitHub Copilot CLI
+function resolveCopilot() {
+  const gh = which('gh.exe') || which('gh.cmd') || which('gh');
+  if (!gh) return null;
+  try {
+    const out = execFileSync(gh.endsWith('.cmd') ? 'cmd.exe' : gh, gh.endsWith('.cmd') ? ['/d', '/c', 'gh', 'extension', 'list'] : ['extension', 'list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
+    if (out.includes('gh-copilot') || out.includes('copilot')) {
+      return { file: gh.endsWith('.cmd') ? 'cmd.exe' : gh, pre: gh.endsWith('.cmd') ? ['/d', '/c', 'gh', 'copilot'] : ['copilot'] };
+    }
+  } catch {}
+  return null;
+}
+
+// Amazon Q Developer CLI
+function resolveAmazonQ() {
+  const candidates = [
+    which('q.exe'),
+    path.join(process.env.PROGRAMFILES || '', 'Amazon', 'Q', 'q.exe'),
+    path.join(os.homedir(), '.local', 'bin', 'q.exe'),
+  ].filter(Boolean);
+  const exe = candidates.find((p) => fs.existsSync(p));
+  if (exe) return { file: exe, pre: [] };
+  const cmd = which('q.cmd') || which('q');
+  if (cmd) return { file: 'cmd.exe', pre: ['/d', '/c', 'q'] };
+  return null;
+}
+
+// Open Interpreter
+function resolveInterpreter() {
+  const candidates = [
+    which('interpreter.exe'),
+    path.join(os.homedir(), '.local', 'bin', 'interpreter.exe'),
+  ].filter(Boolean);
+  const exe = candidates.find((p) => fs.existsSync(p));
+  if (exe) return { file: exe, pre: [] };
+  const cmd = which('interpreter.cmd') || which('interpreter');
+  if (cmd) return { file: 'cmd.exe', pre: ['/d', '/c', 'interpreter'] };
+  return null;
+}
+
 const AGENTS = {
   claude: {
     label: 'Claude',
     color: '#d97757',
+    peer: true,
     resolve: resolveClaude,
     missing: 'Claude Code CLI (claude) não encontrado. Instale com:\r\n  npm install -g @anthropic-ai/claude-code',
   },
   antigravity: {
     label: 'Antigravity',
     color: '#4f8cf7',
+    peer: true,
     resolve: resolveAgy,
     missing: 'Antigravity CLI (agy) não encontrado. Instale no PowerShell com:\r\n  irm https://antigravity.google/cli/install.ps1 | iex',
   },
-  shell: { label: 'Terminal', color: '#9aa0a6', resolve: () => ({ file: 'powershell.exe', pre: ['-NoLogo'] }) },
+  ollama: {
+    label: 'Ollama',
+    color: '#f59e0b',
+    peer: true,
+    resolve: (model) => resolveOllama(model),
+    missing: 'Ollama CLI não encontrado. Instale em: https://ollama.com/download',
+  },
+  gemini: {
+    label: 'Gemini',
+    color: '#1a73e8',
+    peer: true,
+    resolve: resolveGemini,
+    missing: 'Gemini CLI não encontrado. Instale com:\r\n  npm install -g @google/gemini-cli',
+  },
+  aider: {
+    label: 'Aider',
+    color: '#22c55e',
+    peer: true,
+    resolve: resolveAider,
+    missing: 'Aider CLI não encontrado. Instale com:\r\n  pip install aider-chat',
+  },
+  goose: {
+    label: 'Goose',
+    color: '#10b981',
+    peer: true,
+    resolve: resolveGoose,
+    missing: 'Goose CLI não encontrado. Instale a partir de: https://github.com/block/goose',
+  },
+  copilot: {
+    label: 'Copilot',
+    color: '#6e40c9',
+    peer: true,
+    resolve: resolveCopilot,
+    missing: 'GitHub Copilot CLI não encontrado. Instale com:\r\n  gh extension install github/gh-copilot',
+  },
+  q: {
+    label: 'Amazon Q',
+    color: '#ff9900',
+    peer: true,
+    resolve: resolveAmazonQ,
+    missing: 'Amazon Q Developer CLI não encontrado.',
+  },
+  interpreter: {
+    label: 'Interpreter',
+    color: '#8b5cf6',
+    peer: true,
+    resolve: resolveInterpreter,
+    missing: 'Open Interpreter não encontrado. Instale com:\r\n  pip install open-interpreter',
+  },
+  shell: { label: 'Terminal', color: '#9aa0a6', peer: false, resolve: () => ({ file: 'powershell.exe', pre: ['-NoLogo'] }) },
 };
-const ALIASES = { agy: 'antigravity' };
-const ALL_PEERS = ['claude', 'antigravity'];
-// Só os agentes instalados entram na ponte.
-const peers = () => ALL_PEERS.filter((id) => AGENTS[id].resolve());
+const ALIASES = {
+  agy: 'antigravity',
+  claudecode: 'claude',
+  qwen: 'ollama',
+  llama: 'ollama',
+  local: 'ollama',
+  geminicli: 'gemini',
+  'gh-copilot': 'copilot',
+  'amazon-q': 'q',
+};
+// Só os agentes instalados e habilitados como peer entram na ponte.
+const peers = () => {
+  const basePeers = Object.entries(AGENTS).filter(([_, a]) => a.peer && a.resolve()).map(([id]) => id);
+  const ollama = resolveOllama();
+  if (ollama?.models && ollama.models.length > 0) {
+    const ollamaPeers = ollama.models.map((m) => `ollama:${m}`);
+    return basePeers.concat(ollamaPeers);
+  }
+  return basePeers;
+};
 
 function bridgeInstructions(self) {
-  const others = peers().filter((p) => p !== self).join(', ');
+  const ollama = resolveOllama();
+  const others = peers().filter((p) => p !== self && p !== 'ollama').map((id) => {
+    if (id.startsWith('ollama:')) return `ollama (${id.slice('ollama:'.length)})`;
+    return id;
+  });
+  if (others.length === 0 && ollama) {
+    others.push(ollama.model ? `ollama (${ollama.model})` : 'ollama');
+  }
+  const formatted = others.join(', ');
   return [
     self
       ? `Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui é "${self}".`
@@ -96,8 +387,8 @@ function bridgeInstructions(self) {
     'Para conversar com outro agente, execute no shell:',
     '  ask-agent <agente> "sua mensagem"',
     `Agentes disponíveis: ${others}. A resposta é impressa no stdout e pode levar alguns minutos (use timeout de até 600000 ms).`,
-    'O histórico de cada par de agentes é mantido entre chamadas. Use quando o usuário pedir para consultar ou colaborar com outro agente,',
-    'ou quando uma segunda opinião for claramente útil. Sempre resuma ao usuário o que o outro agente respondeu.',
+    'O histórico de cada par de agentes é mantido entre chamadas. O usuário tem acesso à "Conversa integrada" em tempo real no CommandDeck, portanto você NÃO precisa relatar nem resumir a conversa dos agentes para ele.',
+    'Ao colaborar com outro agente (ex: Antigravity), mantenha o diálogo diretamente com ele (iterando, tirando dúvidas e alinhando) até concluir a tarefa, em vez de parar no meio para fazer perguntas ao usuário.',
   ].join('\n');
 }
 
@@ -288,28 +579,47 @@ function send(channel, payload) {
 }
 
 ipcMain.handle('pty:spawn', (_e, { kind, cols, rows }) => {
-  const def = AGENTS[kind];
+  const isOllamaSub = kind.startsWith('ollama:');
+  const baseKind = isOllamaSub ? 'ollama' : kind;
+  const def = AGENTS[baseKind];
   if (!def) throw new Error(`Agente desconhecido: ${kind}`);
-  const resolved = def.resolve();
+  const targetModel = isOllamaSub ? kind.slice('ollama:'.length) : undefined;
+  const resolved = baseKind === 'ollama' ? resolveOllama(targetModel) : def.resolve();
   if (!resolved) throw new Error(def.missing);
   const { file, pre } = resolved;
   const args = [...pre];
-  if (kind === 'claude') args.push('--append-system-prompt', bridgeInstructions('claude'));
-  if (kind !== 'shell') args.push('--add-dir', DATA_DIR);
+  if (baseKind === 'claude') args.push('--append-system-prompt', bridgeInstructions('claude'));
+  if (baseKind === 'claude' || baseKind === 'antigravity') args.push('--add-dir', DATA_DIR);
   const id = nextPtyId++;
-  const proc = pty.spawn(file, args, {
+  let fileToSpawn = file;
+  let argsToSpawn = [...args];
+  const envToSpawn = agentEnv(kind);
+
+  if (baseKind === 'ollama') {
+    const nodeExe = which('node.exe') || which('node') || process.execPath;
+    fileToSpawn = nodeExe;
+    argsToSpawn = [path.join(BIN_DIR, 'ollama-agent.js')];
+    if (targetModel || resolved.model) argsToSpawn.push(targetModel || resolved.model);
+    envToSpawn.ELECTRON_RUN_AS_NODE = '1';
+    envToSpawn.JWIC_OLLAMA_MODEL = targetModel || resolved.model || 'qwen3.5:9b';
+  }
+
+  const proc = pty.spawn(fileToSpawn, argsToSpawn, {
     name: 'xterm-256color',
     cols: cols || 120,
     rows: rows || 30,
     cwd: config.workspace,
-    env: agentEnv(kind),
+    env: envToSpawn,
     useConpty: true,
   });
   proc._kind = kind;
   proc.onData((data) => send('pty:data', { id, data }));
   proc.onExit(({ exitCode }) => { ptys.delete(id); send('pty:exit', { id, exitCode }); });
   ptys.set(id, proc);
-  return { id, kind, label: def.label, color: def.color };
+  const label = isOllamaSub
+    ? `Ollama (${targetModel})`
+    : (baseKind === 'ollama' && resolved.model ? `Ollama (${resolved.model})` : def.label);
+  return { id, kind, label, color: def.color };
 });
 
 ipcMain.on('pty:write', (_e, { id, data }) => ptys.get(id)?.write(data));
@@ -335,7 +645,7 @@ ipcMain.on('pty:submit', (_e, { id, text }) => {
   // Se contiver menção a arquivo (@), CLIs interativos (como Antigravity e Claude)
   // abrem o menu de autocomplete de arquivo. O primeiro \r confirma a seleção do autocomplete,
   // e o segundo \r (após o fechamento do menu) submete o prompt de fato.
-  if (text.includes('@') && p._kind !== 'shell') {
+  if (text.includes('@') && (p._kind === 'claude' || p._kind === 'antigravity')) {
     setTimeout(() => p.write('\r'), 600);
   }
 });
@@ -353,6 +663,17 @@ function agyPromptArg(prompt) {
   const file = path.join(dataDir('prompts'), `s_${CURRENT_SESSION}_prompt-${Date.now()}.md`);
   fs.writeFileSync(file, prompt);
   return `A mensagem completa está no arquivo ${refPath(file)}. Leia o arquivo inteiro e responda seguindo o que ele pede.`;
+}
+
+// Limpa formatação ANSI e tags residuais de raciocínio de LLMs para a ponte
+function cleanAgentOutput(text) {
+  if (!text) return '';
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
 }
 
 // Extrai o texto da resposta e o id da conversa da saída --output-format json do agy.
@@ -380,23 +701,62 @@ function parseAgyOutput(out) {
   return { text: (text ?? out).trim(), id };
 }
 
-function runHeadless(agent, prompt, { sessionKey, depth = 0, extraSystem } = {}) {
-  const resolved = AGENTS[agent].resolve();
-  if (!resolved) return Promise.reject(new Error(AGENTS[agent].missing));
+function runHeadless(agent, prompt, { sessionKey, depth = 0, extraSystem, attachments = [] } = {}) {
+  const isOllamaSub = agent.startsWith('ollama:');
+  const baseAgent = isOllamaSub ? 'ollama' : (ALIASES[agent] || agent);
+  const def = AGENTS[baseAgent];
+  if (!def) return Promise.reject(new Error(`Agente desconhecido: ${agent}`));
+  const targetModel = isOllamaSub ? agent.slice('ollama:'.length) : undefined;
+  const resolved = baseAgent === 'ollama' ? resolveOllama(targetModel) : def.resolve();
+  if (!resolved) return Promise.reject(new Error(def.missing));
+
+  if (baseAgent === 'ollama') {
+    const model = targetModel || resolved.model || 'qwen3.5:9b';
+    return runOllamaWithTools({
+      model,
+      prompt,
+      workspace: config.workspace,
+      sessionKey,
+      extraSystem,
+      attachments,
+      onFeed: (f) => feed(f),
+    });
+  }
+
   const { file, pre } = resolved;
   const args = [...pre];
   let sid = sessionKey ? sessions.get(sessionKey) : null;
   const isNew = sessionKey && !sid;
   let stdin = prompt;
 
-  if (agent === 'claude') {
+  if (baseAgent === 'claude') {
     if (isNew) sid = crypto.randomUUID();
     args.push('-p', '--output-format', 'text');
     if (sid) args.push(isNew ? '--session-id' : '--resume', sid);
     args.push('--append-system-prompt', extraSystem || bridgeInstructions('claude'), '--add-dir', DATA_DIR);
-  } else if (agent === 'antigravity') {
+  } else if (baseAgent === 'antigravity') {
     args.push('-p', agyPromptArg(prompt), '--output-format', 'json', '--print-timeout', '10m', '--add-dir', DATA_DIR);
     if (sid) args.push('--conversation', sid);
+    stdin = '';
+  } else if (baseAgent === 'gemini') {
+    if (isNew) sid = crypto.randomUUID();
+    args.push('-p', prompt, '-o', 'text', '--approval-mode', 'yolo', '--skip-trust');
+    if (sid) args.push(isNew ? '--session-id' : '--resume', sid);
+    stdin = '';
+  } else if (baseAgent === 'aider') {
+    args.push('--message', prompt, '--no-auto-commits', '--yes-always');
+    stdin = '';
+  } else if (baseAgent === 'goose') {
+    args.push('run', '--text', prompt);
+    stdin = '';
+  } else if (baseAgent === 'copilot') {
+    args.push('explain', prompt);
+    stdin = '';
+  } else if (baseAgent === 'q') {
+    args.push('chat', '--message', prompt);
+    stdin = '';
+  } else if (baseAgent === 'interpreter') {
+    args.push('-y', '--prompt', prompt);
     stdin = '';
   }
 
@@ -411,6 +771,8 @@ function runHeadless(agent, prompt, { sessionKey, depth = 0, extraSystem } = {})
       reject(new Error(`agente "${agent}" excedeu o tempo limite de resposta (timeout de 10 minutos)`));
     }, HEADLESS_TIMEOUT_MS);
 
+    if (child.stdout) child.stdout.setEncoding('utf8');
+    if (child.stderr) child.stderr.setEncoding('utf8');
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e) => {
@@ -422,16 +784,17 @@ function runHeadless(agent, prompt, { sessionKey, depth = 0, extraSystem } = {})
       clearTimeout(timeoutTimer);
       running.delete(child);
       if (code === 0 && out.trim()) {
-        if (agent !== 'antigravity') {
-          if (isNew) sessions.set(sessionKey, sid);
-          return resolve(out.trim());
-        }
-        try {
-          const { text, id } = parseAgyOutput(out);
-          if (sessionKey && id) sessions.set(sessionKey, id);
-          return resolve(text);
-        } catch (e) {
-          if (!(sessionKey && !isNew)) return reject(e);
+        if (baseAgent === 'antigravity') {
+          try {
+            const { text, id } = parseAgyOutput(out);
+            if (sessionKey && id) sessions.set(sessionKey, id);
+            return resolve(cleanAgentOutput(text));
+          } catch (e) {
+            if (!(sessionKey && !isNew)) return reject(e);
+          }
+        } else {
+          if (isNew && sid) sessions.set(sessionKey, sid);
+          return resolve(cleanAgentOutput(out));
         }
       }
       if (sessionKey && !isNew) {
@@ -468,34 +831,57 @@ function startBridge() {
     let body = '';
     req.on('data', (d) => (body += d));
     req.on('end', async () => {
-      let msg;
-      try { msg = JSON.parse(body); } catch { return reply(400, { error: 'JSON inválido' }); }
-      const from = String(msg.from || 'usuário');
-      const asked = String(msg.to || '').toLowerCase();
-      const to = ALIASES[asked] || asked;
-      const depth = Number(msg.depth || 0);
-      const available = peers();
-      if (!available.includes(to)) return reply(400, { error: `agente desconhecido ou não instalado "${asked}". Disponíveis: ${available.join(', ')}` });
-      if (to === from) return reply(400, { error: 'um agente não pode perguntar a si mesmo' });
-      if (depth >= MAX_DEPTH) return reply(400, { error: 'profundidade máxima de conversa entre agentes atingida' });
-
-      feed({ kind: 'ask', from, to, text: msg.message });
-      const prompt = `[Mensagem do agente "${from}" recebida pelo CommandDeck]\n\n${msg.message}\n\nResponda diretamente; sua resposta será entregue ao agente "${from}".`;
-
-      const sessionKey = `${from}->${to}`;
-      const prevPromise = bridgeQueues.get(sessionKey) || Promise.resolve();
-      const task = prevPromise.then(async () => {
-        return await runHeadless(to, prompt, { sessionKey, depth: depth + 1 });
-      });
-      bridgeQueues.set(sessionKey, task.catch(() => {}));
-
       try {
-        const answer = await task;
-        feed({ kind: 'answer', from: to, to: from, text: answer });
-        reply(200, { answer });
-      } catch (e) {
-        feed({ kind: 'error', from: to, to: from, text: e.message });
-        reply(500, { error: e.message });
+        let msg;
+        try { msg = JSON.parse(body); } catch { return reply(400, { error: 'JSON inválido' }); }
+        const from = String(msg.from || 'usuário');
+        const asked = String(msg.to || '').toLowerCase();
+        const depth = Number(msg.depth || 0);
+        let to = ALIASES[asked] || asked;
+        const available = peers();
+        if (!available.includes(to)) {
+          const ollamaInfo = resolveOllama();
+          if (ollamaInfo?.models && ollamaInfo.models.length > 0) {
+            if (to === 'ollama') {
+              const first = `ollama:${ollamaInfo.models[0]}`;
+              if (available.includes(first)) to = first;
+            } else {
+              const match = ollamaInfo.models.find((m) => {
+                const ml = m.toLowerCase();
+                const mBase = ml.replace(/:latest$/, '');
+                return ml === asked || ml.includes(asked) || mBase === asked || asked.includes(mBase);
+              });
+              if (match) {
+                to = available.includes(`ollama:${match}`) ? `ollama:${match}` : (available.includes('ollama') ? 'ollama' : to);
+              }
+            }
+          }
+        }
+        if (!available.includes(to)) return reply(400, { error: `agente desconhecido ou não instalado "${asked}". Disponíveis: ${available.join(', ')}` });
+        if (to === from) return reply(400, { error: 'um agente não pode perguntar a si mesmo' });
+        if (depth >= MAX_DEPTH) return reply(400, { error: 'profundidade máxima de conversa entre agentes atingida' });
+
+        feed({ kind: 'ask', from, to, text: msg.message });
+        const prompt = `[Mensagem do agente "${from}" recebida pelo CommandDeck]\n\n${msg.message}\n\nResponda diretamente ao agente "${from}". O usuário acompanha a conversa integrada em tempo real.`;
+
+        const sessionKey = `${from}->${to}`;
+        const prevPromise = bridgeQueues.get(sessionKey) || Promise.resolve();
+        const task = prevPromise.then(async () => {
+          return await runHeadless(to, prompt, { sessionKey, depth: depth + 1 });
+        });
+        bridgeQueues.set(sessionKey, task.catch(() => {}));
+
+        try {
+          const answer = await task;
+          feed({ kind: 'answer', from: to, to: from, text: answer });
+          reply(200, { answer });
+        } catch (e) {
+          feed({ kind: 'error', from: to, to: from, text: e.message });
+          reply(500, { error: e.message });
+        }
+      } catch (err) {
+        feed({ kind: 'error', from: 'bridge', to: 'bridge', text: err.message });
+        reply(500, { error: err.message });
       }
     });
   });
@@ -525,7 +911,10 @@ ipcMain.handle('table:run', async (_e, { task, agents, rounds, attachments }) =>
       ].join('\n\n');
       feed({ kind: 'thinking', from: agent, text: `rodada ${r}/${rounds}…` });
       try {
-        const text = await runHeadless(agent, prompt, { extraSystem: 'Você está numa mesa de colaboração entre agentes de IA no CommandDeck.' });
+        const text = await runHeadless(agent, prompt, {
+          extraSystem: 'Você está numa mesa de colaboração entre agentes de IA no CommandDeck.',
+          attachments,
+        });
         transcript.push({ agent, round: r, text });
         feed({ kind: 'table', from: agent, text });
       } catch (e) {
@@ -614,7 +1003,7 @@ ipcMain.handle('audio:save', async (_e, bytes) => {
 const WHISPER_DIR = path.join(__dirname, 'whisper');
 const WHISPER_MODEL = path.join(WHISPER_DIR, 'models', 'ggml-large-v3-turbo.bin');
 const WHISPER_RELEASE = 'https://github.com/ggml-org/whisper.cpp/releases/download/b5454';
-const WHISPER_PROMPT = 'CommandDeck Terminal, Claude, Antigravity, agy, Claude Code, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.';
+const WHISPER_PROMPT = 'CommandDeck Terminal, Claude, Antigravity, agy, Claude Code, Ollama, Gemini, Aider, Goose, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.';
 
 function normalizeTranscription(text) {
   if (!text) return '';
@@ -751,8 +1140,57 @@ ipcMain.handle('audio:transcribe', async (_e, ref) => {
   }
 });
 
-ipcMain.handle('agents:list', () =>
-  Object.entries(AGENTS).map(([id, a]) => ({ id, label: a.label, color: a.color, installed: !!a.resolve(), peer: ALL_PEERS.includes(id) })));
+ipcMain.handle('agents:list', async () => {
+  const result = [];
+  await refreshOllamaModelsAsync();
+  const ollama = resolveOllama();
+
+  for (const [id, a] of Object.entries(AGENTS)) {
+    if (id === 'ollama') {
+      if (ollama && ollama.models && ollama.models.length > 0) {
+        if (ollama.models.length === 1) {
+          result.push({
+            id: 'ollama',
+            label: `Ollama (${ollama.models[0]})`,
+            color: a.color,
+            installed: true,
+            peer: true,
+            model: ollama.models[0],
+          });
+        } else {
+          for (const m of ollama.models) {
+            result.push({
+              id: `ollama:${m}`,
+              label: `Ollama (${m})`,
+              color: a.color,
+              installed: true,
+              peer: true,
+              model: m,
+            });
+          }
+        }
+      } else {
+        result.push({
+          id: 'ollama',
+          label: a.label,
+          color: a.color,
+          installed: !!ollama,
+          peer: !!ollama,
+        });
+      }
+      continue;
+    }
+
+    result.push({
+      id,
+      label: a.label,
+      color: a.color,
+      installed: !!a.resolve(),
+      peer: !!a.peer,
+    });
+  }
+  return result;
+});
 
 // ---------- Workspace ----------
 

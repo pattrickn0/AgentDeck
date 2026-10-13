@@ -53,15 +53,16 @@ input, select, textarea { font-family: var(--ui-font); color: inherit; }
 .tab:hover { background: var(--panel-2); }
 .tab.active { background: var(--bg); color: var(--text); box-shadow: inset 0 2px 0 var(--tab-color); }
 .tab.dead .label { text-decoration: line-through; }
+.tab .label { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
 .tab .close { border: 0; background: none; color: var(--muted); padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
 .tab .close:hover { background: var(--border); color: var(--text); }
 #new-tab-wrap { position: relative; }
 #new-tab { height: 100%; width: 38px; border: 0; background: none; color: var(--muted); font-size: 18px; }
 #new-tab:hover { color: var(--text); background: var(--panel-2); }
-#new-tab-menu { position: absolute; top: 100%; left: 0; z-index: 10; min-width: 180px; padding: 4px;
+#new-tab-menu { position: absolute; top: 100%; left: 0; z-index: 100; min-width: 180px; padding: 4px;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px #0008; }
 #new-tab-menu button { display: flex; align-items: center; width: 100%; padding: 8px 10px; border: 0;
-  background: none; border-radius: 6px; text-align: left; }
+  background: none; border-radius: 6px; text-align: left; color: var(--text); font-size: 13px; font-family: var(--ui-font); cursor: pointer; }
 #new-tab-menu button:hover { background: var(--border); }
 #workspace { border: 0; background: none; color: var(--muted); padding: 0 14px; max-width: 35vw;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -146,6 +147,49 @@ input, select, textarea { font-family: var(--ui-font); color: inherit; }
 .xterm .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
 .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
 
+/* Estado vazio dos terminais */
+.terminals-empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: var(--bg); z-index: 2; user-select: none;
+}
+.terminals-empty[hidden] { display: none !important; }
+.empty-state-card {
+  max-width: 420px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.empty-state-icon {
+  color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  width: 58px; height: 58px; display: grid; place-items: center;
+}
+.empty-state-card h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+.empty-state-card p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.empty-state-card p strong { color: var(--text); }
+.empty-state-actions { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; justify-content: center; align-items: center; }
+.empty-agent-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; font-weight: 500;
+  transition: all 0.15s ease; cursor: pointer;
+}
+.empty-agent-btn:hover {
+  background: var(--panel-2); border-color: var(--btn-agent-color, var(--text)); transform: translateY(-1px);
+}
+.empty-agent-group {
+  display: inline-flex; align-items: stretch; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  transition: all 0.15s ease;
+}
+.empty-agent-group:hover {
+  background: var(--panel-2); border-color: #f59e0b; transform: translateY(-1px);
+}
+.empty-agent-group .empty-agent-btn {
+  border: 0; border-radius: 0; background: transparent; transform: none !important;
+}
+.empty-model-select {
+  background: var(--panel-2); color: #e5e5ea; border: 0; border-left: 1px solid var(--border);
+  padding: 0 8px; font-size: 11.5px; font-family: var(--ui-font); outline: none; cursor: pointer;
+  max-width: 140px;
+}
+.empty-model-select:hover { color: #fff; }
+
 #splitter { height: 1px; cursor: row-resize; background: var(--border); border: 0;
   flex-shrink: 0; position: relative; z-index: 20; transition: background 0.15s, box-shadow 0.15s; }
 #splitter::before { content: ""; position: absolute; left: 0; right: 0; top: -3px; bottom: -3px; }
@@ -182,6 +226,7 @@ input, select, textarea { font-family: var(--ui-font); color: inherit; }
 #composer-opts select, #composer-opts input { margin-left: 6px; background: var(--panel-2); color: #a4a4af;
   border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font-family: var(--ui-font); font-size: 12.5px; }
 #composer-opts select option { background: var(--panel-2); color: #a4a4af; font-family: var(--ui-font); }
+#composer-opts select optgroup { background: var(--panel); color: var(--muted); font-size: 11px; font-weight: 700; font-family: var(--ui-font); }
 #rounds { width: 52px; }
 #chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--panel-2); border: 1px solid var(--border);

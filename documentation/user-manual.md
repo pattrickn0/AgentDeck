@@ -38,6 +38,7 @@ O CommandDeck hospeda instâncias completas de pseudo-terminais (`node-pty`) con
 - **Abas Disponíveis:**
   - **Claude (Laranja - `#d97757`):** Sessão interativa oficial do `claude.exe`. Recebe instruções da ponte via `--append-system-prompt`.
   - **Antigravity (Azul - `#4f8cf7`):** Sessão interativa do `agy.exe`. Recebe instruções da ponte através de bloco delimitado em `AGENTS.md`.
+  - **Ollama (Amarelo - `#f59e0b`):** Sessão interativa com agente autônomo local (`bin/ollama-agent.js`). Conecta-se aos modelos locais (como `qwen3.5:9b`), equipado com ferramentas completas de workspace para ler, criar, editar arquivos e rodar comandos PowerShell com feedback visual em tempo real.
   - **Terminal / PowerShell (Cinza - `#9aa0a6`):** Sessão padrão do PowerShell (`powershell.exe -NoLogo`) para tarefas de administração local.
 
 - **Atalhos e Ações:**

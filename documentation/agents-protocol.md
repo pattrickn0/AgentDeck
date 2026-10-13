@@ -163,3 +163,33 @@ O modo de Mesa Colaborativa permite que múltiplos agentes trabalhem juntos para
    - Instrui o agente a ser objetivo, criticar construtivamente e construir sobre as ideias anteriores.
 4. **Fechamento e Síntese Final:** No último turno da última rodada, o último agente a falar recebe a instrução especial: *"Como último a falar, feche com uma síntese final da mesa."*
 5. **Controle de Abort:** O botão `Parar` no compositor aciona o evento `table:stop`, setando a flag `tableAbort = true` e encerrando graciosamente os processos de trabalho.
+
+---
+
+## 🦙 Agente Local Autônomo Ollama (`ollamaAgent.js`)
+
+Ao contrário de execuções convencionais de LLM em modo texto simples, o CommandDeck implementa um **motor de agente autônomo com suporte a Function Calling / Tool Use nativo** para modelos locais (como `qwen3.5:9b`, `qwen2.5-coder`, etc.) via API HTTP do Ollama (`127.0.0.1:11434/api/chat`).
+
+### 1. Ferramentas Integradas do Workspace (`WORKSPACE_TOOLS`)
+O agente possui autorização completa para ler, modificar e operar dentro do diretório do workspace configurado:
+
+| Ferramenta | Parâmetros | Descrição |
+| :--- | :--- | :--- |
+| `read_file` | `path` (string) | Lê o conteúdo textual de qualquer arquivo do projeto (com truncamento seguro para arquivos > 250 KB). |
+| `write_file` | `path` (string), `content` (string) | Cria ou sobrescreve arquivos, gerando automaticamente diretórios pais. |
+| `edit_file` | `path` (string), `target` (string), `replacement` (string) | Substitui cirurgicamente trechos de código existentes após leitura. |
+| `list_directory` | `path` (string, opcional) | Lista arquivos e pastas do workspace, filtrando ruídos (`.git`, `node_modules`). |
+| `run_command` | `command` (string) | Executa comandos no PowerShell dentro do workspace com captura de stdout/stderr e timeout de 60s. |
+| `delete_file` | `path` (string) | Exclui arquivos ou diretórios dentro do workspace. |
+
+### 2. Segurança e Confinamento (`resolveWorkspacePath`)
+Para garantir a segurança do sistema operacional, toda operação de sistema de arquivos do agente é validada pela função `resolveWorkspacePath`. Qualquer tentativa de ler ou escrever fora do diretório do workspace configurado é bloqueada imediatamente com erro de permissão.
+
+### 3. Suporte Multimodal (Imagens e Visão)
+Modelos locais compatíveis com visão (como o `qwen3.5:9b`) recebem automaticamente arquivos de imagem anexados (`.png`, `.jpg`, `.jpeg`, `.webp`) convertidos em base64 através do campo `images` da API do Ollama.
+
+### 4. Ciclo de Execução Autônoma (Loop de Agente)
+1. O prompt do usuário (ou de outro agente via `ask-agent ollama`) é submetido à API `/api/chat` acompanhado das definições JSON Schema das ferramentas.
+2. Caso o modelo emita `tool_calls`, o CommandDeck emite evento de progresso visual para a UI (`feed: {kind: "thinking", text: "⚙️ [ferramenta]..."}`).
+3. A ferramenta é executada no Node.js do CommandDeck e o resultado é devolvido com a role `tool`.
+4. O ciclo se repete até o modelo concluir a tarefa e gerar a resposta textual definitiva.
