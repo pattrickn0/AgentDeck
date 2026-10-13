@@ -1,0 +1,27 @@
+[package]
+name = "commanddeck-core"
+description = "Backend do CommandDeck Terminal: agentes, ponte HTTP, execução headless, agente Ollama, mesas, workspace e transcrição."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+uuid.workspace = true
+regex.workspace = true
+base64.workspace = true
+ureq.workspace = true
+tiny_http.workspace = true
+notify.workspace = true
+which.workspace = true
+dirs.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

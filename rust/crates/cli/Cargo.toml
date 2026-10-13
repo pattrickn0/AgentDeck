@@ -1,0 +1,21 @@
+[package]
+name = "commanddeck-cli"
+description = "Utilitários de linha de comando do CommandDeck: ask-agent e ollama-agent."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ask-agent"
+path = "src/bin/ask-agent.rs"
+
+[[bin]]
+name = "ollama-agent"
+path = "src/bin/ollama-agent.rs"
+
+[dependencies]
+commanddeck-core.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
