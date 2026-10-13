@@ -46,3 +46,6 @@ dados/sessions.json
 .vscode/
 .idea/
 .gemini/
+
+# Worktrees temporários de agentes (Claude Code)
+.claude/worktrees/
