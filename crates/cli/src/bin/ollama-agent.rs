@@ -38,8 +38,10 @@ struct Palette {
     green: &'static str,
     yellow: &'static str,
     cyan: &'static str,
-    /// Laranja do Ollama (cor da marca e do indicador de atividade).
+    /// Laranja do Ollama (indicador de atividade e destaques).
     orange: &'static str,
+    /// Branco forte (a logo do Ollama).
+    white: &'static str,
 }
 
 impl Palette {
@@ -55,15 +57,64 @@ impl Palette {
                 yellow: "\x1b[33m",
                 cyan: "\x1b[36m",
                 orange: "\x1b[38;5;208m",
+                white: "\x1b[97m",
             }
         } else {
-            Self { reset: "", bold: "", dim: "", red: "", green: "", yellow: "", cyan: "", orange: "" }
+            Self { reset: "", bold: "", dim: "", red: "", green: "", yellow: "", cyan: "", orange: "", white: "" }
         }
     }
 
     fn enabled(&self) -> bool {
         !self.reset.is_empty()
     }
+}
+
+// ---------- Logo do Ollama ----------
+
+/// A cabeça da lhama do Ollama em arte de contorno, 20×20 pixels (`#` = traço branco, `.` = fundo):
+/// orelhas, cabeça redonda, os dois olhos e o focinho oval com nariz e boca, como a logo em tema
+/// escuro. Simétrica.
+const LOGO: [&str; 20] = [
+    "...###........###...",
+    "..#...#......#...#..",
+    "..#...#......#...#..",
+    "..#...#......#...#..",
+    "..#...#......#...#..",
+    ".#....#......#....#.",
+    ".#....########....#.",
+    ".#................#.",
+    "#..................#",
+    "#..................#",
+    "#....##......##....#",
+    "#....##......##....#",
+    "#..................#",
+    "#.....########.....#",
+    "#....#..####..#....#",
+    "#....#...##...#....#",
+    "#....#........#....#",
+    "#.....########.....#",
+    "#..................#",
+    "#..................#",
+];
+const LOGO_W: usize = 20;
+
+/// A logo em meio-blocos (`▀ ▄ █`): cada linha do terminal leva duas linhas do desenho, e como a
+/// célula é umas duas vezes mais alta que larga os pixels ficam quadrados.
+fn llama_logo(c: Palette) -> Vec<String> {
+    let on = |row: usize, col: usize| LOGO[row].as_bytes()[col] == b'#';
+    (0..LOGO.len() / 2)
+        .map(|r| {
+            let cells: String = (0..LOGO_W)
+                .map(|x| match (on(r * 2, x), on(r * 2 + 1, x)) {
+                    (true, true) => '█',
+                    (true, false) => '▀',
+                    (false, true) => '▄',
+                    (false, false) => ' ',
+                })
+                .collect();
+            format!("{}{cells}{}", c.white, c.reset)
+        })
+        .collect()
 }
 
 // ---------- Saída com indicador de atividade ----------
@@ -343,19 +394,26 @@ impl App {
             ),
             Err(_) => (format!("{}● offline{r}", c.red), true),
         };
-        println!();
-        println!("{o} ▄▀▀▀▀▄{r}   {b}Ollama Agent{r} {d}v{}{r}", env!("CARGO_PKG_VERSION"));
-        println!("{o} █ ▪▪ █{r}   {o}{}{r} {d}·{r} {status}", self.model);
-        println!("{o} ▀▄▄▄▄▀{r}   {d}{}{r}", self.workspace.display());
-        match bridge_peers() {
-            Some(peers) if !peers.is_empty() => {
-                println!("            {d}ask-agent <agente> \"mensagem\" → {}{r}", peers.join(", "))
-            }
-            Some(_) => println!("            {d}nenhum outro agente na ponte{r}"),
-            None => println!("            {d}ponte indisponível (rode dentro do CommandDeck para usar ask-agent){r}"),
-        }
+        let mut text = vec![
+            format!("{b}Ollama Agent{r} {d}v{}{r}", env!("CARGO_PKG_VERSION")),
+            format!("{o}{}{r} {d}·{r} {status}", self.model),
+            format!("{d}{}{r}", self.workspace.display()),
+            match bridge_peers() {
+                Some(peers) if !peers.is_empty() => format!("{d}ask-agent <agente> \"mensagem\" → {}{r}", peers.join(", ")),
+                Some(_) => format!("{d}nenhum outro agente na ponte{r}"),
+                None => format!("{d}ponte indisponível (rode dentro do CommandDeck para usar ask-agent){r}"),
+            },
+        ];
         if !installed {
-            println!("            {}⚠ modelo não instalado — use /models ou `ollama pull {}`{r}", c.yellow, self.model);
+            text.push(format!("{}⚠ modelo não instalado — use /models ou `ollama pull {}`{r}", c.yellow, self.model));
+        }
+        // O texto fica ao lado da logo, a partir da terceira linha dela (as orelhas ficam sozinhas).
+        let logo = llama_logo(c);
+        println!();
+        for i in 0..logo.len().max(text.len() + 2) {
+            let art = logo.get(i).cloned().unwrap_or_else(|| " ".repeat(LOGO_W));
+            let line = i.checked_sub(2).and_then(|j| text.get(j)).map(String::as_str).unwrap_or("");
+            println!(" {art}  {line}");
         }
         if let Err(e) = models {
             println!();
@@ -690,7 +748,7 @@ mod tests {
     use super::*;
 
     fn plain_helper(boxed: bool) -> CliHelper {
-        let none = Palette { reset: "", bold: "", dim: "", red: "", green: "", yellow: "", cyan: "", orange: "" };
+        let none = Palette { reset: "", bold: "", dim: "", red: "", green: "", yellow: "", cyan: "", orange: "", white: "" };
         CliHelper { models: Vec::new(), model: "qwen3.5:4b".into(), c: none, boxed }
     }
 
@@ -714,7 +772,7 @@ mod tests {
     fn highlighting_keeps_the_three_lines_and_colors_only_the_model_dot() {
         let helper = {
             let mut h = plain_helper(true);
-            h.c = Palette { reset: "<r>", bold: "", dim: "<d>", red: "", green: "", yellow: "", cyan: "", orange: "<o>" };
+            h.c = Palette { reset: "<r>", bold: "", dim: "<d>", red: "", green: "", yellow: "", cyan: "", orange: "<o>", white: "" };
             h
         };
         let hint = helper.bottom(true);
@@ -723,6 +781,22 @@ mod tests {
         assert!(styled.contains("<o>●<r> <d>qwen3.5:4b<r>"), "{styled}");
         // Fora de um terminal (sem caixa) o hint passa como veio.
         assert_eq!(plain_helper(false).highlight_hint("x"), "x");
+    }
+
+    #[test]
+    fn the_llama_logo_is_a_symmetric_sprite_of_whole_terminal_rows() {
+        assert_eq!(LOGO.len() % 2, 0, "cada linha do terminal leva 2 linhas do desenho");
+        for row in LOGO {
+            assert_eq!(row.len(), LOGO_W);
+            assert_eq!(row.chars().rev().collect::<String>(), row, "simétrica: {row}");
+            assert!(row.chars().all(|c| c == '#' || c == '.'));
+        }
+        let rows = llama_logo(plain_helper(true).c);
+        assert_eq!(rows.len(), LOGO.len() / 2);
+        assert!(rows.iter().all(|r| r.chars().count() == LOGO_W), "{rows:?}");
+        // Orelhas, olhos e nariz ficam vazados/brancos como na logo: o desenho tem os dois tons.
+        let all: String = rows.concat();
+        assert!(all.contains('█') && all.contains('▀') && all.contains('▄') && all.contains(' '));
     }
 
     #[test]
