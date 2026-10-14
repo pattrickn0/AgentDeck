@@ -4,7 +4,7 @@
 //! Windows os binários ficam em `whisper/bin-*/[Release/]whisper-cli.exe`; no Linux, em
 //! `whisper/bin-*-linux/whisper-cli` (ou o `whisper-cli` do PATH). O modelo e o motor de CPU
 //! (Windows e Linux) e o CUDA (Windows) são baixados sob demanda, com SHA-256 fixado neste
-//! arquivo; CUDA/Vulkan no Linux são compilados com `scripts/build-whisper-linux.sh`.
+//! arquivo; para CUDA/Vulkan no Linux, um `whisper-cli` compilado com eles no PATH.
 //! O WAV temporário é SEMPRE apagado após a transcrição.
 
 use std::fs::File;

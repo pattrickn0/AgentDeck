@@ -44,6 +44,30 @@ CLIs suportados (instale os que quiser usar):
 - OpenCode: `npm install -g opencode-ai`
 - Ollama: https://ollama.com/download
 
+## Compilar e rodar (Linux)
+
+Pré-requisito: [Rust](https://rustup.rs) 1.89 ou mais novo e as bibliotecas de sistema abaixo.
+
+```bash
+# Ubuntu / Debian
+sudo apt install build-essential pkg-config libasound2-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 libgl1
+# Fedora
+sudo dnf install gcc pkgconf-pkg-config alsa-lib-devel gtk3-devel libxkbcommon-devel libxkbcommon-x11 mesa-libGL
+
+cargo build --workspace --release
+./target/release/commanddeck
+```
+
+- Sem som nem microfone (dispensa a ALSA): `cargo build -p commanddeck --no-default-features --release`.
+- Os três executáveis ficam juntos em `target/release/`; para usar o `ask-agent` fora do app, ponha essa pasta no
+  `PATH` (dentro das abas o app já resolve). As pastas `dados/`, `workspace/` e `whisper/` seguem a mesma regra do
+  Windows (ou `COMMANDDECK_HOME`). Configuração em `~/.config/CommandDeck/config.json`.
+- Ditado: o motor de CPU e o modelo são baixados sozinhos; para usar a GPU, deixe no `PATH` um `whisper-cli`
+  compilado com CUDA ou Vulkan.
+- CLIs: os mesmos `npm install -g …` acima; Antigravity e Ollama têm instalador de Linux nos sites
+  (https://antigravity.google, https://ollama.com/download).
+- Testado em X11 (Ubuntu). Wayland é suportado pela biblioteca de janelas, mas ainda não foi testado.
+
 ## Comunicação entre agentes
 
 Dentro de qualquer aba:

@@ -65,6 +65,14 @@ pub struct AgentDef {
     pub missing: &'static str,
 }
 
+/// O instalador do Antigravity é um script de PowerShell no Windows; nos outros sistemas, o do site.
+#[cfg(windows)]
+const ANTIGRAVITY_MISSING: &str =
+    "Antigravity CLI (agy) não encontrado. Instale no PowerShell com:\r\n  irm https://antigravity.google/cli/install.ps1 | iex";
+#[cfg(not(windows))]
+const ANTIGRAVITY_MISSING: &str =
+    "Antigravity CLI (agy) não encontrado. Veja o instalador para o seu sistema em:\r\n  https://antigravity.google";
+
 /// Todos os agentes, na ordem dos menus.
 pub const AGENTS: &[AgentDef] = &[
     AgentDef {
@@ -74,14 +82,7 @@ pub const AGENTS: &[AgentDef] = &[
         peer: true,
         missing: "Claude Code CLI (claude) não encontrado. Instale com:\r\n  npm install -g @anthropic-ai/claude-code",
     },
-    AgentDef {
-        id: "antigravity",
-        label: "Antigravity",
-        color: COLOR_ANTIGRAVITY,
-        peer: true,
-        missing:
-            "Antigravity CLI (agy) não encontrado. Instale no PowerShell com:\r\n  irm https://antigravity.google/cli/install.ps1 | iex",
-    },
+    AgentDef { id: "antigravity", label: "Antigravity", color: COLOR_ANTIGRAVITY, peer: true, missing: ANTIGRAVITY_MISSING },
     AgentDef {
         id: "ollama",
         label: "Ollama",

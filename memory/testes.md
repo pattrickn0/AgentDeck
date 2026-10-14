@@ -21,6 +21,7 @@ Gemini **removido** (item 9).
 
 - [ ] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\commanddeck.exe` (os três `.exe` na mesma pasta).
 - [ ] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
+- [ ] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
 - [ ] Trocar a pasta de trabalho para um projeto seu que seja repositório git (clique no caminho na topbar), ou usar a pasta `workspace/` padrão.
 
 ## 1. Barra direita ★
