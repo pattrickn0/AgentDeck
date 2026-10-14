@@ -212,8 +212,10 @@ impl ApplicationHandler<UserEvent> for App {
         });
         self.egui = Some(egui);
         self.gl = Some(gl);
-        glw.window.request_redraw();
         self.gl_window = Some(glw);
+        // No Windows, uma janela invisível não recebe WM_PAINT: `request_redraw` nunca vira
+        // `RedrawRequested` e o `set_visible(true)` do primeiro quadro não roda. Desenha já.
+        self.redraw(event_loop);
         self.try_init_core(event_loop);
     }
 

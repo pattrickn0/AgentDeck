@@ -364,7 +364,7 @@ fn input_field(deck: &mut Deck, ui: &mut Ui, r: Rect, ctx: &egui::Context) {
         let te = egui::TextEdit::multiline(&mut deck.input)
             .id(id)
             .frame(egui::Frame::NONE)
-            .margin(egui::Margin { left: 6, right: 6, top: 4, bottom: 4 })
+            .margin(egui::Margin { left: 10, right: 10, top: 7, bottom: 7 })
             .hint_text(egui::RichText::new(placeholder).font(theme::ui(INPUT_FONT)).color(ph_color))
             .desired_width(ui.available_width())
             .desired_rows(2)

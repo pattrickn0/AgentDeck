@@ -28,7 +28,7 @@ pub const TREE_TEXT: Color32 = rgb(0xcccccc);
 pub const TREE_ICON: Color32 = rgb(0x858585);
 pub const SELECT_TEXT: Color32 = rgb(0xa4a4af);
 pub const CHIP_TEXT: Color32 = rgb(0xb8b8c2);
-pub const INPUT_TEXT: Color32 = rgb(0xd0d0d8);
+pub const INPUT_TEXT: Color32 = rgb(0xe2e2e8);
 /// Cor padrão do placeholder de `<textarea>` no Chromium (tema escuro).
 pub const PLACEHOLDER: Color32 = rgb(0x75757e);
 /// `--send-color` padrão (azul-claro) quando não há aba específica.
