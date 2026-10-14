@@ -478,11 +478,13 @@ mod tests {
         }
 
         fn frame(&mut self, events: Vec<Event>, modifiers: Modifiers) -> ViewResponse {
-            let mut input = RawInput::default();
-            input.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)));
-            // O egui 0.36 recebe os modificadores como evento (e os mantém entre quadros).
-            input.events = std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect();
-            input.time = Some(self.time);
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                // O egui 0.36 recebe os modificadores como evento (e os mantém entre quadros).
+                events: std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect(),
+                time: Some(self.time),
+                ..Default::default()
+            };
             self.time += 0.016;
             let mut out = None;
             let (session, state) = (&self.session, &mut self.state);

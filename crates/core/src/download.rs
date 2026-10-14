@@ -429,10 +429,12 @@ mod tests {
         }
     }
 
+    /// (url, cabeçalho Range) de cada pedido recebido.
+    type RequestLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
     struct Fixture {
         base: String,
-        /// (url, cabeçalho Range) de cada pedido recebido.
-        log: Arc<Mutex<Vec<(String, Option<String>)>>>,
+        log: RequestLog,
         server: Arc<Server>,
     }
 

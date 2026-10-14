@@ -140,40 +140,6 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
     text_in(&painter, info_rect, Align2::LEFT_CENTER, &info, font, if error { theme::RED_TEXT } else { theme::MUTED });
 }
 
-#[cfg(test)]
-mod download_tests {
-    use super::*;
-
-    fn p(state: DownloadState, received: u64, total: Option<u64>) -> DownloadProgress {
-        DownloadProgress { label: "x".into(), state, received, total, speed: 0.0, attempt: 0, max_attempts: 0, retry_in_ms: 0, message: None }
-    }
-
-    #[test]
-    fn formata_bytes_em_ptbr() {
-        assert_eq!(format_bytes(680_000_000.0), "648,5 MB");
-        assert_eq!(format_bytes(1_624_555_275.0), "1,51 GB");
-        assert_eq!(format_bytes(12.0), "1 KB");
-    }
-
-    #[test]
-    fn textos_de_cada_estado() {
-        let mut d = p(DownloadState::Downloading, 680_000_000, Some(1_624_555_275));
-        d.speed = 12_900_000.0;
-        let (f, t) = download_view(&d);
-        assert_eq!(t, "41% · 648,5 MB / 1,51 GB · 12,3 MB/s");
-        assert!((f.expect("fração") - 0.4186).abs() < 0.001);
-        assert_eq!(download_view(&p(DownloadState::Downloading, 5_000_000, None)), (None, "4,8 MB".into()));
-        assert_eq!(download_view(&p(DownloadState::Verifying, 812_277_637, Some(1_624_555_275))).1, "verificando integridade (SHA-256) · 49%");
-        let mut r = p(DownloadState::Retrying, 100, Some(1000));
-        (r.attempt, r.max_attempts, r.retry_in_ms) = (2, 5, 4200);
-        assert_eq!(download_view(&r).1, "conexão instável, nova tentativa 2/5 em 4s");
-        assert_eq!(download_view(&p(DownloadState::Extracting, 0, None)), (None, "extraindo…".into()));
-        let mut e = p(DownloadState::Error, 0, None);
-        e.message = Some("SHA-256 não confere".into());
-        assert_eq!(download_view(&e), (Some(0.0), "SHA-256 não confere".into()));
-    }
-}
-
 fn draw_feed(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     // border-bottom: 1px solid var(--border)
     ui.painter().rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
@@ -346,4 +312,38 @@ pub fn row_splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect, comp_h
     let painter = ui.painter_at(full);
     paint_splitter(&painter, line, hot, deck.active_color());
     tip(r, "Arraste para redimensionar");
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    fn p(state: DownloadState, received: u64, total: Option<u64>) -> DownloadProgress {
+        DownloadProgress { label: "x".into(), state, received, total, speed: 0.0, attempt: 0, max_attempts: 0, retry_in_ms: 0, message: None }
+    }
+
+    #[test]
+    fn formata_bytes_em_ptbr() {
+        assert_eq!(format_bytes(680_000_000.0), "648,5 MB");
+        assert_eq!(format_bytes(1_624_555_275.0), "1,51 GB");
+        assert_eq!(format_bytes(12.0), "1 KB");
+    }
+
+    #[test]
+    fn textos_de_cada_estado() {
+        let mut d = p(DownloadState::Downloading, 680_000_000, Some(1_624_555_275));
+        d.speed = 12_900_000.0;
+        let (f, t) = download_view(&d);
+        assert_eq!(t, "41% · 648,5 MB / 1,51 GB · 12,3 MB/s");
+        assert!((f.expect("fração") - 0.4186).abs() < 0.001);
+        assert_eq!(download_view(&p(DownloadState::Downloading, 5_000_000, None)), (None, "4,8 MB".into()));
+        assert_eq!(download_view(&p(DownloadState::Verifying, 812_277_637, Some(1_624_555_275))).1, "verificando integridade (SHA-256) · 49%");
+        let mut r = p(DownloadState::Retrying, 100, Some(1000));
+        (r.attempt, r.max_attempts, r.retry_in_ms) = (2, 5, 4200);
+        assert_eq!(download_view(&r).1, "conexão instável, nova tentativa 2/5 em 4s");
+        assert_eq!(download_view(&p(DownloadState::Extracting, 0, None)), (None, "extraindo…".into()));
+        let mut e = p(DownloadState::Error, 0, None);
+        e.message = Some("SHA-256 não confere".into());
+        assert_eq!(download_view(&e), (Some(0.0), "SHA-256 não confere".into()));
+    }
 }
