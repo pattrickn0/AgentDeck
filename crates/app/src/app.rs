@@ -94,9 +94,7 @@ impl App {
         core.set_waker(Self::waker(&self.proxy));
         // SOMENTE DEPURAÇÃO: grava porta e token da ponte para testes ponta a ponta com `ask-agent`.
         if let Some(file) = std::env::var_os("COMMANDDECK_DEBUG_BRIDGE") {
-            let _ = std::fs::write(file, format!("{}
-{}
-", core.bridge_port(), core.bridge_token()));
+            let _ = std::fs::write(file, format!("{}\n{}\n", core.bridge_port(), core.bridge_token()));
         }
         // Tamanho salvo da janela (a janela abre antes de a configuração ser lida).
         let cfg = core.config();

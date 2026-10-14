@@ -187,7 +187,7 @@ pub const MOUSE_NO_BUTTON: u8 = 3;
 pub fn mouse_report(sgr: bool, code: u8, col: usize, row: usize, release: bool) -> Option<Vec<u8>> {
     if sgr {
         let end = if release { 'm' } else { 'M' };
-        return Some(format!("[<{code};{col};{row}{end}").into_bytes());
+        return Some(format!("\x1b[<{code};{col};{row}{end}").into_bytes());
     }
     if col >= 224 || row >= 224 {
         return None;
@@ -281,11 +281,11 @@ mod tests {
 
     #[test]
     fn mouse_reports_sgr_and_legacy() {
-        assert_eq!(mouse_report(true, MOUSE_LEFT, 5, 3, false).unwrap(), b"[<0;5;3M");
-        assert_eq!(mouse_report(true, MOUSE_LEFT, 5, 3, true).unwrap(), b"[<0;5;3m");
-        assert_eq!(mouse_report(true, MOUSE_RIGHT + mouse_mods(false, true), 1, 1, false).unwrap(), b"[<18;1;1M");
-        assert_eq!(mouse_report(true, MOUSE_LEFT + MOUSE_MOTION, 10, 2, false).unwrap(), b"[<32;10;2M");
-        assert_eq!(mouse_report(true, 64, 7, 7, false).unwrap(), b"[<64;7;7M");
+        assert_eq!(mouse_report(true, MOUSE_LEFT, 5, 3, false).unwrap(), b"\x1b[<0;5;3M");
+        assert_eq!(mouse_report(true, MOUSE_LEFT, 5, 3, true).unwrap(), b"\x1b[<0;5;3m");
+        assert_eq!(mouse_report(true, MOUSE_RIGHT + mouse_mods(false, true), 1, 1, false).unwrap(), b"\x1b[<18;1;1M");
+        assert_eq!(mouse_report(true, MOUSE_LEFT + MOUSE_MOTION, 10, 2, false).unwrap(), b"\x1b[<32;10;2M");
+        assert_eq!(mouse_report(true, 64, 7, 7, false).unwrap(), b"\x1b[<64;7;7M");
         // Legado: soltar vira botão 3, coordenadas somam 32.
         assert_eq!(mouse_report(false, MOUSE_LEFT, 5, 3, false).unwrap(), vec![0x1b, b'[', b'M', 32, 37, 35]);
         assert_eq!(mouse_report(false, MOUSE_RIGHT, 5, 3, true).unwrap(), vec![0x1b, b'[', b'M', 35, 37, 35]);

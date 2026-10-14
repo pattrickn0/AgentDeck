@@ -501,8 +501,7 @@ fn main() -> ExitCode {
 
     // Primeira mensagem de quem assumiu uma aba visualizadora do CommandDeck (takeover).
     if let Some(first) = env_nonempty("COMMANDDECK_INITIAL_PROMPT") {
-        println!("{}› {first}{}
-", c.dim, c.reset);
+        println!("{}› {first}{}\n", c.dim, c.reset);
         app.turn(&first);
     }
 

@@ -507,25 +507,25 @@ mod tests {
 
     #[test]
     fn sgr_click_drag_and_release_are_reported() {
-        let mut h = Harness::new("[?1002h[?1006h");
+        let mut h = Harness::new("\x1b[?1002h\x1b[?1006h");
         assert!(h.moved(cell(3, 2)).is_empty(), "sem botão e sem modo 1003, mover não relata");
-        assert_eq!(h.button(cell(3, 2), true, Modifiers::NONE), b"[<0;4;3M");
-        assert_eq!(h.moved(cell(5, 2)), b"[<32;6;3M", "arrastar com botão: bit de movimento");
+        assert_eq!(h.button(cell(3, 2), true, Modifiers::NONE), b"\x1b[<0;4;3M");
+        assert_eq!(h.moved(cell(5, 2)), b"\x1b[<32;6;3M", "arrastar com botão: bit de movimento");
         assert!(h.session.shared.emu.lock().term.selection.is_none(), "o programa recebe o arrasto: nada de seleção");
         assert!(h.moved(cell(5, 2)).is_empty(), "mesma célula não repete");
-        assert_eq!(h.button(cell(5, 2), false, Modifiers::NONE), b"[<0;6;3m");
+        assert_eq!(h.button(cell(5, 2), false, Modifiers::NONE), b"\x1b[<0;6;3m");
         assert!(h.state.mouse_down.is_none());
     }
 
     #[test]
     fn plain_motion_only_in_mode_1003() {
-        let mut h = Harness::new("[?1003h[?1006h");
-        assert_eq!(h.moved(cell(2, 1)), b"[<35;3;2M");
+        let mut h = Harness::new("\x1b[?1003h\x1b[?1006h");
+        assert_eq!(h.moved(cell(2, 1)), b"\x1b[<35;3;2M");
     }
 
     #[test]
     fn legacy_encoding_without_sgr() {
-        let mut h = Harness::new("[?1000h");
+        let mut h = Harness::new("\x1b[?1000h");
         h.moved(cell(0, 0));
         assert_eq!(h.button(cell(0, 0), true, Modifiers::NONE), vec![0x1b, b'[', b'M', 32, 33, 33]);
         assert_eq!(h.button(cell(0, 0), false, Modifiers::NONE), vec![0x1b, b'[', b'M', 35, 33, 33]);
@@ -536,9 +536,9 @@ mod tests {
 
     #[test]
     fn ctrl_modifier_goes_into_the_code() {
-        let mut h = Harness::new("[?1000h[?1006h");
+        let mut h = Harness::new("\x1b[?1000h\x1b[?1006h");
         h.moved(cell(1, 1));
-        assert_eq!(h.button(cell(1, 1), true, Modifiers::CTRL), b"[<16;2;2M");
+        assert_eq!(h.button(cell(1, 1), true, Modifiers::CTRL), b"\x1b[<16;2;2M");
     }
 
     #[test]
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn shift_returns_the_mouse_to_the_terminal() {
-        let mut h = Harness::new("[?1000h[?1006h");
+        let mut h = Harness::new("\x1b[?1000h\x1b[?1006h");
         h.moved(cell(3, 2));
         assert!(h.button(cell(3, 2), true, Modifiers::SHIFT).is_empty());
         assert!(h.state.mouse_down.is_none());
@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn click_outside_the_area_is_not_reported() {
-        let mut h = Harness::new("[?1000h[?1006h");
+        let mut h = Harness::new("\x1b[?1000h\x1b[?1006h");
         let outside = Pos2::new(500.0, 100.0);
         h.moved(outside);
         assert!(h.button(outside, true, Modifiers::NONE).is_empty());
