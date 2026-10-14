@@ -126,7 +126,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         let label_x = r.min.x + 14.0 + 8.0 + 8.0 + 2.0;
         let g = galley_trunc(&tab_painter, &tab.label, font.clone(), color, 150.0);
         let lr = place(&tab_painter, Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + 150.0, r.max.y)), Align2::LEFT_CENTER, g, color);
-        if !tab.alive {
+        if !tab.alive && tab.viewer.is_none() {
             // .tab.dead .label { text-decoration: line-through }
             let y = lr.center().y + 0.5;
             tab_painter.hline(lr.min.x..=lr.max.x, y, Stroke::new(1.0, color));

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
+use commanddeck_core::agents::SpawnExtras;
 use commanddeck_core::{AgentInfo, Core, CoreEvent, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, SpawnSpec, TableRequest};
 use crossbeam_channel::{Receiver, Sender};
 use egui::Color32;
@@ -23,6 +24,7 @@ use crate::terminal::view::{Metrics, ViewState};
 use crate::terminal::{GridSize, Session, Wake};
 use crate::theme;
 use crate::util;
+use crate::viewer::{Viewer, ViewerEvent};
 
 /// Mensagens de tarefas em segundo plano para a UI.
 pub enum UiMsg {
@@ -53,6 +55,12 @@ pub struct Tab {
     pub view: ViewState,
     pub alive: bool,
     pub busy: bool,
+    /// Aba visualizadora (sem processo): mostra a conversa da ponte até o usuário assumir.
+    pub viewer: Option<Viewer>,
+    /// Aberta pelo app a pedido de `ask-agent` (e não pelo usuário).
+    pub auto: bool,
+    /// Par cuja conversa esta aba assumiu (liberado quando o processo termina).
+    claimed_pair: Option<String>,
     seen_output: u64,
     idle_deadline: Option<Instant>,
     spec: Option<SpawnSpec>,
@@ -146,6 +154,10 @@ pub struct Deck {
     pub settings_open: bool,
     pub target_menu_open: bool,
     pub sound_enabled: bool,
+    /// Espelho de `Config.auto_open_agent_tabs` (item do menu de configurações).
+    pub auto_open_agent_tabs: bool,
+    /// Agentes cuja aba automática o usuário fechou: não reabrem até fechar o app.
+    dismissed_agent_tabs: HashSet<String>,
     pub drop_hover: bool,
     pub term_focus: bool,
     /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
@@ -158,9 +170,13 @@ pub struct Deck {
     debug_fake_shell: bool,
     /// SOMENTE DEPURAÇÃO: fecha as abas restauradas (captura do estado vazio).
     pub debug_close_all: bool,
+    /// SOMENTE DEPURAÇÃO: abre o visualizador depois da restauração das abas (`true` = com texto digitado).
+    pub debug_viewer: Option<bool>,
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(120);
+/// Quantas abas o app abre sozinho (a pedido de `ask-agent`) ao mesmo tempo; passou disso, só o feed.
+const MAX_AUTO_TABS: usize = 3;
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(60);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
 const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
@@ -218,6 +234,8 @@ impl Deck {
             settings_open: false,
             target_menu_open: false,
             sound_enabled: cfg.sound_enabled,
+            auto_open_agent_tabs: cfg.auto_open_agent_tabs,
+            dismissed_agent_tabs: HashSet::new(),
             drop_hover: false,
             term_focus: false,
             ime_preedit: String::new(),
@@ -227,6 +245,7 @@ impl Deck {
             terminal_rect: None,
             window_focused: true,
             debug_close_all: false,
+            debug_viewer: None,
             debug_fake_shell: std::env::var("COMMANDDECK_DEBUG_FAKE_SHELL").is_ok_and(|v| v == "1"),
         };
         deck.refresh_agents();
@@ -316,6 +335,7 @@ impl Deck {
             CoreEvent::TableFinished => self.finish_table(),
             CoreEvent::AgentsChanged => self.refresh_agents(),
             CoreEvent::Download(_) if self.debug_hold_download => {}
+            CoreEvent::EnsureAgentTab { agent, pair } => self.ensure_agent_tab(&agent, &pair),
             CoreEvent::Download(p) => self.download = match p.state {
                 DownloadState::Done => None,
                 // O erro fica visível por alguns segundos (o detalhe também vai para a Conversa integrada).
@@ -338,10 +358,13 @@ impl Deck {
                 if !self.initialized {
                     self.initialized = true;
                     self.restore_tabs();
-                    if self.debug_close_all {
+                    if self.debug_close_all || self.debug_viewer.is_some() {
                         while !self.tabs.is_empty() {
                             self.close_tab(0);
                         }
+                    }
+                    if let Some(typing) = self.debug_viewer.take() {
+                        self.debug_viewer_run(typing);
                     }
                 }
             }
@@ -463,6 +486,10 @@ impl Deck {
                     tab.pending_resize = None;
                     if let Some(m) = &metrics {
                         tab.session.resize(size, m.cell_w, m.cell_h);
+                        if let Some(v) = &tab.viewer {
+                            tab.session.reset();
+                            tab.session.print(&v.full_render(size.cols));
+                        }
                     }
                 } else {
                     want(at);
@@ -472,6 +499,9 @@ impl Deck {
         for (i, code) in exits {
             let tab = &mut self.tabs[i];
             tab.alive = false;
+            if let Some(pair) = tab.claimed_pair.take() {
+                self.core.release_conversation(&pair);
+            }
             tab.session.print(&format!("\r\n\x1b[90m[processo encerrado (código {code}) — pressione Enter para reiniciar]\x1b[0m\r\n"));
         }
         if chime {
@@ -523,7 +553,7 @@ impl Deck {
         }
     }
 
-    pub fn open_tab(&mut self, kind: &str, restoring: bool) {
+    fn make_tab(&mut self, kind: &str, viewer: Option<Viewer>, auto: bool) -> Tab {
         let same_kind = self.tabs.iter().filter(|t| t.kind == kind).count();
         let mut label = self.agents.name(kind);
         if same_kind > 0 {
@@ -538,12 +568,53 @@ impl Deck {
             view: ViewState::default(),
             alive: false,
             busy: false,
+            viewer,
+            auto,
+            claimed_pair: None,
             seen_output: 0,
             idle_deadline: None,
             spec: None,
             pending_resize: None,
         };
         self.next_uid += 1;
+        tab
+    }
+
+    /// `ask-agent` chamou `agent`: garante uma aba para ele, em segundo plano e sem roubar o
+    /// foco. Agentes que sabem retomar a conversa da ponte abrem como visualizador (ver
+    /// `viewer.rs`); os demais, como aba interativa comum. Respeita a opção do usuário, abas
+    /// que ele fechou e um teto de abas automáticas.
+    fn ensure_agent_tab(&mut self, agent: &str, pair: &str) {
+        if !self.auto_open_agent_tabs
+            || !self.agents.knows(agent)
+            || self.tabs.iter().any(|t| t.kind == agent)
+            || self.dismissed_agent_tabs.contains(agent)
+            || self.tabs.iter().filter(|t| t.auto).count() >= MAX_AUTO_TABS
+        {
+            return;
+        }
+        let viewer = self.core.viewer_supported(agent).then(|| Viewer::new(agent, pair, &self.agents.name(agent)));
+        let tab = self.make_tab(agent, viewer, true);
+        self.tabs.push(tab);
+        let idx = self.tabs.len() - 1;
+        match &self.tabs[idx].viewer {
+            Some(v) => {
+                let screen = v.full_render(self.current_grid().cols);
+                self.tabs[idx].session.print(&screen);
+            }
+            None => self.start(idx),
+        }
+        if self.active.is_none() {
+            self.activate(idx); // sem nenhuma aba visível, a nova aparece
+        }
+        self.persist_tabs();
+        self.system(format!("Abri a aba de {} para a conversa com outro agente.", self.agents.name(agent)));
+    }
+
+    pub fn open_tab(&mut self, kind: &str, restoring: bool) {
+        // Abrir à mão devolve ao agente o direito de abrir abas sozinho.
+        self.dismissed_agent_tabs.remove(kind);
+        let tab = self.make_tab(kind, None, false);
         self.tabs.push(tab);
         let idx = self.tabs.len() - 1;
         self.activate(idx);
@@ -555,9 +626,14 @@ impl Deck {
 
     /// `start(tab)`: reinicia o terminal e o processo.
     pub fn start(&mut self, idx: usize) {
+        self.start_with(idx, &SpawnExtras::default());
+    }
+
+    /// Como [`Deck::start`], retomando uma conversa e/ou já enviando a primeira mensagem.
+    fn start_with(&mut self, idx: usize, extras: &SpawnExtras) {
         let wake = self.wake.clone();
         let grid = self.current_grid();
-        let spec = match self.core.spawn_spec(&self.tabs[idx].kind) {
+        let spec = match self.core.spawn_spec_with(&self.tabs[idx].kind, extras) {
             Ok(spec) => Ok(spec),
             Err(e) if self.debug_fake_shell => {
                 log::warn!("COMMANDDECK_DEBUG_FAKE_SHELL: usando shell local no lugar de '{}' ({e})", self.tabs[idx].kind);
@@ -599,6 +675,13 @@ impl Deck {
         }
         let mut tab = self.tabs.remove(idx);
         tab.session.kill();
+        if let Some(pair) = tab.claimed_pair.take() {
+            self.core.release_conversation(&pair);
+        }
+        if tab.auto {
+            // Fechou uma aba que o app abriu sozinho: não insiste até o próximo início.
+            self.dismissed_agent_tabs.insert(tab.kind.clone());
+        }
         match self.active {
             Some(a) if a == idx => {
                 if self.tabs.is_empty() {
@@ -634,8 +717,10 @@ impl Deck {
             return;
         }
         self.persist_at = None;
-        let open: Vec<String> = self.tabs.iter().map(|t| t.kind.clone()).collect();
-        let idx = self.active.map(|i| i as i32).unwrap_or(-1);
+        // Visualizadores são efêmeros: sem o histórico da ponte, reabrir seria uma aba vazia.
+        let saved: Vec<usize> = (0..self.tabs.len()).filter(|&i| self.tabs[i].viewer.is_none()).collect();
+        let open: Vec<String> = saved.iter().map(|&i| self.tabs[i].kind.clone()).collect();
+        let idx = self.active.and_then(|a| saved.iter().position(|&i| i == a)).map(|p| p as i32).unwrap_or(-1);
         self.core.update_config(|c| {
             c.open_tabs = open;
             c.active_tab_index = idx;
@@ -746,7 +831,9 @@ impl Deck {
                 }
             } else if lower == "v" {
                 if let Some(text) = clipboard_text().filter(|t| !t.is_empty()) {
-                    if self.tabs[idx].alive {
+                    if self.tabs[idx].viewer.is_some() {
+                        self.viewer_paste(idx, &text);
+                    } else if self.tabs[idx].alive {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
                         self.tabs[idx].session.write(&input::paste_bytes(&text, bracketed));
                     }
@@ -766,8 +853,67 @@ impl Deck {
         true
     }
 
+    /// Entrada numa aba visualizadora: edita o prompt; Enter com texto assume a conversa.
+    fn viewer_input(&mut self, idx: usize, bytes: &[u8]) {
+        let cols = self.current_grid().cols;
+        let Some(viewer) = self.tabs[idx].viewer.as_mut() else { return };
+        let ev = viewer.input(bytes, cols);
+        self.apply_viewer_event(idx, ev);
+    }
+
+    fn viewer_paste(&mut self, idx: usize, text: &str) {
+        let cols = self.current_grid().cols;
+        let Some(viewer) = self.tabs[idx].viewer.as_mut() else { return };
+        let ev = viewer.paste(text, cols);
+        self.apply_viewer_event(idx, ev);
+    }
+
+    fn apply_viewer_event(&mut self, idx: usize, ev: ViewerEvent) {
+        match ev {
+            ViewerEvent::None => {}
+            ViewerEvent::Redraw(bytes) => {
+                let session = &self.tabs[idx].session;
+                session.shared.emu.lock().term.scroll_display(Scroll::Bottom);
+                session.print(&bytes);
+            }
+            ViewerEvent::Takeover(text) => self.take_over(idx, text),
+        }
+    }
+
+    /// O usuário assumiu a conversa: a aba vira o CLI interativo do agente, retomando a conversa
+    /// da ponte e já enviando a mensagem digitada. Enquanto a aba viver, a ponte usa outra
+    /// conversa (um escritor por conversa).
+    fn take_over(&mut self, idx: usize, text: String) {
+        let Some(viewer) = self.tabs[idx].viewer.clone() else { return };
+        if self.core.conversation_busy(&viewer.pair) {
+            // Um agente ainda está respondendo nesta conversa: esperar evita dois escritores.
+            let cols = self.current_grid().cols;
+            let tab = &mut self.tabs[idx];
+            let warning = "O agente ainda está respondendo à conversa: espere terminar e envie de novo.";
+            if let Some(v) = tab.viewer.as_mut() {
+                let note = v.notice(warning, &text, cols);
+                tab.session.print(&note);
+            }
+            return;
+        }
+        let resume = self.core.conversation_for(&viewer.pair);
+        let extras = SpawnExtras { resume: resume.clone(), prompt: Some(text) };
+        self.tabs[idx].viewer = None;
+        self.start_with(idx, &extras);
+        let tab = &mut self.tabs[idx];
+        tab.busy = tab.alive;
+        if let (true, Some(_)) = (tab.alive, resume) {
+            self.core.claim_conversation(&viewer.pair);
+            tab.claimed_pair = Some(viewer.pair);
+        }
+    }
+
     /// `term.onData`: envia ao processo ou reinicia com Enter quando morto.
     fn terminal_data(&mut self, idx: usize, bytes: &[u8]) {
+        if self.tabs[idx].viewer.is_some() {
+            self.viewer_input(idx, bytes);
+            return;
+        }
         let tab = &mut self.tabs[idx];
         if tab.alive {
             if bytes == b"\r" {
@@ -885,7 +1031,39 @@ impl Deck {
     // Conversa integrada
     // ------------------------------------------------------------------
 
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=viewer`): abre a aba do Antigravity como
+    /// visualizador e simula uma conversa da ponte para captura de tela.
+    fn debug_viewer_run(&mut self, typing: bool) {
+        self.ensure_agent_tab("antigravity", "claude->antigravity");
+        let Some(idx) = self.tabs.iter().position(|t| t.kind == "antigravity") else { return };
+        self.activate(idx);
+        let ask = "Oi Antigravity! O Pattrick pediu para a gente discutir a nova função de abrir abas.\nQual a sua opinião sobre mostrar a conversa da ponte aqui?";
+        let answer = "Acho ótimo: o headless continua sendo o transporte e esta aba mostra tudo em tempo real.\nQuando você quiser assumir, é só digitar uma mensagem e dar Enter.";
+        self.add_feed(FeedEntry::new(FeedKind::Ask, Some("claude"), Some("antigravity"), ask));
+        self.add_feed(FeedEntry::new(FeedKind::Answer, Some("antigravity"), Some("claude"), answer));
+        if typing {
+            self.viewer_input(idx, "e se o Ollama também abrir sozinho?".as_bytes());
+        }
+    }
+
+    /// Mostra nas abas visualizadoras as entradas da ponte que lhes dizem respeito.
+    fn route_to_viewers(&mut self, e: &FeedEntry) {
+        if !self.tabs.iter().any(|t| t.viewer.as_ref().is_some_and(|v| v.wants(e))) {
+            return;
+        }
+        let cols = self.current_grid().cols;
+        let agents = &self.agents;
+        let who = |id: &str| agents.who_name(id);
+        for tab in &mut self.tabs {
+            if let Some(v) = tab.viewer.as_mut().filter(|v| v.wants(e)) {
+                let out = v.push(e, &who, cols);
+                tab.session.print(&out);
+            }
+        }
+    }
+
     pub fn add_feed(&mut self, e: FeedEntry) {
+        self.route_to_viewers(&e);
         if let Some(from) = &e.from {
             if let Some(id) = self.thinking.remove(from) {
                 self.feed.retain(|f| f.id != id);

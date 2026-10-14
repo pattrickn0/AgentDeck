@@ -69,13 +69,15 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     let title_h = 11.0 * theme::LINE_HEIGHT + 4.0;
     let item_h = 13.0 * theme::LINE_HEIGHT + 12.0;
     let btn_h = 12.0 * theme::LINE_HEIGHT + 12.0 + 2.0;
-    let h = 8.0 + title_h + 8.0 + item_h + 6.0 + btn_h + 8.0 + 2.0;
+    let h = 8.0 + title_h + 8.0 + item_h + 2.0 + item_h + 6.0 + btn_h + 8.0 + 2.0;
     // right: 4px a partir da borda direita do botão (que fica colado à janela).
     let pos = Pos2::new(anchor.max.x - 4.0 - w, anchor.max.y);
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut toggle = false;
+    let mut toggle_tabs = false;
     let mut test = false;
     let sound = deck.sound_enabled;
+    let auto_tabs = deck.auto_open_agent_tabs;
     Area::new(Id::new("settings-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         let p = ui.painter();
@@ -104,8 +106,21 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             toggle = true;
         }
 
+        // Item com checkbox: abas dos agentes chamados por `ask-agent`
+        let item2 = Rect::from_min_size(Pos2::new(inner.min.x, item.max.y + 2.0), Vec2::new(inner.width(), item_h));
+        let r = super::clickable(ui, item2, Id::new("setting-auto-tabs"));
+        if r.hovered() {
+            p.rect_filled(item2, 6.0, theme::BORDER);
+        }
+        text_in(p, item2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Abrir abas dos agentes", theme::ui(13.0), theme::TEXT);
+        let cb2 = Rect::from_center_size(Pos2::new(item2.max.x - 8.0 - 8.0, item2.center().y), Vec2::splat(16.0));
+        checkbox(p, cb2, auto_tabs);
+        if r.clicked() {
+            toggle_tabs = true;
+        }
+
         // ▶ Testar som
-        let btn = Rect::from_min_size(Pos2::new(inner.min.x, item.max.y + 6.0), Vec2::new(inner.width(), btn_h));
+        let btn = Rect::from_min_size(Pos2::new(inner.min.x, item2.max.y + 6.0), Vec2::new(inner.width(), btn_h));
         let r = super::clickable(ui, btn, Id::new("setting-test-sound"));
         let hot = r.hovered();
         frame(p, btn, 6.0, if hot { theme::BORDER } else { theme::PANEL }, theme::BORDER);
@@ -118,6 +133,11 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         deck.sound_enabled = !deck.sound_enabled;
         let v = deck.sound_enabled;
         deck.core.update_config(|c| c.sound_enabled = v);
+    }
+    if toggle_tabs {
+        deck.auto_open_agent_tabs = !deck.auto_open_agent_tabs;
+        let v = deck.auto_open_agent_tabs;
+        deck.core.update_config(|c| c.auto_open_agent_tabs = v);
     }
     if test {
         deck.play_sound(true);
