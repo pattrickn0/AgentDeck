@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use commanddeck_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_OLLAMA, COLOR_SHELL};
-use commanddeck_core::AgentInfo;
+use commanddeck_core::{AgentInfo, Ident};
 use egui::Color32;
 
 use crate::theme;
@@ -199,14 +199,21 @@ impl Agents {
         }
     }
 
-    /// `whoColor(name)`
+    /// `whoColor(name)`; uma instância (`claude@dev`) usa a cor do modelo.
     pub fn who_color(&self, name: Option<&str>) -> Color32 {
-        name.and_then(|n| self.colors.get(n).copied()).unwrap_or(theme::WHO_DEFAULT)
+        name.and_then(|n| self.colors.get(n).copied().or_else(|| Ident::parse(n).and_then(|i| self.colors.get(&i.kind).copied())))
+            .unwrap_or(theme::WHO_DEFAULT)
     }
 
-    /// `whoName(name)`
+    /// `whoName(name)`; uma instância vira `Claude · Dev · Ana`.
     pub fn who_name(&self, name: &str) -> String {
-        self.names.get(name).cloned().unwrap_or_else(|| name.to_owned())
+        if let Some(n) = self.names.get(name) {
+            return n.clone();
+        }
+        match Ident::parse(name) {
+            Some(i) if i.role.is_some() || i.name.is_some() => i.label(&self.who_name(&i.kind)),
+            _ => name.to_owned(),
+        }
     }
 
     /// Restauração só abre abas de tipos conhecidos (`if (COLORS[kind])`).

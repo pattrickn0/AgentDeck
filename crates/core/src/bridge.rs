@@ -6,13 +6,16 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
 use serde_json::{json, Value};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::agents::resolve_alias;
-use crate::events::{CoreEvent, FeedEntry, FeedKind};
+use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
+use crate::exchange::Reply;
+use crate::instances::Ident;
 use crate::headless::HeadlessOptions;
 use crate::{Core, CoreInner};
 
@@ -117,7 +120,8 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
     if *req.method() == Method::Get && req.url() == "/agents" {
         return reply(req, 200, json!({ "agents": core.peers() }));
     }
-    if *req.method() != Method::Post || req.url() != "/ask" {
+    let is_reply_route = *req.method() == Method::Post && req.url() == "/reply";
+    if *req.method() != Method::Post || (req.url() != "/ask" && !is_reply_route) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
     }
 
@@ -128,7 +132,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
     let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
         return reply(req, 400, json!({ "error": "JSON inválido" }));
     };
-    let (status, out) = ask(&core, &msg);
+    let (status, out) = if is_reply_route { reply_pending(&core, &msg) } else { ask(&core, &msg) };
     reply(req, status, out);
 }
 
@@ -183,9 +187,100 @@ pub(crate) fn resolve_target(asked: &str, available: &[String], ollama_models: &
     to
 }
 
+/// Quanto tempo uma pergunta entregue numa aba espera pela resposta.
+const TAB_REPLY_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// `POST /reply` `{"from","to","message"}`: `from` responde à pergunta que `to` fez. Só conclui uma
+/// pergunta **pendente** (404 se não houver): nunca cria uma pergunta nova. É o que o `ollama-agent`
+/// usa para devolver sozinho a resposta, sem depender de o modelo rodar `ask-agent`.
+fn reply_pending(core: &Core, msg: &Value) -> (u16, Value) {
+    let from = js_string_or(msg.get("from"), "").to_lowercase();
+    let to = js_string_or(msg.get("to"), "").to_lowercase();
+    let message = js_string_or(msg.get("message"), "");
+    if !core.inner.exchange.reply(&from, &to, &message) {
+        return (404, json!({ "delivered": false, "error": "nenhuma pergunta pendente" }));
+    }
+    core.feed(FeedEntry::new(FeedKind::Answer, Some(&from), Some(&to), message));
+    (200, json!({ "delivered": true }))
+}
+
+/// Texto digitado no terminal da instância que recebe a pergunta.
+fn tab_prompt(from: &str, message: &str) -> String {
+    format!(
+        "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\n\
+Responda ao agente \"{from}\" executando no shell: ask-agent \"{from}\" \"sua resposta\"\n\
+(a resposta só chega a ele por esse comando; texto escrito apenas aqui não é entregue. Para respostas longas, \
+envie pela entrada padrão: ask-agent \"{from}\" -). O usuário acompanha a conversa na Conversa integrada."
+    )
+}
+
+/// Pergunta entregue numa aba (instância) interativa e respondida por `ask-agent` de volta.
+fn ask_tab(core: &Core, from: &str, asked: &str, message: &str, force_new: bool) -> (u16, Value) {
+    let (base, suffix) = match asked.find('@') {
+        Some(i) => (&asked[..i], &asked[i..]),
+        None => (asked, ""),
+    };
+    let kinds = core.inner.agents.peers();
+    let models = core.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
+    let kind = resolve_target(base, &kinds, &models);
+    let Some(want) = kinds.contains(&kind).then(|| Ident::parse(&format!("{kind}{suffix}"))).flatten() else {
+        return (
+            400,
+            json!({ "error": format!("agente desconhecido ou não instalado \"{asked}\". Disponíveis: {}", core.peers().join(", ")) }),
+        );
+    };
+    let resolved = core.inner.instances.lock().resolve_or_create(&want, force_new);
+    let (ident, created) = match resolved {
+        Ok(v) => v,
+        Err(options) => {
+            return (400, json!({ "error": format!("\"{asked}\" é ambíguo: {}. Use o nome completo.", options.join(", ")) }));
+        }
+    };
+    let id = ident.id();
+    if id == from {
+        return (400, json!({ "error": "um agente não pode perguntar a si mesmo" }));
+    }
+    let (request, rx) = match core.inner.exchange.register(from, &id) {
+        Ok(v) => v,
+        Err(e) => {
+            if created {
+                core.inner.instances.lock().remove(&id);
+            }
+            return (409, json!({ "error": e }));
+        }
+    };
+
+    core.feed(FeedEntry::new(FeedKind::Ask, Some(from), Some(&id), message.to_owned()));
+    core.emit(CoreEvent::Deliver(Delivery { request, ident, create: created, from: from.to_owned(), prompt: tab_prompt(from, message) }));
+
+    let deadline = Instant::now() + TAB_REPLY_TIMEOUT;
+    let outcome = loop {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(reply) => break reply,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                if core.inner.state.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                    break Reply::Failed("CommandDeck encerrando".into());
+                }
+                if Instant::now() >= deadline {
+                    break Reply::Failed(format!("\"{id}\" não respondeu em 10 minutos"));
+                }
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break Reply::Failed("pergunta cancelada".into()),
+        }
+    };
+    core.inner.exchange.remove(request);
+    match outcome {
+        Reply::Answer(answer) => (200, json!({ "answer": answer })),
+        Reply::Failed(text) => {
+            core.feed(FeedEntry::new(FeedKind::Error, Some(&id), Some(from), text.clone()));
+            (500, json!({ "error": text }))
+        }
+    }
+}
+
 /// Processa um `POST /ask` já decodificado. Retorna (status HTTP, corpo).
 fn ask(core: &Core, msg: &Value) -> (u16, Value) {
-    let from = js_string_or(msg.get("from"), "usuário");
+    let from = js_string_or(msg.get("from"), "usuário").to_lowercase();
     let asked = js_string_or(msg.get("to"), "").to_lowercase();
     let depth = js_depth(msg.get("depth"));
     let message = match msg.get("message") {
@@ -193,6 +288,17 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
         None | Some(Value::Null) => String::new(),
         Some(other) => other.to_string(),
     };
+
+    // `from` está respondendo a uma pergunta que `asked` fez: entrega a quem espera.
+    if core.inner.exchange.reply(&from, &asked, &message) {
+        core.feed(FeedEntry::new(FeedKind::Answer, Some(&from), Some(&asked), message));
+        return (200, json!({ "answer": format!("Resposta entregue a \"{asked}\".") }));
+    }
+    // Com a interface ligada, a pergunta vai para a aba (instância) do agente; sem ela, em headless.
+    if core.tab_delivery() {
+        let force_new = msg.get("new").and_then(Value::as_bool).unwrap_or(false);
+        return ask_tab(core, &from, &asked, &message, force_new);
+    }
 
     let available = core.peers();
     let models = core.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
@@ -210,11 +316,6 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
         return (400, json!({ "error": "profundidade máxima de conversa entre agentes atingida" }));
     }
 
-    // A aba do agente chamado abre antes de a pergunta chegar ao feed (mesmo canal, ordem preservada).
-    // A resposta continua saindo pelo modo headless: a aba é só o terminal normal do agente.
-    if core.config().auto_open_agent_tabs {
-        core.emit(CoreEvent::EnsureAgentTab { agent: to.clone() });
-    }
     core.feed(FeedEntry::new(FeedKind::Ask, Some(&from), Some(&to), message.clone()));
     let prompt = format!(
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
@@ -222,7 +323,8 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
     let session_key = format!("{from}->{to}");
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
-        core.run_headless(&to, &prompt, HeadlessOptions { session_key: Some(session_key.clone()), depth: depth + 1, ..Default::default() })
+        let kind = Ident::parse(&to).map(|i| i.kind).unwrap_or_else(|| to.clone());
+        core.run_headless(&kind, &prompt, HeadlessOptions { session_key: Some(session_key.clone()), depth: depth + 1, ..Default::default() })
     };
     match result {
         Ok(answer) => {

@@ -75,16 +75,10 @@ fn http(port: u16, method: &str, path: &str, host: &str, token: &str, body: &str
     (status, serde_json::from_str(body).unwrap_or(Value::Null))
 }
 
-/// Agentes pedidos à UI (`EnsureAgentTab`) desde a última chamada.
+/// Chamada à ponte que pode ir para outra thread (só porta e token).
 #[cfg(unix)]
-fn ensure_events(env: &Env) -> Vec<String> {
-    env.rx
-        .try_iter()
-        .filter_map(|ev| match ev {
-            CoreEvent::EnsureAgentTab { agent } => Some(agent),
-            _ => None,
-        })
-        .collect()
+fn ask_raw(port: u16, token: &str, body: Value) -> (u16, Value) {
+    http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), token, &body.to_string())
 }
 
 fn ask(env: &Env, body: Value) -> (u16, Value) {
@@ -321,24 +315,192 @@ fn attachments_and_config_persistence() {
     env.core.shutdown();
 }
 
+#[test]
+fn spawn_spec_for_an_instance_carries_its_identity() {
+    let env = start(&[]);
+    let ident = commanddeck_core::Ident::parse("shell@qa@ana").expect("id");
+    let spec = env.core.spawn_spec_for(&ident).expect("shell sempre existe");
+    assert_eq!(spec.kind, "shell");
+    assert_eq!(spec.env["COMMANDDECK_AGENT"], "shell@qa@ana");
+    // `shell@main@ana` não tem cargo: sem COMMANDDECK_ROLE.
+    let main = env.core.spawn_spec_for(&commanddeck_core::Ident::parse("shell@main@bia").expect("id")).expect("spec");
+    assert_eq!(main.env["COMMANDDECK_AGENT"], "shell@main@bia");
+    assert!(!main.env.contains_key("COMMANDDECK_ROLE"));
+    env.core.shutdown();
+}
+
+#[test]
+fn instances_are_registered_named_and_forgotten() {
+    let env = start(&[]);
+    assert_eq!(env.core.register_instance("claude").id(), "claude");
+    assert_eq!(env.core.register_instance("claude").id(), "claude@main@ana");
+    assert_eq!(env.core.restore_instance("claude@dev").map(|i| i.id()).as_deref(), Some("claude@dev"));
+    assert!(env.core.restore_instance("claude@Dev!").is_none());
+    assert_eq!(env.core.instance_ids(), vec!["claude", "claude@main@ana", "claude@dev"]);
+    env.core.close_instance("claude@main@ana");
+    assert_eq!(env.core.register_instance("claude").id(), "claude@main@ana", "o nome é reaproveitado");
+    env.core.shutdown();
+}
+
+/// Próxima entrega pedida à interface (ignora os outros eventos).
+#[cfg(unix)]
+fn next_delivery(env: &Env) -> commanddeck_core::Delivery {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match env.rx.recv_timeout(left) {
+            Ok(CoreEvent::Deliver(d)) => return d,
+            Ok(_) => continue,
+            Err(_) => panic!("nenhuma entrega pedida à interface"),
+        }
+    }
+}
+
 #[cfg(unix)]
 #[test]
-fn ask_asks_the_ui_to_open_the_agent_tab() {
-    let env = start(&[("claude", "cat >/dev/null; echo resposta")]);
-    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
-    assert_eq!((st, b["answer"].as_str()), (200, Some("resposta")));
-    assert_eq!(ensure_events(&env), vec!["claude".to_owned()]);
+fn a_question_is_typed_into_the_tab_and_answered_by_callback() {
+    let env = start(&[("claude", "echo headless")]);
+    env.core.enable_tab_delivery();
+    let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
 
-    // Com a opção desligada nada é pedido à UI (a resposta continua saindo em headless).
-    env.core.update_config(|c| c.auto_open_agent_tabs = false);
-    let (st, _) = ask(&env, json!({"from": "shell", "to": "claude", "message": "de novo"}));
+    let asker = std::thread::spawn({
+        let token = token.clone();
+        move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "qual a capital da França?"}))
+    });
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create, d.from.as_str()), ("claude", true, "shell"));
+    assert!(d.prompt.contains("qual a capital da França?"));
+    assert!(d.prompt.contains("ask-agent \"shell\""), "ensina como responder: {}", d.prompt);
+
+    // A aba (claude) responde chamando `ask-agent shell "Paris"`: isso conclui a pergunta de quem espera.
+    let (st, b) = ask_raw(port, &token, json!({"from": "claude", "to": "shell", "message": "Paris"}));
     assert_eq!(st, 200);
-    assert!(ensure_events(&env).is_empty());
+    assert!(b["answer"].as_str().expect("texto").contains("entregue"));
+    let (st, b) = asker.join().expect("thread");
+    assert_eq!((st, b["answer"].as_str()), (200, Some("Paris")));
+    env.core.shutdown();
+}
 
-    // Pedido inválido (agente desconhecido) também não abre aba.
-    env.core.update_config(|c| c.auto_open_agent_tabs = true);
-    let (st, _) = ask(&env, json!({"from": "shell", "to": "bogus", "message": "oi"}));
+#[cfg(unix)]
+#[test]
+fn a_role_opens_a_new_instance_and_new_forces_another() {
+    let env = start(&[("claude", "echo headless")]);
+    env.core.enable_tab_delivery();
+    let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
+    let spawn_ask = |to: &'static str, new: bool| {
+        let token = token.clone();
+        std::thread::spawn(move || ask_raw(port, &token, json!({"from": "shell", "to": to, "message": "tarefa", "new": new})))
+    };
+
+    let first = spawn_ask("claude@dev", false);
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev", true));
+    let second = spawn_ask("claude@dev", false);
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev", false), "mesmo cargo: reaproveita a aba");
+    let third = spawn_ask("claude@dev", true);
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev@ana", true), "--new: outra instância, com nome");
+
+    // Quando as abas fecham, quem esperava recebe o erro (e nenhuma thread fica presa).
+    env.core.close_instance("claude@dev");
+    env.core.close_instance("claude@dev@ana");
+    for t in [first, second, third] {
+        let (st, b) = t.join().expect("thread");
+        assert_eq!(st, 500);
+        assert!(b["error"].as_str().expect("erro").contains("fechada"), "{b}");
+    }
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_delivery_unblocks_the_asker() {
+    let env = start(&[("claude", "echo headless")]);
+    env.core.enable_tab_delivery();
+    let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
+    let asker = std::thread::spawn(move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "oi"})));
+    let d = next_delivery(&env);
+    env.core.fail_delivery(d.request, "a aba não subiu");
+    let (st, b) = asker.join().expect("thread");
+    assert_eq!((st, b["error"].as_str()), (500, Some("a aba não subiu")));
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
+    let env = start(&[("claude", "echo x"), ("agy", "echo x")]);
+    env.core.enable_tab_delivery();
+    env.core.register_instance("claude"); // a aba principal do Claude
+    let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
+    let call = |from: &'static str, to: &'static str| {
+        let token = token.clone();
+        std::thread::spawn(move || ask_raw(port, &token, json!({"from": from, "to": to, "message": "oi"})))
+    };
+
+    // claude espera antigravity; antigravity espera claude@dev; claude@dev esperar claude fecharia o ciclo.
+    let a = call("claude", "antigravity");
+    next_delivery(&env);
+    let b = call("antigravity", "claude@dev");
+    next_delivery(&env);
+    let (st, body) = ask_raw(port, &token, json!({"from": "claude@dev", "to": "claude", "message": "oi"}));
+    assert_eq!(st, 409, "{body}");
+    assert!(body["error"].as_str().expect("erro").contains("ciclo"));
+
+    // Alvo desconhecido e instância ambígua.
+    assert_eq!(ask_raw(port, &token, json!({"from": "shell", "to": "bogus", "message": "oi"})).0, 400);
+    env.core.restore_instance("claude@qa@ana");
+    env.core.restore_instance("claude@qa@bia");
+    let (st, body) = ask_raw(port, &token, json!({"from": "shell", "to": "claude@qa", "message": "oi"}));
     assert_eq!(st, 400);
-    assert!(ensure_events(&env).is_empty());
+    assert!(body["error"].as_str().expect("erro").contains("ambíguo"), "{body}");
+
+    env.core.shutdown();
+    for t in [a, b] {
+        let _ = t.join();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn without_tab_delivery_the_bridge_still_answers_headless() {
+    // A interface não ligou a entrega (CLI/testes) ou o usuário desligou a opção: modo headless.
+    let env = start(&[("claude", "cat >/dev/null; echo resposta-headless")]);
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
+    assert_eq!((st, b["answer"].as_str()), (200, Some("resposta-headless")));
+
+    env.core.enable_tab_delivery();
+    env.core.update_config(|c| c.auto_open_agent_tabs = false);
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "de novo"}));
+    assert_eq!((st, b["answer"].as_str()), (200, Some("resposta-headless")));
+    assert!(env.rx.try_iter().all(|e| !matches!(e, CoreEvent::Deliver(_))));
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn reply_route_only_completes_pending_questions() {
+    let env = start(&[("claude", "echo x")]);
+    env.core.enable_tab_delivery();
+    let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
+    let host = format!("127.0.0.1:{port}");
+
+    // Sem pergunta pendente, /reply não cria nada: 404.
+    let body = json!({"from": "claude", "to": "shell", "message": "sozinha"}).to_string();
+    assert_eq!(http(port, "POST", "/reply", &host, &token, &body).0, 404);
+    assert!(env.rx.try_iter().all(|e| !matches!(e, CoreEvent::Deliver(_))));
+
+    let asker = std::thread::spawn({
+        let token = token.clone();
+        move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "oi"}))
+    });
+    next_delivery(&env);
+    let (st, b) = http(port, "POST", "/reply", &host, &token, &body);
+    assert_eq!((st, b["delivered"].as_bool()), (200, Some(true)));
+    let (st, b) = asker.join().expect("thread");
+    assert_eq!((st, b["answer"].as_str()), (200, Some("sozinha")));
+    // A segunda tentativa (o modelo já tinha respondido) não entrega de novo.
+    assert_eq!(http(port, "POST", "/reply", &host, &token, &body).0, 404);
     env.core.shutdown();
 }

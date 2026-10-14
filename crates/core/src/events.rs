@@ -93,8 +93,22 @@ pub enum CoreEvent {
     AgentsChanged,
     /// Progresso de um download em segundo plano.
     Download(DownloadProgress),
-    /// Um agente foi chamado pela ponte (`ask-agent`): a UI deve garantir uma aba (terminal
-    /// normal) para ele. É idempotente (emitido a cada pergunta); quem decide se abre, ou se já
-    /// existe, é a UI.
-    EnsureAgentTab { agent: String },
+    /// Uma pergunta do `ask-agent` para uma instância (aba): a UI abre a aba se `create` e digita
+    /// o `prompt` no terminal dela quando estiver pronta (ver [`Delivery`]).
+    Deliver(Delivery),
+}
+
+/// Mensagem a digitar no terminal de uma instância de agente.
+#[derive(Debug, Clone)]
+pub struct Delivery {
+    /// Número da pergunta (para avisar o core se a entrega falhar).
+    pub request: u64,
+    /// Instância de destino (já registrada no core).
+    pub ident: crate::instances::Ident,
+    /// A aba ainda não existe: a UI precisa abri-la.
+    pub create: bool,
+    /// Quem perguntou.
+    pub from: String,
+    /// Texto completo a digitar (mensagem + como responder).
+    pub prompt: String,
 }

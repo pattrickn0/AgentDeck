@@ -73,7 +73,7 @@ fn list_help_and_errors() {
 
     let out = ask_agent(Some(&core), &["--help"], None);
     assert_eq!(out.status.code(), Some(0));
-    assert!(text(&out.stdout).starts_with("Uso: ask-agent <agente>"));
+    assert!(text(&out.stdout).starts_with("Uso: ask-agent") && text(&out.stdout).contains("--new"));
     let out = ask_agent(Some(&core), &[], None);
     assert_eq!(out.status.code(), Some(2));
 

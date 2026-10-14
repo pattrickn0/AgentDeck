@@ -215,6 +215,32 @@ struct App {
     generating: Arc<AtomicBool>,
 }
 
+/// Quem fez a pergunta, se `text` veio da ponte: `[Mensagem do agente "X" recebida pelo CommandDeck]…`.
+fn bridge_asker(text: &str) -> Option<String> {
+    let rest = text.trim_start().strip_prefix("[Mensagem do agente \"")?;
+    let (asker, tail) = rest.split_once('"')?;
+    (tail.starts_with(" recebida pelo CommandDeck]") && !asker.is_empty()).then(|| asker.to_owned())
+}
+
+/// Devolve `answer` a `asker` pela ponte (`POST /reply`). `Ok(false)` = não havia pergunta pendente
+/// (o modelo já tinha respondido pelo `ask-agent`).
+fn reply_to_bridge(asker: &str, answer: &str) -> Result<bool, String> {
+    let (port, token) = (env_nonempty("COMMANDDECK_PORT").ok_or("fora do CommandDeck")?, env_nonempty("COMMANDDECK_TOKEN").ok_or("fora do CommandDeck")?);
+    let me = env_nonempty("COMMANDDECK_AGENT").unwrap_or_default();
+    let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).http_status_as_error(false).build().into();
+    let body = serde_json::json!({ "from": me, "to": asker, "message": answer });
+    let resp = agent
+        .post(format!("http://127.0.0.1:{port}/reply"))
+        .header("x-commanddeck-token", &token)
+        .send_json(&body)
+        .map_err(|e| e.to_string())?;
+    match resp.status().as_u16() {
+        200 => Ok(true),
+        404 => Ok(false),
+        other => Err(format!("a ponte respondeu {other}")),
+    }
+}
+
 fn env_nonempty(k: &str) -> Option<String> {
     std::env::var(k).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
@@ -385,8 +411,9 @@ impl App {
         println!("\n{}Workspace:{} {} {}({count} itens na raiz){}\n", c.bold, c.reset, self.workspace.display(), c.dim, c.reset);
     }
 
-    /// Envia uma mensagem ao modelo, mostrando o progresso em tempo real.
-    fn turn(&mut self, prompt: &str) {
+    /// Envia uma mensagem ao modelo, mostrando o progresso em tempo real. Devolve a resposta final
+    /// (`None` se foi interrompida ou falhou).
+    fn turn(&mut self, prompt: &str) -> Option<String> {
         let c = self.c;
         let term = self.term.clone();
         let mut opts = RunOptions::new(self.model.clone(), prompt, self.workspace.clone());
@@ -424,8 +451,12 @@ impl App {
         term.stop();
 
         let elapsed = started.elapsed().as_secs_f32();
+        let mut answer = None;
         match result {
             Ok(out) => {
+                if !out.cancelled {
+                    answer = Some(out.text.clone());
+                }
                 if !printed && !out.cancelled {
                     term.write(&out.text);
                 }
@@ -452,6 +483,7 @@ impl App {
             }
         }
         println!();
+        answer
     }
 }
 
@@ -563,9 +595,38 @@ fn main() -> ExitCode {
             other if other.starts_with('/') && !other[1..].contains('/') => {
                 println!("{}Comando desconhecido: {cmd} — digite /help.{}", c.yellow, c.reset);
             }
-            _ => app.turn(text),
+            _ => {
+                let answer = app.turn(text);
+                // Pergunta de outro agente (digitada pela ponte): a resposta volta sozinha, sem
+                // depender de o modelo lembrar de rodar `ask-agent`.
+                if let (Some(asker), Some(answer)) = (bridge_asker(text), answer) {
+                    match reply_to_bridge(&asker, &answer) {
+                        Ok(true) => println!("{}↩ resposta enviada a {asker}.{}\n", c.dim, c.reset),
+                        Ok(false) => {} // o modelo já respondeu por conta própria
+                        Err(e) => println!("{}⚠ não consegui enviar a resposta a {asker}: {e}{}\n", c.yellow, c.reset),
+                    }
+                }
+            }
         }
     }
     println!("{}Encerrando sessão do agente Ollama.{}", c.dim, c.reset);
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_questions_typed_by_the_bridge() {
+        let q = "[Mensagem do agente \"claude@dev\" recebida pelo CommandDeck]\n\nqual a capital?";
+        assert_eq!(bridge_asker(q).as_deref(), Some("claude@dev"));
+        // O terminal pode colar as quebras de linha como nada.
+        assert_eq!(bridge_asker("[Mensagem do agente \"driver\" recebida pelo CommandDeck]Você está num teste").as_deref(), Some("driver"));
+        assert_eq!(bridge_asker("  [Mensagem do agente \"x\" recebida pelo CommandDeck] oi").as_deref(), Some("x"));
+        // Conversa normal do usuário não é pergunta da ponte.
+        assert_eq!(bridge_asker("olá, tudo bem?"), None);
+        assert_eq!(bridge_asker("[Mensagem do agente \"\" recebida pelo CommandDeck] oi"), None);
+        assert_eq!(bridge_asker("[Mensagem do agente \"x\" qualquer coisa] oi"), None);
+    }
 }

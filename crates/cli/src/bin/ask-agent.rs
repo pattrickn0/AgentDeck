@@ -1,7 +1,10 @@
 //! `ask-agent` — pergunta algo a outro agente pela ponte do CommandDeck (porta de bin/ask-agent.js).
 //!
 //! Uso: ask-agent <agente> "mensagem"     (ou "-" para ler a mensagem do stdin)
+//!      ask-agent --new <agente> "mensagem"   (abre outra instância, mesmo se já houver uma)
 //!      ask-agent --list
+//!
+//! `<agente>` é `modelo[@cargo[@nome]]`: `claude`, `claude@dev`, `claude@dev@ana`.
 //!
 //! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do CommandDeck.
 
@@ -10,7 +13,7 @@ use std::process::ExitCode;
 
 use serde_json::{json, Value};
 
-const USAGE: &str = "Uso: ask-agent <agente> \"mensagem\"   |   ask-agent --list";
+const USAGE: &str = "Uso: ask-agent [--new] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --list";
 
 struct Bridge {
     port: String,
@@ -49,7 +52,11 @@ fn main() -> ExitCode {
     let depth: i64 = env("COMMANDDECK_DEPTH").and_then(|d| d.trim().parse::<f64>().ok()).map(|d| d as i64).unwrap_or(0);
     let bridge = Bridge { port, token };
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let force_new = args.first().is_some_and(|a| a == "--new");
+    if force_new {
+        args.remove(0);
+    }
     let to = args.first().map(String::as_str).unwrap_or("");
     if to.is_empty() || to == "-h" || to == "--help" {
         println!("{USAGE}");
@@ -80,7 +87,7 @@ fn main() -> ExitCode {
         return fail("mensagem vazia.", 2);
     }
 
-    let body = json!({ "from": from, "to": to, "message": message, "depth": depth });
+    let body = json!({ "from": from, "to": to, "message": message, "depth": depth, "new": force_new });
     match bridge.request("POST", "/ask", Some(&body)) {
         Ok((200, json)) => {
             let answer = match json.get("answer") {

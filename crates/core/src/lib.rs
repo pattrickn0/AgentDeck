@@ -15,7 +15,9 @@ pub mod config;
 pub mod context;
 pub mod download;
 pub mod events;
+pub mod exchange;
 pub mod headless;
+pub mod instances;
 pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
@@ -36,7 +38,8 @@ use parking_lot::{Mutex, RwLock};
 
 pub use agents::{AgentInfo, SpawnSpec};
 pub use config::Config;
-pub use events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry, FeedKind};
+pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind};
+pub use instances::Ident;
 pub use headless::HeadlessOptions;
 pub use workspace::DirEntry;
 
@@ -107,6 +110,11 @@ pub(crate) struct CoreInner {
     pub processes: process::ProcessRegistry,
     /// Chave do par → id da sessão/conversa headless.
     pub headless_sessions: Mutex<HashMap<String, String>>,
+    /// Instâncias de agentes (uma por aba) e as perguntas aguardando resposta entre elas.
+    pub instances: Mutex<instances::Instances>,
+    pub exchange: exchange::Exchange,
+    /// A interface sabe entregar mensagens nas abas (senão a ponte responde em modo headless).
+    pub tab_delivery: std::sync::atomic::AtomicBool,
     pub bridge_queues: bridge::PairQueues,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
@@ -178,6 +186,9 @@ impl Core {
             providers,
             processes: process::ProcessRegistry::default(),
             headless_sessions: Mutex::new(HashMap::new()),
+            instances: Mutex::new(instances::Instances::default()),
+            exchange: exchange::Exchange::default(),
+            tab_delivery: std::sync::atomic::AtomicBool::new(false),
             bridge_queues: bridge::PairQueues::default(),
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
@@ -281,9 +292,66 @@ impl Core {
         agents::spawn_spec(self, kind)
     }
 
-    /// Ids que podem ser usados com `ask-agent` (equivalente a `peers()`).
+    /// Como [`Core::spawn_spec`] para uma instância (modelo + cargo + nome): o id dela vai em
+    /// `COMMANDDECK_AGENT` e o cargo em `COMMANDDECK_ROLE`.
+    pub fn spawn_spec_for(&self, ident: &Ident) -> Result<SpawnSpec, String> {
+        agents::spawn_spec_for(self, ident)
+    }
+
+    // ---------- Instâncias (abas) e perguntas entre elas ----------
+
+    /// A interface passa a entregar as perguntas do `ask-agent` digitando nas abas (em vez de rodar
+    /// o agente à parte, em modo headless). Só vale com `Config.auto_open_agent_tabs`.
+    pub fn enable_tab_delivery(&self) {
+        self.inner.tab_delivery.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn tab_delivery(&self) -> bool {
+        self.inner.tab_delivery.load(Ordering::SeqCst) && self.config().auto_open_agent_tabs
+    }
+
+    /// Nova instância aberta pelo usuário (menu "+"): `claude`, e `claude@main@ana` se já há uma.
+    pub fn register_instance(&self, kind: &str) -> Ident {
+        self.inner.instances.lock().allocate(kind, None, None)
+    }
+
+    /// Reabre uma instância com o id que ela tinha (restauração das abas). `None` se o id é inválido.
+    pub fn restore_instance(&self, id: &str) -> Option<Ident> {
+        let ident = Ident::parse(id)?;
+        self.inner.instances.lock().register(ident.clone());
+        Some(ident)
+    }
+
+    /// A aba da instância fechou: esquece a instância e avisa quem esperava resposta dela.
+    pub fn close_instance(&self, id: &str) {
+        self.inner.instances.lock().remove(id);
+        self.inner.exchange.fail_target(id, &format!("a aba de \"{id}\" foi fechada antes de responder"));
+    }
+
+    /// O processo da instância terminou (a aba continua aberta): quem esperava a resposta dela é liberado.
+    pub fn instance_ended(&self, id: &str) {
+        self.inner.exchange.fail_target(id, &format!("o processo de \"{id}\" encerrou antes de responder"));
+    }
+
+    /// A entrega não pôde ser feita (aba morreu, não subiu…): libera quem espera.
+    pub fn fail_delivery(&self, request: u64, reason: &str) {
+        self.inner.exchange.fail(request, reason);
+    }
+
+    /// Ids das instâncias abertas.
+    pub fn instance_ids(&self) -> Vec<String> {
+        self.inner.instances.lock().ids()
+    }
+
+    /// Ids que podem ser usados com `ask-agent`: os agentes instalados e as instâncias abertas.
     pub fn peers(&self) -> Vec<String> {
-        self.inner.agents.peers()
+        let mut out = self.inner.agents.peers();
+        for id in self.inner.instances.lock().ids() {
+            if !out.contains(&id) && Ident::parse(&id).is_some_and(|i| out.contains(&i.kind)) {
+                out.push(id);
+            }
+        }
+        out
     }
 
     /// Instruções da ponte para o agente `self_id` (`None` = texto genérico do AGENTS.md).

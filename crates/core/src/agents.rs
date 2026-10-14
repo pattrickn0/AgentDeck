@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
+use crate::instances::Ident;
 use crate::Core;
 
 /// Item de menu de agente (equivalente ao retorno de `agents:list`).
@@ -435,6 +436,14 @@ impl Registry {
     }
 
     /// Texto injetado no prompt de sistema / AGENTS.md (equivalente a `bridgeInstructions`).
+    pub fn bridge_instructions_for(&self, ident: &Ident) -> String {
+        let mut text = self.bridge_instructions(Some(&ident.id()));
+        if let Some(role) = &ident.role {
+            text.push_str(&format!("\nSeu cargo nesta instância: {role}. Aja de acordo com ele."));
+        }
+        text
+    }
+
     pub fn bridge_instructions(&self, self_id: Option<&str>) -> String {
         let ollama = self.resolve_ollama(None);
         let mut others: Vec<String> = self
@@ -468,6 +477,8 @@ impl Registry {
             ),
             "O histórico de cada par de agentes é mantido entre chamadas. O usuário tem acesso à \"Conversa integrada\" em tempo real no CommandDeck, portanto você NÃO precisa relatar nem resumir a conversa dos agentes para ele.".to_owned(),
             "Ao colaborar com outro agente (ex: Antigravity), mantenha o diálogo diretamente com ele (iterando, tirando dúvidas e alinhando) até concluir a tarefa, em vez de parar no meio para fazer perguntas ao usuário.".to_owned(),
+            "Cada aba é uma instância com nome <modelo>[@<cargo>[@<nome>]] (ex.: claude, claude@dev, claude@dev@ana). Para delegar a uma instância com cargo, chame-a pelo nome: ask-agent claude@dev \"tarefa\" (a aba é aberta se não existir); use --new para abrir outra instância do mesmo cargo.".to_owned(),
+            "Quando outro agente lhe mandar uma mensagem, responda executando ask-agent <nome-dele> \"sua resposta\": é só assim que a resposta chega a ele.".to_owned(),
         ]
         .join("\n")
     }
@@ -632,12 +643,23 @@ pub fn ollama_agent_exe(bin_dir: &Path) -> PathBuf {
 
 /// Monta o comando de uma aba interativa (equivalente a `pty:spawn`).
 pub(crate) fn spawn_spec(core: &Core, kind: &str) -> Result<SpawnSpec, String> {
+    spawn_spec_for(core, &Ident::main(kind))
+}
+
+/// Como [`spawn_spec`], para uma instância: `COMMANDDECK_AGENT` leva o id dela e o cargo vai
+/// em `COMMANDDECK_ROLE` e no prompt de sistema.
+pub(crate) fn spawn_spec_for(core: &Core, ident: &Ident) -> Result<SpawnSpec, String> {
+    let kind = ident.kind.as_str();
+    let id = ident.id();
     let reg = &core.inner.agents;
     let sub_model = kind.strip_prefix("ollama:");
     let base = if sub_model.is_some() { "ollama" } else { kind };
     let def = agent_def(base).ok_or_else(|| format!("Agente desconhecido: {kind}"))?;
     let data_dir = core.paths().data_dir.to_string_lossy().into_owned();
-    let mut env = agent_env(core, kind, 0);
+    let mut env = agent_env(core, &id, 0);
+    if let Some(role) = &ident.role {
+        env.insert("COMMANDDECK_ROLE".into(), role.clone());
+    }
 
     let (program, args, label) = if base == "ollama" {
         let resolved = reg.resolve_ollama(sub_model).ok_or_else(|| def.missing.to_owned())?;
@@ -650,7 +672,10 @@ pub(crate) fn spawn_spec(core: &Core, kind: &str) -> Result<SpawnSpec, String> {
         let mut args = resolved.pre;
         if base == "claude" {
             args.push("--append-system-prompt".into());
-            args.push(reg.bridge_instructions(Some("claude")));
+            args.push(reg.bridge_instructions_for(ident));
+            // Responder a outro agente é rodar `ask-agent`: libera só esse comando, sem perguntar.
+            args.push("--allowedTools".into());
+            args.push("Bash(ask-agent:*)".into());
         }
         if base == "claude" || base == "antigravity" {
             args.push("--add-dir".into());

@@ -1,13 +1,13 @@
 //! Estado e lógica da interface (porta do `renderer.js`), independente da pintura.
 //! A pintura fica em [`crate::ui`]; a janela/loop em [`crate::app`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
-use commanddeck_core::{AgentInfo, Core, CoreEvent, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, SpawnSpec, TableRequest};
+use commanddeck_core::{AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec, TableRequest};
 use crossbeam_channel::{Receiver, Sender};
 use egui::Color32;
 use winit::event::{ElementState, KeyEvent};
@@ -42,9 +42,17 @@ pub enum Action {
     CopyText(String),
 }
 
+/// Pergunta de outro agente esperando para ser digitada no terminal da aba.
+struct Queued {
+    request: u64,
+    prompt: String,
+}
+
 pub struct Tab {
     pub uid: u64,
     pub kind: String,
+    /// Identidade da instância (`claude`, `claude@dev`, `claude@dev@ana`).
+    pub ident: Ident,
     pub label: String,
     pub color: Color32,
     pub session: Session,
@@ -53,6 +61,10 @@ pub struct Tab {
     pub busy: bool,
     /// Aberta pelo app a pedido de `ask-agent` (e não pelo usuário).
     pub auto: bool,
+    /// Perguntas de outros agentes aguardando a aba ficar pronta (uma por vez).
+    queue: VecDeque<Queued>,
+    /// Quando o processo foi iniciado (para esperar a TUI subir antes de digitar nela).
+    spawned_at: Instant,
     seen_output: u64,
     idle_deadline: Option<Instant>,
     spec: Option<SpawnSpec>,
@@ -148,8 +160,6 @@ pub struct Deck {
     pub sound_enabled: bool,
     /// Espelho de `Config.auto_open_agent_tabs` (item do menu de configurações).
     pub auto_open_agent_tabs: bool,
-    /// Agentes cuja aba automática o usuário fechou: não reabrem até fechar o app.
-    dismissed_agent_tabs: HashSet<String>,
     pub drop_hover: bool,
     pub term_focus: bool,
     /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
@@ -165,8 +175,12 @@ pub struct Deck {
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(120);
-/// Quantas abas o app abre sozinho (a pedido de `ask-agent`) ao mesmo tempo; passou disso, só o feed.
-const MAX_AUTO_TABS: usize = 3;
+/// Quantas abas o app abre sozinho (a pedido de `ask-agent`) ao mesmo tempo.
+const MAX_AUTO_TABS: usize = 8;
+/// A TUI do agente precisa ficar parada por este tempo para receber uma pergunta digitada.
+const READY_IDLE: Duration = Duration::from_millis(1500);
+/// Se a aba nunca sossegar, a pergunta é digitada mesmo assim depois disso.
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(60);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
 const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
@@ -225,7 +239,6 @@ impl Deck {
             target_menu_open: false,
             sound_enabled: cfg.sound_enabled,
             auto_open_agent_tabs: cfg.auto_open_agent_tabs,
-            dismissed_agent_tabs: HashSet::new(),
             drop_hover: false,
             term_focus: false,
             ime_preedit: String::new(),
@@ -239,6 +252,8 @@ impl Deck {
         };
         deck.refresh_agents();
         deck.refresh_engine();
+        // A ponte passa a digitar as perguntas dos agentes nas abas (em vez de rodar o agente à parte).
+        deck.core.enable_tab_delivery();
         if std::env::var("COMMANDDECK_DEBUG_FEED").is_ok_and(|v| v == "1") {
             deck.debug_feed();
         }
@@ -324,7 +339,7 @@ impl Deck {
             CoreEvent::TableFinished => self.finish_table(),
             CoreEvent::AgentsChanged => self.refresh_agents(),
             CoreEvent::Download(_) if self.debug_hold_download => {}
-            CoreEvent::EnsureAgentTab { agent } => self.ensure_agent_tab(&agent),
+            CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::Download(p) => self.download = match p.state {
                 DownloadState::Done => None,
                 // O erro fica visível por alguns segundos (o detalhe também vai para a Conversa integrada).
@@ -481,7 +496,31 @@ impl Deck {
         for (i, code) in exits {
             let tab = &mut self.tabs[i];
             tab.alive = false;
+            for q in tab.queue.drain(..) {
+                self.core.fail_delivery(q.request, "a aba encerrou antes de receber a mensagem");
+            }
+            self.core.instance_ended(&tab.ident.id());
             tab.session.print(&format!("\r\n\x1b[90m[processo encerrado (código {code}) — pressione Enter para reiniciar]\x1b[0m\r\n"));
+        }
+        // Perguntas de outros agentes: digitadas no terminal assim que a aba sossega (uma por vez).
+        for i in 0..self.tabs.len() {
+            if self.tabs[i].queue.is_empty() {
+                continue;
+            }
+            if !self.tabs[i].alive {
+                for q in self.tabs[i].queue.drain(..) {
+                    self.core.fail_delivery(q.request, "a aba não está rodando");
+                }
+                continue;
+            }
+            if self.tab_ready(i, now) {
+                if let Some(q) = self.tabs[i].queue.pop_front() {
+                    self.submit(i, &q.prompt);
+                }
+            }
+            if !self.tabs[i].queue.is_empty() {
+                want(now + Duration::from_millis(300));
+            }
         }
         if chime {
             self.play_sound(false);
@@ -505,9 +544,10 @@ impl Deck {
         let cfg = self.core.config();
         if !cfg.open_tabs.is_empty() {
             self.restoring = true;
-            for kind in &cfg.open_tabs {
-                if self.agents.knows(kind) {
-                    self.open_tab(kind, true);
+            for id in &cfg.open_tabs {
+                if let Some(ident) = Ident::parse(id).filter(|i| self.agents.knows(&i.kind)) {
+                    self.core.restore_instance(id);
+                    self.add_tab(ident, true, false);
                 }
             }
             let idx = if cfg.active_tab_index >= 0 && (cfg.active_tab_index as usize) < self.tabs.len() { cfg.active_tab_index as usize } else { 0 };
@@ -532,47 +572,76 @@ impl Deck {
         }
     }
 
+    /// Abre uma aba nova do modelo `kind` (menu "+", Ctrl+T): `claude`, e `claude@main@ana` se já há uma.
     pub fn open_tab(&mut self, kind: &str, restoring: bool) {
-        // Abrir à mão devolve ao agente o direito de abrir abas sozinho.
-        self.dismissed_agent_tabs.remove(kind);
-        self.add_tab(kind, restoring, false);
+        let ident = self.core.register_instance(kind);
+        self.add_tab(ident, restoring, false);
     }
 
-    /// `ask-agent` chamou `agent`: garante uma aba (terminal normal) para ele, em segundo plano e
-    /// sem roubar o foco. A conversa da ponte continua indo pelo modo headless; a aba é só o
-    /// terminal do agente, pronto para o usuário usar. Respeita a opção do usuário, abas que ele
-    /// fechou e um teto de abas automáticas.
-    fn ensure_agent_tab(&mut self, agent: &str) {
-        if !self.auto_open_agent_tabs
-            || !self.agents.knows(agent)
-            || self.tabs.iter().any(|t| t.kind == agent)
-            || self.dismissed_agent_tabs.contains(agent)
-            || self.tabs.iter().filter(|t| t.auto).count() >= MAX_AUTO_TABS
-        {
-            return;
+    /// Pergunta de outro agente (`ask-agent`) para uma instância: abre a aba dela, se ainda não
+    /// existe (em segundo plano, sem roubar o foco), e coloca a pergunta na fila para ser
+    /// digitada no terminal assim que ele estiver pronto. A resposta volta quando o agente da
+    /// aba rodar `ask-agent <quem-perguntou> "resposta"`.
+    fn on_deliver(&mut self, d: Delivery) {
+        let id = d.ident.id();
+        let idx = match self.tabs.iter().position(|t| t.ident.id() == id) {
+            Some(i) => i,
+            None => {
+                let reason = if !self.agents.knows(&d.ident.kind) {
+                    Some(format!("o agente \"{}\" não está disponível", d.ident.kind))
+                } else if self.tabs.iter().filter(|t| t.auto).count() >= MAX_AUTO_TABS {
+                    Some(format!("limite de {MAX_AUTO_TABS} abas abertas automaticamente; feche alguma"))
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    self.core.fail_delivery(d.request, &reason);
+                    self.core.close_instance(&id);
+                    return;
+                }
+                self.add_tab(d.ident.clone(), false, true);
+                let label = self.tabs.last().map(|t| t.label.clone()).unwrap_or_else(|| id.clone());
+                self.system(format!("Abri a aba de {label} para a conversa com outro agente."));
+                self.tabs.len() - 1
+            }
+        };
+        if !self.tabs[idx].alive {
+            self.start(idx); // o processo tinha encerrado: sobe de novo para receber a pergunta
         }
-        self.add_tab(agent, false, true);
-        self.system(format!("Abri a aba de {} para a conversa com outro agente.", self.agents.name(agent)));
+        self.tabs[idx].queue.push_back(Queued { request: d.request, prompt: d.prompt });
     }
 
-    /// Cria a aba e inicia o processo. Uma aba `auto` fica em segundo plano (só ganha o foco se
-    /// não houver nenhuma outra).
-    fn add_tab(&mut self, kind: &str, restoring: bool, auto: bool) {
-        let same_kind = self.tabs.iter().filter(|t| t.kind == kind).count();
-        let mut label = self.agents.name(kind);
-        if same_kind > 0 {
-            label = format!("{label} {}", same_kind + 1);
+    /// A TUI do agente já subiu e está parada (não está no meio de uma resposta)?
+    fn tab_ready(&self, idx: usize, now: Instant) -> bool {
+        let tab = &self.tabs[idx];
+        if !tab.alive || tab.busy {
+            return false;
         }
+        if now.duration_since(tab.spawned_at) >= READY_TIMEOUT {
+            return true;
+        }
+        let last = *tab.session.shared.last_output.lock();
+        last.is_some_and(|t| now.duration_since(t) >= READY_IDLE)
+    }
+
+    /// Cria a aba da instância e inicia o processo. Uma aba `auto` fica em segundo plano (só ganha
+    /// o foco se não houver nenhuma outra).
+    fn add_tab(&mut self, ident: Ident, restoring: bool, auto: bool) {
+        let kind = ident.kind.clone();
+        let label = ident.label(&self.agents.name(&kind));
         let tab = Tab {
             uid: self.next_uid,
-            kind: kind.to_owned(),
+            kind: kind.clone(),
+            ident,
             label,
-            color: self.agents.tab_color(kind),
+            color: self.agents.tab_color(&kind),
             session: Session::new(self.current_grid()),
             view: ViewState::default(),
             alive: false,
             busy: false,
             auto,
+            queue: VecDeque::new(),
+            spawned_at: Instant::now(),
             seen_output: 0,
             idle_deadline: None,
             spec: None,
@@ -594,7 +663,8 @@ impl Deck {
     pub fn start(&mut self, idx: usize) {
         let wake = self.wake.clone();
         let grid = self.current_grid();
-        let spec = match self.core.spawn_spec(&self.tabs[idx].kind) {
+        let ident = self.tabs[idx].ident.clone();
+        let spec = match self.core.spawn_spec_for(&ident) {
             Ok(spec) => Ok(spec),
             Err(e) if self.debug_fake_shell => {
                 log::warn!("COMMANDDECK_DEBUG_FAKE_SHELL: usando shell local no lugar de '{}' ({e})", self.tabs[idx].kind);
@@ -604,6 +674,7 @@ impl Deck {
         };
         let tab = &mut self.tabs[idx];
         tab.session.reset();
+        tab.spawned_at = Instant::now();
         if let Some(m) = &self.metrics {
             tab.session.resize(grid, m.cell_w, m.cell_h);
         }
@@ -636,10 +707,11 @@ impl Deck {
         }
         let mut tab = self.tabs.remove(idx);
         tab.session.kill();
-        if tab.auto {
-            // Fechou uma aba que o app abriu sozinho: não insiste até o próximo início.
-            self.dismissed_agent_tabs.insert(tab.kind.clone());
+        for q in tab.queue.drain(..) {
+            self.core.fail_delivery(q.request, "a aba foi fechada antes de receber a mensagem");
         }
+        // Esquece a instância e libera quem esperava resposta dela.
+        self.core.close_instance(&tab.ident.id());
         match self.active {
             Some(a) if a == idx => {
                 if self.tabs.is_empty() {
@@ -675,7 +747,7 @@ impl Deck {
             return;
         }
         self.persist_at = None;
-        let open: Vec<String> = self.tabs.iter().map(|t| t.kind.clone()).collect();
+        let open: Vec<String> = self.tabs.iter().map(|t| t.ident.id()).collect();
         let idx = self.active.map(|i| i as i32).unwrap_or(-1);
         self.core.update_config(|c| {
             c.open_tabs = open;
