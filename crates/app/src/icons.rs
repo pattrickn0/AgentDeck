@@ -45,6 +45,8 @@ pub enum Icon {
     ArrowUp,
     /// Git: descartar alterações. Material Icons `undo` (Apache-2.0, viewBox 24).
     Undo,
+    /// Topbar: liga/desliga a tela dividida. Material Icons `space_dashboard` (Apache-2.0, viewBox 24).
+    Split,
 }
 
 impl Icon {
@@ -65,6 +67,7 @@ impl Icon {
             Icon::Diagram => ("M22 11V3h-7v3H9V3H2v8h7V8h2v10h4v3h7v-8h-7v3h-2V8h2v3z", 24.0),
             Icon::GitBranch => ("M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z", 16.0),
             Icon::Refresh => ("M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z", 24.0),
+            Icon::Split => ("M11 21H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h6v18zm2 0h6c1.1 0 2-.9 2-2v-7h-8v9zm8-11V5c0-1.1-.9-2-2-2h-6v7h8z", 24.0),
             Icon::ArrowDown => ("m20 12-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z", 24.0),
             Icon::ArrowUp => ("m4 12 1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z", 24.0),
             Icon::Undo => ("M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z", 24.0),
@@ -508,6 +511,7 @@ mod tests {
             Icon::ArrowDown,
             Icon::ArrowUp,
             Icon::Undo,
+            Icon::Split,
         ] {
             let (d, vb) = icon.path();
             let polys = flatten_path(d);

@@ -22,7 +22,7 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 
 ## 1. Barra direita ★
 
-- [ ] A Conversa integrada e o compositor aparecem à **direita**, ocupando a altura toda; o terminal ocupa a altura toda no centro.
+- [ ] A Conversa integrada e o compositor aparecem à **direita**, ocupando a altura toda; as janelas dos terminais ocupam a altura toda no centro.
 - [ ] Arrastar a borda esquerda da barra muda a largura (entre ~300 px e ~metade da janela); **não existe** como recolher.
 - [ ] Fechar e reabrir o app: a largura escolhida volta igual.
 - [ ] Diminuir a janela até o mínimo (~820 px de largura): nada se sobrepõe; o terminal continua usável.
@@ -38,7 +38,27 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - [ ] Ficar no Mapa ou no Git enquanto chegam mensagens: aparece um **número** sobre o ícone da Conversa; voltar à Conversa zera.
 - [ ] "Limpar" só aparece na Conversa.
 
-## 3. Conversa entre agentes (ponte) ★
+## 3. Tela dividida ★
+
+Comece com uma aba do Claude e uma do Antigravity.
+
+- [ ] Claude e Antigravity aparecem **lado a lado**, cada um com o próprio cabeçalho de abas.
+- [ ] "+" no cabeçalho do Claude: a 2ª aba do Claude entra **na mesma janela** (não divide de novo).
+- [ ] Abrir um Ollama (ou Codex, ou Terminal) pelo "+" da topbar: a tela vira **2 em cima + 1 largo embaixo**. Com o 4º tipo, 2×2.
+- [ ] Dois modelos do Ollama ficam na **mesma janela**, um em cada aba. `claude@dev` fica na janela do Claude.
+- [ ] Clicar numa janela: ela ganha o **contorno na cor do agente** e o que você digita vai para ela; "Enviar para → Aba ativa" manda para ela.
+- [ ] A rolagem do mouse funciona na janela sob o ponteiro, mesmo sem foco.
+- [ ] Ctrl+Tab troca de aba **só dentro** da janela focada; Ctrl+Alt+← → ↑ ↓ passa o foco para a janela vizinha (anotar se o driver de vídeo girar a tela com esse atalho).
+- [ ] Arrastar o divisor entre janelas muda o tamanho; duplo clique iguala; fechar e reabrir o app mantém.
+- [ ] Arrastar a alça **⋮⋮** de uma janela sobre outra: aparece "Soltar para trocar de lugar" e, ao soltar, as duas trocam. A ordem volta igual ao reabrir.
+- [ ] Fechar a última aba de um tipo: a janela some e as outras ocupam o espaço. Fechar uma aba com outras do mesmo tipo: o foco fica na mesma janela.
+- [ ] Um agente chamar outro que não está aberto (`ask-agent codex "oi"`): a janela do Codex aparece **sem tirar o foco** de onde você digita. Se já houver Codex, vira aba na janela dele.
+- [ ] Botão de **tela dividida** na topbar: desligado, volta a uma janela só com todas as abas; ligado de novo, volta a dividir.
+- [ ] Janela mínima (~820 px) com 3 ou mais tipos: as janelas empilham; o que não cabe vira aba da última janela, sem sumir nada.
+- [ ] Com o Mapa ou um diff do Git aberto, a barra se alarga por cima das janelas e elas **não mudam de tamanho**.
+- [ ] Com 4–6 janelas e agentes respondendo ao mesmo tempo: o app continua fluido (anotar se travar).
+
+## 4. Conversa entre agentes (ponte) ★
 
 Abra uma aba do Claude e uma do Antigravity.
 
@@ -50,7 +70,7 @@ Abra uma aba do Claude e uma do Antigravity.
 - [ ] Fechar a aba de quem perguntou no meio da espera: nada trava; a outra aba segue normal.
 - [ ] Cadeia longa: A pergunta a B, B a C, e C tenta perguntar a um quarto agente → recusado com "profundidade máxima" (o limite é 2 saltos).
 
-## 4. Quando a mensagem é digitada na aba ★
+## 5. Quando a mensagem é digitada na aba ★
 
 - [ ] Enquanto **você digita** algo (sem Enter) na aba de um agente, uma pergunta de outro agente **não é digitada no meio** (espera ~20 s sem teclas).
 - [ ] Com o Claude **no meio de uma resposta** (ou numa pausa longa de raciocínio), a pergunta espera ele terminar (hooks do Claude).
@@ -58,7 +78,7 @@ Abra uma aba do Claude e uma do Antigravity.
 - [ ] Apertar Enter num **menu** do Claude (ex.: `/model`) não trava a fila: uma pergunta seguinte ainda é entregue.
 - [ ] Digitar logo depois de uma mensagem ser enviada à aba: suas teclas aparecem **depois** da mensagem, nunca misturadas.
 
-## 5. Mapa de agentes ★
+## 6. Mapa de agentes ★
 
 - [ ] Abrir o Mapa: a barra **se alarga sobre o terminal** e o terminal **não muda de tamanho** (o texto do agente não se reorganiza).
 - [ ] Clicar no terminal visível ao lado do mapa funciona; clicar sobre o mapa não vaza clique para o terminal.
@@ -69,7 +89,7 @@ Abra uma aba do Claude e uma do Antigravity.
 - [ ] Os traços `─│├└►` e os símbolos `●○×` ficam **alinhados** (colunas certas) na fonte do Windows.
 - [ ] Rodar uma **mesa** (Enviar para → mesa): aparece `MESA · rodada x/y` com quem está falando.
 
-## 6. Git ★
+## 7. Git ★
 
 Com a pasta de trabalho num repositório git:
 
@@ -90,25 +110,25 @@ Com a pasta de trabalho num repositório git:
 - [ ] (Se possível) sem git instalado / fora do PATH: aparece a mensagem com o link de instalação.
 - [ ] Observar: o `AGENTS.md` da pasta aparece como alterado (já conhecido, está em pendências).
 
-## 7. Segurança e ambiente
+## 8. Segurança e ambiente
 
 - [ ] Abrir **uma segunda janela** do CommandDeck: aparece a mensagem "outra janela já está usando a pasta de dados" e ela fecha.
 - [ ] Com `COMMANDDECK_HOME` apontando para outra pasta, a segunda janela abre (instância separada).
 - [ ] Abrir o CommandDeck **de dentro de uma aba** de outro CommandDeck: a aba de origem não cai.
 - [ ] Colar (Ctrl+V) um texto grande com várias linhas no terminal de um agente: vira texto, não comandos soltos.
 
-## 8. Agentes novos e shims do Windows
+## 9. Agentes novos e shims do Windows
 
 - [ ] **Codex**: abre pela aba "+"; ao terminar um turno, a fila de perguntas anda (aviso `notify`). Se ele pedir aprovação para rodar `ask-agent`, anotar.
 - [ ] **OpenCode**: abre pela aba "+" e responde a um `ask-agent opencode "oi"`.
 - [ ] Agente instalado **via npm sem `.exe`** (ex.: Codex ou OpenCode, `codex.cmd`/`opencode.cmd`): responder a uma pergunta numa **mesa** com uma mensagem com aspas, `&`, `|` e várias linhas → a resposta vem e **nada é executado** no cmd.
 - [ ] Codex, OpenCode, Aider, Goose, Copilot, Amazon Q, Open Interpreter (os que tiver): ao receber uma pergunta numa aba, pedem aprovação para rodar `ask-agent`? Anotar quais pedem.
 
-## 9. Teclado e entrada
+## 10. Teclado e entrada
 
 - [ ] **IME real**: teclado chinês/japonês/coreano ou o seletor de emoji `Win+.` dentro do terminal — a pré-edição aparece sublinhada no cursor e o texto confirmado chega ao programa.
 - [ ] Acentos do português no terminal e no compositor.
 
-## 10. Para fechar
+## 11. Para fechar
 
 - [ ] Tirar um print da tela principal (com a barra direita) para substituir `docs/screenshots/main.png`.

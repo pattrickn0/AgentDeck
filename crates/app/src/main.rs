@@ -15,6 +15,7 @@ mod deck;
 mod git_ui;
 mod icons;
 mod smoke;
+mod split;
 mod terminal;
 mod theme;
 mod ui;

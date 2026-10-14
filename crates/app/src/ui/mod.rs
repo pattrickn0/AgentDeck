@@ -7,8 +7,10 @@ mod git;
 mod map;
 mod menus;
 mod overlay;
+mod panes;
 mod right_panel;
 mod sidebar;
+mod tabs;
 mod topbar;
 
 use std::sync::Arc;
@@ -16,10 +18,10 @@ use std::sync::Arc;
 use egui::{Align2, Color32, CursorIcon, FontId, Galley, Id, Order, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 use crate::deck::{Deck, RightView};
-use crate::terminal::view;
 use crate::theme;
 
 pub use composer::COMPOSER_INPUT_ID;
+pub use panes::pane_body;
 
 /// Largura mínima que sobra para o terminal ao lado da barra direita.
 const TERM_MIN_W: f32 = 360.0;
@@ -57,8 +59,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     // Na aba Git o compositor some: o commit tem a própria caixa de mensagem.
     let comp_h = if deck.right_view == RightView::Git { 0.0 } else { composer::measure(deck, ui, panel_w) };
 
-    // ---------- Terminal ativo ----------
-    draw_terminals(deck, ui, term_rect);
+    // ---------- Terminais (tela dividida por tipo de agente) ----------
+    panes::draw(deck, ui, term_rect);
 
     // ---------- Barra lateral ----------
     if !collapsed {
@@ -105,55 +107,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     if egui_focus.is_some() {
         deck.term_focus = false;
         deck.ime_preedit.clear();
-    }
-}
-
-fn draw_terminals(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
-    deck.fit_active(rect);
-    if deck.tabs.is_empty() {
-        if deck.initialized {
-            empty_state::draw(deck, ui, rect);
-        }
-        return;
-    }
-    let Some(idx) = deck.active else { return };
-    let Some(metrics) = deck.metrics.clone() else { return };
-    let ctx = ui.ctx().clone();
-    let window_focused = deck.window_focused;
-    let focused = deck.term_focus && window_focused;
-    let elapsed = deck.blink_epoch.elapsed().as_millis();
-    let blink_on = (elapsed / 600).is_multiple_of(2);
-    let preedit = deck.ime_preedit.clone();
-    let tab = &mut deck.tabs[idx];
-    let id = Id::new(("terminal", tab.uid));
-    let resp = view::show(ui, rect, id, &tab.session, &mut tab.view, focused, blink_on, &preedit, &metrics);
-    let bytes = resp.to_pty;
-    // Habilita o IME do sistema ancorado no cursor do terminal (candidatos e seletor de emoji).
-    if let (true, Some(cell)) = (focused, resp.cursor_rect) {
-        ctx.output_mut(|o| {
-            o.ime = Some(egui::output::IMEOutput {
-                purpose: egui::IMEPurpose::Terminal,
-                rect: cell,
-                cursor_rect: cell,
-                should_interrupt_composition: false,
-            });
-        });
-    }
-    if resp.focus {
-        ctx.memory_mut(|m| {
-            if let Some(f) = m.focused() {
-                m.surrender_focus(f);
-            }
-        });
-        deck.set_term_focus(true);
-        deck.new_tab_menu_open = false;
-    }
-    if !bytes.is_empty() {
-        deck.terminal_mouse_bytes(idx, &bytes);
-    }
-    if focused {
-        let next = 600 - (elapsed % 600) as u64;
-        ctx.request_repaint_after(std::time::Duration::from_millis(next));
     }
 }
 

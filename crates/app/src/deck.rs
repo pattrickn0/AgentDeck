@@ -20,6 +20,7 @@ use crate::agent_map::{self, AnswerInFlight, Link, LinkState, NodeState, Recent,
 use crate::agents::Agents;
 use crate::audio;
 use crate::icons::IconCache;
+use crate::split;
 use crate::terminal::input::{self, Mods};
 use crate::terminal::view::{Metrics, ViewState};
 use crate::terminal::{GridSize, Session, Wake};
@@ -42,7 +43,14 @@ pub enum UiMsg {
 pub enum Action {
     NewTabShortcut,
     ToggleSidebar,
-    CycleTab { back: bool },
+    CycleTab {
+        back: bool,
+    },
+    /// Ctrl+Alt+setas: foco para a janela vizinha da tela dividida.
+    FocusPane {
+        dx: i32,
+        dy: i32,
+    },
     FocusComposer,
     CopyText(String),
 }
@@ -77,6 +85,9 @@ pub struct Tab {
     pub view: ViewState,
     pub alive: bool,
     pub busy: bool,
+    /// Quando a aba foi ativada pela última vez (contador): em cada janela da tela dividida
+    /// aparece a mais recente.
+    pub shown: u64,
     /// Aberta pelo app a pedido de `ask-agent` (e não pelo usuário).
     pub auto: bool,
     /// Perguntas de outros agentes aguardando a aba ficar pronta (uma por vez).
@@ -98,6 +109,27 @@ pub struct Tab {
     idle_deadline: Option<Instant>,
     spec: Option<SpawnSpec>,
     pending_resize: Option<(GridSize, Instant)>,
+}
+
+/// Uma janela da tela dividida, como ficou no último quadro.
+pub struct PaneSlot {
+    /// Janela inteira (cabeçalho de abas + terminal).
+    pub rect: egui::Rect,
+    /// Área do terminal.
+    pub body: egui::Rect,
+    pub uids: Vec<u64>,
+    /// Grupos da janela (mais de um quando não cabem todos e os que sobram dividem a última).
+    pub groups: Vec<String>,
+}
+
+/// O que a tela dividida mostra neste quadro.
+pub struct PanePlan {
+    pub rect: egui::Rect,
+    /// Índices das abas da janela, na ordem do cabeçalho.
+    pub tabs: Vec<usize>,
+    /// A aba visível (a ativada mais recentemente).
+    pub shown: usize,
+    pub groups: Vec<String>,
 }
 
 pub struct FeedItem {
@@ -150,6 +182,19 @@ pub struct Deck {
     pub right_w: f32,
     pub right_dragging: Option<(f32, f32)>,
     pub right_view: RightView,
+
+    // Tela dividida (ver `split.rs`)
+    pub split_enabled: bool,
+    /// Ordem das janelas (grupos de `split::group_key`).
+    pub group_order: Vec<String>,
+    pub split_ratios: split::Ratios,
+    /// Janelas do último quadro (atalhos de teclado e tamanho das abas novas).
+    pub panes: Vec<PaneSlot>,
+    /// Janela sendo arrastada pela alça para trocar de lugar com outra.
+    pub pane_drag: Option<usize>,
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=split-drag`): janela-alvo fictícia do arrasto.
+    pub debug_pane_drop: Option<usize>,
+    show_seq: u64,
 
     // Mapa de conversas
     /// Conversas concluídas há pouco (o "Limpar" da conversa não apaga).
@@ -261,6 +306,13 @@ impl Deck {
             right_w: if cfg.right_panel_width > 0.0 { cfg.right_panel_width } else { theme::RIGHT_DEFAULT_W },
             right_dragging: None,
             right_view: RightView::Conversa,
+            split_enabled: cfg.split_enabled,
+            group_order: Vec::new(),
+            split_ratios: split::Ratios { rows: cfg.split_rows.clone(), cols: cfg.split_cols.clone() },
+            panes: Vec::new(),
+            pane_drag: None,
+            debug_pane_drop: None,
+            show_seq: 0,
             recent: VecDeque::new(),
             table_agents: Vec::new(),
             table_round: String::new(),
@@ -372,13 +424,16 @@ impl Deck {
             }
             Action::ToggleSidebar => self.toggle_sidebar(),
             Action::CycleTab { back } => {
-                let n = self.tabs.len();
+                // Só entre as abas da janela focada.
+                let ring = self.focused_pane_tabs();
+                let n = ring.len();
                 if n > 0 {
-                    let cur = self.active.unwrap_or(0) as isize;
+                    let cur = self.active.and_then(|a| ring.iter().position(|&i| i == a)).unwrap_or(0) as isize;
                     let next = (cur + if back { -1 } else { 1 } + n as isize).rem_euclid(n as isize) as usize;
-                    self.activate(next);
+                    self.activate(ring[next]);
                 }
             }
+            Action::FocusPane { dx, dy } => self.focus_pane(dx, dy),
             Action::FocusComposer => self.request_composer_focus(),
             Action::CopyText(t) => ctx.copy_text(t),
         }
@@ -635,6 +690,7 @@ impl Deck {
 
     fn restore_tabs(&mut self) {
         let cfg = self.core.config();
+        self.group_order = cfg.pane_order.clone();
         if !cfg.open_tabs.is_empty() {
             self.restoring = true;
             for id in &cfg.open_tabs {
@@ -648,6 +704,7 @@ impl Deck {
             } else {
                 0
             };
+            self.sync_groups();
             if !self.tabs.is_empty() {
                 self.activate(idx);
             }
@@ -662,8 +719,12 @@ impl Deck {
         self.refresh_tree();
     }
 
-    fn current_grid(&self) -> GridSize {
-        match (&self.metrics, self.terminal_rect) {
+    /// Grade inicial de uma aba: a da janela do grupo dela (ou a da área toda, se o grupo é novo;
+    /// o primeiro quadro corrige).
+    fn current_grid(&self, kind: &str) -> GridSize {
+        let group = split::group_key(kind);
+        let rect = self.panes.iter().find(|p| p.groups.iter().any(|g| g == group)).map(|p| p.body).or(self.terminal_rect);
+        match (&self.metrics, rect) {
             (Some(m), Some(r)) => m.grid_size_for(r),
             _ => GridSize { cols: 120, rows: 30 },
         }
@@ -761,10 +822,11 @@ impl Deck {
             ident,
             label,
             color: self.agents.tab_color(&kind),
-            session: Session::new(self.current_grid()),
+            session: Session::new(self.current_grid(&kind)),
             view: ViewState::default(),
             alive: false,
             busy: false,
+            shown: 0,
             auto,
             queue: Mailbox::default(),
             last_key: None,
@@ -781,6 +843,9 @@ impl Deck {
         self.next_uid += 1;
         self.tabs.push(tab);
         let idx = self.tabs.len() - 1;
+        if !self.restoring {
+            self.sync_groups();
+        }
         if !auto || self.active.is_none() {
             self.activate(idx);
         }
@@ -793,7 +858,7 @@ impl Deck {
     /// `start(tab)`: reinicia o terminal e o processo.
     pub fn start(&mut self, idx: usize) {
         let wake = self.wake.clone();
-        let grid = self.current_grid();
+        let grid = self.current_grid(&self.tabs[idx].kind);
         let ident = self.tabs[idx].ident.clone();
         let spec = match self.core.spawn_spec_for(&ident) {
             Ok(spec) => Ok(spec),
@@ -833,8 +898,106 @@ impl Deck {
             return;
         }
         self.active = Some(idx);
+        self.show_seq += 1;
+        self.tabs[idx].shown = self.show_seq;
         self.set_term_focus(true);
         self.persist_tabs();
+    }
+
+    /// Mantém `group_order` igual aos grupos abertos: um grupo novo entra no fim (vira uma janela
+    /// nova) e sai quando a última aba dele fecha.
+    fn sync_groups(&mut self) {
+        split::sync_order(&mut self.group_order, self.tabs.iter().map(|t| t.kind.as_str()));
+    }
+
+    /// Janelas deste quadro na área `area`: a grade automática com um grupo por janela (ou uma
+    /// janela só, com a divisão desligada). Guarda o resultado em `panes` para os atalhos.
+    pub fn plan_panes(&mut self, area: egui::Rect) -> (Vec<usize>, Vec<PanePlan>) {
+        let (shape, rects, groups) = if self.split_enabled && self.group_order.len() > 1 {
+            let shape = split::grid_shape(self.group_order.len(), area.width(), area.height());
+            self.split_ratios.conform(&shape);
+            let rects = split::layout(area, &shape, &self.split_ratios);
+            let groups = split::assign(&self.group_order, rects.len());
+            (shape, rects, groups)
+        } else {
+            (vec![1], vec![area], vec![self.group_order.clone()])
+        };
+        let one = groups.len() == 1;
+        let keys: Vec<&str> = self.tabs.iter().map(|t| split::group_key(&t.kind)).collect();
+        let plans: Vec<PanePlan> = rects
+            .into_iter()
+            .zip(groups)
+            .map(|(rect, groups)| {
+                // Uma janela só: todas as abas na ordem de abertura (como sem divisão).
+                let tabs: Vec<usize> = if one { (0..keys.len()).collect() } else { split::pane_tabs(&keys, &groups) };
+                let shown = self.most_recent(tabs.iter().copied()).unwrap_or(0);
+                PanePlan { rect, tabs, shown, groups }
+            })
+            .filter(|p| !p.tabs.is_empty())
+            .collect();
+        self.panes = plans
+            .iter()
+            .map(|p| PaneSlot {
+                rect: p.rect,
+                body: crate::ui::pane_body(p.rect),
+                uids: p.tabs.iter().map(|&i| self.tabs[i].uid).collect(),
+                groups: p.groups.clone(),
+            })
+            .collect();
+        (shape, plans)
+    }
+
+    /// A aba ativada mais recentemente entre `tabs` (empate: a primeira).
+    fn most_recent(&self, tabs: impl Iterator<Item = usize>) -> Option<usize> {
+        let shown: Vec<u64> = self.tabs.iter().map(|t| t.shown).collect();
+        split::most_recent(&shown, tabs)
+    }
+
+    /// Janela (do último quadro) que tem a aba ativa.
+    fn focused_slot(&self) -> Option<usize> {
+        let uid = self.active_tab()?.uid;
+        self.panes.iter().position(|p| p.uids.contains(&uid))
+    }
+
+    fn slot_tabs(&self, slot: usize) -> Vec<usize> {
+        self.panes[slot].uids.iter().filter_map(|u| self.tabs.iter().position(|t| t.uid == *u)).collect()
+    }
+
+    /// Abas da janela focada (todas, se ainda não houve quadro).
+    fn focused_pane_tabs(&self) -> Vec<usize> {
+        match self.focused_slot() {
+            Some(s) => self.slot_tabs(s),
+            None => (0..self.tabs.len()).collect(),
+        }
+    }
+
+    /// Foco na janela vizinha (Ctrl+Alt+setas): ativa a aba visível dela.
+    pub fn focus_pane(&mut self, dx: i32, dy: i32) {
+        let Some(from) = self.focused_slot() else { return };
+        let rects: Vec<egui::Rect> = self.panes.iter().map(|p| p.rect).collect();
+        if let Some(to) = split::neighbor(&rects, from, dx, dy) {
+            if let Some(i) = self.most_recent(self.slot_tabs(to).into_iter()) {
+                self.activate(i);
+            }
+        }
+    }
+
+    /// Troca duas janelas de lugar (arrastando a alça de uma sobre a outra).
+    pub fn swap_panes(&mut self, a: usize, b: usize) {
+        let first = |s: usize| self.panes.get(s).and_then(|p| p.groups.first()).cloned();
+        let (Some(ga), Some(gb)) = (first(a), first(b)) else { return };
+        let ia = self.group_order.iter().position(|g| *g == ga);
+        let ib = self.group_order.iter().position(|g| *g == gb);
+        if let (Some(ia), Some(ib)) = (ia, ib) {
+            self.group_order.swap(ia, ib);
+            self.persist_tabs();
+        }
+    }
+
+    /// Liga/desliga a tela dividida.
+    pub fn toggle_split(&mut self) {
+        self.split_enabled = !self.split_enabled;
+        self.persist_layout();
     }
 
     pub fn close_tab(&mut self, idx: usize) {
@@ -848,12 +1011,15 @@ impl Deck {
         }
         // Esquece a instância e libera quem esperava resposta dela.
         self.core.close_instance(&tab.ident.id());
+        self.sync_groups();
         match self.active {
             Some(a) if a == idx => {
-                if self.tabs.is_empty() {
-                    self.active = None;
-                } else {
-                    self.activate(idx.min(self.tabs.len() - 1));
+                // Fica na mesma janela (a aba do grupo usada por último); sem nenhuma, a última usada.
+                let kinds: Vec<&str> = self.tabs.iter().map(|t| t.kind.as_str()).collect();
+                let shown: Vec<u64> = self.tabs.iter().map(|t| t.shown).collect();
+                match split::after_close(&kinds, &shown, &tab.kind) {
+                    Some(i) => self.activate(i),
+                    None => self.active = None,
                 }
             }
             Some(a) if a > idx => self.active = Some(a - 1),
@@ -885,9 +1051,11 @@ impl Deck {
         self.persist_at = None;
         let open: Vec<String> = self.tabs.iter().map(|t| t.ident.id()).collect();
         let idx = self.active.map(|i| i as i32).unwrap_or(-1);
+        let order = self.group_order.clone();
         self.core.update_config(|c| {
             c.open_tabs = open;
             c.active_tab_index = idx;
+            c.pane_order = order;
         });
     }
 
@@ -898,17 +1066,20 @@ impl Deck {
     pub fn persist_layout_now(&mut self) {
         self.layout_persist_at = None;
         let (sw, sc, rw) = (self.sidebar_w, self.sidebar_collapsed, self.right_w);
+        let (split_on, ratios) = (self.split_enabled, self.split_ratios.clone());
         self.core.update_config(|c| {
             c.sidebar_width = sw;
             c.sidebar_collapsed = sc;
             c.right_panel_width = rw;
+            c.split_enabled = split_on;
+            c.split_rows = ratios.rows;
+            c.split_cols = ratios.cols;
         });
     }
 
-    /// Ajusta a grade da aba ativa à área visível (debounce de 60 ms ao PTY).
-    pub fn fit_active(&mut self, rect: egui::Rect) {
-        self.terminal_rect = Some(rect);
-        let (Some(m), Some(idx)) = (self.metrics.clone(), self.active) else { return };
+    /// Ajusta a grade de uma aba visível à área dela (debounce de 60 ms ao PTY).
+    pub fn fit_tab(&mut self, idx: usize, rect: egui::Rect) {
+        let Some(m) = self.metrics.clone() else { return };
         let size = m.grid_size_for(rect);
         let tab = &mut self.tabs[idx];
         let current = tab.pending_resize.map(|p| p.0).unwrap_or(tab.session.size());
@@ -956,6 +1127,19 @@ impl Deck {
             Key::Character(s) => s.to_lowercase(),
             _ => String::new(),
         };
+        if ctrl && mods.alt_key() && !mods.shift_key() {
+            let dir = match &ev.logical_key {
+                Key::Named(NamedKey::ArrowLeft) => Some((-1, 0)),
+                Key::Named(NamedKey::ArrowRight) => Some((1, 0)),
+                Key::Named(NamedKey::ArrowUp) => Some((0, -1)),
+                Key::Named(NamedKey::ArrowDown) => Some((0, 1)),
+                _ => None,
+            };
+            if let Some((dx, dy)) = dir {
+                self.push_action(Action::FocusPane { dx, dy });
+                return true;
+            }
+        }
         if ctrl && !mods.alt_key() {
             match lower.as_str() {
                 "t" if !ev.repeat => {

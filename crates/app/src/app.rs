@@ -403,7 +403,7 @@ fn debug_map() -> crate::agent_map::Snapshot {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,map,map-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,map,map-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -437,6 +437,10 @@ fn apply_debug_ui(deck: &mut Deck) {
             "map-demo" => {
                 deck.set_right_view(crate::deck::RightView::Mapa);
                 deck.debug_map = Some(debug_map());
+            }
+            "split-drag" => {
+                deck.pane_drag = Some(0);
+                deck.debug_pane_drop = Some(1);
             }
             "sidebar-collapsed" => deck.sidebar_collapsed = true,
             "attach" => deck.attachments = vec!["dados/anexos/1a2b3c-captura de tela.png".into(), "dados/anexos/9f8e-relatorio.pdf".into()],

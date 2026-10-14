@@ -73,15 +73,12 @@ Nada pendente.
 ## 5. Testes automáticos
 
 - [ ] Os testes de integração do fluxo entre abas (`a_question_is_typed_into_the_tab_and_answered_by_callback` e vizinhos) só rodam em Unix (agentes falsos em shell): criar agentes falsos para Windows (`.cmd`/`.exe` de teste) para a CI do Windows cobrir a ponte.
-- [ ] Testes de interface (egui) para a barra direita, o Mapa e a aba Git (hoje só capturas de tela no Linux).
+- [ ] Testes de interface (egui) para a barra direita, o Mapa, a aba Git e a tela dividida (hoje só capturas de tela no Linux).
+- [ ] Tela dividida: com várias janelas, cada uma redesenha a grade inteira a cada quadro (e qualquer saída de qualquer aba pede um quadro). Se pesar com 5–6 janelas, guardar as linhas que não mudaram (cache por aba).
+- [ ] Tela dividida, depois: arrastar uma **aba** para outra janela (hoje o agrupamento é sempre pelo tipo) e maximizar uma janela temporariamente.
 
 ## 6. Novas funcionalidades (comparação com o Orca)
 
-- [ ] **Painéis divididos (split panes).** Ver duas ou mais abas lado a lado (horizontal/vertical), cada uma com o próprio terminal.
-  - Hoje há um foco único: `Deck::active` recebe o teclado, `fit_active` só redimensiona a aba ativa e `draw_terminals` (`crates/app/src/ui/mod.rs`) desenha uma aba só.
-  - Proposta: uma árvore de layout (painel = aba, nó = divisão com proporção) com painel focado, `fit` por painel e arrastar a divisória. `terminal::view::show` já recebe o retângulo, então o desenho por painel é direto.
-  - Persistir o layout em `Config` junto com `open_tabs`. Atalhos para dividir, fechar e trocar de painel.
-  - Esforço estimado: médio. Fica mais simples se `deck.rs` (1300 linhas) for dividido antes (abas / entrega / compositor / layout).
 - [ ] **Integração com o GitHub (PRs, issues e Actions).**
   - Listar e abrir PRs e issues do repositório do workspace, ver o estado das Actions (checks) de cada PR e o log de um job que falhou.
   - Ações diretas: mandar um PR, uma issue ou um job vermelho para um agente (ex.: "claude@review, revise o PR #12"; "claude@dev, corrija este job").

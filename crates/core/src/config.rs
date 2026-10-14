@@ -21,6 +21,14 @@ pub struct Config {
     /// Largura da barra lateral direita (Conversa integrada + compositor); 0 = padrão. Ela não
     /// recolhe. (Substitui `bottomHeight`/`feedCollapsed` do antigo painel de baixo, ignorados ao ler.)
     pub right_panel_width: f32,
+    /// Tela dividida: uma janela por tipo de agente (desligada = uma aba por vez).
+    pub split_enabled: bool,
+    /// Ordem das janelas da tela dividida (grupos: `claude`, `antigravity`, `ollama`…).
+    pub pane_order: Vec<String>,
+    /// Proporções das linhas da grade e das colunas de cada linha (vazias = iguais). Só valem se
+    /// o formato da grade ainda for o mesmo.
+    pub split_rows: Vec<f32>,
+    pub split_cols: Vec<Vec<f32>>,
     pub window_width: f32,
     pub window_height: f32,
     /// Host da API do Ollama (padrão `127.0.0.1:11434`, ou `OLLAMA_HOST`).
@@ -40,6 +48,10 @@ impl Default for Config {
             sidebar_width: 220.0,
             sidebar_collapsed: false,
             right_panel_width: 0.0,
+            split_enabled: true,
+            pane_order: Vec::new(),
+            split_rows: Vec::new(),
+            split_cols: Vec::new(),
             window_width: 1280.0,
             window_height: 860.0,
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),

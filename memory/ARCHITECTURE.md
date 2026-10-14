@@ -122,6 +122,17 @@ bloqueantes; a UI chama numa thread):
   acima da pasta de trabalho (o `.git` não é vigiado), a aba relê a cada 10 s enquanto está aberta;
 - pull só por avanço direto (`--ff-only`); push sem upstream publica no único remoto (`push -u`).
 
+**Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
+(`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (todo `ollama:*` vira `ollama`). A cada quadro,
+`Deck::plan_panes` calcula a grade (`grid_shape` → `layout` com as proporções salvas, que voltam a iguais quando
+o formato muda), distribui os grupos (`assign`: os que não cabem dividem a última janela) e escolhe a aba
+visível de cada janela (a de `shown` mais alto). `Deck::active` continua sendo a aba que recebe o teclado: é a
+visível da janela focada, por isso o resto do código (teclado, IME, compositor, cores) não mudou. Cada aba
+visível é redimensionada para a sua janela (`fit_tab`, com o debounce de 60 ms); as escondidas mantêm o tamanho
+até aparecerem. O retrato das janelas do último quadro (`Deck::panes`) serve aos atalhos (Ctrl+Tab dentro da
+janela, Ctrl+Alt+setas) e ao tamanho inicial das abas novas. Ordem, proporções e liga/desliga ficam em
+`Config` (`paneOrder`, `splitRows`, `splitCols`, `splitEnabled`).
+
 **Mapa de conversas.** `Core::conversation_map()` devolve um retrato barato (pode ser chamado a cada quadro):
 instâncias abertas, perguntas pendentes entre abas (`PendingInfo`: id, quem perguntou, a quem, profundidade,
 desde quando e se o `ask-agent` já voltou com 202) e perguntas sendo respondidas em headless. Uma pergunta

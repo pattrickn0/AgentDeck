@@ -9,6 +9,8 @@ mesas de orquestração e trabalham na mesma pasta, enquanto você acompanha tud
 ## Funções
 
 - Abas de terminal reais (ConPTY no Windows) para cada agente, com cores próprias, restauradas ao reabrir.
+- **Tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama…) ganha uma janela com as próprias
+  abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar ou desligar a divisão.
 - **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real, e o
   **Mapa** (em texto de terminal) de quem está conversando com quem agora.
 - **Enviar para**: aba ativa, todos os agentes abertos ou **mesas** (vários agentes em rodadas, com síntese final).

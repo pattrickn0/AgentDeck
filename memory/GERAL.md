@@ -91,9 +91,24 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | Área | O que tem |
 | :-- | :-- |
 | Barra esquerda | árvore do workspace (recolhe com Ctrl+B) |
-| Centro | abas e o terminal da aba ativa |
-| Topbar | abas dos agentes, o chip da branch git (`main ↑1 ↓2 •3`: à frente, atrás, alterações; clique abre a aba Git), a pasta de trabalho e as configurações |
+| Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
+| Topbar | "+" (nova aba), o botão da tela dividida, o chip da branch git (`main ↑1 ↓2 •3`: à frente, atrás, alterações; clique abre a aba Git), a pasta de trabalho e as configurações |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, três abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama) e **Git** (branch). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some na aba Git |
+
+A **tela dividida** organiza as abas por tipo de agente:
+- abas do mesmo tipo ficam na mesma janela (2 Claude = 1 janela com 2 abas; todos os modelos do Ollama juntos;
+  `claude@dev` fica na janela do Claude); um tipo novo abre mais uma janela;
+- as janelas ficam numa grade automática: 2 lado a lado; 3 = 2 em cima + 1 largo embaixo; 4 = 2×2; 5 = 3+2;
+  6 = 3×2. Se não cabem no tamanho mínimo (~260 × 140 px), os tipos que sobram viram abas da última janela;
+- cada janela tem o cabeçalho com as abas dela, a alça ⋮⋮ (arrastar sobre outra janela troca as duas de lugar) e
+  um "+" que abre outra aba do mesmo tipo. A janela focada tem o contorno na cor do agente e recebe o teclado,
+  o IME e o "Enviar para → Aba ativa";
+- os divisores entre janelas se arrastam (duplo clique iguala); tamanhos, ordem e o liga/desliga ficam salvos.
+  Desligada (botão na topbar), volta a ser uma janela só com todas as abas;
+- uma aba aberta por outro agente (`ask-agent codex …`) entra na janela do tipo dela (ou cria a janela) sem tirar
+  o foco de onde você está digitando;
+- atalhos: Ctrl+Tab / Ctrl+Shift+Tab trocam de aba dentro da janela focada; Ctrl+Alt+setas mudam o foco para a
+  janela vizinha; Ctrl+T abre outra aba do tipo focado.
 
 O **Mapa** mostra, em texto de terminal, quem está conversando com quem agora: a árvore de quem pergunta a quem
 (pergunta na fila, digitada, com resposta atrasada ou em modo headless, com o tempo de espera), as respostas a
@@ -137,6 +152,7 @@ ela dura.
 
 - Abrir abas de agentes: Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q,
   Open Interpreter, modelos Ollama e um terminal comum.
+- Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente).
 - Mandar uma mensagem para a aba ativa, para todos os agentes abertos ou para uma **mesa** (vários agentes em
   rodadas, com síntese no fim).
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.

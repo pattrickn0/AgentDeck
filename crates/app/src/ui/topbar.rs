@@ -1,8 +1,8 @@
-//! `#topbar`: botão da barra lateral, abas, "+", pasta de trabalho e configurações.
+//! `#topbar`: botão da barra lateral, "+", tela dividida, branch, pasta de trabalho e configurações.
 
-use egui::{Align2, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Id, Pos2, Rect, Ui, Vec2};
 
-use super::{clickable, dot, galley, galley_trunc, place, text_in, text_w, tip};
+use super::{clickable, galley, galley_trunc, place, text_w, tip};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
@@ -62,124 +62,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     });
     let right_edge = chip_rect.map_or(ws_rect.min.x, |r| r.min.x);
 
-    // ---------- Abas ----------
-    let tabs_x0 = toggle.max.x;
+    // ---------- #new-tab (+) (as abas ficam no cabeçalho de cada janela; ver `panes.rs`) ----------
     let plus_w = 38.0;
-    let tabs_avail = (right_edge - plus_w - tabs_x0).max(0.0);
-    let font = theme::ui(TAB_FONT);
-    let close_w = 12.0 + text_w(&painter, "×", font.clone());
-    let widths: Vec<f32> = deck
-        .tabs
-        .iter()
-        .map(|t| {
-            let lw = text_w(&painter, &t.label, font.clone()).min(150.0);
-            14.0 + 8.0 + 8.0 + 2.0 + lw + 2.0 + 6.0 + close_w + 10.0 + 1.0
-        })
-        .collect();
-    let total: f32 = widths.iter().sum();
-    let tabs_w = total.min(tabs_avail);
-    let tabs_rect = Rect::from_min_size(Pos2::new(tabs_x0, inner.min.y), Vec2::new(tabs_w, inner.height()));
-
-    // Rolagem horizontal das abas (overflow-x: auto, sem barra visível).
-    let scroll_id = Id::new("tabs-scroll");
-    let mut scroll = ctx.data(|d| d.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
-    if total > tabs_w {
-        let over = ui.interact(tabs_rect, Id::new("tabs-scroll-area"), Sense::hover());
-        if over.hovered() {
-            let d = ui.input(|i| i.smooth_scroll_delta);
-            scroll -= d.x + d.y;
-        }
-        if let Some(a) = deck.active {
-            // Garante a aba ativa visível.
-            let start: f32 = widths[..a].iter().sum();
-            let end = start + widths[a];
-            if start < scroll {
-                scroll = start;
-            } else if end > scroll + tabs_w {
-                scroll = end - tabs_w;
-            }
-        }
-        scroll = scroll.clamp(0.0, total - tabs_w);
-    } else {
-        scroll = 0.0;
-    }
-    ctx.data_mut(|d| d.insert_temp(scroll_id, scroll));
-
-    let tab_painter = painter.with_clip_rect(tabs_rect);
-    let mut x = tabs_x0 - scroll;
-    let mut activate = None;
-    let mut close = None;
-    for (i, tab) in deck.tabs.iter().enumerate() {
-        let w = widths[i];
-        let r = Rect::from_min_size(Pos2::new(x, inner.min.y), Vec2::new(w - 1.0, inner.height()));
-        x += w;
-        if r.max.x < tabs_rect.min.x || r.min.x > tabs_rect.max.x {
-            continue;
-        }
-        let vis = r.intersect(tabs_rect);
-        let is_active = deck.active == Some(i);
-        let resp = ui.interact(vis, Id::new(("tab", tab.uid)), Sense::click());
-        // Botão fechar (×): padding 2px 6px, margin-left 6px.
-        let close_rect = Rect::from_min_size(Pos2::new(r.max.x - 10.0 - close_w, r.center().y - 11.5), Vec2::new(close_w, 23.0));
-        let close_resp = ui.interact(close_rect.intersect(tabs_rect), Id::new(("tab-close", tab.uid)), Sense::click());
-
-        let bg = if is_active {
-            Some(theme::BG)
-        } else if resp.hovered() || close_resp.hovered() {
-            Some(theme::PANEL_2)
-        } else {
-            None
-        };
-        if let Some(bg) = bg {
-            tab_painter.rect_filled(r, 0.0, bg);
-        }
-        if is_active {
-            // box-shadow: inset 0 2px 0 var(--tab-color)
-            tab_painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width(), 2.0)), 0.0, tab.color);
-        }
-        // border-right
-        tab_painter.rect_filled(Rect::from_min_size(Pos2::new(r.max.x, r.min.y), Vec2::new(1.0, r.height())), 0.0, theme::BORDER);
-
-        let color = if is_active { theme::TEXT } else { theme::MUTED };
-        dot(&tab_painter, Pos2::new(r.min.x + 14.0 + 4.0, r.center().y), tab.color);
-        let label_x = r.min.x + 14.0 + 8.0 + 8.0 + 2.0;
-        let g = galley_trunc(&tab_painter, &tab.label, font.clone(), color, 150.0);
-        let lr = place(
-            &tab_painter,
-            Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + 150.0, r.max.y)),
-            Align2::LEFT_CENTER,
-            g,
-            color,
-        );
-        if !tab.alive {
-            // .tab.dead .label { text-decoration: line-through }
-            let y = lr.center().y + 0.5;
-            tab_painter.hline(lr.min.x..=lr.max.x, y, Stroke::new(1.0, color));
-        }
-
-        let close_hot = close_resp.hovered();
-        if close_hot {
-            tab_painter.rect_filled(close_rect, 4.0, theme::BORDER);
-            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-        } else if resp.hovered() {
-            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        text_in(&tab_painter, close_rect, Align2::CENTER_CENTER, "×", font.clone(), if close_hot { theme::TEXT } else { theme::MUTED });
-
-        if tip(close_resp, "Fechar").clicked() {
-            close = Some(i);
-        } else if tip(resp, tab.label.clone()).clicked() {
-            activate = Some(i);
-        }
-    }
-    if let Some(i) = close {
-        deck.close_tab(i);
-    } else if let Some(i) = activate {
-        deck.activate(i);
-    }
-
-    // ---------- #new-tab (+) ----------
-    let plus = Rect::from_min_size(Pos2::new(tabs_rect.max.x, inner.min.y), Vec2::new(plus_w, inner.height()));
+    let plus = Rect::from_min_size(Pos2::new(toggle.max.x, inner.min.y), Vec2::new(plus_w, inner.height()));
     let r = clickable(ui, plus, Id::new("new-tab"));
     let hot = r.hovered() || deck.new_tab_menu_open;
     if r.hovered() {
@@ -192,6 +77,32 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         deck.settings_open = false;
         if deck.new_tab_menu_open {
             deck.refresh_agents();
+        }
+    }
+
+    // ---------- Tela dividida (liga/desliga) ----------
+    let split_btn = Rect::from_min_max(Pos2::new(right_edge - 36.0, inner.min.y), Pos2::new(right_edge - 4.0, inner.max.y));
+    if split_btn.min.x > plus.max.x {
+        let r = clickable(ui, split_btn, Id::new("split-toggle"));
+        let on = deck.split_enabled;
+        if r.hovered() {
+            painter.rect_filled(split_btn.shrink2(Vec2::new(0.0, 6.0)), 6.0, theme::PANEL_2);
+        }
+        let c = if on {
+            deck.active_color()
+        } else if r.hovered() {
+            theme::TEXT
+        } else {
+            theme::MUTED
+        };
+        deck.icons.paint(&painter, Icon::Split, split_btn.center(), 16.0, c, 0.0);
+        let title = if on {
+            "Tela dividida: ligada\nCada tipo de agente numa janela · clique para ver uma aba por vez"
+        } else {
+            "Tela dividida: desligada\nClique para abrir uma janela por tipo de agente"
+        };
+        if tip(r, title).clicked() {
+            deck.toggle_split();
         }
     }
 

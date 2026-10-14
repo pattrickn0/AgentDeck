@@ -93,6 +93,12 @@ core) com o que só a interface sabe (filas das abas, quem está ocupado, recent
 existem nas fontes monoespaçadas do Windows (o teste confere). Para ver sem agentes reais:
 `COMMANDDECK_DEBUG_UI=map-demo`.
 
+**Mexer na tela dividida.** O cálculo é puro e testado em `crates/app/src/split.rs` (grupo de cada aba,
+formato da grade, retângulos, divisores, vizinho para os atalhos, ordem das janelas, foco ao fechar); o
+`Deck` guarda a ordem (`group_order`), as proporções (`split_ratios`) e qual aba aparece em cada janela (a
+ativada mais recentemente, `Tab::shown`); a pintura fica em `crates/app/src/ui/panes.rs` (janelas, divisores,
+arrasto) e `ui/tabs.rs` (faixa de abas). Para ver o arrasto sem mouse: `COMMANDDECK_DEBUG_UI=split-drag`.
+
 **Mexer na aba Git.** As operações ficam em `crates/core/src/git.rs` (`impl Core`, com o ambiente seguro em
 `base_command`); o estado e as releituras, em `crates/app/src/git_ui.rs`; a pintura, em `crates/app/src/ui/git.rs`
 (o desenho só coleta as ações e aplica no fim). Comando novo do git: sempre `args([...])` com `--` antes de
@@ -113,7 +119,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app. Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`map`, `map-demo`, `git`, `git-demo`, `git-diff`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app. Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`map`, `map-demo`, `git`, `git-demo`, `git-diff`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas
