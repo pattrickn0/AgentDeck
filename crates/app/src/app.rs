@@ -281,7 +281,12 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 glw.window.request_redraw();
             }
-            WindowEvent::Ime(_) if deck.term_focus => forward = false,
+            // Com o terminal focado o IME é do terminal (não do egui).
+            WindowEvent::Ime(ime) if deck.term_focus => {
+                deck.handle_ime(ime);
+                forward = false;
+                glw.window.request_redraw();
+            }
             WindowEvent::HoveredFile(_) => {
                 deck.drop_hover = true;
                 glw.window.request_redraw();

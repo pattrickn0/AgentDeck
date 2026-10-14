@@ -146,6 +146,8 @@ pub struct Deck {
     pub sound_enabled: bool,
     pub drop_hover: bool,
     pub term_focus: bool,
+    /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
+    pub ime_preedit: String,
     pub metrics: Option<Metrics>,
     pub blink_epoch: Instant,
     pub icons: IconCache,
@@ -216,6 +218,7 @@ impl Deck {
             sound_enabled: cfg.sound_enabled,
             drop_hover: false,
             term_focus: false,
+            ime_preedit: String::new(),
             metrics: None,
             blink_epoch: Instant::now(),
             icons: IconCache::default(),
@@ -674,6 +677,24 @@ impl Deck {
     // ------------------------------------------------------------------
     // Teclado
     // ------------------------------------------------------------------
+
+    /// IME com o terminal focado (teclados CJK, seletor de emoji `Win+.`): a confirmação vai ao
+    /// processo como se tivesse sido digitada; a pré-edição só é desenhada, sem enviar nada.
+    pub fn handle_ime(&mut self, ime: &winit::event::Ime) {
+        use winit::event::Ime;
+        match ime {
+            Ime::Preedit(text, _) => self.ime_preedit = text.clone(),
+            Ime::Commit(text) => {
+                self.ime_preedit.clear();
+                if let (false, Some(idx)) = (text.is_empty(), self.active) {
+                    self.blink_epoch = Instant::now();
+                    self.terminal_data(idx, text.as_bytes());
+                }
+            }
+            Ime::Enabled => {}
+            Ime::Disabled => self.ime_preedit.clear(),
+        }
+    }
 
     /// Trata uma tecla vinda do winit. Retorna `true` se consumiu (não repassar ao egui).
     pub fn handle_key(&mut self, ev: &KeyEvent, mods: ModifiersState, egui_has_focus: bool) -> bool {

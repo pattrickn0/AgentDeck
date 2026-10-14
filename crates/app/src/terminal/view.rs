@@ -1,4 +1,5 @@
-//! Pintura da grade do terminal no egui + mouse (seleção, rolagem, roda).
+//! Pintura da grade do terminal no egui + mouse (seleção, rolagem, roda e relatório de mouse para o
+//! programa quando ele ativa os modos 1000/1002/1003/1006).
 
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
@@ -9,6 +10,7 @@ use alacritty_terminal::vte::ansi::CursorShape;
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
+use super::input::{mouse_mods, mouse_report, MOUSE_LEFT, MOUSE_MIDDLE, MOUSE_MOTION, MOUSE_NO_BUTTON, MOUSE_RIGHT};
 use super::{colors, GridSize, Session};
 use crate::theme;
 
@@ -50,6 +52,10 @@ impl Metrics {
 pub struct ViewState {
     wheel_accum: f32,
     dragging_scrollbar: Option<(f32, usize)>,
+    /// Botão (já com modificadores) enviado ao programa e ainda não solto.
+    mouse_down: Option<u8>,
+    /// Última célula (coluna, linha, base 1) relatada, para não repetir movimentos.
+    last_cell: Option<(usize, usize)>,
 }
 
 /// Resultado da interação no quadro atual.
@@ -59,11 +65,14 @@ pub struct ViewResponse {
     pub focus: bool,
     /// Bytes a enviar ao processo (ex.: roda do mouse em modo de relatório/tela alternativa).
     pub to_pty: Vec<u8>,
+    /// Célula do cursor do terminal (onde o IME ancora a composição), se visível na tela.
+    pub cursor_rect: Option<Rect>,
 }
 
-/// Pinta o terminal e trata o mouse. `focused` = recebe teclado; `blink_on` = fase do cursor.
+/// Pinta o terminal e trata o mouse. `focused` = recebe teclado; `blink_on` = fase do cursor;
+/// `preedit` = texto em composição do IME, desenhado sobre o cursor.
 #[allow(clippy::too_many_arguments)]
-pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, state: &mut ViewState, focused: bool, blink_on: bool, m: &Metrics) -> ViewResponse {
+pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, state: &mut ViewState, focused: bool, blink_on: bool, preedit: &str, m: &Metrics) -> ViewResponse {
     let mut out = ViewResponse::default();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::TERM_BG);
@@ -95,6 +104,18 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
     let pointer = ui.input(|i| i.pointer.interact_pos());
     let on_scrollbar = pointer.is_some_and(|p| track.expand2(Vec2::new(1.0, 0.0)).contains(p)) && thumb.is_some();
 
+    // O programa pediu o mouse (vim, htop, menus interativos): clique/arrasto/movimento vão para ele.
+    // Shift devolve o mouse ao terminal (seleção), como no xterm.
+    let mode = *emu.term.mode();
+    let reporting = mode.intersects(TermMode::MOUSE_MODE) && !ui.input(|i| i.modifiers.shift);
+    if reporting && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+    }
+    if !reporting {
+        state.mouse_down = None;
+        state.last_cell = None;
+    }
+
     // ---------- Mouse ----------
     let to_point = |p: Pos2, offset: usize| -> (Point, Side) {
         let x = ((p.x - origin.x) / m.cell_w).max(0.0);
@@ -112,7 +133,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
             let offset = emu.term.grid().display_offset();
             let grab = if t.contains(p) { p.y - t.min.y } else { t.height() / 2.0 };
             state.dragging_scrollbar = Some((grab, offset));
-        } else if let Some(p) = response.interact_pointer_pos() {
+        } else if let (false, Some(p)) = (reporting, response.interact_pointer_pos()) {
             let offset = emu.term.grid().display_offset();
             let (pt, side) = to_point(p, offset);
             emu.term.selection = Some(Selection::new(SelectionType::Simple, pt, side));
@@ -125,7 +146,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
             let target = history as f32 - frac * history as f32;
             let cur = emu.term.grid().display_offset() as f32;
             emu.term.scroll_display(Scroll::Delta((target - cur).round() as i32));
-        } else if let Some(p) = response.interact_pointer_pos() {
+        } else if let (false, Some(p)) = (reporting, response.interact_pointer_pos()) {
             // Rolagem automática ao arrastar para fora da área.
             if p.y < rect.min.y {
                 emu.term.scroll_display(Scroll::Delta(1));
@@ -145,7 +166,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
             emu.term.selection = None;
         }
     }
-    if response.double_clicked() || response.triple_clicked() {
+    if (response.double_clicked() || response.triple_clicked()) && !reporting {
         if let Some(p) = response.interact_pointer_pos() {
             let offset = emu.term.grid().display_offset();
             let (pt, side) = to_point(p, offset);
@@ -158,7 +179,6 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
 
     // Roda do mouse.
     if response.hovered() {
-        let mode = *emu.term.mode();
         let events = ui.input(|i| i.events.clone());
         for ev in events {
             if let egui::Event::MouseWheel { unit, delta, .. } = ev {
@@ -204,6 +224,63 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
         }
     }
 
+    // Clique, soltar e movimento relatados ao programa.
+    if reporting {
+        let sgr = mode.contains(TermMode::SGR_MOUSE);
+        let drag = mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION);
+        let motion = mode.contains(TermMode::MOUSE_MOTION);
+        let cell_of = |p: Pos2| {
+            let (pt, _) = to_point(p, 0);
+            (pt.column.0 + 1, pt.line.0 as usize + 1)
+        };
+        let over_scrollbar = |p: Pos2| thumb.is_some() && track.expand2(Vec2::new(1.0, 0.0)).contains(p);
+        let events = ui.input(|i| i.events.clone());
+        for ev in events {
+            match ev {
+                egui::Event::PointerButton { pos, button, pressed, modifiers } => {
+                    let base = match button {
+                        egui::PointerButton::Primary => MOUSE_LEFT,
+                        egui::PointerButton::Middle => MOUSE_MIDDLE,
+                        egui::PointerButton::Secondary => MOUSE_RIGHT,
+                        _ => continue,
+                    };
+                    let code = base + mouse_mods(modifiers.alt, modifiers.ctrl);
+                    let (c, r) = cell_of(pos);
+                    if pressed {
+                        if state.mouse_down.is_some() || !response.hovered() || !rect.contains(pos) || over_scrollbar(pos) {
+                            continue;
+                        }
+                        state.mouse_down = Some(code);
+                        state.last_cell = Some((c, r));
+                        out.to_pty.extend(mouse_report(sgr, code, c, r, false).unwrap_or_default());
+                    } else if let Some(down) = state.mouse_down.filter(|d| d & 3 == base) {
+                        state.mouse_down = None;
+                        state.last_cell = Some((c, r));
+                        out.to_pty.extend(mouse_report(sgr, down, c, r, true).unwrap_or_default());
+                    }
+                }
+                egui::Event::PointerMoved(pos) => {
+                    let (c, r) = cell_of(pos);
+                    if state.last_cell == Some((c, r)) {
+                        continue;
+                    }
+                    match state.mouse_down {
+                        Some(code) if drag => {
+                            state.last_cell = Some((c, r));
+                            out.to_pty.extend(mouse_report(sgr, code + MOUSE_MOTION, c, r, false).unwrap_or_default());
+                        }
+                        None if motion && response.hovered() && rect.contains(pos) => {
+                            state.last_cell = Some((c, r));
+                            out.to_pty.extend(mouse_report(sgr, MOUSE_NO_BUTTON + MOUSE_MOTION, c, r, false).unwrap_or_default());
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     // ---------- Pintura ----------
     let content = emu.term.renderable_content();
     let offset = content.display_offset;
@@ -212,6 +289,10 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
     let selection = content.selection;
     let cursor_row = cursor.point.line.0 + offset as i32;
     let cursor_visible = cursor.shape != CursorShape::Hidden && cursor_row >= 0 && (cursor_row as usize) < rows;
+    if cursor_row >= 0 && (cursor_row as usize) < rows {
+        let pos = Pos2::new(origin.x + cursor.point.column.0 as f32 * m.cell_w, origin.y + cursor_row as f32 * m.cell_h);
+        out.cursor_rect = Some(Rect::from_min_size(pos, Vec2::new(m.cell_w, m.cell_h)));
+    }
 
     let mut bgs: Vec<(Rect, Color32)> = Vec::new();
     let mut texts: Vec<(Pos2, LayoutJob, Option<f32>)> = Vec::new();
@@ -318,6 +399,15 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
         }
     }
 
+    // Texto em composição do IME (ainda não confirmado): sublinhado, sobre o cursor.
+    if let (false, Some(cell)) = (preedit.is_empty(), out.cursor_rect) {
+        let galley = painter.layout_no_wrap(preedit.to_owned(), m.font.clone(), theme::TERM_FG);
+        let w = galley.size().x;
+        painter.rect_filled(Rect::from_min_size(cell.min, Vec2::new(w, m.cell_h)), 0.0, theme::TERM_BG);
+        painter.galley(cell.min, galley, theme::TERM_FG);
+        painter.hline(cell.min.x..=cell.min.x + w, cell.min.y + m.cell_h - 1.5, Stroke::new(1.0, theme::TERM_FG));
+    }
+
     if let Some(t) = thumb {
         let hot = on_scrollbar || state.dragging_scrollbar.is_some();
         painter.rect_filled(t, 3.0, theme::rgba(255, 255, 255, if hot { 0.25 } else { 0.12 }));
@@ -351,5 +441,135 @@ impl Run {
         job.append(&self.text, 0.0, TextFormat { font_id: font, color: self.style.fg, italics: self.style.italic, ..Default::default() });
         let span = (!self.ascii).then_some(m.cell_w * self.width_cells);
         (self.start, job, span)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Event, Modifiers, PointerButton, RawInput};
+
+    const AREA: Rect = Rect { min: Pos2::new(0.0, 0.0), max: Pos2::new(400.0, 400.0) };
+
+    fn metrics() -> Metrics {
+        Metrics { cell_w: 10.0, cell_h: 20.0, font: FontId::monospace(14.0), bold: FontId::monospace(14.0) }
+    }
+
+    /// Centro da célula (coluna, linha), base 0, em coordenadas da tela.
+    fn cell(col: usize, row: usize) -> Pos2 {
+        Pos2::new(PAD_LEFT + col as f32 * 10.0 + 5.0, PAD_TOP + row as f32 * 20.0 + 10.0)
+    }
+
+    struct Harness {
+        ctx: egui::Context,
+        session: Session,
+        state: ViewState,
+        time: f64,
+    }
+
+    impl Harness {
+        /// `modes`: sequências DECSET que o "programa" enviaria (ex.: `ESC[?1002h`).
+        fn new(modes: &str) -> Self {
+            let session = Session::new(GridSize { cols: 30, rows: 15 });
+            session.shared.emu.lock().feed(modes.as_bytes());
+            let mut h = Self { ctx: egui::Context::default(), session, state: ViewState::default(), time: 0.0 };
+            h.frame(vec![], Modifiers::NONE); // registra o widget (o hover usa o quadro anterior)
+            h
+        }
+
+        fn frame(&mut self, events: Vec<Event>, modifiers: Modifiers) -> ViewResponse {
+            let mut input = RawInput::default();
+            input.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)));
+            // O egui 0.36 recebe os modificadores como evento (e os mantém entre quadros).
+            input.events = std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect();
+            input.time = Some(self.time);
+            self.time += 0.016;
+            let mut out = None;
+            let (session, state) = (&self.session, &mut self.state);
+            let mut full = self.ctx.run_ui(input, |ui| {
+                out = Some(show(ui, AREA, egui::Id::new("t"), session, state, true, true, "", &metrics()));
+            });
+            full.textures_delta.clear(); // sem GPU: nada a aplicar
+            out.expect("quadro executado")
+        }
+
+        fn moved(&mut self, p: Pos2) -> Vec<u8> {
+            self.frame(vec![Event::PointerMoved(p)], Modifiers::NONE).to_pty
+        }
+
+        fn button(&mut self, p: Pos2, pressed: bool, modifiers: Modifiers) -> Vec<u8> {
+            let ev = Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers };
+            self.frame(vec![ev], modifiers).to_pty
+        }
+    }
+
+    #[test]
+    fn sgr_click_drag_and_release_are_reported() {
+        let mut h = Harness::new("[?1002h[?1006h");
+        assert!(h.moved(cell(3, 2)).is_empty(), "sem botão e sem modo 1003, mover não relata");
+        assert_eq!(h.button(cell(3, 2), true, Modifiers::NONE), b"[<0;4;3M");
+        assert_eq!(h.moved(cell(5, 2)), b"[<32;6;3M", "arrastar com botão: bit de movimento");
+        assert!(h.session.shared.emu.lock().term.selection.is_none(), "o programa recebe o arrasto: nada de seleção");
+        assert!(h.moved(cell(5, 2)).is_empty(), "mesma célula não repete");
+        assert_eq!(h.button(cell(5, 2), false, Modifiers::NONE), b"[<0;6;3m");
+        assert!(h.state.mouse_down.is_none());
+    }
+
+    #[test]
+    fn plain_motion_only_in_mode_1003() {
+        let mut h = Harness::new("[?1003h[?1006h");
+        assert_eq!(h.moved(cell(2, 1)), b"[<35;3;2M");
+    }
+
+    #[test]
+    fn legacy_encoding_without_sgr() {
+        let mut h = Harness::new("[?1000h");
+        h.moved(cell(0, 0));
+        assert_eq!(h.button(cell(0, 0), true, Modifiers::NONE), vec![0x1b, b'[', b'M', 32, 33, 33]);
+        assert_eq!(h.button(cell(0, 0), false, Modifiers::NONE), vec![0x1b, b'[', b'M', 35, 33, 33]);
+        // Modo 1000 não relata arrasto.
+        h.button(cell(0, 0), true, Modifiers::NONE);
+        assert!(h.moved(cell(4, 4)).is_empty());
+    }
+
+    #[test]
+    fn ctrl_modifier_goes_into_the_code() {
+        let mut h = Harness::new("[?1000h[?1006h");
+        h.moved(cell(1, 1));
+        assert_eq!(h.button(cell(1, 1), true, Modifiers::CTRL), b"[<16;2;2M");
+    }
+
+    #[test]
+    fn without_mouse_mode_nothing_is_reported_and_selection_works() {
+        let mut h = Harness::new("");
+        h.moved(cell(3, 2));
+        assert!(h.button(cell(3, 2), true, Modifiers::NONE).is_empty());
+        assert!(h.moved(cell(8, 2)).is_empty());
+        assert!(h.session.shared.emu.lock().term.selection.is_some(), "arrastar seleciona texto");
+        assert!(h.button(cell(8, 2), false, Modifiers::NONE).is_empty());
+    }
+
+    #[test]
+    fn shift_returns_the_mouse_to_the_terminal() {
+        let mut h = Harness::new("[?1000h[?1006h");
+        h.moved(cell(3, 2));
+        assert!(h.button(cell(3, 2), true, Modifiers::SHIFT).is_empty());
+        assert!(h.state.mouse_down.is_none());
+    }
+
+    #[test]
+    fn click_outside_the_area_is_not_reported() {
+        let mut h = Harness::new("[?1000h[?1006h");
+        let outside = Pos2::new(500.0, 100.0);
+        h.moved(outside);
+        assert!(h.button(outside, true, Modifiers::NONE).is_empty());
+    }
+
+    #[test]
+    fn cursor_rect_is_exposed_for_the_ime() {
+        let mut h = Harness::new("ab");
+        let r = h.frame(vec![], Modifiers::NONE).cursor_rect.expect("cursor visível");
+        assert_eq!(r.min, Pos2::new(PAD_LEFT + 20.0, PAD_TOP));
+        assert_eq!(r.size(), Vec2::new(10.0, 20.0));
     }
 }

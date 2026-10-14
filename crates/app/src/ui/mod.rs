@@ -76,6 +76,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     deck.composer_focused = egui_focus == Some(Id::new(COMPOSER_INPUT_ID));
     if egui_focus.is_some() {
         deck.term_focus = false;
+        deck.ime_preedit.clear();
     }
 }
 
@@ -94,10 +95,22 @@ fn draw_terminals(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let focused = deck.term_focus && window_focused;
     let elapsed = deck.blink_epoch.elapsed().as_millis();
     let blink_on = (elapsed / 600) % 2 == 0;
+    let preedit = deck.ime_preedit.clone();
     let tab = &mut deck.tabs[idx];
     let id = Id::new(("terminal", tab.uid));
-    let resp = view::show(ui, rect, id, &tab.session, &mut tab.view, focused, blink_on, &metrics);
+    let resp = view::show(ui, rect, id, &tab.session, &mut tab.view, focused, blink_on, &preedit, &metrics);
     let bytes = resp.to_pty;
+    // Habilita o IME do sistema ancorado no cursor do terminal (candidatos e seletor de emoji).
+    if let (true, Some(cell)) = (focused, resp.cursor_rect) {
+        ctx.output_mut(|o| {
+            o.ime = Some(egui::output::IMEOutput {
+                purpose: egui::IMEPurpose::Terminal,
+                rect: cell,
+                cursor_rect: cell,
+                should_interrupt_composition: false,
+            });
+        });
+    }
     if resp.focus {
         ctx.memory_mut(|m| {
             if let Some(f) = m.focused() {

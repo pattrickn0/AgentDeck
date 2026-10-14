@@ -170,6 +170,37 @@ pub fn submit_paste(text: &str) -> Vec<u8> {
     format!("\x1b[200~{text}\x1b[201~").into_bytes()
 }
 
+/// Código base do botão para relatório de mouse (xterm): 0 esquerdo, 1 meio, 2 direito.
+pub const MOUSE_LEFT: u8 = 0;
+pub const MOUSE_MIDDLE: u8 = 1;
+pub const MOUSE_RIGHT: u8 = 2;
+/// Bit de movimento (arrastar ou mover) somado ao código do botão.
+pub const MOUSE_MOTION: u8 = 32;
+/// Movimento sem nenhum botão pressionado (`3 + 32`).
+pub const MOUSE_NO_BUTTON: u8 = 3;
+
+/// Relatório de mouse (clique, soltar, movimento, roda) para o PTY.
+///
+/// `code` é o código do botão do xterm já somado aos modificadores (`alt` 8, `ctrl` 16) e ao bit
+/// de movimento (32), ou 64/65 para a roda. `col`/`row` começam em 1. No modo SGR (1006) soltar é
+/// `m`; no formato legado (X10) soltar vira o botão 3 e as coordenadas só vão até 223.
+pub fn mouse_report(sgr: bool, code: u8, col: usize, row: usize, release: bool) -> Option<Vec<u8>> {
+    if sgr {
+        let end = if release { 'm' } else { 'M' };
+        return Some(format!("[<{code};{col};{row}{end}").into_bytes());
+    }
+    if col >= 224 || row >= 224 {
+        return None;
+    }
+    let code = if release { (code & !0b11) | 3 } else { code };
+    Some(vec![0x1b, b'[', b'M', 32 + code, 32 + col as u8, 32 + row as u8])
+}
+
+/// Soma os modificadores do relatório de mouse (`shift` fica de fora: ele devolve o mouse ao app).
+pub fn mouse_mods(alt: bool, ctrl: bool) -> u8 {
+    (if alt { 8 } else { 0 }) | (if ctrl { 16 } else { 0 })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +277,22 @@ mod tests {
     fn unknown_named_keys_produce_nothing() {
         assert!(encode_key(&Key::Named(NamedKey::Shift), None, SHIFT, false).is_none());
         assert!(encode_key(&Key::Named(NamedKey::CapsLock), None, NONE, false).is_none());
+    }
+
+    #[test]
+    fn mouse_reports_sgr_and_legacy() {
+        assert_eq!(mouse_report(true, MOUSE_LEFT, 5, 3, false).unwrap(), b"[<0;5;3M");
+        assert_eq!(mouse_report(true, MOUSE_LEFT, 5, 3, true).unwrap(), b"[<0;5;3m");
+        assert_eq!(mouse_report(true, MOUSE_RIGHT + mouse_mods(false, true), 1, 1, false).unwrap(), b"[<18;1;1M");
+        assert_eq!(mouse_report(true, MOUSE_LEFT + MOUSE_MOTION, 10, 2, false).unwrap(), b"[<32;10;2M");
+        assert_eq!(mouse_report(true, 64, 7, 7, false).unwrap(), b"[<64;7;7M");
+        // Legado: soltar vira botão 3, coordenadas somam 32.
+        assert_eq!(mouse_report(false, MOUSE_LEFT, 5, 3, false).unwrap(), vec![0x1b, b'[', b'M', 32, 37, 35]);
+        assert_eq!(mouse_report(false, MOUSE_RIGHT, 5, 3, true).unwrap(), vec![0x1b, b'[', b'M', 35, 37, 35]);
+        assert_eq!(mouse_report(false, MOUSE_NO_BUTTON + MOUSE_MOTION, 1, 1, false).unwrap(), vec![0x1b, b'[', b'M', 67, 33, 33]);
+        assert!(mouse_report(false, MOUSE_LEFT, 224, 1, false).is_none());
+        assert!(mouse_report(true, MOUSE_LEFT, 300, 400, false).is_some());
+        assert_eq!(mouse_mods(true, true), 24);
     }
 
     #[test]
