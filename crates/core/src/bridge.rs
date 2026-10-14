@@ -67,6 +67,24 @@ impl PairQueues {
     }
 }
 
+/// Marca de "pergunta em andamento" numa conversa (ver [`Core::conversation_busy`]).
+pub(crate) struct RunningGuard {
+    pub(crate) core: Core,
+    pub(crate) key: String,
+}
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        let mut running = self.core.inner.running_pairs.lock();
+        if let Some(n) = running.get_mut(&self.key) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                running.remove(&self.key);
+            }
+        }
+    }
+}
+
 // ---------- Servidor ----------
 
 /// Sobe o servidor em 127.0.0.1:0 e devolve (servidor, porta).
@@ -235,6 +253,8 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
     let prompt = format!(
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
     );
+    // Conta já na fila: o takeover de uma aba espera a conversa ficar livre.
+    let _running = core.mark_running(&session_key);
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
         core.run_headless(&to, &prompt, HeadlessOptions { session_key: Some(session_key.clone()), depth: depth + 1, ..Default::default() })
