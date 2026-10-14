@@ -17,6 +17,7 @@ pub mod delivery;
 pub mod download;
 pub mod events;
 pub mod exchange;
+pub mod git;
 pub mod headless;
 pub mod instances;
 pub mod ollama;
@@ -129,6 +130,7 @@ pub(crate) struct CoreInner {
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub whisper: whisper::WhisperState,
+    pub git: git::GitState,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
     _data_lock: Option<std::fs::File>,
 }
@@ -290,6 +292,7 @@ impl Core {
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
             whisper: whisper::WhisperState::default(),
+            git: git::GitState::default(),
             _data_lock: Some(data_lock),
             paths,
         };

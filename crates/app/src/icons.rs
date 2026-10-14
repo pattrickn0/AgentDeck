@@ -31,6 +31,20 @@ pub enum Icon {
     FolderClosed,
     /// Arquivo genérico (viewBox 16).
     FileGeneric,
+    /// Aba "Conversa integrada": Material Icons `forum` (Apache-2.0, viewBox 24).
+    Chat,
+    /// Aba "Mapa de agentes": Material Icons `account_tree` (Apache-2.0, viewBox 24).
+    Diagram,
+    /// Aba "Git" e chip da branch: Octicons `git-branch-16` (MIT, viewBox 16).
+    GitBranch,
+    /// Git: buscar (fetch). Material Icons `refresh` (Apache-2.0, viewBox 24).
+    Refresh,
+    /// Git: puxar (pull). Material Icons `arrow_downward` (Apache-2.0, viewBox 24).
+    ArrowDown,
+    /// Git: enviar (push). Material Icons `arrow_upward` (Apache-2.0, viewBox 24).
+    ArrowUp,
+    /// Git: descartar alterações. Material Icons `undo` (Apache-2.0, viewBox 24).
+    Undo,
 }
 
 impl Icon {
@@ -47,6 +61,13 @@ impl Icon {
             Icon::FolderOpen => ("M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 14.5 4H7.414L5.707 2.293A1 1 0 0 0 5 2H1.5zm0 1H5l1.707 1.707A1 1 0 0 0 7.414 5H14.5a.5.5 0 0 1 .5.5v1.25H1V3.5a.5.5 0 0 1 .5-.5z", 16.0),
             Icon::FolderClosed => ("M14.5 3H7.71l-.85-.85L6.51 2h-5l-.5.5v11l.5.5h13l.5-.5v-10l-.5-.5zm-.5 10H2V3h4.29l.86.85.35.15H14v9z", 16.0),
             Icon::FileGeneric => ("M9 1H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7L9 1zm4 12H3V3h5v5h5v5z", 16.0),
+            Icon::Chat => ("M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1zm-4 6V3c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v14l4-4h10c.55 0 1-.45 1-1z", 24.0),
+            Icon::Diagram => ("M22 11V3h-7v3H9V3H2v8h7V8h2v10h4v3h7v-8h-7v3h-2V8h2v3z", 24.0),
+            Icon::GitBranch => ("M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z", 16.0),
+            Icon::Refresh => ("M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z", 24.0),
+            Icon::ArrowDown => ("m20 12-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z", 24.0),
+            Icon::ArrowUp => ("m4 12 1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z", 24.0),
+            Icon::Undo => ("M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z", 24.0),
         }
     }
 }
@@ -480,6 +501,13 @@ mod tests {
             Icon::FolderOpen,
             Icon::FolderClosed,
             Icon::FileGeneric,
+            Icon::Chat,
+            Icon::Diagram,
+            Icon::GitBranch,
+            Icon::Refresh,
+            Icon::ArrowDown,
+            Icon::ArrowUp,
+            Icon::Undo,
         ] {
             let (d, vb) = icon.path();
             let polys = flatten_path(d);
@@ -489,5 +517,17 @@ mod tests {
             assert!(total > 10.0, "{icon:?} quase vazio: {total}");
             assert!(cov.iter().all(|c| *c <= 1.0001), "{icon:?} cobertura > 1");
         }
+    }
+
+    #[test]
+    fn the_branch_icon_keeps_its_holes() {
+        // Os círculos do Octicons são anéis: o centro (furo) fica vazio com a regra nonzero.
+        let (d, vb) = Icon::GitBranch.path();
+        let cov = rasterize(&flatten_path(d), vb, 64, 64);
+        let at = |x: f32, y: f32| cov[(y / vb * 64.0) as usize * 64 + (x / vb * 64.0) as usize];
+        assert!(at(4.25, 3.25) < 0.3, "furo do círculo de cima à esquerda");
+        assert!(at(11.75, 3.25) < 0.3, "furo do círculo da direita");
+        assert!(at(4.25, 12.75) < 0.3, "furo do círculo de baixo");
+        assert!(at(4.25, 8.0) > 0.7, "o traço entre os círculos é cheio");
     }
 }

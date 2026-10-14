@@ -114,10 +114,24 @@ pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
     })
 }
 
+/// A mudança em `path` é no estado do repositório git do workspace (`.git/HEAD`, `index`, refs…)?
+/// Os arquivos `*.lock` (temporários do próprio git) não contam.
+pub(crate) fn git_state_change(workspace: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(workspace.join(".git")) else { return false };
+    let name = rel.to_string_lossy();
+    if name.ends_with(".lock") {
+        return false;
+    }
+    let first = rel.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
+    matches!(first.as_str(), "HEAD" | "index" | "FETCH_HEAD" | "MERGE_HEAD" | "ORIG_HEAD" | "packed-refs" | "refs")
+}
+
 /// Inicia um watcher recursivo com debounce de 300 ms que emite
-/// [`crate::CoreEvent::WorkspaceChanged`]. O watcher para quando o valor retornado é solto.
+/// [`crate::CoreEvent::WorkspaceChanged`] (e [`crate::CoreEvent::GitChanged`] quando muda o estado
+/// do repositório em `.git/`). O watcher para quando o valor retornado é solto.
 pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> notify::Result<notify::RecommendedWatcher> {
-    let (tx, rx) = crossbeam_channel::unbounded::<()>();
+    // `true` = mudança no repositório git; `false` = na árvore de arquivos.
+    let (tx, rx) = crossbeam_channel::unbounded::<bool>();
     let ws = workspace.to_path_buf();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(ev) = res else { return };
@@ -125,27 +139,38 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
         if matches!(ev.kind, EventKind::Access(_)) {
             return;
         }
+        if ev.paths.iter().any(|p| git_state_change(&ws, p)) {
+            let _ = tx.send(true);
+        }
         if !ev.paths.is_empty() && ev.paths.iter().all(|p| watch_ignored(&ws, p)) {
             return;
         }
-        let _ = tx.send(());
+        let _ = tx.send(false);
     })?;
     watcher.watch(workspace, RecursiveMode::Recursive)?;
     std::thread::Builder::new()
         .name("cd-watch-debounce".into())
         .spawn(move || {
             // Termina quando o watcher (dono do `tx`) é solto.
-            while rx.recv().is_ok() {
+            while let Ok(first) = rx.recv() {
+                let (mut tree, mut git) = (!first, first);
                 loop {
                     match rx.recv_timeout(Duration::from_millis(300)) {
-                        Ok(()) => continue,
+                        Ok(is_git) => {
+                            git |= is_git;
+                            tree |= !is_git;
+                        }
                         Err(crossbeam_channel::RecvTimeoutError::Timeout) => break,
                         Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
                     }
                 }
-                match core.upgrade() {
-                    Some(inner) => crate::Core { inner }.emit(crate::CoreEvent::WorkspaceChanged),
-                    None => return,
+                let Some(inner) = core.upgrade() else { return };
+                let core = crate::Core { inner };
+                if tree {
+                    core.emit(crate::CoreEvent::WorkspaceChanged);
+                }
+                if git {
+                    core.emit(crate::CoreEvent::GitChanged);
                 }
             }
         })
@@ -223,6 +248,13 @@ mod tests {
     fn watcher_filter() {
         let ws = Path::new("/w");
         assert!(watch_ignored(ws, Path::new("/w/.git/index")));
+        // …mas o estado do repositório vira um aviso próprio (GitChanged), sem os `.lock` do git.
+        for p in ["/w/.git/HEAD", "/w/.git/index", "/w/.git/refs/heads/main", "/w/.git/FETCH_HEAD", "/w/.git/packed-refs"] {
+            assert!(git_state_change(ws, Path::new(p)), "{p}");
+        }
+        for p in ["/w/.git/index.lock", "/w/.git/objects/ab/cd", "/w/.git/logs/HEAD", "/w/src/HEAD", "/w/.gitignore"] {
+            assert!(!git_state_change(ws, Path::new(p)), "{p}");
+        }
         assert!(watch_ignored(ws, Path::new("/w/sub/node_modules/x")));
         assert!(watch_ignored(ws, Path::new("/w/target/debug/x")));
         assert!(!watch_ignored(ws, Path::new("/w/src/main.rs")));

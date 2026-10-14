@@ -108,6 +108,20 @@ O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
    (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
    digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
 
+**Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
+bloqueantes; a UI chama numa thread):
+- sempre `Command::new(git).args([...])`, nunca um shell; caminhos e a mensagem de commit vão pela entrada padrão
+  (`--pathspec-from-file=- --pathspec-file-nul`, `commit -F -`), e todo caminho passa por `safe_rel`;
+- ambiente que não trava: `GIT_TERMINAL_PROMPT=0`, ssh em `BatchMode` nas operações de rede (a menos que o
+  usuário tenha ssh próprio configurado), `GIT_OPTIONAL_LOCKS=0` (o status não regrava o índice),
+  `GIT_LITERAL_PATHSPECS=1`, `LC_ALL=C` (os erros são reconhecidos em `classify_error`);
+- limites de tempo (status/diff 5 s, commit 120 s, rede 60 s) e de saída (diff de até 1 MiB / 10 000 linhas,
+  5000 entradas de status); uma operação de escrita por vez (`index.lock`);
+- o watcher do workspace separa as mudanças de estado do repositório (`.git/HEAD`, `index`, `refs/…`, sem os
+  `*.lock`) e emite `CoreEvent::GitChanged`; a interface relê o status 400 ms depois. Se o repositório fica
+  acima da pasta de trabalho (o `.git` não é vigiado), a aba relê a cada 10 s enquanto está aberta;
+- pull só por avanço direto (`--ff-only`); push sem upstream publica no único remoto (`push -u`).
+
 **Mapa de conversas.** `Core::conversation_map()` devolve um retrato barato (pode ser chamado a cada quadro):
 instâncias abertas, perguntas pendentes entre abas (`PendingInfo`: id, quem perguntou, a quem, profundidade,
 desde quando e se o `ask-agent` já voltou com 202) e perguntas sendo respondidas em headless. Uma pergunta

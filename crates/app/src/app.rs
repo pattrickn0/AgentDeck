@@ -316,6 +316,7 @@ impl ApplicationHandler<UserEvent> for App {
                 deck.window_focused = *f;
                 if *f {
                     deck.refresh_tree();
+                    deck.git_refresh_soon();
                 }
                 glw.window.request_redraw();
             }
@@ -333,7 +334,7 @@ impl ApplicationHandler<UserEvent> for App {
         // Arquivos soltos numa mesma operação são anexados juntos.
         if !self.dropped.is_empty() {
             let files = std::mem::take(&mut self.dropped);
-            if let Some(deck) = self.deck.as_ref() {
+            if let Some(deck) = self.deck.as_mut() {
                 deck.attach_paths(files);
             }
         }
@@ -402,7 +403,7 @@ fn debug_map() -> crate::agent_map::Snapshot {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,map,map-demo,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,map,map-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -413,6 +414,26 @@ fn apply_debug_ui(deck: &mut Deck) {
             "target" => deck.target_menu_open = true,
             "drop" => deck.drop_hover = true,
             "map" => deck.set_right_view(crate::deck::RightView::Mapa),
+            "git" => deck.set_right_view(crate::deck::RightView::Git),
+            "git-demo" | "git-diff" | "git-branches" => {
+                deck.set_right_view(crate::deck::RightView::Git);
+                deck.git.debug_hold = true;
+                deck.git.view = crate::git_ui::GitView::Ready(crate::git_ui::demo_status());
+                deck.git.message = "Aba Git na barra direita".into();
+                if item == "git-diff" {
+                    let entry = crate::git_ui::demo_status().entries[2].clone();
+                    deck.git.diff = Some(crate::git_ui::OpenDiff { entry, staged: false, diff: Some(Ok(crate::git_ui::demo_diff())) });
+                }
+                if item == "git-branches" {
+                    deck.git.branch_menu = true;
+                    deck.git.branches = crate::git_ui::demo_branches();
+                }
+            }
+            "git-norepo" | "git-nogit" => {
+                deck.set_right_view(crate::deck::RightView::Git);
+                deck.git.debug_hold = true;
+                deck.git.view = if item == "git-norepo" { crate::git_ui::GitView::NotRepo } else { crate::git_ui::GitView::NoGit };
+            }
             "map-demo" => {
                 deck.set_right_view(crate::deck::RightView::Mapa);
                 deck.debug_map = Some(debug_map());

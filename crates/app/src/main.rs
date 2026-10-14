@@ -12,6 +12,7 @@ mod app;
 mod audio;
 mod crash;
 mod deck;
+mod git_ui;
 mod icons;
 mod smoke;
 mod terminal;

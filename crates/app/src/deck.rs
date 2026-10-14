@@ -34,6 +34,7 @@ pub enum UiMsg {
     Engine(String),
     WorkspacePicked(PathBuf),
     TableDone,
+    Git(crate::git_ui::GitReply),
 }
 
 /// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
@@ -61,6 +62,8 @@ struct Queued {
 pub enum RightView {
     Conversa,
     Mapa,
+    /// Repositório git do workspace (ver `git_ui.rs`).
+    Git,
 }
 
 pub struct Tab {
@@ -157,6 +160,9 @@ pub struct Deck {
     table_speaking: Option<String>,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=map-demo`): mapa fictício para capturas de tela.
     pub debug_map: Option<Snapshot>,
+
+    /// Aba Git (ver `git_ui.rs`).
+    pub git: crate::git_ui::GitUi,
 
     // Árvore
     pub workspace: PathBuf,
@@ -260,6 +266,7 @@ impl Deck {
             table_round: String::new(),
             table_speaking: None,
             debug_map: None,
+            git: crate::git_ui::GitUi::default(),
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
             feed: Vec::new(),
             thinking: HashMap::new(),
@@ -306,10 +313,12 @@ impl Deck {
         if std::env::var("COMMANDDECK_DEBUG_FEED").is_ok_and(|v| v == "1") {
             deck.debug_feed();
         }
+        // O chip da branch na topbar aparece já ao abrir.
+        deck.git_refresh();
         deck
     }
 
-    fn spawn_bg(&self, name: &str, f: impl FnOnce(Core) -> Option<UiMsg> + Send + 'static) {
+    pub(crate) fn spawn_bg(&self, name: &str, f: impl FnOnce(Core) -> Option<UiMsg> + Send + 'static) {
         let core = self.core.clone();
         let tx = self.tx.clone();
         let wake = self.wake.clone();
@@ -384,7 +393,11 @@ impl Deck {
                     self.play_sound(false);
                 }
             }
-            CoreEvent::WorkspaceChanged => self.refresh_tree(),
+            CoreEvent::WorkspaceChanged => {
+                self.refresh_tree();
+                self.git_refresh_soon();
+            }
+            CoreEvent::GitChanged => self.git_refresh_soon(),
             CoreEvent::TableFinished => self.finish_table(),
             CoreEvent::AgentsChanged => self.refresh_agents(),
             CoreEvent::Download(_) if self.debug_hold_download => {}
@@ -454,8 +467,12 @@ impl Deck {
                 }
                 self.workspace = self.core.workspace();
                 self.refresh_tree();
+                self.git.diff = None;
+                self.git.view = crate::git_ui::GitView::Loading;
+                self.git_refresh();
             }
             UiMsg::TableDone => self.finish_table(),
+            UiMsg::Git(reply) => self.on_git(reply),
         }
     }
 
@@ -597,6 +614,9 @@ impl Deck {
         }
         if chime {
             self.play_sound(false);
+        }
+        if let Some(t) = self.git_tick(now) {
+            want(t);
         }
         if let Some(t) = next {
             ctx.request_repaint_after(t.saturating_duration_since(now));
@@ -1151,7 +1171,7 @@ impl Deck {
         if self.feed_near_bottom {
             self.feed_scroll_to_bottom = true;
         }
-        if self.right_view == RightView::Mapa && e.kind != FeedKind::Thinking {
+        if self.right_view != RightView::Conversa && e.kind != FeedKind::Thinking {
             self.unseen += 1;
         }
     }
@@ -1187,9 +1207,17 @@ impl Deck {
 
     /// Troca o que a barra direita mostra (voltar à Conversa zera as não vistas).
     pub fn set_right_view(&mut self, view: RightView) {
+        let opening_git = view == RightView::Git && self.right_view != RightView::Git;
         self.right_view = view;
         if view == RightView::Conversa {
             self.unseen = 0;
+        }
+        if view == RightView::Git {
+            // O compositor some na aba Git: o menu "Enviar para" não pode ficar aberto.
+            self.target_menu_open = false;
+        }
+        if opening_git {
+            self.git_refresh();
         }
     }
 
@@ -1288,6 +1316,10 @@ impl Deck {
     // ------------------------------------------------------------------
 
     pub fn request_composer_focus(&mut self) {
+        // Na aba Git o compositor fica escondido: volta para a Conversa.
+        if self.right_view == RightView::Git {
+            self.set_right_view(RightView::Conversa);
+        }
         self.focus_composer = true;
         self.term_focus = false;
     }
@@ -1340,9 +1372,12 @@ impl Deck {
         });
     }
 
-    pub fn attach_paths(&self, paths: Vec<PathBuf>) {
+    pub fn attach_paths(&mut self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
+        }
+        if self.right_view == RightView::Git {
+            self.set_right_view(RightView::Conversa);
         }
         self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(core.attach_files(&paths))));
     }

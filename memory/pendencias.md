@@ -103,7 +103,20 @@ Nada pendente.
 - [ ] Os testes de integração do fluxo (`a_question_is_typed_into_the_tab_and_answered_by_callback` e os vizinhos) só rodam em Unix (agentes falsos em shell); no Windows foram verificados ao vivo.
 - [ ] Não há como o usuário dar cargo a uma aba aberta à mão (hoje só duplicatas ganham nome, tipo `claude@main@ana`).
 
+## 7. Git
+
+- [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário (o bloco é reescrito ao iniciar). Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
+- [ ] **Validar a aba Git ao vivo no Windows**: `git.exe` do Git for Windows, push com o Credential Manager (janela de login), caminhos com acentos e espaços, repositório na rede.
+- [ ] Ssh com senha na chave: hoje o push/pull falha com "falha de autenticação" (o `BatchMode` evita travar); orientar a usar o ssh-agent.
+- [ ] Stash, preparar por trecho (hunk), editor de conflitos, histórico (log), merge/rebase pela interface.
+- [ ] Integração com o GitHub (PRs, issues, Actions) — ver a seção 6.
+
 ## Concluído
+
+- [x] **Aba Git e ícones no cabeçalho da barra direita.**
+  - Conversa, Mapa e Git viraram ícones (balões, diagrama, branch) com dica ao passar o mouse; o número de mensagens novas fica sobre o ícone da Conversa.
+  - Git local do workspace (`core/src/git.rs`): status, diff, preparar/tirar/descartar, commit (e corrigir o último), branches, buscar/puxar/enviar e `git init`, sempre sem shell e sem prompts que travam. Testado com o git real em `tests/git.rs` (inclusive conflito e push/pull num remoto local).
+  - Chip da branch na topbar; releitura automática por `CoreEvent::GitChanged` (watcher do `.git/`).
 
 - [x] **Barra lateral direita fixa com Conversa e Mapa.**
   - A Conversa integrada, o compositor e o menu "Enviar para" saíram de baixo dos terminais para uma barra à direita que não recolhe e tem largura ajustável (salva em `Config.right_panel_width`; `bottomHeight`/`feedCollapsed` antigos são ignorados).

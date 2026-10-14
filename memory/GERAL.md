@@ -91,12 +91,24 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | :-- | :-- |
 | Barra esquerda | árvore do workspace (recolhe com Ctrl+B) |
 | Centro | abas e o terminal da aba ativa |
-| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, as abas **Conversa** (com o número de mensagens novas enquanto você olha o mapa) e **Mapa**; embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar) |
+| Topbar | abas dos agentes, o chip da branch git (`main ↑1 ↓2 •3`: à frente, atrás, alterações; clique abre a aba Git), a pasta de trabalho e as configurações |
+| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, três abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama) e **Git** (branch). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some na aba Git |
 
 O **Mapa** mostra, em texto de terminal, quem está conversando com quem agora: a árvore de quem pergunta a quem
 (pergunta na fila, digitada, com resposta atrasada ou em modo headless, com o tempo de espera), as respostas a
 caminho, a mesa em andamento, as conversas concluídas no último minuto (esmaecidas) e os agentes sem conversa.
 Com o Mapa aberto, a barra se alarga sobre o terminal (sem redimensioná-lo). Clicar num agente abre a aba dele.
+
+A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
+- branch atual e menu de branches (buscar, trocar, criar); buscar, puxar (só avanço direto) e enviar
+  ("Publicar" quando a branch ainda não existe no remoto);
+- alterações em seções (conflitos, preparadas, alterações, não rastreados) com preparar (+), tirar (−) e
+  descartar (↶, com confirmação); clique abre o diff (a barra se alarga), duplo clique abre o arquivo;
+- caixa de commit (Ctrl+Enter), com a opção de corrigir o último commit;
+- sem repositório: botão "Inicializar repositório"; sem git: o link para instalar.
+
+Atualiza sozinha quando o `.git/` muda (commit ou checkout feitos pelo terminal ou por um agente), quando a
+pasta muda e quando a janela volta a ter foco. Nada de agentes por enquanto: tudo é manual.
 
 ### Limites e proteções
 
@@ -128,6 +140,8 @@ ela dura.
   rodadas, com síntese no fim).
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
 - Ver no **Mapa** quem está conversando com quem neste momento.
+- Usar o **git** do projeto pela aba Git: ver alterações e diffs, preparar, fazer commit, trocar/criar branch,
+  buscar, puxar e enviar.
 - Citar arquivos do workspace (`@arquivo`), anexar arquivos e imagens, ditar por voz (whisper.cpp local).
 
 **Como agente, dentro de uma aba:**

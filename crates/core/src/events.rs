@@ -81,6 +81,9 @@ pub enum CoreEvent {
     Feed(FeedEntry),
     /// Algo mudou na pasta de trabalho (debounce de 300 ms) — recarregar a árvore.
     WorkspaceChanged,
+    /// O repositório git do workspace mudou (`.git/HEAD`, índice, refs…: commit, checkout, fetch
+    /// feitos pelo terminal ou por um agente) — reler o status.
+    GitChanged,
     /// A mesa terminou (normalmente ou interrompida).
     TableFinished,
     /// A lista de agentes/modelos Ollama foi atualizada em background.

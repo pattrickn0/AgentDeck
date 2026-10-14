@@ -3,6 +3,7 @@
 
 mod composer;
 mod empty_state;
+mod git;
 mod map;
 mod menus;
 mod overlay;
@@ -49,10 +50,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let center = Rect::from_min_max(Pos2::new(full.min.x + left, full.min.y), Pos2::new(full.max.x - right_w - 1.0, full.max.y));
     let topbar = Rect::from_min_size(center.min, Vec2::new(center.width(), theme::TOPBAR_H));
     let term_rect = Rect::from_min_max(Pos2::new(center.min.x, topbar.max.y), center.max);
-    let map_open = deck.right_view == RightView::Mapa;
+    // O Mapa e o diff do Git alargam a barra sobre o terminal (sem redimensioná-lo).
+    let map_open = deck.right_view == RightView::Mapa || (deck.right_view == RightView::Git && deck.git.diff.is_some());
     let panel_w = if map_open { map_width(right_w, full.width(), left) } else { right_w };
     let panel = Rect::from_min_max(Pos2::new(full.max.x - panel_w, full.min.y), full.max);
-    let comp_h = composer::measure(deck, ui, panel_w);
+    // Na aba Git o compositor some: o commit tem a própria caixa de mensagem.
+    let comp_h = if deck.right_view == RightView::Git { 0.0 } else { composer::measure(deck, ui, panel_w) };
 
     // ---------- Terminal ativo ----------
     draw_terminals(deck, ui, term_rect);

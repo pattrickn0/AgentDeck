@@ -91,27 +91,57 @@ pub(crate) fn kill_tree(child: &mut Child) {
     let _ = child.kill();
 }
 
-fn spawn_reader<R: Read + Send + 'static>(mut r: R, buf: Arc<Mutex<Vec<u8>>>) -> JoinHandle<()> {
+/// Lê `r` até o fim guardando no máximo `max` bytes (o resto é lido e descartado, para o
+/// processo não travar com o pipe cheio).
+fn spawn_reader<R: Read + Send + 'static>(mut r: R, buf: Arc<Mutex<Vec<u8>>>, max: usize) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut chunk = [0u8; 8192];
         loop {
             match r.read(&mut chunk) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => buf.lock().extend_from_slice(&chunk[..n]),
+                Ok(n) => {
+                    let mut b = buf.lock();
+                    let room = max.saturating_sub(b.len());
+                    b.extend_from_slice(&chunk[..n.min(room)]);
+                }
             }
         }
     })
 }
 
+/// Saída em bytes (ver [`run_captured_raw`]).
+#[derive(Debug)]
+pub(crate) struct CapturedRaw {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub exit: Exit,
+}
+
 /// Executa `cmd` capturando stdout/stderr. `stdin`: `Some` = escreve e fecha; `None` = nulo.
 /// Encerra a árvore do processo no timeout ou quando `cancel` vira `true`.
 pub(crate) fn run_captured(
-    mut cmd: Command,
+    cmd: Command,
     stdin: Option<Vec<u8>>,
     timeout: Duration,
     cancel: Option<&AtomicBool>,
     registry: Option<&ProcessRegistry>,
 ) -> std::io::Result<Captured> {
+    let raw = run_captured_raw(cmd, stdin, timeout, cancel, registry, usize::MAX)?;
+    let stdout = String::from_utf8_lossy(&raw.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&raw.stderr).into_owned();
+    Ok(Captured { stdout, stderr, exit: raw.exit })
+}
+
+/// Como [`run_captured`], com a saída em bytes e no máximo `max_out` bytes de cada fluxo (ex.: o
+/// diff de um arquivo enorme não ocupa a memória toda).
+pub(crate) fn run_captured_raw(
+    mut cmd: Command,
+    stdin: Option<Vec<u8>>,
+    timeout: Duration,
+    cancel: Option<&AtomicBool>,
+    registry: Option<&ProcessRegistry>,
+    max_out: usize,
+) -> std::io::Result<CapturedRaw> {
     cmd.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     platform_flags(&mut cmd);
@@ -121,10 +151,10 @@ pub(crate) fn run_captured(
     let err_buf = Arc::new(Mutex::new(Vec::new()));
     let mut readers = Vec::new();
     if let Some(out) = child.stdout.take() {
-        readers.push(spawn_reader(out, out_buf.clone()));
+        readers.push(spawn_reader(out, out_buf.clone(), max_out));
     }
     if let Some(err) = child.stderr.take() {
-        readers.push(spawn_reader(err, err_buf.clone()));
+        readers.push(spawn_reader(err, err_buf.clone(), max_out.max(64 * 1024)));
     }
     if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
         // Thread própria: um prompt grande não pode travar a leitura da saída.
@@ -168,9 +198,9 @@ pub(crate) fn run_captured(
             let _ = h.join();
         }
     }
-    let stdout = String::from_utf8_lossy(&out_buf.lock()).into_owned();
-    let stderr = String::from_utf8_lossy(&err_buf.lock()).into_owned();
-    Ok(Captured { stdout, stderr, exit })
+    let stdout = std::mem::take(&mut *out_buf.lock());
+    let stderr = std::mem::take(&mut *err_buf.lock());
+    Ok(CapturedRaw { stdout, stderr, exit })
 }
 
 #[cfg(all(test, unix))]
@@ -185,6 +215,16 @@ mod tests {
         assert_eq!(c.stdout, "ola");
         assert_eq!(c.stderr.trim(), "erro");
         assert_eq!(c.exit, Exit::Code(Some(3)));
+    }
+
+    #[test]
+    fn raw_output_is_capped_without_blocking_the_process() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "head -c 300000 /dev/zero; echo fim >&2"]);
+        let c = run_captured_raw(cmd, None, Duration::from_secs(10), None, None, 1000).expect("run");
+        assert_eq!(c.stdout.len(), 1000);
+        assert_eq!(c.exit, Exit::Code(Some(0)), "o processo terminou: o resto foi lido e descartado");
+        assert_eq!(String::from_utf8_lossy(&c.stderr).trim(), "fim");
     }
 
     #[test]

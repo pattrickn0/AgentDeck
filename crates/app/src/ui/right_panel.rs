@@ -8,6 +8,7 @@ use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use super::{composer, galley, map, paint_splitter, place, text_in, tip};
 use crate::deck::{Deck, FeedItem, RightView};
+use crate::icons::Icon;
 use crate::theme;
 use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
 
@@ -33,46 +34,51 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) -> Rect
         match deck.right_view {
             RightView::Conversa => draw_feed(deck, ui, body),
             RightView::Mapa => map::draw(deck, ui, body),
+            RightView::Git => super::git::draw(deck, ui, body),
         }
+    }
+    if comp_h <= 0.0 {
+        return Rect::NOTHING;
     }
     composer::draw(deck, ui, comp)
 }
 
-/// Uma aba do cabeçalho ("Conversa", "Mapa"). Devolve se foi clicada.
-fn head_tab(deck: &Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, label: &str, badge: u32, active: bool) -> bool {
-    let r = super::clickable(ui, rect, Id::new(("right-tab", label)));
-    if active || r.hovered() {
-        painter.rect_filled(rect.shrink2(Vec2::new(0.0, 6.0)), 6.0, if active { theme::PANEL_2 } else { theme::PANEL });
+/// Uma aba do cabeçalho: ícone, dica (tooltip) e o número de não vistas.
+struct HeadTab {
+    icon: Icon,
+    tip: &'static str,
+    badge: u32,
+}
+
+/// Largura de cada aba do cabeçalho (fixa: o número de não vistas fica sobre o ícone).
+const HEAD_TAB_W: f32 = 36.0;
+
+/// Pinta uma aba do cabeçalho. Devolve se foi clicada.
+fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: HeadTab, active: bool) -> bool {
+    let r = super::clickable(ui, rect, Id::new(("right-tab", tab.tip)));
+    let hovered = r.hovered();
+    if active || hovered {
+        painter.rect_filled(rect.shrink2(Vec2::new(2.0, 6.0)), 6.0, if active { theme::PANEL_2 } else { theme::PANEL });
     }
-    let font = theme::ui(13.0);
-    let color = if active || r.hovered() { theme::TEXT } else { theme::MUTED };
-    let g = galley(painter, label, font, color);
-    let lw = g.size().x;
-    let text_rect = Rect::from_min_size(Pos2::new(rect.min.x + 10.0, rect.min.y), Vec2::new(lw, rect.height()));
-    place(painter, text_rect, Align2::LEFT_CENTER, g, color);
-    if badge > 0 {
-        let txt = badge.to_string();
-        let g = galley(painter, &txt, theme::ui(11.0), theme::WHITE);
-        let size = Vec2::new(g.size().x + 12.0, 16.0);
-        let b = Rect::from_min_size(Pos2::new(text_rect.max.x + 6.0, rect.center().y - size.y / 2.0), size);
-        painter.rect_filled(b, 8.0, theme::ACCENT);
+    let color = if active || hovered { theme::TEXT } else { theme::MUTED };
+    let center = rect.center();
+    deck.icons.paint(painter, tab.icon, center, 16.0, color, 0.0);
+    if tab.badge > 0 {
+        // Pílula sobre o canto superior direito do ícone.
+        let txt = if tab.badge > 99 { "99+".to_owned() } else { tab.badge.to_string() };
+        let g = galley(painter, &txt, theme::ui(10.0), theme::WHITE);
+        let size = Vec2::new((g.size().x + 8.0).max(14.0), 14.0);
+        let b = Rect::from_min_size(Pos2::new(center.x + 3.0, center.y - 13.0), size);
+        painter.rect_filled(b.expand(1.5), 8.0, theme::PANEL);
+        painter.rect_filled(b, 7.0, theme::ACCENT);
         place(painter, b, Align2::CENTER_CENTER, g, theme::WHITE);
     }
     if active {
         // Sublinhado na cor do agente ativo.
-        let line = Rect::from_min_max(Pos2::new(rect.min.x + 8.0, rect.max.y - 2.0), Pos2::new(rect.max.x - 8.0, rect.max.y));
+        let line = Rect::from_min_max(Pos2::new(rect.min.x + 6.0, rect.max.y - 2.0), Pos2::new(rect.max.x - 6.0, rect.max.y));
         painter.rect_filled(line, 1.0, deck.active_color());
     }
-    r.clicked()
-}
-
-/// Largura de uma aba do cabeçalho.
-fn head_tab_w(painter: &egui::Painter, label: &str, badge: u32) -> f32 {
-    let mut w = galley(painter, label, theme::ui(13.0), theme::TEXT).size().x + 20.0;
-    if badge > 0 {
-        w += galley(painter, &badge.to_string(), theme::ui(11.0), theme::WHITE).size().x + 18.0;
-    }
-    w
+    tip(r, tab.tip).clicked()
 }
 
 fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
@@ -81,17 +87,18 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     // Borda inferior alinhada à da topbar.
     painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
     let view = deck.right_view;
-    let unseen = deck.unseen;
-    let x = rect.min.x + 6.0;
-    let cw = head_tab_w(&painter, "Conversa", unseen);
-    let conversa = Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(cw, rect.height() - 1.0));
-    if head_tab(deck, ui, &painter, conversa, "Conversa", unseen, view == RightView::Conversa) {
-        deck.set_right_view(RightView::Conversa);
-    }
-    let mw = head_tab_w(&painter, "Mapa", 0);
-    let mapa = Rect::from_min_size(Pos2::new(conversa.max.x + 2.0, rect.min.y), Vec2::new(mw, rect.height() - 1.0));
-    if head_tab(deck, ui, &painter, mapa, "Mapa", 0, view == RightView::Mapa) {
-        deck.set_right_view(RightView::Mapa);
+    let tabs = [
+        (RightView::Conversa, HeadTab { icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
+        (RightView::Mapa, HeadTab { icon: Icon::Diagram, tip: "Mapa de agentes", badge: 0 }),
+        (RightView::Git, HeadTab { icon: Icon::GitBranch, tip: "Git", badge: 0 }),
+    ];
+    let mut x = rect.min.x + 6.0;
+    for (target, tab) in tabs {
+        let r = Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(HEAD_TAB_W, rect.height() - 1.0));
+        if head_tab(deck, ui, &painter, r, tab, view == target) {
+            deck.set_right_view(target);
+        }
+        x = r.max.x + 2.0;
     }
     // "Limpar" à direita, só na Conversa.
     if view == RightView::Conversa {

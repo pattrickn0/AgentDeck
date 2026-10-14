@@ -253,7 +253,7 @@ impl Registry {
         reg
     }
 
-    fn which(&self, name: &str) -> Option<PathBuf> {
+    pub(crate) fn which(&self, name: &str) -> Option<PathBuf> {
         let found = match &self.disc.search_path {
             Some(p) => which::which_in(name, Some(p), std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
             None => which::which(name),
@@ -267,7 +267,7 @@ impl Registry {
 
     /// Pasta do sistema da variável `key` (`APPDATA`…). Nos testes (`system_dirs = false`), fica
     /// dentro de `home`, para o resultado não depender do que está instalado na máquina.
-    fn system_dir(&self, key: &str) -> Option<PathBuf> {
+    pub(crate) fn system_dir(&self, key: &str) -> Option<PathBuf> {
         if self.disc.system_dirs {
             std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from)
         } else {

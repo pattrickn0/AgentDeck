@@ -9,13 +9,13 @@ use crate::theme;
 /// Posição do canto superior esquerdo para um menu `size` não sair da tela pela direita/esquerda.
 /// (Não usar `Area::constrain`: ele desloca o menu depois que `closes_on_outside` já calculou o
 /// retângulo, e o clique num item passa a contar como "fora", fechando o menu antes de escolher.)
-fn keep_on_screen(ctx: &egui::Context, pos: Pos2, size: Vec2) -> Pos2 {
+pub(super) fn keep_on_screen(ctx: &egui::Context, pos: Pos2, size: Vec2) -> Pos2 {
     let screen = ctx.content_rect();
     Pos2::new(pos.x.min(screen.max.x - size.x - 4.0).max(screen.min.x + 4.0), pos.y)
 }
 
 /// Fecha o menu se houve clique fora dele e da âncora (`document.addEventListener('click')`).
-fn closes_on_outside(ctx: &egui::Context, menu: Rect, anchor: Rect) -> bool {
+pub(super) fn closes_on_outside(ctx: &egui::Context, menu: Rect, anchor: Rect) -> bool {
     ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu.contains(p) && !anchor.contains(p)))
 }
 

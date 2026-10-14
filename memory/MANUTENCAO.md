@@ -44,14 +44,17 @@ crates/
 │   ├── whisper.rs    transcrição de voz (whisper.cpp)
 │   ├── attachments.rs, sessions.rs, workspace.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── context.rs    ponto de extensão para RAG (vazio hoje)
-│   └── tests/bridge.rs   testes de ponta a ponta da ponte
+│   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
+│   ├── tests/bridge.rs   testes de ponta a ponta da ponte
+│   └── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
 ├── app/    (commanddeck)        interface gráfica (o .exe principal)
 │   ├── main.rs / app.rs / window.rs   janela winit, OpenGL, loop de eventos
 │   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
 │   ├── terminal/     emulador de terminal (pty + alacritty_terminal + desenho + teclado)
 │   ├── agent_map.rs  mapa de conversas entre agentes em texto (render_map: função pura, com testes)
+│   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
 │   ├── ui/           topbar/abas, sidebar (árvore), right_panel (barra direita: Conversa/Mapa),
-│   │                 map (pintura do mapa), compositor, menus, overlay
+│   │                 map (pintura do mapa), git (aba Git), compositor, menus, overlay
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas)
 │   └── audio.rs      som de notificação e microfone (cpal)
 └── cli/    (commanddeck-cli)    ask-agent e ollama-agent
@@ -90,6 +93,12 @@ core) com o que só a interface sabe (filas das abas, quem está ocupado, recent
 existem nas fontes monoespaçadas do Windows (o teste confere). Para ver sem agentes reais:
 `COMMANDDECK_DEBUG_UI=map-demo`.
 
+**Mexer na aba Git.** As operações ficam em `crates/core/src/git.rs` (`impl Core`, com o ambiente seguro em
+`base_command`); o estado e as releituras, em `crates/app/src/git_ui.rs`; a pintura, em `crates/app/src/ui/git.rs`
+(o desenho só coleta as ações e aplica no fim). Comando novo do git: sempre `args([...])` com `--` antes de
+caminhos, nunca um shell; teste a interpretação da saída com bytes de exemplo e o fluxo em `tests/git.rs`. Para ver
+sem um repositório: `COMMANDDECK_DEBUG_UI=git-demo` (ou `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
+
 **Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
 
 **Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O agente Ollama já consulta os provedores registrados.
@@ -104,7 +113,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app. Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`map`, `map-demo`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app. Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`map`, `map-demo`, `git`, `git-demo`, `git-diff`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas

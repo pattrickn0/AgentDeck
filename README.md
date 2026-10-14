@@ -12,6 +12,7 @@ mesas de orquestração e trabalham na mesma pasta, enquanto você acompanha tud
 - **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real, e o
   **Mapa** (em texto de terminal) de quem está conversando com quem agora.
 - **Enviar para**: aba ativa, todos os agentes abertos ou **mesas** (vários agentes em rodadas, com síntese final).
+- **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
 - Explorador de arquivos do workspace: clique insere `@arquivo` na mensagem, duplo clique abre no sistema.
 - Anexos por botão, arrastar e soltar ou colar imagem (Ctrl+V).
 - Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU); o áudio é apagado logo após transcrever.
