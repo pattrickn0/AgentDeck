@@ -69,7 +69,8 @@ como o CommandDeck funciona por dentro, o que dá para fazer nele e quais regras
 
 - [memory/ARCHITECTURE.md](memory/ARCHITECTURE.md): arquitetura e protocolo entre agentes.
 - [memory/MANUTENCAO.md](memory/MANUTENCAO.md): guia de manutenção, com introdução prática ao Rust.
-- [memory/pendencias.md](memory/pendencias.md): pendências e o que já foi concluído.
+- [memory/pendencias.md](memory/pendencias.md): o que falta desenvolver e o que já foi concluído.
+- [memory/testes.md](memory/testes.md): roteiro de testes manuais (Windows, agentes reais).
 - [CONTRIBUTING.md](CONTRIBUTING.md): como contribuir.
 
 ## Licença

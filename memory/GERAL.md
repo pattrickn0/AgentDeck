@@ -9,7 +9,8 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 | [GERAL.md](GERAL.md) (este) | quiser o mapa geral |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | for mexer na ponte, nas abas, nas instâncias ou no protocolo entre agentes |
 | [MANUTENCAO.md](MANUTENCAO.md) | for compilar, testar, achar um arquivo ou seguir uma receita (ex.: novo agente) |
-| [pendencias.md](pendencias.md) | quiser saber o que falta, o que está adiado e o que já foi feito |
+| [pendencias.md](pendencias.md) | quiser saber o que falta desenvolver, o que está adiado e o que já foi feito |
+| [testes.md](testes.md) | for testar à mão, no Windows, com os agentes reais (roteiro com caixas de marcar) |
 
 ---
 
@@ -166,7 +167,8 @@ Cada documento cuida de um assunto. Mudou o assunto? Atualize o documento **no m
 | `memory/GERAL.md` | visão geral e este mapa | atualizar quando surgir um documento, uma pasta, um comando ou um limite novo |
 | `memory/ARCHITECTURE.md` | stack, crates, protocolo da ponte, instâncias, entrega nas abas | **contrato**: rotas, códigos HTTP, variáveis de ambiente e limites da ponte. Mudou o protocolo? Atualize aqui |
 | `memory/MANUTENCAO.md` | guia prático: Rust, comandos, mapa do código, receitas | mapa do código e receitas (ex.: novo agente: prompt nunca cru na linha de comando, hooks se o CLI tiver) |
-| `memory/pendencias.md` | pendências por prioridade e o que já foi concluído | item concluído vai para "Concluído" com uma linha do que foi feito; limitação nova vira item |
+| `memory/pendencias.md` | trabalho de desenvolvimento por prioridade e o que já foi concluído | item concluído vai para "Concluído" com uma linha do que foi feito; limitação nova vira item; só desenvolvimento (testes manuais ficam em `testes.md`) |
+| `memory/testes.md` | roteiro de testes manuais (Windows, agentes reais) | marcar `[x]` o que passou; o que falhar vira item em `pendencias.md`; funcionalidade nova que só dá para validar à mão ganha um item aqui |
 | `README.md` (raiz) | apresentação, como compilar e rodar, exemplos de `ask-agent` | fica na raiz porque o GitHub mostra na página do repositório |
 | `CONTRIBUTING.md` (raiz) | como contribuir e os **princípios do projeto** | rodar `cargo fmt`, `clippy -D warnings` e `cargo test` antes do PR; privacidade; UI nunca trava; textos em pt-BR. Fica na raiz porque o GitHub o mostra ao abrir PRs |
 | `AGENTS.md` (raiz) e `workspace/AGENTS.md` | instruções lidas pelos CLIs de agentes | **gerados pelo app**: o bloco entre `<!-- commanddeck:start -->` e `<!-- commanddeck:end -->` é reescrito a cada início; edite só fora dele. Ficam na raiz da pasta de trabalho porque é lá que os CLIs os procuram |

@@ -1,7 +1,11 @@
 # Pendências
 
-Lista de melhorias e limitações conhecidas, em ordem sugerida de prioridade. Ao concluir um item, mova-o para
-"Concluído" com uma linha do que foi feito (regras dos documentos em [GERAL.md](GERAL.md)).
+Lista do **trabalho de desenvolvimento** que falta (melhorias e limitações conhecidas), em ordem sugerida de
+prioridade. Ao concluir um item, mova-o para "Concluído" com uma linha do que foi feito (regras dos documentos em
+[GERAL.md](GERAL.md)).
+
+Os **testes manuais** (validar no Windows, com os agentes reais) ficam em [testes.md](testes.md). Um teste que
+falhar vira item aqui.
 
 ## 0. Direção: IA local como serviço interno (adiado)
 
@@ -60,18 +64,16 @@ Nada pendente.
 ## 4. Interface
 
 - [ ] **Botão "quem conversa com quem"** (próximo passo do Mapa): contagem de mensagens por par de agentes na sessão, a partir do anel de recentes do `Deck` ampliado (hoje só guarda 60 s).
-- [ ] **Validar ao vivo no Windows a barra direita e o Mapa**: arrastar a borda, alternar Conversa/Mapa com duas abas conversando de verdade (estados na fila / digitada / 202), e se os símbolos `─│├└►●○×` alinham na fonte mono do Windows. Feito só por testes e capturas no Linux (Xvfb).
-- [ ] Atualizar `docs/screenshots/main.png` com a barra direita.
 - [ ] Janela estreita (perto do mínimo de 820 px): com muitas abas, as de trás encolhem até virar só o ponto colorido.
 
 - [ ] Emojis monocromáticos (limitação do egui). Avaliar fonte de emoji colorida ou renderização própria.
 - [ ] Select, spinner e tooltips desenhados à mão imitando o Chromium; desfoque atrás do overlay de arrastar é aproximado.
 - [ ] Animação suave (hover) nos botões do estado vazio.
 
-## 5. Validação
+## 5. Testes automáticos
 
-- [ ] **Validar no Windows, ao vivo, o que mudou na ponte** (feito só por testes no Linux e `cargo check`/clippy para `x86_64-pc-windows-gnu`): hooks do Claude (`--settings`) avisando início/fim de turno, `notify` do Codex, agentes instalados como shim `.cmd` (headless com prompt por arquivo, abas com `cmd_safe_arg`), resposta atrasada digitada na aba de quem perguntou e a mensagem de "outra janela usando a pasta de dados".
-- [ ] **Testar o IME com um IME real** (teclado CJK, seletor de emoji `Win+.`): a lógica está ligada, mas só foi verificada por compilação e testes do cursor; não foi exercitada com composição de verdade.
+- [ ] Os testes de integração do fluxo entre abas (`a_question_is_typed_into_the_tab_and_answered_by_callback` e vizinhos) só rodam em Unix (agentes falsos em shell): criar agentes falsos para Windows (`.cmd`/`.exe` de teste) para a CI do Windows cobrir a ponte.
+- [ ] Testes de interface (egui) para a barra direita, o Mapa e a aba Git (hoje só capturas de tela no Linux).
 
 ## 6. Novas funcionalidades (comparação com o Orca)
 
@@ -93,20 +95,18 @@ Nada pendente.
 
 ## Instâncias (abas) — pontos em aberto
 
-- [ ] Só o Claude abre com o comando `ask-agent` pré-autorizado (`--allowedTools`). No Antigravity funcionou sem aprovação no modo atual (`accept-edits`), mas outros agentes (codex, opencode, gemini, aider, goose, copilot, q, interpreter) não foram testados e podem pedir aprovação na própria aba.
+- [ ] Pré-autorizar o `ask-agent` nos CLIs que pedirem aprovação na aba (hoje só o Claude abre com `--allowedTools`; quais pedem é verificado em [testes.md](testes.md), seção 8).
 - [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
 - [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
 - [ ] Falta `ask-agent --cancel <n>` para desistir de uma pergunta (hoje ela expira em 10 min).
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
 - [ ] No headless, gemini (`--approval-mode yolo`), aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] As mesas (`table.rs`) e a ponte sem interface ainda usam o modo headless: não aparecem nas abas.
-- [ ] Os testes de integração do fluxo (`a_question_is_typed_into_the_tab_and_answered_by_callback` e os vizinhos) só rodam em Unix (agentes falsos em shell); no Windows foram verificados ao vivo.
 - [ ] Não há como o usuário dar cargo a uma aba aberta à mão (hoje só duplicatas ganham nome, tipo `claude@main@ana`).
 
 ## 7. Git
 
 - [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário (o bloco é reescrito ao iniciar). Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
-- [ ] **Validar a aba Git ao vivo no Windows**: `git.exe` do Git for Windows, push com o Credential Manager (janela de login), caminhos com acentos e espaços, repositório na rede.
 - [ ] Ssh com senha na chave: hoje o push/pull falha com "falha de autenticação" (o `BatchMode` evita travar); orientar a usar o ssh-agent.
 - [ ] Stash, preparar por trecho (hunk), editor de conflitos, histórico (log), merge/rebase pela interface.
 - [ ] Integração com o GitHub (PRs, issues, Actions) — ver a seção 6.
