@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::agents::resolve_alias;
-use crate::events::{FeedEntry, FeedKind};
+use crate::events::{CoreEvent, FeedEntry, FeedKind};
 use crate::headless::HeadlessOptions;
 use crate::{Core, CoreInner};
 
@@ -183,6 +183,15 @@ pub(crate) fn resolve_target(asked: &str, available: &[String], ollama_models: &
     to
 }
 
+/// Chave da conversa headless de um par: o próprio par ou, se uma aba interativa o assumiu
+/// (`claimed = Some(..)`), `<par>@bg`. O segundo valor diz se é a primeira vez (avisar o usuário).
+pub(crate) fn bridge_session_key(pair: String, claimed: Option<bool>) -> (String, bool) {
+    match claimed {
+        None => (pair, false),
+        Some(first) => (format!("{pair}@bg"), first),
+    }
+}
+
 /// Processa um `POST /ask` já decodificado. Retorna (status HTTP, corpo).
 fn ask(core: &Core, msg: &Value) -> (u16, Value) {
     let from = js_string_or(msg.get("from"), "usuário");
@@ -210,11 +219,22 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
         return (400, json!({ "error": "profundidade máxima de conversa entre agentes atingida" }));
     }
 
+    let pair = format!("{from}->{to}");
+    // A aba do destino abre antes da pergunta chegar ao feed (mesmo canal, ordem preservada).
+    if core.config().auto_open_agent_tabs {
+        core.emit(CoreEvent::EnsureAgentTab { agent: to.clone(), pair: pair.clone() });
+    }
+    // Um escritor por conversa: se uma aba interativa assumiu o par, a ponte usa outra conversa.
+    let (session_key, notify) = bridge_session_key(pair.clone(), core.claimed_notice(&pair));
+    if notify {
+        core.feed(FeedEntry::system(format!(
+            "A aba de \"{to}\" está em uso por você: as perguntas de \"{from}\" seguem numa conversa separada."
+        )));
+    }
     core.feed(FeedEntry::new(FeedKind::Ask, Some(&from), Some(&to), message.clone()));
     let prompt = format!(
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
     );
-    let session_key = format!("{from}->{to}");
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
         core.run_headless(&to, &prompt, HeadlessOptions { session_key: Some(session_key.clone()), depth: depth + 1, ..Default::default() })
@@ -252,6 +272,14 @@ mod tests {
         assert_eq!(resolve_target("ollama", &avail, &models), "ollama");
         let avail2: Vec<String> = vec!["ollama:qwen3.5:9b".into()];
         assert_eq!(resolve_target("local", &avail2, &models), "ollama:qwen3.5:9b");
+    }
+
+    #[test]
+    fn claimed_pair_uses_a_separate_conversation() {
+        assert_eq!(bridge_session_key("claude->agy".into(), None), ("claude->agy".to_owned(), false));
+        // Primeira pergunta depois do takeover avisa; as seguintes não.
+        assert_eq!(bridge_session_key("claude->agy".into(), Some(true)), ("claude->agy@bg".to_owned(), true));
+        assert_eq!(bridge_session_key("claude->agy".into(), Some(false)), ("claude->agy@bg".to_owned(), false));
     }
 
     #[test]

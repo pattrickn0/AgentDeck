@@ -107,6 +107,8 @@ pub(crate) struct CoreInner {
     pub processes: process::ProcessRegistry,
     /// Chave do par → id da sessão/conversa headless.
     pub headless_sessions: Mutex<HashMap<String, String>>,
+    /// Pares cuja conversa foi assumida por uma aba interativa (valor: o aviso no feed já saiu).
+    pub claimed_pairs: Mutex<HashMap<String, bool>>,
     pub bridge_queues: bridge::PairQueues,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
@@ -178,6 +180,7 @@ impl Core {
             providers,
             processes: process::ProcessRegistry::default(),
             headless_sessions: Mutex::new(HashMap::new()),
+            claimed_pairs: Mutex::new(HashMap::new()),
             bridge_queues: bridge::PairQueues::default(),
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
@@ -279,6 +282,42 @@ impl Core {
     /// Erro = mensagem amigável de "não instalado" a ser escrita no terminal.
     pub fn spawn_spec(&self, kind: &str) -> Result<SpawnSpec, String> {
         agents::spawn_spec(self, kind)
+    }
+
+    /// Como [`Core::spawn_spec`], retomando uma conversa e/ou já enviando o primeiro prompt
+    /// (takeover de uma aba visualizadora).
+    pub fn spawn_spec_with(&self, kind: &str, extras: &agents::SpawnExtras) -> Result<SpawnSpec, String> {
+        agents::spawn_spec_with(self, kind, extras)
+    }
+
+    /// O modo visualizador (retomar a conversa da ponte no takeover) é suportado para este agente?
+    pub fn viewer_supported(&self, kind: &str) -> bool {
+        agents::viewer_supported(kind)
+    }
+
+    /// Id da conversa headless que a ponte usa para o par `de->para`, se já existe.
+    pub fn conversation_for(&self, pair: &str) -> Option<String> {
+        self.inner.headless_sessions.lock().get(pair).cloned()
+    }
+
+    /// Uma aba interativa assumiu a conversa do par: enquanto durar, a ponte usa uma conversa
+    /// separada (`<par>@bg`), para nunca haver dois escritores no mesmo id.
+    pub fn claim_conversation(&self, pair: &str) {
+        self.inner.claimed_pairs.lock().entry(pair.to_owned()).or_insert(false);
+    }
+
+    /// O processo da aba terminou: a ponte volta a usar a conversa original do par.
+    pub fn release_conversation(&self, pair: &str) {
+        self.inner.claimed_pairs.lock().remove(pair);
+    }
+
+    /// `None` se o par não está reivindicado; `Some(true)` na primeira consulta (avisar o usuário).
+    pub(crate) fn claimed_notice(&self, pair: &str) -> Option<bool> {
+        let mut claimed = self.inner.claimed_pairs.lock();
+        let notified = claimed.get_mut(pair)?;
+        let first = !*notified;
+        *notified = true;
+        Some(first)
     }
 
     /// Ids que podem ser usados com `ask-agent` (equivalente a `peers()`).

@@ -24,6 +24,8 @@ pub struct Config {
     pub window_height: f32,
     /// Host da API do Ollama (padrão `127.0.0.1:11434`, ou `OLLAMA_HOST`).
     pub ollama_host: String,
+    /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
+    pub auto_open_agent_tabs: bool,
 }
 
 impl Default for Config {
@@ -41,6 +43,7 @@ impl Default for Config {
             window_width: 1280.0,
             window_height: 860.0,
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
+            auto_open_agent_tabs: true,
         }
     }
 }

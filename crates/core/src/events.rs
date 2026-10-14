@@ -93,4 +93,8 @@ pub enum CoreEvent {
     AgentsChanged,
     /// Progresso de um download em segundo plano.
     Download(DownloadProgress),
+    /// Um agente foi chamado pela ponte (`ask-agent`): a UI deve garantir uma aba para ele. É
+    /// idempotente (emitido a cada pergunta); quem decide se abre, ou se já existe, é a UI.
+    /// `pair` é a chave `de->para` da conversa (usada para retomá-la no takeover).
+    EnsureAgentTab { agent: String, pair: String },
 }
