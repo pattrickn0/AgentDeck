@@ -48,6 +48,9 @@ ask-agent --list
 cat relatorio.txt | ask-agent claude -
 ```
 
+Se o agente chamado não tem aba aberta, o CommandDeck abre uma para ele em segundo plano e mostra a conversa;
+basta digitar ali uma mensagem e dar Enter para assumir. Dá para desligar em Configurações.
+
 Detalhes do protocolo e da arquitetura em [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Manutenção

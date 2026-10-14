@@ -68,9 +68,17 @@ Nada pendente.
 - [ ] **Testes de integração dependem do `agy` não estar instalado.** `workspace_agents_md_and_spawn_specs` (`crates/core/tests/bridge.rs`) falha quando o Antigravity está instalado na máquina, porque espera o estado "não instalado". Tornar o teste independente do ambiente (PATH e `LOCALAPPDATA` isolados).
 - [ ] **Testar o IME com um IME real** (teclado CJK, seletor de emoji `Win+.`): a lógica está ligada, mas só foi verificada por compilação e testes do cursor; não foi exercitada com composição de verdade.
 
+## Abas automáticas dos agentes — pontos em aberto
+
+- [ ] O visualizador mostra só o resultado de cada pergunta (o `claude -p` e o `agy -p` devolvem só o texto final): não há transmissão ao vivo do raciocínio dos CLIs. Só o Ollama mostra as chamadas de ferramenta.
+- [ ] No takeover do Ollama a conversa começa do zero: o histórico do Ollama headless fica em memória no core, não no processo do `ollama-agent`.
+- [ ] Agentes sem retomada de conversa verificada (gemini, aider, goose, copilot, q, interpreter) abrem como aba interativa comum, sem visualizador.
+- [ ] Os testes de integração desta função (`ask_asks_the_ui_to_open_the_agent_tab`, `claimed_pair_runs_in_a_separate_conversation`) só rodam em Unix (agentes falsos em shell); no Windows foram verificados à mão contra os CLIs reais.
+
 ## Concluído
 
 - [x] **Download do Whisper robusto** (motor e modelo): retomada por `Range`, retry com espera crescente, detecção de conexão parada, redirecionamentos, verificação de SHA-256 e barra de progresso no cabeçalho da Conversa integrada; suporte a Linux. Módulo `crates/core/src/download.rs`.
 - [x] **Mouse no terminal** (`crates/app/src/terminal/view.rs`, `input.rs`): clique, soltar, arrasto e movimento são enviados ao programa quando ele ativa os modos 1000/1002/1003, em SGR (1006) ou no formato legado; Shift devolve o mouse ao terminal para selecionar texto. Coberto por testes headless com eventos reais do egui.
 - [x] **IME no terminal**: com o terminal focado o IME do sistema é habilitado ancorado no cursor; a confirmação vai ao processo como texto digitado e a pré-edição aparece sublinhada sobre o cursor (antes o evento era descartado). Falta só testar com um IME real (teclado CJK, `Win+.`).
+- [x] **Abrir a aba do agente sozinho** quando outro agente o chama pelo `ask-agent` (visualizador da conversa da ponte, takeover com retomada da conversa, um escritor por conversa). Verificado com Antigravity, Claude e Ollama reais. Ver `ARCHITECTURE.md`.
 - [x] **Validação no Windows** (feita à mão): abas, ConPTY, microfone/Whisper, som, arrastar arquivos, colar imagem e restauração de abas.

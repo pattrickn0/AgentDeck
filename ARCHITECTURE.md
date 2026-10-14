@@ -51,3 +51,28 @@ serializados, e o histórico de cada par é mantido entre chamadas: `--session-i
 Claude, `--conversation` no Antigravity, e memória em processo no Ollama.
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do CommandDeck).
+
+### Abas abertas pela ponte (visualizador)
+
+O transporte é sempre o modo headless (o agente de destino **não precisa** de aba aberta). Quando o
+destino não tem aba, o app abre uma sozinha:
+
+1. `POST /ask` valida o destino e emite `CoreEvent::EnsureAgentTab { agent, pair }` (se
+   `Config.auto_open_agent_tabs`), no mesmo canal da entrada `Ask` do feed. É idempotente: quem
+   deduplica é a UI.
+2. A UI abre a aba em segundo plano (não rouba o foco). `claude`, `antigravity` e `ollama:<modelo>`
+   abrem como **visualizador** (`crates/app/src/viewer.rs`): sem processo, mostra as perguntas e
+   respostas da ponte (e as chamadas de ferramenta do Ollama) e uma linha de prompt. Os demais
+   agentes abrem como aba interativa comum.
+3. **Assumir:** digitar uma mensagem e dar Enter (Enter vazio não faz nada) transforma a aba no CLI
+   do agente, retomando a conversa da ponte e já enviando a mensagem: `claude --resume <id> -- <msg>`,
+   `agy --conversation <id> -i <msg>`, e `COMMANDDECK_INITIAL_PROMPT` no `ollama-agent` (que começa
+   uma conversa nova). Ver `SpawnExtras` em `crates/core/src/agents.rs`.
+4. **Um escritor por conversa:** enquanto a aba assumida estiver viva, o par é "reivindicado"
+   (`Core::claim_conversation`) e a ponte usa a conversa `<par>@bg`, avisando uma vez no feed. Se a
+   ponte ainda estiver respondendo no par, assumir é recusado até ela terminar
+   (`Core::conversation_busy`).
+5. **Limites:** no máximo 3 abas automáticas; fechar uma aba automática impede que ela reabra até
+   fechar o app (abrir à mão limpa isso); visualizadores não são salvos em `open_tabs`; o texto de
+   agentes é saneado (sem sequências de escape) antes de ir ao terminal. A opção fica em
+   Configurações ("Abrir abas dos agentes").
