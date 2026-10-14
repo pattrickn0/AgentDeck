@@ -53,8 +53,9 @@ crates/
 │   ├── terminal/     emulador de terminal (pty + alacritty_terminal + desenho + teclado)
 │   ├── agent_map.rs  mapa de conversas entre agentes em texto (render_map: função pura, com testes)
 │   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
-│   ├── ui/           topbar/abas, sidebar (árvore), right_panel (barra direita: Conversa/Mapa),
-│   │                 map (pintura do mapa), git (aba Git), compositor, menus, overlay
+│   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
+│   ├── ui/           topbar, panes (janelas da tela dividida) + tabs (abas de cada janela), sidebar
+│   │                 (árvore), right_panel (barra direita: Conversa/Mapa/Git), map, git, compositor, menus
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas)
 │   └── audio.rs      som de notificação e microfone (cpal)
 └── cli/    (commanddeck-cli)    ask-agent e ollama-agent

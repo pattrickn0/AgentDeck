@@ -232,7 +232,10 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
         painter.rect_filled(r, 3.0, theme::ACCENT);
     }
     let info_rect = Rect::from_min_max(Pos2::new(track.max.x + 8.0, head.min.y), Pos2::new(limit, head.max.y));
-    text_in(&painter, info_rect, Align2::LEFT_CENTER, &info, font, if error { theme::RED_TEXT } else { theme::MUTED });
+    // Na barra estreita o detalhe termina em reticências em vez de cortar no meio.
+    let color = if error { theme::RED_TEXT } else { theme::MUTED };
+    let g = super::galley_trunc(&painter, &info, font, color, info_rect.width());
+    super::place(&painter, info_rect, Align2::LEFT_CENTER, g, color);
 }
 
 fn draw_feed(deck: &mut Deck, ui: &mut Ui, rect: Rect) {

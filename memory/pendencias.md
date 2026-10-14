@@ -110,6 +110,14 @@ Nada pendente.
 
 ## Concluído
 
+- [x] **Tela dividida por tipo de agente.**
+  - Uma janela por tipo (todos os Ollama juntos), numa grade automática (2 lado a lado, 2+1, 2×2, 3+2, 3×2); os tipos que não cabem viram abas da última janela.
+  - Abas no cabeçalho de cada janela (saíram da topbar), "+" por janela, contorno na janela focada, Ctrl+Tab dentro da janela e Ctrl+Alt+setas entre janelas.
+  - Divisores arrastáveis (duplo clique iguala), troca de lugar pela alça ⋮⋮ e botão liga/desliga; ordem, proporções e liga/desliga salvos em `Config`.
+  - Cálculo puro e testado em `crates/app/src/split.rs`.
+- [x] **Barra direita mais estreita.** Padrão de 380 para 330 px e mínimo de 300 para 280 px (quem tinha o padrão antigo salvo passa ao novo); o detalhe do download termina em reticências.
+- [x] **Gemini removido.** Substituído pelo Antigravity em todo o projeto (catálogo de agentes, headless, prompts, ditado, testes e documentos). Só os filtros da pasta `.gemini` ficaram: é a configuração do próprio Antigravity.
+
 - [x] **Aba Git e ícones no cabeçalho da barra direita.**
   - Conversa, Mapa e Git viraram ícones (balões, diagrama, branch) com dica ao passar o mouse; o número de mensagens novas fica sobre o ícone da Conversa.
   - Git local do workspace (`core/src/git.rs`): status, diff, preparar/tirar/descartar, commit (e corrigir o último), branches, buscar/puxar/enviar e `git init`, sempre sem shell e sem prompts que travam. Testado com o git real em `tests/git.rs` (inclusive conflito e push/pull num remoto local).

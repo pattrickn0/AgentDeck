@@ -12,6 +12,9 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - Os números entre parênteses (ex.: 202, 409) são só referência para quem for corrigir.
 - Itens com ★ são os mais importantes (mudanças grandes que ainda não rodaram no Windows).
 
+**Novidades desta rodada** (comece por elas): **3. Tela dividida**, a barra direita **mais estreita** (item 1) e o
+Gemini **removido** (item 9).
+
 ---
 
 ## 0. Preparação
@@ -23,7 +26,7 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 ## 1. Barra direita ★
 
 - [ ] A Conversa integrada e o compositor aparecem à **direita**, ocupando a altura toda; as janelas dos terminais ocupam a altura toda no centro.
-- [ ] Arrastar a borda esquerda da barra muda a largura (entre ~300 px e ~metade da janela); **não existe** como recolher.
+- [ ] Arrastar a borda esquerda da barra muda a largura (entre ~280 px e ~metade da janela; o padrão agora é 330 px, um pouco mais estreito); **não existe** como recolher.
 - [ ] Fechar e reabrir o app: a largura escolhida volta igual.
 - [ ] Diminuir a janela até o mínimo (~820 px de largura): nada se sobrepõe; o terminal continua usável.
 - [ ] Compositor: "Enviar para" + seletor na 1ª linha, anexos embaixo, caixa de texto na largura toda, microfone/anexo à esquerda e **Enviar** à direita.
@@ -119,6 +122,7 @@ Com a pasta de trabalho num repositório git:
 
 ## 9. Agentes novos e shims do Windows
 
+- [ ] O **Gemini não aparece** mais no "+", no "Enviar para" nem no `ask-agent --list` (o Antigravity é o agente do Google).
 - [ ] **Codex**: abre pela aba "+"; ao terminar um turno, a fila de perguntas anda (aviso `notify`). Se ele pedir aprovação para rodar `ask-agent`, anotar.
 - [ ] **OpenCode**: abre pela aba "+" e responde a um `ask-agent opencode "oi"`.
 - [ ] Agente instalado **via npm sem `.exe`** (ex.: Codex ou OpenCode, `codex.cmd`/`opencode.cmd`): responder a uma pergunta numa **mesa** com uma mensagem com aspas, `&`, `|` e várias linhas → a resposta vem e **nada é executado** no cmd.

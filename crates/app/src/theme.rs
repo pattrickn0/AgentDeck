@@ -65,8 +65,10 @@ pub const SIDEBAR_DEFAULT_W: f32 = 220.0;
 pub const SIDEBAR_MIN_W: f32 = 150.0;
 pub const SIDEBAR_MAX_W: f32 = 480.0;
 /// Barra lateral direita (Conversa integrada + compositor): não recolhe, só muda de largura.
-pub const RIGHT_DEFAULT_W: f32 = 380.0;
-pub const RIGHT_MIN_W: f32 = 300.0;
+pub const RIGHT_DEFAULT_W: f32 = 330.0;
+pub const RIGHT_MIN_W: f32 = 280.0;
+/// Padrão anterior (380): quem nunca arrastou a barra tinha esse valor salvo e passa ao novo padrão.
+pub const RIGHT_OLD_DEFAULT_W: f32 = 380.0;
 pub const RIGHT_MAX_W: f32 = 640.0;
 
 const fn rgb(hex: u32) -> Color32 {

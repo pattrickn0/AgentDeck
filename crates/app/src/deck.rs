@@ -303,7 +303,11 @@ impl Deck {
             },
             sidebar_collapsed: cfg.sidebar_collapsed,
             sidebar_dragging: None,
-            right_w: if cfg.right_panel_width > 0.0 { cfg.right_panel_width } else { theme::RIGHT_DEFAULT_W },
+            right_w: if cfg.right_panel_width > 0.0 && cfg.right_panel_width != theme::RIGHT_OLD_DEFAULT_W {
+                cfg.right_panel_width
+            } else {
+                theme::RIGHT_DEFAULT_W
+            },
             right_dragging: None,
             right_view: RightView::Conversa,
             split_enabled: cfg.split_enabled,
