@@ -68,11 +68,20 @@ Nada pendente.
 - [ ] **Testes de integração dependem do `agy` não estar instalado.** `workspace_agents_md_and_spawn_specs` (`crates/core/tests/bridge.rs`) falha quando o Antigravity está instalado na máquina, porque espera o estado "não instalado". Tornar o teste independente do ambiente (PATH e `LOCALAPPDATA` isolados).
 - [ ] **Testar o IME com um IME real** (teclado CJK, seletor de emoji `Win+.`): a lógica está ligada, mas só foi verificada por compilação e testes do cursor; não foi exercitada com composição de verdade.
 
+## Instâncias (abas) — pontos em aberto
+
+- [ ] Só o Claude abre com o comando `ask-agent` pré-autorizado (`--allowedTools`). No Antigravity funcionou sem aprovação no modo atual (`accept-edits`), mas outros agentes (gemini, aider, goose, copilot, q, interpreter) não foram testados e podem pedir aprovação na própria aba.
+- [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta espera 10 minutos e dá erro. Só o `ollama-agent` responde sozinho.
+- [ ] A mensagem é digitada quando o terminal fica parado por 1,5 s (ou 30 s após subir). Se o usuário estiver digitando na mesma aba nesse instante, os textos se misturam.
+- [ ] As mesas (`table.rs`) e a ponte sem interface ainda usam o modo headless: não aparecem nas abas.
+- [ ] Os testes de integração do fluxo (`a_question_is_typed_into_the_tab_and_answered_by_callback` e os vizinhos) só rodam em Unix (agentes falsos em shell); no Windows foram verificados ao vivo.
+- [ ] Não há como o usuário dar cargo a uma aba aberta à mão (hoje só duplicatas ganham nome, tipo `claude@main@ana`).
+
 ## Concluído
 
 - [x] **Download do Whisper robusto** (motor e modelo): retomada por `Range`, retry com espera crescente, detecção de conexão parada, redirecionamentos, verificação de SHA-256 e barra de progresso no cabeçalho da Conversa integrada; suporte a Linux. Módulo `crates/core/src/download.rs`.
 - [x] **Mouse no terminal** (`crates/app/src/terminal/view.rs`, `input.rs`): clique, soltar, arrasto e movimento são enviados ao programa quando ele ativa os modos 1000/1002/1003, em SGR (1006) ou no formato legado; Shift devolve o mouse ao terminal para selecionar texto. Coberto por testes headless com eventos reais do egui.
 - [x] **IME no terminal**: com o terminal focado o IME do sistema é habilitado ancorado no cursor; a confirmação vai ao processo como texto digitado e a pré-edição aparece sublinhada sobre o cursor (antes o evento era descartado). Falta só testar com um IME real (teclado CJK, `Win+.`).
-- [x] **Abrir a aba do agente sozinho** quando outro agente o chama pelo `ask-agent` (terminal normal em segundo plano, com teto de 3 abas, opção em Configurações e sem reabrir o que o usuário fechou). A conversa segue pela Conversa integrada. Ver `ARCHITECTURE.md`.
+- [x] **Instâncias com identidade e conversa entre abas reais.** Cada aba é `modelo[@cargo[@nome]]`; `ask-agent` digita a mensagem no terminal da aba (abrindo-a se preciso, inclusive um segundo Claude) e a resposta volta por `ask-agent` de volta, sem raspar a tela; ciclos de espera são recusados e fechar a aba libera quem esperava. Verificado ao vivo com duas abas do Claude, Claude ↔ Antigravity, dois Ollama (4B e 9B) e um orquestrador delegando a `claude@dev` e `claude@design`. Ver `ARCHITECTURE.md`.
 - [x] **Colar no Windows derrubava o app** (corrupção de heap): o clipboard agora só é lido na thread da interface. Reproduzido e corrigido.
 - [x] **Validação no Windows** (feita à mão): abas, ConPTY, microfone/Whisper, som, arrastar arquivos, colar imagem e restauração de abas.

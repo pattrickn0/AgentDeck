@@ -52,15 +52,40 @@ Claude, `--conversation` no Antigravity, e memória em processo no Ollama.
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do CommandDeck).
 
-### Aba do agente chamado
+### Instâncias (abas) e perguntas entre elas
 
-O transporte é sempre o modo headless: o agente de destino **não precisa** de aba aberta, e a conversa
-aparece na Conversa integrada. Para o usuário poder usar o agente, o app abre a aba dele sozinho:
+Cada aba é uma **instância** com identidade própria, usada em `COMMANDDECK_AGENT` e como destino do
+`ask-agent`: `<modelo>[@<cargo>[@<nome>]]`.
 
-1. `POST /ask` valida o destino e emite `CoreEvent::EnsureAgentTab { agent }` (se
-   `Config.auto_open_agent_tabs`), no mesmo canal da entrada `Ask` do feed. É idempotente: quem
-   deduplica é a UI.
-2. A UI abre um **terminal normal** do agente (processo novo, conversa própria), em segundo plano e
-   sem roubar o foco. Ele só ganha o foco se não houver nenhuma outra aba.
-3. Limites: no máximo 3 abas automáticas; fechar uma aba automática impede que ela reabra até fechar o
-   app (abrir à mão limpa isso). A opção fica em Configurações ("Abrir abas dos agentes").
+| Id | Significado |
+| :-- | :-- |
+| `claude` | a instância principal (sem cargo), a que o usuário abre pelo "+" |
+| `claude@dev`, `claude@design` | instâncias com cargo, abertas por um agente (ou pelo usuário) |
+| `claude@dev@ana` | quando já existe outra do mesmo modelo **e** cargo, a nova ganha um nome |
+| `claude@main@bia` | segunda instância principal (sem cargo) aberta à mão |
+
+A aba aparece como `Claude`, `Claude · Dev`, `Claude · Dev · Ana`. O id é gerado pelo core
+(`crates/core/src/instances.rs`) e salvo em `Config.open_tabs`, então as abas voltam com o mesmo nome.
+O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
+
+`ask-agent <id> "msg"` (e `--new` para forçar outra instância) funciona assim:
+
+1. O core resolve o destino: o id exato, a instância principal do modelo ou a única que existe;
+   se nenhuma existe, **cria** (`claude@dev` abre uma aba nova). Destino ambíguo ou desconhecido dá erro.
+2. A pergunta vira `CoreEvent::Deliver`. A interface abre a aba (em segundo plano, sem roubar o foco),
+   espera o terminal ficar parado e **digita a mensagem nele**, uma por vez por aba (fila).
+3. A mensagem digitada ensina a responder: `ask-agent <quem-perguntou> "resposta"`. Essa chamada é
+   reconhecida como resposta a uma pergunta pendente (`crates/core/src/exchange.rs`) e entregue a
+   quem espera; o `ask-agent` de quem perguntou fica bloqueado até lá (10 minutos no máximo).
+   Nada de raspar a tela do terminal.
+4. O `ollama-agent` devolve a resposta sozinho (`POST /reply`, que só conclui perguntas pendentes e
+   nunca cria uma nova), porque modelos pequenos esquecem de rodar o comando.
+5. Fechar a aba ou o processo terminar libera quem esperava, com erro. Ciclos de espera (A espera B,
+   B espera C, C espera A) são recusados na hora (HTTP 409).
+
+Tudo fica visível nas abas (raciocínio, ferramentas, aprovações) e o usuário pode intervir digitando.
+O Claude abre com `--allowedTools "Bash(ask-agent:*)"`, para responder sem pedir aprovação.
+
+O **modo headless** (`claude -p`, `agy -p`) continua em dois casos: nas **mesas** (`table.rs`) e quando a
+interface não ligou a entrega em abas ou o usuário desligou "Abrir abas dos agentes" nas Configurações.
+Limites: no máximo 8 abas abertas automaticamente.

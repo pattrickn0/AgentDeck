@@ -48,8 +48,11 @@ ask-agent --list
 cat relatorio.txt | ask-agent claude -
 ```
 
-Se o agente chamado não tem aba aberta, o CommandDeck abre o terminal dele em segundo plano; a conversa
-aparece na Conversa integrada. Dá para desligar em Configurações.
+O `ask-agent` conversa com **abas de verdade**: a mensagem é digitada no terminal do agente e você vê o
+raciocínio dele, podendo intervir. Se o agente não tem aba, ela é aberta em segundo plano. Cada aba é
+uma instância com nome `modelo[@cargo[@nome]]` (`claude`, `claude@dev`, `claude@dev@ana`), então dá para
+ter várias do mesmo modelo e delegar por cargo: `ask-agent claude@dev "tarefa"` (use `--new` para outra
+instância). Dá para desligar em Configurações.
 
 Detalhes do protocolo e da arquitetura em [ARCHITECTURE.md](ARCHITECTURE.md).
 
