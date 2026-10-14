@@ -504,6 +504,7 @@ dependencies = [
  "portable-pty",
  "raw-window-handle",
  "rfd",
+ "windows-sys 0.61.2",
  "winit",
 ]
 

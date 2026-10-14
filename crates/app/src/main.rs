@@ -9,6 +9,7 @@
 mod agents;
 mod app;
 mod audio;
+mod crash;
 mod deck;
 mod icons;
 mod smoke;
@@ -24,6 +25,7 @@ use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    crash::install(&AppPaths::detect().data_dir);
 
     let event_loop = EventLoop::<app::UserEvent>::with_user_event().build()?;
     let proxy = std::sync::Arc::new(parking_lot::Mutex::new(event_loop.create_proxy()));
