@@ -32,7 +32,6 @@ rfd.workspace = true
 arboard.workspace = true
 png.workspace = true
 chrono.workspace = true
-unicode-width.workspace = true
 cpal = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]

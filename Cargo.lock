@@ -504,7 +504,6 @@ dependencies = [
  "portable-pty",
  "raw-window-handle",
  "rfd",
- "unicode-width",
  "windows-sys 0.61.2",
  "winit",
 ]

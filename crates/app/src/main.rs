@@ -17,7 +17,6 @@ mod terminal;
 mod theme;
 mod ui;
 mod util;
-mod viewer;
 mod window;
 
 use commanddeck_core::paths::AppPaths;

@@ -499,12 +499,6 @@ fn main() -> ExitCode {
     };
     app.banner(&models);
 
-    // Primeira mensagem de quem assumiu uma aba visualizadora do CommandDeck (takeover).
-    if let Some(first) = env_nonempty("COMMANDDECK_INITIAL_PROMPT") {
-        println!("{}› {first}{}\n", c.dim, c.reset);
-        app.turn(&first);
-    }
-
     let config = rustyline::Config::builder().auto_add_history(false).completion_type(CompletionType::List).build();
     let mut rl: Editor<CliHelper, DefaultHistory> = match Editor::with_config(config) {
         Ok(rl) => rl,

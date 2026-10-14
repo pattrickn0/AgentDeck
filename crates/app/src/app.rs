@@ -368,7 +368,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,collapsed,download,download-retry,download-error,viewer,viewer-typing` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,collapsed,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -384,7 +384,6 @@ fn apply_debug_ui(deck: &mut Deck) {
             "text" => deck.input = "Revisa o @README.md e sugere melhorias na seção de instalação".into(),
             "needs-text" => deck.needs_text = true,
             "empty" => deck.debug_close_all = true,
-            "viewer" | "viewer-typing" => deck.debug_viewer = Some(item == "viewer-typing"),
             "download" | "download-retry" | "download-error" => {
                 deck.download = Some((debug_download(item), None));
                 deck.debug_hold_download = true;

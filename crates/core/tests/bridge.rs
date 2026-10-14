@@ -75,13 +75,13 @@ fn http(port: u16, method: &str, path: &str, host: &str, token: &str, body: &str
     (status, serde_json::from_str(body).unwrap_or(Value::Null))
 }
 
-/// Eventos `EnsureAgentTab` pendentes no canal.
+/// Agentes pedidos à UI (`EnsureAgentTab`) desde a última chamada.
 #[cfg(unix)]
-fn ensure_events(env: &Env) -> Vec<(String, String)> {
+fn ensure_events(env: &Env) -> Vec<String> {
     env.rx
         .try_iter()
         .filter_map(|ev| match ev {
-            CoreEvent::EnsureAgentTab { agent, pair } => Some((agent, pair)),
+            CoreEvent::EnsureAgentTab { agent } => Some(agent),
             _ => None,
         })
         .collect()
@@ -327,7 +327,7 @@ fn ask_asks_the_ui_to_open_the_agent_tab() {
     let env = start(&[("claude", "cat >/dev/null; echo resposta")]);
     let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
     assert_eq!((st, b["answer"].as_str()), (200, Some("resposta")));
-    assert_eq!(ensure_events(&env), vec![("claude".to_owned(), "shell->claude".to_owned())]);
+    assert_eq!(ensure_events(&env), vec!["claude".to_owned()]);
 
     // Com a opção desligada nada é pedido à UI (a resposta continua saindo em headless).
     env.core.update_config(|c| c.auto_open_agent_tabs = false);
@@ -340,35 +340,5 @@ fn ask_asks_the_ui_to_open_the_agent_tab() {
     let (st, _) = ask(&env, json!({"from": "shell", "to": "bogus", "message": "oi"}));
     assert_eq!(st, 400);
     assert!(ensure_events(&env).is_empty());
-    env.core.shutdown();
-}
-
-#[cfg(unix)]
-#[test]
-fn claimed_pair_runs_in_a_separate_conversation() {
-    let env = start(&[("claude", "cat >/dev/null; echo resposta")]);
-    ask(&env, json!({"from": "shell", "to": "claude", "message": "um"}));
-    let original = env.core.conversation_for("shell->claude").expect("conversa do par");
-    assert!(env.core.conversation_for("shell->claude@bg").is_none());
-
-    // A aba interativa assume a conversa: a ponte passa a usar outra, sem tocar na original.
-    env.core.claim_conversation("shell->claude");
-    ask(&env, json!({"from": "shell", "to": "claude", "message": "dois"}));
-    ask(&env, json!({"from": "shell", "to": "claude", "message": "tres"}));
-    assert_eq!(env.core.conversation_for("shell->claude").as_deref(), Some(original.as_str()));
-    let bg = env.core.conversation_for("shell->claude@bg").expect("conversa separada");
-    assert_ne!(bg, original);
-    // O aviso sai uma única vez.
-    let notices = env
-        .rx
-        .try_iter()
-        .filter(|ev| matches!(ev, CoreEvent::Feed(e) if e.kind == FeedKind::System && e.text.contains("em uso por você")))
-        .count();
-    assert_eq!(notices, 1);
-
-    // Ao terminar o processo da aba, volta à conversa original.
-    env.core.release_conversation("shell->claude");
-    ask(&env, json!({"from": "shell", "to": "claude", "message": "quatro"}));
-    assert_eq!(env.core.conversation_for("shell->claude").as_deref(), Some(original.as_str()));
     env.core.shutdown();
 }

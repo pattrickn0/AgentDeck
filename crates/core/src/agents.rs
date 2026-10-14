@@ -630,86 +630,8 @@ pub fn ollama_agent_exe(bin_dir: &Path) -> PathBuf {
     bin_dir.join(if cfg!(windows) { "ollama-agent.exe" } else { "ollama-agent" })
 }
 
-/// Máximo de caracteres do primeiro prompt de uma aba (vai em argv ou variável de ambiente).
-pub const MAX_INITIAL_PROMPT: usize = 4000;
-
-/// O que acrescentar ao abrir uma aba a partir de uma conversa da ponte (takeover do visualizador).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SpawnExtras {
-    /// Id da conversa a retomar (o mesmo que a ponte usa em modo headless).
-    pub resume: Option<String>,
-    /// Primeira mensagem, já enviada ao agente ao subir.
-    pub prompt: Option<String>,
-}
-
-/// Agentes cujo CLI sabe retomar a conversa da ponte e receber um prompt inicial: só eles abrem em
-/// modo visualizador. Os demais ganham uma aba interativa comum.
-pub fn viewer_supported(kind: &str) -> bool {
-    kind == "claude" || kind == "antigravity" || kind.starts_with("ollama:")
-}
-
-/// Um id de conversa só pode ter letras, números, `-`, `_` e `.` (vai em argv).
-fn safe_conversation_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-}
-
-/// `.cmd`/`.bat` passam pelo `cmd.exe`, que interpreta `& | ^`: nesses casos o texto do usuário
-/// nunca vai em argv.
-fn is_shell_shim(program: &Path) -> bool {
-    program
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
-}
-
-/// Argumentos e variáveis de ambiente extras de [`SpawnExtras`] para o agente `base`.
-///
-/// - `claude`: `--resume <id>` e o prompt como argumento posicional, depois de `--` (o
-///   `--add-dir` aceita vários valores e engoliria o prompt).
-/// - `antigravity`: `--conversation <id>` e `-i <prompt>` (continua interativo depois do prompt).
-/// - `ollama`: o prompt vai em `COMMANDDECK_INITIAL_PROMPT` (o `ollama-agent` o lê ao subir).
-pub(crate) fn extras_for(base: &str, program: &Path, extras: &SpawnExtras) -> (Vec<String>, Vec<(String, String)>) {
-    let resume = extras.resume.as_deref().filter(|id| safe_conversation_id(id));
-    let prompt: Option<String> = extras
-        .prompt
-        .as_deref()
-        .map(|p| p.chars().filter(|c| *c != '\0').take(MAX_INITIAL_PROMPT).collect::<String>())
-        .filter(|p| !p.trim().is_empty());
-    let (mut args, mut env) = (Vec::new(), Vec::new());
-    match base {
-        "claude" => {
-            if let Some(id) = resume {
-                args.extend(["--resume".to_owned(), id.to_owned()]);
-            }
-            if let (Some(p), false) = (&prompt, is_shell_shim(program)) {
-                args.extend(["--".to_owned(), p.clone()]);
-            }
-        }
-        "antigravity" => {
-            if let Some(id) = resume {
-                args.extend(["--conversation".to_owned(), id.to_owned()]);
-            }
-            if let (Some(p), false) = (&prompt, is_shell_shim(program)) {
-                args.extend(["-i".to_owned(), p.clone()]);
-            }
-        }
-        "ollama" => {
-            if let Some(p) = prompt {
-                env.push(("COMMANDDECK_INITIAL_PROMPT".to_owned(), p));
-            }
-        }
-        _ => {}
-    }
-    (args, env)
-}
-
 /// Monta o comando de uma aba interativa (equivalente a `pty:spawn`).
 pub(crate) fn spawn_spec(core: &Core, kind: &str) -> Result<SpawnSpec, String> {
-    spawn_spec_with(core, kind, &SpawnExtras::default())
-}
-
-/// Como [`spawn_spec`], retomando uma conversa e/ou enviando o primeiro prompt.
-pub(crate) fn spawn_spec_with(core: &Core, kind: &str, extras: &SpawnExtras) -> Result<SpawnSpec, String> {
     let reg = &core.inner.agents;
     let sub_model = kind.strip_prefix("ollama:");
     let base = if sub_model.is_some() { "ollama" } else { kind };
@@ -722,9 +644,7 @@ pub(crate) fn spawn_spec_with(core: &Core, kind: &str, extras: &SpawnExtras) -> 
         let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
         env.insert("COMMANDDECK_OLLAMA_MODEL".into(), model.clone());
         env.insert("COMMANDDECK_OLLAMA_HOST".into(), core.config().ollama_host);
-        let program = ollama_agent_exe(&core.paths().bin_dir);
-        env.extend(extras_for("ollama", &program, extras).1);
-        (program, vec![model.clone()], format!("Ollama ({model})"))
+        (ollama_agent_exe(&core.paths().bin_dir), vec![model.clone()], format!("Ollama ({model})"))
     } else {
         let resolved = reg.resolve(base).ok_or_else(|| def.missing.to_owned())?;
         let mut args = resolved.pre;
@@ -736,8 +656,6 @@ pub(crate) fn spawn_spec_with(core: &Core, kind: &str, extras: &SpawnExtras) -> 
             args.push("--add-dir".into());
             args.push(data_dir);
         }
-        // Por último: o prompt posicional do Claude precisa vir depois de todas as opções.
-        args.extend(extras_for(base, &resolved.program, extras).0);
         (resolved.program, args, def.label.to_owned())
     };
 
@@ -756,62 +674,6 @@ pub(crate) fn spawn_spec_with(core: &Core, kind: &str, extras: &SpawnExtras) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extras_per_agent() {
-        let exe = Path::new("C:/bin/agent.exe");
-        let both = SpawnExtras { resume: Some("abc-123".into()), prompt: Some("oi & tudo bem?".into()) };
-
-        let (args, env) = extras_for("claude", exe, &both);
-        assert_eq!(args, ["--resume", "abc-123", "--", "oi & tudo bem?"]);
-        assert!(env.is_empty());
-
-        let (args, _) = extras_for("antigravity", exe, &both);
-        assert_eq!(args, ["--conversation", "abc-123", "-i", "oi & tudo bem?"]);
-
-        let (args, env) = extras_for("ollama", exe, &both);
-        assert!(args.is_empty());
-        assert_eq!(env, [("COMMANDDECK_INITIAL_PROMPT".to_owned(), "oi & tudo bem?".to_owned())]);
-
-        // Agentes sem retomada verificada não recebem nada.
-        assert_eq!(extras_for("gemini", exe, &both), (Vec::new(), Vec::new()));
-        assert_eq!(extras_for("claude", exe, &SpawnExtras::default()), (Vec::new(), Vec::new()));
-    }
-
-    #[test]
-    fn extras_are_sanitized() {
-        let exe = Path::new("agent.exe");
-        // Id suspeito (espaço, aspas, ponto e vírgula) é descartado; o prompt segue.
-        let bad = SpawnExtras { resume: Some("x; rm -rf /".into()), prompt: Some("ola".into()) };
-        assert_eq!(extras_for("claude", exe, &bad).0, ["--", "ola"]);
-        // Prompt vazio/só espaços não vira argumento.
-        let blank = SpawnExtras { resume: Some("id1".into()), prompt: Some("   ".into()) };
-        assert_eq!(extras_for("antigravity", exe, &blank).0, ["--conversation", "id1"]);
-        // Limite de tamanho e NUL removido.
-        let long = SpawnExtras { resume: None, prompt: Some(format!("a\0{}", "b".repeat(MAX_INITIAL_PROMPT * 2))) };
-        let args = extras_for("antigravity", exe, &long).0;
-        assert_eq!(args[1].chars().count(), MAX_INITIAL_PROMPT);
-        assert!(!args[1].contains('\0'));
-    }
-
-    #[test]
-    fn shell_shims_never_get_the_prompt_in_argv() {
-        let extras = SpawnExtras { resume: Some("id1".into()), prompt: Some("a & calc".into()) };
-        for shim in ["C:/npm/claude.cmd", "C:/npm/claude.BAT"] {
-            assert_eq!(extras_for("claude", Path::new(shim), &extras).0, ["--resume", "id1"]);
-        }
-        // O ollama-agent usa variável de ambiente, então segue com o prompt.
-        assert_eq!(extras_for("ollama", Path::new("x.cmd"), &extras).1.len(), 1);
-    }
-
-    #[test]
-    fn viewer_support() {
-        assert!(viewer_supported("claude"));
-        assert!(viewer_supported("antigravity"));
-        assert!(viewer_supported("ollama:qwen3.5:9b"));
-        assert!(!viewer_supported("gemini"));
-        assert!(!viewer_supported("ollama")); // sem modelo definido
-    }
 
     #[test]
     fn aliases() {
