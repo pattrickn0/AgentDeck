@@ -15,7 +15,7 @@ use crate::Core;
 /// Item de menu de agente (equivalente ao retorno de `agents:list`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentInfo {
-    /// `claude`, `antigravity`, `ollama`, `ollama:<modelo>`, `gemini`, ..., `shell`.
+    /// `claude`, `antigravity`, `ollama`, `ollama:<modelo>`, `codex`, ..., `shell`.
     pub id: String,
     pub label: String,
     /// Cor `#rrggbb`.
@@ -104,13 +104,6 @@ pub const AGENTS: &[AgentDef] = &[
         missing: "OpenCode não encontrado. Instale com:\r\n  npm install -g opencode-ai",
     },
     AgentDef {
-        id: "gemini",
-        label: "Gemini",
-        color: "#1a73e8",
-        peer: true,
-        missing: "Gemini CLI não encontrado. Instale com:\r\n  npm install -g @google/gemini-cli",
-    },
-    AgentDef {
         id: "aider",
         label: "Aider",
         color: "#22c55e",
@@ -149,7 +142,6 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("qwen", "ollama"),
     ("llama", "ollama"),
     ("local", "ollama"),
-    ("geminicli", "gemini"),
     ("gh-copilot", "copilot"),
     ("amazon-q", "q"),
     ("openai", "codex"),
@@ -331,7 +323,6 @@ impl Registry {
                     local_bin,
                 ],
                 "q" => vec![which_exe(), Some(env("PROGRAMFILES").join("Amazon").join("Q").join("q.exe")), local_bin],
-                "gemini" => vec![which_exe()],
                 _ => vec![which_exe(), local_bin],
             };
             if let Some(p) = first_existing(candidates) {

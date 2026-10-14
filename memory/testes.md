@@ -101,8 +101,8 @@ Com a pasta de trabalho num repositório git:
 
 - [ ] **Codex**: abre pela aba "+"; ao terminar um turno, a fila de perguntas anda (aviso `notify`). Se ele pedir aprovação para rodar `ask-agent`, anotar.
 - [ ] **OpenCode**: abre pela aba "+" e responde a um `ask-agent opencode "oi"`.
-- [ ] Agente instalado **via npm sem `.exe`** (ex.: Gemini CLI, `gemini.cmd`): responder a uma pergunta numa **mesa** com uma mensagem com aspas, `&`, `|` e várias linhas → a resposta vem e **nada é executado** no cmd.
-- [ ] Gemini, Aider, Goose, Copilot, Amazon Q, Open Interpreter (os que tiver): ao receber uma pergunta numa aba, pedem aprovação para rodar `ask-agent`? Anotar quais pedem.
+- [ ] Agente instalado **via npm sem `.exe`** (ex.: Codex ou OpenCode, `codex.cmd`/`opencode.cmd`): responder a uma pergunta numa **mesa** com uma mensagem com aspas, `&`, `|` e várias linhas → a resposta vem e **nada é executado** no cmd.
+- [ ] Codex, OpenCode, Aider, Goose, Copilot, Amazon Q, Open Interpreter (os que tiver): ao receber uma pergunta numa aba, pedem aprovação para rodar `ask-agent`? Anotar quais pedem.
 
 ## 9. Teclado e entrada
 

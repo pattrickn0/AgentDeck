@@ -414,7 +414,7 @@ mod tests {
                 ("claude@dev".into(), NodeState::Busy),
                 ("antigravity".into(), NodeState::Idle),
                 ("codex".into(), NodeState::Idle),
-                ("gemini".into(), NodeState::Idle),
+                ("opencode".into(), NodeState::Idle),
                 ("shell".into(), NodeState::Ended),
             ],
             links: vec![
@@ -422,7 +422,7 @@ mod tests {
                 link(13, "claude@dev", "antigravity", 5_000, LinkState::Queued(1)),
                 link(14, "claude", "codex", 70_000, LinkState::Detached),
             ],
-            answers: vec![AnswerInFlight { request: 9, from: "gemini".into(), to: "claude".into() }],
+            answers: vec![AnswerInFlight { request: 9, from: "opencode".into(), to: "claude".into() }],
             recent: vec![
                 Recent { from: "claude@dev".into(), to: "claude".into(), ok: true, at_ms: NOW - 20_000 },
                 Recent { from: "codex".into(), to: "claude".into(), ok: false, at_ms: NOW - 90_000 },
@@ -453,7 +453,7 @@ mod tests {
             "└─► ○ codex                              #14",
             "      202 · responde depois · 1:10",
             "RESPOSTAS A CAMINHO",
-            "  gemini ─► claude  #9",
+            "  opencode ─► claude  #9",
             "RECENTES",
             "  claude@dev ─► claude  ok  0:20",
             "",

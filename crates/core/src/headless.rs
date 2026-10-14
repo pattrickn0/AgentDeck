@@ -203,18 +203,6 @@ impl Core {
                 }
                 stdin.clear();
             }
-            "gemini" => {
-                if is_new {
-                    sid = Some(uuid::Uuid::new_v4().to_string());
-                }
-                args.extend(["-p".into(), self.prompt_arg(prompt, via_cmd)]);
-                args.extend(["-o", "text", "--approval-mode", "yolo", "--skip-trust"].map(String::from));
-                if let Some(s) = &sid {
-                    args.push(if is_new { "--session-id" } else { "--resume" }.into());
-                    args.push(s.clone());
-                }
-                stdin.clear();
-            }
             "aider" => {
                 match self.prompt_file_if(prompt, via_cmd) {
                     Some(file) => args.extend(["--message-file".into(), file]),

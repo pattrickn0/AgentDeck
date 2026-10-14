@@ -135,7 +135,7 @@ ela dura.
 
 **Como usuário:**
 
-- Abrir abas de agentes: Claude Code, Antigravity, Codex, OpenCode, Gemini, Aider, Goose, Copilot, Amazon Q,
+- Abrir abas de agentes: Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q,
   Open Interpreter, modelos Ollama e um terminal comum.
 - Mandar uma mensagem para a aba ativa, para todos os agentes abertos ou para uma **mesa** (vários agentes em
   rodadas, com síntese no fim).

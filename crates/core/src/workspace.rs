@@ -17,7 +17,7 @@ pub struct DirEntry {
     pub ext: String,
 }
 
-/// Nomes ignorados na árvore.
+/// Nomes ignorados na árvore (`.gemini` é a pasta de configuração do Antigravity, `~/.gemini/antigravity`).
 pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", "dados", "$RECYCLE.BIN", "target"];
 
 pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
@@ -102,7 +102,7 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
 
 // ---------- Watcher ----------
 
-/// Mudanças nestas pastas não recarregam a árvore.
+/// Mudanças nestas pastas não recarregam a árvore (`.gemini`: configuração do Antigravity).
 const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", "dados", "target"];
 
 /// `true` se a mudança em `path` deve ser ignorada.

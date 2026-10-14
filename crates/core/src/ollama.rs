@@ -454,7 +454,6 @@ pub fn system_prompt(workspace: &Path, host: &str, extra_system: Option<&str>, c
         "Você faz parte de uma equipe de agentes de elite no CommandDeck. Você pode consultar e colaborar com outros agentes a qualquer momento:".to_owned(),
         "- antigravity: Google Antigravity CLI — parceiro de ponta para visão multimodal (imagens), planejamento arquitetural, auditoria e tarefas complexas.".to_owned(),
         "- claude: Claude Code CLI — parceiro de ponta para refatoração e implementação profunda.".to_owned(),
-        "- gemini: Gemini CLI — parceiro multimodal e rápido para buscas e análises.".to_owned(),
         "Como chamar outro agente:".to_owned(),
         "  run_command: ask-agent <agente> \"sua pergunta ou instrução detalhada\"".to_owned(),
         "Exemplo: ask-agent antigravity \"Preciso de uma revisão de segurança neste script.\"".to_owned(),

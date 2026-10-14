@@ -198,10 +198,7 @@ fn workspace_agents_md_and_spawn_specs() {
 
     let list = env.core.list_agents();
     let ids: Vec<&str> = list.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        ["claude", "antigravity", "ollama", "codex", "opencode", "gemini", "aider", "goose", "copilot", "q", "interpreter", "shell"]
-    );
+    assert_eq!(ids, ["claude", "antigravity", "ollama", "codex", "opencode", "aider", "goose", "copilot", "q", "interpreter", "shell"]);
     let ollama = &list[2];
     assert!(!ollama.installed && !ollama.peer && ollama.label == "Ollama");
     let shell = list.last().expect("shell");
@@ -253,12 +250,12 @@ fn ask_runs_headless_with_sessions() {
 fn failing_resumed_session_retries_and_errors_report_tail() {
     // Falha sempre que receber --resume; senão responde. Erros vão para o stderr.
     let script = r#"for a in "$@"; do [ "$a" = "--resume" ] && { echo "sessão expirada" >&2; exit 1; }; done; cat >/dev/null; echo novo"#;
-    let env = start(&[("claude", script), ("gemini", "echo l1 >&2; echo l2 >&2; exit 3")]);
+    let env = start(&[("claude", script), ("aider", "echo l1 >&2; echo l2 >&2; exit 3")]);
     assert_eq!(ask(&env, json!({"from": "shell", "to": "claude", "message": "a"})).1["answer"], "novo");
     // Sessão "expira": a ponte descarta e tenta de novo, limpa.
     assert_eq!(ask(&env, json!({"from": "shell", "to": "claude", "message": "b"})).1["answer"], "novo");
 
-    let (st, b) = ask(&env, json!({"from": "shell", "to": "gemini", "message": "x"}));
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "aider", "message": "x"}));
     assert_eq!((st, b), (500, json!({"error": "l1\nl2"})));
     env.core.shutdown();
 }
@@ -287,10 +284,10 @@ fn same_pair_requests_are_serialized() {
 #[cfg(unix)]
 #[test]
 fn table_runs_rounds_and_finishes() {
-    let env = start(&[("claude", "cat >/dev/null; echo 'contribuição'"), ("gemini", "exit 1")]);
+    let env = start(&[("claude", "cat >/dev/null; echo 'contribuição'"), ("aider", "exit 1")]);
     env.core.run_table(TableRequest {
         task: "Planeje".into(),
-        agents: vec!["claude".into(), "gemini".into()],
+        agents: vec!["claude".into(), "aider".into()],
         rounds: 1,
         attachments: vec!["a.png".into()],
     });
@@ -305,8 +302,8 @@ fn table_runs_rounds_and_finishes() {
     assert_eq!(feed[0], (FeedKind::User, "você".into(), "Planeje\n@a.png".into()));
     assert_eq!(feed[1], (FeedKind::Thinking, "claude".into(), "rodada 1/1…".into()));
     assert_eq!(feed[2], (FeedKind::Table, "claude".into(), "contribuição".into()));
-    assert_eq!(feed[3], (FeedKind::Thinking, "gemini".into(), "rodada 1/1…".into()));
-    assert_eq!((feed[4].0, feed[4].1.as_str(), feed[4].2.as_str()), (FeedKind::Error, "gemini", "processo saiu com código 1"));
+    assert_eq!(feed[3], (FeedKind::Thinking, "aider".into(), "rodada 1/1…".into()));
+    assert_eq!((feed[4].0, feed[4].1.as_str(), feed[4].2.as_str()), (FeedKind::Error, "aider", "processo saiu com código 1"));
     assert_eq!(feed[5], (FeedKind::System, String::new(), "Mesa encerrada.".into()));
     assert!(matches!(events.last(), Some(CoreEvent::TableFinished)));
     env.core.shutdown();

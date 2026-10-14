@@ -309,7 +309,7 @@ mod tests {
         let mut a = Agents::new();
         a.build(&[
             agent("claude", "Claude", false, true, None),
-            agent("gemini", "Gemini", false, true, None),
+            agent("codex", "Codex", false, true, None),
             agent("ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", true, true, Some("qwen3.5:9b")),
             agent("shell", "Terminal", true, false, None),
         ]);
