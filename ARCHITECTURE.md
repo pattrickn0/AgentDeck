@@ -37,8 +37,8 @@ não exige alterar o resto do sistema.
 
 ## Protocolo entre agentes (`ask-agent`)
 
-Cada aba recebe no ambiente: `JWIC_PORT` (porta da ponte), `JWIC_TOKEN` (token de 128 bits por sessão),
-`JWIC_AGENT` (nome do agente da aba), `JWIC_DEPTH` (profundidade de chamadas) e a pasta dos
+Cada aba recebe no ambiente: `COMMANDDECK_PORT` (porta da ponte), `COMMANDDECK_TOKEN` (token de 128 bits por sessão),
+`COMMANDDECK_AGENT` (nome do agente da aba), `COMMANDDECK_DEPTH` (profundidade de chamadas) e a pasta dos
 executáveis no início do `PATH`.
 
 | Rota | Descrição |
@@ -46,7 +46,7 @@ executáveis no início do `PATH`.
 | `GET /agents` | `{"agents": [...]}` com os agentes instalados |
 | `POST /ask` | `{"from","to","message","depth"}` → `{"answer"}`; 400 para agente desconhecido, auto-pergunta ou `depth >= 2`; 403 para token/Host inválido; 500 em erro/timeout (10 min) |
 
-Toda requisição exige o cabeçalho `x-jwic-token`. Pedidos ao mesmo par `de->para` são
+Toda requisição exige o cabeçalho `x-commanddeck-token`. Pedidos ao mesmo par `de->para` são
 serializados, e o histórico de cada par é mantido entre chamadas: `--session-id`/`--resume` no
 Claude, `--conversation` no Antigravity, e memória em processo no Ollama.
 

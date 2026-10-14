@@ -1,5 +1,5 @@
 <!-- commanddeck:start -->
-Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui está na variável de ambiente JWIC_AGENT; nunca pergunte a si mesmo.
+Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui está na variável de ambiente COMMANDDECK_AGENT; nunca pergunte a si mesmo.
 Para conversar com outro agente, execute no shell:
   ask-agent <agente> "sua mensagem"
 Agentes disponíveis: claude, antigravity. A resposta é impressa no stdout e pode levar alguns minutos (use timeout de até 600000 ms).

@@ -1,4 +1,4 @@
-//! Modo de verificação (porta do `JWIC_SMOKE`): com `COMMANDDECK_SMOKE=<pasta>`, após
+//! Modo de verificação (porta do `COMMANDDECK_SMOKE`): com `COMMANDDECK_SMOKE=<pasta>`, após
 //! `COMMANDDECK_SMOKE_DELAY` ms (padrão 4000) lê o framebuffer, salva `<pasta>/screen.png` e sai.
 
 use std::path::{Path, PathBuf};

@@ -6,7 +6,7 @@
 //! de ferramentas mostradas na hora com prévia do resultado, indicador "pensando…",
 //! Ctrl+C interrompe só a geração atual, rodapé com tempo e passos e comandos `/`.
 //!
-//! Uso: ollama-agent [modelo]   (ou JWIC_OLLAMA_MODEL; padrão: primeiro modelo instalado)
+//! Uso: ollama-agent [modelo]   (ou COMMANDDECK_OLLAMA_MODEL; padrão: primeiro modelo instalado)
 
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -221,12 +221,12 @@ fn env_nonempty(k: &str) -> Option<String> {
 
 /// Agentes disponíveis na ponte (`GET /agents`), quando rodando dentro do CommandDeck.
 fn bridge_peers() -> Option<Vec<String>> {
-    let (port, token) = (env_nonempty("JWIC_PORT")?, env_nonempty("JWIC_TOKEN")?);
+    let (port, token) = (env_nonempty("COMMANDDECK_PORT")?, env_nonempty("COMMANDDECK_TOKEN")?);
     let agent: ureq::Agent =
         ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_millis(1500))).build().into();
-    let mut resp = agent.get(format!("http://127.0.0.1:{port}/agents")).header("x-jwic-token", &token).call().ok()?;
+    let mut resp = agent.get(format!("http://127.0.0.1:{port}/agents")).header("x-commanddeck-token", &token).call().ok()?;
     let v: serde_json::Value = resp.body_mut().read_json().ok()?;
-    let me = env_nonempty("JWIC_AGENT").unwrap_or_default();
+    let me = env_nonempty("COMMANDDECK_AGENT").unwrap_or_default();
     Some(
         v.get("agents")?
             .as_array()?
@@ -458,11 +458,11 @@ impl App {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("Uso: ollama-agent [modelo]\n\nModelo: argumento, JWIC_OLLAMA_MODEL ou o primeiro instalado.\nServidor: JWIC_OLLAMA_HOST, OLLAMA_HOST ou {}.", ollama::DEFAULT_HOST);
+        println!("Uso: ollama-agent [modelo]\n\nModelo: argumento, COMMANDDECK_OLLAMA_MODEL ou o primeiro instalado.\nServidor: COMMANDDECK_OLLAMA_HOST, OLLAMA_HOST ou {}.", ollama::DEFAULT_HOST);
         return ExitCode::SUCCESS;
     }
     let c = Palette::detect();
-    let host = env_nonempty("JWIC_OLLAMA_HOST").or_else(|| env_nonempty("OLLAMA_HOST")).unwrap_or_else(|| ollama::DEFAULT_HOST.into());
+    let host = env_nonempty("COMMANDDECK_OLLAMA_HOST").or_else(|| env_nonempty("OLLAMA_HOST")).unwrap_or_else(|| ollama::DEFAULT_HOST.into());
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let agent = OllamaAgent::new(host.clone());
     let models = ollama::list_models(&host, Duration::from_millis(2500));
@@ -470,7 +470,7 @@ fn main() -> ExitCode {
         .first()
         .filter(|a| !a.starts_with('-'))
         .cloned()
-        .or_else(|| env_nonempty("JWIC_OLLAMA_MODEL"))
+        .or_else(|| env_nonempty("COMMANDDECK_OLLAMA_MODEL"))
         .or_else(|| models.as_ref().ok().and_then(|l| l.first().cloned()))
         .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.into());
 

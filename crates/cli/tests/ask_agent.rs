@@ -22,7 +22,7 @@ fn start_core(root: &std::path::Path) -> Core {
     {
         use std::os::unix::fs::PermissionsExt;
         let script = fake_bin.join("claude");
-        std::fs::write(&script, "#!/bin/sh\necho \"claude respondeu (de $JWIC_AGENT)\"; cat >/dev/null\n").expect("write");
+        std::fs::write(&script, "#!/bin/sh\necho \"claude respondeu (de $COMMANDDECK_AGENT)\"; cat >/dev/null\n").expect("write");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
     let opts = StartOptions {
@@ -37,9 +37,9 @@ fn start_core(root: &std::path::Path) -> Core {
 
 fn ask_agent(core: Option<&Core>, args: &[&str], stdin: Option<&str>) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    cmd.args(args).env_remove("JWIC_PORT").env_remove("JWIC_TOKEN").env_remove("JWIC_AGENT").env_remove("JWIC_DEPTH");
+    cmd.args(args).env_remove("COMMANDDECK_PORT").env_remove("COMMANDDECK_TOKEN").env_remove("COMMANDDECK_AGENT").env_remove("COMMANDDECK_DEPTH");
     if let Some(core) = core {
-        cmd.env("JWIC_PORT", core.bridge_port().to_string()).env("JWIC_TOKEN", core.bridge_token()).env("JWIC_AGENT", "shell");
+        cmd.env("COMMANDDECK_PORT", core.bridge_port().to_string()).env("COMMANDDECK_TOKEN", core.bridge_token()).env("COMMANDDECK_AGENT", "shell");
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");

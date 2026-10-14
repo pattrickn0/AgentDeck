@@ -1,6 +1,6 @@
 //! Ponte HTTP local agente → agente (equivalente a `startBridge`).
 //!
-//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-jwic-token` e valida o
+//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-commanddeck-token` e valida o
 //! cabeçalho `Host` contra DNS rebinding. Requisições para o mesmo par `de->para` são
 //! atendidas em ordem de chegada (fila FIFO por par), uma de cada vez.
 
@@ -104,7 +104,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         return reply(req, 503, json!({ "error": "CommandDeck encerrando" }));
     };
     let core = Core { inner };
-    if header(&req, "x-jwic-token") != Some(core.bridge_token()) {
+    if header(&req, "x-commanddeck-token") != Some(core.bridge_token()) {
         return reply(req, 403, json!({ "error": "token inválido" }));
     }
     // Validação de Host contra DNS rebinding.

@@ -432,7 +432,7 @@ pub fn system_prompt(workspace: &Path, host: &str, extra_system: Option<&str>, c
         "Você NÃO é um chatbot isolado e NÃO está em um CLI genérico ou sem contexto. Você tem ferramentas ativas e integração profunda com o sistema.".to_owned(),
         String::new(),
         "=== AMBIENTE E CONTEXTO OPERACIONAL ===".to_owned(),
-        "* Aplicação: CommandDeck Terminal (projeto \"jwic\") — terminal multi-agente desktop nativo, escrito em Rust.".to_owned(),
+        "* Aplicação: CommandDeck Terminal (projeto \"commanddeck\") — terminal multi-agente desktop nativo, escrito em Rust.".to_owned(),
         format!("* Execução: Modelo local rodando no servidor Ollama ({}). Você opera com total privacidade, segurança e sem custo de nuvem.", base_url(host).trim_start_matches("http://")),
         format!("* Workspace Atual: \"{}\". Você tem autorização completa do usuário para ler, criar, editar e testar qualquer arquivo nesta pasta.", workspace.display()),
         format!("* Sistema Operacional: {} (shell {shell}).", os_name()),

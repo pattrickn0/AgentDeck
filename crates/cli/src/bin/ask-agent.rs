@@ -23,9 +23,9 @@ impl Bridge {
         let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).http_status_as_error(false).build().into();
         let url = format!("http://127.0.0.1:{}{route}", self.port);
         let resp = match (method, body) {
-            ("GET", _) => agent.get(&url).header("x-jwic-token", &self.token).header("content-type", "application/json").call(),
-            (_, Some(b)) => agent.post(&url).header("x-jwic-token", &self.token).send_json(b),
-            (_, None) => agent.post(&url).header("x-jwic-token", &self.token).send_empty(),
+            ("GET", _) => agent.get(&url).header("x-commanddeck-token", &self.token).header("content-type", "application/json").call(),
+            (_, Some(b)) => agent.post(&url).header("x-commanddeck-token", &self.token).send_json(b),
+            (_, None) => agent.post(&url).header("x-commanddeck-token", &self.token).send_empty(),
         };
         let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
@@ -42,11 +42,11 @@ fn fail(msg: impl std::fmt::Display, code: u8) -> ExitCode {
 
 fn main() -> ExitCode {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let (Some(port), Some(token)) = (env("JWIC_PORT"), env("JWIC_TOKEN")) else {
+    let (Some(port), Some(token)) = (env("COMMANDDECK_PORT"), env("COMMANDDECK_TOKEN")) else {
         return fail("rode este comando de dentro de um terminal do CommandDeck.", 2);
     };
-    let from = env("JWIC_AGENT").unwrap_or_else(|| "shell".into());
-    let depth: i64 = env("JWIC_DEPTH").and_then(|d| d.trim().parse::<f64>().ok()).map(|d| d as i64).unwrap_or(0);
+    let from = env("COMMANDDECK_AGENT").unwrap_or_else(|| "shell".into());
+    let depth: i64 = env("COMMANDDECK_DEPTH").and_then(|d| d.trim().parse::<f64>().ok()).map(|d| d as i64).unwrap_or(0);
     let bridge = Bridge { port, token };
 
     let args: Vec<String> = std::env::args().skip(1).collect();

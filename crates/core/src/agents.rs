@@ -31,7 +31,7 @@ pub struct SpawnSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub cwd: PathBuf,
-    /// Ambiente COMPLETO a usar (já derivado do ambiente do processo, com PATH/JWIC_* injetados
+    /// Ambiente COMPLETO a usar (já derivado do ambiente do processo, com PATH/COMMANDDECK_* injetados
     /// e CLAUDECODE & cia removidos). A UI deve limpar o ambiente herdado e aplicar este.
     pub env: BTreeMap<String, String>,
     /// Rótulo da aba (ex.: "Claude", "Ollama (qwen3.5:9b)").
@@ -455,7 +455,7 @@ impl Registry {
             Some(id) => format!(
                 "Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui é \"{id}\"."
             ),
-            None => "Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui está na variável de ambiente JWIC_AGENT; nunca pergunte a si mesmo.".to_owned(),
+            None => "Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui está na variável de ambiente COMMANDDECK_AGENT; nunca pergunte a si mesmo.".to_owned(),
         };
         // `${others}` no JS converte o array com "," (sem espaço) — mantido igual.
         [
@@ -616,10 +616,10 @@ pub(crate) fn build_agent_env(
         }
     }
     env.insert("PATH".into(), format!("{}{PATH_SEP}{old_path}", bin_dir.display()));
-    env.insert("JWIC_PORT".into(), port.to_string());
-    env.insert("JWIC_TOKEN".into(), token.to_owned());
-    env.insert("JWIC_AGENT".into(), agent_id.to_owned());
-    env.insert("JWIC_DEPTH".into(), depth.to_string());
+    env.insert("COMMANDDECK_PORT".into(), port.to_string());
+    env.insert("COMMANDDECK_TOKEN".into(), token.to_owned());
+    env.insert("COMMANDDECK_AGENT".into(), agent_id.to_owned());
+    env.insert("COMMANDDECK_DEPTH".into(), depth.to_string());
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
     env
@@ -642,8 +642,8 @@ pub(crate) fn spawn_spec(core: &Core, kind: &str) -> Result<SpawnSpec, String> {
     let (program, args, label) = if base == "ollama" {
         let resolved = reg.resolve_ollama(sub_model).ok_or_else(|| def.missing.to_owned())?;
         let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
-        env.insert("JWIC_OLLAMA_MODEL".into(), model.clone());
-        env.insert("JWIC_OLLAMA_HOST".into(), core.config().ollama_host);
+        env.insert("COMMANDDECK_OLLAMA_MODEL".into(), model.clone());
+        env.insert("COMMANDDECK_OLLAMA_HOST".into(), core.config().ollama_host);
         (ollama_agent_exe(&core.paths().bin_dir), vec![model.clone()], format!("Ollama ({model})"))
     } else {
         let resolved = reg.resolve(base).ok_or_else(|| def.missing.to_owned())?;
@@ -708,10 +708,10 @@ mod tests {
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
         assert_eq!(env["HOME"], "/h");
         assert_eq!(env["PATH"], format!("/app/bin{PATH_SEP}/usr/bin"));
-        assert_eq!(env["JWIC_PORT"], "1234");
-        assert_eq!(env["JWIC_TOKEN"], "tok");
-        assert_eq!(env["JWIC_AGENT"], "claude");
-        assert_eq!(env["JWIC_DEPTH"], "1");
+        assert_eq!(env["COMMANDDECK_PORT"], "1234");
+        assert_eq!(env["COMMANDDECK_TOKEN"], "tok");
+        assert_eq!(env["COMMANDDECK_AGENT"], "claude");
+        assert_eq!(env["COMMANDDECK_DEPTH"], "1");
         assert_eq!(env["TERM"], "xterm-256color");
         assert_eq!(env["COLORTERM"], "truecolor");
     }

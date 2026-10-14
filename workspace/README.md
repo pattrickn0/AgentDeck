@@ -16,6 +16,6 @@ Para evitar que os agentes executem alterações acidentais nos arquivos de infr
 ## 📄 Instruções para Agentes (`AGENTS.md`)
 
 O arquivo [`AGENTS.md`](./AGENTS.md) presente nesta pasta é automaticamente injetado e lido pelos CLIs de IA no momento de inicialização. Ele instrui os agentes sobre:
-1. Seu nome de agente ativo (via variável de ambiente `JWIC_AGENT`).
+1. Seu nome de agente ativo (via variável de ambiente `COMMANDDECK_AGENT`).
 2. O comando shell `ask-agent <agente> "mensagem"` para consultar outro agente.
 3. As diretrizes para troca de opiniões, revisão mútua de código e síntese colaborativa de tarefas.

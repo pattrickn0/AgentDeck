@@ -63,7 +63,7 @@ fn http(port: u16, method: &str, path: &str, host: &str, token: &str, body: &str
     let mut s = TcpStream::connect(("127.0.0.1", port)).expect("connect");
     s.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nx-jwic-token: {token}\r\ncontent-type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nx-commanddeck-token: {token}\r\ncontent-type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     s.write_all(req.as_bytes()).expect("write");
@@ -128,13 +128,13 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md criado no workspace do app");
     assert!(md.starts_with("<!-- commanddeck:start -->\nVocê está rodando dentro do CommandDeck Terminal"));
-    assert!(md.contains("Seu nome aqui está na variável de ambiente JWIC_AGENT"));
+    assert!(md.contains("Seu nome aqui está na variável de ambiente COMMANDDECK_AGENT"));
 
     let shell = env.core.spawn_spec("shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
     assert_eq!(shell.cwd, ws);
-    assert_eq!(shell.env["JWIC_AGENT"], "shell");
-    assert_eq!(shell.env["JWIC_PORT"], env.core.bridge_port().to_string());
+    assert_eq!(shell.env["COMMANDDECK_AGENT"], "shell");
+    assert_eq!(shell.env["COMMANDDECK_PORT"], env.core.bridge_port().to_string());
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
@@ -165,7 +165,7 @@ fn workspace_agents_md_and_spawn_specs() {
 }
 
 #[cfg(unix)]
-const ECHO_AGENT: &str = r#"printf 'ARGS:'; for a in "$@"; do case "$a" in *CommandDeck*) printf ' [<sys>]';; *) printf ' [%s]' "$a";; esac; done; echo; echo "ENV: $JWIC_AGENT $JWIC_DEPTH"; cat"#;
+const ECHO_AGENT: &str = r#"printf 'ARGS:'; for a in "$@"; do case "$a" in *CommandDeck*) printf ' [<sys>]';; *) printf ' [%s]' "$a";; esac; done; echo; echo "ENV: $COMMANDDECK_AGENT $COMMANDDECK_DEPTH"; cat"#;
 
 #[cfg(unix)]
 #[test]
