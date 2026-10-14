@@ -68,6 +68,24 @@ Nada pendente.
 - [ ] **Validar no Windows, ao vivo, o que mudou na ponte** (feito só por testes no Linux e `cargo check`/clippy para `x86_64-pc-windows-gnu`): hooks do Claude (`--settings`) avisando início/fim de turno, `notify` do Codex, agentes instalados como shim `.cmd` (headless com prompt por arquivo, abas com `cmd_safe_arg`), resposta atrasada digitada na aba de quem perguntou e a mensagem de "outra janela usando a pasta de dados".
 - [ ] **Testar o IME com um IME real** (teclado CJK, seletor de emoji `Win+.`): a lógica está ligada, mas só foi verificada por compilação e testes do cursor; não foi exercitada com composição de verdade.
 
+## 6. Novas funcionalidades (comparação com o Orca)
+
+- [ ] **Painéis divididos (split panes).** Ver duas ou mais abas lado a lado (horizontal/vertical), cada uma com o próprio terminal.
+  - Hoje há um foco único: `Deck::active` recebe o teclado, `fit_active` só redimensiona a aba ativa e `draw_terminals` (`crates/app/src/ui/mod.rs`) desenha uma aba só.
+  - Proposta: uma árvore de layout (painel = aba, nó = divisão com proporção) com painel focado, `fit` por painel e arrastar a divisória. `terminal::view::show` já recebe o retângulo, então o desenho por painel é direto.
+  - Persistir o layout em `Config` junto com `open_tabs`. Atalhos para dividir, fechar e trocar de painel.
+  - Esforço estimado: médio. Fica mais simples se `deck.rs` (1300 linhas) for dividido antes (abas / entrega / compositor / layout).
+- [ ] **Integração com o GitHub (PRs, issues e Actions).**
+  - Listar e abrir PRs e issues do repositório do workspace, ver o estado das Actions (checks) de cada PR e o log de um job que falhou.
+  - Ações diretas: mandar um PR, uma issue ou um job vermelho para um agente (ex.: "claude@review, revise o PR #12"; "claude@dev, corrija este job").
+  - Caminho mais simples: usar o `gh` já autenticado na máquina (`gh pr list --json`, `gh run view --log-failed`), sem guardar token no app; alternativa: API REST com token no cofre do sistema.
+  - Novo módulo no core (ex.: `github.rs`) chamado fora da thread da interface; painel próprio na barra lateral.
+  - Depende de o workspace ser um repositório git (hoje não há nada de git no código).
+- [ ] **Editor de arquivos.** Abrir e editar arquivos do workspace dentro do app, em vez de mandar para o programa padrão do sistema (`Core::open_path`).
+  - egui não tem editor de código pronto: avaliar `egui_extras::syntax_highlighting`/`syntect` para realce, ou um componente de editor de terceiros.
+  - Mínimo útil: abas de arquivo ao lado das abas de terminal, realce de sintaxe, salvar (Ctrl+S), aviso quando um agente alterar o arquivo aberto (o watcher de `workspace.rs` já avisa) e pré-visualização de Markdown.
+  - Clique na árvore continua inserindo `@arquivo`; o duplo clique passaria a abrir no editor (com opção de manter o programa do sistema).
+
 ## Instâncias (abas) — pontos em aberto
 
 - [ ] Só o Claude abre com o comando `ask-agent` pré-autorizado (`--allowedTools`). No Antigravity funcionou sem aprovação no modo atual (`accept-edits`), mas outros agentes (codex, opencode, gemini, aider, goose, copilot, q, interpreter) não foram testados e podem pedir aprovação na própria aba.
