@@ -1,6 +1,7 @@
 # Pendências
 
-Lista de melhorias e limitações conhecidas, em ordem sugerida de prioridade.
+Lista de melhorias e limitações conhecidas, em ordem sugerida de prioridade. Ao concluir um item, mova-o para
+"Concluído" com uma linha do que foi feito (regras dos documentos em [GERAL.md](GERAL.md)).
 
 ## 0. Direção: IA local como serviço interno (adiado)
 
@@ -72,6 +73,7 @@ Nada pendente.
 - [ ] Só o Claude abre com o comando `ask-agent` pré-autorizado (`--allowedTools`). No Antigravity funcionou sem aprovação no modo atual (`accept-edits`), mas outros agentes (codex, opencode, gemini, aider, goose, copilot, q, interpreter) não foram testados e podem pedir aprovação na própria aba.
 - [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
 - [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
+- [ ] **Resposta atrasada ainda conta como espera bloqueante na detecção de ciclos.** Quando o `ask-agent` volta com 202, quem perguntou fica livre, mas a pergunta segue em `exchange` como se ele estivesse bloqueado. Isso gera falsos "ciclo de espera" (409) por até 10 min (ex.: claude espera claude@dev, que espera antigravity; antigravity não consegue perguntar ao claude). Marcar a pergunta como "destacada" e ignorá-la em `reaches`, mantendo-a na profundidade. Também falta `ask-agent --cancel <n>` para desistir de uma pergunta.
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
 - [ ] No headless, gemini (`--approval-mode yolo`), aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] As mesas (`table.rs`) e a ponte sem interface ainda usam o modo headless: não aparecem nas abas.

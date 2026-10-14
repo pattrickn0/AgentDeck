@@ -58,12 +58,17 @@ ter várias do mesmo modelo e delegar por cargo: `ask-agent claude@dev "tarefa"`
 instância). Se o outro agente demorar mais de 90 s (`COMMANDDECK_ASK_WAIT`), o `ask-agent` termina avisando e a
 resposta é digitada depois no terminal de quem perguntou. Dá para desligar em Configurações.
 
-Detalhes do protocolo e da arquitetura em [ARCHITECTURE.md](ARCHITECTURE.md).
+Detalhes do protocolo e da arquitetura em [memory/ARCHITECTURE.md](memory/ARCHITECTURE.md).
 
-## Manutenção
+## Documentação
 
-Guia para quem vai manter o projeto (sozinho ou com agentes), incluindo uma introdução prática ao Rust:
-**[docs/MANUTENCAO.md](docs/MANUTENCAO.md)**. Para contribuir: [CONTRIBUTING.md](CONTRIBUTING.md).
+A documentação do projeto fica em **[memory/](memory/GERAL.md)**. Comece por **[memory/GERAL.md](memory/GERAL.md)**:
+como o CommandDeck funciona por dentro, o que dá para fazer nele e quais regras cada documento define.
+
+- [memory/ARCHITECTURE.md](memory/ARCHITECTURE.md): arquitetura e protocolo entre agentes.
+- [memory/MANUTENCAO.md](memory/MANUTENCAO.md): guia de manutenção, com introdução prática ao Rust.
+- [memory/pendencias.md](memory/pendencias.md): pendências e o que já foi concluído.
+- [CONTRIBUTING.md](CONTRIBUTING.md): como contribuir.
 
 ## Licença
 

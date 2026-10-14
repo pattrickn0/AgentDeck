@@ -1,6 +1,7 @@
 # Guia de manutenção
 
 Este guia é para quem vai manter o CommandDeck, sozinho ou junto com agentes de IA. Ele não pressupõe experiência com Rust.
+Visão geral e mapa dos documentos: [GERAL.md](GERAL.md).
 
 ## 1. Como o Rust funciona, na prática
 
@@ -19,11 +20,11 @@ cargo run -p commanddeck            # compila e abre o app (debug)
 cargo build --workspace --release   # gera os .exe otimizados em target/release/
 cargo test --workspace              # roda os testes
 cargo clippy --workspace --all-targets -- -D warnings   # "linter": aponta código suspeito
-cargo fmt --all                     # formata o código
+cargo fmt --all                     # formata o código (estilo em rustfmt.toml; a CI confere com --check)
 cargo update                        # atualiza dependências dentro das versões permitidas
 ```
 
-A primeira compilação demora alguns minutos, porque compila todas as dependências. As seguintes são incrementais e rápidas. A pasta `target/` pode ser apagada a qualquer momento: ela é só cache de build.
+Versão mínima do Rust: **1.89** (`rust-version` no `Cargo.toml`). A primeira compilação demora alguns minutos, porque compila todas as dependências. As seguintes são incrementais e rápidas. A pasta `target/` pode ser apagada a qualquer momento: ela é só cache de build.
 
 ## 2. Mapa do código
 
@@ -33,7 +34,10 @@ crates/
 ├── core/   (commanddeck-core)   "backend": nada de interface gráfica
 │   ├── lib.rs        Core: a API que a interface usa (como os canais IPC)
 │   ├── agents.rs     lista de agentes, onde achar cada CLI, comando de cada aba
-│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /ask)
+│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /ask, /reply, /signal)
+│   ├── exchange.rs   perguntas entre abas esperando resposta (ciclos, profundidade, resposta por número)
+│   ├── instances.rs  nomes das instâncias (modelo@cargo@nome) e resolução do destino
+│   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
 │   ├── ollama.rs     agente Ollama: ferramentas, sandbox do workspace, loop de tool calling
 │   ├── table.rs      mesas de orquestração (rodadas entre agentes)
@@ -46,7 +50,7 @@ crates/
 │   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
 │   ├── terminal/     emulador de terminal (pty + alacritty_terminal + desenho + teclado)
 │   ├── ui/           topbar/abas, sidebar (árvore), feed, compositor, menus, overlay
-│   ├── deck.rs       estado das abas e lógica de envio
+│   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas)
 │   └── audio.rs      som de notificação e microfone (cpal)
 └── cli/    (commanddeck-cli)    ask-agent e ollama-agent
 ```
@@ -69,8 +73,12 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
 
 **Adicionar um novo agente CLI.** Edite `crates/core/src/agents.rs`:
 1. Crie uma entrada na tabela `AGENTS` com id, rótulo, cor, função de resolução e mensagem de "não instalado".
-2. Se ele tiver modo não interativo, adicione os argumentos em `headless.rs` (no `match` por agente).
-3. Opcionalmente, crie um alias em `ALIASES`.
+2. Se ele tiver modo não interativo, adicione os argumentos em `headless.rs` (no `match` por agente). O prompt
+   **nunca** vai cru na linha de comando: use a entrada padrão ou `self.prompt_arg(prompt, via_cmd)`, que manda
+   por arquivo quando o agente é um shim `.cmd` no Windows (o `cmd.exe` executaria `&`, `|`… do texto).
+3. Se o CLI tiver hooks de início/fim de turno, ligue-os a `ask-agent --signal busy|idle` no `spawn_spec_for`
+   (como o Claude e o Codex): a entrega nas abas fica mais precisa (`delivery.rs`).
+4. Opcionalmente, crie um alias em `ALIASES`, e atualize a lista de ids no teste `workspace_agents_md_and_spawn_specs`.
 
 **Mudar uma cor ou tamanho.** Edite `crates/app/src/theme.rs`.
 
@@ -79,6 +87,9 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
 **Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O agente Ollama já consulta os provedores registrados.
 
 **Adicionar um teste.** Coloque um `#[test]` num bloco `#[cfg(test)] mod tests` no fim do arquivo. Para testes de ponta a ponta, use `crates/core/tests/`.
+Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident).env["COMMANDDECK_TOKEN"]`
+(veja `tab_token` em `tests/bridge.rs`); com o token mestre, o `from` do corpo é aceito. Os testes iniciam o
+`Core` com `system_dirs: false`, para não depender dos CLIs instalados na máquina.
 
 ## 4. Trabalhando com agentes de IA no projeto
 
@@ -90,6 +101,8 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
 
 ## 5. Limitações conhecidas
 
-- **Mouse no terminal.** Programas de terminal "tela cheia", como `vim`, `htop` ou menus interativos, podem pedir para receber cliques do mouse (o chamado *mouse mode*). Hoje repassamos só a **roda** do mouse. Clicar dentro desses programas não chega até eles, mas a rolagem funciona e a seleção de texto com o mouse continua funcionando normalmente. Nos CLIs de agentes, que se usam pelo teclado, quase nunca faz diferença. A implementação ficaria em `crates/app/src/terminal/` (traduzir clique/movimento nas sequências SGR `\x1b[<...M`).
-- **IME no terminal.** IME é o sistema que monta caracteres compostos antes de enviá-los: teclados chinês/japonês/coreano, o teclado de emoji do Windows (`Win+.`) e alguns métodos de entrada. No **compositor** (a caixa de mensagem) funciona. Dentro do **terminal**, o texto em composição ainda não é encaminhado. Acentos do português (á, ç, ã...) funcionam normalmente nos dois, porque não passam por IME.
+A lista atualizada fica em [pendencias.md](pendencias.md). As principais:
+
+- **IME no terminal:** ligado e coberto por testes, mas ainda não exercitado com um IME real (teclado CJK, `Win+.`).
+- **Entrega nas abas:** só Claude e Codex têm hooks de turno; os outros agentes dependem da heurística da saída.
 - Emojis aparecem monocromáticos (limitação do egui).

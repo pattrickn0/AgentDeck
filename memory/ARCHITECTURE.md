@@ -1,5 +1,7 @@
 # Arquitetura do CommandDeck Terminal
 
+Visão geral e mapa dos documentos: [GERAL.md](GERAL.md).
+
 Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com as mesmas funções e o mesmo visual.)
 
 ## Stack (decisões do Lead)
@@ -9,7 +11,7 @@ Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com a
 | Janela/eventos | **winit 0.30** (loop próprio, `ApplicationHandler`) | pedido do projeto; controle total do loop e de DnD |
 | Render | **glutin + glow** com **egui** (`egui-winit` + `egui_glow`) | widgets prontos e estilização fina para reproduzir o CSS; OpenGL leve (roda até em Xvfb/llvmpipe para testes) |
 | Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação madura; o render da grade é nosso (pintado no egui) |
-| Ponte HTTP | **tiny_http** (thread por requisição) | mesma API `/agents` e `/ask`, token + validação de Host |
+| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/ask`, `/reply`, `/signal`; token por processo de agente + validação de Host |
 | Cliente HTTP | **ureq** (Ollama `/api/chat`, `/api/tags`, downloads) | bloqueante e simples, roda em threads |
 | Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
 | Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
