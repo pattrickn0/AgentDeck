@@ -401,6 +401,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         Some(reply) => reply,
         None => match (detach_at, asker) {
             (Some(_), Some(asker)) if Instant::now() < deadline => {
+                core.inner.exchange.detach(request);
                 let core2 = core.clone();
                 let target = id.clone();
                 let spawned = std::thread::Builder::new().name("cd-bridge-late".into()).spawn(move || {
@@ -506,6 +507,7 @@ fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
     );
     let session_key = format!("{from}->{to}");
+    let _live = core.headless_ask_started(from, &to);
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
         let kind = Ident::parse(&to).map(|i| i.kind).unwrap_or_else(|| to.clone());

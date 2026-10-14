@@ -40,6 +40,7 @@ use parking_lot::{Mutex, RwLock};
 pub use agents::{AgentInfo, SpawnSpec};
 pub use config::Config;
 pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind};
+pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
 pub use workspace::DirEntry;
@@ -121,12 +122,46 @@ pub(crate) struct CoreInner {
     pub tab_delivery: std::sync::atomic::AtomicBool,
     /// Token de cada processo de agente → quem ele é (a ponte não confia no `from` do corpo).
     pub callers: Mutex<HashMap<String, Caller>>,
+    /// Perguntas da ponte sendo respondidas em modo headless agora (para o mapa de conversas).
+    pub headless_asks: Mutex<Vec<(u64, HeadlessAsk)>>,
+    pub headless_seq: std::sync::atomic::AtomicU64,
     pub bridge_queues: bridge::PairQueues,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub whisper: whisper::WhisperState,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
     _data_lock: Option<std::fs::File>,
+}
+
+/// Pergunta da ponte respondida em modo headless (sem aba), em andamento.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadlessAsk {
+    pub asker: String,
+    pub target: String,
+    pub since_ms: u64,
+}
+
+/// Retrato das conversas entre agentes agora (ver [`Core::conversation_map`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConversationMap {
+    /// Instâncias abertas (abas).
+    pub instances: Vec<String>,
+    /// Perguntas entre abas esperando resposta, da mais antiga para a mais nova.
+    pub pending: Vec<PendingInfo>,
+    /// Perguntas sendo respondidas em modo headless.
+    pub headless: Vec<HeadlessAsk>,
+}
+
+/// Mantém uma pergunta headless no mapa enquanto existir.
+pub(crate) struct HeadlessAskGuard {
+    inner: Arc<CoreInner>,
+    key: u64,
+}
+
+impl Drop for HeadlessAskGuard {
+    fn drop(&mut self) {
+        self.inner.headless_asks.lock().retain(|(k, _)| *k != self.key);
+    }
 }
 
 /// Quem chamou a ponte, pelo token que recebeu no ambiente.
@@ -249,6 +284,8 @@ impl Core {
             exchange: exchange::Exchange::default(),
             tab_delivery: std::sync::atomic::AtomicBool::new(false),
             callers: Mutex::new(HashMap::new()),
+            headless_asks: Mutex::new(Vec::new()),
+            headless_seq: std::sync::atomic::AtomicU64::new(0),
             bridge_queues: bridge::PairQueues::default(),
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
@@ -400,6 +437,25 @@ impl Core {
     /// A entrega não pôde ser feita (aba morreu, não subiu…): libera quem espera.
     pub fn fail_delivery(&self, request: u64, reason: &str) {
         self.inner.exchange.fail(request, reason);
+    }
+
+    /// Quem está conversando com quem agora: instâncias abertas, perguntas entre abas pendentes
+    /// (inclusive as de resposta atrasada) e perguntas em modo headless. Barato: dois locks e
+    /// listas pequenas, pode ser chamado a cada quadro.
+    pub fn conversation_map(&self) -> ConversationMap {
+        ConversationMap {
+            instances: self.instance_ids(),
+            pending: self.inner.exchange.snapshot(),
+            headless: self.inner.headless_asks.lock().iter().map(|(_, a)| a.clone()).collect(),
+        }
+    }
+
+    /// Registra uma pergunta headless em andamento (some do mapa quando o guarda cai).
+    pub(crate) fn headless_ask_started(&self, asker: &str, target: &str) -> HeadlessAskGuard {
+        let key = self.inner.headless_seq.fetch_add(1, Ordering::Relaxed);
+        let ask = HeadlessAsk { asker: asker.to_owned(), target: target.to_owned(), since_ms: util::now_ms() };
+        self.inner.headless_asks.lock().push((key, ask));
+        HeadlessAskGuard { inner: self.inner.clone(), key }
     }
 
     /// Ids das instâncias abertas.

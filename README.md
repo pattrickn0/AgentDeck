@@ -9,7 +9,8 @@ mesas de orquestração e trabalham na mesma pasta, enquanto você acompanha tud
 ## Funções
 
 - Abas de terminal reais (ConPTY no Windows) para cada agente, com cores próprias, restauradas ao reabrir.
-- **Conversa integrada**: perguntas e respostas entre agentes em tempo real.
+- **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real, e o
+  **Mapa** (em texto de terminal) de quem está conversando com quem agora.
 - **Enviar para**: aba ativa, todos os agentes abertos ou **mesas** (vários agentes em rodadas, com síntese final).
 - Explorador de arquivos do workspace: clique insere `@arquivo` na mensagem, duplo clique abre no sistema.
 - Anexos por botão, arrastar e soltar ou colar imagem (Ctrl+V).

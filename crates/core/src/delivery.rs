@@ -117,6 +117,11 @@ impl<T> Mailbox<T> {
         self.items.is_empty()
     }
 
+    /// As mensagens na ordem da fila.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.items.iter().map(|(_, item)| item)
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }

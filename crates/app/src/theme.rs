@@ -64,7 +64,10 @@ pub const TOPBAR_H: f32 = 38.0;
 pub const SIDEBAR_DEFAULT_W: f32 = 220.0;
 pub const SIDEBAR_MIN_W: f32 = 150.0;
 pub const SIDEBAR_MAX_W: f32 = 480.0;
-pub const BOTTOM_DEFAULT_H: f32 = 310.0;
+/// Barra lateral direita (Conversa integrada + compositor): não recolhe, só muda de largura.
+pub const RIGHT_DEFAULT_W: f32 = 380.0;
+pub const RIGHT_MIN_W: f32 = 300.0;
+pub const RIGHT_MAX_W: f32 = 640.0;
 
 const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)

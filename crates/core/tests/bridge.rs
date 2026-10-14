@@ -776,3 +776,52 @@ fn a_plain_terminal_waits_until_the_end_instead_of_getting_typed_answers() {
     assert_eq!((st, b["answer"].as_str()), (200, Some("resposta")));
     env.core.shutdown();
 }
+
+#[cfg(unix)]
+#[test]
+fn the_conversation_map_follows_questions_live() {
+    let env = start(&[("claude", "echo x")]);
+    env.core.enable_tab_delivery();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    assert_eq!(env.core.conversation_map().pending, []);
+    let claude = tab_token(&env, "claude");
+    let asking = std::thread::spawn({
+        let host = host.clone();
+        move || http(port, "POST", "/ask", &host, &claude, &json!({"to": "claude@dev", "message": "x", "wait": 1}).to_string())
+    });
+    let d = next_delivery(&env);
+    let map = env.core.conversation_map();
+    assert_eq!(map.pending.len(), 1);
+    let p = &map.pending[0];
+    assert_eq!((p.id, p.asker.as_str(), p.target.as_str(), p.detached), (d.request, "claude", "claude@dev", false));
+    assert!(map.instances.contains(&"claude@dev".to_owned()));
+    // Depois do 202, a pergunta continua no mapa, marcada como resposta atrasada.
+    assert_eq!(asking.join().expect("thread").0, 202);
+    assert!(env.core.conversation_map().pending[0].detached);
+    let dev = tab_token(&env, "claude@dev");
+    let reply = json!({"to": "", "message": "ok", "reply_to": d.request}).to_string();
+    assert_eq!(http(port, "POST", "/ask", &host, &dev, &reply).0, 200);
+    assert_eq!(env.core.conversation_map().pending, []);
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_headless_question_shows_in_the_map_while_it_runs() {
+    let env = std::sync::Arc::new(start(&[("claude", "cat >/dev/null; sleep 1; echo pronto")]));
+    let e2 = env.clone();
+    let asking = std::thread::spawn(move || ask(&e2, json!({"from": "shell", "to": "claude", "message": "oi"})));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let seen = loop {
+        let h = env.core.conversation_map().headless;
+        if !h.is_empty() || std::time::Instant::now() > deadline {
+            break h;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(seen.iter().map(|a| (a.asker.as_str(), a.target.as_str())).collect::<Vec<_>>(), [("shell", "claude")]);
+    assert_eq!(asking.join().expect("thread").0, 200);
+    assert!(env.core.conversation_map().headless.is_empty(), "some quando a resposta chega");
+    env.core.shutdown();
+}

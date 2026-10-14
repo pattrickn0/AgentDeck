@@ -1,4 +1,5 @@
-//! `#composer`: "Enviar para", "Rodadas", chips de anexo, campo de texto e botões.
+//! Compositor (embaixo da barra lateral direita): "Enviar para", "Rodadas", chips de anexo, campo
+//! de texto na largura toda e, embaixo dele, microfone/anexo à esquerda e Enviar à direita.
 
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Align2, Color32, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2};
@@ -15,11 +16,11 @@ const ROUNDS_ID: &str = "composer-rounds";
 
 const INPUT_FONT: f32 = 13.5;
 const INPUT_LINE: f32 = INPUT_FONT * theme::LINE_HEIGHT;
-const INPUT_MAX_H: f32 = 260.0;
+const INPUT_MAX_H: f32 = 200.0;
 const SELECT_H: f32 = 23.0;
 const CHIP_H: f32 = 21.0;
 const BTN: f32 = 31.0;
-const PLACEHOLDER: &str = "Escreva um comando ou mensagem…  (Enter envia, Shift+Enter quebra linha)";
+const PLACEHOLDER: &str = "Mensagem…  (Enter envia, Shift+Enter quebra linha)";
 
 struct Layout {
     opts_h: f32,
@@ -82,7 +83,8 @@ fn layout(deck: &Deck, painter: &egui::Painter, rect: Rect) -> Layout {
     // ---------- #composer-opts (flex-wrap, gap 14px) ----------
     let lw = text_w(painter, "Enviar para", label_font.clone());
     let select_label = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(lw, SELECT_H));
-    let sw = select_width(deck, painter);
+    // A largura da maior opção, mas sem passar da barra (o texto é cortado com "…").
+    let sw = select_width(deck, painter).min(x1 - select_label.max.x - 6.0).max(60.0);
     let select = Rect::from_min_size(Pos2::new(select_label.max.x + 6.0, y), Vec2::new(sw, SELECT_H));
     let mut cx = select.max.x + 14.0;
     let mut line_top = y;
@@ -115,46 +117,26 @@ fn layout(deck: &Deck, painter: &egui::Painter, rect: Rect) -> Layout {
     let opts_h = line_top + SELECT_H - y;
     y += opts_h + 6.0;
 
-    // ---------- #composer-row ----------
+    // ---------- Moldura: campo de texto na largura toda; botões numa linha embaixo dele ----------
     let recording = deck.is_recording();
-    let send_w = text_w(painter, deck.send_label(), theme::ui_semibold(12.0)) + 26.0;
-    let mut right = x1 - 1.0 - 6.0; // borda + padding
-    let send = Rect::from_min_size(Pos2::new(right - send_w, 0.0), Vec2::new(send_w, BTN));
-    right = send.min.x - 8.0;
-    let attach = Rect::from_min_size(Pos2::new(right - BTN, 0.0), Vec2::splat(BTN));
-    right = attach.min.x - 8.0;
-    let mic = Rect::from_min_size(Pos2::new(right - BTN, 0.0), Vec2::splat(BTN));
-    right = mic.min.x;
+    let input_x = x0 + 1.0 + 6.0;
+    let input_w = (x1 - 1.0 - 6.0 - input_x).max(40.0);
+    let ih = input_height(deck, painter, input_w);
+    let input = Rect::from_min_size(Pos2::new(input_x, y + 1.0 + 2.0), Vec2::new(input_w, ih));
+    let by = input.max.y + 4.0;
+    let mut left = input_x;
     let cancel = recording.then(|| {
-        let r = Rect::from_min_size(Pos2::new(right - 4.0 - BTN, 0.0), Vec2::splat(BTN));
-        right = r.min.x;
+        let r = Rect::from_min_size(Pos2::new(left, by), Vec2::splat(BTN));
+        left = r.max.x + 6.0;
         r
     });
-    right -= 8.0;
-    let input_x = x0 + 1.0 + 6.0;
-    let input_w = (right - input_x).max(40.0);
-    let ih = input_height(deck, painter, input_w);
-    let inner_h = ih.max(BTN);
-    let row = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(x1 - x0, inner_h + 12.0 + 2.0));
-    let bottom = row.max.y - 1.0 - 6.0;
-    let at_bottom = |r: Rect| Rect::from_min_size(Pos2::new(r.min.x, bottom - BTN), r.size());
-    let input = Rect::from_min_size(Pos2::new(input_x, bottom - ih), Vec2::new(input_w, ih));
+    let mic = Rect::from_min_size(Pos2::new(left, by), Vec2::splat(BTN));
+    let attach = Rect::from_min_size(Pos2::new(mic.max.x + 6.0, by), Vec2::splat(BTN));
+    let send_w = text_w(painter, deck.send_label(), theme::ui_semibold(12.0)) + 26.0;
+    let send = Rect::from_min_size(Pos2::new(input.max.x - send_w, by), Vec2::new(send_w, BTN));
+    let row = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, send.max.y + 6.0 + 1.0));
     let total_h = (row.max.y + 10.0) - rect.min.y;
-    Layout {
-        opts_h,
-        select,
-        select_label,
-        rounds_label,
-        rounds,
-        chips,
-        row,
-        input,
-        cancel: cancel.map(at_bottom),
-        mic: at_bottom(mic),
-        attach: at_bottom(attach),
-        send: at_bottom(send),
-        total_h,
-    }
+    Layout { opts_h, select, select_label, rounds_label, rounds, chips, row, input, cancel, mic, attach, send, total_h }
 }
 
 /// Altura total do compositor para a largura dada.
@@ -240,7 +222,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Rect {
         bg = theme::RED;
         fg = theme::WHITE;
         // animation: blink 1.2s infinite
-        opacity = super::feed::blink_alpha(ctx.input(|i| i.time), 1.2);
+        opacity = super::right_panel::blink_alpha(ctx.input(|i| i.time), 1.2);
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
     if busy || !audio::AVAILABLE {

@@ -59,6 +59,11 @@ Nada pendente.
 
 ## 4. Interface
 
+- [ ] **Botão "quem conversa com quem"** (próximo passo do Mapa): contagem de mensagens por par de agentes na sessão, a partir do anel de recentes do `Deck` ampliado (hoje só guarda 60 s).
+- [ ] **Validar ao vivo no Windows a barra direita e o Mapa**: arrastar a borda, alternar Conversa/Mapa com duas abas conversando de verdade (estados na fila / digitada / 202), e se os símbolos `─│├└►●○×` alinham na fonte mono do Windows. Feito só por testes e capturas no Linux (Xvfb).
+- [ ] Atualizar `docs/screenshots/main.png` com a barra direita.
+- [ ] Janela estreita (perto do mínimo de 820 px): com muitas abas, as de trás encolhem até virar só o ponto colorido.
+
 - [ ] Emojis monocromáticos (limitação do egui). Avaliar fonte de emoji colorida ou renderização própria.
 - [ ] Select, spinner e tooltips desenhados à mão imitando o Chromium; desfoque atrás do overlay de arrastar é aproximado.
 - [ ] Animação suave (hover) nos botões do estado vazio.
@@ -91,7 +96,7 @@ Nada pendente.
 - [ ] Só o Claude abre com o comando `ask-agent` pré-autorizado (`--allowedTools`). No Antigravity funcionou sem aprovação no modo atual (`accept-edits`), mas outros agentes (codex, opencode, gemini, aider, goose, copilot, q, interpreter) não foram testados e podem pedir aprovação na própria aba.
 - [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
 - [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
-- [ ] **Resposta atrasada ainda conta como espera bloqueante na detecção de ciclos.** Quando o `ask-agent` volta com 202, quem perguntou fica livre, mas a pergunta segue em `exchange` como se ele estivesse bloqueado. Isso gera falsos "ciclo de espera" (409) por até 10 min (ex.: claude espera claude@dev, que espera antigravity; antigravity não consegue perguntar ao claude). Marcar a pergunta como "destacada" e ignorá-la em `reaches`, mantendo-a na profundidade. Também falta `ask-agent --cancel <n>` para desistir de uma pergunta.
+- [ ] Falta `ask-agent --cancel <n>` para desistir de uma pergunta (hoje ela expira em 10 min).
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
 - [ ] No headless, gemini (`--approval-mode yolo`), aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] As mesas (`table.rs`) e a ponte sem interface ainda usam o modo headless: não aparecem nas abas.
@@ -99,6 +104,12 @@ Nada pendente.
 - [ ] Não há como o usuário dar cargo a uma aba aberta à mão (hoje só duplicatas ganham nome, tipo `claude@main@ana`).
 
 ## Concluído
+
+- [x] **Barra lateral direita fixa com Conversa e Mapa.**
+  - A Conversa integrada, o compositor e o menu "Enviar para" saíram de baixo dos terminais para uma barra à direita que não recolhe e tem largura ajustável (salva em `Config.right_panel_width`; `bottomHeight`/`feedCollapsed` antigos são ignorados).
+  - Compositor redesenhado para a barra estreita; menus ficam dentro da tela e rolam quando não cabem (corrigido também o `constrain` do menu "+", que fechava o menu no clique).
+  - **Mapa** em texto de terminal com quem conversa com quem agora (`Core::conversation_map` + `agent_map::render_map`), alargando a barra sobre o terminal sem redimensioná-lo.
+  - Uma pergunta com resposta atrasada (202) deixou de causar falsos "ciclo de espera".
 
 - [x] **Segurança da ponte e das abas.**
   - A colagem nas abas remove ESC e caracteres de controle: uma mensagem não fecha mais o *bracketed paste* para virar teclas em outra aba.

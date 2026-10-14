@@ -18,8 +18,9 @@ pub struct Config {
     // --- Layout (novidade da versão Rust; a versão Electron guardava só em CSS) ---
     pub sidebar_width: f32,
     pub sidebar_collapsed: bool,
-    pub bottom_height: f32,
-    pub feed_collapsed: bool,
+    /// Largura da barra lateral direita (Conversa integrada + compositor); 0 = padrão. Ela não
+    /// recolhe. (Substitui `bottomHeight`/`feedCollapsed` do antigo painel de baixo, ignorados ao ler.)
+    pub right_panel_width: f32,
     pub window_width: f32,
     pub window_height: f32,
     /// Host da API do Ollama (padrão `127.0.0.1:11434`, ou `OLLAMA_HOST`).
@@ -38,8 +39,7 @@ impl Default for Config {
             active_tab_index: -1,
             sidebar_width: 220.0,
             sidebar_collapsed: false,
-            bottom_height: 310.0,
-            feed_collapsed: false,
+            right_panel_width: 0.0,
             window_width: 1280.0,
             window_height: 860.0,
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
@@ -152,6 +152,18 @@ mod tests {
         assert_eq!(back.open_tabs, cfg.open_tabs);
         assert_eq!(back.sidebar_width, 300.0);
         assert_eq!(back.workspace, cfg.workspace);
+    }
+
+    #[test]
+    fn the_old_bottom_panel_keys_are_ignored() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let cfg = Config::from_json_over_defaults(r#"{"bottomHeight": 420, "feedCollapsed": true, "sidebarWidth": 250}"#, &p);
+        assert_eq!((cfg.sidebar_width, cfg.right_panel_width), (250.0, 0.0));
+        let cfg = Config::from_json_over_defaults(r#"{"rightPanelWidth": 410}"#, &p);
+        assert_eq!(cfg.right_panel_width, 410.0);
+        let text = serde_json::to_string(&cfg).expect("json");
+        assert!(!text.contains("bottomHeight") && !text.contains("feedCollapsed"));
     }
 
     #[test]

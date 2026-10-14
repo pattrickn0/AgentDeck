@@ -3,24 +3,37 @@
 
 mod composer;
 mod empty_state;
-mod feed;
+mod map;
 mod menus;
 mod overlay;
+mod right_panel;
 mod sidebar;
 mod topbar;
 
 use std::sync::Arc;
 
-use egui::{Align2, Color32, CursorIcon, FontId, Galley, Id, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Color32, CursorIcon, FontId, Galley, Id, Order, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 
-use crate::deck::Deck;
+use crate::deck::{Deck, RightView};
 use crate::terminal::view;
 use crate::theme;
 
 pub use composer::COMPOSER_INPUT_ID;
 
-/// Altura de `#feed-head` (padding 4px + botão com linha de 13px × 1,45 + padding 2px).
-pub const FEED_HEAD_H: f32 = 31.0;
+/// Largura mínima que sobra para o terminal ao lado da barra direita.
+const TERM_MIN_W: f32 = 360.0;
+
+/// Largura efetiva da barra direita e o máximo que a janela permite agora. O valor salvo não é
+/// alterado: se a janela crescer de novo, a barra volta à largura escolhida.
+pub fn right_width(saved: f32, win_w: f32, left: f32) -> (f32, f32) {
+    let max = theme::RIGHT_MAX_W.min(win_w * 0.5).min(win_w - left - TERM_MIN_W).max(260.0);
+    (saved.max(theme::RIGHT_MIN_W).min(max), max)
+}
+
+/// Largura da barra com o Mapa aberto: ela se alarga sobre o terminal (sem redimensioná-lo).
+pub fn map_width(right: f32, win_w: f32, left: f32) -> f32 {
+    right.max((win_w * 0.55).min(win_w - left - 240.0))
+}
 
 /// Desenha a janela inteira.
 pub fn draw(deck: &mut Deck, ui: &mut Ui) {
@@ -28,23 +41,18 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     ui.painter().rect_filled(full, 0.0, theme::BG);
     let ctx = ui.ctx().clone();
 
-    // ---------- Layout (flex do #app-wrap / #main-content) ----------
+    // ---------- Layout: barra esquerda | topbar + terminal | barra direita ----------
     let collapsed = deck.sidebar_collapsed;
     let sw = deck.sidebar_w.clamp(theme::SIDEBAR_MIN_W, theme::SIDEBAR_MAX_W);
-    let main_x = if collapsed { full.min.x } else { full.min.x + sw + 1.0 };
-    let main = Rect::from_min_max(Pos2::new(main_x, full.min.y), full.max);
-    let topbar = Rect::from_min_size(main.min, Vec2::new(main.width(), theme::TOPBAR_H));
-
-    let comp_h = composer::measure(deck, ui, main.width());
-    let min_h = (FEED_HEAD_H + comp_h + 60.0).max(200.0);
-    if !deck.feed_collapsed && deck.bottom_h < min_h {
-        deck.bottom_h = min_h; // ensureBottomMinHeight()
-    }
-    let bottom_h = if deck.feed_collapsed { FEED_HEAD_H + comp_h } else { deck.bottom_h };
-    let term_h = (main.height() - theme::TOPBAR_H - 1.0 - bottom_h).max(120.0);
-    let term_rect = Rect::from_min_size(Pos2::new(main.min.x, topbar.max.y), Vec2::new(main.width(), term_h));
-    let splitter_y = term_rect.max.y;
-    let bottom = Rect::from_min_size(Pos2::new(main.min.x, splitter_y + 1.0), Vec2::new(main.width(), bottom_h));
+    let left = if collapsed { 0.0 } else { sw + 1.0 };
+    let (right_w, right_max) = right_width(deck.right_w, full.width(), left);
+    let center = Rect::from_min_max(Pos2::new(full.min.x + left, full.min.y), Pos2::new(full.max.x - right_w - 1.0, full.max.y));
+    let topbar = Rect::from_min_size(center.min, Vec2::new(center.width(), theme::TOPBAR_H));
+    let term_rect = Rect::from_min_max(Pos2::new(center.min.x, topbar.max.y), center.max);
+    let map_open = deck.right_view == RightView::Mapa;
+    let panel_w = if map_open { map_width(right_w, full.width(), left) } else { right_w };
+    let panel = Rect::from_min_max(Pos2::new(full.max.x - panel_w, full.min.y), full.max);
+    let comp_h = composer::measure(deck, ui, panel_w);
 
     // ---------- Terminal ativo ----------
     draw_terminals(deck, ui, term_rect);
@@ -55,15 +63,32 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
         sidebar::draw(deck, ui, side);
     }
 
-    // ---------- Topbar, área inferior ----------
+    // ---------- Topbar ----------
     let menus = topbar::draw(deck, ui, topbar);
-    let composer_anchor = feed::draw_bottom(deck, ui, bottom, comp_h);
 
-    // ---------- Divisores (por último: ganham o clique na faixa de ±3px) ----------
+    // ---------- Divisores (por último no fundo: ganham o clique na faixa de ±3px) ----------
     if !collapsed {
         sidebar::splitter(deck, ui, Rect::from_min_size(Pos2::new(full.min.x + sw, full.min.y), Vec2::new(1.0, full.height())), full);
     }
-    feed::row_splitter(deck, ui, Rect::from_min_size(Pos2::new(main.min.x, splitter_y), Vec2::new(main.width(), 1.0)), full, comp_h);
+    if !map_open {
+        let line = Rect::from_min_size(Pos2::new(full.max.x - right_w - 1.0, full.min.y), Vec2::new(1.0, full.height()));
+        right_panel::splitter(deck, ui, line, full, right_w, right_max);
+    }
+
+    // ---------- Barra direita: numa camada acima, para o Mapa alargado cobrir o terminal sem que
+    // ele receba os cliques (o terminal só reage ao mouse quando está sob o ponteiro). ----------
+    let composer_anchor = egui::Area::new(Id::new("right-panel"))
+        .order(Order::Middle)
+        .fixed_pos(panel.min)
+        .show(&ctx, |ui| {
+            let (rect, _) = ui.allocate_exact_size(panel.size(), Sense::hover());
+            if map_open && panel_w > right_w {
+                shadow(ui.painter(), rect, 0, 0, 18, theme::rgba(0, 0, 0, 0.55));
+                ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(1.0, rect.height())), 0.0, theme::BORDER);
+            }
+            right_panel::draw_panel(deck, ui, rect, comp_h)
+        })
+        .inner;
 
     // ---------- Menus suspensos e overlay ----------
     menus::new_tab_menu(deck, &ctx, menus.new_tab_anchor);
@@ -207,4 +232,32 @@ pub fn paint_splitter(painter: &Painter, line: Rect, hot: bool, color: Color32) 
 /// Moldura arredondada com borda de 1px.
 pub fn frame(painter: &Painter, rect: Rect, radius: f32, fill: Color32, border: Color32) {
     painter.rect(rect, radius, fill, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_right_panel_keeps_room_for_the_terminal() {
+        // Janela larga: a largura salva vale (respeitando o mínimo e o máximo).
+        assert_eq!(right_width(380.0, 1280.0, 221.0), (380.0, 640.0));
+        assert_eq!(right_width(100.0, 1280.0, 221.0).0, theme::RIGHT_MIN_W);
+        assert_eq!(right_width(900.0, 1280.0, 221.0).0, 640.0);
+        // Janela estreita: o terminal fica com pelo menos TERM_MIN_W, e a barra com pelo menos 260.
+        let (w, max) = right_width(380.0, 820.0, 221.0);
+        assert_eq!((w, max), (260.0, 260.0));
+        assert!(820.0 - 221.0 - w >= 300.0);
+        let (w, _) = right_width(380.0, 1000.0, 0.0);
+        assert_eq!(w, 380.0);
+    }
+
+    #[test]
+    fn the_map_widens_the_panel_over_the_terminal() {
+        assert_eq!(map_width(380.0, 1280.0, 221.0), 1280.0 * 0.55);
+        // Nunca encolhe a barra, e deixa ao menos 240px de terminal visível.
+        assert_eq!(map_width(260.0, 820.0, 221.0), 820.0 - 221.0 - 240.0);
+        assert_eq!(map_width(380.0, 820.0, 221.0), 380.0);
+        assert_eq!(map_width(640.0, 900.0, 221.0), 640.0);
+    }
 }

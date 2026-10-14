@@ -50,7 +50,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     let settings = Rect::from_min_max(Pos2::new(inner.max.x - 38.0, inner.min.y), inner.max);
     let ws_text = format!("📁 {}", deck.workspace.display());
     let ws_font = theme::ui(TAB_FONT);
-    let ws_max = ctx.content_rect().width() * 0.35;
+    // Relativo à topbar (não à janela): ela divide a largura com as duas barras laterais.
+    let ws_max = inner.width() * 0.30;
     let ws_w = (text_w(&painter, &ws_text, ws_font.clone()) + 28.0).min(ws_max);
     let ws_rect = Rect::from_min_max(Pos2::new(settings.min.x - ws_w, inner.min.y), Pos2::new(settings.min.x, inner.max.y));
 

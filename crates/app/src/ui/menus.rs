@@ -6,6 +6,14 @@ use super::{dot, frame, galley_trunc, place, shadow, text_in, text_w};
 use crate::deck::Deck;
 use crate::theme;
 
+/// Posição do canto superior esquerdo para um menu `size` não sair da tela pela direita/esquerda.
+/// (Não usar `Area::constrain`: ele desloca o menu depois que `closes_on_outside` já calculou o
+/// retângulo, e o clique num item passa a contar como "fora", fechando o menu antes de escolher.)
+fn keep_on_screen(ctx: &egui::Context, pos: Pos2, size: Vec2) -> Pos2 {
+    let screen = ctx.content_rect();
+    Pos2::new(pos.x.min(screen.max.x - size.x - 4.0).max(screen.min.x + 4.0), pos.y)
+}
+
 /// Fecha o menu se houve clique fora dele e da âncora (`document.addEventListener('click')`).
 fn closes_on_outside(ctx: &egui::Context, menu: Rect, anchor: Rect) -> bool {
     ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu.contains(p) && !anchor.contains(p)))
@@ -29,10 +37,10 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     let w = (content_w + 8.0 + 2.0).max(180.0);
     let item_h = 13.0 * theme::LINE_HEIGHT + 16.0;
     let h = items.len() as f32 * item_h + 8.0 + 2.0;
-    let pos = Pos2::new(anchor.min.x, anchor.max.y);
+    let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x, anchor.max.y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut chosen = None;
-    Area::new(Id::new("new-tab-menu")).order(Order::Foreground).fixed_pos(pos).constrain(true).show(ctx, |ui| {
+    Area::new(Id::new("new-tab-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
         shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
@@ -188,45 +196,56 @@ pub fn target_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         .fold(anchor.width(), f32::max);
     let row_h = 20.0;
     let n_rows: usize = groups.iter().map(|g| 1 + g.options.len()).sum();
-    let h = n_rows as f32 * row_h + 2.0;
-    // Abre para cima se não couber abaixo (o seletor fica no rodapé da janela).
+    let content_h = n_rows as f32 * row_h + 2.0;
+    // Abre para cima se não couber abaixo (o seletor fica no rodapé da janela); se não couber
+    // inteiro nem acima, a lista rola.
     let screen = ctx.content_rect();
-    let pos =
-        if anchor.max.y + h > screen.max.y { Pos2::new(anchor.min.x, anchor.min.y - h) } else { Pos2::new(anchor.min.x, anchor.max.y) };
+    let below = screen.max.y - anchor.max.y - 4.0;
+    let above = anchor.min.y - screen.min.y - 4.0;
+    let (h, up) = if content_h <= below { (content_h, false) } else { (content_h.min(above.max(below)), above > below) };
+    let w = w.min(screen.width() - 8.0);
+    let pos = Pos2::new(anchor.min.x, if up { anchor.min.y - h } else { anchor.max.y });
+    let pos = keep_on_screen(ctx, pos, Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut chosen = None;
     let current = deck.target.clone();
-    Area::new(Id::new("target-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-        let p = ui.painter();
-        shadow(p, rect, 4, 4, 12, theme::rgba(0, 0, 0, 0.5));
-        frame(p, rect, 4.0, theme::PANEL_2, theme::BORDER);
-        let mut y = rect.min.y + 1.0;
-        for g in &groups {
-            let gr = Rect::from_min_size(Pos2::new(rect.min.x + 1.0, y), Vec2::new(w - 2.0, row_h));
-            p.rect_filled(gr, 0.0, theme::PANEL);
-            text_in(p, gr.shrink2(Vec2::new(6.0, 0.0)), Align2::LEFT_CENTER, &g.label, group_font.clone(), theme::MUTED);
-            y += row_h;
-            for o in &g.options {
-                let r = Rect::from_min_size(Pos2::new(rect.min.x + 1.0, y), Vec2::new(w - 2.0, row_h));
+    Area::new(Id::new("target-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
+        let (outer, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
+        shadow(ui.painter(), outer, 4, 4, 12, theme::rgba(0, 0, 0, 0.5));
+        frame(ui.painter(), outer, 4.0, theme::PANEL_2, theme::BORDER);
+        let mut list = ui.new_child(egui::UiBuilder::new().max_rect(outer.shrink(1.0)));
+        list.set_clip_rect(outer.shrink(1.0));
+        egui::ScrollArea::vertical().id_salt("target-menu-scroll").auto_shrink([false, false]).show(&mut list, |ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w - 2.0, content_h - 2.0), Sense::hover());
+            let rect = rect.expand(1.0);
+            let p = ui.painter();
+            let mut y = rect.min.y + 1.0;
+            for g in &groups {
+                let gr = Rect::from_min_size(Pos2::new(rect.min.x + 1.0, y), Vec2::new(w - 2.0, row_h));
+                p.rect_filled(gr, 0.0, theme::PANEL);
+                text_in(p, gr.shrink2(Vec2::new(6.0, 0.0)), Align2::LEFT_CENTER, &g.label, group_font.clone(), theme::MUTED);
                 y += row_h;
-                let resp = super::clickable(ui, r, Id::new(("target-opt", &o.value)));
-                let selected = o.value == current;
-                let (bg, fg) = if resp.hovered() {
-                    (theme::rgba(79, 140, 247, 0.85), theme::WHITE)
-                } else if selected {
-                    (theme::BORDER, theme::TEXT)
-                } else {
-                    (theme::PANEL_2, theme::SELECT_TEXT)
-                };
-                p.rect_filled(r, 0.0, bg);
-                let g = galley_trunc(p, &o.label, opt_font.clone(), fg, r.width() - 24.0);
-                place(p, Rect::from_min_max(Pos2::new(r.min.x + 18.0, r.min.y), r.max), Align2::LEFT_CENTER, g, fg);
-                if resp.clicked() {
-                    chosen = Some(o.value.clone());
+                for o in &g.options {
+                    let r = Rect::from_min_size(Pos2::new(rect.min.x + 1.0, y), Vec2::new(w - 2.0, row_h));
+                    y += row_h;
+                    let resp = super::clickable(ui, r, Id::new(("target-opt", &o.value)));
+                    let selected = o.value == current;
+                    let (bg, fg) = if resp.hovered() {
+                        (theme::rgba(79, 140, 247, 0.85), theme::WHITE)
+                    } else if selected {
+                        (theme::BORDER, theme::TEXT)
+                    } else {
+                        (theme::PANEL_2, theme::SELECT_TEXT)
+                    };
+                    p.rect_filled(r, 0.0, bg);
+                    let g = galley_trunc(p, &o.label, opt_font.clone(), fg, r.width() - 24.0);
+                    place(p, Rect::from_min_max(Pos2::new(r.min.x + 18.0, r.min.y), r.max), Align2::LEFT_CENTER, g, fg);
+                    if resp.clicked() {
+                        chosen = Some(o.value.clone());
+                    }
                 }
             }
-        }
+        });
     });
     if let Some(v) = chosen {
         deck.set_target(v);

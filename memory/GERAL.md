@@ -19,7 +19,8 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 
 Terminal desktop nativo em Rust (winit + egui). São três executáveis, que precisam ficar **na mesma pasta**:
 
-- `commanddeck` (crate `app`): a janela, as abas de terminal, a Conversa integrada e o compositor;
+- `commanddeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (Conversa integrada,
+  Mapa de agentes e compositor);
 - `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si;
 - `ollama-agent` (crate `cli`): o agente local com ferramentas, que roda numa aba.
 
@@ -84,6 +85,19 @@ As instruções da ponte chegam a cada agente por um canal diferente:
 
 Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer aba.
 
+### A janela
+
+| Área | O que tem |
+| :-- | :-- |
+| Barra esquerda | árvore do workspace (recolhe com Ctrl+B) |
+| Centro | abas e o terminal da aba ativa |
+| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, as abas **Conversa** (com o número de mensagens novas enquanto você olha o mapa) e **Mapa**; embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar) |
+
+O **Mapa** mostra, em texto de terminal, quem está conversando com quem agora: a árvore de quem pergunta a quem
+(pergunta na fila, digitada, com resposta atrasada ou em modo headless, com o tempo de espera), as respostas a
+caminho, a mesa em andamento, as conversas concluídas no último minuto (esmaecidas) e os agentes sem conversa.
+Com o Mapa aberto, a barra se alarga sobre o terminal (sem redimensioná-lo). Clicar num agente abre a aba dele.
+
 ### Limites e proteções
 
 | Regra | Valor |
@@ -113,6 +127,7 @@ ela dura.
 - Mandar uma mensagem para a aba ativa, para todos os agentes abertos ou para uma **mesa** (vários agentes em
   rodadas, com síntese no fim).
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
+- Ver no **Mapa** quem está conversando com quem neste momento.
 - Citar arquivos do workspace (`@arquivo`), anexar arquivos e imagens, ditar por voz (whisper.cpp local).
 
 **Como agente, dentro de uma aba:**

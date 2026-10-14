@@ -16,6 +16,7 @@ use egui::Color32;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+use crate::agent_map::{self, AnswerInFlight, Link, LinkState, NodeState, Recent, Snapshot, TableInfo};
 use crate::agents::Agents;
 use crate::audio;
 use crate::icons::IconCache;
@@ -45,10 +46,21 @@ pub enum Action {
     CopyText(String),
 }
 
-/// Pergunta de outro agente esperando para ser digitada no terminal da aba.
+/// Mensagem de outro agente esperando para ser digitada no terminal da aba.
 struct Queued {
     request: u64,
     prompt: String,
+    /// Quem mandou (quem perguntou; ou quem respondeu, se `answer`).
+    from: String,
+    /// É uma resposta atrasada a uma pergunta desta aba, não uma pergunta nova.
+    answer: bool,
+}
+
+/// O que a barra lateral direita mostra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightView {
+    Conversa,
+    Mapa,
 }
 
 pub struct Tab {
@@ -130,10 +142,21 @@ pub struct Deck {
     // Layout
     pub sidebar_w: f32,
     pub sidebar_collapsed: bool,
-    pub bottom_h: f32,
-    pub feed_collapsed: bool,
     pub sidebar_dragging: Option<(f32, f32)>,
-    pub row_dragging: Option<(f32, f32, bool)>,
+    /// Largura pedida da barra direita (a efetiva depende da janela; ver `ui::right_width`).
+    pub right_w: f32,
+    pub right_dragging: Option<(f32, f32)>,
+    pub right_view: RightView,
+
+    // Mapa de conversas
+    /// Conversas concluídas há pouco (o "Limpar" da conversa não apaga).
+    recent: VecDeque<Recent>,
+    /// Mesa em andamento: participantes, rodada ("1/2") e quem está falando.
+    table_agents: Vec<String>,
+    table_round: String,
+    table_speaking: Option<String>,
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=map-demo`): mapa fictício para capturas de tela.
+    pub debug_map: Option<Snapshot>,
 
     // Árvore
     pub workspace: PathBuf,
@@ -228,10 +251,15 @@ impl Deck {
                 theme::SIDEBAR_DEFAULT_W
             },
             sidebar_collapsed: cfg.sidebar_collapsed,
-            bottom_h: if cfg.bottom_height > 0.0 { cfg.bottom_height } else { theme::BOTTOM_DEFAULT_H },
-            feed_collapsed: cfg.feed_collapsed,
             sidebar_dragging: None,
-            row_dragging: None,
+            right_w: if cfg.right_panel_width > 0.0 { cfg.right_panel_width } else { theme::RIGHT_DEFAULT_W },
+            right_dragging: None,
+            right_view: RightView::Conversa,
+            recent: VecDeque::new(),
+            table_agents: Vec::new(),
+            table_round: String::new(),
+            table_speaking: None,
+            debug_map: None,
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
             feed: Vec::new(),
             thinking: HashMap::new(),
@@ -433,6 +461,9 @@ impl Deck {
 
     fn finish_table(&mut self) {
         self.table_running = false;
+        self.table_agents.clear();
+        self.table_round.clear();
+        self.table_speaking = None;
     }
 
     /// Temporizadores (setTimeout do renderer).
@@ -638,7 +669,7 @@ impl Deck {
             match found {
                 // Num terminal comum o texto seria executado como comando (a ponte já evita isso).
                 Some(i) if self.tabs[i].alive && self.tabs[i].kind != "shell" => {
-                    self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt })
+                    self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, from: d.from, answer: true })
                 }
                 _ => log::info!("resposta atrasada para \"{id}\" descartada: a aba não está aberta"),
             }
@@ -668,7 +699,7 @@ impl Deck {
         if !self.tabs[idx].alive {
             self.start(idx); // o processo tinha encerrado: sobe de novo para receber a pergunta
         }
-        self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt });
+        self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, from: d.from, answer: false });
     }
 
     /// O que a regra de entrega precisa saber da aba.
@@ -846,12 +877,11 @@ impl Deck {
 
     pub fn persist_layout_now(&mut self) {
         self.layout_persist_at = None;
-        let (sw, sc, bh, fc) = (self.sidebar_w, self.sidebar_collapsed, self.bottom_h, self.feed_collapsed);
+        let (sw, sc, rw) = (self.sidebar_w, self.sidebar_collapsed, self.right_w);
         self.core.update_config(|c| {
             c.sidebar_width = sw;
             c.sidebar_collapsed = sc;
-            c.bottom_height = bh;
-            c.feed_collapsed = fc;
+            c.right_panel_width = rw;
         });
     }
 
@@ -1095,6 +1125,7 @@ impl Deck {
     // ------------------------------------------------------------------
 
     pub fn add_feed(&mut self, e: FeedEntry) {
+        self.track_for_map(&e);
         if let Some(from) = &e.from {
             if let Some(id) = self.thinking.remove(from) {
                 self.feed.retain(|f| f.id != id);
@@ -1120,9 +1151,107 @@ impl Deck {
         if self.feed_near_bottom {
             self.feed_scroll_to_bottom = true;
         }
-        if self.feed_collapsed && e.kind != FeedKind::Thinking {
+        if self.right_view == RightView::Mapa && e.kind != FeedKind::Thinking {
             self.unseen += 1;
         }
+    }
+
+    /// Alimenta o mapa de conversas a partir de uma entrada da conversa (antes de virar `FeedItem`).
+    fn track_for_map(&mut self, e: &FeedEntry) {
+        match e.kind {
+            // Resposta ou falha de uma pergunta entre dois agentes (um destinatário só).
+            FeedKind::Answer | FeedKind::Error => {
+                if let (Some(from), Some(to)) = (&e.from, &e.to) {
+                    if !to.contains(" + ") {
+                        let at_ms = commanddeck_core::util::now_ms();
+                        self.recent.push_back(Recent { from: from.clone(), to: to.clone(), ok: e.kind == FeedKind::Answer, at_ms });
+                        while self.recent.len() > 50
+                            || self.recent.front().is_some_and(|r| at_ms.saturating_sub(r.at_ms) > agent_map::RECENT_MS)
+                        {
+                            self.recent.pop_front();
+                        }
+                    }
+                }
+            }
+            // Mesa: "rodada 1/2…" de quem vai falar.
+            FeedKind::Thinking if self.table_running => {
+                if let Some(round) = e.text.strip_prefix("rodada ") {
+                    self.table_round = round.trim_end_matches('…').to_owned();
+                    self.table_speaking = e.from.clone();
+                }
+            }
+            FeedKind::Table if self.table_running => self.table_speaking = None,
+            _ => {}
+        }
+    }
+
+    /// Troca o que a barra direita mostra (voltar à Conversa zera as não vistas).
+    pub fn set_right_view(&mut self, view: RightView) {
+        self.right_view = view;
+        if view == RightView::Conversa {
+            self.unseen = 0;
+        }
+    }
+
+    /// Quem está conversando com quem agora, para o mapa: o core sabe as perguntas pendentes; a
+    /// interface sabe as filas das abas, quem está ocupado, as conversas recentes e a mesa.
+    pub fn map_snapshot(&self) -> Snapshot {
+        if let Some(demo) = &self.debug_map {
+            return demo.clone();
+        }
+        let cm = self.core.conversation_map();
+        let nodes = self
+            .tabs
+            .iter()
+            .map(|t| {
+                let state = if !t.alive {
+                    NodeState::Ended
+                } else if t.busy || !t.pending_enter.is_empty() {
+                    NodeState::Busy
+                } else {
+                    NodeState::Idle
+                };
+                (t.ident.id(), state)
+            })
+            .collect();
+        let queued = |target: &str, request: u64| -> Option<usize> {
+            let tab = self.tabs.iter().find(|t| t.ident.id() == target)?;
+            tab.queue.iter().filter(|q| !q.answer).position(|q| q.request == request).map(|i| i + 1)
+        };
+        let mut links: Vec<Link> = cm
+            .pending
+            .iter()
+            .map(|p| {
+                let state =
+                    if p.detached { LinkState::Detached } else { queued(&p.target, p.id).map_or(LinkState::Typed, LinkState::Queued) };
+                Link { id: Some(p.id), from: p.asker.clone(), to: p.target.clone(), since_ms: p.since_ms, state }
+            })
+            .collect();
+        links.extend(cm.headless.iter().map(|h| Link {
+            id: None,
+            from: h.asker.clone(),
+            to: h.target.clone(),
+            since_ms: h.since_ms,
+            state: LinkState::Headless,
+        }));
+        let answers = self
+            .tabs
+            .iter()
+            .flat_map(|t| {
+                let to = t.ident.id();
+                t.queue
+                    .iter()
+                    .filter(|q| q.answer)
+                    .map(move |q| AnswerInFlight { request: q.request, from: q.from.clone(), to: to.clone() })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let table = self.table_running.then(|| TableInfo {
+            round: self.table_round.clone(),
+            agents: self.table_agents.clone(),
+            speaking: self.table_speaking.clone(),
+        });
+        Snapshot { nodes, links, answers, recent: self.recent.iter().cloned().collect(), table }
     }
 
     pub fn system(&mut self, text: impl Into<String>) {
@@ -1132,14 +1261,6 @@ impl Deck {
     pub fn clear_feed(&mut self) {
         self.feed.clear();
         self.thinking.clear();
-    }
-
-    pub fn toggle_feed(&mut self) {
-        self.feed_collapsed = !self.feed_collapsed;
-        if !self.feed_collapsed {
-            self.unseen = 0;
-        }
-        self.persist_layout();
     }
 
     fn debug_feed(&mut self) {
@@ -1316,10 +1437,11 @@ impl Deck {
             let rounds = util::clamp_rounds(&self.rounds);
             let files = std::mem::take(&mut self.attachments);
             self.input.clear();
-            if self.feed_collapsed {
-                self.toggle_feed();
-            }
+            self.set_right_view(RightView::Conversa);
             self.table_running = true;
+            self.table_agents = agents.clone();
+            self.table_round.clear();
+            self.table_speaking = None;
             let req = TableRequest { task: text, agents, rounds, attachments: files };
             self.spawn_bg("table", move |core| {
                 core.run_table(req);

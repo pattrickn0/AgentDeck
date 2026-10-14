@@ -1,65 +1,137 @@
-//! `#bottom`: cabeçalho da "Conversa integrada", mensagens e divisor horizontal.
+//! Barra lateral direita (fixa, não recolhe): abas "Conversa | Mapa", faixa de download,
+//! mensagens da Conversa integrada (ou o mapa de agentes) e o compositor colado embaixo.
 
 use std::time::Duration;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use super::{composer, galley, paint_splitter, place, text_in, tip, FEED_HEAD_H};
-use crate::deck::{Deck, FeedItem};
+use super::{composer, galley, map, paint_splitter, place, text_in, tip};
+use crate::deck::{Deck, FeedItem, RightView};
 use crate::theme;
 use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
 
-/// Desenha `#bottom` (cabeçalho, conversa e compositor). Devolve a âncora do seletor "Enviar para".
-pub fn draw_bottom(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) -> Rect {
+/// Altura da faixa de download (abaixo do cabeçalho, só durante um download).
+const DOWNLOAD_H: f32 = 22.0;
+
+/// Desenha a barra em `rect` (cabeçalho da altura da topbar, corpo e compositor). Devolve a
+/// âncora do seletor "Enviar para".
+pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) -> Rect {
     ui.painter().rect_filled(rect, 0.0, theme::BG);
-    let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), FEED_HEAD_H));
+    let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), theme::TOPBAR_H));
     draw_head(deck, ui, head);
+    let mut body_top = head.max.y;
+    if let Some((p, _)) = &deck.download {
+        let strip = Rect::from_min_size(Pos2::new(rect.min.x, body_top), Vec2::new(rect.width(), DOWNLOAD_H));
+        ui.painter().rect_filled(strip, 0.0, theme::PANEL);
+        draw_download(ui, ui.painter(), p, strip, strip.min.x + 12.0, strip.max.x - 12.0);
+        body_top = strip.max.y;
+    }
     let comp = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - comp_h), rect.max);
-    if !deck.feed_collapsed {
-        let feed = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), Pos2::new(rect.max.x, comp.min.y));
-        if feed.height() > 1.0 {
-            draw_feed(deck, ui, feed);
+    let body = Rect::from_min_max(Pos2::new(rect.min.x, body_top), Pos2::new(rect.max.x, comp.min.y));
+    if body.height() > 1.0 {
+        match deck.right_view {
+            RightView::Conversa => draw_feed(deck, ui, body),
+            RightView::Mapa => map::draw(deck, ui, body),
         }
     }
     composer::draw(deck, ui, comp)
 }
 
+/// Uma aba do cabeçalho ("Conversa", "Mapa"). Devolve se foi clicada.
+fn head_tab(deck: &Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, label: &str, badge: u32, active: bool) -> bool {
+    let r = super::clickable(ui, rect, Id::new(("right-tab", label)));
+    if active || r.hovered() {
+        painter.rect_filled(rect.shrink2(Vec2::new(0.0, 6.0)), 6.0, if active { theme::PANEL_2 } else { theme::PANEL });
+    }
+    let font = theme::ui(13.0);
+    let color = if active || r.hovered() { theme::TEXT } else { theme::MUTED };
+    let g = galley(painter, label, font, color);
+    let lw = g.size().x;
+    let text_rect = Rect::from_min_size(Pos2::new(rect.min.x + 10.0, rect.min.y), Vec2::new(lw, rect.height()));
+    place(painter, text_rect, Align2::LEFT_CENTER, g, color);
+    if badge > 0 {
+        let txt = badge.to_string();
+        let g = galley(painter, &txt, theme::ui(11.0), theme::WHITE);
+        let size = Vec2::new(g.size().x + 12.0, 16.0);
+        let b = Rect::from_min_size(Pos2::new(text_rect.max.x + 6.0, rect.center().y - size.y / 2.0), size);
+        painter.rect_filled(b, 8.0, theme::ACCENT);
+        place(painter, b, Align2::CENTER_CENTER, g, theme::WHITE);
+    }
+    if active {
+        // Sublinhado na cor do agente ativo.
+        let line = Rect::from_min_max(Pos2::new(rect.min.x + 8.0, rect.max.y - 2.0), Pos2::new(rect.max.x - 8.0, rect.max.y));
+        painter.rect_filled(line, 1.0, deck.active_color());
+    }
+    r.clicked()
+}
+
+/// Largura de uma aba do cabeçalho.
+fn head_tab_w(painter: &egui::Painter, label: &str, badge: u32) -> f32 {
+    let mut w = galley(painter, label, theme::ui(13.0), theme::TEXT).size().x + 20.0;
+    if badge > 0 {
+        w += galley(painter, &badge.to_string(), theme::ui(11.0), theme::WHITE).size().x + 18.0;
+    }
+    w
+}
+
 fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
-    let font = theme::ui(13.0);
-    // padding: 4px 10px; botões com padding 2px 4px.
-    let label = format!("{} Conversa integrada", if deck.feed_collapsed { "▸" } else { "▾" });
-    let lw = galley(&painter, &label, font.clone(), theme::MUTED).size().x + 8.0;
-    let btn = Rect::from_min_size(Pos2::new(rect.min.x + 10.0, rect.min.y + 4.0), Vec2::new(lw, rect.height() - 8.0));
-    let r = super::clickable(ui, btn, Id::new("feed-toggle"));
-    text_in(&painter, btn, Align2::CENTER_CENTER, &label, font.clone(), if r.hovered() { theme::TEXT } else { theme::MUTED });
-    if r.clicked() {
-        deck.toggle_feed();
+    painter.rect_filled(rect, 0.0, theme::PANEL);
+    // Borda inferior alinhada à da topbar.
+    painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
+    let view = deck.right_view;
+    let unseen = deck.unseen;
+    let x = rect.min.x + 6.0;
+    let cw = head_tab_w(&painter, "Conversa", unseen);
+    let conversa = Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(cw, rect.height() - 1.0));
+    if head_tab(deck, ui, &painter, conversa, "Conversa", unseen, view == RightView::Conversa) {
+        deck.set_right_view(RightView::Conversa);
     }
-    // Badge de não vistas.
-    let mut left = btn.max.x + 8.0;
-    if deck.unseen > 0 {
-        let txt = deck.unseen.to_string();
-        let g = galley(&painter, &txt, theme::ui(11.0), theme::WHITE);
-        let size = Vec2::new(g.size().x + 14.0, 16.0);
-        let b = Rect::from_min_size(Pos2::new(btn.max.x + 8.0, rect.center().y - size.y / 2.0), size);
-        painter.rect_filled(b, 9.0, theme::ACCENT);
-        place(&painter, b, Align2::CENTER_CENTER, g, theme::WHITE);
-        left = b.max.x + 8.0;
+    let mw = head_tab_w(&painter, "Mapa", 0);
+    let mapa = Rect::from_min_size(Pos2::new(conversa.max.x + 2.0, rect.min.y), Vec2::new(mw, rect.height() - 1.0));
+    if head_tab(deck, ui, &painter, mapa, "Mapa", 0, view == RightView::Mapa) {
+        deck.set_right_view(RightView::Mapa);
     }
-    // "Limpar" à direita.
-    let cw = galley(&painter, "Limpar", font.clone(), theme::MUTED).size().x + 8.0;
-    let clear = Rect::from_min_size(Pos2::new(rect.max.x - 10.0 - cw, rect.min.y + 4.0), Vec2::new(cw, rect.height() - 8.0));
-    let r = super::clickable(ui, clear, Id::new("feed-clear"));
-    text_in(&painter, clear, Align2::CENTER_CENTER, "Limpar", font, if r.hovered() { theme::TEXT } else { theme::MUTED });
-    if r.clicked() {
-        deck.clear_feed();
+    // "Limpar" à direita, só na Conversa.
+    if view == RightView::Conversa {
+        let font = theme::ui(13.0);
+        let cw = galley(&painter, "Limpar", font.clone(), theme::MUTED).size().x + 8.0;
+        let clear = Rect::from_min_size(Pos2::new(rect.max.x - 10.0 - cw, rect.min.y + 6.0), Vec2::new(cw, rect.height() - 13.0));
+        let r = super::clickable(ui, clear, Id::new("feed-clear"));
+        text_in(&painter, clear, Align2::CENTER_CENTER, "Limpar", font, if r.hovered() { theme::TEXT } else { theme::MUTED });
+        if tip(r, "Limpar a conversa integrada").clicked() {
+            deck.clear_feed();
+        }
     }
-    // Barra de progresso de download (Whisper), entre o título e "Limpar".
-    if let Some((p, _)) = &deck.download {
-        draw_download(ui, &painter, p, rect, left, clear.min.x - 12.0);
+}
+
+/// Divisor arrastável na borda esquerda da barra (muda a largura; a barra nunca recolhe).
+/// `cur_w` é a largura efetiva agora; `max_w`, o máximo que a janela permite.
+pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect, cur_w: f32, max_w: f32) {
+    let hit = line.expand2(Vec2::new(3.0, 0.0));
+    let r = ui.interact(hit, Id::new("right-splitter"), Sense::drag());
+    if r.hovered() || r.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
+    if r.drag_started() {
+        if let Some(p) = r.interact_pointer_pos() {
+            deck.right_dragging = Some((p.x, cur_w));
+        }
+    }
+    if r.dragged() {
+        if let (Some((x0, w0)), Some(p)) = (deck.right_dragging, ui.input(|i| i.pointer.latest_pos())) {
+            deck.right_w = (w0 + x0 - p.x).clamp(theme::RIGHT_MIN_W, max_w.max(theme::RIGHT_MIN_W));
+        }
+    }
+    if r.drag_stopped() {
+        deck.right_dragging = None;
+        deck.persist_layout();
+    }
+    let hot = r.hovered() || deck.right_dragging.is_some();
+    let painter = ui.painter_at(full);
+    paint_splitter(&painter, line, hot, deck.active_color());
+    tip(r, "Arraste para redimensionar a conversa");
 }
 
 /// Texto "1,51 GB" / "648,5 MB" / "12 KB".
@@ -134,8 +206,9 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
         if error { theme::RED_TEXT } else { theme::TEXT },
     );
 
-    // Trilho 140×6 e preenchimento (indeterminado: trecho que vai e volta).
-    let track = Rect::from_min_size(Pos2::new(left + label_w + 8.0, cy - 3.0), Vec2::new(140.0, 6.0));
+    // Trilho ×6 (até 140px, menor na barra estreita) e preenchimento (indeterminado: vai e volta).
+    let track_w = ((limit - left) * 0.25).clamp(60.0, 140.0);
+    let track = Rect::from_min_size(Pos2::new(left + label_w + 8.0, cy - 3.0), Vec2::new(track_w, 6.0));
     painter.rect_filled(track, 3.0, theme::PANEL_2);
     let fill = match frac {
         Some(f) => Some(Rect::from_min_size(track.min, Vec2::new(track.width() * f, track.height()))),
@@ -288,47 +361,6 @@ fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
     painter.galley(Pos2::new(x, y + head_h + 4.0), body_g, body_color);
     let _: Color32 = body_color;
     r
-}
-
-/// `#splitter` entre terminal e conversa (arrastar redimensiona; expande se recolhida).
-pub fn row_splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect, comp_h: f32) {
-    let hit = line.expand2(Vec2::new(0.0, 3.0));
-    let r = ui.interact(hit, Id::new("row-splitter"), Sense::drag());
-    if r.hovered() || r.dragged() {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
-    }
-    let min_h = (super::FEED_HEAD_H + comp_h + 60.0).max(200.0);
-    if r.drag_started() {
-        if let Some(p) = r.interact_pointer_pos() {
-            let start_h = if deck.feed_collapsed { min_h } else { deck.bottom_h };
-            deck.row_dragging = Some((p.y, start_h, deck.feed_collapsed));
-        }
-    }
-    if r.dragged() {
-        if let (Some((y0, h0, _)), Some(p)) = (deck.row_dragging, ui.input(|i| i.pointer.latest_pos())) {
-            let mut apply = true;
-            if deck.feed_collapsed {
-                if y0 - p.y > 10.0 {
-                    deck.toggle_feed();
-                } else {
-                    apply = false;
-                }
-            }
-            if apply {
-                let win_h = full.height();
-                let max_h = min_h.max((win_h * 0.75).min(win_h - 140.0));
-                deck.bottom_h = (h0 + y0 - p.y).clamp(min_h, max_h);
-            }
-        }
-    }
-    if r.drag_stopped() {
-        deck.row_dragging = None;
-        deck.persist_layout();
-    }
-    let hot = r.hovered() || deck.row_dragging.is_some();
-    let painter = ui.painter_at(full);
-    paint_splitter(&painter, line, hot, deck.active_color());
-    tip(r, "Arraste para redimensionar");
 }
 
 #[cfg(test)]

@@ -108,6 +108,13 @@ O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
    (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
    digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
 
+**Mapa de conversas.** `Core::conversation_map()` devolve um retrato barato (pode ser chamado a cada quadro):
+instâncias abertas, perguntas pendentes entre abas (`PendingInfo`: id, quem perguntou, a quem, profundidade,
+desde quando e se o `ask-agent` já voltou com 202) e perguntas sendo respondidas em headless. Uma pergunta
+com resposta atrasada (`detached`) não entra na detecção de ciclos (quem perguntou não está bloqueado), mas
+continua contando na profundidade. A interface completa o retrato com o que só ela sabe (filas das abas,
+respostas a caminho, recentes, mesa) em `Deck::map_snapshot` e desenha com `agent_map::render_map`.
+
 **Quando digitar** (`crates/core/src/delivery.rs`, regra pura com testes; a interface só consulta):
 
 - nunca logo depois de uma tecla do usuário na aba (2 s), nem com texto começado e não enviado (20 s);

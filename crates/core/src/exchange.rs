@@ -22,7 +22,24 @@ struct Pending {
     /// Quantas perguntas pendentes há antes desta na cadeia (0 = quem perguntou não estava
     /// respondendo a ninguém).
     depth: i64,
+    /// Quando a pergunta foi feita (epoch ms).
+    since_ms: u64,
+    /// O `ask-agent` de quem perguntou já voltou (HTTP 202): a resposta será digitada depois no
+    /// terminal dele. Quem perguntou não está bloqueado, então a pergunta não entra na detecção de
+    /// ciclos (mas continua contando na profundidade).
+    detached: bool,
     tx: Sender<Reply>,
+}
+
+/// Retrato de uma pergunta pendente (para o mapa de conversas da interface).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingInfo {
+    pub id: u64,
+    pub asker: String,
+    pub target: String,
+    pub depth: i64,
+    pub since_ms: u64,
+    pub detached: bool,
 }
 
 #[derive(Default)]
@@ -41,7 +58,7 @@ fn reaches(list: &[Pending], from: &str, to: &str) -> bool {
     let mut seen = vec![from.to_owned()];
     let mut stack = vec![from.to_owned()];
     while let Some(node) = stack.pop() {
-        for p in list.iter().filter(|p| p.asker == node) {
+        for p in list.iter().filter(|p| p.asker == node && !p.detached) {
             if p.target == to {
                 return true;
             }
@@ -71,7 +88,8 @@ impl Exchange {
         let id = st.next;
         st.next += 1;
         let (tx, rx) = bounded(1);
-        st.list.push(Pending { id, asker: asker.to_owned(), target: target.to_owned(), depth, tx });
+        let since_ms = crate::util::now_ms();
+        st.list.push(Pending { id, asker: asker.to_owned(), target: target.to_owned(), depth, since_ms, detached: false, tx });
         Ok((id, rx))
     }
 
@@ -148,6 +166,30 @@ impl Exchange {
     /// Remove o pedido (quem esperava desistiu ou já recebeu).
     pub fn remove(&self, id: u64) {
         self.state.lock().list.retain(|p| p.id != id);
+    }
+
+    /// O `ask-agent` de quem fez a pergunta `id` voltou sem a resposta (202). Idempotente.
+    pub fn detach(&self, id: u64) {
+        if let Some(p) = self.state.lock().list.iter_mut().find(|p| p.id == id) {
+            p.detached = true;
+        }
+    }
+
+    /// Perguntas pendentes, da mais antiga para a mais nova.
+    pub fn snapshot(&self) -> Vec<PendingInfo> {
+        self.state
+            .lock()
+            .list
+            .iter()
+            .map(|p| PendingInfo {
+                id: p.id,
+                asker: p.asker.clone(),
+                target: p.target.clone(),
+                depth: p.depth,
+                since_ms: p.since_ms,
+                detached: p.detached,
+            })
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -267,6 +309,41 @@ mod tests {
         assert!(!ex.is_waiting("a", "b"));
         // Sem a pergunta antiga, b pode perguntar a a sem "ciclo".
         assert!(ex.register("b", "a").is_ok());
+    }
+
+    #[test]
+    fn the_snapshot_lists_pending_questions_in_order() {
+        let ex = Exchange::default();
+        let (a, _ra) = ex.register_at("a", "b", 0).unwrap();
+        let (b, _rb) = ex.register_at("b", "c", 1).unwrap();
+        let snap = ex.snapshot();
+        assert_eq!(
+            snap.iter().map(|p| (p.id, p.asker.as_str(), p.target.as_str(), p.depth)).collect::<Vec<_>>(),
+            [(a, "a", "b", 0), (b, "b", "c", 1)]
+        );
+        assert!(snap.iter().all(|p| p.since_ms > 0 && !p.detached));
+        ex.detach(a);
+        ex.detach(a);
+        assert!(ex.snapshot()[0].detached);
+        ex.reply("b", "a", "ok");
+        assert_eq!(ex.snapshot().len(), 1);
+        ex.detach(a); // já removida: nada acontece
+        assert_eq!(ex.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn a_detached_question_does_not_block_and_makes_no_cycle() {
+        // claude espera claude@dev, que espera antigravity: antigravity perguntar a claude fecharia o ciclo…
+        let ex = Exchange::default();
+        let (first, _r1) = ex.register("claude", "claude@dev").unwrap();
+        ex.register("claude@dev", "antigravity").unwrap();
+        assert!(ex.would_cycle("antigravity", "claude"));
+        // …mas o ask-agent de claude já voltou (202): claude está livre, então não há ciclo.
+        ex.detach(first);
+        assert!(!ex.would_cycle("antigravity", "claude"));
+        assert!(ex.register("antigravity", "claude").is_ok());
+        // A profundidade continua contando a pergunta destacada.
+        assert_eq!(ex.chain_depth("claude@dev"), 1);
     }
 
     #[test]
