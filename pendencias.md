@@ -64,20 +64,38 @@ Nada pendente.
 
 ## 5. Validação
 
-- [ ] **Agentes herdam o ambiente do terminal pai.** Ao abrir o app de dentro de um terminal que já roda o CommandDeck, a nova instância herda `COMMANDDECK_PORT`, `COMMANDDECK_TOKEN` e `COMMANDDECK_AGENT` (e pode compartilhar a pasta de dados). Suspeita de ter derrubado o terminal em uso numa sessão de testes. Limpar essas variáveis ao iniciar e/ou isolar `dados/` por instância.
-- [ ] **Testes de integração dependem do `agy` não estar instalado.** `workspace_agents_md_and_spawn_specs` (`crates/core/tests/bridge.rs`) falha quando o Antigravity está instalado na máquina, porque espera o estado "não instalado". Tornar o teste independente do ambiente (PATH e `LOCALAPPDATA` isolados).
+- [ ] **Validar no Windows, ao vivo, o que mudou na ponte** (feito só por testes no Linux e `cargo check`/clippy para `x86_64-pc-windows-gnu`): hooks do Claude (`--settings`) avisando início/fim de turno, `notify` do Codex, agentes instalados como shim `.cmd` (headless com prompt por arquivo, abas com `cmd_safe_arg`), resposta atrasada digitada na aba de quem perguntou e a mensagem de "outra janela usando a pasta de dados".
 - [ ] **Testar o IME com um IME real** (teclado CJK, seletor de emoji `Win+.`): a lógica está ligada, mas só foi verificada por compilação e testes do cursor; não foi exercitada com composição de verdade.
 
 ## Instâncias (abas) — pontos em aberto
 
-- [ ] Só o Claude abre com o comando `ask-agent` pré-autorizado (`--allowedTools`). No Antigravity funcionou sem aprovação no modo atual (`accept-edits`), mas outros agentes (gemini, aider, goose, copilot, q, interpreter) não foram testados e podem pedir aprovação na própria aba.
-- [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta espera 10 minutos e dá erro. Só o `ollama-agent` responde sozinho.
-- [ ] A mensagem é digitada quando o terminal fica parado por 1,5 s (ou 30 s após subir). Se o usuário estiver digitando na mesma aba nesse instante, os textos se misturam.
+- [ ] Só o Claude abre com o comando `ask-agent` pré-autorizado (`--allowedTools`). No Antigravity funcionou sem aprovação no modo atual (`accept-edits`), mas outros agentes (codex, opencode, gemini, aider, goose, copilot, q, interpreter) não foram testados e podem pedir aprovação na própria aba.
+- [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
+- [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
+- [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
+- [ ] No headless, gemini (`--approval-mode yolo`), aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] As mesas (`table.rs`) e a ponte sem interface ainda usam o modo headless: não aparecem nas abas.
 - [ ] Os testes de integração do fluxo (`a_question_is_typed_into_the_tab_and_answered_by_callback` e os vizinhos) só rodam em Unix (agentes falsos em shell); no Windows foram verificados ao vivo.
 - [ ] Não há como o usuário dar cargo a uma aba aberta à mão (hoje só duplicatas ganham nome, tipo `claude@main@ana`).
 
 ## Concluído
+
+- [x] **Segurança da ponte e das abas.**
+  - A colagem nas abas remove ESC e caracteres de controle: uma mensagem não fecha mais o *bracketed paste* para virar teclas em outra aba.
+  - Cada processo de agente tem token próprio; a ponte sabe quem pergunta pelo token, não pelo `from`, e só a instância perguntada responde (`ask-agent --reply <n>`).
+  - Ids validados (sem aspas, espaços nem controle).
+  - No Windows, shims `.cmd` não recebem texto livre na linha de comando.
+  - Limites: 16 MB por requisição, 128 requisições simultâneas, `Host` obrigatório, token comparado em tempo constante.
+- [x] **Profundidade e perguntas órfãs entre abas.** O limite de profundidade vale também no modo abas (medido pela cadeia de perguntas pendentes), e fechar a aba de quem perguntou descarta as perguntas dela.
+- [x] **Entrega previsível nas abas** (`crates/core/src/delivery.rs`, com testes).
+  - O prazo conta desde a entrada na fila.
+  - Nada é digitado logo após uma tecla do usuário (nem com texto começado).
+  - Hooks do Claude/Codex marcam início e fim de turno.
+  - O Enter sai em ordem com as teclas do usuário.
+  - A resposta lenta é entregue depois na aba de quem perguntou, em vez de prender o `ask-agent` (que estourava o timeout de 2 min do Bash do Claude).
+- [x] **Codex e OpenCode** no catálogo de agentes (abas e headless).
+- [x] **Ambiente isolado.** Nenhuma `COMMANDDECK_*` herdada vaza para os agentes, e uma segunda janela na mesma pasta de dados é recusada com uma mensagem clara.
+- [x] **Testes independentes da máquina** (`StartOptions::system_dirs = false`), teste do spawn do Claude corrigido, `rustfmt.toml` + `cargo fmt --check` na CI.
 
 - [x] **Download do Whisper robusto** (motor e modelo): retomada por `Range`, retry com espera crescente, detecção de conexão parada, redirecionamentos, verificação de SHA-256 e barra de progresso no cabeçalho da Conversa integrada; suporte a Linux. Módulo `crates/core/src/download.rs`.
 - [x] **Mouse no terminal** (`crates/app/src/terminal/view.rs`, `input.rs`): clique, soltar, arrasto e movimento são enviados ao programa quando ele ativa os modos 1000/1002/1003, em SGR (1006) ou no formato legado; Shift devolve o mouse ao terminal para selecionar texto. Coberto por testes headless com eventos reais do egui.

@@ -19,6 +19,9 @@ struct Pending {
     id: u64,
     asker: String,
     target: String,
+    /// Quantas perguntas pendentes há antes desta na cadeia (0 = quem perguntou não estava
+    /// respondendo a ninguém).
+    depth: i64,
     tx: Sender<Reply>,
 }
 
@@ -55,6 +58,12 @@ impl Exchange {
     /// Registra que `asker` espera resposta de `target`. Recusa se isso fecharia um ciclo de
     /// espera (A espera B, B espera C, C espera A): ninguém responderia nunca.
     pub fn register(&self, asker: &str, target: &str) -> Result<(u64, Receiver<Reply>), String> {
+        self.register_at(asker, target, 0)
+    }
+
+    /// Como [`Exchange::register`], guardando a profundidade da pergunta na cadeia (ver
+    /// [`Exchange::chain_depth`]).
+    pub fn register_at(&self, asker: &str, target: &str, depth: i64) -> Result<(u64, Receiver<Reply>), String> {
         let mut st = self.state.lock();
         if asker == target || reaches(&st.list, target, asker) {
             return Err(format!("\"{target}\" já está esperando uma resposta de \"{asker}\" (ciclo de espera)"));
@@ -62,17 +71,42 @@ impl Exchange {
         let id = st.next;
         st.next += 1;
         let (tx, rx) = bounded(1);
-        st.list.push(Pending { id, asker: asker.to_owned(), target: target.to_owned(), tx });
+        st.list.push(Pending { id, asker: asker.to_owned(), target: target.to_owned(), depth, tx });
         Ok((id, rx))
     }
 
+    /// `asker` esperar `target` fecharia um ciclo de espera?
+    pub fn would_cycle(&self, asker: &str, target: &str) -> bool {
+        asker == target || reaches(&self.state.lock().list, target, asker)
+    }
+
+    /// Profundidade de uma pergunta nova feita por `asker`: 0 se ninguém espera resposta dele;
+    /// senão, uma a mais que a pergunta mais profunda que ele está respondendo. Com abas, a
+    /// profundidade não viaja pelo ambiente (a pergunta é digitada), então é medida aqui.
+    pub fn chain_depth(&self, asker: &str) -> i64 {
+        self.state.lock().list.iter().filter(|p| p.target == asker).map(|p| p.depth + 1).max().unwrap_or(0)
+    }
+
     /// `from` respondeu a `to`: entrega ao pedido pendente mais antigo de `to` para `from`.
+    ///
+    /// Uma pergunta nova de `from` para `to` enquanto `to` espera `from` fecharia um ciclo de
+    /// espera (recusado em [`Exchange::register`]); por isso essa mensagem só pode ser resposta.
     pub fn reply(&self, from: &str, to: &str, text: &str) -> bool {
         let mut st = self.state.lock();
         let Some(pos) = st.list.iter().position(|p| p.asker == to && p.target == from) else { return false };
         let p = st.list.remove(pos);
         let _ = p.tx.send(Reply::Answer(text.to_owned()));
         true
+    }
+
+    /// `from` respondeu à pergunta número `id`. Só vale se a pergunta foi feita a `from`.
+    /// Devolve quem perguntou.
+    pub fn reply_id(&self, id: u64, from: &str, text: &str) -> Option<String> {
+        let mut st = self.state.lock();
+        let pos = st.list.iter().position(|p| p.id == id && p.target == from)?;
+        let p = st.list.remove(pos);
+        let _ = p.tx.send(Reply::Answer(text.to_owned()));
+        Some(p.asker)
     }
 
     /// Há alguém esperando resposta de `from` para `to`? (`ask-agent` de `from` para `to` seria resposta.)
@@ -93,6 +127,17 @@ impl Exchange {
     pub fn fail_target(&self, target: &str, reason: &str) -> usize {
         let mut st = self.state.lock();
         let (gone, kept): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut st.list).into_iter().partition(|p| p.target == target);
+        st.list = kept;
+        for p in &gone {
+            let _ = p.tx.send(Reply::Failed(reason.to_owned()));
+        }
+        gone.len()
+    }
+
+    /// Falha todos os pedidos feitos por `asker` (a aba dele foi fechada: ninguém lê a resposta).
+    pub fn fail_asker(&self, asker: &str, reason: &str) -> usize {
+        let mut st = self.state.lock();
+        let (gone, kept): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut st.list).into_iter().partition(|p| p.asker == asker);
         st.list = kept;
         for p in &gone {
             let _ = p.tx.send(Reply::Failed(reason.to_owned()));
@@ -185,6 +230,43 @@ mod tests {
         assert_eq!(r2.recv_timeout(T), Ok(Reply::Failed("a aba foi fechada".into())));
         assert!(r3.try_recv().is_err(), "quem espera outro alvo segue esperando");
         assert_eq!(ex.len(), 1);
+    }
+
+    #[test]
+    fn replies_by_id_only_from_the_target() {
+        let ex = Exchange::default();
+        let (first, r1) = ex.register("a", "b").unwrap();
+        let (second, r2) = ex.register("a", "b").unwrap();
+        assert_eq!(ex.reply_id(second, "c", "intruso"), None, "só quem recebeu a pergunta responde");
+        assert_eq!(ex.reply_id(second, "b", "dois").as_deref(), Some("a"));
+        assert_eq!(r2.recv_timeout(T), Ok(Reply::Answer("dois".into())));
+        assert!(r1.try_recv().is_err(), "a outra pergunta segue pendente");
+        assert_eq!(ex.reply_id(second, "b", "de novo"), None);
+        assert_eq!(ex.reply_id(first, "b", "um").as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn chain_depth_follows_the_pending_questions() {
+        let ex = Exchange::default();
+        assert_eq!(ex.chain_depth("a"), 0);
+        ex.register_at("a", "b", 0).unwrap();
+        assert_eq!(ex.chain_depth("b"), 1, "b responde a uma pergunta de profundidade 0");
+        ex.register_at("b", "c", 1).unwrap();
+        assert_eq!(ex.chain_depth("c"), 2);
+        assert_eq!(ex.chain_depth("a"), 0);
+    }
+
+    #[test]
+    fn failing_an_asker_drops_its_questions() {
+        let ex = Exchange::default();
+        let (_, r1) = ex.register("a", "b").unwrap();
+        let (_, r2) = ex.register("c", "b").unwrap();
+        assert_eq!(ex.fail_asker("a", "fechada"), 1);
+        assert_eq!(r1.recv_timeout(T), Ok(Reply::Failed("fechada".into())));
+        assert!(r2.try_recv().is_err());
+        assert!(!ex.is_waiting("a", "b"));
+        // Sem a pergunta antiga, b pode perguntar a a sem "ciclo".
+        assert!(ex.register("b", "a").is_ok());
     }
 
     #[test]

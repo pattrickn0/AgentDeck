@@ -31,6 +31,7 @@ fn start_core(root: &std::path::Path) -> Core {
         ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::default_for(&paths)),
+        system_dirs: false,
     };
     Core::start_with(paths, opts).expect("start").0
 }
@@ -101,5 +102,24 @@ fn list_help_and_errors() {
         let out = ask_agent(Some(&core), &["claudecode", "-"], Some("pelo stdin"));
         assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     }
+    core.shutdown();
+}
+
+#[test]
+fn signal_never_fails_and_reply_needs_a_number() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let core = start_core(tmp.path());
+    // Um hook que falha não pode atrapalhar o agente (no Claude, saída 2 no Stop bloquearia o fim
+    // do turno): `--signal` sai com 0 mesmo recusado pela ponte (aqui, token mestre) ou fora dele.
+    let out = ask_agent(Some(&core), &["--signal", "idle", "{\"type\":\"agent-turn-complete\"}"], None);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(ask_agent(None, &["--signal", "busy"], None).status.code(), Some(0), "nem fora do CommandDeck");
+
+    let out = ask_agent(Some(&core), &["--reply", "x", "oi"], None);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("--reply precisa do número da pergunta"), "{}", text(&out.stderr));
+    let out = ask_agent(Some(&core), &["--reply", "#41", "oi"], None);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("a pergunta #41 não está esperando resposta"), "{}", text(&out.stderr));
     core.shutdown();
 }

@@ -37,20 +37,35 @@ não exige alterar o resto do sistema.
 
 ## Protocolo entre agentes (`ask-agent`)
 
-Cada aba recebe no ambiente: `COMMANDDECK_PORT` (porta da ponte), `COMMANDDECK_TOKEN` (token de 128 bits por sessão),
-`COMMANDDECK_AGENT` (nome do agente da aba), `COMMANDDECK_DEPTH` (profundidade de chamadas) e a pasta dos
-executáveis no início do `PATH`.
+Cada aba recebe no ambiente: `COMMANDDECK_PORT` (porta da ponte), `COMMANDDECK_TOKEN` (token de 128 bits **da
+própria aba**), `COMMANDDECK_AGENT` (nome do agente da aba), `COMMANDDECK_DEPTH` (profundidade de chamadas) e a
+pasta dos executáveis no início do `PATH`. Nenhuma outra `COMMANDDECK_*` do ambiente do app passa para os
+agentes (exceto `COMMANDDECK_ASK_WAIT`, configuração do usuário).
+
+**Identidade pelo token.** Cada processo de agente tem um token próprio: o da aba vale enquanto a instância
+existir (`Core::tab_token`); o de uma execução headless, só durante ela (`Core::headless_token`). A ponte
+descobre **quem** pergunta pelo token, e o campo `from` do corpo é ignorado. Assim uma aba não consegue se
+passar por outra nem responder no lugar dela. O token mestre (`Core::bridge_token`) não vai para nenhum
+agente: serve a testes e ferramentas de depuração, e com ele o `from` do corpo é aceito se for um id válido.
 
 | Rota | Descrição |
 | :-- | :-- |
 | `GET /agents` | `{"agents": [...]}` com os agentes instalados |
-| `POST /ask` | `{"from","to","message","depth"}` → `{"answer"}`; 400 para agente desconhecido, auto-pergunta ou `depth >= 2`; 403 para token/Host inválido; 500 em erro/timeout (10 min) |
+| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"]}` → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido ou profundidade `>= 2`; 404 para `reply_to` que não está pendente; 409 para ciclo de espera; 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
+| `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
+| `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
 
-Toda requisição exige o cabeçalho `x-commanddeck-token`. Pedidos ao mesmo par `de->para` são
-serializados, e o histórico de cada par é mantido entre chamadas: `--session-id`/`--resume` no
-Claude, `--conversation` no Antigravity, e memória em processo no Ollama.
+Toda requisição exige o cabeçalho `x-commanddeck-token` (comparado em tempo constante) e um `Host`
+`127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
+mesmo tempo (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
+mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e memória em
+processo no Ollama.
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do CommandDeck).
+`ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
+
+**Uma janela por pasta de dados.** O core trava `dados/.commanddeck.lock` ao iniciar; uma segunda janela
+na mesma pasta é recusada com uma mensagem (defina `COMMANDDECK_HOME` para abrir outra instância isolada).
 
 ### Instâncias (abas) e perguntas entre elas
 
@@ -74,14 +89,38 @@ O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
    se nenhuma existe, **cria** (`claude@dev` abre uma aba nova). Destino ambíguo ou desconhecido dá erro.
 2. A pergunta vira `CoreEvent::Deliver`. A interface abre a aba (em segundo plano, sem roubar o foco),
    espera o terminal ficar parado e **digita a mensagem nele**, uma por vez por aba (fila).
-3. A mensagem digitada ensina a responder: `ask-agent <quem-perguntou> "resposta"`. Essa chamada é
-   reconhecida como resposta a uma pergunta pendente (`crates/core/src/exchange.rs`) e entregue a
-   quem espera; o `ask-agent` de quem perguntou fica bloqueado até lá (10 minutos no máximo).
-   Nada de raspar a tela do terminal.
-4. O `ollama-agent` devolve a resposta sozinho (`POST /reply`, que só conclui perguntas pendentes e
+3. A mensagem digitada ensina a responder: `ask-agent --reply <n> "resposta"`, com o número da pergunta.
+   Só a instância que recebeu a pergunta consegue respondê-la (`crates/core/src/exchange.rs`). A forma
+   antiga, `ask-agent <quem-perguntou> "resposta"`, continua valendo: uma pergunta nova para quem está
+   esperando você fecharia um ciclo de espera, então só pode ser resposta. Nada de raspar a tela.
+4. **Resposta síncrona ou atrasada.** O `ask-agent` de quem perguntou espera até `COMMANDDECK_ASK_WAIT`
+   segundos (padrão 90, abaixo do timeout padrão do Bash do Claude Code). Se a resposta não chegou, ele
+   termina com HTTP 202 e um aviso, e a resposta, quando chegar (até 10 minutos), é **digitada no terminal
+   de quem perguntou** como uma mensagem nova (`Delivery { answer: true }`). Isso só vale para abas de
+   agentes: num terminal comum (`shell`) o texto seria executado como comando, então ali o `ask-agent`
+   espera até o fim, assim como nas execuções headless e no `ollama-agent` (`COMMANDDECK_ASK_WAIT=0`).
+5. O `ollama-agent` devolve a resposta sozinho (`POST /reply`, que só conclui perguntas pendentes e
    nunca cria uma nova), porque modelos pequenos esquecem de rodar o comando.
-5. Fechar a aba ou o processo terminar libera quem esperava, com erro. Ciclos de espera (A espera B,
-   B espera C, C espera A) são recusados na hora (HTTP 409).
+6. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**
+   descarta as perguntas dela. Ciclos de espera (A espera B, B espera C, C espera A) são recusados na hora
+   (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
+   digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
+
+**Quando digitar** (`crates/core/src/delivery.rs`, regra pura com testes; a interface só consulta):
+
+- nunca logo depois de uma tecla do usuário na aba (2 s), nem com texto começado e não enviado (20 s);
+- com **hooks** (Claude: `UserPromptSubmit`/`Stop` via `--settings dados/hooks/claude-settings.json`;
+  Codex: `notify`), a aba só fica livre depois do aviso de fim de turno, mais 300 ms de saída parada;
+- sem hooks, quando o terminal fica parado por 1,5 s; se nunca sossegar, depois de 30 s **na fila**
+  (antes contava desde que a aba abriu, o que fazia digitar no meio de uma resposta);
+- a colagem vai entre `ESC[200~ … ESC[201~` sem ESC nem caracteres de controle no texto (uma mensagem
+  não consegue fechar a colagem e virar teclas), e o Enter sai da thread da interface, na ordem certa em
+  relação ao que o usuário digitar nesse meio-tempo.
+
+**Windows e shims `.cmd`.** Um agente instalado como shim do npm/pip roda como `cmd.exe /d /c <nome>`, e o
+cmd interpreta `& | < > ^ % "` e quebras de linha. No headless o shim é chamado direto (a std do Rust aplica
+o escape de arquivos em lote) e o prompt vai por arquivo em `dados/prompts`, nunca na linha de comando; nas
+abas, os argumentos (gerados pelo app) passam por `cmd_safe_arg`.
 
 Tudo fica visível nas abas (raciocínio, ferramentas, aprovações) e o usuário pode intervir digitando.
 O Claude abre com `--allowedTools "Bash(ask-agent:*)"`, para responder sem pedir aprovação.

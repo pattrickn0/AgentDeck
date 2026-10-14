@@ -165,9 +165,12 @@ pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     }
 }
 
-/// Texto enviado pelo compositor (`pty:submit`): sempre como colagem entre colchetes.
+/// Texto enviado pelo compositor (`pty:submit`) ou por outro agente: sempre como colagem entre
+/// colchetes. ESC e demais caracteres de controle são removidos, para o texto não poder fechar a
+/// colagem (`ESC[201~`) e virar teclas no programa da aba.
 pub fn submit_paste(text: &str) -> Vec<u8> {
-    format!("\x1b[200~{text}\x1b[201~").into_bytes()
+    let safe = commanddeck_core::util::terminal_text(text);
+    format!("\x1b[200~{safe}\x1b[201~").into_bytes()
 }
 
 /// Código base do botão para relatório de mouse (xterm): 0 esquerdo, 1 meio, 2 direito.
@@ -301,5 +304,8 @@ mod tests {
         assert_eq!(paste_bytes("x\ny", true), b"\x1b[200~x\ry\x1b[201~");
         assert_eq!(paste_bytes("\x1b[201~rm", true), b"\x1b[200~rm\x1b[201~");
         assert_eq!(submit_paste("oi @a.md"), b"\x1b[200~oi @a.md\x1b[201~");
+        // Uma mensagem de outro agente não fecha a colagem para virar teclas (ex.: `!cmd` + Enter).
+        assert_eq!(submit_paste("x\x1b[201~!rm -rf ~\r\x1b[200~"), b"\x1b[200~x[201~!rm -rf ~\n[200~\x1b[201~");
+        assert_eq!(submit_paste("a\u{9b}2J\x03b"), b"\x1b[200~a2Jb\x1b[201~");
     }
 }

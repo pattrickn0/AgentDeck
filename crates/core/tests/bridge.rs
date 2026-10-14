@@ -43,9 +43,28 @@ fn start(fake_agents: &[(&str, &str)]) -> Env {
         ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::default_for(&paths)),
+        system_dirs: false,
     };
     let (core, rx) = Core::start_with(paths, opts).expect("start");
     Env { _tmp: tmp, core, rx, root }
+}
+
+/// Pastas do app dentro de `root` (como em `start`).
+fn paths_in(root: &Path) -> AppPaths {
+    AppPaths {
+        app_dir: root.to_path_buf(),
+        bin_dir: root.join("bin"),
+        data_dir: root.join("dados"),
+        default_workspace: root.join("workspace"),
+        whisper_dir: root.join("whisper"),
+        config_file: root.join("cfg").join("config.json"),
+    }
+}
+
+/// Token que a aba da instância `id` recebe no ambiente.
+fn tab_token(env: &Env, id: &str) -> String {
+    let ident = commanddeck_core::Ident::parse(id).expect("id");
+    env.core.spawn_spec_for(&ident).expect("spec").env["COMMANDDECK_TOKEN"].clone()
 }
 
 #[cfg(unix)]
@@ -141,6 +160,11 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(shell.cwd, ws);
     assert_eq!(shell.env["COMMANDDECK_AGENT"], "shell");
     assert_eq!(shell.env["COMMANDDECK_PORT"], env.core.bridge_port().to_string());
+    // Cada aba tem o próprio token (o mestre não vai para os agentes), estável enquanto ela existir.
+    let token = shell.env["COMMANDDECK_TOKEN"].clone();
+    assert_ne!(token, env.core.bridge_token());
+    assert_eq!(token.len(), 32);
+    assert_eq!(env.core.spawn_spec("shell").expect("de novo").env["COMMANDDECK_TOKEN"], token);
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
@@ -155,14 +179,29 @@ fn workspace_agents_md_and_spawn_specs() {
         assert_eq!(claude.program, env.root.join("fake-bin").join("claude"));
         assert_eq!(claude.args[0], "--append-system-prompt");
         assert!(claude.args[1].contains("Seu nome aqui é \"claude\"."));
-        assert_eq!(&claude.args[2..], ["--add-dir".to_owned(), env.root.join("dados").display().to_string()]);
+        let hooks = env.root.join("dados").join("hooks").join("claude-settings.json");
+        assert_eq!(
+            &claude.args[2..],
+            [
+                "--allowedTools".to_owned(),
+                "Bash(ask-agent:*)".to_owned(),
+                "--settings".to_owned(),
+                hooks.display().to_string(),
+                "--add-dir".to_owned(),
+                env.root.join("dados").display().to_string()
+            ]
+        );
+        assert!(std::fs::read_to_string(&hooks).expect("hooks gravados").contains("ask-agent --signal idle"));
         assert!(claude.double_enter_on_mention);
         assert_eq!(claude.label, "Claude");
     }
 
     let list = env.core.list_agents();
     let ids: Vec<&str> = list.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(ids, ["claude", "antigravity", "ollama", "gemini", "aider", "goose", "copilot", "q", "interpreter", "shell"]);
+    assert_eq!(
+        ids,
+        ["claude", "antigravity", "ollama", "codex", "opencode", "gemini", "aider", "goose", "copilot", "q", "interpreter", "shell"]
+    );
     let ollama = &list[2];
     assert!(!ollama.installed && !ollama.peer && ollama.label == "Ollama");
     let shell = list.last().expect("shell");
@@ -370,7 +409,8 @@ fn a_question_is_typed_into_the_tab_and_answered_by_callback() {
     let d = next_delivery(&env);
     assert_eq!((d.ident.id().as_str(), d.create, d.from.as_str()), ("claude", true, "shell"));
     assert!(d.prompt.contains("qual a capital da França?"));
-    assert!(d.prompt.contains("ask-agent \"shell\""), "ensina como responder: {}", d.prompt);
+    assert!(d.prompt.contains(&format!("ask-agent --reply {} ", d.request)), "ensina como responder: {}", d.prompt);
+    assert!(!d.answer);
 
     // A aba (claude) responde chamando `ask-agent shell "Paris"`: isso conclui a pergunta de quem espera.
     let (st, b) = ask_raw(port, &token, json!({"from": "claude", "to": "shell", "message": "Paris"}));
@@ -502,5 +542,237 @@ fn reply_route_only_completes_pending_questions() {
     assert_eq!((st, b["answer"].as_str()), (200, Some("sozinha")));
     // A segunda tentativa (o modelo já tinha respondido) não entrega de novo.
     assert_eq!(http(port, "POST", "/reply", &host, &token, &body).0, 404);
+    env.core.shutdown();
+}
+
+#[test]
+fn the_token_names_the_caller_and_the_body_cannot_forge_it() {
+    let env = start(&[]);
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let qa = tab_token(&env, "shell@qa");
+    // Com o token de uma aba, o `from` do corpo é ignorado: quem fala é a aba.
+    let _ = env.rx.try_iter().count();
+    let body = json!({"from": "claude", "state": "busy"}).to_string();
+    assert_eq!(http(port, "POST", "/signal", &host, &qa, &body).0, 200);
+    let who: Vec<String> = env
+        .rx
+        .try_iter()
+        .filter_map(|e| match e {
+            CoreEvent::AgentSignal { id, .. } => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(who, ["shell@qa"]);
+    // Com o token mestre, o `from` precisa ser um id válido.
+    let body = json!({"from": "x\u{1b}[201~", "to": "claude", "message": "oi"}).to_string();
+    let (st, b) = http(port, "POST", "/ask", &host, env.core.bridge_token(), &body);
+    assert_eq!(st, 400);
+    assert!(b["error"].as_str().expect("erro").starts_with("remetente inválido"), "{b}");
+    // Fechar a aba invalida o token dela.
+    env.core.close_instance("shell@qa");
+    assert_eq!(http(port, "GET", "/agents", &host, &qa, "").0, 403);
+    env.core.shutdown();
+}
+
+#[test]
+fn requests_without_host_or_too_big_are_refused() {
+    let env = start(&[]);
+    let port = env.core.bridge_port();
+    let token = env.core.bridge_token().to_owned();
+    assert_eq!(http(port, "GET", "/agents", "", &token, ""), (403, json!({"error": "host inválido"})));
+    let big = "x".repeat((16 << 20) + 1);
+    let (st, _) = http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), &token, &big);
+    assert_eq!(st, 413);
+    env.core.shutdown();
+}
+
+#[test]
+fn hooks_signal_turns_of_a_tab() {
+    let env = start(&[]);
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let token = tab_token(&env, "shell@dev");
+    let _ = env.rx.try_iter().count();
+    let (st, _) = http(port, "POST", "/signal", &host, &token, &json!({"state": "busy"}).to_string());
+    assert_eq!(st, 200);
+    let (st, _) = http(port, "POST", "/signal", &host, &token, &json!({"state": "idle"}).to_string());
+    assert_eq!(st, 200);
+    let signals: Vec<(String, bool)> = env
+        .rx
+        .try_iter()
+        .filter_map(|e| match e {
+            CoreEvent::AgentSignal { id, busy } => Some((id, busy)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(signals, [("shell@dev".to_owned(), true), ("shell@dev".to_owned(), false)]);
+    // Estado inválido, ou sem ser uma aba (token mestre): recusado.
+    assert_eq!(http(port, "POST", "/signal", &host, &token, &json!({"state": "x"}).to_string()).0, 400);
+    assert_eq!(http(port, "POST", "/signal", &host, env.core.bridge_token(), &json!({"state": "idle"}).to_string()).0, 400);
+    env.core.shutdown();
+}
+
+#[test]
+fn one_app_per_data_dir() {
+    let env = start(&[]);
+    let second = Core::start_with(
+        paths_in(&env.root),
+        StartOptions { ollama_discovery: false, watch_workspace: false, system_dirs: false, ..Default::default() },
+    );
+    let err = second.err().expect("a segunda instância na mesma pasta de dados é recusada").to_string();
+    assert!(err.contains("já está usando a pasta de dados"), "{err}");
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_runs_get_their_own_short_lived_token() {
+    let env = start(&[("claude", r#"cat >/dev/null; echo "$COMMANDDECK_TOKEN""#)]);
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
+    assert_eq!(st, 200, "{b}");
+    let token = b["answer"].as_str().expect("token").trim().to_owned();
+    assert_eq!(token.len(), 32);
+    assert_ne!(token, env.core.bridge_token());
+    let port = env.core.bridge_port();
+    assert_eq!(http(port, "GET", "/agents", &format!("127.0.0.1:{port}"), &token, "").0, 403, "token esquecido ao terminar");
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn only_the_asked_agent_can_answer_a_question() {
+    let env = start(&[("claude", "echo x"), ("agy", "echo x")]);
+    env.core.enable_tab_delivery();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let master = env.core.bridge_token().to_owned();
+    let asker = std::thread::spawn(move || ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "oi"})));
+    let d = next_delivery(&env);
+    // Outra aba tentando responder no lugar do claude (pelo número ou pelo par): não entrega.
+    let agy = tab_token(&env, "antigravity");
+    let forged = json!({"to": "shell", "message": "forjada", "reply_to": d.request, "from": "claude"}).to_string();
+    let (st, b) = http(port, "POST", "/ask", &host, &agy, &forged);
+    assert_eq!(st, 404, "{b}");
+    assert_eq!(http(port, "POST", "/reply", &host, &agy, &forged).0, 404);
+    // O claude responde pelo número da pergunta.
+    let claude = tab_token(&env, "claude");
+    let body = json!({"to": "", "message": "Paris", "reply_to": d.request}).to_string();
+    let (st, b) = http(port, "POST", "/ask", &host, &claude, &body);
+    assert_eq!((st, b), (200, json!({"answer": "Resposta entregue a \"shell\"."})));
+    let (st, b) = asker.join().expect("thread");
+    assert_eq!((st, b["answer"].as_str()), (200, Some("Paris")));
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn the_depth_limit_also_holds_between_tabs() {
+    let env = start(&[("claude", "echo x"), ("agy", "echo x")]);
+    env.core.enable_tab_delivery();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let master = env.core.bridge_token().to_owned();
+    // shell → claude (profundidade 0), claude → claude@dev (1), claude@dev → antigravity (2: recusada).
+    let first = std::thread::spawn(move || ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "a"})));
+    next_delivery(&env);
+    let claude = tab_token(&env, "claude");
+    let second = std::thread::spawn({
+        let claude = claude.clone();
+        move || http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), &claude, &json!({"to": "claude@dev", "message": "b"}).to_string())
+    });
+    next_delivery(&env);
+    let dev = tab_token(&env, "claude@dev");
+    let (st, b) = http(port, "POST", "/ask", &host, &dev, &json!({"to": "antigravity", "message": "c"}).to_string());
+    assert_eq!((st, b), (400, json!({"error": "profundidade máxima de conversa entre agentes atingida"})));
+    env.core.shutdown();
+    let _ = (first.join(), second.join());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_slow_answer_is_typed_later_into_the_askers_tab() {
+    let env = start(&[("claude", "echo x")]);
+    env.core.enable_tab_delivery();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let claude = tab_token(&env, "claude");
+    // O `ask-agent` do claude aceita esperar 1 s: depois disso volta (202) e a resposta vem depois.
+    let t = std::time::Instant::now();
+    let body = json!({"to": "claude@dev", "message": "tarefa longa", "wait": 1}).to_string();
+    let asking = std::thread::spawn({
+        let claude = claude.clone();
+        let host = host.clone();
+        move || http(port, "POST", "/ask", &host, &claude, &body)
+    });
+    let question = next_delivery(&env);
+    let (st, b) = asking.join().expect("thread");
+    assert!(t.elapsed() >= Duration::from_secs(1));
+    assert_eq!(st, 202, "{b}");
+    assert_eq!(b["pending"].as_u64(), Some(question.request));
+    assert!(b["answer"].as_str().expect("aviso").contains("será digitada neste terminal"), "{b}");
+
+    let dev = tab_token(&env, "claude@dev");
+    let reply = json!({"to": "", "message": "pronto\u{1b}[201~", "reply_to": question.request}).to_string();
+    assert_eq!(http(port, "POST", "/ask", &host, &dev, &reply).0, 200);
+    let late = next_delivery(&env);
+    assert!(late.answer);
+    assert_eq!((late.ident.id().as_str(), late.create, late.from.as_str()), ("claude", false, "claude@dev"));
+    assert!(
+        late.prompt.starts_with(&format!("[Resposta do agente \"claude@dev\" à sua pergunta #{}", question.request)),
+        "{}",
+        late.prompt
+    );
+    assert!(late.prompt.contains("pronto[201~") && !late.prompt.contains('\u{1b}'), "{}", late.prompt);
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn closing_the_askers_tab_drops_its_questions() {
+    let env = start(&[("claude", "echo x")]);
+    env.core.enable_tab_delivery();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let dev = tab_token(&env, "claude@dev");
+    let asking = std::thread::spawn(move || http(port, "POST", "/ask", &host, &dev, &json!({"to": "claude", "message": "oi"}).to_string()));
+    let d = next_delivery(&env);
+    env.core.close_instance("claude@dev");
+    let (st, b) = asking.join().expect("thread");
+    assert_eq!(st, 500);
+    assert!(b["error"].as_str().expect("erro").contains("fechada"), "{b}");
+    // Sem a pergunta antiga, claude pode perguntar a claude@dev (nada de "ciclo" fantasma).
+    let claude = tab_token(&env, "claude");
+    let port2 = env.core.bridge_port();
+    let again = std::thread::spawn(move || {
+        http(port2, "POST", "/ask", &format!("127.0.0.1:{port2}"), &claude, &json!({"to": "claude@dev", "message": "e aí?"}).to_string())
+    });
+    let d2 = next_delivery(&env);
+    assert_ne!(d2.request, d.request);
+    assert_eq!(d2.ident.id(), "claude@dev");
+    env.core.shutdown();
+    let _ = again.join();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_plain_terminal_waits_until_the_end_instead_of_getting_typed_answers() {
+    // Numa aba "shell", uma resposta digitada depois seria executada como comando.
+    let env = start(&[("claude", "echo x")]);
+    env.core.enable_tab_delivery();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let shell = tab_token(&env, "shell");
+    let asking = std::thread::spawn(move || {
+        http(port, "POST", "/ask", &host, &shell, &json!({"to": "claude", "message": "oi", "wait": 1}).to_string())
+    });
+    let d = next_delivery(&env);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!asking.is_finished(), "não pode voltar com 202 depois de 1 s");
+    let claude = tab_token(&env, "claude");
+    let body = json!({"to": "", "message": "resposta", "reply_to": d.request}).to_string();
+    assert_eq!(http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), &claude, &body).0, 200);
+    let (st, b) = asking.join().expect("thread");
+    assert_eq!((st, b["answer"].as_str()), (200, Some("resposta")));
     env.core.shutdown();
 }

@@ -90,6 +90,12 @@ pub enum CoreEvent {
     /// Uma pergunta do `ask-agent` para uma instância (aba): a UI abre a aba se `create` e digita
     /// o `prompt` no terminal dela quando estiver pronta (ver [`Delivery`]).
     Deliver(Delivery),
+    /// O agente da instância `id` avisou (por hook) que começou (`busy`) ou terminou um turno.
+    /// Mais confiável que adivinhar pela saída do terminal; ver `delivery::gate`.
+    AgentSignal {
+        id: String,
+        busy: bool,
+    },
 }
 
 /// Mensagem a digitar no terminal de uma instância de agente.
@@ -105,4 +111,7 @@ pub struct Delivery {
     pub from: String,
     /// Texto completo a digitar (mensagem + como responder).
     pub prompt: String,
+    /// É a resposta (atrasada) a uma pergunta que a instância fez, não uma pergunta nova:
+    /// se a aba dela já fechou, não é reaberta.
+    pub answer: bool,
 }

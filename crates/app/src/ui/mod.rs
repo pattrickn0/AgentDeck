@@ -94,7 +94,7 @@ fn draw_terminals(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let window_focused = deck.window_focused;
     let focused = deck.term_focus && window_focused;
     let elapsed = deck.blink_epoch.elapsed().as_millis();
-    let blink_on = (elapsed / 600) % 2 == 0;
+    let blink_on = (elapsed / 600).is_multiple_of(2);
     let preedit = deck.ime_preedit.clone();
     let tab = &mut deck.tabs[idx];
     let id = Id::new(("terminal", tab.uid));

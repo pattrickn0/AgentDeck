@@ -87,6 +87,13 @@ impl App {
             Ok(v) => v,
             Err(e) => {
                 log::error!("falha ao iniciar o backend: {e:#}");
+                // Sem console no Windows: sem a caixa, o app só fecharia sem explicação.
+                rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Error)
+                    .set_title("CommandDeck")
+                    .set_description(format!("{e:#}"))
+                    .set_buttons(rfd::MessageButtons::Ok)
+                    .show();
                 event_loop.exit();
                 return;
             }

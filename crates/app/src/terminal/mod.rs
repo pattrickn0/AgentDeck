@@ -45,9 +45,6 @@ impl Dimensions for GridSize {
     }
 }
 
-/// Escrita no processo utilizável de outra thread.
-pub type WriteFn = Arc<dyn Fn(&[u8]) + Send + Sync>;
-
 type SharedWriter = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
 
 /// Recebe eventos do emulador (chamado com o terminal travado — não pode travá-lo de novo).
@@ -183,12 +180,6 @@ impl Session {
     /// Envia bytes ao processo (entrada do usuário).
     pub fn write(&self, bytes: &[u8]) {
         self.shared.write_input(bytes);
-    }
-
-    /// Função para escrever no processo a partir de outra thread (Enter atrasado do submit).
-    pub fn writer_handle(&self) -> WriteFn {
-        let shared = self.shared.clone();
-        Arc::new(move |b: &[u8]| shared.write_input(b))
     }
 
     /// Abre o PTY e inicia o programa da [`SpawnSpec`] com exatamente o ambiente dela.

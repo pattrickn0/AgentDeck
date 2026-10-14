@@ -119,9 +119,22 @@ pub fn home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default()
 }
 
+/// Texto que vai ser digitado num terminal: sem ESC nem outros caracteres de controle (que
+/// mexeriam no terminal ou sairiam do modo colagem), quebras de linha como `\n`.
+pub fn terminal_text(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n").chars().filter(|&c| c == '\n' || c == '\t' || !c.is_control()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_text_cannot_escape_the_paste() {
+        let evil = "oi\x1b[201~!rm -rf ~\r\x1b[200~\u{9b}2J\x07\x00fim\r\nlinha\ttab";
+        assert_eq!(terminal_text(evil), "oi[201~!rm -rf ~\n[200~2Jfim\nlinha\ttab");
+        assert_eq!(terminal_text("ação ✓ 🎉"), "ação ✓ 🎉");
+    }
 
     #[test]
     fn base36_matches_js() {

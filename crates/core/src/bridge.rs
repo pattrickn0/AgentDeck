@@ -1,10 +1,14 @@
 //! Ponte HTTP local agente → agente (equivalente a `startBridge`).
 //!
 //! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-commanddeck-token` e valida o
-//! cabeçalho `Host` contra DNS rebinding. Requisições para o mesmo par `de->para` são
-//! atendidas em ordem de chegada (fila FIFO por par), uma de cada vez.
+//! cabeçalho `Host` contra DNS rebinding. Cada processo de agente recebe um token próprio, e é o
+//! token que diz quem está perguntando (o `from` do corpo só vale com o token mestre, usado em
+//! testes). Requisições para o mesmo par `de->para` são atendidas em ordem de chegada (fila FIFO
+//! por par), uma de cada vez.
 
 use std::collections::HashMap;
+use std::io::Read;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -17,6 +21,8 @@ use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
 use crate::exchange::Reply;
 use crate::headless::HeadlessOptions;
 use crate::instances::Ident;
+use crate::util::terminal_text;
+use crate::{Auth, Caller};
 use crate::{Core, CoreInner};
 
 /// agente → agente → agente, no máximo.
@@ -72,6 +78,20 @@ impl PairQueues {
 
 // ---------- Servidor ----------
 
+/// Tamanho máximo do corpo de uma requisição (mensagens longas vão pelo stdin do `ask-agent`).
+const MAX_BODY: u64 = 16 << 20;
+/// Requisições em atendimento ao mesmo tempo (cada pergunta esperando resposta ocupa uma).
+const MAX_ACTIVE: usize = 128;
+
+/// Conta uma requisição em atendimento enquanto existir.
+struct Active(Arc<AtomicUsize>);
+
+impl Drop for Active {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Sobe o servidor em 127.0.0.1:0 e devolve (servidor, porta).
 pub(crate) fn start(core: &Core) -> anyhow::Result<(Arc<Server>, u16)> {
     let server = Server::http("127.0.0.1:0").map_err(|e| anyhow::anyhow!("falha ao iniciar a ponte HTTP: {e}"))?;
@@ -80,10 +100,21 @@ pub(crate) fn start(core: &Core) -> anyhow::Result<(Arc<Server>, u16)> {
     let srv = server.clone();
     let weak = Arc::downgrade(&core.inner);
     std::thread::Builder::new().name("cd-bridge".into()).spawn(move || {
+        let active = Arc::new(AtomicUsize::new(0));
         // Termina quando `Server::unblock` é chamado (shutdown).
         for req in srv.incoming_requests() {
+            if active.fetch_add(1, Ordering::SeqCst) >= MAX_ACTIVE {
+                active.fetch_sub(1, Ordering::SeqCst);
+                reply(req, 503, json!({ "error": "ponte ocupada: perguntas demais em andamento" }));
+                continue;
+            }
+            let slot = Active(active.clone());
             let weak = weak.clone();
-            let _ = std::thread::Builder::new().name("cd-bridge-req".into()).spawn(move || handle(weak, req));
+            // Se a thread não subir, o fechamento é descartado e `slot` libera a vaga.
+            let _ = std::thread::Builder::new().name("cd-bridge-req".into()).spawn(move || {
+                let _slot = slot;
+                handle(weak, req)
+            });
         }
     })?;
     Ok((server, port))
@@ -107,33 +138,61 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         return reply(req, 503, json!({ "error": "CommandDeck encerrando" }));
     };
     let core = Core { inner };
-    if header(&req, "x-commanddeck-token") != Some(core.bridge_token()) {
+    let Some(auth) = core.authenticate(header(&req, "x-commanddeck-token").unwrap_or("")) else {
         return reply(req, 403, json!({ "error": "token inválido" }));
-    }
-    // Validação de Host contra DNS rebinding.
+    };
+    // Validação de Host contra DNS rebinding (sem Host também é recusado).
     let port = core.bridge_port();
     let host = header(&req, "host").unwrap_or("");
-    if port != 0 && !host.is_empty() && host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+    if port != 0 && host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
         return reply(req, 403, json!({ "error": "host inválido" }));
     }
 
     if *req.method() == Method::Get && req.url() == "/agents" {
         return reply(req, 200, json!({ "agents": core.peers() }));
     }
-    let is_reply_route = *req.method() == Method::Post && req.url() == "/reply";
-    if *req.method() != Method::Post || (req.url() != "/ask" && !is_reply_route) {
+    let route = req.url().to_owned();
+    if *req.method() != Method::Post || !["/ask", "/reply", "/signal"].contains(&route.as_str()) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
     }
 
     let mut body = Vec::new();
-    if req.as_reader().read_to_end(&mut body).is_err() {
+    if req.as_reader().take(MAX_BODY + 1).read_to_end(&mut body).is_err() {
         return reply(req, 400, json!({ "error": "JSON inválido" }));
+    }
+    if body.len() as u64 > MAX_BODY {
+        return reply(req, 413, json!({ "error": "mensagem grande demais (máximo de 16 MB)" }));
     }
     let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
         return reply(req, 400, json!({ "error": "JSON inválido" }));
     };
-    let (status, out) = if is_reply_route { reply_pending(&core, &msg) } else { ask(&core, &msg) };
+    let default_from = if route == "/ask" { "usuário" } else { "" };
+    let caller = match caller(&auth, &msg, default_from) {
+        Ok(c) => c,
+        Err(e) => return reply(req, 400, json!({ "error": e })),
+    };
+    let (status, out) = match route.as_str() {
+        "/reply" => reply_pending(&core, &caller, &msg),
+        "/signal" => signal(&core, &auth, &msg),
+        _ => ask(&core, &caller, &msg),
+    };
     reply(req, status, out);
+}
+
+/// Quem está chamando. Com o token de um agente, é ele (o `from` do corpo é ignorado); com o
+/// token mestre, o `from` do corpo, desde que seja um id válido.
+fn caller(auth: &Auth, msg: &Value, default_from: &str) -> Result<Caller, String> {
+    match auth {
+        Auth::Agent(c) => Ok(c.clone()),
+        Auth::Master => {
+            let from = js_string_or(msg.get("from"), default_from).to_lowercase();
+            if from == "usuário" || Ident::parse(&from).is_some() {
+                Ok(Caller { id: from, tab: false })
+            } else {
+                Err(format!("remetente inválido: \"{}\"", from.escape_debug()))
+            }
+        }
+    }
 }
 
 /// `String(x || padrão)` do JS.
@@ -190,32 +249,101 @@ pub(crate) fn resolve_target(asked: &str, available: &[String], ollama_models: &
 /// Quanto tempo uma pergunta entregue numa aba espera pela resposta.
 const TAB_REPLY_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// `POST /reply` `{"from","to","message"}`: `from` responde à pergunta que `to` fez. Só conclui uma
-/// pergunta **pendente** (404 se não houver): nunca cria uma pergunta nova. É o que o `ollama-agent`
-/// usa para devolver sozinho a resposta, sem depender de o modelo rodar `ask-agent`.
-fn reply_pending(core: &Core, msg: &Value) -> (u16, Value) {
-    let from = js_string_or(msg.get("from"), "").to_lowercase();
-    let to = js_string_or(msg.get("to"), "").to_lowercase();
+/// Mensagem que acompanha uma resposta entregue a quem perguntou.
+fn delivered(to: &str) -> Value {
+    json!({ "answer": format!("Resposta entregue a \"{to}\".") })
+}
+
+/// `POST /reply` `{"to","message"[,"reply_to"]}`: o chamador responde à pergunta que `to` fez (ou
+/// à pergunta número `reply_to`). Só conclui uma pergunta **pendente** (404 se não houver): nunca
+/// cria uma pergunta nova. É o que o `ollama-agent` usa para devolver sozinho a resposta, sem
+/// depender de o modelo rodar `ask-agent`.
+fn reply_pending(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
+    let from = caller.id.as_str();
     let message = js_string_or(msg.get("message"), "");
-    if !core.inner.exchange.reply(&from, &to, &message) {
+    let to = match msg.get("reply_to").and_then(Value::as_u64) {
+        Some(id) => core.inner.exchange.reply_id(id, from, &message),
+        None => {
+            let to = js_string_or(msg.get("to"), "").to_lowercase();
+            core.inner.exchange.reply(from, &to, &message).then_some(to)
+        }
+    };
+    let Some(to) = to else {
         return (404, json!({ "delivered": false, "error": "nenhuma pergunta pendente" }));
-    }
-    core.feed(FeedEntry::new(FeedKind::Answer, Some(&from), Some(&to), message));
+    };
+    core.feed(FeedEntry::new(FeedKind::Answer, Some(from), Some(&to), message));
     (200, json!({ "delivered": true }))
 }
 
-/// Texto digitado no terminal da instância que recebe a pergunta.
-fn tab_prompt(from: &str, message: &str) -> String {
+/// `POST /signal` `{"state":"busy"|"idle"}`: hook do agente avisando que começou ou terminou um
+/// turno (`ask-agent --signal`). Só o processo de uma aba sinaliza.
+fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
+    let Auth::Agent(Caller { id, tab: true }) = auth else {
+        return (400, json!({ "error": "só o processo de uma aba envia sinais" }));
+    };
+    let busy = match msg.get("state").and_then(Value::as_str) {
+        Some("busy") => true,
+        Some("idle") => false,
+        _ => return (400, json!({ "error": "estado inválido (use busy ou idle)" })),
+    };
+    core.emit(CoreEvent::AgentSignal { id: id.clone(), busy });
+    (200, json!({ "ok": true }))
+}
+
+/// Texto digitado no terminal da instância que recebe a pergunta número `request`.
+fn tab_prompt(from: &str, request: u64, message: &str) -> String {
+    let message = terminal_text(message);
     format!(
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\n\
-Responda ao agente \"{from}\" executando no shell: ask-agent \"{from}\" \"sua resposta\"\n\
-(a resposta só chega a ele por esse comando; texto escrito apenas aqui não é entregue. Para respostas longas, \
-envie pela entrada padrão: ask-agent \"{from}\" -). O usuário acompanha a conversa na Conversa integrada."
+Responda executando no shell: ask-agent --reply {request} \"sua resposta\"\n\
+(a resposta só chega a \"{from}\" por esse comando; texto escrito apenas aqui não é entregue. Para respostas longas, \
+envie pela entrada padrão: ask-agent --reply {request} -). O usuário acompanha a conversa na Conversa integrada."
     )
 }
 
-/// Pergunta entregue numa aba (instância) interativa e respondida por `ask-agent` de volta.
-fn ask_tab(core: &Core, from: &str, asked: &str, message: &str, force_new: bool) -> (u16, Value) {
+/// Espera a resposta até `until`. `None` = o prazo acabou sem resposta.
+fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: Instant) -> Option<Reply> {
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        match rx.recv_timeout(left.min(Duration::from_millis(500))) {
+            Ok(reply) => return Some(reply),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                if core.inner.state.shutdown.load(Ordering::SeqCst) {
+                    return Some(Reply::Failed("CommandDeck encerrando".into()));
+                }
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return Some(Reply::Failed("pergunta cancelada".into())),
+        }
+    }
+}
+
+/// Resposta que chegou depois de o `ask-agent` de quem perguntou já ter terminado: é digitada
+/// no terminal de quem perguntou, como uma mensagem nova.
+fn deliver_late(core: &Core, asker: Ident, target: &str, request: u64, outcome: Reply) {
+    let prompt = match outcome {
+        Reply::Answer(text) => format!(
+            "[Resposta do agente \"{target}\" à sua pergunta #{request}, recebida pelo CommandDeck]\n\n{}\n\n\
+Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Conversa integrada.",
+            terminal_text(&text)
+        ),
+        Reply::Failed(text) => {
+            core.feed(FeedEntry::new(FeedKind::Error, Some(target), Some(&asker.id()), text.clone()));
+            format!("[CommandDeck] A pergunta #{request} para \"{target}\" ficou sem resposta: {}", terminal_text(&text))
+        }
+    };
+    core.emit(CoreEvent::Deliver(Delivery { request, ident: asker, create: false, from: target.to_owned(), prompt, answer: true }));
+}
+
+/// Pergunta entregue numa aba (instância) interativa e respondida por `ask-agent --reply`.
+///
+/// Se quem pergunta é uma aba e pediu `wait` segundos, o `ask-agent` dela volta depois desse
+/// tempo (antes de o Bash do agente estourar o próprio timeout) e a resposta, quando chegar, é
+/// digitada no terminal dela.
+fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAsk) -> (u16, Value) {
+    let from = caller.id.as_str();
     let (base, suffix) = match asked.find('@') {
         Some(i) => (&asked[..i], &asked[i..]),
         None => (asked, ""),
@@ -229,7 +357,7 @@ fn ask_tab(core: &Core, from: &str, asked: &str, message: &str, force_new: bool)
             json!({ "error": format!("agente desconhecido ou não instalado \"{asked}\". Disponíveis: {}", core.peers().join(", ")) }),
         );
     };
-    let resolved = core.inner.instances.lock().resolve_or_create(&want, force_new);
+    let resolved = core.inner.instances.lock().resolve_or_create(&want, opts.force_new);
     let (ident, created) = match resolved {
         Ok(v) => v,
         Err(options) => {
@@ -240,33 +368,64 @@ fn ask_tab(core: &Core, from: &str, asked: &str, message: &str, force_new: bool)
     if id == from {
         return (400, json!({ "error": "um agente não pode perguntar a si mesmo" }));
     }
-    let (request, rx) = match core.inner.exchange.register(from, &id) {
-        Ok(v) => v,
-        Err(e) => {
-            if created {
-                core.inner.instances.lock().remove(&id);
-            }
-            return (409, json!({ "error": e }));
+    let forget = |status: u16, error: Value| {
+        if created {
+            core.inner.instances.lock().remove(&id);
         }
+        (status, error)
+    };
+    // Com abas a profundidade não viaja no ambiente (a pergunta é digitada): mede-se pela cadeia
+    // de perguntas pendentes de quem pergunta. Um ciclo de espera é recusado primeiro (409).
+    let depth = opts.depth.max(core.inner.exchange.chain_depth(from));
+    if depth >= MAX_DEPTH && !core.inner.exchange.would_cycle(from, &id) {
+        return forget(400, json!({ "error": "profundidade máxima de conversa entre agentes atingida" }));
+    }
+    let (request, rx) = match core.inner.exchange.register_at(from, &id, depth) {
+        Ok(v) => v,
+        Err(e) => return forget(409, json!({ "error": e })),
     };
 
     core.feed(FeedEntry::new(FeedKind::Ask, Some(from), Some(&id), message.to_owned()));
-    core.emit(CoreEvent::Deliver(Delivery { request, ident, create: created, from: from.to_owned(), prompt: tab_prompt(from, message) }));
+    let prompt = tab_prompt(from, request, message);
+    core.emit(CoreEvent::Deliver(Delivery { request, ident, create: created, from: from.to_owned(), prompt, answer: false }));
 
     let deadline = Instant::now() + TAB_REPLY_TIMEOUT;
-    let outcome = loop {
-        match rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(reply) => break reply,
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                if core.inner.state.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
-                    break Reply::Failed("CommandDeck encerrando".into());
+    // Só um agente recebe uma resposta atrasada digitada: num terminal comum (`shell`) o texto
+    // seria executado como comando. Ali o `ask-agent` espera até o fim.
+    let asker = Ident::parse(from).filter(|i| caller.tab && i.kind != "shell");
+    let detach_at = match (opts.wait, &asker) {
+        (Some(w), Some(_)) if w > 0 => Some(Instant::now() + Duration::from_secs(w)),
+        _ => None,
+    };
+    let outcome = match wait_reply(core, &rx, detach_at.map_or(deadline, |d| d.min(deadline))) {
+        Some(reply) => reply,
+        None => match (detach_at, asker) {
+            (Some(_), Some(asker)) if Instant::now() < deadline => {
+                let core2 = core.clone();
+                let target = id.clone();
+                let spawned = std::thread::Builder::new().name("cd-bridge-late".into()).spawn(move || {
+                    let outcome = wait_reply(&core2, &rx, deadline)
+                        .unwrap_or_else(|| Reply::Failed(format!("\"{target}\" não respondeu em 10 minutos")));
+                    core2.inner.exchange.remove(request);
+                    deliver_late(&core2, asker, &target, request, outcome);
+                });
+                if spawned.is_err() {
+                    core.inner.exchange.fail(request, "falha interna da ponte");
+                    return (500, json!({ "error": "falha interna da ponte" }));
                 }
-                if Instant::now() >= deadline {
-                    break Reply::Failed(format!("\"{id}\" não respondeu em 10 minutos"));
-                }
+                return (
+                    202,
+                    json!({
+                        "pending": request,
+                        "answer": format!(
+                            "A pergunta #{request} foi entregue a \"{id}\", que ainda está trabalhando nela. A resposta será digitada \
+                    neste terminal quando chegar, como uma nova mensagem. Não repita a pergunta: siga com outra parte da tarefa ou encerre o turno e aguarde."
+                        ),
+                    }),
+                );
             }
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break Reply::Failed("pergunta cancelada".into()),
-        }
+            _ => Reply::Failed(format!("\"{id}\" não respondeu em 10 minutos")),
+        },
     };
     core.inner.exchange.remove(request);
     match outcome {
@@ -278,9 +437,17 @@ fn ask_tab(core: &Core, from: &str, asked: &str, message: &str, force_new: bool)
     }
 }
 
+/// Opções de uma pergunta a uma aba.
+struct TabAsk {
+    force_new: bool,
+    depth: i64,
+    /// Segundos que o `ask-agent` de quem pergunta aceita esperar (`None`/0 = até o fim).
+    wait: Option<u64>,
+}
+
 /// Processa um `POST /ask` já decodificado. Retorna (status HTTP, corpo).
-fn ask(core: &Core, msg: &Value) -> (u16, Value) {
-    let from = js_string_or(msg.get("from"), "usuário").to_lowercase();
+fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
+    let from = caller.id.as_str();
     let asked = js_string_or(msg.get("to"), "").to_lowercase();
     let depth = js_depth(msg.get("depth"));
     let message = match msg.get("message") {
@@ -289,15 +456,33 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
         Some(other) => other.to_string(),
     };
 
-    // `from` está respondendo a uma pergunta que `asked` fez: entrega a quem espera.
-    if core.inner.exchange.reply(&from, &asked, &message) {
-        core.feed(FeedEntry::new(FeedKind::Answer, Some(&from), Some(&asked), message));
-        return (200, json!({ "answer": format!("Resposta entregue a \"{asked}\".") }));
+    // Resposta explícita à pergunta número N (`ask-agent --reply N "texto"`).
+    if let Some(id) = msg.get("reply_to").and_then(Value::as_u64) {
+        return match core.inner.exchange.reply_id(id, from, &message) {
+            Some(asker) => {
+                core.feed(FeedEntry::new(FeedKind::Answer, Some(from), Some(&asker), message));
+                (200, delivered(&asker))
+            }
+            None => (
+                404,
+                json!({ "error": format!("a pergunta #{id} não está esperando resposta de \"{from}\" (já foi respondida, cancelada ou era para outro agente)") }),
+            ),
+        };
+    }
+    // `from` está respondendo a uma pergunta que `asked` fez: entrega a quem espera. (Uma pergunta
+    // nova de `from` para quem o espera fecharia um ciclo de espera; por isso é resposta.)
+    if core.inner.exchange.reply(from, &asked, &message) {
+        core.feed(FeedEntry::new(FeedKind::Answer, Some(from), Some(&asked), message));
+        return (200, delivered(&asked));
     }
     // Com a interface ligada, a pergunta vai para a aba (instância) do agente; sem ela, em headless.
     if core.tab_delivery() {
-        let force_new = msg.get("new").and_then(Value::as_bool).unwrap_or(false);
-        return ask_tab(core, &from, &asked, &message, force_new);
+        let opts = TabAsk {
+            force_new: msg.get("new").and_then(Value::as_bool).unwrap_or(false),
+            depth,
+            wait: msg.get("wait").and_then(Value::as_u64),
+        };
+        return ask_tab(core, caller, &asked, &message, opts);
     }
 
     let available = core.peers();
@@ -316,7 +501,7 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
         return (400, json!({ "error": "profundidade máxima de conversa entre agentes atingida" }));
     }
 
-    core.feed(FeedEntry::new(FeedKind::Ask, Some(&from), Some(&to), message.clone()));
+    core.feed(FeedEntry::new(FeedKind::Ask, Some(from), Some(&to), message.clone()));
     let prompt = format!(
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
     );
@@ -332,12 +517,12 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
     };
     match result {
         Ok(answer) => {
-            core.feed(FeedEntry::new(FeedKind::Answer, Some(&to), Some(&from), answer.clone()));
+            core.feed(FeedEntry::new(FeedKind::Answer, Some(&to), Some(from), answer.clone()));
             (200, json!({ "answer": answer }))
         }
         Err(e) => {
             let text = e.to_string();
-            core.feed(FeedEntry::new(FeedKind::Error, Some(&to), Some(&from), text.clone()));
+            core.feed(FeedEntry::new(FeedKind::Error, Some(&to), Some(from), text.clone()));
             (500, json!({ "error": text }))
         }
     }
@@ -363,6 +548,14 @@ mod tests {
         assert_eq!(resolve_target("ollama", &avail, &models), "ollama");
         let avail2: Vec<String> = vec!["ollama:qwen3.5:9b".into()];
         assert_eq!(resolve_target("local", &avail2, &models), "ollama:qwen3.5:9b");
+    }
+
+    #[test]
+    fn the_tab_prompt_names_the_request() {
+        let p = tab_prompt("claude@dev", 7, "faça\x1b[201~ x");
+        assert!(p.starts_with("[Mensagem do agente \"claude@dev\" recebida pelo CommandDeck]\n\nfaça[201~ x\n\n"), "{p}");
+        assert!(p.contains("ask-agent --reply 7 \"sua resposta\""), "{p}");
+        assert!(!p.contains('\x1b'));
     }
 
     #[test]

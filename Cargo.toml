@@ -6,7 +6,7 @@ members = ["crates/core", "crates/app", "crates/cli"]
 version = "0.3.0"
 edition = "2021"
 license = "MIT"
-rust-version = "1.85"
+rust-version = "1.89"
 
 [workspace.dependencies]
 commanddeck-core = { path = "crates/core" }

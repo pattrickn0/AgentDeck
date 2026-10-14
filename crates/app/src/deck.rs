@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
+use commanddeck_core::delivery::{self, Gate, Mailbox, TabState};
 use commanddeck_core::{
     AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec, TableRequest,
 };
@@ -64,9 +65,20 @@ pub struct Tab {
     /// Aberta pelo app a pedido de `ask-agent` (e não pelo usuário).
     pub auto: bool,
     /// Perguntas de outros agentes aguardando a aba ficar pronta (uma por vez).
-    queue: VecDeque<Queued>,
-    /// Quando o processo foi iniciado (para esperar a TUI subir antes de digitar nela).
-    spawned_at: Instant,
+    queue: Mailbox<Queued>,
+    /// Última tecla do usuário nesta aba e se ela deixou texto começado na linha.
+    last_key: Option<Instant>,
+    typing: bool,
+    /// O agente avisa início/fim de turno por hook (`ask-agent --signal`): `busy` vem dele.
+    hooked: bool,
+    /// O hook confirmou que o turno atual começou: só o aviso de fim de turno libera a aba. Sem
+    /// confirmação (ex.: Enter num menu, que não abre turno), vale a heurística da saída.
+    turn_confirmed: bool,
+    /// Enters agendados de um envio (`submit`), em ordem.
+    pending_enter: VecDeque<Instant>,
+    /// Teclas do usuário que chegaram enquanto um envio esperava o Enter: vão depois dele, para
+    /// não entrar no meio da mensagem.
+    held_keys: Vec<u8>,
     seen_output: u64,
     idle_deadline: Option<Instant>,
     spec: Option<SpawnSpec>,
@@ -179,10 +191,13 @@ pub struct Deck {
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(120);
 /// Quantas abas o app abre sozinho (a pedido de `ask-agent`) ao mesmo tempo.
 const MAX_AUTO_TABS: usize = 8;
-/// A TUI do agente precisa ficar parada por este tempo para receber uma pergunta digitada.
-const READY_IDLE: Duration = Duration::from_millis(1500);
-/// Se a aba nunca sossegar, a pergunta é digitada mesmo assim depois disso.
-const READY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Depois de colar um envio, o Enter vai após este tempo (e de novo após `SECOND_ENTER` quando há
+/// menção `@` em CLIs com autocomplete de arquivo).
+const FIRST_ENTER: Duration = Duration::from_millis(250);
+const SECOND_ENTER: Duration = Duration::from_millis(600);
+/// Com hooks, a aba só deixa de estar ocupada pelo aviso de fim de turno. Se o aviso se perder,
+/// ela é liberada depois deste tempo sem nenhuma saída.
+const HOOK_STALE: Duration = Duration::from_secs(600);
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(60);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
 const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
@@ -346,6 +361,7 @@ impl Deck {
             CoreEvent::AgentsChanged => self.refresh_agents(),
             CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Deliver(d) => self.on_deliver(d),
+            CoreEvent::AgentSignal { id, busy } => self.on_agent_signal(&id, busy),
             CoreEvent::Download(p) => {
                 self.download = match p.state {
                     DownloadState::Done => None,
@@ -471,11 +487,27 @@ impl Deck {
             if let Some(text) = tab.session.take_clipboard() {
                 ctx.copy_text(text);
             }
+            // Enters agendados por `submit`; as teclas seguradas nesse meio-tempo vão logo depois.
+            while let Some(&at) = tab.pending_enter.front() {
+                if now < at {
+                    want(at);
+                    break;
+                }
+                tab.pending_enter.pop_front();
+                tab.session.write(b"\r");
+                if tab.pending_enter.is_empty() && !tab.held_keys.is_empty() {
+                    let held = std::mem::take(&mut tab.held_keys);
+                    tab.session.write(&held);
+                }
+            }
             let seq = tab.session.shared.output_seq.load(std::sync::atomic::Ordering::Relaxed);
             if seq != tab.seen_output {
                 tab.seen_output = seq;
-                if tab.busy {
-                    let last = (*tab.session.shared.last_output.lock()).unwrap_or(now);
+                let last = (*tab.session.shared.last_output.lock()).unwrap_or(now);
+                if tab.busy && tab.turn_confirmed {
+                    // Quem libera é o hook de fim de turno; isto só cobre um aviso perdido.
+                    tab.idle_deadline = Some(last + HOOK_STALE);
+                } else if tab.busy {
                     tab.idle_deadline = Some(last + IDLE_CHIME);
                 }
             }
@@ -504,30 +536,32 @@ impl Deck {
         for (i, code) in exits {
             let tab = &mut self.tabs[i];
             tab.alive = false;
-            for q in tab.queue.drain(..) {
+            for q in tab.queue.drain() {
                 self.core.fail_delivery(q.request, "a aba encerrou antes de receber a mensagem");
             }
             self.core.instance_ended(&tab.ident.id());
             tab.session.print(&format!("\r\n\x1b[90m[processo encerrado (código {code}) — pressione Enter para reiniciar]\x1b[0m\r\n"));
         }
-        // Perguntas de outros agentes: digitadas no terminal assim que a aba sossega (uma por vez).
+        // Mensagens de outros agentes: digitadas no terminal quando a aba fica livre (uma por vez;
+        // regra em `commanddeck_core::delivery`).
         for i in 0..self.tabs.len() {
-            if self.tabs[i].queue.is_empty() {
-                continue;
-            }
-            if !self.tabs[i].alive {
-                for q in self.tabs[i].queue.drain(..) {
-                    self.core.fail_delivery(q.request, "a aba não está rodando");
+            let Some(since) = self.tabs[i].queue.front_since() else { continue };
+            match delivery::gate(&self.tab_state(i), since, now) {
+                Gate::Fail => {
+                    for q in self.tabs[i].queue.drain() {
+                        self.core.fail_delivery(q.request, "a aba não está rodando");
+                    }
                 }
-                continue;
-            }
-            if self.tab_ready(i, now) {
-                if let Some(q) = self.tabs[i].queue.pop_front() {
-                    self.submit(i, &q.prompt);
+                Gate::Ready => {
+                    if let Some(q) = self.tabs[i].queue.pop() {
+                        self.submit(i, &q.prompt);
+                        want(now + FIRST_ENTER);
+                    }
+                    if !self.tabs[i].queue.is_empty() {
+                        want(now + delivery::POLL);
+                    }
                 }
-            }
-            if !self.tabs[i].queue.is_empty() {
-                want(now + Duration::from_millis(300));
+                Gate::WaitUntil(t) => want(t),
             }
         }
         if chime {
@@ -593,10 +627,24 @@ impl Deck {
     /// Pergunta de outro agente (`ask-agent`) para uma instância: abre a aba dela, se ainda não
     /// existe (em segundo plano, sem roubar o foco), e coloca a pergunta na fila para ser
     /// digitada no terminal assim que ele estiver pronto. A resposta volta quando o agente da
-    /// aba rodar `ask-agent <quem-perguntou> "resposta"`.
+    /// aba rodar `ask-agent --reply <n> "resposta"`.
+    ///
+    /// Uma resposta atrasada (`d.answer`) vai para a aba de quem perguntou só se ela ainda está
+    /// aberta e rodando: não reabre nada (a resposta já está na Conversa integrada).
     fn on_deliver(&mut self, d: Delivery) {
         let id = d.ident.id();
-        let idx = match self.tabs.iter().position(|t| t.ident.id() == id) {
+        let found = self.tabs.iter().position(|t| t.ident.id() == id);
+        if d.answer {
+            match found {
+                // Num terminal comum o texto seria executado como comando (a ponte já evita isso).
+                Some(i) if self.tabs[i].alive && self.tabs[i].kind != "shell" => {
+                    self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt })
+                }
+                _ => log::info!("resposta atrasada para \"{id}\" descartada: a aba não está aberta"),
+            }
+            return;
+        }
+        let idx = match found {
             Some(i) => i,
             None => {
                 let reason = if !self.agents.knows(&d.ident.kind) {
@@ -620,20 +668,35 @@ impl Deck {
         if !self.tabs[idx].alive {
             self.start(idx); // o processo tinha encerrado: sobe de novo para receber a pergunta
         }
-        self.tabs[idx].queue.push_back(Queued { request: d.request, prompt: d.prompt });
+        self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt });
     }
 
-    /// A TUI do agente já subiu e está parada (não está no meio de uma resposta)?
-    fn tab_ready(&self, idx: usize, now: Instant) -> bool {
+    /// O que a regra de entrega precisa saber da aba.
+    fn tab_state(&self, idx: usize) -> TabState {
         let tab = &self.tabs[idx];
-        if !tab.alive || tab.busy {
-            return false;
+        TabState {
+            alive: tab.alive,
+            // Um envio cujo Enter ainda não saiu também ocupa a aba.
+            busy: tab.busy || !tab.pending_enter.is_empty(),
+            hooked: tab.hooked,
+            last_output: *tab.session.shared.last_output.lock(),
+            last_key: tab.last_key,
+            typing: tab.typing,
         }
-        if now.duration_since(tab.spawned_at) >= READY_TIMEOUT {
-            return true;
+    }
+
+    /// Hook do agente (`ask-agent --signal`): início ou fim de turno.
+    fn on_agent_signal(&mut self, id: &str, busy: bool) {
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.ident.id() == id) else { return };
+        tab.hooked = true;
+        tab.turn_confirmed = busy;
+        // Ocupada: se o aviso de fim de turno se perder, a aba é liberada após HOOK_STALE.
+        tab.idle_deadline = busy.then(|| Instant::now() + HOOK_STALE);
+        let finished = tab.busy && !busy;
+        tab.busy = busy;
+        if finished {
+            self.play_sound(false);
         }
-        let last = *tab.session.shared.last_output.lock();
-        last.is_some_and(|t| now.duration_since(t) >= READY_IDLE)
     }
 
     /// Cria a aba da instância e inicia o processo. Uma aba `auto` fica em segundo plano (só ganha
@@ -652,8 +715,13 @@ impl Deck {
             alive: false,
             busy: false,
             auto,
-            queue: VecDeque::new(),
-            spawned_at: Instant::now(),
+            queue: Mailbox::default(),
+            last_key: None,
+            typing: false,
+            hooked: false,
+            turn_confirmed: false,
+            pending_enter: VecDeque::new(),
+            held_keys: Vec::new(),
             seen_output: 0,
             idle_deadline: None,
             spec: None,
@@ -686,7 +754,12 @@ impl Deck {
         };
         let tab = &mut self.tabs[idx];
         tab.session.reset();
-        tab.spawned_at = Instant::now();
+        // Processo novo: os hooks precisam se apresentar de novo, e nada do anterior vale.
+        tab.hooked = false;
+        tab.turn_confirmed = false;
+        tab.busy = false;
+        tab.pending_enter.clear();
+        tab.held_keys.clear();
         if let Some(m) = &self.metrics {
             tab.session.resize(grid, m.cell_w, m.cell_h);
         }
@@ -719,7 +792,7 @@ impl Deck {
         }
         let mut tab = self.tabs.remove(idx);
         tab.session.kill();
-        for q in tab.queue.drain(..) {
+        for q in tab.queue.drain() {
             self.core.fail_delivery(q.request, "a aba foi fechada antes de receber a mensagem");
         }
         // Esquece a instância e libera quem esperava resposta dela.
@@ -873,7 +946,7 @@ impl Deck {
                 if let Some(text) = clipboard_text().filter(|t| !t.is_empty()) {
                     if self.tabs[idx].alive {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                        self.tabs[idx].session.write(&input::paste_bytes(&text, bracketed));
+                        self.user_input(idx, &input::paste_bytes(&text, bracketed), true);
                     }
                 }
                 return true;
@@ -893,19 +966,33 @@ impl Deck {
 
     /// `term.onData`: envia ao processo ou reinicia com Enter quando morto.
     fn terminal_data(&mut self, idx: usize, bytes: &[u8]) {
-        let tab = &mut self.tabs[idx];
-        if tab.alive {
+        if self.tabs[idx].alive {
             if bytes == b"\r" {
-                tab.busy = true;
+                self.tabs[idx].busy = true;
+                self.tabs[idx].turn_confirmed = false;
             }
             {
-                let mut emu = tab.session.shared.emu.lock();
+                let mut emu = self.tabs[idx].session.shared.emu.lock();
                 emu.term.scroll_display(Scroll::Bottom);
                 emu.term.selection = None;
             }
-            tab.session.write(bytes);
+            let typing = delivery::typing_after(bytes, self.tabs[idx].typing);
+            self.user_input(idx, bytes, typing);
         } else if bytes == b"\r" {
             self.start(idx);
+        }
+    }
+
+    /// Bytes digitados (ou colados) pelo usuário. Registra a tecla para a regra de entrega e, se
+    /// um envio ainda espera o Enter, segura os bytes até ele sair.
+    fn user_input(&mut self, idx: usize, bytes: &[u8], typing: bool) {
+        let tab = &mut self.tabs[idx];
+        tab.last_key = Some(Instant::now());
+        tab.typing = typing;
+        if tab.pending_enter.is_empty() {
+            tab.session.write(bytes);
+        } else {
+            tab.held_keys.extend_from_slice(bytes);
         }
     }
 
@@ -1246,18 +1333,35 @@ impl Deck {
 
     /// `pty:submit`: cola entre colchetes e confirma com Enter após 250 ms (e de novo após
     /// 600 ms quando há menção `@` em CLIs com autocomplete de arquivo).
+    ///
+    /// Os Enters saem da thread da interface (em `tick`), na ordem certa em relação ao que o
+    /// usuário digitar nesse meio-tempo; uma thread só acorda a interface na hora.
     fn submit(&mut self, idx: usize, text: &str) {
+        let now = Instant::now();
         let tab = &mut self.tabs[idx];
+        // Um envio anterior que ainda esperava o Enter é confirmado antes desta colagem.
+        for _ in tab.pending_enter.drain(..) {
+            tab.session.write(b"\r");
+        }
+        if !tab.held_keys.is_empty() {
+            let held = std::mem::take(&mut tab.held_keys);
+            tab.session.write(&held);
+        }
         tab.busy = true;
+        tab.turn_confirmed = false;
+        tab.typing = false;
         tab.session.write(&input::submit_paste(text));
-        let writer = tab.session.writer_handle();
         let double = text.contains('@') && tab.spec.as_ref().is_some_and(|s| s.double_enter_on_mention);
-        let _ = std::thread::Builder::new().name("submit".into()).spawn(move || {
-            std::thread::sleep(Duration::from_millis(250));
-            writer(b"\r");
-            if double {
-                std::thread::sleep(Duration::from_millis(350));
-                writer(b"\r");
+        let mut times = vec![now + FIRST_ENTER];
+        if double {
+            times.push(now + SECOND_ENTER);
+        }
+        tab.pending_enter.extend(times.iter().copied());
+        let wake = self.wake.clone();
+        let _ = std::thread::Builder::new().name("submit-wake".into()).spawn(move || {
+            for at in times {
+                std::thread::sleep(at.saturating_duration_since(Instant::now()) + Duration::from_millis(2));
+                wake();
             }
         });
     }

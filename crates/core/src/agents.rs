@@ -90,6 +90,20 @@ pub const AGENTS: &[AgentDef] = &[
         missing: "Ollama CLI não encontrado. Instale em: https://ollama.com/download",
     },
     AgentDef {
+        id: "codex",
+        label: "Codex",
+        color: "#10a37f",
+        peer: true,
+        missing: "Codex CLI não encontrado. Instale com:\r\n  npm install -g @openai/codex",
+    },
+    AgentDef {
+        id: "opencode",
+        label: "OpenCode",
+        color: "#f97316",
+        peer: true,
+        missing: "OpenCode não encontrado. Instale com:\r\n  npm install -g opencode-ai",
+    },
+    AgentDef {
         id: "gemini",
         label: "Gemini",
         color: "#1a73e8",
@@ -138,6 +152,8 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("geminicli", "gemini"),
     ("gh-copilot", "copilot"),
     ("amazon-q", "q"),
+    ("openai", "codex"),
+    ("open-code", "opencode"),
 ];
 
 pub fn agent_def(id: &str) -> Option<&'static AgentDef> {
@@ -154,12 +170,39 @@ pub fn resolve_alias(name: &str) -> &str {
 pub(crate) struct Resolved {
     pub program: PathBuf,
     pub pre: Vec<String>,
+    /// Windows: o agente é um shim `.cmd` (npm/pip), aberto via `cmd.exe /d /c <nome>`. O cmd.exe
+    /// interpreta `& | < > ^ % "` e quebras de linha nos argumentos: nada de texto livre neles.
+    pub shim: Option<PathBuf>,
 }
 
 impl Resolved {
     fn direct(p: PathBuf) -> Self {
-        Self { program: p, pre: Vec::new() }
+        Self { program: p, pre: Vec::new(), shim: None }
     }
+
+    /// `cmd.exe /d /c <nome> [extra…]` para o shim em `path`.
+    fn via_cmd(path: PathBuf, name: &str, extra: &[&str]) -> Self {
+        let mut pre: Vec<String> = ["/d", "/c", name].map(String::from).to_vec();
+        pre.extend(extra.iter().map(|s| s.to_string()));
+        Self { program: "cmd.exe".into(), pre, shim: Some(path) }
+    }
+
+    /// Programa e argumentos fixos para `std::process::Command`. Um shim `.cmd` é chamado
+    /// direto: assim a std do Rust aplica o escape próprio de arquivos em lote (e recusa o que
+    /// não dá para escapar), o que não acontece com um `cmd.exe /c` explícito.
+    pub fn command(&self) -> (PathBuf, Vec<String>) {
+        match &self.shim {
+            Some(path) => (path.clone(), self.pre.iter().skip(3).cloned().collect()),
+            None => (self.program.clone(), self.pre.clone()),
+        }
+    }
+}
+
+/// Deixa um argumento inofensivo para o `cmd.exe /c` (abas abertas por um shim `.cmd`, em que o
+/// argumento passa pelo interpretador do cmd): quebras de linha viram espaço e os caracteres
+/// especiais do cmd são removidos. Só para textos gerados pelo app (instruções, caminhos).
+pub(crate) fn cmd_safe_arg(arg: &str) -> String {
+    arg.replace("\r\n", " ").replace(['\r', '\n'], " ").chars().filter(|c| !"\"^&|<>%!".contains(*c)).collect()
 }
 
 /// Resultado de `resolveOllama`.
@@ -175,6 +218,9 @@ pub(crate) struct Discovery {
     pub search_path: Option<OsString>,
     pub home: PathBuf,
     pub ollama: bool,
+    /// Procurar CLIs nas pastas do sistema (`APPDATA`, `LOCALAPPDATA`, `ProgramFiles`). Desligado
+    /// nos testes: essas pastas passam a ser procuradas dentro de `home`.
+    pub system_dirs: bool,
 }
 
 #[derive(Default)]
@@ -219,6 +265,16 @@ impl Registry {
         &self.disc.home
     }
 
+    /// Pasta do sistema da variável `key` (`APPDATA`…). Nos testes (`system_dirs = false`), fica
+    /// dentro de `home`, para o resultado não depender do que está instalado na máquina.
+    fn system_dir(&self, key: &str) -> Option<PathBuf> {
+        if self.disc.system_dirs {
+            std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from)
+        } else {
+            Some(self.home().join(key))
+        }
+    }
+
     // ---------- Resolução dos executáveis ----------
 
     /// Resolve um agente base (sem `ollama:`); `ollama` usa o modelo padrão.
@@ -237,7 +293,7 @@ impl Registry {
         let name = if id == "antigravity" { "agy" } else { id };
         let first_existing = |c: Vec<Option<PathBuf>>| c.into_iter().flatten().find(|p| p.is_file());
         if cfg!(windows) {
-            let env = |k: &str| std::env::var_os(k).map(PathBuf::from).unwrap_or_default();
+            let env = |k: &str| self.system_dir(k).unwrap_or_default();
             let home = self.home().to_path_buf();
             let exe = format!("{name}.exe");
             let which_exe = || self.which(&exe);
@@ -288,7 +344,7 @@ impl Registry {
                 if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
                     Resolved::direct(p)
                 } else {
-                    Resolved { program: "cmd.exe".into(), pre: vec!["/d".into(), "/c".into(), name.into()] }
+                    Resolved::via_cmd(p, name, &[])
                 }
             })
         } else {
@@ -323,14 +379,17 @@ impl Registry {
             self.which("gh")
         }?;
         let is_cmd = gh.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd"));
-        let (program, mut pre): (PathBuf, Vec<String>) =
-            if is_cmd { ("cmd.exe".into(), vec!["/d".into(), "/c".into(), "gh".into()]) } else { (gh, Vec::new()) };
+        let gh_resolved = if is_cmd { Resolved::via_cmd(gh.clone(), "gh", &[]) } else { Resolved::direct(gh.clone()) };
+        let (program, pre) = gh_resolved.command();
         let mut cmd = std::process::Command::new(&program);
         cmd.args(&pre).args(["extension", "list"]);
         let out = crate::process::run_captured(cmd, None, Duration::from_secs(3), None, None).ok()?;
         if out.stdout.contains("gh-copilot") || out.stdout.contains("copilot") {
-            pre.push("copilot".into());
-            return Some(Resolved { program, pre });
+            return Some(if is_cmd {
+                Resolved::via_cmd(gh, "gh", &["copilot"])
+            } else {
+                Resolved { program: gh, pre: vec!["copilot".into()], shim: None }
+            });
         }
         None
     }
@@ -355,7 +414,7 @@ impl Registry {
             return exe.clone();
         }
         let candidates: Vec<Option<PathBuf>> = if cfg!(windows) {
-            let env = |k: &str, d: &str| std::env::var_os(k).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(d));
+            let env = |k: &str, d: &str| self.system_dir(k).unwrap_or_else(|| PathBuf::from(d));
             vec![
                 Some(env("LOCALAPPDATA", "").join("Programs").join("Ollama").join("ollama.exe")),
                 Some(env("ProgramFiles", "C:\\Program Files").join("Ollama").join("ollama.exe")),
@@ -474,13 +533,13 @@ impl Registry {
             "Para conversar com outro agente, execute no shell:".to_owned(),
             "  ask-agent <agente> \"sua mensagem\"".to_owned(),
             format!(
-                "Agentes disponíveis: {}. A resposta é impressa no stdout e pode levar alguns minutos (use timeout de até 600000 ms).",
+                "Agentes disponíveis: {}. A resposta é impressa no stdout e pode levar alguns minutos (use timeout de até 600000 ms). Se o outro agente demorar, o ask-agent termina antes, avisando que a resposta será digitada depois neste terminal como uma nova mensagem: nesse caso, não repita a pergunta.",
                 others.join(",")
             ),
             "O histórico de cada par de agentes é mantido entre chamadas. O usuário tem acesso à \"Conversa integrada\" em tempo real no CommandDeck, portanto você NÃO precisa relatar nem resumir a conversa dos agentes para ele.".to_owned(),
             "Ao colaborar com outro agente (ex: Antigravity), mantenha o diálogo diretamente com ele (iterando, tirando dúvidas e alinhando) até concluir a tarefa, em vez de parar no meio para fazer perguntas ao usuário.".to_owned(),
             "Cada aba é uma instância com nome <modelo>[@<cargo>[@<nome>]] (ex.: claude, claude@dev, claude@dev@ana). Para delegar a uma instância com cargo, chame-a pelo nome: ask-agent claude@dev \"tarefa\" (a aba é aberta se não existir); use --new para abrir outra instância do mesmo cargo.".to_owned(),
-            "Quando outro agente lhe mandar uma mensagem, responda executando ask-agent <nome-dele> \"sua resposta\": é só assim que a resposta chega a ele.".to_owned(),
+            "Quando outro agente lhe mandar uma mensagem, responda executando o comando indicado nela (ask-agent --reply <número> \"sua resposta\"): é só assim que a resposta chega a ele.".to_owned(),
         ]
         .join("\n")
     }
@@ -535,7 +594,7 @@ impl Registry {
 /// Shell da aba "Terminal": PowerShell no Windows; `$SHELL` (ou /bin/bash) nos demais.
 fn shell_resolved() -> Resolved {
     if cfg!(windows) {
-        Resolved { program: "powershell.exe".into(), pre: vec!["-NoLogo".into()] }
+        Resolved { program: "powershell.exe".into(), pre: vec!["-NoLogo".into()], shim: None }
     } else {
         let sh = std::env::var_os("SHELL").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| "/bin/bash".into());
         Resolved::direct(sh)
@@ -596,10 +655,11 @@ pub const PATH_SEP: &str = if cfg!(windows) { ";" } else { ":" };
 /// Ambiente dos agentes (equivalente a `agentEnv`): herda o do processo, remove marcas de
 /// sessões aninhadas do Claude Code, põe a pasta dos binários no início do PATH e injeta
 /// as variáveis da ponte.
-pub(crate) fn agent_env(core: &Core, agent_id: &str, depth: i64) -> BTreeMap<String, String> {
+/// `token` é o do processo (ver [`Core::tab_token`] e [`Core::headless_token`]), nunca o mestre.
+pub(crate) fn agent_env(core: &Core, agent_id: &str, depth: i64, token: &str) -> BTreeMap<String, String> {
     let base: Vec<(String, String)> =
         std::env::vars_os().map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())).collect();
-    build_agent_env(base, &core.paths().bin_dir, core.bridge_port(), core.bridge_token(), agent_id, depth)
+    build_agent_env(base, &core.paths().bin_dir, core.bridge_port(), token, agent_id, depth)
 }
 
 pub(crate) fn build_agent_env(
@@ -623,7 +683,10 @@ pub(crate) fn build_agent_env(
             }
             continue;
         }
-        let removed = if cfg!(windows) { REMOVE.iter().any(|r| r.eq_ignore_ascii_case(&k)) } else { REMOVE.contains(&k.as_str()) };
+        let removed = if cfg!(windows) { REMOVE.iter().any(|r| r.eq_ignore_ascii_case(&k)) } else { REMOVE.contains(&k.as_str()) }
+            // Nada do CommandDeck que abriu este app (ex.: o app rodando dentro de uma aba de
+            // outro CommandDeck) vaza para os agentes: cargo, pasta de dados, depuração…
+            || (k.get(..12).is_some_and(|p| p.eq_ignore_ascii_case("COMMANDDECK_")) && !k.eq_ignore_ascii_case("COMMANDDECK_ASK_WAIT"));
         if !removed {
             env.insert(k, v);
         }
@@ -636,6 +699,21 @@ pub(crate) fn build_agent_env(
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
     env
+}
+
+/// Grava `dados/hooks/claude-settings.json`: hooks que avisam a ponte quando o Claude começa
+/// (`UserPromptSubmit`) e termina (`Stop`) um turno. Somam-se às configurações do usuário.
+fn write_claude_hooks(data_dir: &Path) -> std::io::Result<PathBuf> {
+    let dir = data_dir.join("hooks");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("claude-settings.json");
+    let hook = |state: &str| serde_json::json!([{ "hooks": [{ "type": "command", "command": format!("ask-agent --signal {state}") }] }]);
+    let settings = serde_json::json!({ "hooks": { "UserPromptSubmit": hook("busy"), "Stop": hook("idle") } });
+    let text = serde_json::to_string_pretty(&settings).unwrap_or_default();
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+        std::fs::write(&path, text)?;
+    }
+    Ok(path)
 }
 
 /// Nome do binário `ollama-agent` na pasta dos executáveis.
@@ -658,7 +736,7 @@ pub(crate) fn spawn_spec_for(core: &Core, ident: &Ident) -> Result<SpawnSpec, St
     let base = if sub_model.is_some() { "ollama" } else { kind };
     let def = agent_def(base).ok_or_else(|| format!("Agente desconhecido: {kind}"))?;
     let data_dir = core.paths().data_dir.to_string_lossy().into_owned();
-    let mut env = agent_env(core, &id, 0);
+    let mut env = agent_env(core, &id, 0, &core.tab_token(&id));
     if let Some(role) = &ident.role {
         env.insert("COMMANDDECK_ROLE".into(), role.clone());
     }
@@ -668,22 +746,43 @@ pub(crate) fn spawn_spec_for(core: &Core, ident: &Ident) -> Result<SpawnSpec, St
         let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
         env.insert("COMMANDDECK_OLLAMA_MODEL".into(), model.clone());
         env.insert("COMMANDDECK_OLLAMA_HOST".into(), core.config().ollama_host);
+        // O `ask-agent` do modelo roda como ferramenta e precisa da resposta no stdout: espera tudo.
+        env.insert("COMMANDDECK_ASK_WAIT".into(), "0".into());
         (ollama_agent_exe(&core.paths().bin_dir), vec![model.clone()], format!("Ollama ({model})"))
     } else {
         let resolved = reg.resolve(base).ok_or_else(|| def.missing.to_owned())?;
-        let mut args = resolved.pre;
+        let mut args = Vec::new();
         if base == "claude" {
             args.push("--append-system-prompt".into());
             args.push(reg.bridge_instructions_for(ident));
             // Responder a outro agente é rodar `ask-agent`: libera só esse comando, sem perguntar.
             args.push("--allowedTools".into());
             args.push("Bash(ask-agent:*)".into());
+            // Hooks avisam o início e o fim de cada turno (ver `delivery.rs`).
+            match write_claude_hooks(&core.paths().data_dir) {
+                Ok(path) => {
+                    args.push("--settings".into());
+                    args.push(path.to_string_lossy().into_owned());
+                }
+                Err(e) => log::warn!("não consegui gravar os hooks do Claude: {e}"),
+            }
+        }
+        if base == "codex" && resolved.shim.is_none() {
+            // Fim de turno do Codex → `ask-agent --signal idle <json>`. Pelo cmd.exe o valor TOML
+            // (com aspas) não sobrevive, então só com o executável direto.
+            args.push("-c".into());
+            args.push(r#"notify=["ask-agent","--signal","idle"]"#.into());
         }
         if base == "claude" || base == "antigravity" {
             args.push("--add-dir".into());
             args.push(data_dir);
         }
-        (resolved.program, args, def.label.to_owned())
+        if resolved.shim.is_some() {
+            args = args.iter().map(|a| cmd_safe_arg(a)).collect();
+        }
+        let mut full = resolved.pre;
+        full.extend(args);
+        (resolved.program, full, def.label.to_owned())
     };
 
     Ok(SpawnSpec {
@@ -729,8 +828,20 @@ mod tests {
             ("CLAUDE_CODE_ENTRYPOINT".to_owned(), "cli".to_owned()),
             ("HOME".to_owned(), "/h".to_owned()),
             ("PATH".to_owned(), "/usr/bin".to_owned()),
+            // Herdados de um CommandDeck que abriu este (app rodando dentro de uma aba).
+            ("COMMANDDECK_ROLE".to_owned(), "dev".to_owned()),
+            ("COMMANDDECK_HOME".to_owned(), "/outro".to_owned()),
+            ("COMMANDDECK_TOKEN".to_owned(), "velho".to_owned()),
+            ("COMMANDDECK_DEBUG_UI".to_owned(), "1".to_owned()),
+            // Configuração do usuário: continua valendo.
+            ("COMMANDDECK_ASK_WAIT".to_owned(), "300".to_owned()),
         ];
         let env = build_agent_env(base, Path::new("/app/bin"), 1234, "tok", "claude", 1);
+        for k in ["COMMANDDECK_ROLE", "COMMANDDECK_HOME", "COMMANDDECK_DEBUG_UI"] {
+            assert!(!env.contains_key(k), "{k} herdado");
+        }
+        assert_eq!(env["COMMANDDECK_TOKEN"], "tok");
+        assert_eq!(env["COMMANDDECK_ASK_WAIT"], "300");
         assert!(!env.contains_key("CLAUDECODE"));
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
         assert_eq!(env["HOME"], "/h");
@@ -741,6 +852,32 @@ mod tests {
         assert_eq!(env["COMMANDDECK_DEPTH"], "1");
         assert_eq!(env["TERM"], "xterm-256color");
         assert_eq!(env["COLORTERM"], "truecolor");
+    }
+
+    #[test]
+    fn cmd_args_lose_what_the_cmd_interprets() {
+        assert_eq!(cmd_safe_arg("a \"b\" & calc | x <y> ^z %PATH% !v!\r\nfim\n"), "a b  calc  x y z PATH v fim ");
+        assert_eq!(cmd_safe_arg(r"C:\Users\ana\dados"), r"C:\Users\ana\dados");
+    }
+
+    #[test]
+    fn a_cmd_shim_is_called_directly_by_std() {
+        let r = Resolved::via_cmd(PathBuf::from(r"C:\npm\gh.cmd"), "gh", &["copilot"]);
+        assert_eq!(r.program, PathBuf::from("cmd.exe"));
+        assert_eq!(r.pre, ["/d", "/c", "gh", "copilot"]);
+        assert_eq!(r.command(), (PathBuf::from(r"C:\npm\gh.cmd"), vec!["copilot".to_owned()]));
+        let d = Resolved::direct(PathBuf::from("/bin/claude"));
+        assert_eq!(d.command(), (PathBuf::from("/bin/claude"), Vec::new()));
+    }
+
+    #[test]
+    fn claude_hooks_signal_the_bridge() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let path = write_claude_hooks(tmp.path()).expect("hooks");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("ler")).expect("json");
+        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "ask-agent --signal idle");
+        assert_eq!(v["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"], "ask-agent --signal busy");
+        assert_eq!(write_claude_hooks(tmp.path()).expect("de novo"), path);
     }
 
     #[cfg(windows)]

@@ -138,7 +138,9 @@ impl Core {
             ro.extra_system = opts.extra_system;
             ro.attachments = opts.attachments;
             // `ask-agent` chamado pelo modelo enxerga a ponte (com a profundidade correta).
-            ro.command_env = Some(agents::agent_env(self, agent, opts.depth));
+            // Token próprio desta execução: a ponte sabe quem pergunta, sem confiar no `from`.
+            let guard = self.headless_token(agent);
+            ro.command_env = Some(agents::agent_env(self, agent, opts.depth, &guard.token));
             let core = self.clone();
             let out = self.inner.ollama.run(ro, cancel, &mut |ev| {
                 if let AgentEvent::ToolCall { name, summary } = ev {
@@ -166,7 +168,9 @@ impl Core {
             prompt_owned.as_str()
         };
 
-        let mut args = resolved.pre.clone();
+        let (program, mut args) = resolved.command();
+        // Shim `.cmd` (Windows): texto livre não vai na linha de comando; o prompt vai por arquivo.
+        let via_cmd = resolved.shim.is_some();
         let mut sid = opts.session_key.as_ref().and_then(|k| self.inner.headless_sessions.lock().get(k).cloned());
         let is_new = opts.session_key.is_some() && sid.is_none();
         let mut stdin = prompt.to_owned();
@@ -186,7 +190,7 @@ impl Core {
             "antigravity" => {
                 args.extend([
                     "-p".into(),
-                    self.agy_prompt_arg(prompt),
+                    self.prompt_arg(prompt, via_cmd),
                     "--output-format".into(),
                     "json".into(),
                     "--print-timeout".into(),
@@ -203,7 +207,8 @@ impl Core {
                 if is_new {
                     sid = Some(uuid::Uuid::new_v4().to_string());
                 }
-                args.extend(["-p", prompt, "-o", "text", "--approval-mode", "yolo", "--skip-trust"].map(String::from));
+                args.extend(["-p".into(), self.prompt_arg(prompt, via_cmd)]);
+                args.extend(["-o", "text", "--approval-mode", "yolo", "--skip-trust"].map(String::from));
                 if let Some(s) = &sid {
                     args.push(if is_new { "--session-id" } else { "--resume" }.into());
                     args.push(s.clone());
@@ -211,32 +216,51 @@ impl Core {
                 stdin.clear();
             }
             "aider" => {
-                args.extend(["--message", prompt, "--no-auto-commits", "--yes-always"].map(String::from));
+                match self.prompt_file_if(prompt, via_cmd) {
+                    Some(file) => args.extend(["--message-file".into(), file]),
+                    None => args.extend(["--message".into(), prompt.to_owned()]),
+                }
+                args.extend(["--no-auto-commits", "--yes-always"].map(String::from));
                 stdin.clear();
             }
             "goose" => {
-                args.extend(["run", "--text", prompt].map(String::from));
+                match self.prompt_file_if(prompt, via_cmd) {
+                    Some(file) => args.extend(["run".into(), "--instructions".into(), file]),
+                    None => args.extend(["run".into(), "--text".into(), prompt.to_owned()]),
+                }
                 stdin.clear();
             }
             "copilot" => {
-                args.extend(["explain", prompt].map(String::from));
+                args.extend(["explain".into(), self.prompt_arg(prompt, via_cmd)]);
                 stdin.clear();
             }
             "q" => {
-                args.extend(["chat", "--message", prompt].map(String::from));
+                args.extend(["chat".into(), "--message".into(), self.prompt_arg(prompt, via_cmd)]);
                 stdin.clear();
             }
             "interpreter" => {
-                args.extend(["-y", "--prompt", prompt].map(String::from));
+                args.extend(["-y".into(), "--prompt".into(), self.prompt_arg(prompt, via_cmd)]);
+                stdin.clear();
+            }
+            // `codex exec -`: o prompt vem pela entrada padrão; só a resposta final vai ao stdout.
+            "codex" => args.extend(["exec", "--skip-git-repo-check", "-"].map(String::from)),
+            "opencode" => {
+                args.extend(["run".into(), self.prompt_arg(prompt, via_cmd)]);
                 stdin.clear();
             }
             _ => {}
         }
 
-        let mut cmd = std::process::Command::new(&resolved.program);
-        cmd.args(&args).current_dir(&workspace).env_clear().envs(agents::agent_env(self, agent, opts.depth));
+        if via_cmd {
+            // Arquivos em lote não recebem quebras de linha nos argumentos (ex.: o prompt de sistema).
+            args = args.into_iter().map(|a| a.replace("\r\n", " ").replace(['\r', '\n'], " ")).collect();
+        }
+        let guard = self.headless_token(agent);
+        let mut cmd = std::process::Command::new(&program);
+        cmd.args(&args).current_dir(&workspace).env_clear().envs(agents::agent_env(self, agent, opts.depth, &guard.token));
         let captured = run_captured(cmd, Some(stdin.into_bytes()), HEADLESS_TIMEOUT, None, Some(&self.inner.processes))
-            .map_err(|e| anyhow::anyhow!("falha ao iniciar \"{}\": {e}", resolved.program.display()))?;
+            .map_err(|e| anyhow::anyhow!("falha ao iniciar \"{}\": {e}", program.display()))?;
+        drop(guard);
         if captured.exit == Exit::TimedOut {
             anyhow::bail!("agente \"{agent}\" excedeu o tempo limite de resposta (timeout de 10 minutos)");
         }
@@ -281,21 +305,34 @@ impl Core {
         anyhow::bail!("{msg}")
     }
 
-    /// O agy -p recebe o prompt pela linha de comando; prompts longos vão para um arquivo
-    /// em `dados/prompts`. Equivalente a `agyPromptArg`.
-    fn agy_prompt_arg(&self, prompt: &str) -> String {
-        if prompt.chars().count() <= MAX_ARG_PROMPT {
-            return prompt.to_owned();
+    /// Grava o prompt em `dados/prompts` quando ele não pode ir na linha de comando: longo demais
+    /// (a do Windows tem ~32 mil caracteres) ou `force` (passaria por um shim `.cmd`). Devolve o
+    /// caminho do arquivo; `None` = vai como argumento mesmo.
+    fn prompt_file_if(&self, prompt: &str, force: bool) -> Option<String> {
+        if !force && prompt.chars().count() <= MAX_ARG_PROMPT {
+            return None;
         }
         let dir = self.paths().data_dir.join("prompts");
-        let file = dir.join(format!("s_{}_prompt-{}.md", self.inner.state.session_id, crate::util::now_ms()));
-        if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, prompt)).is_err() {
-            return prompt.to_owned();
+        let file = dir.join(format!("s_{}_prompt-{}.md", self.inner.state.session_id, uuid::Uuid::new_v4().simple()));
+        match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, prompt)) {
+            Ok(()) => Some(file.to_string_lossy().into_owned()),
+            Err(e) => {
+                log::warn!("não consegui gravar o prompt em {}: {e}", file.display());
+                None
+            }
         }
-        format!(
-            "A mensagem completa está no arquivo {}. Leia o arquivo inteiro e responda seguindo o que ele pede.",
-            crate::util::ref_path(&self.workspace(), &file)
-        )
+    }
+
+    /// O prompt como argumento, ou a instrução de ler o arquivo dele (ver [`Core::prompt_file_if`]).
+    /// Equivalente a `agyPromptArg`.
+    fn prompt_arg(&self, prompt: &str, force: bool) -> String {
+        match self.prompt_file_if(prompt, force) {
+            Some(file) => format!(
+                "A mensagem completa está no arquivo {}. Leia o arquivo inteiro e responda seguindo o que ele pede.",
+                crate::util::ref_path(&self.workspace(), std::path::Path::new(&file))
+            ),
+            None => prompt.to_owned(),
+        }
     }
 }
 

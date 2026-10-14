@@ -36,6 +36,12 @@ fn valid_word(s: &str) -> bool {
     !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
+/// Modelo: letras, números e `:._/+-` (`claude`, `ollama:qwen3.5:9b`, `ollama:user/custom:latest`).
+/// O id vai para prompts e variáveis de ambiente: nada de espaços, aspas ou caracteres de controle.
+fn valid_kind(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 128 && s.chars().all(|c| c.is_ascii_alphanumeric() || ":._/+-".contains(c))
+}
+
 impl Ident {
     /// A instância principal de um modelo.
     pub fn main(kind: &str) -> Self {
@@ -54,7 +60,7 @@ impl Ident {
     /// Lê um id. `None` se vier mal formado (cargo/nome inválidos, partes demais).
     pub fn parse(text: &str) -> Option<Self> {
         let mut parts = text.split(SEP);
-        let kind = parts.next().filter(|k| !k.is_empty())?.to_owned();
+        let kind = parts.next().filter(|k| valid_kind(k))?.to_owned();
         let role = parts.next();
         let name = parts.next();
         if parts.next().is_some() {
@@ -215,6 +221,12 @@ mod tests {
             assert!(Ident::parse(s).is_none(), "{s:?}");
         }
         assert!(Ident::parse(&format!("claude@{}", "a".repeat(33))).is_none());
+        // O modelo também é validado: o id vai para prompts digitados em outras abas.
+        for s in ["cla ude", "claude\"", "claude\x1b[201~", "claude\n", "a&b", "x<y", "usuário"] {
+            assert!(Ident::parse(s).is_none(), "{s:?}");
+        }
+        assert!(Ident::parse("ollama:user/custom:latest").is_some());
+        assert!(Ident::parse("ollama:qwen3.5:9b@dev").is_some());
     }
 
     #[test]

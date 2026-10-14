@@ -13,6 +13,7 @@ pub mod attachments;
 pub mod bridge;
 pub mod config;
 pub mod context;
+pub mod delivery;
 pub mod download;
 pub mod events;
 pub mod exchange;
@@ -82,11 +83,14 @@ pub struct StartOptions {
     pub watch_workspace: bool,
     /// Configuração a usar em vez de ler `paths.config_file` (não é gravada até `update_config`).
     pub config: Option<Config>,
+    /// Procurar CLIs também nas pastas do sistema (`APPDATA`, `LOCALAPPDATA`, `ProgramFiles`).
+    /// Os testes desligam, para não depender do que está instalado na máquina.
+    pub system_dirs: bool,
 }
 
 impl Default for StartOptions {
     fn default() -> Self {
-        Self { search_path: None, home_dir: None, ollama_discovery: true, watch_workspace: true, config: None }
+        Self { search_path: None, home_dir: None, ollama_discovery: true, watch_workspace: true, config: None, system_dirs: true }
     }
 }
 
@@ -115,10 +119,67 @@ pub(crate) struct CoreInner {
     pub exchange: exchange::Exchange,
     /// A interface sabe entregar mensagens nas abas (senão a ponte responde em modo headless).
     pub tab_delivery: std::sync::atomic::AtomicBool,
+    /// Token de cada processo de agente → quem ele é (a ponte não confia no `from` do corpo).
+    pub callers: Mutex<HashMap<String, Caller>>,
     pub bridge_queues: bridge::PairQueues,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub whisper: whisper::WhisperState,
+    /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
+    _data_lock: Option<std::fs::File>,
+}
+
+/// Quem chamou a ponte, pelo token que recebeu no ambiente.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Caller {
+    /// Id da instância (`claude`, `claude@dev`…).
+    pub id: String,
+    /// É o processo da aba (interativo). `false` = execução headless (mesa ou ponte sem abas).
+    pub tab: bool,
+}
+
+/// Resultado da autenticação de uma requisição à ponte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Auth {
+    /// Token mestre (testes e ferramentas de depuração): o `from` do corpo é aceito, validado.
+    Master,
+    /// Token de um processo de agente: o `from` é o dele, sempre.
+    Agent(Caller),
+}
+
+/// Token de um processo headless; esquecido quando o processo termina.
+pub(crate) struct TokenGuard {
+    inner: Arc<CoreInner>,
+    pub token: String,
+}
+
+impl Drop for TokenGuard {
+    fn drop(&mut self) {
+        self.inner.callers.lock().remove(&self.token);
+    }
+}
+
+/// Comparação em tempo constante (o token não vaza pelo tempo de resposta).
+fn same_secret(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Trava `dados/.commanddeck.lock`. Erro se outra instância do app já usa a pasta.
+fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
+    std::fs::create_dir_all(data_dir)?;
+    let path = data_dir.join(".commanddeck.lock");
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(
+            "Outra janela do CommandDeck já está usando a pasta de dados {}.\n\nFeche-a, ou defina COMMANDDECK_HOME com outra pasta para abrir uma instância separada.",
+            data_dir.display()
+        ),
+        Err(std::fs::TryLockError::Error(e)) => {
+            log::warn!("não consegui travar {}: {e}", path.display());
+            Ok(file)
+        }
+    }
 }
 
 pub(crate) mod state {
@@ -154,6 +215,7 @@ impl Core {
 
     /// Como [`Core::start`], com opções (testes / uso embutido).
     pub fn start_with(paths: paths::AppPaths, opts: StartOptions) -> anyhow::Result<(Core, Receiver<CoreEvent>)> {
+        let data_lock = lock_data_dir(&paths.data_dir)?;
         let (tx, rx) = crossbeam_channel::unbounded();
         let home = opts.home_dir.clone().unwrap_or_else(util::home_dir);
         let mut config = match opts.config {
@@ -176,6 +238,7 @@ impl Core {
                 search_path: opts.search_path,
                 home: home.clone(),
                 ollama: opts.ollama_discovery,
+                system_dirs: opts.system_dirs,
             }),
             home,
             watch_workspace: opts.watch_workspace,
@@ -185,10 +248,12 @@ impl Core {
             instances: Mutex::new(instances::Instances::default()),
             exchange: exchange::Exchange::default(),
             tab_delivery: std::sync::atomic::AtomicBool::new(false),
+            callers: Mutex::new(HashMap::new()),
             bridge_queues: bridge::PairQueues::default(),
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
             whisper: whisper::WhisperState::default(),
+            _data_lock: Some(data_lock),
             paths,
         };
         let core = Core { inner: Arc::new(inner) };
@@ -318,10 +383,13 @@ impl Core {
         Some(ident)
     }
 
-    /// A aba da instância fechou: esquece a instância e avisa quem esperava resposta dela.
+    /// A aba da instância fechou: esquece a instância e o token dela, avisa quem esperava
+    /// resposta dela e descarta as perguntas que ela fez (ninguém mais lê as respostas).
     pub fn close_instance(&self, id: &str) {
         self.inner.instances.lock().remove(id);
+        self.inner.callers.lock().retain(|_, c| !(c.tab && c.id == id));
         self.inner.exchange.fail_target(id, &format!("a aba de \"{id}\" foi fechada antes de responder"));
+        self.inner.exchange.fail_asker(id, &format!("a aba de \"{id}\" foi fechada"));
     }
 
     /// O processo da instância terminou (a aba continua aberta): quem esperava a resposta dela é liberado.
@@ -474,8 +542,35 @@ impl Core {
         *self.inner.state.bridge_port.lock()
     }
 
+    /// Token mestre da ponte. Os agentes recebem tokens próprios (ver [`Core::tab_token`]).
     pub fn bridge_token(&self) -> &str {
         &self.inner.state.bridge_token
+    }
+
+    /// Token da aba da instância `id` (o mesmo enquanto a instância existir).
+    pub(crate) fn tab_token(&self, id: &str) -> String {
+        let mut callers = self.inner.callers.lock();
+        if let Some((token, _)) = callers.iter().find(|(_, c)| c.tab && c.id == id) {
+            return token.clone();
+        }
+        let token = random_token();
+        callers.insert(token.clone(), Caller { id: id.to_owned(), tab: true });
+        token
+    }
+
+    /// Token de uma execução headless de `id`, válido enquanto o guarda existir.
+    pub(crate) fn headless_token(&self, id: &str) -> TokenGuard {
+        let token = random_token();
+        self.inner.callers.lock().insert(token.clone(), Caller { id: id.to_owned(), tab: false });
+        TokenGuard { inner: self.inner.clone(), token }
+    }
+
+    /// Quem é o dono do token (`None` = token inválido).
+    pub(crate) fn authenticate(&self, token: &str) -> Option<Auth> {
+        if same_secret(token, &self.inner.state.bridge_token) {
+            return Some(Auth::Master);
+        }
+        self.inner.callers.lock().get(token).cloned().map(Auth::Agent)
     }
 
     /// Encerra processos filhos headless (chamado ao fechar a janela), a ponte e o watcher.

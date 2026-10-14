@@ -1,7 +1,7 @@
 # ⚡ CommandDeck Terminal
 
 Terminal desktop nativo (Rust + winit) que conecta agentes de IA: **Claude Code**, **Antigravity CLI**,
-**modelos locais via Ollama** e outros CLIs. Os agentes conversam entre si (`ask-agent`), colaboram em
+**Codex**, **OpenCode**, **modelos locais via Ollama** e outros CLIs. Os agentes conversam entre si (`ask-agent`), colaboram em
 mesas de orquestração e trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada**.
 
 ![Tela principal](docs/screenshots/main.png)
@@ -36,6 +36,8 @@ As pastas `dados/`, `workspace/` e `whisper/` são procuradas subindo a partir d
 CLIs suportados (instale os que quiser usar):
 - Claude Code: `npm install -g @anthropic-ai/claude-code`
 - Antigravity: `irm https://antigravity.google/cli/install.ps1 | iex`
+- Codex: `npm install -g @openai/codex`
+- OpenCode: `npm install -g opencode-ai`
 - Ollama: https://ollama.com/download
 
 ## Comunicação entre agentes
@@ -44,6 +46,7 @@ Dentro de qualquer aba:
 
 ```bash
 ask-agent antigravity "Revise a estrutura de pastas proposta"
+ask-agent --reply 7 "Feito: a pasta src/ foi dividida"   # responde à pergunta nº 7
 ask-agent --list
 cat relatorio.txt | ask-agent claude -
 ```
@@ -52,7 +55,8 @@ O `ask-agent` conversa com **abas de verdade**: a mensagem é digitada no termin
 raciocínio dele, podendo intervir. Se o agente não tem aba, ela é aberta em segundo plano. Cada aba é
 uma instância com nome `modelo[@cargo[@nome]]` (`claude`, `claude@dev`, `claude@dev@ana`), então dá para
 ter várias do mesmo modelo e delegar por cargo: `ask-agent claude@dev "tarefa"` (use `--new` para outra
-instância). Dá para desligar em Configurações.
+instância). Se o outro agente demorar mais de 90 s (`COMMANDDECK_ASK_WAIT`), o `ask-agent` termina avisando e a
+resposta é digitada depois no terminal de quem perguntou. Dá para desligar em Configurações.
 
 Detalhes do protocolo e da arquitetura em [ARCHITECTURE.md](ARCHITECTURE.md).
 
