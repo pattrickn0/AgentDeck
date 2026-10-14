@@ -312,18 +312,14 @@ pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
     let mono_key = mono.as_ref().map(|_| "sys-mono");
     defs.families.insert(FontFamily::Proportional, chain(&[ui_key], &default_prop));
     defs.families.insert(FontFamily::Monospace, chain(&[mono_key], &default_mono));
-    defs.families.insert(
-        FontFamily::Name(FAMILY_UI_SEMIBOLD.into()),
-        chain(&[ui_sb.as_ref().map(|_| "sys-ui-semibold"), ui_key], &default_prop),
-    );
+    defs.families
+        .insert(FontFamily::Name(FAMILY_UI_SEMIBOLD.into()), chain(&[ui_sb.as_ref().map(|_| "sys-ui-semibold"), ui_key], &default_prop));
     defs.families.insert(
         FontFamily::Name(FAMILY_UI_BOLD.into()),
         chain(&[ui_b.as_ref().map(|_| "sys-ui-bold"), ui_sb.as_ref().map(|_| "sys-ui-semibold"), ui_key], &default_prop),
     );
-    defs.families.insert(
-        FontFamily::Name(FAMILY_MONO_BOLD.into()),
-        chain(&[mono_b.as_ref().map(|_| "sys-mono-bold"), mono_key], &default_mono),
-    );
+    defs.families
+        .insert(FontFamily::Name(FAMILY_MONO_BOLD.into()), chain(&[mono_b.as_ref().map(|_| "sys-mono-bold"), mono_key], &default_mono));
 
     loaded.ui = ui;
     loaded.mono = mono;

@@ -27,7 +27,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let items = deck.agents.empty_actions.clone();
     let font = theme::ui(12.0);
     let btn_h = 12.0 * theme::LINE_HEIGHT + 14.0 + 2.0;
-    let widths: Vec<f32> = items.iter().map(|m| 14.0 + 8.0 + 8.0 + 6.0 + galley(&painter, &m.label, font.clone(), theme::TEXT).size().x + 14.0 + 2.0).collect();
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|m| 14.0 + 8.0 + 8.0 + 6.0 + galley(&painter, &m.label, font.clone(), theme::TEXT).size().x + 14.0 + 2.0)
+        .collect();
     let max_row = 420.0f32.min(rect.width() - 48.0);
     let mut rows: Vec<Vec<usize>> = vec![Vec::new()];
     let mut row_w = 0.0;
@@ -78,7 +81,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             frame(&painter, rr, 6.0, if hot { theme::PANEL_2 } else { theme::PANEL }, if hot { m.color } else { theme::BORDER });
             dot(&painter, Pos2::new(rr.min.x + 15.0 + 4.0, rr.center().y), m.color);
             let g = galley(&painter, &m.label, font.clone(), theme::TEXT);
-            place(&painter, Rect::from_min_max(Pos2::new(rr.min.x + 15.0 + 8.0 + 8.0 + 6.0, rr.min.y), rr.max), Align2::LEFT_CENTER, g, theme::TEXT);
+            place(
+                &painter,
+                Rect::from_min_max(Pos2::new(rr.min.x + 15.0 + 8.0 + 8.0 + 6.0, rr.min.y), rr.max),
+                Align2::LEFT_CENTER,
+                g,
+                theme::TEXT,
+            );
             if resp.clicked() {
                 open = Some(m.kind.clone());
             }

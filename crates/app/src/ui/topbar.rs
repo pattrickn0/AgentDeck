@@ -26,10 +26,21 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     let toggle = Rect::from_min_size(inner.min, Vec2::new(20.0, inner.height()));
     let r = clickable(ui, toggle, Id::new("sidebar-toggle"));
     let hovered = r.hovered();
-    painter.rect_filled(Rect::from_min_max(toggle.min, Pos2::new(toggle.max.x - 1.0, toggle.max.y)), 0.0, if hovered { theme::PANEL_2 } else { theme::PANEL });
+    painter.rect_filled(
+        Rect::from_min_max(toggle.min, Pos2::new(toggle.max.x - 1.0, toggle.max.y)),
+        0.0,
+        if hovered { theme::PANEL_2 } else { theme::PANEL },
+    );
     painter.rect_filled(Rect::from_min_max(Pos2::new(toggle.max.x - 1.0, toggle.min.y), toggle.max), 0.0, theme::BORDER);
     let t = ctx.animate_bool_with_time(Id::new("sidebar-chevron"), deck.sidebar_collapsed, 0.15);
-    deck.icons.paint(&painter, Icon::SidebarChevron, Pos2::new(toggle.center().x - 0.5, toggle.center().y), 9.0, if hovered { theme::TEXT } else { theme::MUTED }, t * std::f32::consts::PI);
+    deck.icons.paint(
+        &painter,
+        Icon::SidebarChevron,
+        Pos2::new(toggle.center().x - 0.5, toggle.center().y),
+        9.0,
+        if hovered { theme::TEXT } else { theme::MUTED },
+        t * std::f32::consts::PI,
+    );
     let title = if deck.sidebar_collapsed { "Expandir barra lateral (Ctrl+B)" } else { "Recolher barra lateral (Ctrl+B)" };
     if tip(r, title).clicked() {
         deck.toggle_sidebar();
@@ -125,7 +136,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         dot(&tab_painter, Pos2::new(r.min.x + 14.0 + 4.0, r.center().y), tab.color);
         let label_x = r.min.x + 14.0 + 8.0 + 8.0 + 2.0;
         let g = galley_trunc(&tab_painter, &tab.label, font.clone(), color, 150.0);
-        let lr = place(&tab_painter, Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + 150.0, r.max.y)), Align2::LEFT_CENTER, g, color);
+        let lr = place(
+            &tab_painter,
+            Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + 150.0, r.max.y)),
+            Align2::LEFT_CENTER,
+            g,
+            color,
+        );
         if !tab.alive {
             // .tab.dead .label { text-decoration: line-through }
             let y = lr.center().y + 0.5;

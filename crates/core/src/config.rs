@@ -99,8 +99,7 @@ impl Config {
         } else if self.workspace.is_relative() {
             self.workspace = crate::util::normalize_lexical(&paths.app_dir.join(&self.workspace));
         }
-        if !home.as_os_str().is_empty()
-            && crate::util::same_path(&crate::util::absolutize(&self.workspace), &crate::util::absolutize(home))
+        if !home.as_os_str().is_empty() && crate::util::same_path(&crate::util::absolutize(&self.workspace), &crate::util::absolutize(home))
         {
             self.workspace = paths.default_workspace.clone();
         }

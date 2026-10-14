@@ -83,7 +83,16 @@ struct Reporter<'a> {
 
 impl<'a> Reporter<'a> {
     fn new(label: &str, sink: &'a mut dyn FnMut(DownloadProgress)) -> Self {
-        Self { label: label.to_owned(), sink, received: 0, total: None, speed: 0.0, last_emit: Instant::now(), last_bytes: 0, progressed: false }
+        Self {
+            label: label.to_owned(),
+            sink,
+            received: 0,
+            total: None,
+            speed: 0.0,
+            last_emit: Instant::now(),
+            last_bytes: 0,
+            progressed: false,
+        }
     }
 
     fn emit(&mut self, state: DownloadState, attempt: u32, max_attempts: u32, retry_in_ms: u64, message: Option<String>) {
@@ -247,12 +256,8 @@ fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) ->
         (0, header("content-length").and_then(|v| v.trim().parse::<u64>().ok()))
     };
 
-    let mut file = if start == 0 {
-        File::create(part)
-    } else {
-        OpenOptions::new().append(true).open(part)
-    }
-    .map_err(|e| DownloadError::fatal(format!("não foi possível gravar {}: {e}", part.display())))?;
+    let mut file = if start == 0 { File::create(part) } else { OpenOptions::new().append(true).open(part) }
+        .map_err(|e| DownloadError::fatal(format!("não foi possível gravar {}: {e}", part.display())))?;
 
     rep.begin(start, total);
 
@@ -309,7 +314,14 @@ fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) ->
 }
 
 /// Uma tentativa completa: baixa o que falta, confere o hash e publica o arquivo.
-fn attempt(url: &str, dest: &Path, part: &Path, opts: &DownloadOpts, mismatches: &mut u32, rep: &mut Reporter) -> Result<(), DownloadError> {
+fn attempt(
+    url: &str,
+    dest: &Path,
+    part: &Path,
+    opts: &DownloadOpts,
+    mismatches: &mut u32,
+    rep: &mut Reporter,
+) -> Result<(), DownloadError> {
     fetch_to_part(url, part, opts.stall_timeout, rep)?;
     if let Some(expected) = opts.sha256 {
         let size = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
@@ -332,7 +344,12 @@ fn attempt(url: &str, dest: &Path, part: &Path, opts: &DownloadOpts, mismatches:
 }
 
 /// Baixa `url` para `dest`. Só entrega o arquivo depois de conferir o SHA-256 (quando informado).
-pub fn download_file(url: &str, dest: &Path, opts: &DownloadOpts, on_progress: &mut dyn FnMut(DownloadProgress)) -> Result<(), DownloadError> {
+pub fn download_file(
+    url: &str,
+    dest: &Path,
+    opts: &DownloadOpts,
+    on_progress: &mut dyn FnMut(DownloadProgress),
+) -> Result<(), DownloadError> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| DownloadError::fatal(e.to_string()))?;
     }
@@ -358,7 +375,10 @@ pub fn download_file(url: &str, dest: &Path, opts: &DownloadOpts, on_progress: &
                     return Err(e);
                 }
                 let exp = opts.base_delay.saturating_mul(1u32 << (failures - 1).min(16));
-                let jitter = 0.75 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0) % 500) as f64 / 1000.0;
+                let jitter = 0.75
+                    + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0) % 500)
+                        as f64
+                        / 1000.0;
                 let delay = exp.min(opts.max_delay).mul_f64(jitter);
                 rep.emit(DownloadState::Retrying, failures, opts.retries, delay.as_millis() as u64, Some(e.message));
                 std::thread::sleep(delay);
@@ -499,13 +519,17 @@ mod tests {
                 if let (Some(n), true) = (b.drop_after, drops < b.drop_times) {
                     drops += 1;
                     let reader = Breaking { inner: Cursor::new(chunk), limit: n, sent: 0 };
-                    let _ = req.respond(Response::new(StatusCode(code), headers, reader, Some(len), None).with_chunked_threshold(never_chunked));
+                    let _ = req
+                        .respond(Response::new(StatusCode(code), headers, reader, Some(len), None).with_chunked_threshold(never_chunked));
                 } else if let (Some(pause), true) = (b.stall_for, stalls < b.stall_times) {
                     stalls += 1;
                     let reader = Stalling { inner: Cursor::new(chunk), at: b.stall_after, sent: 0, pause, paused: false };
-                    let _ = req.respond(Response::new(StatusCode(code), headers, reader, Some(len), None).with_chunked_threshold(never_chunked));
+                    let _ = req
+                        .respond(Response::new(StatusCode(code), headers, reader, Some(len), None).with_chunked_threshold(never_chunked));
                 } else {
-                    let _ = req.respond(Response::new(StatusCode(code), headers, Cursor::new(chunk), Some(len), None).with_chunked_threshold(never_chunked));
+                    let _ = req.respond(
+                        Response::new(StatusCode(code), headers, Cursor::new(chunk), Some(len), None).with_chunked_threshold(never_chunked),
+                    );
                 }
             }
         });
@@ -652,7 +676,10 @@ mod tests {
     #[test]
     fn detecta_conexao_parada_e_tenta_de_novo() {
         let data = body();
-        let fx = serve(data.clone(), Behavior { stall_after: 100 * 1024, stall_for: Some(Duration::from_millis(1500)), stall_times: 1, ..Default::default() });
+        let fx = serve(
+            data.clone(),
+            Behavior { stall_after: 100 * 1024, stall_for: Some(Duration::from_millis(1500)), stall_times: 1, ..Default::default() },
+        );
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
         let digest = sha(&data);
@@ -660,7 +687,11 @@ mod tests {
         opts.stall_timeout = Duration::from_millis(300);
         let (r, ev) = run(&format!("{}/file", fx.base), &dest, &opts);
         r.expect("download");
-        assert!(ev.iter().any(|e| e.state == DownloadState::Retrying && e.message.as_deref().is_some_and(|m| m.contains("parada") || m.contains("tempo") || m.contains("timeout"))), "{ev:?}");
+        assert!(
+            ev.iter().any(|e| e.state == DownloadState::Retrying
+                && e.message.as_deref().is_some_and(|m| m.contains("parada") || m.contains("tempo") || m.contains("timeout"))),
+            "{ev:?}"
+        );
         assert_eq!(std::fs::read(&dest).expect("read"), data);
     }
 
@@ -685,7 +716,11 @@ mod tests {
         opts.stall_timeout = Duration::from_secs(30);
         let (r, ev) = run(URL, &dest, &opts);
         r.expect("download real");
-        assert_eq!(ev.iter().find(|e| e.state == DownloadState::Downloading).expect("dl").received, 3_000_000, "deveria retomar do byte 3.000.000");
+        assert_eq!(
+            ev.iter().find(|e| e.state == DownloadState::Downloading).expect("dl").received,
+            3_000_000,
+            "deveria retomar do byte 3.000.000"
+        );
         assert_eq!(std::fs::metadata(&dest).expect("meta").len(), 8_928_640);
 
         // Hugging Face: Range precisa sobreviver ao redirect para o CDN.

@@ -25,10 +25,7 @@ impl AppPaths {
     /// Em desenvolvimento (`target/debug|release`), sobe até achar a raiz do repositório
     /// (pasta com `workspace/` e `dados/`), para reaproveitar as pastas da versão Electron.
     pub fn detect() -> Self {
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| PathBuf::from("."));
+        let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."));
         match std::env::var_os("COMMANDDECK_HOME").filter(|v| !v.is_empty()).map(PathBuf::from) {
             Some(home) => Self::isolated(home, exe_dir),
             None => Self::with_dirs(find_app_dir(&exe_dir), exe_dir),
@@ -42,10 +39,7 @@ impl AppPaths {
     }
 
     pub fn with_dirs(app_dir: PathBuf, bin_dir: PathBuf) -> Self {
-        let config_file = dirs::config_dir()
-            .unwrap_or_else(|| app_dir.clone())
-            .join("CommandDeck")
-            .join("config.json");
+        let config_file = dirs::config_dir().unwrap_or_else(|| app_dir.clone()).join("CommandDeck").join("config.json");
         Self {
             data_dir: app_dir.join("dados"),
             default_workspace: app_dir.join("workspace"),

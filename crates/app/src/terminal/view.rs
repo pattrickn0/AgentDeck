@@ -72,7 +72,17 @@ pub struct ViewResponse {
 /// Pinta o terminal e trata o mouse. `focused` = recebe teclado; `blink_on` = fase do cursor;
 /// `preedit` = texto em composição do IME, desenhado sobre o cursor.
 #[allow(clippy::too_many_arguments)]
-pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, state: &mut ViewState, focused: bool, blink_on: bool, preedit: &str, m: &Metrics) -> ViewResponse {
+pub fn show(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    session: &Session,
+    state: &mut ViewState,
+    focused: bool,
+    blink_on: bool,
+    preedit: &str,
+    m: &Metrics,
+) -> ViewResponse {
     let mut out = ViewResponse::default();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::TERM_BG);
@@ -381,7 +391,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, id: egui::Id, session: &Session, stat
                     painter.rect_filled(Rect::from_min_size(pos, Vec2::new(1.0, m.cell_h)), 0.0, theme::TERM_CURSOR);
                 }
                 CursorShape::Underline => {
-                    painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y + m.cell_h - 2.0), Vec2::new(m.cell_w, 2.0)), 0.0, theme::TERM_CURSOR);
+                    painter.rect_filled(
+                        Rect::from_min_size(Pos2::new(pos.x, pos.y + m.cell_h - 2.0), Vec2::new(m.cell_w, 2.0)),
+                        0.0,
+                        theme::TERM_CURSOR,
+                    );
                 }
                 CursorShape::HollowBlock => {
                     painter.rect_stroke(cell_rect.shrink(0.5), 0.0, Stroke::new(1.0, theme::TERM_CURSOR), egui::StrokeKind::Inside);

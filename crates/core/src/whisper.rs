@@ -52,12 +52,18 @@ fn engine_archive(engine: Engine, os: &str, arch: &str) -> Option<Archive> {
     let zip = |file, sha256| Some(Archive { file, tar_gz: false, strip: 0, sha256 });
     let tgz = |file, sha256| Some(Archive { file, tar_gz: true, strip: 1, sha256 });
     match (os, arch, engine) {
-        ("windows", "x86_64", Engine::Cpu) => zip("whisper-bin-x64.zip", "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb"),
+        ("windows", "x86_64", Engine::Cpu) => {
+            zip("whisper-bin-x64.zip", "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb")
+        }
         ("windows", "x86_64", Engine::Cuda) => {
             zip("whisper-bin-win-cuda-12.4.0-x64.zip", "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a")
         }
-        ("linux", "x86_64", Engine::Cpu) => tgz("whisper-bin-ubuntu-x64.tar.gz", "a72becf15d7917f990f6313867a52638b82b7f9ef237fb0c980dac56a135781c"),
-        ("linux", "aarch64", Engine::Cpu) => tgz("whisper-bin-ubuntu-arm64.tar.gz", "6b95ebfc60447df48e70ef00a73bdc3f41679ed2d01ef465827206a2ff325149"),
+        ("linux", "x86_64", Engine::Cpu) => {
+            tgz("whisper-bin-ubuntu-x64.tar.gz", "a72becf15d7917f990f6313867a52638b82b7f9ef237fb0c980dac56a135781c")
+        }
+        ("linux", "aarch64", Engine::Cpu) => {
+            tgz("whisper-bin-ubuntu-arm64.tar.gz", "6b95ebfc60447df48e70ef00a73bdc3f41679ed2d01ef465827206a2ff325149")
+        }
         _ => None,
     }
 }
@@ -231,7 +237,10 @@ pub fn normalize_transcription(text: &str) -> String {
             (r"(?i)\b(com o|para o|pro|ao|chama o|pergunta pro|pergunta ao)\s+Cloud\b", "${1} Claude"),
             (r"(?i)\b(com o|para o|pro|chama o|pergunta pro|pergunta ao)\s+Cl[áa]udio\b", "${1} Claude"),
             // Antigravity.
-            (r"(?i)\b(?:Anti-?crafty|Anti-?craft|Anti-?graft(?:ing)?|Anti-?graph|Anti-gravity|Anti\s+gravity|Antigraviti)\b", "Antigravity"),
+            (
+                r"(?i)\b(?:Anti-?crafty|Anti-?craft|Anti-?graft(?:ing)?|Anti-?graph|Anti-gravity|Anti\s+gravity|Antigraviti)\b",
+                "Antigravity",
+            ),
         ]
         .into_iter()
         .filter_map(|(re, rep)| regex::Regex::new(re).ok().map(|r| (r, rep)))
@@ -274,11 +283,19 @@ fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String
     let lang = Some(core.config().whisper_lang).filter(|l| !l.is_empty()).unwrap_or_else(|| "auto".into());
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(2).max(1);
     let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("-m")
-        .arg(model_path(dir))
-        .arg("-f")
-        .arg(wav)
-        .args(["-l", &lang, "-nt", "-np", "-t", &threads.to_string(), "--prompt", WHISPER_PROMPT, "-mc", "0", "--carry-initial-prompt"]);
+    cmd.arg("-m").arg(model_path(dir)).arg("-f").arg(wav).args([
+        "-l",
+        &lang,
+        "-nt",
+        "-np",
+        "-t",
+        &threads.to_string(),
+        "--prompt",
+        WHISPER_PROMPT,
+        "-mc",
+        "0",
+        "--carry-initial-prompt",
+    ]);
     if engine == Engine::Cpu {
         cmd.arg("-ng");
     }
@@ -325,10 +342,7 @@ pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<
             match res {
                 Ok(text) => return Ok(Transcription { text, engine: engine.label().to_owned() }),
                 Err(e) if e == NO_SPEECH || i + 1 == list.len() => anyhow::bail!(e),
-                Err(e) => core.feed(FeedEntry::system(format!(
-                    "Whisper em {} falhou ({e}); tentando a próxima opção.",
-                    engine.label()
-                ))),
+                Err(e) => core.feed(FeedEntry::system(format!("Whisper em {} falhou ({e}); tentando a próxima opção.", engine.label()))),
             }
         }
         anyhow::bail!(NOT_READY)
@@ -413,7 +427,17 @@ fn download_engine(core: &Core, engine: Engine, label: &str) -> Result<(), Strin
 }
 
 fn progress(label: &str, state: DownloadState) -> DownloadProgress {
-    DownloadProgress { label: label.to_owned(), state, received: 0, total: None, speed: 0.0, attempt: 0, max_attempts: 0, retry_in_ms: 0, message: None }
+    DownloadProgress {
+        label: label.to_owned(),
+        state,
+        received: 0,
+        total: None,
+        speed: 0.0,
+        attempt: 0,
+        max_attempts: 0,
+        retry_in_ms: 0,
+        message: None,
+    }
 }
 
 /// Download com progresso para a interface. O `Done` do downloader ainda é seguido por

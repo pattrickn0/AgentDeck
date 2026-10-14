@@ -86,7 +86,8 @@ pub fn build_target_groups(main_agents: &[AgentInfo], ollama_models: &[AgentInfo
         all.push(p);
     }
     if all.len() > 2 {
-        let summary = main_peers.iter().map(|p| p.label.as_str()).collect::<Vec<_>>().join(" + ") + if primary.is_some() { " + Ollama" } else { "" };
+        let summary =
+            main_peers.iter().map(|p| p.label.as_str()).collect::<Vec<_>>().join(" + ") + if primary.is_some() { " + Ollama" } else { "" };
         let ids = all.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(",");
         tables.push(opt(format!("Mesa Geral ({summary})"), format!("table:{ids}")));
     }
@@ -141,17 +142,23 @@ impl Agents {
         let shell_core = agents.iter().find(|a| a.id == "shell");
         self.names.insert("shell".into(), shell_label(shell_core.map(|a| a.label.as_str())));
 
-        self.available = agents.iter().filter(|a| a.installed || a.id == "shell" || a.id == "claude" || a.id == "antigravity").cloned().collect();
+        self.available =
+            agents.iter().filter(|a| a.installed || a.id == "shell" || a.id == "claude" || a.id == "antigravity").cloned().collect();
         let main: Vec<AgentInfo> = self.available.iter().filter(|a| !is_ollama(&a.id)).cloned().collect();
         let ollama: Vec<AgentInfo> = self.available.iter().filter(|a| is_ollama(&a.id)).cloned().collect();
 
-        let ai: Vec<&AgentInfo> = self.available.iter().filter(|a| a.id != "shell" && (a.installed || a.id == "claude" || a.id == "antigravity")).collect();
+        let ai: Vec<&AgentInfo> =
+            self.available.iter().filter(|a| a.id != "shell" && (a.installed || a.id == "claude" || a.id == "antigravity")).collect();
         let shell_color = shell_core.map(color_of).unwrap_or(theme::SHELL);
         let shell_name = shell_label(shell_core.map(|a| a.label.as_str()));
 
         self.new_tab_menu = ai
             .iter()
-            .map(|a| MenuItem { kind: a.id.clone(), label: format!("{}{}", a.label, if a.installed { "" } else { " (não instalado)" }), color: color_of(a) })
+            .map(|a| MenuItem {
+                kind: a.id.clone(),
+                label: format!("{}{}", a.label, if a.installed { "" } else { " (não instalado)" }),
+                color: color_of(a),
+            })
             .chain(std::iter::once(MenuItem { kind: "shell".into(), label: shell_name.clone(), color: shell_color }))
             .collect();
         self.empty_actions = ai
@@ -257,7 +264,11 @@ mod tests {
 
     #[test]
     fn tables_between_main_agents_and_preferred_ollama() {
-        let main = vec![agent("claude", "Claude", true, true, None), agent("antigravity", "Antigravity", true, true, None), agent("shell", "Terminal", true, false, None)];
+        let main = vec![
+            agent("claude", "Claude", true, true, None),
+            agent("antigravity", "Antigravity", true, true, None),
+            agent("shell", "Terminal", true, false, None),
+        ];
         let ollama = vec![
             agent("ollama:qwen3.5:4b", "Ollama (qwen3.5:4b)", true, true, Some("qwen3.5:4b")),
             agent("ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", true, true, Some("qwen3.5:9b")),

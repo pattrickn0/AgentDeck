@@ -35,13 +35,7 @@ pub struct FeedEntry {
 
 impl FeedEntry {
     pub fn new(kind: FeedKind, from: Option<&str>, to: Option<&str>, text: impl Into<String>) -> Self {
-        Self {
-            ts: crate::util::now_ms(),
-            kind,
-            from: from.map(str::to_owned),
-            to: to.map(str::to_owned),
-            text: text.into(),
-        }
+        Self { ts: crate::util::now_ms(), kind, from: from.map(str::to_owned), to: to.map(str::to_owned), text: text.into() }
     }
 
     pub fn system(text: impl Into<String>) -> Self {

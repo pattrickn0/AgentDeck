@@ -415,7 +415,9 @@ fn debug_download(kind: &str) -> commanddeck_core::DownloadProgress {
     };
     match kind {
         "download-retry" => (p.state, p.attempt, p.max_attempts, p.retry_in_ms, p.speed) = (DownloadState::Retrying, 2, 5, 4200, 0.0),
-        "download-error" => (p.state, p.message) = (DownloadState::Error, Some("SHA-256 não confere (esperado 1fc70f77…, obtido 9a3b02c1…)".into())),
+        "download-error" => {
+            (p.state, p.message) = (DownloadState::Error, Some("SHA-256 não confere (esperado 1fc70f77…, obtido 9a3b02c1…)".into()))
+        }
         _ => {}
     }
     p

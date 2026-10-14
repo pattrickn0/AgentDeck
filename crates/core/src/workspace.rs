@@ -202,11 +202,7 @@ mod tests {
         assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X").expect("ok"), AgentContext::Unchanged);
 
         // Fora do app, AGENTS.md existente com bloco legado: substitui só o bloco.
-        std::fs::write(
-            foreign.join("AGENTS.md"),
-            "# Regras\n\n<!-- jwic:start -->\nvelho $1\n<!-- jwic:end -->\n\nfim\n",
-        )
-        .expect("write");
+        std::fs::write(foreign.join("AGENTS.md"), "# Regras\n\n<!-- jwic:start -->\nvelho $1\n<!-- jwic:end -->\n\nfim\n").expect("write");
         assert_eq!(ensure_agent_context(&foreign, &app, &home, "novo $1").expect("ok"), AgentContext::Written);
         let text = std::fs::read_to_string(foreign.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("# Regras\n\n{MARKER_START}\nnovo $1\n{MARKER_END}\n\nfim\n"));

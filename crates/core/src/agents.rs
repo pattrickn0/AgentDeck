@@ -79,7 +79,8 @@ pub const AGENTS: &[AgentDef] = &[
         label: "Antigravity",
         color: COLOR_ANTIGRAVITY,
         peer: true,
-        missing: "Antigravity CLI (agy) não encontrado. Instale no PowerShell com:\r\n  irm https://antigravity.google/cli/install.ps1 | iex",
+        missing:
+            "Antigravity CLI (agy) não encontrado. Instale no PowerShell com:\r\n  irm https://antigravity.google/cli/install.ps1 | iex",
     },
     AgentDef {
         id: "ollama",
@@ -243,7 +244,15 @@ impl Registry {
             let local_bin = Some(home.join(".local").join("bin").join(&exe));
             let candidates = match id {
                 "claude" => vec![
-                    Some(env("APPDATA").join("npm").join("node_modules").join("@anthropic-ai").join("claude-code").join("bin").join("claude.exe")),
+                    Some(
+                        env("APPDATA")
+                            .join("npm")
+                            .join("node_modules")
+                            .join("@anthropic-ai")
+                            .join("claude-code")
+                            .join("bin")
+                            .join("claude.exe"),
+                    ),
                     local_bin,
                     which_exe(),
                 ],
@@ -273,11 +282,8 @@ impl Registry {
                 return Some(Resolved::direct(p));
             }
             // Shims do npm/pip (`.cmd`) precisam passar pelo cmd.exe.
-            let shim = if id == "antigravity" {
-                self.which("agy.cmd")
-            } else {
-                self.which(&format!("{name}.cmd")).or_else(|| self.which(name))
-            };
+            let shim =
+                if id == "antigravity" { self.which("agy.cmd") } else { self.which(&format!("{name}.cmd")).or_else(|| self.which(name)) };
             shim.map(|p| {
                 if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
                     Resolved::direct(p)
@@ -416,10 +422,7 @@ impl Registry {
         }
         let exe = self.ollama_exe();
         let models = self.ollama_models();
-        let model = specific
-            .map(str::to_owned)
-            .or_else(|| models.first().cloned())
-            .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_owned());
+        let model = specific.map(str::to_owned).or_else(|| models.first().cloned()).unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_owned());
         (exe.is_some() || !models.is_empty()).then_some(OllamaResolved { model, models })
     }
 
@@ -427,8 +430,7 @@ impl Registry {
 
     /// Só os agentes instalados e habilitados como peer entram na ponte (+ `ollama:<modelo>`).
     pub fn peers(&self) -> Vec<String> {
-        let mut out: Vec<String> =
-            AGENTS.iter().filter(|a| a.peer && self.resolve(a.id).is_some()).map(|a| a.id.to_owned()).collect();
+        let mut out: Vec<String> = AGENTS.iter().filter(|a| a.peer && self.resolve(a.id).is_some()).map(|a| a.id.to_owned()).collect();
         if let Some(o) = self.resolve_ollama(None) {
             out.extend(o.models.iter().map(|m| format!("ollama:{m}")));
         }

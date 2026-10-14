@@ -98,8 +98,7 @@ mod tests {
 
         register_and_cleanup(data, "a6");
 
-        let hist: Vec<String> =
-            serde_json::from_str(&std::fs::read_to_string(data.join("sessions.json")).expect("read")).expect("json");
+        let hist: Vec<String> = serde_json::from_str(&std::fs::read_to_string(data.join("sessions.json")).expect("read")).expect("json");
         assert_eq!(hist, ["a2", "a3", "a4", "a5", "a6"]);
         let exists = |p: &str| data.join(p).exists();
         assert!(!exists("anexos/s_a1_x.png"));

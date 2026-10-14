@@ -146,9 +146,11 @@ impl Session {
     pub fn new(size: GridSize) -> Self {
         let writer: SharedWriter = Arc::new(Mutex::new(None));
         let bell = Arc::new(AtomicBool::new(false));
-        let window_size = Arc::new(Mutex::new(WindowSize { num_lines: size.rows as u16, num_cols: size.cols as u16, cell_width: 8, cell_height: 17 }));
+        let window_size =
+            Arc::new(Mutex::new(WindowSize { num_lines: size.rows as u16, num_cols: size.cols as u16, cell_width: 8, cell_height: 17 }));
         let clipboard = Arc::new(Mutex::new(None));
-        let listener = Listener { writer: writer.clone(), bell: bell.clone(), window_size: window_size.clone(), clipboard: clipboard.clone() };
+        let listener =
+            Listener { writer: writer.clone(), bell: bell.clone(), window_size: window_size.clone(), clipboard: clipboard.clone() };
         let shared = Arc::new(Shared {
             emu: Mutex::new(Emulator::new(size, listener)),
             writer,
@@ -195,7 +197,8 @@ impl Session {
         self.generation += 1;
         let generation = self.generation;
         let pty_system = portable_pty::native_pty_system();
-        let pair = pty_system.openpty(PtySize { rows: self.size.rows as u16, cols: self.size.cols as u16, pixel_width: 0, pixel_height: 0 })?;
+        let pair =
+            pty_system.openpty(PtySize { rows: self.size.rows as u16, cols: self.size.cols as u16, pixel_width: 0, pixel_height: 0 })?;
 
         let mut cmd = CommandBuilder::new(&spec.program);
         cmd.args(&spec.args);
@@ -277,8 +280,12 @@ impl Session {
     /// Redimensiona grade e PTY (mínimo 2×2).
     pub fn resize(&mut self, size: GridSize, cell_w: f32, cell_h: f32) {
         let size = GridSize { cols: size.cols.max(2), rows: size.rows.max(2) };
-        *self.shared.window_size.lock() =
-            WindowSize { num_lines: size.rows as u16, num_cols: size.cols as u16, cell_width: cell_w.round() as u16, cell_height: cell_h.round() as u16 };
+        *self.shared.window_size.lock() = WindowSize {
+            num_lines: size.rows as u16,
+            num_cols: size.cols as u16,
+            cell_width: cell_w.round() as u16,
+            cell_height: cell_h.round() as u16,
+        };
         if size == self.size {
             return;
         }

@@ -37,9 +37,15 @@ fn start_core(root: &std::path::Path) -> Core {
 
 fn ask_agent(core: Option<&Core>, args: &[&str], stdin: Option<&str>) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    cmd.args(args).env_remove("COMMANDDECK_PORT").env_remove("COMMANDDECK_TOKEN").env_remove("COMMANDDECK_AGENT").env_remove("COMMANDDECK_DEPTH");
+    cmd.args(args)
+        .env_remove("COMMANDDECK_PORT")
+        .env_remove("COMMANDDECK_TOKEN")
+        .env_remove("COMMANDDECK_AGENT")
+        .env_remove("COMMANDDECK_DEPTH");
     if let Some(core) = core {
-        cmd.env("COMMANDDECK_PORT", core.bridge_port().to_string()).env("COMMANDDECK_TOKEN", core.bridge_token()).env("COMMANDDECK_AGENT", "shell");
+        cmd.env("COMMANDDECK_PORT", core.bridge_port().to_string())
+            .env("COMMANDDECK_TOKEN", core.bridge_token())
+            .env("COMMANDDECK_AGENT", "shell");
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");

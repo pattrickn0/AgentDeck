@@ -19,7 +19,11 @@ pub struct GlWindow {
 impl GlWindow {
     /// Cria a janela (invisível até o primeiro quadro) e o contexto GL.
     pub fn new(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> anyhow::Result<(Self, Arc<glow::Context>)> {
-        let template = glutin::config::ConfigTemplateBuilder::new().prefer_hardware_accelerated(None).with_depth_size(0).with_stencil_size(0).with_transparency(false);
+        let template = glutin::config::ConfigTemplateBuilder::new()
+            .prefer_hardware_accelerated(None)
+            .with_depth_size(0)
+            .with_stencil_size(0)
+            .with_transparency(false);
         let (window, config) = glutin_winit::DisplayBuilder::new()
             .with_preference(glutin_winit::ApiPreference::FallbackEgl)
             .with_window_attributes(Some(attrs.clone()))

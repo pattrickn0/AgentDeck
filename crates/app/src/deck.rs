@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
-use commanddeck_core::{AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec, TableRequest};
+use commanddeck_core::{
+    AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec, TableRequest,
+};
 use crossbeam_channel::{Receiver, Sender};
 use egui::Color32;
 use winit::event::{ElementState, KeyEvent};
@@ -205,7 +207,11 @@ impl Deck {
             persist_at: None,
             layout_persist_at: None,
             actions: Vec::new(),
-            sidebar_w: if cfg.sidebar_width > 0.0 { cfg.sidebar_width.clamp(theme::SIDEBAR_MIN_W, theme::SIDEBAR_MAX_W) } else { theme::SIDEBAR_DEFAULT_W },
+            sidebar_w: if cfg.sidebar_width > 0.0 {
+                cfg.sidebar_width.clamp(theme::SIDEBAR_MIN_W, theme::SIDEBAR_MAX_W)
+            } else {
+                theme::SIDEBAR_DEFAULT_W
+            },
             sidebar_collapsed: cfg.sidebar_collapsed,
             bottom_h: if cfg.bottom_height > 0.0 { cfg.bottom_height } else { theme::BOTTOM_DEFAULT_H },
             feed_collapsed: cfg.feed_collapsed,
@@ -340,12 +346,14 @@ impl Deck {
             CoreEvent::AgentsChanged => self.refresh_agents(),
             CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Deliver(d) => self.on_deliver(d),
-            CoreEvent::Download(p) => self.download = match p.state {
-                DownloadState::Done => None,
-                // O erro fica visível por alguns segundos (o detalhe também vai para a Conversa integrada).
-                DownloadState::Error => Some((p, Some(Instant::now() + Duration::from_secs(8)))),
-                _ => Some((p, None)),
-            },
+            CoreEvent::Download(p) => {
+                self.download = match p.state {
+                    DownloadState::Done => None,
+                    // O erro fica visível por alguns segundos (o detalhe também vai para a Conversa integrada).
+                    DownloadState::Error => Some((p, Some(Instant::now() + Duration::from_secs(8)))),
+                    _ => Some((p, None)),
+                }
+            }
         }
     }
 
@@ -550,7 +558,11 @@ impl Deck {
                     self.add_tab(ident, true, false);
                 }
             }
-            let idx = if cfg.active_tab_index >= 0 && (cfg.active_tab_index as usize) < self.tabs.len() { cfg.active_tab_index as usize } else { 0 };
+            let idx = if cfg.active_tab_index >= 0 && (cfg.active_tab_index as usize) < self.tabs.len() {
+                cfg.active_tab_index as usize
+            } else {
+                0
+            };
             if !self.tabs.is_empty() {
                 self.activate(idx);
             }
@@ -1046,8 +1058,18 @@ impl Deck {
     fn debug_feed(&mut self) {
         let mk = |kind, from: Option<&str>, to: Option<&str>, text: &str| FeedEntry::new(kind, from, to, text);
         self.add_feed(mk(FeedKind::User, Some("você"), Some("claude + antigravity"), "Revisem o @README.md e proponham melhorias."));
-        self.add_feed(mk(FeedKind::Ask, Some("claude"), Some("antigravity"), "Você pode verificar se o build do Windows ainda usa o ConPTY?"));
-        self.add_feed(mk(FeedKind::Answer, Some("antigravity"), Some("claude"), "Sim — portable-pty usa ConPTY no Windows 10+.\nNada a mudar."));
+        self.add_feed(mk(
+            FeedKind::Ask,
+            Some("claude"),
+            Some("antigravity"),
+            "Você pode verificar se o build do Windows ainda usa o ConPTY?",
+        ));
+        self.add_feed(mk(
+            FeedKind::Answer,
+            Some("antigravity"),
+            Some("claude"),
+            "Sim — portable-pty usa ConPTY no Windows 10+.\nNada a mudar.",
+        ));
         self.add_feed(mk(FeedKind::System, None, None, "Mesa iniciada: Claude → Antigravity (2 rodadas)."));
         self.add_feed(mk(FeedKind::Error, Some("ollama:qwen3.5:9b"), None, "Falha ao contatar o Ollama em 127.0.0.1:11434."));
         self.add_feed(mk(FeedKind::Thinking, Some("claude"), None, "rodada 1/2…"));
@@ -1068,7 +1090,11 @@ impl Deck {
 
     /// `ready` do botão Enviar.
     pub fn send_ready(&self) -> bool {
-        !self.input.trim().is_empty() || !self.attachments.is_empty() || self.is_recording() || self.transcribing || self.send_after_transcribe
+        !self.input.trim().is_empty()
+            || !self.attachments.is_empty()
+            || self.is_recording()
+            || self.transcribing
+            || self.send_after_transcribe
     }
 
     /// `--send-color`: cor da aba ativa quando o alvo é "Aba ativa" e não é um shell.
@@ -1135,7 +1161,11 @@ impl Deck {
         self.transcribing = true;
         self.spawn_bg("transcribe", move |core| {
             let pcm = rec.stop();
-            let res = if pcm.is_empty() { Err("nenhum áudio capturado".to_string()) } else { core.transcribe_pcm16k(&pcm).map(|t| t.text).map_err(|e| e.to_string()) };
+            let res = if pcm.is_empty() {
+                Err("nenhum áudio capturado".to_string())
+            } else {
+                core.transcribe_pcm16k(&pcm).map(|t| t.text).map_err(|e| e.to_string())
+            };
             Some(UiMsg::Transcribed(res))
         });
     }

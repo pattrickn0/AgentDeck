@@ -50,13 +50,9 @@ pub struct AgyOutput {
 /// Extrai a resposta e o id da conversa da saída JSON do agy. Erro quando o status é
 /// `ERROR`/`INVALID`/`CANCELED`.
 pub fn parse_agy_output(out: &str) -> Result<AgyOutput, String> {
-    let json: Option<Value> = serde_json::from_str(out).ok().or_else(|| {
-        out.trim()
-            .lines()
-            .rev()
-            .find(|l| l.trim().starts_with('{'))
-            .and_then(|l| serde_json::from_str(l).ok())
-    });
+    let json: Option<Value> = serde_json::from_str(out)
+        .ok()
+        .or_else(|| out.trim().lines().rev().find(|l| l.trim().starts_with('{')).and_then(|l| serde_json::from_str(l).ok()));
     let Some(json) = json.filter(Value::is_object) else {
         return Ok(AgyOutput { text: out.trim().to_owned(), id: None });
     };
@@ -83,9 +79,7 @@ pub fn parse_agy_output(out: &str) -> Result<AgyOutput, String> {
 fn walk_agy(v: &Value, text: &mut Option<String>, id: &mut Option<String>) {
     let is_id = |k: &str| {
         let k = k.to_ascii_lowercase();
-        ["conversation", "session"].iter().any(|p| {
-            k.strip_prefix(p).is_some_and(|rest| matches!(rest, "id" | "_id" | "-id"))
-        })
+        ["conversation", "session"].iter().any(|p| k.strip_prefix(p).is_some_and(|rest| matches!(rest, "id" | "_id" | "-id")))
     };
     let is_text = |k: &str| ["response", "result", "text", "output", "answer"].iter().any(|t| t.eq_ignore_ascii_case(k));
     match v {

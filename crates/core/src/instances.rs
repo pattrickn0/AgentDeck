@@ -17,9 +17,8 @@ pub const SEP: char = '@';
 pub const MAIN_ROLE: &str = "main";
 
 /// Nomes dados a instâncias repetidas (mesmo modelo e cargo), na ordem.
-const NAMES: &[&str] = &[
-    "ana", "bia", "caio", "davi", "eva", "fabio", "gabi", "hugo", "iris", "joao", "kaua", "lia", "marco", "nina", "otto", "paula",
-];
+const NAMES: &[&str] =
+    &["ana", "bia", "caio", "davi", "eva", "fabio", "gabi", "hugo", "iris", "joao", "kaua", "lia", "marco", "nina", "otto", "paula"];
 
 /// Identidade de uma instância.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -192,7 +191,15 @@ mod tests {
 
     #[test]
     fn ids_round_trip() {
-        for s in ["claude", "claude@dev", "claude@dev@ana", "claude@main@bia", "ollama:qwen3.5:4b", "ollama:qwen3.5:4b@dev", "ollama:user/custom:latest@qa"] {
+        for s in [
+            "claude",
+            "claude@dev",
+            "claude@dev@ana",
+            "claude@main@bia",
+            "ollama:qwen3.5:4b",
+            "ollama:qwen3.5:4b@dev",
+            "ollama:user/custom:latest@qa",
+        ] {
             assert_eq!(id(s).id(), s, "{s}");
         }
         // "main" é o cargo implícito.
@@ -264,7 +271,10 @@ mod tests {
         r.register(id("claude@dev"));
         assert_eq!(r.resolve_or_create(&Ident::main("claude"), false).unwrap(), (id("claude@dev"), false));
         r.register(id("claude@design"));
-        assert_eq!(r.resolve_or_create(&Ident::main("claude"), false).unwrap_err(), vec!["claude@dev".to_owned(), "claude@design".to_owned()]);
+        assert_eq!(
+            r.resolve_or_create(&Ident::main("claude"), false).unwrap_err(),
+            vec!["claude@dev".to_owned(), "claude@design".to_owned()]
+        );
     }
 
     #[test]

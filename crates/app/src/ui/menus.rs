@@ -46,7 +46,14 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
                 p.rect_filled(r, 6.0, theme::BORDER);
             }
             dot(p, Pos2::new(r.min.x + 10.0 + 4.0, r.center().y), m.color);
-            text_in(p, Rect::from_min_max(Pos2::new(r.min.x + 10.0 + 16.0, r.min.y), r.max), Align2::LEFT_CENTER, &m.label, font.clone(), theme::TEXT);
+            text_in(
+                p,
+                Rect::from_min_max(Pos2::new(r.min.x + 10.0 + 16.0, r.min.y), r.max),
+                Align2::LEFT_CENTER,
+                &m.label,
+                font.clone(),
+                theme::TEXT,
+            );
             if resp.clicked() {
                 chosen = Some(m.kind.clone());
             }
@@ -88,7 +95,11 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         let title = Rect::from_min_size(Pos2::new(inner.min.x + 4.0, inner.min.y), Vec2::new(inner.width() - 8.0, title_h));
         let mut job = egui::text::LayoutJob::default();
         for ch in "CONFIGURAÇÕES".chars() {
-            job.append(&ch.to_string(), 0.0, egui::TextFormat { font_id: theme::ui_bold(11.0), color: theme::MUTED, extra_letter_spacing: 0.5, ..Default::default() });
+            job.append(
+                &ch.to_string(),
+                0.0,
+                egui::TextFormat { font_id: theme::ui_bold(11.0), color: theme::MUTED, extra_letter_spacing: 0.5, ..Default::default() },
+            );
         }
         let g = p.layout_job(job);
         place(p, title, Align2::LEFT_CENTER, g, theme::MUTED);
@@ -180,7 +191,8 @@ pub fn target_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     let h = n_rows as f32 * row_h + 2.0;
     // Abre para cima se não couber abaixo (o seletor fica no rodapé da janela).
     let screen = ctx.content_rect();
-    let pos = if anchor.max.y + h > screen.max.y { Pos2::new(anchor.min.x, anchor.min.y - h) } else { Pos2::new(anchor.min.x, anchor.max.y) };
+    let pos =
+        if anchor.max.y + h > screen.max.y { Pos2::new(anchor.min.x, anchor.min.y - h) } else { Pos2::new(anchor.min.x, anchor.max.y) };
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut chosen = None;
     let current = deck.target.clone();

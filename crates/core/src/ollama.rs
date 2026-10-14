@@ -182,18 +182,15 @@ pub fn resolve_workspace_path(rel_or_abs: &str, workspace: &Path) -> Result<Path
     let ws = crate::util::absolutize(workspace);
     let target = crate::util::normalize_lexical(&ws.join(rel_or_abs));
     if !crate::util::path_within(&target, &ws) {
-        return Err(format!(
-            "Acesso negado: o caminho \"{rel_or_abs}\" está fora do workspace configurado (\"{}\").",
-            workspace.display()
-        ));
+        return Err(format!("Acesso negado: o caminho \"{rel_or_abs}\" está fora do workspace configurado (\"{}\").", workspace.display()));
     }
     Ok(target)
 }
 
 const IMAGE_EXTS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".svgz"];
 const BINARY_EXTS: &[&str] = &[
-    ".pdf", ".zip", ".tar", ".gz", ".7z", ".rar", ".exe", ".dll", ".bin", ".so", ".dylib", ".iso", ".mp3", ".mp4", ".wav", ".avi",
-    ".mov", ".webm", ".pyc", ".pyd", ".node",
+    ".pdf", ".zip", ".tar", ".gz", ".7z", ".rar", ".exe", ".dll", ".bin", ".so", ".dylib", ".iso", ".mp3", ".mp4", ".wav", ".avi", ".mov",
+    ".webm", ".pyc", ".pyd", ".node",
 ];
 
 fn ext_of(p: &Path) -> String {
@@ -861,10 +858,7 @@ mod tests {
         let r = execute_tool("edit_file", &json!({"path": "sub/a.txt", "target": "xyz", "replacement": "1"}), &c);
         assert!(r.starts_with("Erro: Trecho alvo não encontrado"));
         assert_eq!(execute_tool("read_file", &json!({"path": "sub"}), &c), "Erro: \"sub\" é um diretório, use list_directory.");
-        assert_eq!(
-            execute_tool("read_file", &json!({"path": "nada.txt"}), &c),
-            "Erro: Arquivo \"nada.txt\" não encontrado no workspace."
-        );
+        assert_eq!(execute_tool("read_file", &json!({"path": "nada.txt"}), &c), "Erro: Arquivo \"nada.txt\" não encontrado no workspace.");
         std::fs::write(ws.join("f.PNG"), [0u8; 4]).expect("write");
         assert!(execute_tool("read_file", &json!({"path": "f.PNG"}), &c).starts_with("[Arquivo de imagem detectado: \"f.PNG\" (4 bytes)]"));
         std::fs::write(ws.join("x.zip"), [0u8; 4]).expect("write");

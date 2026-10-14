@@ -25,11 +25,8 @@ pub fn base36(mut n: u64) -> String {
 /// (resolve `.` e `..` sem tocar o disco, como `path.resolve` do Node). Funciona com
 /// caminhos que ainda não existem.
 pub fn absolutize(p: &Path) -> PathBuf {
-    let joined = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir().map(|cwd| cwd.join(p)).unwrap_or_else(|_| p.to_path_buf())
-    };
+    let joined =
+        if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|cwd| cwd.join(p)).unwrap_or_else(|_| p.to_path_buf()) };
     normalize_lexical(&joined)
 }
 

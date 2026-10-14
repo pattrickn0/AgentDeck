@@ -15,8 +15,8 @@ use tiny_http::{Header, Method, Request, Response, Server};
 use crate::agents::resolve_alias;
 use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
 use crate::exchange::Reply;
-use crate::instances::Ident;
 use crate::headless::HeadlessOptions;
+use crate::instances::Ident;
 use crate::{Core, CoreInner};
 
 /// agente → agente → agente, no máximo.
@@ -324,7 +324,11 @@ fn ask(core: &Core, msg: &Value) -> (u16, Value) {
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
         let kind = Ident::parse(&to).map(|i| i.kind).unwrap_or_else(|| to.clone());
-        core.run_headless(&kind, &prompt, HeadlessOptions { session_key: Some(session_key.clone()), depth: depth + 1, ..Default::default() })
+        core.run_headless(
+            &kind,
+            &prompt,
+            HeadlessOptions { session_key: Some(session_key.clone()), depth: depth + 1, ..Default::default() },
+        )
     };
     match result {
         Ok(answer) => {

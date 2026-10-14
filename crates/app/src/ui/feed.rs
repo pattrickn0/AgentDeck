@@ -7,8 +7,8 @@ use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use super::{composer, galley, paint_splitter, place, text_in, tip, FEED_HEAD_H};
 use crate::deck::{Deck, FeedItem};
-use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
 use crate::theme;
+use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
 
 /// Desenha `#bottom` (cabeçalho, conversa e compositor). Devolve a âncora do seletor "Enviar para".
 pub fn draw_bottom(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) -> Rect {
@@ -91,13 +91,21 @@ fn download_view(p: &DownloadProgress) -> (Option<f32>, String) {
             }
             (pct.map(|f| f as f32), info)
         }
-        DownloadState::Verifying => (pct.map(|f| f as f32), match pct_txt {
-            Some(pc) => format!("verificando integridade (SHA-256) · {pc}"),
-            None => "verificando integridade (SHA-256)…".into(),
-        }),
+        DownloadState::Verifying => (
+            pct.map(|f| f as f32),
+            match pct_txt {
+                Some(pc) => format!("verificando integridade (SHA-256) · {pc}"),
+                None => "verificando integridade (SHA-256)…".into(),
+            },
+        ),
         DownloadState::Retrying => (
             pct.map(|f| f as f32),
-            format!("conexão instável, nova tentativa {}/{} em {}s", p.attempt, p.max_attempts, (p.retry_in_ms as f64 / 1000.0).round().max(1.0)),
+            format!(
+                "conexão instável, nova tentativa {}/{} em {}s",
+                p.attempt,
+                p.max_attempts,
+                (p.retry_in_ms as f64 / 1000.0).round().max(1.0)
+            ),
         ),
         DownloadState::Extracting => (None, "extraindo…".into()),
         DownloadState::Finalizing => (None, "concluindo…".into()),
@@ -117,7 +125,14 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
     let cy = head.center().y;
 
     let label_w = galley(&painter, &p.label, font.clone(), theme::TEXT).size().x;
-    text_in(&painter, Rect::from_min_size(Pos2::new(left, head.min.y), Vec2::new(label_w, head.height())), Align2::LEFT_CENTER, &p.label, font.clone(), if error { theme::RED_TEXT } else { theme::TEXT });
+    text_in(
+        &painter,
+        Rect::from_min_size(Pos2::new(left, head.min.y), Vec2::new(label_w, head.height())),
+        Align2::LEFT_CENTER,
+        &p.label,
+        font.clone(),
+        if error { theme::RED_TEXT } else { theme::TEXT },
+    );
 
     // Trilho 140×6 e preenchimento (indeterminado: trecho que vai e volta).
     let track = Rect::from_min_size(Pos2::new(left + label_w + 8.0, cy - 3.0), Vec2::new(140.0, 6.0));
@@ -204,7 +219,8 @@ pub fn blink_alpha(time: f64, period: f64) -> f32 {
 fn empty_text(ui: &mut Ui, w: f32) {
     let mut job = LayoutJob::default();
     job.wrap.max_width = w;
-    let base = TextFormat { font_id: theme::ui(13.0), color: theme::MUTED, line_height: Some(13.0 * theme::LINE_HEIGHT), ..Default::default() };
+    let base =
+        TextFormat { font_id: theme::ui(13.0), color: theme::MUTED, line_height: Some(13.0 * theme::LINE_HEIGHT), ..Default::default() };
     job.append("Aqui aparecem as conversas entre os agentes (via ", 0.0, base.clone());
     job.append(" ask-agent ", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::PANEL_2, ..base.clone() });
     job.append(") e as mesas de orquestração.", 0.0, base);
@@ -227,7 +243,8 @@ fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
     head.wrap.max_width = (inner_w - time_g.size().x - 6.0).max(10.0);
     head.wrap.max_rows = 1;
     head.wrap.overflow_character = Some('…');
-    let hfmt = TextFormat { font_id: hfont.clone(), color: theme::MUTED, line_height: Some(12.0 * theme::LINE_HEIGHT), ..Default::default() };
+    let hfmt =
+        TextFormat { font_id: hfont.clone(), color: theme::MUTED, line_height: Some(12.0 * theme::LINE_HEIGHT), ..Default::default() };
     if let Some(who) = &item.who {
         head.append(who, 0.0, TextFormat { font_id: theme::ui_semibold(12.0), color: item.color, ..hfmt.clone() });
     }
@@ -319,7 +336,17 @@ mod download_tests {
     use super::*;
 
     fn p(state: DownloadState, received: u64, total: Option<u64>) -> DownloadProgress {
-        DownloadProgress { label: "x".into(), state, received, total, speed: 0.0, attempt: 0, max_attempts: 0, retry_in_ms: 0, message: None }
+        DownloadProgress {
+            label: "x".into(),
+            state,
+            received,
+            total,
+            speed: 0.0,
+            attempt: 0,
+            max_attempts: 0,
+            retry_in_ms: 0,
+            message: None,
+        }
     }
 
     #[test]
@@ -337,7 +364,10 @@ mod download_tests {
         assert_eq!(t, "41% · 648,5 MB / 1,51 GB · 12,3 MB/s");
         assert!((f.expect("fração") - 0.4186).abs() < 0.001);
         assert_eq!(download_view(&p(DownloadState::Downloading, 5_000_000, None)), (None, "4,8 MB".into()));
-        assert_eq!(download_view(&p(DownloadState::Verifying, 812_277_637, Some(1_624_555_275))).1, "verificando integridade (SHA-256) · 49%");
+        assert_eq!(
+            download_view(&p(DownloadState::Verifying, 812_277_637, Some(1_624_555_275))).1,
+            "verificando integridade (SHA-256) · 49%"
+        );
         let mut r = p(DownloadState::Retrying, 100, Some(1000));
         (r.attempt, r.max_attempts, r.retry_in_ms) = (2, 5, 4200);
         assert_eq!(download_view(&r).1, "conexão instável, nova tentativa 2/5 em 4s");

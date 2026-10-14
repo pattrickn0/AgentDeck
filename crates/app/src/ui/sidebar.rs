@@ -31,7 +31,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let name = util::folder_name(&deck.workspace.to_string_lossy());
     let name_x = root.min.x + 6.0 + 14.0 + 5.0;
     let g = galley_trunc(&painter, &name, theme::ui_semibold(13.0), theme::TEXT, root.max.x - 8.0 - name_x);
-    place(&painter, Rect::from_min_max(Pos2::new(name_x, root.min.y), Pos2::new(root.max.x - 8.0, root.max.y - 1.0)), Align2::LEFT_CENTER, g, theme::TEXT);
+    place(
+        &painter,
+        Rect::from_min_max(Pos2::new(name_x, root.min.y), Pos2::new(root.max.x - 8.0, root.max.y - 1.0)),
+        Align2::LEFT_CENTER,
+        g,
+        theme::TEXT,
+    );
     if r.clicked() {
         deck.toggle_dir("");
     }
@@ -44,24 +50,29 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let mut clicked_dir: Option<String> = None;
     let mut clicked_file: Option<String> = None;
     let mut dbl_file: Option<String> = None;
-    egui::ScrollArea::vertical().id_salt("file-tree").auto_shrink([false, false]).show_rows(&mut ui_list, ROW_H, rows.len(), |ui, range| {
-        let width = ui.available_width();
-        for i in range {
-            let (row_rect, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
-            let row = &rows[i];
-            paint_row(deck, ui, row_rect, row, &resp);
-            let resp = tip(resp, row.entry.rel_path.clone());
-            if row.entry.is_dir {
-                if resp.clicked() {
-                    clicked_dir = Some(row.entry.rel_path.clone());
+    egui::ScrollArea::vertical().id_salt("file-tree").auto_shrink([false, false]).show_rows(
+        &mut ui_list,
+        ROW_H,
+        rows.len(),
+        |ui, range| {
+            let width = ui.available_width();
+            for i in range {
+                let (row_rect, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
+                let row = &rows[i];
+                paint_row(deck, ui, row_rect, row, &resp);
+                let resp = tip(resp, row.entry.rel_path.clone());
+                if row.entry.is_dir {
+                    if resp.clicked() {
+                        clicked_dir = Some(row.entry.rel_path.clone());
+                    }
+                } else if resp.double_clicked() {
+                    dbl_file = Some(row.entry.rel_path.clone());
+                } else if resp.clicked() {
+                    clicked_file = Some(row.entry.rel_path.clone());
                 }
-            } else if resp.double_clicked() {
-                dbl_file = Some(row.entry.rel_path.clone());
-            } else if resp.clicked() {
-                clicked_file = Some(row.entry.rel_path.clone());
             }
-        }
-    });
+        },
+    );
     if let Some(d) = clicked_dir {
         deck.toggle_dir(&d);
     }

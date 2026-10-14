@@ -40,7 +40,8 @@ struct Layout {
 fn select_width(deck: &Deck, painter: &egui::Painter) -> f32 {
     // O <select> do Chromium tem a largura da maior opção (+ padding, seta e borda).
     let font = theme::ui(12.5);
-    let widest = deck.agents.targets.iter().flat_map(|g| g.options.iter()).map(|o| text_w(painter, &o.label, font.clone())).fold(0.0, f32::max);
+    let widest =
+        deck.agents.targets.iter().flat_map(|g| g.options.iter()).map(|o| text_w(painter, &o.label, font.clone())).fold(0.0, f32::max);
     widest + 12.0 + 20.0 + 2.0
 }
 
@@ -219,7 +220,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Rect {
     if let Some(c) = l.cancel {
         let r = clickable(ui, c, Id::new("mic-cancel"));
         let (bg, fg) = if r.hovered() { (theme::RED, theme::WHITE) } else { (theme::rgba(229, 72, 77, 0.15), theme::RED_TEXT) };
-        painter.rect(c, 7.0, bg, Stroke::new(1.0, if r.hovered() { theme::RED } else { theme::rgba(229, 72, 77, 0.35) }), egui::StrokeKind::Inside);
+        painter.rect(
+            c,
+            7.0,
+            bg,
+            Stroke::new(1.0, if r.hovered() { theme::RED } else { theme::rgba(229, 72, 77, 0.35) }),
+            egui::StrokeKind::Inside,
+        );
         deck.icons.paint(&painter, Icon::Close, c.center(), 15.0, fg, 0.0);
         if tip(r, "Cancelar gravação").clicked() {
             deck.cancel_recording();

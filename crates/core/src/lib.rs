@@ -39,8 +39,8 @@ use parking_lot::{Mutex, RwLock};
 pub use agents::{AgentInfo, SpawnSpec};
 pub use config::Config;
 pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind};
-pub use instances::Ident;
 pub use headless::HeadlessOptions;
+pub use instances::Ident;
 pub use workspace::DirEntry;
 
 /// Função chamada sempre que um [`CoreEvent`] é emitido, para acordar o loop da UI
@@ -171,11 +171,7 @@ impl Core {
             config: RwLock::new(config),
             events_tx: tx,
             waker: RwLock::new(None),
-            state: state::SharedState {
-                bridge_token: random_token(),
-                session_id: sessions::new_session_id(),
-                ..Default::default()
-            },
+            state: state::SharedState { bridge_token: random_token(), session_id: sessions::new_session_id(), ..Default::default() },
             agents: agents::Registry::new(agents::Discovery {
                 search_path: opts.search_path,
                 home: home.clone(),

@@ -154,7 +154,11 @@ impl Term {
                     st.frame = (st.frame + 1) % FRAMES.len();
                     let secs = st.since.elapsed().as_secs();
                     let mut out = std::io::stdout().lock();
-                    let _ = write!(out, "\r\x1b[2K{}{}{} {}{}… ({secs}s){}", t.c.orange, FRAMES[st.frame], t.c.reset, t.c.dim, st.label, t.c.reset);
+                    let _ = write!(
+                        out,
+                        "\r\x1b[2K{}{}{} {}{}… ({secs}s){}",
+                        t.c.orange, FRAMES[st.frame], t.c.reset, t.c.dim, st.label, t.c.reset
+                    );
                     let _ = out.flush();
                 }
             });
@@ -284,7 +288,9 @@ impl Highlighter for CliHelper {
         let mut lines = hint.split('\n');
         let (placeholder, rule, footer) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""), lines.next().unwrap_or(""));
         let footer = match footer.rfind("● ") {
-            Some(i) => format!("{}{}{}{}●{} {}{}{}", c.dim, &footer[..i], c.reset, c.orange, c.reset, c.dim, &footer[i + "● ".len()..], c.reset),
+            Some(i) => {
+                format!("{}{}{}{}●{} {}{}{}", c.dim, &footer[..i], c.reset, c.orange, c.reset, c.dim, &footer[i + "● ".len()..], c.reset)
+            }
             None => format!("{}{footer}{}", c.dim, c.reset),
         };
         Cow::Owned(format!("{}{placeholder}{}\n{}{rule}{}\n{footer}", c.dim, c.reset, c.dim, c.reset))
@@ -336,7 +342,8 @@ fn bridge_asker(text: &str) -> Option<String> {
 /// Devolve `answer` a `asker` pela ponte (`POST /reply`). `Ok(false)` = não havia pergunta pendente
 /// (o modelo já tinha respondido pelo `ask-agent`).
 fn reply_to_bridge(asker: &str, answer: &str) -> Result<bool, String> {
-    let (port, token) = (env_nonempty("COMMANDDECK_PORT").ok_or("fora do CommandDeck")?, env_nonempty("COMMANDDECK_TOKEN").ok_or("fora do CommandDeck")?);
+    let (port, token) =
+        (env_nonempty("COMMANDDECK_PORT").ok_or("fora do CommandDeck")?, env_nonempty("COMMANDDECK_TOKEN").ok_or("fora do CommandDeck")?);
     let me = env_nonempty("COMMANDDECK_AGENT").unwrap_or_default();
     let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).http_status_as_error(false).build().into();
     let body = serde_json::json!({ "from": me, "to": asker, "message": answer });
@@ -359,20 +366,11 @@ fn env_nonempty(k: &str) -> Option<String> {
 /// Agentes disponíveis na ponte (`GET /agents`), quando rodando dentro do CommandDeck.
 fn bridge_peers() -> Option<Vec<String>> {
     let (port, token) = (env_nonempty("COMMANDDECK_PORT")?, env_nonempty("COMMANDDECK_TOKEN")?);
-    let agent: ureq::Agent =
-        ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_millis(1500))).build().into();
+    let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_millis(1500))).build().into();
     let mut resp = agent.get(format!("http://127.0.0.1:{port}/agents")).header("x-commanddeck-token", &token).call().ok()?;
     let v: serde_json::Value = resp.body_mut().read_json().ok()?;
     let me = env_nonempty("COMMANDDECK_AGENT").unwrap_or_default();
-    Some(
-        v.get("agents")?
-            .as_array()?
-            .iter()
-            .filter_map(|a| a.as_str())
-            .filter(|a| *a != me && *a != "ollama")
-            .map(str::to_owned)
-            .collect(),
-    )
+    Some(v.get("agents")?.as_array()?.iter().filter_map(|a| a.as_str()).filter(|a| *a != me && *a != "ollama").map(str::to_owned).collect())
 }
 
 fn same_model(installed: &str, wanted: &str) -> bool {
@@ -388,10 +386,9 @@ impl App {
         let c = self.c;
         let (o, r, b, d) = (c.orange, c.reset, c.bold, c.dim);
         let (status, installed) = match models {
-            Ok(list) => (
-                format!("{}● online{r}{d} · {} modelo(s){r}", c.green, list.len()),
-                list.iter().any(|m| same_model(m, &self.model)),
-            ),
+            Ok(list) => {
+                (format!("{}● online{r}{d} · {} modelo(s){r}", c.green, list.len()), list.iter().any(|m| same_model(m, &self.model)))
+            }
             Err(_) => (format!("{}● offline{r}", c.red), true),
         };
         let mut text = vec![
@@ -445,7 +442,10 @@ impl App {
         for (cmd, desc) in COMMANDS {
             println!("  {}{cmd:<11}{} {desc}", c.cyan, c.reset);
         }
-        println!("\n{}Qualquer outro texto é enviado ao modelo. Ctrl+C interrompe a resposta; Ctrl+C duas vezes no prompt (ou Ctrl+D) sai.{}\n", c.dim, c.reset);
+        println!(
+            "\n{}Qualquer outro texto é enviado ao modelo. Ctrl+C interrompe a resposta; Ctrl+C duas vezes no prompt (ou Ctrl+D) sai.{}\n",
+            c.dim, c.reset
+        );
     }
 
     /// Lista os modelos; devolve a lista para o autocompletar.
@@ -559,7 +559,13 @@ impl App {
                 let first = preview.lines().find(|l| !l.trim().is_empty()).unwrap_or("(vazio)");
                 let (s, cut) = commanddeck_core::util::truncate_chars(first.trim(), 120);
                 let extra = preview.lines().count().saturating_sub(1);
-                let more = if extra > 0 { format!(" (+{extra} linhas)") } else if cut { "…".into() } else { String::new() };
+                let more = if extra > 0 {
+                    format!(" (+{extra} linhas)")
+                } else if cut {
+                    "…".into()
+                } else {
+                    String::new()
+                };
                 term.line(&format!("  {}⎿  {s}{more}{}", c.dim, c.reset));
                 term.spin("pensando");
             }
@@ -594,7 +600,12 @@ impl App {
                 let msg = e.to_string();
                 term.line(&format!("{}✖ Erro: {msg}{}", c.red, c.reset));
                 if msg.contains("não está rodando") {
-                    term.line(&format!("{}Dica: inicie o Ollama (`ollama serve` ou o app) — host: {}{}", c.dim, ollama::base_url(&self.host), c.reset));
+                    term.line(&format!(
+                        "{}Dica: inicie o Ollama (`ollama serve` ou o app) — host: {}{}",
+                        c.dim,
+                        ollama::base_url(&self.host),
+                        c.reset
+                    ));
                 } else if msg.contains("not found") {
                     term.line(&format!("{}Dica: veja /models ou baixe com `ollama pull {}`.{}", c.dim, self.model, c.reset));
                 }
@@ -612,7 +623,8 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let c = Palette::detect();
-    let host = env_nonempty("COMMANDDECK_OLLAMA_HOST").or_else(|| env_nonempty("OLLAMA_HOST")).unwrap_or_else(|| ollama::DEFAULT_HOST.into());
+    let host =
+        env_nonempty("COMMANDDECK_OLLAMA_HOST").or_else(|| env_nonempty("OLLAMA_HOST")).unwrap_or_else(|| ollama::DEFAULT_HOST.into());
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let agent = OllamaAgent::new(host.clone());
     let models = ollama::list_models(&host, Duration::from_millis(2500));
