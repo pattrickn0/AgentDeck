@@ -118,6 +118,8 @@ pub struct Deck {
     pub unseen: u32,
     /// Download em andamento (barra no cabeçalho) e, se for um erro, quando some.
     pub download: Option<(DownloadProgress, Option<Instant>)>,
+    /// SOMENTE DEPURAÇÃO: mantém o estado fictício de `COMMANDDECK_DEBUG_UI=download*`, ignorando o download real.
+    pub debug_hold_download: bool,
     pub feed_scroll_to_bottom: bool,
     pub feed_near_bottom: bool,
 
@@ -191,6 +193,7 @@ impl Deck {
             next_feed_id: 1,
             unseen: 0,
             download: None,
+            debug_hold_download: false,
             feed_scroll_to_bottom: false,
             feed_near_bottom: true,
             input: String::new(),
@@ -307,6 +310,7 @@ impl Deck {
             CoreEvent::WorkspaceChanged => self.refresh_tree(),
             CoreEvent::TableFinished => self.finish_table(),
             CoreEvent::AgentsChanged => self.refresh_agents(),
+            CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Download(p) => self.download = match p.state {
                 DownloadState::Done => None,
                 // O erro fica visível por alguns segundos (o detalhe também vai para a Conversa integrada).

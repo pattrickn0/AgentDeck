@@ -375,7 +375,10 @@ fn apply_debug_ui(deck: &mut Deck) {
             "text" => deck.input = "Revisa o @README.md e sugere melhorias na seção de instalação".into(),
             "needs-text" => deck.needs_text = true,
             "empty" => deck.debug_close_all = true,
-            "download" | "download-retry" | "download-error" => deck.download = Some((debug_download(item), None)),
+            "download" | "download-retry" | "download-error" => {
+                deck.download = Some((debug_download(item), None));
+                deck.debug_hold_download = true;
+            }
             other => {
                 if let Some(dir) = other.strip_prefix("expand:") {
                     deck.tree.expanded.insert(dir.to_owned());
