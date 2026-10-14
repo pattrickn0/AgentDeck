@@ -2,7 +2,9 @@
 
 Lista de melhorias e limitações conhecidas, em ordem sugerida de prioridade.
 
-## 0. Direção: IA local como serviço interno (prioridade)
+## 0. Direção: IA local como serviço interno (adiado)
+
+> **Adiado** até o projeto estar mais completo.
 
 Decisão: com Claude e Antigravity disponíveis, o Ollama deixa de ser "agente par" e vira **infraestrutura** do app.
 
@@ -17,7 +19,9 @@ Decisão: com Claude e Antigravity disponíveis, o Ollama deixa de ser "agente p
 - [ ] **Configuração** em `Config`: modelo de embeddings, modelo compressor, limiares (ex.: comprimir acima de N caracteres), ligar/desligar.
 - [ ] Aba Ollama-agente passa a ser opcional (os itens da seção 1 ficam como baixa prioridade).
 
-## 1. Agente local (Ollama) — baixa prioridade: contexto e comportamento
+## 1. Agente local (Ollama) — adiado: contexto e comportamento
+
+> **Adiado** até o projeto estar mais completo.
 
 Problema observado: o modelo local esquece que é um agente ("age como chatbot") e para no meio da colaboração com outros agentes (ex.: Antigravity) em vez de continuar a conversa sozinho.
 
@@ -28,7 +32,9 @@ Problema observado: o modelo local esquece que é um agente ("age como chatbot")
 - [ ] **Verificação antes de encerrar.** Hoje, quando o modelo responde em texto sem chamar ferramenta, o loop considera a tarefa concluída. Adicionar um passo de checagem ("a tarefa terminou ou falta chamar `ask-agent`/ferramentas?") antes de devolver a resposta.
 - [ ] Revisar o limite de 25 passos (`MAX_STEPS`) para conversas longas entre agentes.
 
-## 2. Injeção de contexto como um ponto único (para qualquer IA)
+## 2. Injeção de contexto como um ponto único (para qualquer IA) — adiado
+
+> **Adiado** (gestão de contexto) até o projeto estar mais completo.
 
 Hoje cada agente recebe instruções por um caminho diferente:
 
@@ -48,9 +54,7 @@ Proposta:
 
 ## 3. Terminal
 
-- [ ] **Cliques e movimento do mouse em modo mouse.** Hoje só a roda do mouse chega a programas em tela cheia (`vim`, `htop`, menus interativos). Implementar o envio de clique/movimento nas sequências SGR (`\x1b[<...M`/`m`).
-  - Arquivos: `crates/app/src/terminal/`.
-- [ ] **IME no terminal.** Composição de IME (teclados CJK, seletor de emoji `Win+.`) funciona no compositor, mas não é encaminhada ao terminal. Acentos do português não são afetados.
+Nada pendente.
 
 ## 4. Interface
 
@@ -60,10 +64,13 @@ Proposta:
 
 ## 5. Validação
 
-- [ ] Testar o app de verdade no Windows (o CI só compila e roda testes): abas, ConPTY, microfone/Whisper, som, arrastar arquivos, colar imagem e restauração de abas.
 - [ ] **Agentes herdam o ambiente do terminal pai.** Ao abrir o app de dentro de um terminal que já roda o CommandDeck, a nova instância herda `COMMANDDECK_PORT`, `COMMANDDECK_TOKEN` e `COMMANDDECK_AGENT` (e pode compartilhar a pasta de dados). Suspeita de ter derrubado o terminal em uso numa sessão de testes. Limpar essas variáveis ao iniciar e/ou isolar `dados/` por instância.
 - [ ] **Testes de integração dependem do `agy` não estar instalado.** `workspace_agents_md_and_spawn_specs` (`crates/core/tests/bridge.rs`) falha quando o Antigravity está instalado na máquina, porque espera o estado "não instalado". Tornar o teste independente do ambiente (PATH e `LOCALAPPDATA` isolados).
+- [ ] **Testar o IME com um IME real** (teclado CJK, seletor de emoji `Win+.`): a lógica está ligada, mas só foi verificada por compilação e testes do cursor; não foi exercitada com composição de verdade.
 
 ## Concluído
 
 - [x] **Download do Whisper robusto** (motor e modelo): retomada por `Range`, retry com espera crescente, detecção de conexão parada, redirecionamentos, verificação de SHA-256 e barra de progresso no cabeçalho da Conversa integrada; suporte a Linux. Módulo `crates/core/src/download.rs`.
+- [x] **Mouse no terminal** (`crates/app/src/terminal/view.rs`, `input.rs`): clique, soltar, arrasto e movimento são enviados ao programa quando ele ativa os modos 1000/1002/1003, em SGR (1006) ou no formato legado; Shift devolve o mouse ao terminal para selecionar texto. Coberto por testes headless com eventos reais do egui.
+- [x] **IME no terminal**: com o terminal focado o IME do sistema é habilitado ancorado no cursor; a confirmação vai ao processo como texto digitado e a pré-edição aparece sublinhada sobre o cursor (antes o evento era descartado). Falta só testar com um IME real (teclado CJK, `Win+.`).
+- [x] **Validação no Windows** (feita à mão): abas, ConPTY, microfone/Whisper, som, arrastar arquivos, colar imagem e restauração de abas.
