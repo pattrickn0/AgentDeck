@@ -3,8 +3,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
@@ -938,25 +936,22 @@ impl Deck {
     }
 
     /// Se a área de transferência não tem texto mas tem imagem, anexa como PNG.
+    ///
+    /// O clipboard é lido aqui, na thread da UI (a mesma em que o egui o usa para colar no
+    /// compositor): duas threads nele ao mesmo tempo corrompiam o heap do Windows (`0xC0000374`).
+    /// Só a conversão para PNG e o anexo vão para segundo plano, já sem tocar no clipboard.
     fn check_clipboard_image(&self) {
-        // Uma verificação por vez: colar em rajada não pode empilhar threads no clipboard.
-        if IMAGE_CHECK_BUSY.swap(true, Ordering::AcqRel) {
+        let Ok(mut cb) = arboard::Clipboard::new() else { return };
+        if cb.get_text().is_ok_and(|t| !t.is_empty()) {
             return;
         }
-        self.spawn_bg("clipboard-image", |core| {
-            let _busy = ResetOnDrop(&IMAGE_CHECK_BUSY);
-            let _clip = lock_clipboard();
-            let mut cb = arboard::Clipboard::new().ok()?;
-            if cb.get_text().is_ok_and(|t| !t.is_empty()) {
-                return None;
-            }
-            let img = cb.get_image().ok()?;
-            match core.attach_rgba_png(img.width as u32, img.height as u32, &img.bytes) {
-                Ok(r) => Some(UiMsg::Attached(vec![r])),
-                Err(e) => {
-                    log::warn!("colar imagem: {e}");
-                    None
-                }
+        let Ok(img) = cb.get_image() else { return };
+        let (width, height, bytes) = (img.width as u32, img.height as u32, img.bytes.into_owned());
+        self.spawn_bg("clipboard-image", move |core| match core.attach_rgba_png(width, height, &bytes) {
+            Ok(r) => Some(UiMsg::Attached(vec![r])),
+            Err(e) => {
+                log::warn!("colar imagem: {e}");
+                None
             }
         });
     }
@@ -1310,29 +1305,9 @@ impl Deck {
     }
 }
 
-/// Lê texto da área de transferência do sistema.
+/// Lê texto da área de transferência do sistema. Só da thread da UI (ver `check_clipboard_image`).
 fn clipboard_text() -> Option<String> {
-    let _clip = lock_clipboard();
     arboard::Clipboard::new().ok()?.get_text().ok()
-}
-
-/// O clipboard do Windows é global e o arboard não tolera duas threads nele ao mesmo tempo: colar
-/// em rajada (Ctrl+V, que lê o texto na thread da UI e verifica imagem em segundo plano) corrompia
-/// o heap (`0xC0000374`) e derrubava o app. Todo acesso passa por este trinco.
-static CLIPBOARD_LOCK: Mutex<()> = Mutex::new(());
-static IMAGE_CHECK_BUSY: AtomicBool = AtomicBool::new(false);
-
-fn lock_clipboard() -> std::sync::MutexGuard<'static, ()> {
-    CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// Solta a marca de "em andamento" ao sair do escopo (inclusive pelos `?` da verificação).
-struct ResetOnDrop(&'static AtomicBool);
-
-impl Drop for ResetOnDrop {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
 }
 
 /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_FAKE_SHELL=1`): abre o shell do sistema quando o
