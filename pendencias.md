@@ -61,3 +61,9 @@ Proposta:
 ## 5. Validação
 
 - [ ] Testar o app de verdade no Windows (o CI só compila e roda testes): abas, ConPTY, microfone/Whisper, som, arrastar arquivos, colar imagem e restauração de abas.
+- [ ] **Agentes herdam o ambiente do terminal pai.** Ao abrir o app de dentro de um terminal que já roda o CommandDeck, a nova instância herda `COMMANDDECK_PORT`, `COMMANDDECK_TOKEN` e `COMMANDDECK_AGENT` (e pode compartilhar a pasta de dados). Suspeita de ter derrubado o terminal em uso numa sessão de testes. Limpar essas variáveis ao iniciar e/ou isolar `dados/` por instância.
+- [ ] **Testes de integração dependem do `agy` não estar instalado.** `workspace_agents_md_and_spawn_specs` (`crates/core/tests/bridge.rs`) falha quando o Antigravity está instalado na máquina, porque espera o estado "não instalado". Tornar o teste independente do ambiente (PATH e `LOCALAPPDATA` isolados).
+
+## Concluído
+
+- [x] **Download do Whisper robusto** (motor e modelo): retomada por `Range`, retry com espera crescente, detecção de conexão parada, redirecionamentos, verificação de SHA-256 e barra de progresso no cabeçalho da Conversa integrada; suporte a Linux. Módulo `crates/core/src/download.rs`.
