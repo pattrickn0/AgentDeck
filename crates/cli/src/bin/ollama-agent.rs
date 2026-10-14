@@ -8,6 +8,7 @@
 //!
 //! Uso: ollama-agent [modelo]   (ou COMMANDDECK_OLLAMA_MODEL; padrão: primeiro modelo instalado)
 
+use std::borrow::Cow;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -20,8 +21,10 @@ use commanddeck_core::ollama::{self, AgentEvent, OllamaAgent, RunOptions};
 use parking_lot::Mutex;
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
 use rustyline::history::DefaultHistory;
-use rustyline::{CompletionType, Editor, Helper, Highlighter, Hinter, Validator};
+use rustyline::{CompletionType, Editor, Helper, Validator};
 
 // ---------- Cores ----------
 
@@ -35,7 +38,8 @@ struct Palette {
     green: &'static str,
     yellow: &'static str,
     cyan: &'static str,
-    magenta: &'static str,
+    /// Laranja do Ollama (cor da marca e do indicador de atividade).
+    orange: &'static str,
 }
 
 impl Palette {
@@ -50,10 +54,10 @@ impl Palette {
                 green: "\x1b[32m",
                 yellow: "\x1b[33m",
                 cyan: "\x1b[36m",
-                magenta: "\x1b[35m",
+                orange: "\x1b[38;5;208m",
             }
         } else {
-            Self { reset: "", bold: "", dim: "", red: "", green: "", yellow: "", cyan: "", magenta: "" }
+            Self { reset: "", bold: "", dim: "", red: "", green: "", yellow: "", cyan: "", orange: "" }
         }
     }
 
@@ -80,7 +84,7 @@ struct Term {
     at_line_start: AtomicBool,
 }
 
-const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const FRAMES: &[&str] = &["·", "✢", "✳", "✶", "✻", "✽"];
 
 impl Term {
     fn new(c: Palette) -> Arc<Self> {
@@ -92,14 +96,14 @@ impl Term {
         if c.enabled() {
             let weak = Arc::downgrade(&t);
             let _ = std::thread::Builder::new().name("spinner".into()).spawn(move || loop {
-                std::thread::sleep(Duration::from_millis(90));
+                std::thread::sleep(Duration::from_millis(120));
                 let Some(t) = weak.upgrade() else { return };
                 let mut st = t.spin.lock();
                 if st.active {
                     st.frame = (st.frame + 1) % FRAMES.len();
                     let secs = st.since.elapsed().as_secs();
                     let mut out = std::io::stdout().lock();
-                    let _ = write!(out, "\r\x1b[2K{}{}{} {}{} {secs}s{}", t.c.magenta, FRAMES[st.frame], t.c.reset, t.c.dim, st.label, t.c.reset);
+                    let _ = write!(out, "\r\x1b[2K{}{}{} {}{}… ({secs}s){}", t.c.orange, FRAMES[st.frame], t.c.reset, t.c.dim, st.label, t.c.reset);
                     let _ = out.flush();
                 }
             });
@@ -175,9 +179,65 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/exit", "encerra (também: /sair, sair, exit)"),
 ];
 
-#[derive(Helper, Hinter, Highlighter, Validator)]
+/// Largura do terminal em colunas (80 se não der para saber).
+fn term_width() -> usize {
+    terminal_size::terminal_size().map(|(w, _)| w.0 as usize).filter(|w| *w >= 20).unwrap_or(80)
+}
+
+/// Linha horizontal da caixa de digitação. Uma coluna a menos que o terminal: ocupar a última
+/// coluna deixaria o cursor "pendurado" e o `rustyline` contaria uma linha a mais.
+fn rule(c: Palette) -> String {
+    format!("{}{}{}", c.dim, "─".repeat(term_width().saturating_sub(1)), c.reset)
+}
+
+#[derive(Helper, Validator)]
 struct CliHelper {
     models: Vec<String>,
+    /// Modelo em uso (mostrado no rodapé).
+    model: String,
+    c: Palette,
+    /// Só desenha a caixa (linha de baixo e rodapé) num terminal de verdade.
+    boxed: bool,
+}
+
+impl CliHelper {
+    /// Texto **puro** exibido depois da linha digitada, em 3 linhas: placeholder, linha de baixo da
+    /// caixa e rodapé. O `rustyline` conta esse texto no layout (sabe que a caixa tem 3 linhas de
+    /// altura) e o estilo vem de `highlight_hint`.
+    fn bottom(&self, line_is_empty: bool) -> String {
+        let width = term_width().saturating_sub(1);
+        let left = "  ? /help · Tab completa · Ctrl+C interrompe · /exit sai";
+        let right = format!("● {}", self.model);
+        let gap = width.saturating_sub(left.chars().count() + right.chars().count());
+        let footer = if gap >= 2 { format!("{left}{}{right}", " ".repeat(gap)) } else { left.to_owned() };
+        let placeholder = if line_is_empty { "Pergunte algo ao modelo… (ou /help)" } else { "" };
+        format!("{placeholder}\n{}\n{footer}", "─".repeat(width))
+    }
+}
+
+impl Hinter for CliHelper {
+    type Hint = String;
+
+    fn hint(&self, line: &str, _pos: usize, _ctx: &rustyline::Context<'_>) -> Option<String> {
+        self.boxed.then(|| self.bottom(line.is_empty()))
+    }
+}
+
+impl Highlighter for CliHelper {
+    /// Pinta as 3 linhas do hint: tudo apagado, menos a bolinha laranja do modelo no rodapé.
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        if !self.boxed {
+            return Cow::Borrowed(hint);
+        }
+        let c = self.c;
+        let mut lines = hint.split('\n');
+        let (placeholder, rule, footer) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""), lines.next().unwrap_or(""));
+        let footer = match footer.rfind("● ") {
+            Some(i) => format!("{}{}{}{}●{} {}{}{}", c.dim, &footer[..i], c.reset, c.orange, c.reset, c.dim, &footer[i + "● ".len()..], c.reset),
+            None => format!("{}{footer}{}", c.dim, c.reset),
+        };
+        Cow::Owned(format!("{}{placeholder}{}\n{}{rule}{}\n{footer}", c.dim, c.reset, c.dim, c.reset))
+    }
 }
 
 impl Completer for CliHelper {
@@ -275,54 +335,50 @@ impl App {
 
     fn banner(&self, models: &Result<Vec<String>, String>) {
         let c = self.c;
-        let rule = format!("{}{}{}", c.dim, "━".repeat(66), c.reset);
+        let (o, r, b, d) = (c.orange, c.reset, c.bold, c.dim);
+        let (status, installed) = match models {
+            Ok(list) => (
+                format!("{}● online{r}{d} · {} modelo(s){r}", c.green, list.len()),
+                list.iter().any(|m| same_model(m, &self.model)),
+            ),
+            Err(_) => (format!("{}● offline{r}", c.red), true),
+        };
         println!();
-        println!("{}{}🦙 Ollama Agent — CommandDeck Terminal{} {}v{}{}", c.bold, c.yellow, c.reset, c.dim, env!("CARGO_PKG_VERSION"), c.reset);
-        println!("{rule}");
-        let server = ollama::base_url(&self.host);
-        match models {
-            Ok(list) => {
-                let installed = list.iter().any(|m| same_model(m, &self.model));
-                println!("  {}Servidor{}     {server}  {}● online{}", c.bold, c.reset, c.green, c.reset);
-                let note = if installed {
-                    format!("{}({} modelo(s) instalado(s) — /models){}", c.dim, list.len(), c.reset)
-                } else {
-                    format!("{}⚠ não instalado — use /models ou `ollama pull {}`{}", c.yellow, self.model, c.reset)
-                };
-                println!("  {}Modelo{}       {}{}{}  {note}", c.bold, c.reset, c.yellow, self.model, c.reset);
-            }
-            Err(e) => {
-                println!("  {}Servidor{}     {server}  {}● offline{} {}({e}){}", c.bold, c.reset, c.red, c.reset, c.dim, c.reset);
-                println!("  {}Modelo{}       {}{}{}", c.bold, c.reset, c.yellow, self.model, c.reset);
-            }
-        }
-        println!("  {}Workspace{}    {}", c.bold, c.reset, self.workspace.display());
-        let tools: Vec<&str> = ollama::tool_list().iter().map(|(n, _)| *n).collect();
-        println!("  {}Ferramentas{}  {}", c.bold, c.reset, tools.join(" · "));
+        println!("{o} ▄▀▀▀▀▄{r}   {b}Ollama Agent{r} {d}v{}{r}", env!("CARGO_PKG_VERSION"));
+        println!("{o} █ ▪▪ █{r}   {o}{}{r} {d}·{r} {status}", self.model);
+        println!("{o} ▀▄▄▄▄▀{r}   {d}{}{r}", self.workspace.display());
         match bridge_peers() {
             Some(peers) if !peers.is_empty() => {
-                println!("  {}Agentes{}      ask-agent <agente> \"mensagem\"  {}→ {}{}", c.bold, c.reset, c.dim, peers.join(", "), c.reset)
+                println!("            {d}ask-agent <agente> \"mensagem\" → {}{r}", peers.join(", "))
             }
-            Some(_) => println!("  {}Agentes{}      {}nenhum outro agente instalado na ponte{}", c.bold, c.reset, c.dim, c.reset),
-            None => println!(
-                "  {}Agentes{}      {}ponte indisponível (rode dentro do CommandDeck para usar ask-agent){}",
-                c.bold, c.reset, c.dim, c.reset
-            ),
+            Some(_) => println!("            {d}nenhum outro agente na ponte{r}"),
+            None => println!("            {d}ponte indisponível (rode dentro do CommandDeck para usar ask-agent){r}"),
         }
-        println!("{rule}");
-        println!("  {}/help comandos · Tab completa · Ctrl+C interrompe a resposta · /exit sai{}", c.dim, c.reset);
+        if !installed {
+            println!("            {}⚠ modelo não instalado — use /models ou `ollama pull {}`{r}", c.yellow, self.model);
+        }
         if let Err(e) = models {
             println!();
-            println!("  {}✖ {e}{}", c.red, c.reset);
-            println!("  {}Dica: inicie o Ollama (`ollama serve` ou o app) e tente de novo; o host vem de OLLAMA_HOST.{}", c.dim, c.reset);
+            println!("  {}✖ {e}{r}", c.red);
+            println!("  {d}Dica: inicie o Ollama (`ollama serve` ou o app) e tente de novo; o host vem de OLLAMA_HOST.{r}");
         }
         println!();
     }
 
+    /// Prompt da caixa de digitação: linha horizontal e `❯`. A linha de baixo e o rodapé vêm do
+    /// `Hinter` (ver `CliHelper::bottom`). Fora de um terminal (stdin/stdout redirecionados) é só `> `.
     fn prompt(&self) -> (String, String) {
-        let raw = format!("ollama ({}) › ", self.model);
-        let styled = format!("{}{}ollama{} {}({}){} {}›{} ", self.c.bold, self.c.yellow, self.c.reset, self.c.yellow, self.model, self.c.reset, self.c.bold, self.c.reset);
+        if !self.boxed() {
+            return ("> ".to_owned(), "> ".to_owned());
+        }
+        let width = term_width().saturating_sub(1);
+        let raw = format!("{}\n❯ ", "─".repeat(width));
+        let styled = format!("{}\n{}❯{} ", rule(self.c), self.c.bold, self.c.reset);
         (raw, styled)
+    }
+
+    fn boxed(&self) -> bool {
+        self.c.enabled() && std::io::stdin().is_terminal()
     }
 
     fn help(&self) {
@@ -424,26 +480,30 @@ impl App {
         self.generating.store(true, Ordering::SeqCst);
         let started = Instant::now();
         let mut printed = false;
-        term.spin("pensando…");
+        let bullet = format!("{}●{} ", c.bold, c.reset);
+        term.spin("pensando");
         let result = self.agent.run(opts, &self.cancel, &mut |ev| match ev {
             AgentEvent::ContentDelta(t) => {
+                if !printed {
+                    term.write(&bullet);
+                }
                 printed = true;
                 term.write(&t);
             }
-            AgentEvent::ThinkingDelta(_) => term.spin("raciocinando…"),
+            AgentEvent::ThinkingDelta(_) => term.spin("raciocinando"),
             AgentEvent::ToolCall { name, summary } => {
                 let (s, cut) = commanddeck_core::util::truncate_chars(summary.lines().next().unwrap_or(""), 110);
                 let more = if cut || summary.lines().count() > 1 { "…" } else { "" };
-                term.line(&format!("{}⚙ {name}{} {}{s}{more}{}", c.cyan, c.reset, c.dim, c.reset));
-                term.spin(&format!("executando {name}…"));
+                term.line(&format!("{}●{} {}{name}{}{}({s}{more}){}", c.green, c.reset, c.bold, c.reset, c.dim, c.reset));
+                term.spin(&format!("executando {name}"));
             }
             AgentEvent::ToolResult { preview, .. } => {
                 let first = preview.lines().find(|l| !l.trim().is_empty()).unwrap_or("(vazio)");
                 let (s, cut) = commanddeck_core::util::truncate_chars(first.trim(), 120);
                 let extra = preview.lines().count().saturating_sub(1);
                 let more = if extra > 0 { format!(" (+{extra} linhas)") } else if cut { "…".into() } else { String::new() };
-                term.line(&format!("  {}↳ {s}{more}{}", c.dim, c.reset));
-                term.spin("pensando…");
+                term.line(&format!("  {}⎿  {s}{more}{}", c.dim, c.reset));
+                term.spin("pensando");
             }
             AgentEvent::Done { .. } => term.stop(),
         });
@@ -458,7 +518,7 @@ impl App {
                     answer = Some(out.text.clone());
                 }
                 if !printed && !out.cancelled {
-                    term.write(&out.text);
+                    term.write(&format!("{bullet}{}", out.text));
                 }
                 term.newline_if_needed();
                 if out.cancelled {
@@ -469,7 +529,7 @@ impl App {
                     1 => "1 ferramenta".to_owned(),
                     n => format!("{n} ferramentas"),
                 };
-                term.line(&format!("{}── {elapsed:.1}s · {tools} · {} passo(s) · {}{}", c.dim, out.steps, self.model, c.reset));
+                term.line(&format!("{}✻ Respondeu em {elapsed:.1}s · {tools} · {} passo(s){}", c.dim, out.steps, c.reset));
             }
             Err(e) => {
                 term.newline_if_needed();
@@ -539,13 +599,20 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    rl.set_helper(Some(CliHelper { models: models.unwrap_or_default() }));
+    rl.set_helper(Some(CliHelper { models: models.unwrap_or_default(), model: app.model.clone(), c, boxed: app.boxed() }));
 
     let mut exit_armed = false;
     loop {
+        if let Some(h) = rl.helper_mut() {
+            h.model = app.model.clone(); // o /switch pode ter trocado o modelo
+        }
         let line = match rl.readline(&app.prompt()) {
             Ok(l) => l,
             Err(ReadlineError::Interrupted) => {
+                if app.boxed() {
+                    print!("\x1b[J"); // apaga a linha de baixo da caixa e o rodapé
+                    let _ = std::io::stdout().flush();
+                }
                 if exit_armed {
                     break;
                 }
@@ -560,6 +627,11 @@ fn main() -> ExitCode {
             }
         };
         exit_armed = false;
+        if app.boxed() {
+            // O cursor ficou no começo da linha de baixo da caixa: apaga ela e o rodapé.
+            print!("\x1b[J");
+            let _ = std::io::stdout().flush();
+        }
         let text = line.trim();
         if text.is_empty() {
             continue;
@@ -616,6 +688,42 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plain_helper(boxed: bool) -> CliHelper {
+        let none = Palette { reset: "", bold: "", dim: "", red: "", green: "", yellow: "", cyan: "", orange: "" };
+        CliHelper { models: Vec::new(), model: "qwen3.5:4b".into(), c: none, boxed }
+    }
+
+    #[test]
+    fn the_input_box_bottom_is_three_plain_lines() {
+        let helper = plain_helper(true);
+        let text = helper.bottom(true);
+        let lines: Vec<&str> = text.split('\n').collect();
+        assert_eq!(lines.len(), 3, "placeholder, linha de baixo e rodapé");
+        assert!(lines[0].contains("Pergunte algo"));
+        assert!(!lines[1].is_empty() && lines[1].chars().all(|c| c == '─'));
+        assert_eq!(lines[1].chars().count(), term_width() - 1, "uma coluna a menos que o terminal");
+        assert!(lines[2].contains("/help") && lines[2].ends_with("● qwen3.5:4b"), "{}", lines[2]);
+        // O rustyline conta o hint no layout: precisa ser texto puro (o estilo vem do highlight_hint).
+        assert!(!text.contains('\x1b'));
+        // Com algo digitado não há placeholder (a linha continua existindo, vazia).
+        assert_eq!(helper.bottom(false).split('\n').next(), Some(""));
+    }
+
+    #[test]
+    fn highlighting_keeps_the_three_lines_and_colors_only_the_model_dot() {
+        let helper = {
+            let mut h = plain_helper(true);
+            h.c = Palette { reset: "<r>", bold: "", dim: "<d>", red: "", green: "", yellow: "", cyan: "", orange: "<o>" };
+            h
+        };
+        let hint = helper.bottom(true);
+        let styled = helper.highlight_hint(&hint).into_owned();
+        assert_eq!(styled.split('\n').count(), 3);
+        assert!(styled.contains("<o>●<r> <d>qwen3.5:4b<r>"), "{styled}");
+        // Fora de um terminal (sem caixa) o hint passa como veio.
+        assert_eq!(plain_helper(false).highlight_hint("x"), "x");
+    }
 
     #[test]
     fn recognizes_questions_typed_by_the_bridge() {

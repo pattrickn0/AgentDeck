@@ -21,6 +21,7 @@ serde_json.workspace = true
 parking_lot.workspace = true
 ureq.workspace = true
 rustyline = { version = "18", features = ["derive"] }
+terminal_size = "0.4"
 ctrlc = "3"
 
 [dev-dependencies]
