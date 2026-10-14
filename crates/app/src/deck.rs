@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
-use commanddeck_core::{AgentInfo, Core, CoreEvent, DirEntry, FeedEntry, FeedKind, SpawnSpec, TableRequest};
+use commanddeck_core::{AgentInfo, Core, CoreEvent, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, SpawnSpec, TableRequest};
 use crossbeam_channel::{Receiver, Sender};
 use egui::Color32;
 use winit::event::{ElementState, KeyEvent};
@@ -116,6 +116,8 @@ pub struct Deck {
     thinking: HashMap<String, u64>,
     next_feed_id: u64,
     pub unseen: u32,
+    /// Download em andamento (barra no cabeçalho) e, se for um erro, quando some.
+    pub download: Option<(DownloadProgress, Option<Instant>)>,
     pub feed_scroll_to_bottom: bool,
     pub feed_near_bottom: bool,
 
@@ -188,6 +190,7 @@ impl Deck {
             thinking: HashMap::new(),
             next_feed_id: 1,
             unseen: 0,
+            download: None,
             feed_scroll_to_bottom: false,
             feed_near_bottom: true,
             input: String::new(),
@@ -304,6 +307,12 @@ impl Deck {
             CoreEvent::WorkspaceChanged => self.refresh_tree(),
             CoreEvent::TableFinished => self.finish_table(),
             CoreEvent::AgentsChanged => self.refresh_agents(),
+            CoreEvent::Download(p) => self.download = match p.state {
+                DownloadState::Done => None,
+                // O erro fica visível por alguns segundos (o detalhe também vai para a Conversa integrada).
+                DownloadState::Error => Some((p, Some(Instant::now() + Duration::from_secs(8)))),
+                _ => Some((p, None)),
+            },
         }
     }
 
@@ -378,6 +387,13 @@ impl Deck {
         if let Some(at) = self.persist_at {
             if now >= at {
                 self.persist_tabs_now();
+            } else {
+                want(at);
+            }
+        }
+        if let Some((_, Some(at))) = self.download {
+            if now >= at {
+                self.download = None;
             } else {
                 want(at);
             }

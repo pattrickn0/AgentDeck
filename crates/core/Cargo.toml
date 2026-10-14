@@ -24,6 +24,9 @@ dirs.workspace = true
 log.workspace = true
 getrandom = "0.4"
 png = "0.18"
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 open = "5"
 unicode-normalization = "0.1"

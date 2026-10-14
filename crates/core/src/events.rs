@@ -49,6 +49,39 @@ impl FeedEntry {
     }
 }
 
+/// Fase de um download em andamento (barra de progresso da interface).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadState {
+    Downloading,
+    /// Conferindo o SHA-256 do arquivo baixado.
+    Verifying,
+    /// Conexão caiu: aguardando para tentar de novo.
+    Retrying,
+    Extracting,
+    /// Download concluído, falta só o pós-processamento.
+    Finalizing,
+    Done,
+    Error,
+}
+
+/// Progresso de um download (modelo ou binários do Whisper).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DownloadProgress {
+    pub label: String,
+    pub state: DownloadState,
+    pub received: u64,
+    pub total: Option<u64>,
+    /// Bytes por segundo (média suavizada).
+    pub speed: f64,
+    /// Nova tentativa em andamento (`Retrying`): número e máximo.
+    pub attempt: u32,
+    pub max_attempts: u32,
+    pub retry_in_ms: u64,
+    /// Mensagem de erro (`Error`) ou do último erro transitório (`Retrying`).
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
     Feed(FeedEntry),
@@ -58,4 +91,6 @@ pub enum CoreEvent {
     TableFinished,
     /// A lista de agentes/modelos Ollama foi atualizada em background.
     AgentsChanged,
+    /// Progresso de um download em segundo plano.
+    Download(DownloadProgress),
 }

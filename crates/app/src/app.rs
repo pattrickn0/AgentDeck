@@ -359,7 +359,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,collapsed` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,collapsed,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -375,6 +375,7 @@ fn apply_debug_ui(deck: &mut Deck) {
             "text" => deck.input = "Revisa o @README.md e sugere melhorias na seção de instalação".into(),
             "needs-text" => deck.needs_text = true,
             "empty" => deck.debug_close_all = true,
+            "download" | "download-retry" | "download-error" => deck.download = Some((debug_download(item), None)),
             other => {
                 if let Some(dir) = other.strip_prefix("expand:") {
                     deck.tree.expanded.insert(dir.to_owned());
@@ -384,4 +385,26 @@ fn apply_debug_ui(deck: &mut Deck) {
             }
         }
     }
+}
+
+/// Progresso fictício para capturas de tela da barra de download (`COMMANDDECK_DEBUG_UI`).
+fn debug_download(kind: &str) -> commanddeck_core::DownloadProgress {
+    use commanddeck_core::{DownloadProgress, DownloadState};
+    let mut p = DownloadProgress {
+        label: "Modelo large-v3-turbo".into(),
+        state: DownloadState::Downloading,
+        received: 680_000_000,
+        total: Some(1_624_555_275),
+        speed: 12_900_000.0,
+        attempt: 0,
+        max_attempts: 0,
+        retry_in_ms: 0,
+        message: None,
+    };
+    match kind {
+        "download-retry" => (p.state, p.attempt, p.max_attempts, p.retry_in_ms, p.speed) = (DownloadState::Retrying, 2, 5, 4200, 0.0),
+        "download-error" => (p.state, p.message) = (DownloadState::Error, Some("SHA-256 não confere (esperado 1fc70f77…, obtido 9a3b02c1…)".into())),
+        _ => {}
+    }
+    p
 }

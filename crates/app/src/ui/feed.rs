@@ -1,11 +1,13 @@
 //! `#bottom`: cabeçalho da "Conversa integrada", mensagens e divisor horizontal.
 
+use std::time::Duration;
+
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use super::{composer, galley, paint_splitter, place, text_in, tip, FEED_HEAD_H};
 use crate::deck::{Deck, FeedItem};
-use commanddeck_core::FeedKind;
+use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
 use crate::theme;
 
 /// Desenha `#bottom` (cabeçalho, conversa e compositor). Devolve a âncora do seletor "Enviar para".
@@ -36,6 +38,7 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         deck.toggle_feed();
     }
     // Badge de não vistas.
+    let mut left = btn.max.x + 8.0;
     if deck.unseen > 0 {
         let txt = deck.unseen.to_string();
         let g = galley(&painter, &txt, theme::ui(11.0), theme::WHITE);
@@ -43,6 +46,7 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         let b = Rect::from_min_size(Pos2::new(btn.max.x + 8.0, rect.center().y - size.y / 2.0), size);
         painter.rect_filled(b, 9.0, theme::ACCENT);
         place(&painter, b, Align2::CENTER_CENTER, g, theme::WHITE);
+        left = b.max.x + 8.0;
     }
     // "Limpar" à direita.
     let cw = galley(&painter, "Limpar", font.clone(), theme::MUTED).size().x + 8.0;
@@ -51,6 +55,122 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     text_in(&painter, clear, Align2::CENTER_CENTER, "Limpar", font, if r.hovered() { theme::TEXT } else { theme::MUTED });
     if r.clicked() {
         deck.clear_feed();
+    }
+    // Barra de progresso de download (Whisper), entre o título e "Limpar".
+    if let Some((p, _)) = &deck.download {
+        draw_download(ui, &painter, p, rect, left, clear.min.x - 12.0);
+    }
+}
+
+/// Texto "1,51 GB" / "648,5 MB" / "12 KB".
+fn format_bytes(n: f64) -> String {
+    const KB: f64 = 1024.0;
+    let s = if n >= KB * KB * KB {
+        format!("{:.2} GB", n / (KB * KB * KB))
+    } else if n >= KB * KB {
+        format!("{:.1} MB", n / (KB * KB))
+    } else {
+        format!("{} KB", (n / KB).round().max(1.0))
+    };
+    s.replace('.', ",")
+}
+
+/// Fração preenchida (`None` = indeterminada) e o texto de status de um download.
+fn download_view(p: &DownloadProgress) -> (Option<f32>, String) {
+    let total = p.total.filter(|t| *t > 0);
+    let pct = total.map(|t| (p.received as f64 / t as f64).clamp(0.0, 1.0));
+    let pct_txt = pct.map(|f| format!("{}%", (f * 100.0).floor() as u32));
+    match p.state {
+        DownloadState::Downloading => {
+            let mut info = match (total, &pct_txt) {
+                (Some(t), Some(pc)) => format!("{pc} · {} / {}", format_bytes(p.received as f64), format_bytes(t as f64)),
+                _ => format_bytes(p.received as f64),
+            };
+            if p.speed > 0.0 {
+                info += &format!(" · {}/s", format_bytes(p.speed));
+            }
+            (pct.map(|f| f as f32), info)
+        }
+        DownloadState::Verifying => (pct.map(|f| f as f32), match pct_txt {
+            Some(pc) => format!("verificando integridade (SHA-256) · {pc}"),
+            None => "verificando integridade (SHA-256)…".into(),
+        }),
+        DownloadState::Retrying => (
+            pct.map(|f| f as f32),
+            format!("conexão instável, nova tentativa {}/{} em {}s", p.attempt, p.max_attempts, (p.retry_in_ms as f64 / 1000.0).round().max(1.0)),
+        ),
+        DownloadState::Extracting => (None, "extraindo…".into()),
+        DownloadState::Finalizing => (None, "concluindo…".into()),
+        DownloadState::Error => (Some(0.0), p.message.clone().unwrap_or_else(|| "falha no download".into())),
+        DownloadState::Done => (Some(1.0), String::new()),
+    }
+}
+
+fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: Rect, left: f32, limit: f32) {
+    if limit - left < 160.0 {
+        return;
+    }
+    let painter = painter.with_clip_rect(Rect::from_min_max(Pos2::new(left, head.min.y), Pos2::new(limit, head.max.y)));
+    let (frac, info) = download_view(p);
+    let error = p.state == DownloadState::Error;
+    let font = theme::ui(11.0);
+    let cy = head.center().y;
+
+    let label_w = galley(&painter, &p.label, font.clone(), theme::TEXT).size().x;
+    text_in(&painter, Rect::from_min_size(Pos2::new(left, head.min.y), Vec2::new(label_w, head.height())), Align2::LEFT_CENTER, &p.label, font.clone(), if error { theme::RED_TEXT } else { theme::TEXT });
+
+    // Trilho 140×6 e preenchimento (indeterminado: trecho que vai e volta).
+    let track = Rect::from_min_size(Pos2::new(left + label_w + 8.0, cy - 3.0), Vec2::new(140.0, 6.0));
+    painter.rect_filled(track, 3.0, theme::PANEL_2);
+    let fill = match frac {
+        Some(f) => Some(Rect::from_min_size(track.min, Vec2::new(track.width() * f, track.height()))),
+        None => {
+            let t = ui.ctx().input(|i| i.time);
+            let phase = ((t * 0.9) % 2.0) as f32;
+            let pos = if phase < 1.0 { phase } else { 2.0 - phase };
+            let w = track.width() * 0.35;
+            ui.ctx().request_repaint_after(Duration::from_millis(33));
+            Some(Rect::from_min_size(Pos2::new(track.min.x + (track.width() - w) * pos, track.min.y), Vec2::new(w, track.height())))
+        }
+    };
+    if let Some(r) = fill.filter(|r| r.width() > 0.5) {
+        painter.rect_filled(r, 3.0, theme::ACCENT);
+    }
+    let info_rect = Rect::from_min_max(Pos2::new(track.max.x + 8.0, head.min.y), Pos2::new(limit, head.max.y));
+    text_in(&painter, info_rect, Align2::LEFT_CENTER, &info, font, if error { theme::RED_TEXT } else { theme::MUTED });
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    fn p(state: DownloadState, received: u64, total: Option<u64>) -> DownloadProgress {
+        DownloadProgress { label: "x".into(), state, received, total, speed: 0.0, attempt: 0, max_attempts: 0, retry_in_ms: 0, message: None }
+    }
+
+    #[test]
+    fn formata_bytes_em_ptbr() {
+        assert_eq!(format_bytes(680_000_000.0), "648,5 MB");
+        assert_eq!(format_bytes(1_624_555_275.0), "1,51 GB");
+        assert_eq!(format_bytes(12.0), "1 KB");
+    }
+
+    #[test]
+    fn textos_de_cada_estado() {
+        let mut d = p(DownloadState::Downloading, 680_000_000, Some(1_624_555_275));
+        d.speed = 12_900_000.0;
+        let (f, t) = download_view(&d);
+        assert_eq!(t, "41% · 648,5 MB / 1,51 GB · 12,3 MB/s");
+        assert!((f.expect("fração") - 0.4186).abs() < 0.001);
+        assert_eq!(download_view(&p(DownloadState::Downloading, 5_000_000, None)), (None, "4,8 MB".into()));
+        assert_eq!(download_view(&p(DownloadState::Verifying, 812_277_637, Some(1_624_555_275))).1, "verificando integridade (SHA-256) · 49%");
+        let mut r = p(DownloadState::Retrying, 100, Some(1000));
+        (r.attempt, r.max_attempts, r.retry_in_ms) = (2, 5, 4200);
+        assert_eq!(download_view(&r).1, "conexão instável, nova tentativa 2/5 em 4s");
+        assert_eq!(download_view(&p(DownloadState::Extracting, 0, None)), (None, "extraindo…".into()));
+        let mut e = p(DownloadState::Error, 0, None);
+        e.message = Some("SHA-256 não confere".into());
+        assert_eq!(download_view(&e), (Some(0.0), "SHA-256 não confere".into()));
     }
 }
 

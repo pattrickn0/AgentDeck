@@ -13,6 +13,7 @@ pub mod attachments;
 pub mod bridge;
 pub mod config;
 pub mod context;
+pub mod download;
 pub mod events;
 pub mod headless;
 pub mod ollama;
@@ -35,7 +36,7 @@ use parking_lot::{Mutex, RwLock};
 
 pub use agents::{AgentInfo, SpawnSpec};
 pub use config::Config;
-pub use events::{CoreEvent, FeedEntry, FeedKind};
+pub use events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry, FeedKind};
 pub use headless::HeadlessOptions;
 pub use workspace::DirEntry;
 
