@@ -29,11 +29,12 @@ pub const TREE_ICON: Color32 = rgb(0x858585);
 pub const SELECT_TEXT: Color32 = rgb(0xa4a4af);
 pub const CHIP_TEXT: Color32 = rgb(0xb8b8c2);
 pub const INPUT_TEXT: Color32 = rgb(0xe2e2e8);
-/// Cor padrão do placeholder de `<textarea>` no Chromium (tema escuro).
-pub const PLACEHOLDER: Color32 = rgb(0x75757e);
+/// Cor do placeholder de `<textarea>` com contraste >= 4.5:1 sobre PANEL.
+pub const PLACEHOLDER: Color32 = rgb(0x85858e);
 /// `--send-color` padrão (azul-claro) quando não há aba específica.
 pub const SEND_DEFAULT: Color32 = rgb(0x7cc4fa);
-pub const SEND_IDLE_TEXT: Color32 = rgb(0x55555f);
+/// Cor do texto do botão Enviar/Commit desabilitado (contraste >= 4.5:1 sobre PANEL e PANEL_2, mais apagado que MUTED).
+pub const SEND_IDLE_TEXT: Color32 = rgb(0x82828c);
 pub const STOP_BG: Color32 = rgb(0x444444);
 /// `whoColor()` para remetentes sem cor conhecida (ex.: "você").
 pub const WHO_DEFAULT: Color32 = rgb(0xc9c9d1);
@@ -423,5 +424,42 @@ mod tests {
     #[test]
     fn brightness_filter() {
         assert_eq!(brighten(Color32::from_rgb(100, 200, 250), 1.15), Color32::from_rgb(115, 230, 255));
+    }
+
+    #[test]
+    fn text_contrast_and_hierarchy() {
+        fn rel_lum(c: Color32) -> f32 {
+            let ch = |v: u8| {
+                let f = v as f32 / 255.0;
+                if f <= 0.04045 {
+                    f / 12.92
+                } else {
+                    ((f + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+        }
+        fn contrast(c1: Color32, c2: Color32) -> f32 {
+            let l1 = rel_lum(c1);
+            let l2 = rel_lum(c2);
+            let (lighter, darker) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
+            (lighter + 0.05) / (darker + 0.05)
+        }
+
+        // Ambas >= 4.5:1 sobre PANEL
+        assert!(contrast(SEND_IDLE_TEXT, PANEL) >= 4.5, "SEND_IDLE_TEXT deve ter contraste >= 4.5:1 sobre PANEL");
+        assert!(contrast(PLACEHOLDER, PANEL) >= 4.5, "PLACEHOLDER deve ter contraste >= 4.5:1 sobre PANEL");
+
+        // Também >= 4.5:1 sobre PANEL_2 onde o botão Enviar/Commit desabilitado reside
+        assert!(contrast(SEND_IDLE_TEXT, PANEL_2) >= 4.5, "SEND_IDLE_TEXT deve ter contraste >= 4.5:1 sobre PANEL_2");
+
+        // Hierarquia visual preservada: desabilitado <= placeholder < muted < text
+        let lum_send = rel_lum(SEND_IDLE_TEXT);
+        let lum_ph = rel_lum(PLACEHOLDER);
+        let lum_muted = rel_lum(MUTED);
+        let lum_text = rel_lum(TEXT);
+        assert!(lum_send <= lum_ph, "SEND_IDLE_TEXT deve ser mais apagado ou igual ao placeholder");
+        assert!(lum_ph < lum_muted, "PLACEHOLDER deve ser mais apagado que MUTED");
+        assert!(lum_muted < lum_text, "MUTED deve ser mais apagado que TEXT");
     }
 }
