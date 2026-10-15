@@ -7,9 +7,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use commanddeck_core::paths::AppPaths;
-use commanddeck_core::{Config, Core, CoreEvent, StartOptions};
 #[cfg(unix)]
 use commanddeck_core::FeedKind;
+use commanddeck_core::{Config, Core, CoreEvent, StartOptions};
 use crossbeam_channel::Receiver;
 use serde_json::{json, Value};
 
@@ -554,6 +554,47 @@ fn hooks_signal_turns_of_a_tab() {
     // Estado inválido, ou sem ser uma aba (token mestre): recusado.
     assert_eq!(http(port, "POST", "/signal", &host, &token, &json!({"state": "x"}).to_string()).0, 400);
     assert_eq!(http(port, "POST", "/signal", &host, env.core.bridge_token(), &json!({"state": "idle"}).to_string()).0, 400);
+    env.core.shutdown();
+}
+
+/// Deixa o `claude` "instalado" para o core (o arquivo só precisa existir; nunca roda).
+fn fake_claude(env: &Env) {
+    if cfg!(windows) {
+        let bin = env.root.join("home").join(".local").join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        std::fs::write(bin.join("claude.exe"), b"").expect("write");
+    } else {
+        write_script(&env.root.join("fake-bin").join("claude"), "exit 0");
+    }
+}
+
+#[test]
+fn statusline_reports_usage_of_the_tab_model() {
+    let env = start(&[]);
+    fake_claude(&env);
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let token = tab_token(&env, "claude@dev");
+    let _ = env.rx.try_iter().count();
+    let body = json!({"session": {"used": 0.34, "resets_at_ms": 1_760_000_000_000u64}, "weekly": {"used": 1.0, "resets_at_ms": null}});
+    assert_eq!(http(port, "POST", "/usage", &host, &token, &body.to_string()), (200, json!({"ok": true})));
+    // O modelo vem do token (`claude@dev` → `claude`), não do corpo.
+    let usage = env.core.usage_snapshot();
+    let claude = &usage["claude"];
+    assert_eq!(claude.session, Some(commanddeck_core::UsageWindow { used: 0.34, resets_at_ms: Some(1_760_000_000_000) }));
+    assert_eq!(claude.weekly, Some(commanddeck_core::UsageWindow { used: 1.0, resets_at_ms: None }));
+    assert!(claude.updated_ms > 0 && !claude.local);
+    assert!(env.rx.try_iter().any(|e| matches!(e, CoreEvent::UsageChanged)));
+    // O mesmo uso de novo não acorda a UI.
+    assert_eq!(http(port, "POST", "/usage", &host, &token, &body.to_string()).0, 200);
+    assert!(!env.rx.try_iter().any(|e| matches!(e, CoreEvent::UsageChanged)));
+
+    // Fora de 0..=1, sem ser uma aba (token mestre) ou numa aba sem plano (shell): recusado.
+    let bad = json!({"session": {"used": 34}}).to_string();
+    assert_eq!(http(port, "POST", "/usage", &host, &token, &bad).0, 400);
+    assert_eq!(http(port, "POST", "/usage", &host, env.core.bridge_token(), &body.to_string()).0, 400);
+    assert_eq!(http(port, "POST", "/usage", &host, &tab_token(&env, "shell@dev"), &body.to_string()).0, 400);
+    assert_eq!(env.core.usage_snapshot().len(), 1);
     env.core.shutdown();
 }
 

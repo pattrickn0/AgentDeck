@@ -56,6 +56,7 @@ agente: serve a testes e ferramentas de depuração, e com ele o `from` do corpo
 | `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"]}` → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido ou profundidade `>= 2`; 404 para `reply_to` que não está pendente; 409 para ciclo de espera; 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
+| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
 
 Toda requisição exige o cabeçalho `x-commanddeck-token` (comparado em tempo constante) e um `Host`
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
@@ -121,6 +122,24 @@ bloqueantes; a UI chama numa thread):
   `*.lock`) e emite `CoreEvent::GitChanged`; a interface relê o status 400 ms depois. Se o repositório fica
   acima da pasta de trabalho (o `.git` não é vigiado), a aba relê a cada 10 s enquanto está aberta;
 - pull só por avanço direto (`--ff-only`); push sem upstream publica no único remoto (`push -u`).
+
+**Janela e barra de título.** A janela é criada sem decoração (`with_decorations(false)`, com a sombra de volta
+no Windows por `with_undecorated_shadow`); `ui/titlebar.rs` desenha a barra e manda ao winit os comandos do egui
+(`ViewportCommand::StartDrag`, `Minimized`, `Maximized`, `BeginResize` nas faixas de 5 px das bordas), que o
+`EguiGlow::run` já executa. O "×" liga `Deck::quit_requested`, e o `App` encerra como no `CloseRequested`.
+
+**Uso dos planos** (`crates/core/src/usage.rs`, faixa em `ui/usage.rs`). `Core::usage_snapshot()` devolve o último
+uso de cada modelo (`AgentUsage`: sessão e semana em 0..=1, quando renovam); mudanças emitem `CoreEvent::UsageChanged`.
+- **Claude**: os hooks gravam `statusLine: ask-agent --usage`. O Claude Code passa `rate_limits.five_hour/seven_day`
+  no stdin; o `ask-agent` manda à ponte (`POST /usage`) e imprime "sessão 34% · semana 12%" (ou repassa o stdin à
+  statusline do próprio usuário, se houver, e mostra a dela).
+- **Codex** (`usage/codex.rs`): a thread `cd-usage` relê a cada 60 s o fim do `rollout-*.jsonl` mais novo em
+  `~/.codex/sessions` (`rate_limits.primary/secondary`), só com aba do Codex aberta.
+- **Antigravity** (`usage/antigravity.rs`): a cada 3 min, com aba aberta, `v1internal:retrieveUserQuotaSummary`
+  (janelas `5h` e `weekly`; alternativa: `fetchAvailableModels`) com o token do CLI (Gerenciador de Credenciais do
+  Windows `gemini:antigravity` ou `~/.gemini/oauth_creds.json`) enquanto ele vale; quem o renova é o próprio CLI. API interna: qualquer falha
+  vira "sem dados" (anel tracejado). O token nunca vai para log, Feed ou interface.
+- **Ollama**: local, sem limite.
 
 **Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
 (`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (todo `ollama:*` vira `ollama`). A cada quadro,

@@ -68,6 +68,12 @@ Nada pendente.
 - [ ] Emojis monocromáticos (limitação do egui). Avaliar fonte de emoji colorida ou renderização própria.
 - [ ] Select, spinner e tooltips desenhados à mão imitando o Chromium; desfoque atrás do overlay de arrastar é aproximado.
 - [ ] Animação suave (hover) nos botões do estado vazio.
+- [ ] **Uso do Antigravity com o token vencido:** o app usa só o token que o CLI mantém (sem guardar client ID/secret de terceiros), então com o CLI fechado por mais de ~1 h a barra mostra "sem dados". Avaliar ler o client ID/secret do CLI instalado para renovar em memória.
+- [ ] **Uso do Antigravity depende de API interna** (`v1internal:retrieveUserQuotaSummary`): pode mudar sem aviso; hoje qualquer falha vira "sem dados". Avaliar um aviso discreto quando falhar por muito tempo.
+- [ ] **Uso do Codex só testado com arquivos de exemplo** (o Codex não estava instalado): conferir o formato real de `rate_limits` nos `rollout-*.jsonl`.
+- [ ] **Statusline do usuário perde o `padding`**: a nossa (`ask-agent --usage`) fixa 0 e repassa a dele.
+- [ ] **Acentos trocados por `?` nas respostas do Antigravity** pela ponte (as do Claude chegam certas). Causa provável: o PowerShell 5.1 do Antigravity converte o texto ao passar para o `ask-agent` (`$OutputEncoding`/`Get-Content` sem `-Encoding UTF8`). Orientar nas instruções da ponte ou aceitar `ask-agent --reply <n> --file <caminho>` lido em UTF-8.
+- [ ] **Janela sem decoração:** validar no Windows real (arrastar, snap, Win+setas, redimensionar pelas bordas, maximizada sem cobrir a barra de tarefas); no Linux, conferir X11/Wayland ([testes.md](testes.md), seção 13).
 
 ## 5. Testes automáticos
 
@@ -108,6 +114,12 @@ Nada pendente.
 - [ ] Integração com o GitHub (PRs, issues, Actions) — ver a seção 6.
 
 ## Concluído
+
+- [x] **Barra de título própria, uso dos agentes e barra lateral nova.**
+  - Janela sem a barra do sistema: ☰ (configurações), "CommandDeck", recolher barra, "+", tela dividida e botões de janela menores; arrastar, duplo clique e bordas pelo egui (`ui/titlebar.rs`).
+  - Uso por agente aberto: logo + círculo que enche com a sessão + anel semanal (âmbar a 80 %, vermelho fechado a 100 %). Claude pela statusline (`ask-agent --usage` → `POST /usage`), Codex pelos `rollout-*.jsonl`, Antigravity pela API de cota, Ollama local (`core/src/usage.rs`).
+  - Seletor de workspace no topo da barra lateral (lista de projetos, "Abrir pasta…"); explorador sem a linha raiz, com atualizar e recolher tudo.
+  - O diff do Git deixou de alargar a barra direita: rola dentro dela, como o Mapa.
 
 - [x] **Tela dividida por tipo de agente.**
   - Uma janela por tipo (todos os Ollama juntos), numa grade automática (2 lado a lado, 2+1, 2×2, 3+2, 3×2); os tipos que não cabem viram abas da última janela.

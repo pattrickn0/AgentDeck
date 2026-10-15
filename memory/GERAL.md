@@ -90,9 +90,9 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 
 | Área | O que tem |
 | :-- | :-- |
-| Barra esquerda | árvore do workspace (recolhe com Ctrl+B) |
+| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), "CommandDeck", recolher a barra esquerda, "+" (nova aba), tela dividida; à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
+| Barra esquerda | seletor de workspace no topo (lista de projetos, "Abrir pasta…") e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
-| Topbar | "+" (nova aba), o botão da tela dividida, o chip da branch git (`main ↑1 ↓2 •3`: à frente, atrás, alterações; clique abre a aba Git), a pasta de trabalho e as configurações |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, três abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama) e **Git** (branch). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some na aba Git |
 
 A **tela dividida** organiza as abas por tipo de agente:
@@ -104,7 +104,7 @@ A **tela dividida** organiza as abas por tipo de agente:
   um "+" que abre outra aba do mesmo tipo. A janela focada tem o contorno na cor do agente e recebe o teclado,
   o IME e o "Enviar para → Aba ativa";
 - os divisores entre janelas se arrastam (duplo clique iguala); tamanhos, ordem e o liga/desliga ficam salvos.
-  Desligada (botão na topbar), volta a ser uma janela só com todas as abas;
+  Desligada (botão na barra de título), volta a ser uma janela só com todas as abas;
 - uma aba aberta por outro agente (`ask-agent codex …`) entra na janela do tipo dela (ou cria a janela) sem tirar
   o foco de onde você está digitando;
 - atalhos: Ctrl+Tab / Ctrl+Shift+Tab trocam de aba dentro da janela focada; Ctrl+Alt+setas mudam o foco para a
@@ -113,13 +113,13 @@ A **tela dividida** organiza as abas por tipo de agente:
 O **Mapa** mostra, em texto de terminal, quem está conversando com quem agora: a árvore de quem pergunta a quem
 (pergunta na fila, digitada, com resposta atrasada ou em modo headless, com o tempo de espera), as respostas a
 caminho, as conversas concluídas no último minuto (esmaecidas) e os agentes sem conversa.
-Com o Mapa aberto, a barra se alarga sobre o terminal (sem redimensioná-lo). Clicar num agente abre a aba dele.
+O Mapa rola dentro da barra, que mantém a largura. Clicar num agente abre a aba dele.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
 - branch atual e menu de branches (buscar, trocar, criar); buscar, puxar (só avanço direto) e enviar
   ("Publicar" quando a branch ainda não existe no remoto);
 - alterações em seções (conflitos, preparadas, alterações, não rastreados) com preparar (+), tirar (−) e
-  descartar (↶, com confirmação); clique abre o diff (a barra se alarga), duplo clique abre o arquivo;
+  descartar (↶, com confirmação); clique abre o diff (rola dentro da barra, que mantém a largura), duplo clique abre o arquivo;
 - caixa de commit (Ctrl+Enter), com a opção de corrigir o último commit;
 - sem repositório: botão "Inicializar repositório"; sem git: o link para instalar.
 

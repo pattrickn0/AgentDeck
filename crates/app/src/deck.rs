@@ -202,6 +202,10 @@ pub struct Deck {
     recent: VecDeque<Recent>,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=map-demo`): mapa fictício para capturas de tela.
     pub debug_map: Option<Snapshot>,
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
+    pub debug_usage: Option<HashMap<String, commanddeck_core::AgentUsage>>,
+    /// O botão de fechar da barra de título foi clicado (o `App` encerra depois do quadro).
+    pub quit_requested: bool,
 
     /// Aba Git (ver `git_ui.rs`).
     pub git: crate::git_ui::GitUi,
@@ -209,7 +213,6 @@ pub struct Deck {
     // Árvore e Projetos
     pub workspace: PathBuf,
     pub projects: Vec<PathBuf>,
-    pub projects_expanded: bool,
     pub tree: TreeState,
 
     // Conversa integrada
@@ -289,7 +292,6 @@ impl Deck {
                 }
                 p
             },
-            projects_expanded: true,
             core,
             events,
             tx,
@@ -327,6 +329,8 @@ impl Deck {
             show_seq: 0,
             recent: VecDeque::new(),
             debug_map: None,
+            debug_usage: None,
+            quit_requested: false,
             git: crate::git_ui::GitUi::default(),
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
             feed: Vec::new(),
@@ -464,6 +468,7 @@ impl Deck {
             CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { id, busy } => self.on_agent_signal(&id, busy),
+            CoreEvent::UsageChanged => {}
             CoreEvent::Download(p) => {
                 self.download = match p.state {
                     DownloadState::Done => None,
@@ -1046,9 +1051,8 @@ impl Deck {
         let old_id = self.tabs[idx].ident.id();
         let kind = self.tabs[idx].kind.clone();
         let trimmed = new_text.trim();
-        let full_text = if trimmed.starts_with(&format!("{kind}@")) || trimmed == kind {
-            trimmed.to_owned()
-        } else if trimmed.contains('@') {
+        // Com "@" o texto já é um id completo (o modelo é conferido abaixo); sem, é só o cargo.
+        let full_text = if trimmed == kind || trimmed.contains('@') {
             trimmed.to_owned()
         } else if trimmed.is_empty() {
             kind.clone()
@@ -1093,6 +1097,30 @@ impl Deck {
 
     pub fn active_tab(&self) -> Option<&Tab> {
         self.active.and_then(|i| self.tabs.get(i))
+    }
+
+    /// Modelos das abas abertas, sem repetir e na ordem das abas (`ollama:*` vira `ollama`; sem o terminal comum).
+    pub fn open_models(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for t in &self.tabs {
+            let key = split::group_key(&t.kind);
+            if key != "shell" && !out.iter().any(|k| k == key) {
+                out.push(key.to_owned());
+            }
+        }
+        // Capturas de tela da demonstração sem abas abertas: os modelos fictícios + um sem dados.
+        if out.is_empty() && self.debug_usage.is_some() {
+            out = ["claude", "antigravity", "ollama", "codex"].map(String::from).to_vec();
+        }
+        out
+    }
+
+    /// Uso dos planos por modelo (o fictício em depuração).
+    pub fn usage(&self) -> HashMap<String, commanddeck_core::AgentUsage> {
+        match &self.debug_usage {
+            Some(u) => u.clone(),
+            None => self.core.usage_snapshot(),
+        }
     }
 
     /// `--active-agent-color` (sem aba, volta ao valor do `:root`, a cor do Claude).
@@ -1431,10 +1459,6 @@ impl Deck {
                 self.switch_workspace(next);
             }
         }
-    }
-
-    pub fn pick_project(&self) {
-        self.pick_workspace();
     }
 
     pub fn persist_projects(&mut self) {

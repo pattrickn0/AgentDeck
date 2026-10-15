@@ -22,7 +22,7 @@ Gemini **removido** (item 9).
 - [x] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\commanddeck.exe` (os três `.exe` na mesma pasta).
 - [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
 - [x] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
-- [ ] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
+- [x] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
 - [ ] Trocar a pasta de trabalho para um projeto seu que seja repositório git (clique no caminho na topbar), ou usar a pasta `workspace/` padrão.
 
 ## 1. Barra direita ★
@@ -31,7 +31,7 @@ Gemini **removido** (item 9).
 - [x] Arrastar a borda esquerda da barra muda a largura (entre ~280 px e ~metade da janela; o padrão agora é 330 px, um pouco mais estreito); **não existe** como recolher.
 - [x] Fechar e reabrir o app: a largura escolhida volta igual.
 - [x] Diminuir a janela até o mínimo (~820 px de largura): nada se sobrepõe; o terminal continua usável.
-- [ ] Compositor: **sem** o seletor "Enviar para"; anexos (se houver) em cima, caixa de texto na largura toda, microfone/anexo à esquerda e **Enviar** à direita. A mensagem vai **só para a aba ativa** (sem aba ativa viva: aviso na Conversa).
+- [x] Compositor: **sem** o seletor "Enviar para"; anexos (se houver) em cima, caixa de texto na largura toda, microfone/anexo à esquerda e **Enviar** à direita. A mensagem vai **só para a aba ativa** (sem aba ativa viva: aviso na Conversa).
 - [x] Menu "+" (nova aba) perto da borda direita da janela: abre dentro da tela e a escolha funciona.
 - [x] Download do Whisper (se aparecer): a faixa de progresso fica logo abaixo do topo da barra.
 
@@ -49,20 +49,18 @@ Gemini **removido** (item 9).
 - [x] Abrir um Ollama (ou Codex, ou Terminal) pelo "+" da topbar: a tela vira **2 em cima + 1 largo embaixo**. Com o 4º tipo, 2×2.
 - [x] Dois modelos do Ollama ficam na **mesma janela**, um em cada aba. `claude@dev` fica na janela do Claude.
 - [x] Clicar numa janela: ela ganha o **contorno na cor do agente** e o que você digita vai para ela; o compositor manda para ela.
-- [] A rolagem do mouse funciona na janela sob o ponteiro, mesmo sem foco.
-- [ ] Ctrl+Tab troca de aba **só dentro** da janela focada; Ctrl+Alt+← → ↑ ↓ passa o foco para a janela vizinha (anotar se o driver de vídeo girar a tela com esse atalho).
-- [ ] Arrastar o divisor entre janelas muda o tamanho; duplo clique iguala; fechar e reabrir o app mantém.
-- [ ] Arrastar a alça **⋮⋮** de uma janela sobre outra: aparece "Soltar para trocar de lugar" e, ao soltar, as duas trocam. A ordem volta igual ao reabrir.
-- [ ] Fechar a última aba de um tipo: a janela some e as outras ocupam o espaço. Fechar uma aba com outras do mesmo tipo: o foco fica na mesma janela.
-- [ ] Um agente chamar outro que não está aberto (`ask-agent codex "oi"`): a janela do Codex aparece **sem tirar o foco** de onde você digita. Se já houver Codex, vira aba na janela dele.
-- [ ] Botão de **tela dividida** na topbar: desligado, volta a uma janela só com todas as abas; ligado de novo, volta a dividir.
-- [ ] Janela mínima (~820 px) com 3 ou mais tipos: as janelas empilham; o que não cabe vira aba da última janela, sem sumir nada.
-- [ ] Com o Mapa ou um diff do Git aberto, a barra se alarga por cima das janelas e elas **não mudam de tamanho**.
-- [ ] Com 4–6 janelas e agentes respondendo ao mesmo tempo: o app continua fluido (anotar se travar).
+- [x ] A rolagem do mouse funciona na janela sob o ponteiro, mesmo sem foco.
+- [x] Ctrl+Tab troca de aba **só dentro** da janela focada; Ctrl+Alt+← → ↑ ↓ passa o foco para a janela vizinha (anotar se o driver de vídeo girar a tela com esse atalho).
+- [x] Arrastar o divisor entre janelas muda o tamanho; duplo clique iguala; fechar e reabrir o app mantém.
+- [x] Arrastar a alça **⋮⋮** de uma janela sobre outra: aparece "Soltar para trocar de lugar" e, ao soltar, as duas trocam. A ordem volta igual ao reabrir.
+- [x] Fechar a última aba de um tipo: a janela some e as outras ocupam o espaço. Fechar uma aba com outras do mesmo tipo: o foco fica na mesma janela.
+- [x] Um agente chamar outro que não está aberto (`ask-agent codex "oi"`): a janela do Codex aparece **sem tirar o foco** de onde você digita. Se já houver Codex, vira aba na janela dele.
+- [x] Botão de **tela dividida** na topbar: desligado, volta a uma janela só com todas as abas; ligado de novo, volta a dividir.
+- [x] Janela mínima (~820 px) com 3 ou mais tipos: as janelas empilham; o que não cabe vira aba da última janela, sem sumir nada.
+- [ ] Com o Mapa ou um diff do Git aberto, a barra **mantém a largura** (o conteúdo rola dentro dela) e as janelas **não mudam de tamanho**.
+- [x] Com 4–6 janelas e agentes respondendo ao mesmo tempo: o app continua fluido (anotar se travar).
 
 ## 4. Conversa entre agentes (ponte) ★
-
-Abra uma aba do Claude e uma do Antigravity.
 
 - [ ] Peça ao Claude: *"pergunte ao antigravity qual é a capital da França"*. A pergunta é **digitada na aba do Antigravity** e a resposta volta ao Claude.
 - [ ] A mensagem digitada termina com `ask-agent --reply <número> "sua resposta"`, e o agente responde assim (a resposta chega).
@@ -96,7 +94,7 @@ Com a pasta de trabalho num repositório git:
 
 - [ ] O botão redundante da branch foi **removido da topbar**. O status da branch e contagem de alterações aparecem no topo da aba Git (`dev · N ▾`), no tooltip do ícone Git e no badge de alterações do ícone.
 - [ ] A aba Git lista as alterações em seções; as letras têm cores (M âmbar, A verde, D vermelho…).
-- [ ] Clicar num arquivo abre o **diff** (a barra se alarga), com linhas numeradas e cores; **←** volta.
+- [ ] Clicar num arquivo abre o **diff** (na largura da barra, com rolagem horizontal), com linhas numeradas e cores; **←** volta.
 - [ ] Preparar (+) e tirar (−) um arquivo e "tudo" pelos botões das seções.
 - [ ] Descartar (↶) pede **confirmação**; num arquivo não rastreado, avisa que vai **apagar**.
 - [ ] Commit com mensagem (botão e **Ctrl+Enter**); "Corrigir último commit" traz a última mensagem.
@@ -162,3 +160,17 @@ Com a pasta de trabalho num repositório git:
   - [ ] Status e contagem de alterações visíveis no botão da branch no topo da aba Git (`dev · N ▾`), com badge de alterações no ícone Git da lateral.
   - [ ] Repositório sem git: exibe aviso explicativo e botão para inicializar.
   - [ ] HEAD destacado: exibe `{hash} (destacado) · N ▾`.
+
+## 13. Barra de título, uso dos agentes e barra lateral ★
+
+- [ ] A janela não tem mais a barra do Windows: no topo, ☰, "CommandDeck" (sem logo), ‹, + e tela dividida; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
+- [ ] Arrastar pela barra move a janela; duplo clique maximiza/restaura; arrastar até a borda da tela encaixa (snap); Win+setas funcionam.
+- [ ] Redimensionar pelas 4 bordas e pelos 4 cantos (o cursor muda); maximizada, as bordas não reagem e a janela não cobre a barra de tarefas.
+- [ ] Fechar pelo × salva o tamanho da janela, como antes.
+- [ ] ☰ abre as configurações alinhadas à esquerda.
+- [ ] Uso: com uma aba do Claude, depois da primeira resposta aparece o logo + círculo com o % da sessão; o tooltip mostra sessão, semana e quando renovam. A statusline do Claude mostra "sessão N% · semana M%".
+- [ ] Antigravity aberto: em até ~3 min aparece o uso dele; sem login ou sem rede, anel tracejado e "uso indisponível".
+- [ ] Ollama: anel cinza, "local, sem limite". Fechar a última aba de um modelo tira o item da barra.
+- [ ] Demonstração: `COMMANDDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
+- [ ] Barra lateral: o seletor no topo mostra o nome e o caminho do workspace; o clique abre a lista de projetos (× remove, "Abrir pasta…" adiciona e ativa); Esc ou clique fora fecha.
+- [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.

@@ -25,6 +25,7 @@ pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
 pub mod sessions;
+pub mod usage;
 pub mod util;
 pub mod whisper;
 pub mod workspace;
@@ -44,6 +45,7 @@ pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
+pub use usage::{AgentUsage, UsageWindow};
 pub use workspace::DirEntry;
 
 /// Função chamada sempre que um [`CoreEvent`] é emitido, para acordar o loop da UI
@@ -121,6 +123,8 @@ pub(crate) struct CoreInner {
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub whisper: whisper::WhisperState,
     pub git: git::GitState,
+    /// Uso dos planos dos agentes (barra de título).
+    pub usage: usage::UsageStore,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
     _data_lock: Option<std::fs::File>,
 }
@@ -283,6 +287,7 @@ impl Core {
             watcher: Mutex::new(None),
             whisper: whisper::WhisperState::default(),
             git: git::GitState::default(),
+            usage: usage::UsageStore::default(),
             _data_lock: Some(data_lock),
             paths,
         };
@@ -293,6 +298,8 @@ impl Core {
         let (server, port) = bridge::start(&core)?;
         *core.inner.bridge_server.lock() = Some(server);
         *core.inner.state.bridge_port.lock() = port;
+
+        usage::start_poller(&core);
 
         // Atualiza os modelos Ollama em segundo plano (a lista inicial vem do disco).
         if opts.ollama_discovery {

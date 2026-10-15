@@ -149,6 +149,13 @@ impl App {
         }
         egui.paint(&glw.window);
 
+        // O "×" da barra de título: o mesmo caminho do fechar do sistema.
+        if self.deck.as_ref().is_some_and(|d| d.quit_requested) {
+            self.shutdown();
+            event_loop.exit();
+            return;
+        }
+
         if self.smoke.as_ref().is_some_and(|s| s.armed) {
             let size = glw.window.inner_size();
             let pixels = smoke::read_framebuffer(gl, size.width, size.height);
@@ -201,11 +208,16 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let (w, h) = (1280.0f64, 860.0f64);
         let attrs = WindowAttributes::default()
-            .with_title("CommandDeck Terminal")
+            .with_title("CommandDeck")
+            // A barra de título é desenhada pela interface (`ui/titlebar.rs`).
+            .with_decorations(false)
             .with_inner_size(winit::dpi::LogicalSize::new(w, h))
             // A barra direita (≥ 260px) e o terminal (≥ 360px) precisam caber ao lado da esquerda.
             .with_min_inner_size(winit::dpi::LogicalSize::new(820.0, 480.0))
             .with_visible(false);
+        // Sem decoração, o Windows tira também a sombra da janela; ela volta assim.
+        #[cfg(windows)]
+        let attrs = winit::platform::windows::WindowAttributesExtWindows::with_undecorated_shadow(attrs, true);
         let (glw, gl) = match GlWindow::new(event_loop, attrs) {
             Ok(v) => v,
             Err(e) => {
@@ -402,7 +414,20 @@ fn debug_map() -> crate::agent_map::Snapshot {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`COMMANDDECK_DEBUG_UI=usage-demo`): Claude no meio
+/// da sessão, Antigravity com a semana esgotada (anel vermelho), Ollama local e Codex sem dados.
+fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsage> {
+    use commanddeck_core::{AgentUsage, UsageWindow};
+    let now = commanddeck_core::util::now_ms();
+    let w = |used, hours: u64| Some(UsageWindow { used, resets_at_ms: Some(now + hours * 3_600_000) });
+    std::collections::HashMap::from([
+        ("claude".into(), AgentUsage { session: w(0.34, 2), weekly: w(0.12, 100), updated_ms: now - 60_000, local: false }),
+        ("antigravity".into(), AgentUsage { session: w(0.61, 3), weekly: w(1.0, 30), updated_ms: now - 120_000, local: false }),
+        ("ollama".into(), AgentUsage { local: true, updated_ms: now, ..Default::default() }),
+    ])
+}
+
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -436,6 +461,7 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.set_right_view(crate::deck::RightView::Mapa);
                 deck.debug_map = Some(debug_map());
             }
+            "usage-demo" => deck.debug_usage = Some(debug_usage()),
             "split-drag" => {
                 deck.pane_drag = Some(0);
                 deck.debug_pane_drop = Some(1);

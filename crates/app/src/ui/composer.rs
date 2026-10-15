@@ -199,11 +199,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     // Enviar / Enviando…
     let ready = deck.send_ready();
     let sr = if ready { clickable(ui, l.send, Id::new("send")) } else { ui.interact(l.send, Id::new("send"), Sense::click()) };
-    let (mut bg, fg) = if ready {
-        (deck.send_color(), theme::WHITE)
-    } else {
-        (theme::PANEL_2, theme::SEND_IDLE_TEXT)
-    };
+    let (mut bg, fg) = if ready { (deck.send_color(), theme::WHITE) } else { (theme::PANEL_2, theme::SEND_IDLE_TEXT) };
     if ready && sr.hovered() {
         bg = theme::brighten(bg, 1.15);
     }

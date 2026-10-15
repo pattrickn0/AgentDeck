@@ -362,4 +362,3 @@ mod tests {
         assert_eq!(r.ids(), vec!["claude@lead", "claude@design"]);
     }
 }
-

@@ -5,6 +5,7 @@
 //!      ask-agent --reply <n> "resposta"       (responde à pergunta número n)
 //!      ask-agent --list
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
+//!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
 //!
 //! `<agente>` é `modelo[@cargo[@nome]]`: `claude`, `claude@dev`, `claude@dev@ana`.
 //!
@@ -13,11 +14,15 @@
 //! mais, ele termina avisando, e a resposta é digitada depois no terminal de quem perguntou.
 //!
 //! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do CommandDeck.
-//! `--signal` sai sempre com 0 (um hook que falha não pode atrapalhar o agente).
+//! `--signal` e `--usage` saem sempre com 0 (um hook que falha não pode atrapalhar o agente).
 
-use std::io::Read;
-use std::process::ExitCode;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode, Stdio};
+use std::time::Duration;
 
+use commanddeck_core::usage::{from_claude_statusline, usage_to_json};
+use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
@@ -25,6 +30,10 @@ const USAGE: &str =
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
+/// Limite do `POST /usage`: a statusline roda a cada atualização da tela do Claude.
+const USAGE_POST_TIMEOUT: Duration = Duration::from_millis(1500);
+/// Limite da statusline própria do usuário (repassada pelo `--usage`).
+const USER_STATUSLINE_TIMEOUT: Duration = Duration::from_secs(3);
 
 struct Bridge {
     port: String,
@@ -64,6 +73,10 @@ fn fail(msg: impl std::fmt::Display, code: u8) -> ExitCode {
 fn main() -> ExitCode {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--usage") {
+        let bridge = env("COMMANDDECK_PORT").zip(env("COMMANDDECK_TOKEN")).map(|(port, token)| Bridge { port, token });
+        return statusline(bridge);
+    }
     let (Some(port), Some(token)) = (env("COMMANDDECK_PORT"), env("COMMANDDECK_TOKEN")) else {
         if args.first().is_some_and(|a| a == "--signal") {
             return ExitCode::SUCCESS;
@@ -142,5 +155,131 @@ fn main() -> ExitCode {
         }
         Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
         Err(e) => fail(e, 1),
+    }
+}
+
+// ---------- Statusline do Claude Code (`--usage`) ----------
+
+/// `--usage`: lê o JSON que o Claude Code passa à statusline, manda o uso do plano à ponte
+/// (`POST /usage`) e imprime a linha: a da statusline própria do usuário, se ele tiver uma (o
+/// nosso `--settings` a substitui), ou "sessão 34% · semana 12%". Sem dados, não imprime nada.
+fn statusline(bridge: Option<Bridge>) -> ExitCode {
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let status: Value = serde_json::from_str(&input).unwrap_or(Value::Null);
+    let usage = from_claude_statusline(&status);
+    // A requisição corre junto com a statusline do usuário.
+    let post = bridge.filter(|_| usage.session.is_some() || usage.weekly.is_some()).map(|bridge| {
+        let body = usage_to_json(&usage);
+        std::thread::spawn(move || {
+            let _ = bridge.request("POST", "/usage", Some(&body), Some(USAGE_POST_TIMEOUT));
+        })
+    });
+    let line = user_statusline(&status).and_then(|cmd| run_user_statusline(&cmd, &input)).unwrap_or_else(|| usage_line(&usage));
+    if let Some(post) = post {
+        let _ = post.join();
+    }
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(line.as_bytes());
+    let _ = out.flush();
+    ExitCode::SUCCESS
+}
+
+/// "sessão 34% · semana 12%", com quebra de linha (vazio sem dados).
+fn usage_line(u: &AgentUsage) -> String {
+    let pct = |w: Option<commanddeck_core::UsageWindow>| w.map(|w| format!("{:.0}%", w.used * 100.0));
+    let parts: Vec<String> =
+        [("sessão", pct(u.session)), ("semana", pct(u.weekly))].into_iter().filter_map(|(k, v)| Some(format!("{k} {}", v?))).collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        parts.join(" · ") + "\n"
+    }
+}
+
+/// Comando da statusline do usuário, na ordem de precedência do Claude Code: projeto local,
+/// projeto e usuário (`CLAUDE_CONFIG_DIR` ou `~/.claude`). A nossa própria é ignorada.
+fn user_statusline(status: &Value) -> Option<String> {
+    let project = ["project_dir", "current_dir"]
+        .iter()
+        .find_map(|k| status.get("workspace")?.get(*k)?.as_str().filter(|s| !s.is_empty()).map(PathBuf::from))
+        .or_else(|| std::env::current_dir().ok());
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| commanddeck_core::util::home_dir().join(".claude"));
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Some(p) = &project {
+        files.push(p.join(".claude").join("settings.local.json"));
+        files.push(p.join(".claude").join("settings.json"));
+    }
+    files.push(config_dir.join("settings.json"));
+    files.iter().find_map(|f| statusline_in(f))
+}
+
+fn statusline_in(file: &Path) -> Option<String> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()?;
+    let sl = v.get("statusLine")?;
+    if sl.get("type").and_then(Value::as_str).is_some_and(|t| t != "command") {
+        return None;
+    }
+    let cmd = sl.get("command")?.as_str()?.trim();
+    (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| cmd.to_owned())
+}
+
+/// Roda a statusline do usuário com o mesmo stdin; `None` se ela não roda ou demora demais.
+fn run_user_statusline(cmd: &str, input: &str) -> Option<String> {
+    let mut child = shell(cmd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let input = input.to_owned();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(input.as_bytes());
+        });
+    }
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        let _ = tx.send(out);
+    });
+    match rx.recv_timeout(USER_STATUSLINE_TIMEOUT) {
+        Ok(out) => {
+            let _ = child.wait();
+            Some(String::from_utf8_lossy(&out).into_owned())
+        }
+        Err(_) => {
+            let _ = child.kill();
+            None
+        }
+    }
+}
+
+/// O shell em que o Claude Code roda a statusline: `sh` no Unix; no Windows, o Git Bash
+/// (`CLAUDE_CODE_GIT_BASH_PATH` ou o `bash.exe` do PATH, sem o do WSL em `System32`), ou o `cmd`.
+fn shell(cmd: &str) -> Command {
+    if cfg!(windows) {
+        let windir = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let bash = std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH").filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| {
+            std::env::split_paths(&std::env::var_os("PATH")?)
+                .map(|d| d.join("bash.exe"))
+                .find(|p| p.is_file() && !p.to_string_lossy().to_lowercase().starts_with(&windir.to_string_lossy().to_lowercase()))
+        });
+        match bash {
+            Some(bash) => {
+                let mut c = Command::new(bash);
+                c.args(["-c", cmd]);
+                c
+            }
+            None => {
+                let mut c = Command::new("cmd");
+                c.args(["/D", "/S", "/C", cmd]);
+                c
+            }
+        }
+    } else {
+        let mut c = Command::new("sh");
+        c.args(["-c", cmd]);
+        c
     }
 }

@@ -123,3 +123,75 @@ fn signal_never_fails_and_reply_needs_a_number() {
     assert!(text(&out.stderr).contains("a pergunta #41 não está esperando resposta"), "{}", text(&out.stderr));
     core.shutdown();
 }
+
+/// `ask-agent --usage` como o Claude Code o chama, com a pasta de configuração `config`.
+fn statusline(core: Option<&Core>, token: Option<&str>, config: &std::path::Path, stdin: &str) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    cmd.arg("--usage").env_remove("COMMANDDECK_PORT").env_remove("COMMANDDECK_TOKEN").env("CLAUDE_CONFIG_DIR", config).current_dir(config);
+    if let (Some(core), Some(token)) = (core, token) {
+        cmd.env("COMMANDDECK_PORT", core.bridge_port().to_string()).env("COMMANDDECK_TOKEN", token);
+    }
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn ask-agent");
+    let _ = child.stdin.take().expect("stdin").write_all(stdin.as_bytes());
+    child.wait_with_output().expect("output")
+}
+
+#[test]
+fn usage_statusline_posts_and_prints() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let core = start_core(tmp.path());
+    let config = tmp.path().join("claude-config");
+    std::fs::create_dir_all(&config).expect("mkdir");
+    let input = serde_json::json!({
+        "workspace": { "project_dir": config },
+        "rate_limits": {
+            "five_hour": { "used_percentage": 34.4, "resets_at": 1_760_000_000 },
+            "seven_day": { "used_percentage": 12, "resets_at": 1_760_500_000 }
+        }
+    })
+    .to_string();
+
+    // Sem ponte (fora do CommandDeck), só imprime; com chave de API (sem limites), nada.
+    let out = statusline(None, None, &config, &input);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "sessão 34% · semana 12%\n");
+    let out = statusline(None, None, &config, r#"{"rate_limits":null}"#);
+    assert_eq!((out.status.code(), text(&out.stdout)), (Some(0), String::new()));
+    assert_eq!(statusline(None, None, &config, "lixo").status.code(), Some(0));
+
+    // Numa aba do Claude, o uso chega à ponte.
+    if cfg!(windows) {
+        let bin = tmp.path().join("home").join(".local").join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        std::fs::write(bin.join("claude.exe"), b"").expect("write");
+    }
+    let ident = commanddeck_core::Ident::parse("claude@dev").expect("id");
+    let token = core.spawn_spec_for(&ident).expect("spec").env["COMMANDDECK_TOKEN"].clone();
+    let out = statusline(Some(&core), Some(&token), &config, &input);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let usage = core.usage_snapshot();
+    let claude = usage.get("claude").expect("uso do claude");
+    assert_eq!(claude.session.map(|w| (w.used, w.resets_at_ms)), Some((0.344, Some(1_760_000_000_000))));
+    assert_eq!(claude.weekly.map(|w| w.used), Some(0.12));
+    // Token recusado pela ponte: sai com 0 do mesmo jeito.
+    assert_eq!(statusline(Some(&core), Some("errado"), &config, &input).status.code(), Some(0));
+
+    // A statusline do usuário (aqui, a do projeto) recebe o mesmo stdin e a saída dela é a mostrada.
+    let dot = config.join(".claude");
+    std::fs::create_dir_all(&dot).expect("mkdir");
+    let user_cmd = if cfg!(windows) { "echo minha linha" } else { "read x; echo \"minha linha ${#x}\"" };
+    std::fs::write(dot.join("settings.json"), serde_json::json!({ "statusLine": { "type": "command", "command": user_cmd } }).to_string())
+        .expect("write");
+    let out = statusline(None, None, &config, &input);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    if cfg!(unix) {
+        assert_eq!(text(&out.stdout), format!("minha linha {}\n", input.len()));
+    } else {
+        assert_eq!(text(&out.stdout).trim(), "minha linha");
+    }
+    // A nossa própria, se estiver nas configurações, não roda a si mesma.
+    std::fs::write(dot.join("settings.json"), r#"{"statusLine":{"type":"command","command":"ask-agent --usage"}}"#).expect("write");
+    assert_eq!(text(&statusline(None, None, &config, &input).stdout), "sessão 34% · semana 12%\n");
+    core.shutdown();
+}

@@ -267,11 +267,7 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         None => "(sem commits)".into(),
     });
     let count = st.entries.len();
-    let label = if count > 0 {
-        format!("{name} · {count}  ▾")
-    } else {
-        format!("{name}  ▾")
-    };
+    let label = if count > 0 { format!("{name} · {count}  ▾") } else { format!("{name}  ▾") };
     let g = galley_trunc(&painter, &label, theme::ui_semibold(12.5), theme::TEXT, branch_r.width() - 30.0);
     place(
         &painter,
@@ -281,10 +277,9 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         theme::TEXT,
     );
     let tip_text = match &st.upstream {
-        Some(u) => format!(
-            "Trocar ou criar branch\n{name} · {} alteração(ões)\nAcompanha {u} · {} à frente, {} atrás",
-            count, st.ahead, st.behind
-        ),
+        Some(u) => {
+            format!("Trocar ou criar branch\n{name} · {} alteração(ões)\nAcompanha {u} · {} à frente, {} atrás", count, st.ahead, st.behind)
+        }
         None => format!("Trocar ou criar branch\n{name} · {} alteração(ões)\nSem upstream (ainda não publicada)", count),
     };
     if tip(resp, tip_text).clicked() && !busy {

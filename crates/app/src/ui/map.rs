@@ -29,7 +29,7 @@ fn color(style: Style) -> Color32 {
     }
 }
 
-/// Largura máxima do mapa em colunas: com a barra alargada, os números das perguntas não ficam
+/// Largura máxima do mapa em colunas: com a barra larga, os números das perguntas não ficam
 /// longe demais dos nomes.
 const MAX_COLS: usize = 64;
 

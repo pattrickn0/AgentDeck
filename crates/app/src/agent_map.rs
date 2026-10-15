@@ -82,9 +82,7 @@ pub struct Snapshot {
 impl Snapshot {
     /// Há algo acontecendo que muda com o tempo (o mapa precisa ser redesenhado a cada segundo)?
     pub fn is_live(&self, now_ms: u64) -> bool {
-        !self.links.is_empty()
-            || !self.answers.is_empty()
-            || self.recent.iter().any(|r| now_ms.saturating_sub(r.at_ms) < RECENT_MS)
+        !self.links.is_empty() || !self.answers.is_empty() || self.recent.iter().any(|r| now_ms.saturating_sub(r.at_ms) < RECENT_MS)
     }
 
     fn node_state(&self, id: &str) -> NodeState {

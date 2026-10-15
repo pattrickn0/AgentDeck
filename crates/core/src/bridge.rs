@@ -21,6 +21,7 @@ use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
 use crate::exchange::Reply;
 use crate::headless::HeadlessOptions;
 use crate::instances::Ident;
+use crate::usage::AgentUsage;
 use crate::util::terminal_text;
 use crate::{Auth, Caller};
 use crate::{Core, CoreInner};
@@ -152,7 +153,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         return reply(req, 200, json!({ "agents": core.peers() }));
     }
     let route = req.url().to_owned();
-    if *req.method() != Method::Post || !["/ask", "/reply", "/signal"].contains(&route.as_str()) {
+    if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
     }
 
@@ -174,6 +175,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
     let (status, out) = match route.as_str() {
         "/reply" => reply_pending(&core, &caller, &msg),
         "/signal" => signal(&core, &auth, &msg),
+        "/usage" => usage(&core, &auth, &msg),
         _ => ask(&core, &caller, &msg),
     };
     reply(req, status, out);
@@ -305,6 +307,24 @@ fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
     };
     core.emit(CoreEvent::AgentSignal { id: id.clone(), busy });
     (200, json!({ "ok": true }))
+}
+
+/// `POST /usage` `{"session":{"used","resets_at_ms"}|null,"weekly":…}`: uso do plano do agente
+/// (`ask-agent --usage`, a statusline do Claude). O modelo vem do token; só o processo de uma aba envia.
+fn usage(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
+    let Auth::Agent(Caller { id, tab: true }) = auth else {
+        return (400, json!({ "error": "só o processo de uma aba envia o uso" }));
+    };
+    let Some(kind) = Ident::parse(id).map(|i| i.kind).filter(|k| k != "shell" && !k.starts_with("ollama")) else {
+        return (400, json!({ "error": "esta aba não tem limite de uso" }));
+    };
+    match crate::usage::usage_from_json(msg) {
+        Ok(usage) => {
+            core.set_usage(&kind, AgentUsage { updated_ms: crate::util::now_ms(), ..usage });
+            (200, json!({ "ok": true }))
+        }
+        Err(e) => (400, json!({ "error": e })),
+    }
 }
 
 /// Texto digitado no terminal da instância que recebe a pergunta número `request`.

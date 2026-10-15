@@ -586,7 +586,18 @@ impl Registry {
 /// Shell da aba "Terminal": PowerShell no Windows; `$SHELL` (ou /bin/bash) nos demais.
 fn shell_resolved() -> Resolved {
     if cfg!(windows) {
-        Resolved { program: "powershell.exe".into(), pre: vec!["-NoLogo".into()], shim: None }
+        // No Windows, força UTF-8 sem BOM no console e no pipeline para evitar que
+        // pipes para o ask-agent ou outros executáveis troquem acentos por "?".
+        Resolved {
+            program: "powershell.exe".into(),
+            pre: vec![
+                "-NoLogo".into(),
+                "-NoExit".into(),
+                "-Command".into(),
+                "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)".into(),
+            ],
+            shim: None,
+        }
     } else {
         let sh = std::env::var_os("SHELL").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| "/bin/bash".into());
         Resolved::direct(sh)
@@ -690,17 +701,26 @@ pub(crate) fn build_agent_env(
     env.insert("COMMANDDECK_DEPTH".into(), depth.to_string());
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
+    if cfg!(windows) {
+        env.insert("PYTHONUTF8".into(), "1".into());
+        env.insert("PYTHONIOENCODING".into(), "utf-8".into());
+    }
     env
 }
 
 /// Grava `dados/hooks/claude-settings.json`: hooks que avisam a ponte quando o Claude começa
-/// (`UserPromptSubmit`) e termina (`Stop`) um turno. Somam-se às configurações do usuário.
+/// (`UserPromptSubmit`) e termina (`Stop`) um turno, que se somam às configurações do usuário, e
+/// a statusline (`ask-agent --usage`), que manda o uso do plano à ponte. Esta substitui a do
+/// usuário, por isso o `ask-agent --usage` roda a dele e mostra a saída dela.
 fn write_claude_hooks(data_dir: &Path) -> std::io::Result<PathBuf> {
     let dir = data_dir.join("hooks");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("claude-settings.json");
     let hook = |state: &str| serde_json::json!([{ "hooks": [{ "type": "command", "command": format!("ask-agent --signal {state}") }] }]);
-    let settings = serde_json::json!({ "hooks": { "UserPromptSubmit": hook("busy"), "Stop": hook("idle") } });
+    let settings = serde_json::json!({
+        "hooks": { "UserPromptSubmit": hook("busy"), "Stop": hook("idle") },
+        "statusLine": { "type": "command", "command": "ask-agent --usage", "padding": 0 },
+    });
     let text = serde_json::to_string_pretty(&settings).unwrap_or_default();
     if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
         std::fs::write(&path, text)?;
@@ -869,6 +889,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("ler")).expect("json");
         assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "ask-agent --signal idle");
         assert_eq!(v["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"], "ask-agent --signal busy");
+        assert_eq!(v["statusLine"], serde_json::json!({ "type": "command", "command": "ask-agent --usage", "padding": 0 }));
         assert_eq!(write_claude_hooks(tmp.path()).expect("de novo"), path);
     }
 

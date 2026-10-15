@@ -95,6 +95,8 @@ pub enum CoreEvent {
         id: String,
         busy: bool,
     },
+    /// O uso de algum agente mudou (ver `Core::usage_snapshot`).
+    UsageChanged,
 }
 
 /// Mensagem a digitar no terminal de uma instância de agente.

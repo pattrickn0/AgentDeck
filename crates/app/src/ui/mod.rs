@@ -9,10 +9,11 @@ mod menus;
 mod overlay;
 mod panes;
 mod right_panel;
-mod sidebar;
 mod shortcuts;
+mod sidebar;
 mod tabs;
-mod topbar;
+mod titlebar;
+mod usage;
 
 use std::sync::Arc;
 
@@ -34,31 +35,25 @@ pub fn right_width(saved: f32, win_w: f32, left: f32) -> (f32, f32) {
     (saved.max(theme::RIGHT_MIN_W).min(max), max)
 }
 
-/// Largura da barra com o Mapa aberto: ela se alarga sobre o terminal (sem redimensioná-lo).
-pub fn map_width(right: f32, win_w: f32, left: f32) -> f32 {
-    right.max((win_w * 0.55).min(win_w - left - 240.0))
-}
-
 /// Desenha a janela inteira.
 pub fn draw(deck: &mut Deck, ui: &mut Ui) {
-    let full = ui.max_rect();
-    ui.painter().rect_filled(full, 0.0, theme::BG);
+    let window = ui.max_rect();
+    ui.painter().rect_filled(window, 0.0, theme::BG);
     let ctx = ui.ctx().clone();
 
-    // ---------- Layout: barra esquerda | topbar + terminal | barra direita ----------
+    // ---------- Layout: barra de título em cima; embaixo, barra esquerda | terminal | barra direita ----------
+    let titlebar = Rect::from_min_size(window.min, Vec2::new(window.width(), theme::TITLEBAR_H));
+    let full = Rect::from_min_max(Pos2::new(window.min.x, titlebar.max.y), window.max);
     let collapsed = deck.sidebar_collapsed;
     let sw = deck.sidebar_w.clamp(theme::SIDEBAR_MIN_W, theme::SIDEBAR_MAX_W);
     let left = if collapsed { 0.0 } else { sw + 1.0 };
     let (right_w, right_max) = right_width(deck.right_w, full.width(), left);
     let center = Rect::from_min_max(Pos2::new(full.min.x + left, full.min.y), Pos2::new(full.max.x - right_w - 1.0, full.max.y));
-    let topbar = Rect::from_min_size(center.min, Vec2::new(center.width(), theme::TOPBAR_H));
-    let term_rect = Rect::from_min_max(Pos2::new(center.min.x, topbar.max.y), center.max);
-    // O diff do Git alarga a barra sobre o terminal (sem redimensioná-lo); o Mapa cabe na largura fixa da barra.
-    let diff_open = deck.right_view == RightView::Git && deck.git.diff.is_some();
-    let panel_w = if diff_open { map_width(right_w, full.width(), left) } else { right_w };
-    let panel = Rect::from_min_max(Pos2::new(full.max.x - panel_w, full.min.y), full.max);
+    let term_rect = center;
+    // A barra tem sempre a mesma largura: o Mapa e o diff do Git rolam dentro dela.
+    let panel = Rect::from_min_max(Pos2::new(full.max.x - right_w, full.min.y), full.max);
     // Na aba Git o compositor some: o commit tem a própria caixa de mensagem.
-    let comp_h = if deck.right_view == RightView::Git { 0.0 } else { composer::measure(deck, ui, panel_w) };
+    let comp_h = if deck.right_view == RightView::Git { 0.0 } else { composer::measure(deck, ui, right_w) };
 
     // ---------- Terminais (tela dividida por tipo de agente) ----------
     panes::draw(deck, ui, term_rect);
@@ -69,31 +64,21 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
         sidebar::draw(deck, ui, side);
     }
 
-    // ---------- Topbar ----------
-    let menus = topbar::draw(deck, ui, topbar);
+    // ---------- Barra de título ----------
+    let menus = titlebar::draw(deck, ui, titlebar);
 
     // ---------- Divisores (por último no fundo: ganham o clique na faixa de ±3px) ----------
     if !collapsed {
         sidebar::splitter(deck, ui, Rect::from_min_size(Pos2::new(full.min.x + sw, full.min.y), Vec2::new(1.0, full.height())), full);
     }
-    if !diff_open {
-        let line = Rect::from_min_size(Pos2::new(full.max.x - right_w - 1.0, full.min.y), Vec2::new(1.0, full.height()));
-        right_panel::splitter(deck, ui, line, full, right_w, right_max);
-    }
+    let line = Rect::from_min_size(Pos2::new(full.max.x - right_w - 1.0, full.min.y), Vec2::new(1.0, full.height()));
+    right_panel::splitter(deck, ui, line, full, right_w, right_max);
 
-    // ---------- Barra direita: numa camada acima, para o diff alargado cobrir o terminal sem que
-    // ele receba os cliques (o terminal só reage ao mouse quando está sob o ponteiro). ----------
-    egui::Area::new(Id::new("right-panel"))
-        .order(Order::Middle)
-        .fixed_pos(panel.min)
-        .show(&ctx, |ui| {
-            let (rect, _) = ui.allocate_exact_size(panel.size(), Sense::hover());
-            if diff_open && panel_w > right_w {
-                shadow(ui.painter(), rect, 0, 0, 18, theme::rgba(0, 0, 0, 0.55));
-                ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(1.0, rect.height())), 0.0, theme::BORDER);
-            }
-            right_panel::draw_panel(deck, ui, rect, comp_h);
-        });
+    // ---------- Barra direita (numa camada acima dos terminais) ----------
+    egui::Area::new(Id::new("right-panel")).order(Order::Middle).fixed_pos(panel.min).show(&ctx, |ui| {
+        let (rect, _) = ui.allocate_exact_size(panel.size(), Sense::hover());
+        right_panel::draw_panel(deck, ui, rect, comp_h);
+    });
 
     // ---------- Menus suspensos e overlay ----------
     menus::new_tab_menu(deck, &ctx, menus.new_tab_anchor);
@@ -101,7 +86,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     menus::tab_context_menu(deck, &ctx);
     menus::rename_tab_modal(deck, &ctx);
     shortcuts::shortcuts_modal(deck, &ctx);
-    overlay::drop_overlay(deck, &ctx, full);
+    overlay::drop_overlay(deck, &ctx, window);
 
     // O compositor tem foco de teclado → o terminal não.
     let egui_focus = ctx.memory(|m| m.focused());
@@ -208,14 +193,5 @@ mod tests {
         assert!(820.0 - 221.0 - w >= 300.0);
         let (w, _) = right_width(380.0, 1000.0, 0.0);
         assert_eq!(w, 380.0);
-    }
-
-    #[test]
-    fn the_map_widens_the_panel_over_the_terminal() {
-        assert_eq!(map_width(380.0, 1280.0, 221.0), 1280.0 * 0.55);
-        // Nunca encolhe a barra, e deixa ao menos 240px de terminal visível.
-        assert_eq!(map_width(260.0, 820.0, 221.0), 820.0 - 221.0 - 240.0);
-        assert_eq!(map_width(380.0, 820.0, 221.0), 380.0);
-        assert_eq!(map_width(640.0, 900.0, 221.0), 640.0);
     }
 }
