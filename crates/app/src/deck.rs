@@ -85,6 +85,8 @@ pub struct Tab {
     pub view: ViewState,
     pub alive: bool,
     pub busy: bool,
+    /// Teve turno concluído enquanto não estava ativa (limpa ao focar a aba).
+    pub done: bool,
     /// Quando a aba foi ativada pela última vez (contador): em cada janela da tela dividida
     /// aparece a mais recente.
     pub shown: u64,
@@ -594,6 +596,7 @@ impl Deck {
         let mut chime = false;
         let metrics = self.metrics.clone();
         let mut exits = Vec::new();
+        let active = self.active;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             if let Some(code) = tab.session.take_exit() {
                 exits.push((i, code));
@@ -638,6 +641,9 @@ impl Deck {
                     tab.idle_deadline = None;
                     if tab.busy {
                         tab.busy = false;
+                        if active != Some(i) {
+                            tab.done = true;
+                        }
                         chime = true;
                     }
                 } else {
@@ -658,6 +664,8 @@ impl Deck {
         for (i, code) in exits {
             let tab = &mut self.tabs[i];
             tab.alive = false;
+            tab.busy = false;
+            tab.done = false;
             for q in tab.queue.drain() {
                 self.core.fail_delivery(q.request, "a aba encerrou antes de receber a mensagem");
             }
@@ -818,14 +826,19 @@ impl Deck {
 
     /// Hook do agente (`ask-agent --signal`): início ou fim de turno.
     fn on_agent_signal(&mut self, id: &str, busy: bool) {
-        let Some(tab) = self.tabs.iter_mut().find(|t| t.ident.id() == id) else { return };
+        let Some((idx, tab)) = self.tabs.iter_mut().enumerate().find(|(_, t)| t.ident.id() == id) else { return };
         tab.hooked = true;
         tab.turn_confirmed = busy;
         // Ocupada: se o aviso de fim de turno se perder, a aba é liberada após HOOK_STALE.
         tab.idle_deadline = busy.then(|| Instant::now() + HOOK_STALE);
         let finished = tab.busy && !busy;
         tab.busy = busy;
-        if finished {
+        if busy {
+            tab.done = false;
+        } else if finished {
+            if self.active != Some(idx) {
+                tab.done = true;
+            }
             self.play_sound(false);
         }
     }
@@ -845,6 +858,7 @@ impl Deck {
             view: ViewState::default(),
             alive: false,
             busy: false,
+            done: false,
             shown: 0,
             auto,
             queue: Mailbox::default(),
@@ -893,6 +907,7 @@ impl Deck {
         tab.hooked = false;
         tab.turn_confirmed = false;
         tab.busy = false;
+        tab.done = false;
         tab.pending_enter.clear();
         tab.held_keys.clear();
         if let Some(m) = &self.metrics {
@@ -919,6 +934,7 @@ impl Deck {
         self.active = Some(idx);
         self.show_seq += 1;
         self.tabs[idx].shown = self.show_seq;
+        self.tabs[idx].done = false;
         self.set_term_focus(true);
         self.persist_tabs();
     }
@@ -1171,6 +1187,11 @@ impl Deck {
         self.term_focus = on;
         if on {
             self.blink_epoch = Instant::now();
+            if let Some(i) = self.active {
+                if let Some(tab) = self.tabs.get_mut(i) {
+                    tab.done = false;
+                }
+            }
         }
     }
 
@@ -1283,6 +1304,7 @@ impl Deck {
             if bytes == b"\r" {
                 self.tabs[idx].busy = true;
                 self.tabs[idx].turn_confirmed = false;
+                self.tabs[idx].done = false;
             }
             {
                 let mut emu = self.tabs[idx].session.shared.emu.lock();
@@ -1825,6 +1847,7 @@ impl Deck {
         tab.busy = true;
         tab.turn_confirmed = false;
         tab.typing = false;
+        tab.done = false;
         tab.session.write(&input::submit_paste(text));
         let double = text.contains('@') && tab.spec.as_ref().is_some_and(|s| s.double_enter_on_mention);
         let mut times = vec![now + FIRST_ENTER];

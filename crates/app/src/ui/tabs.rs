@@ -1,6 +1,6 @@
 //! Faixa de abas do cabeçalho de cada janela da tela dividida (antes ficava na topbar).
 
-use egui::{Align2, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use super::{dot, galley_trunc, place, text_in, text_w, tip};
 use crate::deck::Deck;
@@ -89,7 +89,23 @@ pub fn strip(deck: &Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize, foc
         painter.rect_filled(Rect::from_min_size(Pos2::new(r.max.x, r.min.y), Vec2::new(1.0, r.height())), 0.0, theme::BORDER);
 
         let color = if is_shown && focused { theme::TEXT } else { theme::MUTED };
-        dot(&painter, Pos2::new(r.min.x + 12.0 + 4.0, r.center().y), tab.color);
+        let dot_pos = Pos2::new(r.min.x + 12.0 + 4.0, r.center().y);
+        let is_active = deck.active == Some(i) || (is_shown && focused);
+        if tab.busy {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            let t = ctx.input(|inp| inp.time);
+            let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
+            let halo_r = 4.0 + 2.8 * wave;
+            let halo_alpha = 0.35 * (1.0 - wave);
+            painter.circle_filled(dot_pos, halo_r, theme::with_opacity(tab.color, halo_alpha));
+            painter.circle_filled(dot_pos, 3.2 + 1.0 * wave, theme::with_opacity(tab.color, 0.75 + 0.25 * wave));
+        } else if tab.done && !is_active {
+            dot(&painter, dot_pos, tab.color);
+            painter.circle_stroke(dot_pos, 6.2, Stroke::new(1.2, theme::brighten(tab.color, 1.25)));
+            painter.circle_filled(dot_pos, 1.2, theme::with_opacity(Color32::WHITE, 0.75));
+        } else {
+            dot(&painter, dot_pos, tab.color);
+        }
         let label_x = r.min.x + 12.0 + 8.0 + 8.0;
         let g = galley_trunc(&painter, &tab.label, font.clone(), color, LABEL_MAX);
         let lr = place(
