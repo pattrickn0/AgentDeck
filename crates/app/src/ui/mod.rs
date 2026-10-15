@@ -10,6 +10,7 @@ mod overlay;
 mod panes;
 mod right_panel;
 mod sidebar;
+mod shortcuts;
 mod tabs;
 mod topbar;
 
@@ -101,6 +102,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     menus::target_menu(deck, &ctx, composer_anchor);
     menus::tab_context_menu(deck, &ctx);
     menus::rename_tab_modal(deck, &ctx);
+    shortcuts::shortcuts_modal(deck, &ctx);
     overlay::drop_overlay(deck, &ctx, full);
 
     // O compositor tem foco de teclado → o terminal não.
