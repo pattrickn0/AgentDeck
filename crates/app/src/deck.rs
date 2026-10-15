@@ -209,8 +209,10 @@ pub struct Deck {
     /// Aba Git (ver `git_ui.rs`).
     pub git: crate::git_ui::GitUi,
 
-    // Árvore
+    // Árvore e Projetos
     pub workspace: PathBuf,
+    pub projects: Vec<PathBuf>,
+    pub projects_expanded: bool,
     pub tree: TreeState,
 
     // Conversa integrada
@@ -286,6 +288,15 @@ impl Deck {
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut deck = Self {
             workspace: core.workspace(),
+            projects: {
+                let ws = core.workspace();
+                let mut p = cfg.projects.clone();
+                if !p.contains(&ws) {
+                    p.insert(0, ws);
+                }
+                p
+            },
+            projects_expanded: true,
             core,
             events,
             tx,
@@ -527,14 +538,7 @@ impl Deck {
             }
             UiMsg::Engine(label) => self.engine_label = label,
             UiMsg::WorkspacePicked(dir) => {
-                if let Err(e) = self.core.set_workspace(dir) {
-                    self.system(format!("Não foi possível trocar a pasta de trabalho: {e}"));
-                }
-                self.workspace = self.core.workspace();
-                self.refresh_tree();
-                self.git.diff = None;
-                self.git.view = crate::git_ui::GitView::Loading;
-                self.git_refresh();
+                self.add_project(dir);
             }
             UiMsg::TableDone => self.finish_table(),
             UiMsg::Git(reply) => self.on_git(reply),
@@ -1391,6 +1395,59 @@ impl Deck {
         self.spawn_bg("pick-workspace", move |_| {
             let dir = rfd::FileDialog::new().set_directory(&start).pick_folder()?;
             Some(UiMsg::WorkspacePicked(dir))
+        });
+    }
+
+    pub fn switch_workspace(&mut self, path: PathBuf) {
+        if path == self.workspace {
+            return;
+        }
+        if let Err(e) = self.core.set_workspace(path.clone()) {
+            self.system(format!("Não foi possível trocar a pasta de trabalho: {e}"));
+            return;
+        }
+        self.workspace = self.core.workspace();
+        if !self.projects.contains(&self.workspace) {
+            self.projects.push(self.workspace.clone());
+        }
+        self.persist_projects();
+        self.refresh_tree();
+        self.git.diff = None;
+        self.git.view = crate::git_ui::GitView::Loading;
+        self.git_refresh();
+        self.system(format!("Projeto ativo alterado para: {}", self.workspace.display()));
+    }
+
+    pub fn add_project(&mut self, path: PathBuf) {
+        let path = commanddeck_core::util::normalize_lexical(&path);
+        if !self.projects.contains(&path) {
+            self.projects.push(path.clone());
+            self.persist_projects();
+        }
+        self.switch_workspace(path);
+    }
+
+    pub fn remove_project(&mut self, idx: usize) {
+        if idx < self.projects.len() && self.projects.len() > 1 {
+            let removed = self.projects.remove(idx);
+            self.persist_projects();
+            if removed == self.workspace {
+                let next = self.projects.first().cloned().unwrap_or_else(|| self.core.paths().default_workspace.clone());
+                self.switch_workspace(next);
+            }
+        }
+    }
+
+    pub fn pick_project(&self) {
+        self.pick_workspace();
+    }
+
+    pub fn persist_projects(&mut self) {
+        let projects = self.projects.clone();
+        let ws = self.workspace.clone();
+        self.core.update_config(|c| {
+            c.projects = projects;
+            c.workspace = ws;
         });
     }
 

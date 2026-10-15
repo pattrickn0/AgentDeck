@@ -16,8 +16,100 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     painter.rect_filled(rect, 0.0, theme::BG);
     let ctx = ui.ctx().clone();
 
-    // ---------- Linha raiz (26px, negrito, borda inferior) ----------
-    let root = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROOT_H));
+    let mut top_y = rect.min.y;
+
+    // ---------- Seção PROJETOS ----------
+    let proj_head = Rect::from_min_size(Pos2::new(rect.min.x, top_y), Vec2::new(rect.width(), ROOT_H));
+    top_y = proj_head.max.y;
+    let proj_expanded = deck.projects_expanded;
+    let r_head = ui.interact(proj_head, Id::new("proj-head"), Sense::click());
+    if r_head.hovered() {
+        ctx.set_cursor_icon(CursorIcon::PointingHand);
+    }
+    painter.rect_filled(proj_head, 0.0, if r_head.hovered() { theme::PANEL_2 } else { theme::BG });
+    painter.rect_filled(Rect::from_min_max(Pos2::new(proj_head.min.x, proj_head.max.y - 1.0), proj_head.max), 0.0, theme::BORDER);
+
+    let chev_center = Pos2::new(proj_head.min.x + 6.0 + 7.0, proj_head.center().y - 0.5);
+    let t = ctx.animate_bool_with_time(Id::new("proj-chev"), proj_expanded, 0.12);
+    deck.icons.paint(&painter, Icon::TreeChevron, chev_center, 10.0, theme::TREE_ICON, t * std::f32::consts::FRAC_PI_2);
+
+    let title_x = proj_head.min.x + 6.0 + 14.0 + 5.0;
+    let title_g = galley_trunc(&painter, "PROJETOS", theme::ui_semibold(11.0), theme::MUTED, proj_head.width() - 50.0);
+    place(&painter, Rect::from_min_max(Pos2::new(title_x, proj_head.min.y), Pos2::new(proj_head.max.x - 30.0, proj_head.max.y - 1.0)), Align2::LEFT_CENTER, title_g, theme::MUTED);
+
+    // Botão "+" para adicionar projeto
+    let add_r = Rect::from_min_size(Pos2::new(proj_head.max.x - 24.0, proj_head.min.y + 3.0), Vec2::new(20.0, 20.0));
+    let add_resp = super::clickable(ui, add_r, Id::new("proj-add-btn"));
+    if add_resp.hovered() {
+        painter.rect_filled(add_r, 4.0, theme::BORDER);
+    }
+    text_in(&painter, add_r, Align2::CENTER_CENTER, "+", theme::ui(14.0), if add_resp.hovered() { theme::TEXT } else { theme::MUTED });
+    let mut add_clicked = false;
+    if tip(add_resp, "Adicionar projeto…").clicked() {
+        add_clicked = true;
+    }
+
+    if r_head.clicked() && !add_clicked {
+        deck.projects_expanded = !deck.projects_expanded;
+    }
+
+    let mut switch_to = None;
+    let mut remove_idx = None;
+    if deck.projects_expanded {
+        let projects = deck.projects.clone();
+        for (i, p) in projects.iter().enumerate() {
+            let row = Rect::from_min_size(Pos2::new(rect.min.x, top_y), Vec2::new(rect.width(), ROW_H));
+            top_y += ROW_H;
+            let is_active = *p == deck.workspace;
+            let row_resp = ui.interact(row, Id::new(("proj-row", i)), Sense::click());
+            let hovered = row_resp.hovered();
+            if is_active || hovered {
+                painter.rect_filled(row, 0.0, if is_active { theme::PANEL_2 } else { theme::BG });
+            }
+            if hovered {
+                ctx.set_cursor_icon(CursorIcon::PointingHand);
+            }
+            // Indicador de projeto ativo
+            let dot_color = if is_active { deck.active_color() } else { theme::MUTED };
+            super::dot(&painter, Pos2::new(row.min.x + 16.0, row.center().y), dot_color);
+
+            let pname = util::folder_name(&p.to_string_lossy());
+            let font = if is_active { theme::ui_semibold(12.5) } else { theme::ui(12.5) };
+            let color = if is_active { theme::TEXT } else { theme::MUTED };
+            let g = galley_trunc(&painter, &pname, font, color, row.width() - 48.0);
+            place(&painter, Rect::from_min_max(Pos2::new(row.min.x + 28.0, row.min.y), Pos2::new(row.max.x - 24.0, row.max.y)), Align2::LEFT_CENTER, g, color);
+
+            // Botão "×" para remover da lista (se mais de 1 projeto)
+            if projects.len() > 1 && hovered {
+                let del_r = Rect::from_min_size(Pos2::new(row.max.x - 20.0, row.min.y + 2.0), Vec2::new(16.0, 18.0));
+                let del_resp = ui.interact(del_r, Id::new(("proj-del", i)), Sense::click());
+                if del_resp.hovered() {
+                    painter.rect_filled(del_r, 3.0, theme::BORDER);
+                }
+                text_in(&painter, del_r, Align2::CENTER_CENTER, "×", theme::ui(12.0), theme::MUTED);
+                if tip(del_resp, "Remover projeto da lista").clicked() {
+                    remove_idx = Some(i);
+                }
+            }
+
+            if tip(row_resp, format!("{}\nClique para ativar este projeto", p.display())).clicked() {
+                switch_to = Some(p.clone());
+            }
+        }
+        painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, top_y - 1.0), Pos2::new(rect.max.x, top_y)), 0.0, theme::BORDER);
+    }
+
+    if add_clicked {
+        deck.pick_project();
+    }
+    if let Some(p) = switch_to {
+        deck.switch_workspace(p);
+    } else if let Some(i) = remove_idx {
+        deck.remove_project(i);
+    }
+
+    // ---------- Linha raiz do workspace ativo (26px, negrito, borda inferior) ----------
+    let root = Rect::from_min_size(Pos2::new(rect.min.x, top_y), Vec2::new(rect.width(), ROOT_H));
     let root_expanded = deck.tree.expanded.contains("");
     let r = ui.interact(root, Id::new("tree-root"), Sense::click());
     if r.hovered() {

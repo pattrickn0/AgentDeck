@@ -35,6 +35,8 @@ pub struct Config {
     pub ollama_host: String,
     /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
     pub auto_open_agent_tabs: bool,
+    /// Projetos / workspaces conhecidos pelo usuário.
+    pub projects: Vec<PathBuf>,
 }
 
 impl Default for Config {
@@ -56,13 +58,15 @@ impl Default for Config {
             window_height: 860.0,
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
             auto_open_agent_tabs: true,
+            projects: Vec::new(),
         }
     }
 }
 
 impl Config {
     pub fn default_for(paths: &AppPaths) -> Self {
-        Self { workspace: paths.default_workspace.clone(), ..Self::default() }
+        let ws = paths.default_workspace.clone();
+        Self { workspace: ws.clone(), projects: vec![ws], ..Self::default() }
     }
 
     /// Carrega a configuração como o `loadConfig` do Electron: usa `paths.config_file` ou,
@@ -114,6 +118,9 @@ impl Config {
         if !home.as_os_str().is_empty() && crate::util::same_path(&crate::util::absolutize(&self.workspace), &crate::util::absolutize(home))
         {
             self.workspace = paths.default_workspace.clone();
+        }
+        if !self.projects.contains(&self.workspace) {
+            self.projects.insert(0, self.workspace.clone());
         }
     }
 
