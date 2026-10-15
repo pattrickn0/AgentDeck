@@ -1,4 +1,4 @@
-//! `#topbar`: botão da barra lateral, "+", tela dividida, branch, pasta de trabalho e configurações.
+//! `#topbar`: botão da barra lateral, "+", tela dividida, pasta de trabalho e configurações.
 
 use egui::{Align2, Id, Pos2, Rect, Ui, Vec2};
 
@@ -54,13 +54,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     let ws_max = inner.width() * 0.30;
     let ws_w = (text_w(&painter, &ws_text, ws_font.clone()) + 28.0).min(ws_max);
     let ws_rect = Rect::from_min_max(Pos2::new(settings.min.x - ws_w, inner.min.y), Pos2::new(settings.min.x, inner.max.y));
-    // Chip da branch (antes da pasta), só quando a pasta é um repositório git.
-    let chip = deck.git.status().map(crate::git_ui::chip_text);
-    let chip_rect = chip.as_ref().map(|text| {
-        let w = (text_w(&painter, text, theme::ui(12.0)) + 34.0).min(160.0);
-        Rect::from_min_max(Pos2::new(ws_rect.min.x - w, inner.min.y + 6.0), Pos2::new(ws_rect.min.x - 2.0, inner.max.y - 6.0))
-    });
-    let right_edge = chip_rect.map_or(ws_rect.min.x, |r| r.min.x);
+    let right_edge = ws_rect.min.x;
 
     // ---------- #new-tab (+) (as abas ficam no cabeçalho de cada janela; ver `panes.rs`) ----------
     let plus_w = 38.0;
@@ -106,31 +100,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         }
     }
 
-    // ---------- Chip da branch ----------
-    if let (Some(text), Some(cr)) = (chip, chip_rect) {
-        let r = clickable(ui, cr, Id::new("git-chip"));
-        if r.hovered() {
-            painter.rect_filled(cr, 6.0, theme::PANEL_2);
-        }
-        let c = if r.hovered() { theme::TEXT } else { theme::MUTED };
-        deck.icons.paint(&painter, crate::icons::Icon::GitBranch, Pos2::new(cr.min.x + 13.0, cr.center().y), 13.0, c, 0.0);
-        let g = galley_trunc(&painter, &text, theme::ui(12.0), c, cr.width() - 30.0);
-        place(&painter, Rect::from_min_max(Pos2::new(cr.min.x + 24.0, cr.min.y), cr.max), Align2::LEFT_CENTER, g, c);
-        let detail = match deck.git.status() {
-            Some(st) => format!(
-                "Branch {}{}\n{} alteração(ões) · {} à frente · {} atrás\nClique para abrir o Git",
-                st.branch.as_deref().unwrap_or("(destacado)"),
-                st.upstream.as_deref().map(|u| format!(" → {u}")).unwrap_or_default(),
-                st.entries.len(),
-                st.ahead,
-                st.behind
-            ),
-            None => String::new(),
-        };
-        if tip(r, detail).clicked() {
-            deck.set_right_view(crate::deck::RightView::Git);
-        }
-    }
 
     // ---------- #workspace ----------
     let r = clickable(ui, ws_rect, Id::new("workspace"));

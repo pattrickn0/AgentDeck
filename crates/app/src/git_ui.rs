@@ -111,7 +111,7 @@ pub fn sections(st: &GitStatus) -> Vec<(Section, Vec<Row>)> {
     out
 }
 
-/// Texto do chip da branch na topbar: `main ↑1 ↓2 •3` (só o que não for zero).
+/// Texto resumido da branch e alterações: `main ↑1 ↓2 •3` (só o que não for zero).
 pub fn chip_text(st: &GitStatus) -> String {
     let mut t = st
         .branch

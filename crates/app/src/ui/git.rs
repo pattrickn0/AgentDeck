@@ -266,7 +266,13 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         Some(h) => format!("{} (destacado)", h.chars().take(7).collect::<String>()),
         None => "(sem commits)".into(),
     });
-    let g = galley_trunc(&painter, &format!("{name}  ▾"), theme::ui_semibold(12.5), theme::TEXT, branch_r.width() - 30.0);
+    let count = st.entries.len();
+    let label = if count > 0 {
+        format!("{name} · {count}  ▾")
+    } else {
+        format!("{name}  ▾")
+    };
+    let g = galley_trunc(&painter, &label, theme::ui_semibold(12.5), theme::TEXT, branch_r.width() - 30.0);
     place(
         &painter,
         Rect::from_min_max(Pos2::new(branch_r.min.x + 24.0, branch_r.min.y), branch_r.max),
@@ -275,8 +281,11 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         theme::TEXT,
     );
     let tip_text = match &st.upstream {
-        Some(u) => format!("Trocar ou criar branch\nAcompanha {u} · {} à frente, {} atrás", st.ahead, st.behind),
-        None => "Trocar ou criar branch\nSem upstream (ainda não publicada)".into(),
+        Some(u) => format!(
+            "Trocar ou criar branch\n{name} · {} alteração(ões)\nAcompanha {u} · {} à frente, {} atrás",
+            count, st.ahead, st.behind
+        ),
+        None => format!("Trocar ou criar branch\n{name} · {} alteração(ões)\nSem upstream (ainda não publicada)", count),
     };
     if tip(resp, tip_text).clicked() && !busy {
         acts.push(Act::BranchMenu);

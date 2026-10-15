@@ -44,9 +44,10 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) -> Rect
 }
 
 /// Uma aba do cabeçalho: ícone, dica (tooltip) e o número de não vistas.
-struct HeadTab {
+struct HeadTab<'a> {
+    id: &'static str,
     icon: Icon,
-    tip: &'static str,
+    tip: &'a str,
     badge: u32,
 }
 
@@ -54,8 +55,8 @@ struct HeadTab {
 const HEAD_TAB_W: f32 = 36.0;
 
 /// Pinta uma aba do cabeçalho. Devolve se foi clicada.
-fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: HeadTab, active: bool) -> bool {
-    let r = super::clickable(ui, rect, Id::new(("right-tab", tab.tip)));
+fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: HeadTab<'_>, active: bool) -> bool {
+    let r = super::clickable(ui, rect, Id::new(("right-tab", tab.id)));
     let hovered = r.hovered();
     if active || hovered {
         painter.rect_filled(rect.shrink2(Vec2::new(2.0, 6.0)), 6.0, if active { theme::PANEL_2 } else { theme::PANEL });
@@ -87,10 +88,16 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     // Borda inferior alinhada à da topbar.
     painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
     let view = deck.right_view;
+    let git_st = deck.git.status();
+    let git_badge = git_st.as_ref().map(|s| s.entries.len() as u32).unwrap_or(0);
+    let git_tip = match &git_st {
+        Some(st) => format!("Git · {}", crate::git_ui::chip_text(st)),
+        None => "Git".to_string(),
+    };
     let tabs = [
-        (RightView::Conversa, HeadTab { icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
-        (RightView::Mapa, HeadTab { icon: Icon::Diagram, tip: "Mapa de agentes", badge: 0 }),
-        (RightView::Git, HeadTab { icon: Icon::GitBranch, tip: "Git", badge: 0 }),
+        (RightView::Conversa, HeadTab { id: "conversa", icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
+        (RightView::Mapa, HeadTab { id: "mapa", icon: Icon::Diagram, tip: "Mapa de agentes", badge: 0 }),
+        (RightView::Git, HeadTab { id: "git", icon: Icon::GitBranch, tip: &git_tip, badge: git_badge }),
     ];
     let mut x = rect.min.x + 6.0;
     for (target, tab) in tabs {
