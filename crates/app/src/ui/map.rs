@@ -49,11 +49,15 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let mut clicked: Option<String> = None;
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(Align::Min)));
     child.set_clip_rect(area);
-    egui::ScrollArea::vertical().id_salt("agent-map").auto_shrink([false, false]).show(&mut child, |ui| {
+    egui::ScrollArea::both().id_salt("agent-map").auto_shrink([false, false]).show(&mut child, |ui| {
+        let max_line_chars = lines.iter().map(|l| l.spans.iter().map(|(t, _)| t.chars().count()).sum::<usize>()).max().unwrap_or(0);
+        let cell = ui.fonts_mut(|f| f.glyph_width(&theme::mono(FONT_SIZE), 'M')).max(1.0);
+        let content_w = ((max_line_chars as f32 * cell) + 2.0 * PAD_X).max(ui.available_width());
+
         ui.add_space(8.0);
         for line in &lines {
             let sense = if line.node.is_some() { Sense::click() } else { Sense::hover() };
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), LINE_H), sense);
+            let (r, resp) = ui.allocate_exact_size(Vec2::new(content_w, LINE_H), sense);
             if line.node.is_some() && resp.hovered() {
                 ui.painter().rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), 3.0, theme::PANEL_2);
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -72,7 +76,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         }
         ui.add_space(10.0);
         let legend = "● ocupado   ○ livre   × encerrado";
-        let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), LINE_H), Sense::hover());
+        let (r, _) = ui.allocate_exact_size(Vec2::new(content_w, LINE_H), Sense::hover());
         ui.painter().text(
             Pos2::new(r.min.x + PAD_X, r.center().y),
             egui::Align2::LEFT_CENTER,

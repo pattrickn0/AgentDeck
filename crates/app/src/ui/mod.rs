@@ -52,9 +52,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let center = Rect::from_min_max(Pos2::new(full.min.x + left, full.min.y), Pos2::new(full.max.x - right_w - 1.0, full.max.y));
     let topbar = Rect::from_min_size(center.min, Vec2::new(center.width(), theme::TOPBAR_H));
     let term_rect = Rect::from_min_max(Pos2::new(center.min.x, topbar.max.y), center.max);
-    // O Mapa e o diff do Git alargam a barra sobre o terminal (sem redimensioná-lo).
-    let map_open = deck.right_view == RightView::Mapa || (deck.right_view == RightView::Git && deck.git.diff.is_some());
-    let panel_w = if map_open { map_width(right_w, full.width(), left) } else { right_w };
+    // O diff do Git alarga a barra sobre o terminal (sem redimensioná-lo); o Mapa cabe na largura fixa da barra.
+    let diff_open = deck.right_view == RightView::Git && deck.git.diff.is_some();
+    let panel_w = if diff_open { map_width(right_w, full.width(), left) } else { right_w };
     let panel = Rect::from_min_max(Pos2::new(full.max.x - panel_w, full.min.y), full.max);
     // Na aba Git o compositor some: o commit tem a própria caixa de mensagem.
     let comp_h = if deck.right_view == RightView::Git { 0.0 } else { composer::measure(deck, ui, panel_w) };
@@ -75,19 +75,19 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     if !collapsed {
         sidebar::splitter(deck, ui, Rect::from_min_size(Pos2::new(full.min.x + sw, full.min.y), Vec2::new(1.0, full.height())), full);
     }
-    if !map_open {
+    if !diff_open {
         let line = Rect::from_min_size(Pos2::new(full.max.x - right_w - 1.0, full.min.y), Vec2::new(1.0, full.height()));
         right_panel::splitter(deck, ui, line, full, right_w, right_max);
     }
 
-    // ---------- Barra direita: numa camada acima, para o Mapa alargado cobrir o terminal sem que
+    // ---------- Barra direita: numa camada acima, para o diff alargado cobrir o terminal sem que
     // ele receba os cliques (o terminal só reage ao mouse quando está sob o ponteiro). ----------
     let composer_anchor = egui::Area::new(Id::new("right-panel"))
         .order(Order::Middle)
         .fixed_pos(panel.min)
         .show(&ctx, |ui| {
             let (rect, _) = ui.allocate_exact_size(panel.size(), Sense::hover());
-            if map_open && panel_w > right_w {
+            if diff_open && panel_w > right_w {
                 shadow(ui.painter(), rect, 0, 0, 18, theme::rgba(0, 0, 0, 0.55));
                 ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(1.0, rect.height())), 0.0, theme::BORDER);
             }
