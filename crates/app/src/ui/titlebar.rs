@@ -1,11 +1,10 @@
-//! Barra de título própria (a janela não tem decoração do sistema): menu ☰, nome, botão da
-//! barra lateral, "+", tela dividida, área de arrastar, uso dos agentes e minimizar/maximizar/fechar.
+//! Barra de título própria (a janela não tem decoração do sistema): menu ☰, botão da barra
+//! lateral, nome, "+", área de arrastar, uso dos agentes e minimizar/maximizar/fechar.
 
 use egui::{Align2, CursorIcon, Id, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand};
 
 use super::{clickable, galley, place, text_in, tip};
 use crate::deck::Deck;
-use crate::icons::Icon;
 use crate::theme;
 
 pub struct Anchors {
@@ -41,7 +40,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     let r = clickable(ui, menu, Id::new("settings-btn"));
     let hot = r.hovered() || deck.settings_open;
     if hot {
-        painter.rect_filled(menu, 0.0, theme::PANEL_2);
+        painter.rect_filled(menu.shrink2(Vec2::new(4.0, 6.0)), 6.0, theme::PANEL_2);
     }
     let c = if hot { theme::TEXT } else { theme::MUTED };
     for dy in [-4.0, 0.0, 4.0] {
@@ -53,39 +52,32 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         deck.new_tab_menu_open = false;
     }
 
+    // ---------- Barra lateral (recolher/expandir), colada ao ☰ ----------
+    let toggle = Rect::from_min_size(Pos2::new(menu.max.x, inner.min.y), Vec2::new(32.0, inner.height()));
+    let r = clickable(ui, toggle, Id::new("sidebar-toggle"));
+    let hovered = r.hovered();
+    if hovered {
+        painter.rect_filled(toggle.shrink2(Vec2::new(2.0, 6.0)), 6.0, theme::PANEL_2);
+    }
+    let expanded = 1.0 - ctx.animate_bool_with_time(Id::new("sidebar-toggle-anim"), deck.sidebar_collapsed, 0.15);
+    paint_sidebar_icon(&painter, toggle.center(), if hovered { theme::TEXT } else { theme::MUTED }, expanded);
+    let title = if deck.sidebar_collapsed { "Expandir barra lateral (Ctrl+B)" } else { "Recolher barra lateral (Ctrl+B)" };
+    if tip(r, title).clicked() {
+        deck.toggle_sidebar();
+    }
+
     // ---------- Nome ----------
     let title_r = text_in(
         &painter,
-        Rect::from_min_max(Pos2::new(menu.max.x + 4.0, inner.min.y), inner.max),
+        Rect::from_min_max(Pos2::new(toggle.max.x + 6.0, inner.min.y), inner.max),
         Align2::LEFT_CENTER,
         "CommandDeck",
         theme::ui_semibold(13.0),
         theme::TEXT,
     );
 
-    // ---------- Barra lateral (recolher/expandir) ----------
-    let toggle = Rect::from_min_size(Pos2::new(title_r.max.x + 14.0, inner.min.y), Vec2::new(30.0, inner.height()));
-    let r = clickable(ui, toggle, Id::new("sidebar-toggle"));
-    let hovered = r.hovered();
-    if hovered {
-        painter.rect_filled(toggle, 0.0, theme::PANEL_2);
-    }
-    let t = ctx.animate_bool_with_time(Id::new("sidebar-chevron"), deck.sidebar_collapsed, 0.15);
-    deck.icons.paint(
-        &painter,
-        Icon::SidebarChevron,
-        Pos2::new(toggle.center().x - 0.5, toggle.center().y),
-        9.0,
-        if hovered { theme::TEXT } else { theme::MUTED },
-        t * std::f32::consts::PI,
-    );
-    let title = if deck.sidebar_collapsed { "Expandir barra lateral (Ctrl+B)" } else { "Recolher barra lateral (Ctrl+B)" };
-    if tip(r, title).clicked() {
-        deck.toggle_sidebar();
-    }
-
     // ---------- Nova aba (+) (as abas ficam no cabeçalho de cada janela; ver `panes.rs`) ----------
-    let plus = Rect::from_min_size(Pos2::new(toggle.max.x, inner.min.y), Vec2::new(34.0, inner.height()));
+    let plus = Rect::from_min_size(Pos2::new(title_r.max.x + 12.0, inner.min.y), Vec2::new(34.0, inner.height()));
     let r = clickable(ui, plus, Id::new("new-tab"));
     let hot = r.hovered() || deck.new_tab_menu_open;
     if hot {
@@ -99,30 +91,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         if deck.new_tab_menu_open {
             deck.refresh_agents();
         }
-    }
-
-    // ---------- Tela dividida (liga/desliga) ----------
-    let split_btn = Rect::from_min_size(Pos2::new(plus.max.x, inner.min.y), Vec2::new(34.0, inner.height()));
-    let r = clickable(ui, split_btn, Id::new("split-toggle"));
-    let on = deck.split_enabled;
-    if r.hovered() {
-        painter.rect_filled(split_btn, 0.0, theme::PANEL_2);
-    }
-    let c = if on {
-        deck.active_color()
-    } else if r.hovered() {
-        theme::TEXT
-    } else {
-        theme::MUTED
-    };
-    deck.icons.paint(&painter, Icon::Split, split_btn.center(), 15.0, c, 0.0);
-    let title = if on {
-        "Tela dividida: ligada\nCada tipo de agente numa janela · clique para ver uma aba por vez"
-    } else {
-        "Tela dividida: desligada\nClique para abrir uma janela por tipo de agente"
-    };
-    if tip(r, title).clicked() {
-        deck.toggle_split();
     }
 
     // ---------- Botões da janela ----------
@@ -141,7 +109,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     }
 
     // ---------- Uso dos agentes (à esquerda dos botões da janela) ----------
-    let usage = Rect::from_min_max(Pos2::new(split_btn.max.x + 12.0, inner.min.y), Pos2::new(min_btn.min.x - 10.0, inner.max.y));
+    let usage = Rect::from_min_max(Pos2::new(plus.max.x + 12.0, inner.min.y), Pos2::new(min_btn.min.x - 10.0, inner.max.y));
     if usage.width() > 0.0 {
         super::usage::draw(deck, ui, usage);
     }
@@ -151,6 +119,20 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     }
 
     Anchors { new_tab_anchor: plus, settings_anchor: menu }
+}
+
+/// Ícone "painel lateral": janela arredondada com a coluna da esquerda, preenchida conforme a
+/// barra está aberta (`expanded` de 0 a 1, animado).
+fn paint_sidebar_icon(painter: &egui::Painter, center: Pos2, color: egui::Color32, expanded: f32) {
+    let frame = Rect::from_center_size(center, Vec2::new(16.0, 13.0));
+    let col = Rect::from_min_max(frame.min, Pos2::new(frame.min.x + 5.5, frame.max.y));
+    if expanded > 0.0 {
+        let fill = col.shrink(1.5);
+        let fill = Rect::from_min_max(fill.min, Pos2::new(fill.min.x + fill.width() * expanded, fill.max.y));
+        painter.rect_filled(fill, 1.0, theme::with_opacity(color, 0.85));
+    }
+    painter.rect_stroke(frame, 3.0, Stroke::new(1.2, color), egui::StrokeKind::Inside);
+    painter.line_segment([Pos2::new(col.max.x, frame.min.y + 1.0), Pos2::new(col.max.x, frame.max.y - 1.0)], Stroke::new(1.2, color));
 }
 
 #[derive(Clone, Copy)]

@@ -9,8 +9,6 @@ use egui::{Color32, Mesh, Pos2, Rect, TextureHandle, TextureOptions, Vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
-    /// `#sidebar-toggle-icon` (viewBox 16).
-    SidebarChevron,
     /// Ícone do estado vazio (viewBox 24).
     TerminalBox,
     /// `#mic-cancel` (viewBox 24).
@@ -43,7 +41,7 @@ pub enum Icon {
     ArrowUp,
     /// Git: descartar alterações. Material Icons `undo` (Apache-2.0, viewBox 24).
     Undo,
-    /// Topbar: liga/desliga a tela dividida. Material Icons `space_dashboard` (Apache-2.0, viewBox 24).
+    /// Barra lateral (ORGANIZAÇÃO): liga/desliga a tela dividida. Material Icons `space_dashboard` (Apache-2.0, viewBox 24).
     Split,
     /// Logo do Claude: o "spark", o asterisco laranja (viewBox 24).
     ClaudeLogo,
@@ -58,7 +56,6 @@ pub enum Icon {
 impl Icon {
     fn path(self) -> (&'static str, f32) {
         match self {
-            Icon::SidebarChevron => ("M10.354 3.646a.5.5 0 0 1 0 .708L6.707 8l3.647 3.646a.5.5 0 0 1-.708.708l-4-4a.5.5 0 0 1 0-.708l4-4a.5.5 0 0 1 .708 0z", 16.0),
             Icon::TerminalBox => ("M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10zm-2-1h-4v-2h4v2zm-6.29-2.71a.996.996 0 0 0 0-1.41L9.42 11.6l2.3-2.3a.996.996 0 1 0-1.41-1.41L7.59 10.6c-.39.39-.39 1.02 0 1.41l2.71 2.71c.39.39 1.02.39 1.41-.01z", 24.0),
             Icon::Close => ("M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z", 24.0),
             Icon::Mic => ("M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z", 24.0),
@@ -502,7 +499,6 @@ mod tests {
     #[test]
     fn every_icon_rasterizes() {
         for icon in [
-            Icon::SidebarChevron,
             Icon::TerminalBox,
             Icon::Close,
             Icon::Mic,

@@ -9,6 +9,8 @@ use crate::theme;
 use crate::util;
 
 const ROW_H: f32 = 22.0;
+/// Altura do título de cada seção (ORGANIZAÇÃO, EXPLORADOR).
+const SECTION_H: f32 = 24.0;
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
@@ -231,20 +233,59 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         }
     }
 
-    // ---------- Seção EXPLORADOR com ações rápidas ----------
-    let head_h = 24.0;
-    let head_rect = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 6.0), Vec2::new(rect.width(), head_h));
-    top_y = head_rect.max.y;
-
-    let title_x = head_rect.min.x + 12.0;
-    let title_g = galley_trunc(&painter, "EXPLORADOR", theme::ui_semibold(11.0), theme::MUTED, head_rect.width() - 60.0);
+    // ---------- Seção ORGANIZAÇÃO (como as janelas se arrumam) ----------
+    let org_head = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 6.0), Vec2::new(rect.width(), SECTION_H));
+    section_title(&painter, org_head, "ORGANIZAÇÃO");
+    let split_row = Rect::from_min_size(Pos2::new(rect.min.x, org_head.max.y), Vec2::new(rect.width(), ROW_H + 4.0));
+    let split_resp = ui.interact(split_row, Id::new("org-split"), Sense::click());
+    let split_hov = split_resp.hovered() && !dragging;
+    if split_hov {
+        painter.rect_filled(split_row, 0.0, theme::PANEL_2);
+        ctx.set_cursor_icon(CursorIcon::PointingHand);
+    }
+    let on = deck.split_enabled;
+    let label_color = if split_hov { theme::WHITE } else { theme::TREE_TEXT };
+    deck.icons.paint(
+        &painter,
+        Icon::Split,
+        Pos2::new(split_row.min.x + 19.0, split_row.center().y),
+        14.0,
+        if on { deck.active_color() } else { theme::TREE_ICON },
+        0.0,
+    );
+    let switch_r = Rect::from_center_size(Pos2::new(split_row.max.x - 12.0 - 13.0, split_row.center().y), Vec2::new(26.0, 14.0));
+    let label_g =
+        galley_trunc(&painter, "Tela dividida", theme::ui(13.0), label_color, (switch_r.min.x - 8.0 - (split_row.min.x + 32.0)).max(1.0));
     place(
         &painter,
-        Rect::from_min_max(Pos2::new(title_x, head_rect.min.y), Pos2::new(head_rect.max.x - 52.0, head_rect.max.y)),
+        Rect::from_min_max(Pos2::new(split_row.min.x + 32.0, split_row.min.y), Pos2::new(switch_r.min.x - 8.0, split_row.max.y)),
         Align2::LEFT_CENTER,
-        title_g,
-        theme::MUTED,
+        label_g,
+        label_color,
     );
+    let t = ctx.animate_bool_with_time(Id::new("org-split-anim"), on, 0.12);
+    paint_switch(&painter, switch_r, t, deck.active_color());
+    let tip_text = if on {
+        "Tela dividida: ligada
+Cada tipo de agente numa janela · clique para ver uma aba por vez"
+    } else {
+        "Tela dividida: desligada
+Clique para abrir uma janela por tipo de agente"
+    };
+    if tip(split_resp, tip_text).clicked() {
+        deck.toggle_split();
+    }
+    top_y = split_row.max.y + 6.0;
+    painter.rect_filled(
+        Rect::from_min_max(Pos2::new(rect.min.x + 8.0, top_y), Pos2::new(rect.max.x - 8.0, top_y + 1.0)),
+        0.0,
+        theme::BORDER,
+    );
+
+    // ---------- Seção EXPLORADOR com ações rápidas ----------
+    let head_rect = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 6.0), Vec2::new(rect.width(), SECTION_H));
+    top_y = head_rect.max.y;
+    section_title(&painter, head_rect, "EXPLORADOR");
 
     // Botão Atualizar (Icon::Refresh)
     let refresh_r = Rect::from_min_size(Pos2::new(head_rect.max.x - 24.0, head_rect.min.y + 2.0), Vec2::new(20.0, 20.0));
@@ -324,6 +365,27 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     } else if let Some(f) = clicked_file {
         deck.tree_file_click(&f);
     }
+}
+
+/// Título de seção da barra lateral (MAIÚSCULAS, 11 px, MUTED).
+fn section_title(painter: &egui::Painter, head: Rect, title: &str) {
+    let g = galley_trunc(painter, title, theme::ui_semibold(11.0), theme::MUTED, head.width() - 60.0);
+    place(
+        painter,
+        Rect::from_min_max(Pos2::new(head.min.x + 12.0, head.min.y), Pos2::new(head.max.x - 52.0, head.max.y)),
+        Align2::LEFT_CENTER,
+        g,
+        theme::MUTED,
+    );
+}
+
+/// Chave liga/desliga (`t` de 0 a 1, animado): trilho na cor do agente ativo quando ligada.
+fn paint_switch(painter: &egui::Painter, r: Rect, t: f32, on_color: Color32) {
+    let track = theme::BORDER.lerp_to_gamma(on_color, t);
+    painter.rect_filled(r, r.height() / 2.0, track);
+    let knob_r = r.height() / 2.0 - 2.0;
+    let x = egui::lerp((r.min.x + 2.0 + knob_r)..=(r.max.x - 2.0 - knob_r), t);
+    painter.circle_filled(Pos2::new(x, r.center().y), knob_r, theme::MUTED.lerp_to_gamma(theme::WHITE, t));
 }
 
 /// Desenha o ícone de "Recolher todas as pastas" do VS Code no painter: um quadrado com "−"

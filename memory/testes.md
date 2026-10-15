@@ -163,7 +163,7 @@ Com a pasta de trabalho num repositório git:
 
 ## 13. Barra de título, uso dos agentes e barra lateral ★
 
-- [ ] A janela não tem mais a barra do Windows: no topo, ☰, "CommandDeck" (sem logo), ‹, + e tela dividida; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
+- [ ] A janela não tem mais a barra do Windows: no topo, ☰, o botão de painel (recolhe/expande a barra lateral), "CommandDeck" (sem logo) e +; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
 - [ ] Arrastar pela barra move a janela; duplo clique maximiza/restaura; arrastar até a borda da tela encaixa (snap); Win+setas funcionam.
 - [ ] Redimensionar pelas 4 bordas e pelos 4 cantos (o cursor muda); maximizada, as bordas não reagem e a janela não cobre a barra de tarefas.
 - [ ] Fechar pelo × salva o tamanho da janela, como antes.
@@ -174,3 +174,4 @@ Com a pasta de trabalho num repositório git:
 - [ ] Demonstração: `COMMANDDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
 - [ ] Barra lateral: o seletor no topo mostra o nome e o caminho do workspace; o clique abre a lista de projetos (× remove, "Abrir pasta…" adiciona e ativa); Esc ou clique fora fecha.
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
+- [ ] Seção **ORGANIZAÇÃO** na barra lateral: a chave "Tela dividida" liga/desliga a divisão (a chave anima e fica na cor do agente ativo).

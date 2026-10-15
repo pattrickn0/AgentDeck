@@ -90,8 +90,8 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 
 | Área | O que tem |
 | :-- | :-- |
-| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), "CommandDeck", recolher a barra esquerda, "+" (nova aba), tela dividida; à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
-| Barra esquerda | seletor de workspace no topo (lista de projetos, "Abrir pasta…") e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
+| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
+| Barra esquerda | seletor de workspace no topo (lista de projetos, "Abrir pasta…"), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, três abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama) e **Git** (branch). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some na aba Git |
 

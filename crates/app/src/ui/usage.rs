@@ -14,10 +14,10 @@ pub const AMBER: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
 pub const LOGO_SIZE: f32 = 14.0;
 /// Espaçamento entre o logo e o círculo de uso.
 pub const LOGO_GAP: f32 = 6.0;
-/// Raio do círculo interno (sessão de uso). Diâmetro ≈ 16 px.
-pub const CIRCLE_R: f32 = 8.0;
-/// Distância do anel externo em relação ao círculo (2 px fora).
-pub const RING_OFFSET: f32 = 2.0;
+/// Raio do círculo interno (sessão de uso). Diâmetro ≈ 13,6 px.
+pub const CIRCLE_R: f32 = 6.8;
+/// Distância do anel externo em relação ao círculo (1,7 px fora).
+pub const RING_OFFSET: f32 = 1.7;
 /// Raio do anel externo (semana).
 pub const RING_R: f32 = CIRCLE_R + RING_OFFSET;
 /// Diâmetro da área do anel externo.
