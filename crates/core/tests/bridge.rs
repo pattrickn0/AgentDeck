@@ -42,7 +42,7 @@ fn start(fake_agents: &[(&str, &str)]) -> Env {
         home_dir: Some(root.join("home")),
         ollama_discovery: false,
         watch_workspace: false,
-        config: Some(Config::default_for(&paths)),
+        config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,
     };
     let (core, rx) = Core::start_with(paths, opts).expect("start");
@@ -61,10 +61,15 @@ fn paths_in(root: &Path) -> AppPaths {
     }
 }
 
-/// Token que a aba da instância `id` recebe no ambiente.
+/// Token que a aba da instância `id` do projeto ativo recebe no ambiente.
 fn tab_token(env: &Env, id: &str) -> String {
+    tab_token_in(env, &env.core.active_project_id(), id)
+}
+
+/// Token que a aba da instância `id` do projeto `project` recebe no ambiente.
+fn tab_token_in(env: &Env, project: &str, id: &str) -> String {
     let ident = commanddeck_core::Ident::parse(id).expect("id");
-    env.core.spawn_spec_for(&ident).expect("spec").env["COMMANDDECK_TOKEN"].clone()
+    env.core.spawn_spec_for(project, &ident).expect("spec").env["COMMANDDECK_TOKEN"].clone()
 }
 
 #[cfg(unix)]
@@ -95,7 +100,6 @@ fn http(port: u16, method: &str, path: &str, host: &str, token: &str, body: &str
 }
 
 /// Chamada à ponte que pode ir para outra thread (só porta e token).
-#[cfg(unix)]
 fn ask_raw(port: u16, token: &str, body: Value) -> (u16, Value) {
     http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), token, &body.to_string())
 }
@@ -149,13 +153,14 @@ fn auth_and_validation() {
 #[test]
 fn workspace_agents_md_and_spawn_specs() {
     let env = start(&[("claude", "echo ok")]);
+    let p = env.core.active_project_id();
     let ws = env.core.workspace();
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md criado no workspace do app");
     assert!(md.starts_with("<!-- commanddeck:start -->\nVocê está rodando dentro do CommandDeck Terminal"));
     assert!(md.contains("Seu nome aqui está na variável de ambiente COMMANDDECK_AGENT"));
 
-    let shell = env.core.spawn_spec("shell").expect("shell");
+    let shell = env.core.spawn_spec(&p, "shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
     assert_eq!(shell.cwd, ws);
     assert_eq!(shell.env["COMMANDDECK_AGENT"], "shell");
@@ -164,18 +169,29 @@ fn workspace_agents_md_and_spawn_specs() {
     let token = shell.env["COMMANDDECK_TOKEN"].clone();
     assert_ne!(token, env.core.bridge_token());
     assert_eq!(token.len(), 32);
-    assert_eq!(env.core.spawn_spec("shell").expect("de novo").env["COMMANDDECK_TOKEN"], token);
+    assert_eq!(env.core.spawn_spec(&p, "shell").expect("de novo").env["COMMANDDECK_TOKEN"], token);
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
-    assert_eq!(env.core.spawn_spec("nada").expect_err("desconhecido"), "Agente desconhecido: nada");
-    let missing = env.core.spawn_spec("antigravity").expect_err("não instalado");
+    assert_eq!(env.core.spawn_spec(&p, "nada").expect_err("desconhecido"), "Agente desconhecido: nada");
+    let missing = env.core.spawn_spec(&p, "antigravity").expect_err("não instalado");
     assert!(missing.starts_with("Antigravity CLI (agy) não encontrado."));
-    assert!(env.core.spawn_spec("ollama").expect_err("sem ollama").starts_with("Ollama CLI não encontrado."));
+    assert!(env.core.spawn_spec(&p, "ollama").expect_err("sem ollama").starts_with("Ollama CLI não encontrado."));
+    assert_eq!(env.core.spawn_spec("pdeadbeef", "shell").expect_err("sem projeto"), "Projeto desconhecido: pdeadbeef");
+
+    // Outro projeto (não ativo): o terminal abre na pasta dele, que ganha o AGENTS.md na primeira aba.
+    let other_dir = env.root.join("outro");
+    let other = env.core.create_project(&other_dir, None);
+    assert_eq!(env.core.active_project_id(), p, "criar um projeto não troca o ativo");
+    let spec = env.core.spawn_spec(&other.id, "shell").expect("shell");
+    assert_eq!(spec.cwd, other_dir);
+    assert_ne!(spec.env["COMMANDDECK_TOKEN"], token, "o shell de cada projeto tem o próprio token");
+    assert!(std::fs::read_to_string(other_dir.join("AGENTS.md")).expect("AGENTS.md do outro projeto").contains("COMMANDDECK_AGENT"));
+    assert_eq!(env.core.workspace(), ws);
 
     #[cfg(unix)]
     {
-        let claude = env.core.spawn_spec("claude").expect("claude");
+        let claude = env.core.spawn_spec(&p, "claude").expect("claude");
         assert_eq!(claude.program, env.root.join("fake-bin").join("claude"));
         assert_eq!(claude.args[0], "--append-system-prompt");
         assert!(claude.args[1].contains("Seu nome aqui é \"claude\"."));
@@ -242,6 +258,8 @@ fn ask_runs_headless_with_sessions() {
     assert_eq!((feed[0].from.as_deref(), feed[0].to.as_deref(), feed[0].text.as_str()), (Some("shell"), Some("claude"), "Qual a capital?"));
     assert_eq!(feed[1].kind, FeedKind::Answer);
     assert_eq!((feed[1].from.as_deref(), feed[1].to.as_deref()), (Some("claude"), Some("shell")));
+    let project = env.core.active_project_id();
+    assert!(feed.iter().all(|f| f.project.as_deref() == Some(project.as_str())), "a conversa é do projeto de quem perguntou");
     env.core.shutdown();
 }
 
@@ -301,12 +319,14 @@ fn attachments_and_config_persistence() {
 #[test]
 fn spawn_spec_for_an_instance_carries_its_identity() {
     let env = start(&[]);
+    let p = env.core.active_project_id();
     let ident = commanddeck_core::Ident::parse("shell@qa@ana").expect("id");
-    let spec = env.core.spawn_spec_for(&ident).expect("shell sempre existe");
+    let spec = env.core.spawn_spec_for(&p, &ident).expect("shell sempre existe");
     assert_eq!(spec.kind, "shell");
     assert_eq!(spec.env["COMMANDDECK_AGENT"], "shell@qa@ana");
+    assert_eq!(spec.cwd, env.root.join("workspace"));
     // `shell@main@ana` não tem cargo: sem COMMANDDECK_ROLE.
-    let main = env.core.spawn_spec_for(&commanddeck_core::Ident::parse("shell@main@bia").expect("id")).expect("spec");
+    let main = env.core.spawn_spec_for(&p, &commanddeck_core::Ident::parse("shell@main@bia").expect("id")).expect("spec");
     assert_eq!(main.env["COMMANDDECK_AGENT"], "shell@main@bia");
     assert!(!main.env.contains_key("COMMANDDECK_ROLE"));
     env.core.shutdown();
@@ -315,18 +335,178 @@ fn spawn_spec_for_an_instance_carries_its_identity() {
 #[test]
 fn instances_are_registered_named_and_forgotten() {
     let env = start(&[]);
-    assert_eq!(env.core.register_instance("claude").id(), "claude");
-    assert_eq!(env.core.register_instance("claude").id(), "claude@main@ana");
-    assert_eq!(env.core.restore_instance("claude@dev").map(|i| i.id()).as_deref(), Some("claude@dev"));
-    assert!(env.core.restore_instance("claude@Dev!").is_none());
-    assert_eq!(env.core.instance_ids(), vec!["claude", "claude@main@ana", "claude@dev"]);
-    env.core.close_instance("claude@main@ana");
-    assert_eq!(env.core.register_instance("claude").id(), "claude@main@ana", "o nome é reaproveitado");
+    let p = env.core.active_project_id();
+    assert_eq!(env.core.register_instance(&p, "claude").id(), "claude");
+    assert_eq!(env.core.register_instance(&p, "claude").id(), "claude@main@ana");
+    assert_eq!(env.core.restore_instance(&p, "claude@dev").map(|i| i.id()).as_deref(), Some("claude@dev"));
+    assert!(env.core.restore_instance(&p, "claude@Dev!").is_none());
+    assert_eq!(env.core.project_instance_ids(&p), vec!["claude", "claude@main@ana", "claude@dev"]);
+    assert_eq!(env.core.conversation_map(&p).instances, vec!["claude", "claude@main@ana", "claude@dev"]);
+    env.core.close_instance(&p, "claude@main@ana");
+    assert_eq!(env.core.register_instance(&p, "claude").id(), "claude@main@ana", "o nome é reaproveitado");
+    env.core.shutdown();
+}
+
+#[test]
+fn two_projects_each_have_their_own_claude() {
+    let env = start(&[]);
+    fake_claude(&env);
+    let a = env.core.active_project_id();
+    let b = env.core.create_project(&env.root.join("b"), Some("Projeto B")).id;
+    assert_ne!(a, b);
+    assert_eq!(env.core.create_project(&env.root.join("b"), None).id, b, "a mesma pasta é o mesmo projeto");
+    // Cada projeto tem o seu `claude`, sem nome extra.
+    assert_eq!(env.core.register_instance(&a, "claude").id(), "claude");
+    assert_eq!(env.core.register_instance(&b, "claude").id(), "claude");
+    env.core.restore_instance(&a, "claude@qa");
+    let (ta, tb) = (tab_token_in(&env, &a, "claude"), tab_token_in(&env, &b, "claude"));
+    assert_ne!(ta, tb, "um token por projeto");
+    assert_eq!(tab_token_in(&env, &b, "claude"), tb, "estável enquanto a instância existir");
+    // `instance_ids` junta todos os projetos, sem repetir (o uso só olha o modelo).
+    assert_eq!(env.core.instance_ids(), ["claude", "claude@qa"]);
+    assert!(env.core.peers(&a).contains(&"claude@qa".to_owned()));
+    assert!(!env.core.peers(&b).contains(&"claude@qa".to_owned()), "B não vê as instâncias de A");
+
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    // /agents e /signal no projeto do token.
+    let agents = |token: &str| http(port, "GET", "/agents", &host, token, "").1["agents"].clone();
+    assert!(agents(&ta).as_array().expect("lista").contains(&json!("claude@qa")));
+    assert!(!agents(&tb).as_array().expect("lista").contains(&json!("claude@qa")));
+    let _ = env.rx.try_iter().count();
+    assert_eq!(http(port, "POST", "/signal", &host, &tb, &json!({"state": "busy"}).to_string()).0, 200);
+    let signals: Vec<(String, String)> = env
+        .rx
+        .try_iter()
+        .filter_map(|e| match e {
+            CoreEvent::AgentSignal { project, id, .. } => Some((project, id)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(signals, [(b.clone(), "claude".to_owned())]);
+
+    // Fechar o claude de A não mexe no de B.
+    env.core.close_instance(&a, "claude");
+    assert_eq!(http(port, "GET", "/agents", &host, &ta, "").0, 403);
+    assert_eq!(http(port, "GET", "/agents", &host, &tb, "").0, 200);
+    assert_eq!(env.core.project_instance_ids(&b), ["claude"]);
+    env.core.shutdown();
+}
+
+#[test]
+fn a_role_asked_in_one_project_opens_there_and_cycles_do_not_cross_projects() {
+    let env = start(&[]);
+    fake_claude(&env);
+    env.core.enable_tab_delivery();
+    let a = env.core.active_project_id();
+    let b = env.core.create_project(&env.root.join("b"), None).id;
+    env.core.register_instance(&a, "claude"); // a aba principal do Claude em A
+    let port = env.core.bridge_port();
+    let ask_as = |token: String, to: &'static str| std::thread::spawn(move || ask_raw(port, &token, json!({"to": to, "message": "oi"})));
+
+    // A: claude → claude@dev (cria claude@dev em A) → claude@qa.
+    let first = ask_as(tab_token_in(&env, &a, "claude"), "claude@dev");
+    let d = next_delivery(&env);
+    assert_eq!((d.project.as_str(), d.ident.id().as_str(), d.create, d.from.as_str()), (a.as_str(), "claude@dev", true, "claude"));
+    assert!(env.core.project_instance_ids(&a).contains(&"claude@dev".to_owned()));
+    assert!(!env.core.project_instance_ids(&b).contains(&"claude@dev".to_owned()), "B não vê o claude@dev de A");
+    assert!(!env.core.peers(&b).contains(&"claude@dev".to_owned()));
+    let map_a = env.core.conversation_map(&a);
+    assert_eq!(
+        map_a.pending.iter().map(|p| (p.project.as_str(), p.asker.as_str(), p.target.as_str())).collect::<Vec<_>>(),
+        [(a.as_str(), "claude", "claude@dev")]
+    );
+    assert!(env.core.conversation_map(&b).pending.is_empty(), "o mapa de B não mostra as perguntas de A");
+    let second = ask_as(tab_token_in(&env, &a, "claude@dev"), "claude@qa");
+    assert_eq!(next_delivery(&env).ident.id(), "claude@qa");
+
+    // O claude@dev de B não responde no lugar do de A.
+    let host = format!("127.0.0.1:{port}");
+    let forged = json!({"to": "", "message": "x", "reply_to": d.request}).to_string();
+    assert_eq!(http(port, "POST", "/ask", &host, &tab_token_in(&env, &b, "claude@dev"), &forged).0, 404);
+
+    // Em A, claude@qa perguntar a claude fecharia o ciclo (409)…
+    let (st, body) = ask_raw(port, &tab_token_in(&env, &a, "claude@qa"), json!({"to": "claude", "message": "oi"}));
+    assert_eq!(st, 409, "{body}");
+    assert_eq!(body["error"], "\"claude\" já está esperando uma resposta de \"claude@qa\" (ciclo de espera)");
+    // …e perguntar a outro já passa da profundidade máxima.
+    let (st, body) = ask_raw(port, &tab_token_in(&env, &a, "claude@qa"), json!({"to": "claude@x", "message": "oi"}));
+    assert_eq!((st, body), (400, json!({"error": "profundidade máxima de conversa entre agentes atingida"})));
+    // Em B, a mesma pergunta não é ciclo nem está fundo: vai para o claude de B (criado lá).
+    let third = ask_as(tab_token_in(&env, &b, "claude@qa"), "claude");
+    let d = next_delivery(&env);
+    assert_eq!((d.project.as_str(), d.ident.id().as_str(), d.create), (b.as_str(), "claude", true));
+
+    env.core.shutdown();
+    for t in [first, second, third] {
+        let _ = t.join();
+    }
+}
+
+#[test]
+fn the_master_token_picks_the_project_from_the_body() {
+    let env = start(&[]);
+    fake_claude(&env);
+    env.core.enable_tab_delivery();
+    let b = env.core.create_project(&env.root.join("b"), None).id;
+    let port = env.core.bridge_port();
+    let master = env.core.bridge_token().to_owned();
+    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "oi", "project": "pdeadbeef"}));
+    assert_eq!((st, body), (400, json!({"error": "projeto desconhecido: \"pdeadbeef\""})));
+    let asking = std::thread::spawn({
+        let b = b.clone();
+        move || ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "oi", "project": b}))
+    });
+    let d = next_delivery(&env);
+    assert_eq!((d.project.as_str(), d.ident.id().as_str()), (b.as_str(), "claude"));
+    env.core.fail_delivery(d.request, "teste");
+    assert_eq!(asking.join().expect("thread").0, 500);
+    env.core.shutdown();
+}
+
+#[test]
+fn removing_a_project_closes_its_instances() {
+    let env = start(&[]);
+    let a = env.core.active_project_id();
+    let b = env.core.create_project(&env.root.join("b"), None).id;
+    let tb = tab_token_in(&env, &b, "shell");
+    env.core.restore_instance(&b, "shell");
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    assert!(env.core.rename_project(&b, "Novo nome"));
+    assert!(!env.core.rename_project(&b, "  "));
+    assert_eq!(env.core.projects().iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["workspace", "Novo nome"]);
+    assert!(env.core.update_project(&b, |p| {
+        p.open_tabs = vec!["shell".into()];
+        p.id = "outro".into();
+    }));
+    assert_eq!(env.core.projects()[1].open_tabs, ["shell"]);
+    assert_eq!(env.core.projects()[1].id, b, "o id não muda");
+
+    assert!(env.core.remove_project(&b));
+    assert!(!env.core.remove_project(&b));
+    assert_eq!(http(port, "GET", "/agents", &host, &tb, "").0, 403, "o token das abas do projeto removido morre");
+    assert!(env.core.project_instance_ids(&b).is_empty());
+    assert_eq!(env.core.active_project_id(), a);
+    assert!(env.root.join("b").is_dir(), "a pasta não é apagada");
+
+    // Sem o ativo, sobra nenhum: workspace vazio.
+    assert!(env.core.remove_project(&a));
+    assert!(env.core.active_project().is_none());
+    assert_eq!(env.core.workspace(), std::path::PathBuf::new());
+    assert!(env.core.read_dir("").is_empty());
+    // Criar um projeto sem nenhum ativo o ativa.
+    let c = env.core.create_project(&env.root.join("c"), None);
+    assert_eq!(env.core.active_project_id(), c.id);
+    assert_eq!(env.core.workspace(), env.root.join("c"));
+    // set_workspace é um atalho: cria o projeto da pasta e o ativa.
+    env.core.set_workspace(env.root.join("d")).expect("set_workspace");
+    assert_eq!(env.core.active_project().expect("ativo").path, env.root.join("d"));
+    assert_eq!(env.core.projects().len(), 2);
     env.core.shutdown();
 }
 
 /// Próxima entrega pedida à interface (ignora os outros eventos).
-#[cfg(unix)]
 fn next_delivery(env: &Env) -> commanddeck_core::Delivery {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -369,6 +549,7 @@ fn a_question_is_typed_into_the_tab_and_answered_by_callback() {
 #[test]
 fn a_role_opens_a_new_instance_and_new_forces_another() {
     let env = start(&[("claude", "echo headless")]);
+    let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
     let spawn_ask = |to: &'static str, new: bool| {
@@ -387,8 +568,8 @@ fn a_role_opens_a_new_instance_and_new_forces_another() {
     assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev@ana", true), "--new: outra instância, com nome");
 
     // Quando as abas fecham, quem esperava recebe o erro (e nenhuma thread fica presa).
-    env.core.close_instance("claude@dev");
-    env.core.close_instance("claude@dev@ana");
+    env.core.close_instance(&p, "claude@dev");
+    env.core.close_instance(&p, "claude@dev@ana");
     for t in [first, second, third] {
         let (st, b) = t.join().expect("thread");
         assert_eq!(st, 500);
@@ -415,8 +596,9 @@ fn a_failed_delivery_unblocks_the_asker() {
 #[test]
 fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
     let env = start(&[("claude", "echo x"), ("agy", "echo x")]);
+    let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
-    env.core.register_instance("claude"); // a aba principal do Claude
+    env.core.register_instance(&p, "claude"); // a aba principal do Claude
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
     let call = |from: &'static str, to: &'static str| {
         let token = token.clone();
@@ -434,8 +616,8 @@ fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
 
     // Alvo desconhecido e instância ambígua.
     assert_eq!(ask_raw(port, &token, json!({"from": "shell", "to": "bogus", "message": "oi"})).0, 400);
-    env.core.restore_instance("claude@qa@ana");
-    env.core.restore_instance("claude@qa@bia");
+    env.core.restore_instance(&p, "claude@qa@ana");
+    env.core.restore_instance(&p, "claude@qa@bia");
     let (st, body) = ask_raw(port, &token, json!({"from": "shell", "to": "claude@qa", "message": "oi"}));
     assert_eq!(st, 400);
     assert!(body["error"].as_str().expect("erro").contains("ambíguo"), "{body}");
@@ -492,6 +674,7 @@ fn reply_route_only_completes_pending_questions() {
 #[test]
 fn the_token_names_the_caller_and_the_body_cannot_forge_it() {
     let env = start(&[]);
+    let p = env.core.active_project_id();
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
     let qa = tab_token(&env, "shell@qa");
@@ -514,7 +697,7 @@ fn the_token_names_the_caller_and_the_body_cannot_forge_it() {
     assert_eq!(st, 400);
     assert!(b["error"].as_str().expect("erro").starts_with("remetente inválido"), "{b}");
     // Fechar a aba invalida o token dela.
-    env.core.close_instance("shell@qa");
+    env.core.close_instance(&p, "shell@qa");
     assert_eq!(http(port, "GET", "/agents", &host, &qa, "").0, 403);
     env.core.shutdown();
 }
@@ -546,7 +729,7 @@ fn hooks_signal_turns_of_a_tab() {
         .rx
         .try_iter()
         .filter_map(|e| match e {
-            CoreEvent::AgentSignal { id, busy } => Some((id, busy)),
+            CoreEvent::AgentSignal { id, busy, .. } => Some((id, busy)),
             _ => None,
         })
         .collect();
@@ -716,13 +899,14 @@ fn a_slow_answer_is_typed_later_into_the_askers_tab() {
 #[test]
 fn closing_the_askers_tab_drops_its_questions() {
     let env = start(&[("claude", "echo x")]);
+    let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
     let dev = tab_token(&env, "claude@dev");
     let asking = std::thread::spawn(move || http(port, "POST", "/ask", &host, &dev, &json!({"to": "claude", "message": "oi"}).to_string()));
     let d = next_delivery(&env);
-    env.core.close_instance("claude@dev");
+    env.core.close_instance(&p, "claude@dev");
     let (st, b) = asking.join().expect("thread");
     assert_eq!(st, 500);
     assert!(b["error"].as_str().expect("erro").contains("fechada"), "{b}");
@@ -766,28 +950,32 @@ fn a_plain_terminal_waits_until_the_end_instead_of_getting_typed_answers() {
 #[test]
 fn the_conversation_map_follows_questions_live() {
     let env = start(&[("claude", "echo x")]);
+    let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
-    assert_eq!(env.core.conversation_map().pending, []);
+    assert_eq!(env.core.conversation_map(&p).pending, []);
     let claude = tab_token(&env, "claude");
     let asking = std::thread::spawn({
         let host = host.clone();
         move || http(port, "POST", "/ask", &host, &claude, &json!({"to": "claude@dev", "message": "x", "wait": 1}).to_string())
     });
     let d = next_delivery(&env);
-    let map = env.core.conversation_map();
+    let map = env.core.conversation_map(&p);
     assert_eq!(map.pending.len(), 1);
-    let p = &map.pending[0];
-    assert_eq!((p.id, p.asker.as_str(), p.target.as_str(), p.detached), (d.request, "claude", "claude@dev", false));
+    let q = &map.pending[0];
+    assert_eq!(
+        (q.id, q.project.as_str(), q.asker.as_str(), q.target.as_str(), q.detached),
+        (d.request, p.as_str(), "claude", "claude@dev", false)
+    );
     assert!(map.instances.contains(&"claude@dev".to_owned()));
     // Depois do 202, a pergunta continua no mapa, marcada como resposta atrasada.
     assert_eq!(asking.join().expect("thread").0, 202);
-    assert!(env.core.conversation_map().pending[0].detached);
+    assert!(env.core.conversation_map(&p).pending[0].detached);
     let dev = tab_token(&env, "claude@dev");
     let reply = json!({"to": "", "message": "ok", "reply_to": d.request}).to_string();
     assert_eq!(http(port, "POST", "/ask", &host, &dev, &reply).0, 200);
-    assert_eq!(env.core.conversation_map().pending, []);
+    assert_eq!(env.core.conversation_map(&p).pending, []);
     env.core.shutdown();
 }
 
@@ -795,18 +983,23 @@ fn the_conversation_map_follows_questions_live() {
 #[test]
 fn a_headless_question_shows_in_the_map_while_it_runs() {
     let env = std::sync::Arc::new(start(&[("claude", "cat >/dev/null; sleep 1; echo pronto")]));
+    let p = env.core.active_project_id();
     let e2 = env.clone();
     let asking = std::thread::spawn(move || ask(&e2, json!({"from": "shell", "to": "claude", "message": "oi"})));
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let seen = loop {
-        let h = env.core.conversation_map().headless;
+        let h = env.core.conversation_map(&p).headless;
         if !h.is_empty() || std::time::Instant::now() > deadline {
             break h;
         }
         std::thread::sleep(Duration::from_millis(20));
     };
-    assert_eq!(seen.iter().map(|a| (a.asker.as_str(), a.target.as_str())).collect::<Vec<_>>(), [("shell", "claude")]);
+    assert_eq!(
+        seen.iter().map(|a| (a.project.as_str(), a.asker.as_str(), a.target.as_str())).collect::<Vec<_>>(),
+        [(p.as_str(), "shell", "claude")]
+    );
+    assert!(env.core.conversation_map("pdeadbeef").headless.is_empty(), "só no projeto de quem perguntou");
     assert_eq!(asking.join().expect("thread").0, 200);
-    assert!(env.core.conversation_map().headless.is_empty(), "some quando a resposta chega");
+    assert!(env.core.conversation_map(&p).headless.is_empty(), "some quando a resposta chega");
     env.core.shutdown();
 }

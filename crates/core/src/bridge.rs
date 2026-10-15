@@ -20,7 +20,7 @@ use crate::agents::resolve_alias;
 use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
 use crate::exchange::Reply;
 use crate::headless::HeadlessOptions;
-use crate::instances::Ident;
+use crate::instances::{scoped, unscoped, Ident};
 use crate::usage::AgentUsage;
 use crate::util::terminal_text;
 use crate::{Auth, Caller};
@@ -150,7 +150,11 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
     }
 
     if *req.method() == Method::Get && req.url() == "/agents" {
-        return reply(req, 200, json!({ "agents": core.peers() }));
+        let project = match &auth {
+            Auth::Agent(c) => c.project.clone(),
+            Auth::Master => core.active_project_id(),
+        };
+        return reply(req, 200, json!({ "agents": core.peers(&project) }));
     }
     let route = req.url().to_owned();
     if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
@@ -168,7 +172,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         return reply(req, 400, json!({ "error": "JSON inválido" }));
     };
     let default_from = if route == "/ask" { "usuário" } else { "" };
-    let caller = match caller(&auth, &msg, default_from) {
+    let caller = match caller(&core, &auth, &msg, default_from) {
         Ok(c) => c,
         Err(e) => return reply(req, 400, json!({ "error": e })),
     };
@@ -181,18 +185,26 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
     reply(req, status, out);
 }
 
-/// Quem está chamando. Com o token de um agente, é ele (o `from` do corpo é ignorado); com o
-/// token mestre, o `from` do corpo, desde que seja um id válido.
-fn caller(auth: &Auth, msg: &Value, default_from: &str) -> Result<Caller, String> {
+/// Quem está chamando. Com o token de um agente, é ele, no projeto dele (o `from` e o `project`
+/// do corpo são ignorados); com o token mestre, o `from` do corpo, desde que seja um id válido,
+/// no projeto `project` do corpo ou, sem ele, no projeto ativo.
+fn caller(core: &Core, auth: &Auth, msg: &Value, default_from: &str) -> Result<Caller, String> {
     match auth {
         Auth::Agent(c) => Ok(c.clone()),
         Auth::Master => {
             let from = js_string_or(msg.get("from"), default_from).to_lowercase();
-            if from == "usuário" || Ident::parse(&from).is_some() {
-                Ok(Caller { id: from, tab: false })
-            } else {
-                Err(format!("remetente inválido: \"{}\"", from.escape_debug()))
+            if from != "usuário" && Ident::parse(&from).is_none() {
+                return Err(format!("remetente inválido: \"{}\"", from.escape_debug()));
             }
+            let project = match msg.get("project").and_then(Value::as_str).filter(|p| !p.is_empty()) {
+                Some(p) if core.project_path(p).is_some() => p.to_owned(),
+                Some(p) => return Err(format!("projeto desconhecido: \"{}\"", p.escape_debug())),
+                None => core.active_project_id(),
+            };
+            if project.is_empty() {
+                return Err("nenhum projeto aberto".into());
+            }
+            Ok(Caller { id: from, project, tab: false })
         }
     }
 }
@@ -254,13 +266,25 @@ const TAB_REPLY_TIMEOUT: Duration = Duration::from_secs(600);
 /// Teto absoluto, mesmo que a aba continue ativa: evita esperar para sempre um agente travado.
 const TAB_REPLY_MAX: Duration = Duration::from_secs(3600);
 
-/// Até quando esperar a resposta de `target` a uma pergunta entregue em `sent`.
+/// Até quando esperar a resposta de `target` (chave com escopo) a uma pergunta entregue em `sent`.
 ///
 /// São [`TAB_REPLY_TIMEOUT`] depois da pergunta *ou* depois da última atividade da aba (saída no
 /// terminal ou turno em andamento), o que for mais tarde: um agente ocupado numa tarefa longa não
 /// estoura o prazo, que só começa a correr quando ele sossega. Limitado a [`TAB_REPLY_MAX`].
 fn reply_deadline(core: &Core, target: &str, sent: Instant) -> Instant {
     deadline_after(sent, core.inner.activity.last(target))
+}
+
+impl Caller {
+    /// Chave com o escopo do projeto de quem chama para o id `id` (o dele, ou o de outra instância).
+    fn key(&self, id: &str) -> String {
+        scoped(&self.project, id)
+    }
+
+    /// Entrada da Conversa integrada no projeto de quem chama.
+    fn feed(&self, core: &Core, kind: FeedKind, from: &str, to: &str, text: String) {
+        core.feed(FeedEntry::new(kind, Some(from), Some(to), text).in_project(&self.project));
+    }
 }
 
 fn deadline_after(sent: Instant, last_activity: Option<Instant>) -> Instant {
@@ -281,23 +305,23 @@ fn reply_pending(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
     let from = caller.id.as_str();
     let message = js_string_or(msg.get("message"), "");
     let to = match msg.get("reply_to").and_then(Value::as_u64) {
-        Some(id) => core.inner.exchange.reply_id(id, from, &message),
+        Some(id) => core.inner.exchange.reply_id(id, &caller.key(from), &message).map(|asker| unscoped(&asker).1.to_owned()),
         None => {
             let to = js_string_or(msg.get("to"), "").to_lowercase();
-            core.inner.exchange.reply(from, &to, &message).then_some(to)
+            core.inner.exchange.reply(&caller.key(from), &caller.key(&to), &message).then_some(to)
         }
     };
     let Some(to) = to else {
         return (404, json!({ "delivered": false, "error": "nenhuma pergunta pendente" }));
     };
-    core.feed(FeedEntry::new(FeedKind::Answer, Some(from), Some(&to), message));
+    caller.feed(core, FeedKind::Answer, from, &to, message);
     (200, json!({ "delivered": true }))
 }
 
 /// `POST /signal` `{"state":"busy"|"idle"}`: hook do agente avisando que começou ou terminou um
 /// turno (`ask-agent --signal`). Só o processo de uma aba sinaliza.
 fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
-    let Auth::Agent(Caller { id, tab: true }) = auth else {
+    let Auth::Agent(Caller { id, project, tab: true }) = auth else {
         return (400, json!({ "error": "só o processo de uma aba envia sinais" }));
     };
     let busy = match msg.get("state").and_then(Value::as_str) {
@@ -305,14 +329,14 @@ fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
         Some("idle") => false,
         _ => return (400, json!({ "error": "estado inválido (use busy ou idle)" })),
     };
-    core.emit(CoreEvent::AgentSignal { id: id.clone(), busy });
+    core.emit(CoreEvent::AgentSignal { project: project.clone(), id: id.clone(), busy });
     (200, json!({ "ok": true }))
 }
 
 /// `POST /usage` `{"session":{"used","resets_at_ms"}|null,"weekly":…}`: uso do plano do agente
 /// (`ask-agent --usage`, a statusline do Claude). O modelo vem do token; só o processo de uma aba envia.
 fn usage(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
-    let Auth::Agent(Caller { id, tab: true }) = auth else {
+    let Auth::Agent(Caller { id, tab: true, .. }) = auth else {
         return (400, json!({ "error": "só o processo de uma aba envia o uso" }));
     };
     let Some(kind) = Ident::parse(id).map(|i| i.kind).filter(|k| k != "shell" && !k.starts_with("ollama")) else {
@@ -359,8 +383,8 @@ fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl 
 }
 
 /// Resposta que chegou depois de o `ask-agent` de quem perguntou já ter terminado: é digitada
-/// no terminal de quem perguntou, como uma mensagem nova.
-fn deliver_late(core: &Core, asker: Ident, target: &str, request: u64, outcome: Reply) {
+/// no terminal de quem perguntou, como uma mensagem nova. `target` é o id sem o projeto.
+fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request: u64, outcome: Reply) {
     let prompt = match outcome {
         Reply::Answer(text) => format!(
             "[Resposta do agente \"{target}\" à sua pergunta #{request}, recebida pelo CommandDeck]\n\n{}\n\n\
@@ -368,20 +392,30 @@ Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Co
             terminal_text(&text)
         ),
         Reply::Failed(text) => {
-            core.feed(FeedEntry::new(FeedKind::Error, Some(target), Some(&asker.id()), text.clone()));
+            core.feed(FeedEntry::new(FeedKind::Error, Some(target), Some(&asker.id()), text.clone()).in_project(project));
             format!("[CommandDeck] A pergunta #{request} para \"{target}\" ficou sem resposta: {}", terminal_text(&text))
         }
     };
-    core.emit(CoreEvent::Deliver(Delivery { request, ident: asker, create: false, from: target.to_owned(), prompt, answer: true }));
+    core.emit(CoreEvent::Deliver(Delivery {
+        request,
+        project: project.to_owned(),
+        ident: asker,
+        create: false,
+        from: target.to_owned(),
+        prompt,
+        answer: true,
+    }));
 }
 
 /// Pergunta entregue numa aba (instância) interativa e respondida por `ask-agent --reply`.
+/// O destino é resolvido (e criado, se preciso) no projeto de quem pergunta.
 ///
 /// Se quem pergunta é uma aba e pediu `wait` segundos, o `ask-agent` dela volta depois desse
 /// tempo (antes de o Bash do agente estourar o próprio timeout) e a resposta, quando chegar, é
 /// digitada no terminal dela.
 fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAsk) -> (u16, Value) {
     let from = caller.id.as_str();
+    let project = caller.project.as_str();
     let (base, suffix) = match asked.find('@') {
         Some(i) => (&asked[..i], &asked[i..]),
         None => (asked, ""),
@@ -392,10 +426,10 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     let Some(want) = kinds.contains(&kind).then(|| Ident::parse(&format!("{kind}{suffix}"))).flatten() else {
         return (
             400,
-            json!({ "error": format!("agente desconhecido ou não instalado \"{asked}\". Disponíveis: {}", core.peers().join(", ")) }),
+            json!({ "error": format!("agente desconhecido ou não instalado \"{asked}\". Disponíveis: {}", core.peers(project).join(", ")) }),
         );
     };
-    let resolved = core.inner.instances.lock().resolve_or_create(&want, opts.force_new);
+    let resolved = core.with_instances(project, |list| list.resolve_or_create(&want, opts.force_new));
     let (ident, created) = match resolved {
         Ok(v) => v,
         Err(options) => {
@@ -408,24 +442,36 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     }
     let forget = |status: u16, error: Value| {
         if created {
-            core.inner.instances.lock().remove(&id);
+            core.with_instances(project, |list| list.remove(&id));
         }
         (status, error)
     };
     // Com abas a profundidade não viaja no ambiente (a pergunta é digitada): mede-se pela cadeia
     // de perguntas pendentes de quem pergunta. Um ciclo de espera é recusado primeiro (409).
-    let depth = opts.depth.max(core.inner.exchange.chain_depth(from));
-    if depth >= MAX_DEPTH && !core.inner.exchange.would_cycle(from, &id) {
+    let (from_key, target_key) = (caller.key(from), caller.key(&id));
+    let depth = opts.depth.max(core.inner.exchange.chain_depth(&from_key));
+    if depth >= MAX_DEPTH && !core.inner.exchange.would_cycle(&from_key, &target_key) {
         return forget(400, json!({ "error": "profundidade máxima de conversa entre agentes atingida" }));
     }
-    let (request, rx) = match core.inner.exchange.register_at(from, &id, depth) {
+    let (request, rx) = match core.inner.exchange.register_at(&from_key, &target_key, depth) {
         Ok(v) => v,
-        Err(e) => return forget(409, json!({ "error": e })),
+        // A mensagem de erro do Exchange cita as chaves com escopo: refeita com os ids.
+        Err(_) => {
+            return forget(409, json!({ "error": format!("\"{id}\" já está esperando uma resposta de \"{from}\" (ciclo de espera)") }))
+        }
     };
 
-    core.feed(FeedEntry::new(FeedKind::Ask, Some(from), Some(&id), message.to_owned()));
+    caller.feed(core, FeedKind::Ask, from, &id, message.to_owned());
     let prompt = tab_prompt(from, request, message);
-    core.emit(CoreEvent::Deliver(Delivery { request, ident, create: created, from: from.to_owned(), prompt, answer: false }));
+    core.emit(CoreEvent::Deliver(Delivery {
+        request,
+        project: project.to_owned(),
+        ident,
+        create: created,
+        from: from.to_owned(),
+        prompt,
+        answer: false,
+    }));
 
     let sent = Instant::now();
     // Só um agente recebe uma resposta atrasada digitada: num terminal comum (`shell`) o texto
@@ -436,20 +482,20 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         _ => None,
     };
     let outcome = match wait_reply(core, &rx, || {
-        let deadline = reply_deadline(core, &id, sent);
+        let deadline = reply_deadline(core, &target_key, sent);
         detach_at.map_or(deadline, |d| d.min(deadline))
     }) {
         Some(reply) => reply,
         None => match (detach_at, asker) {
-            (Some(_), Some(asker)) if Instant::now() < reply_deadline(core, &id, sent) => {
+            (Some(_), Some(asker)) if Instant::now() < reply_deadline(core, &target_key, sent) => {
                 core.inner.exchange.detach(request);
                 let core2 = core.clone();
-                let target = id.clone();
+                let (target, key, project) = (id.clone(), target_key.clone(), project.to_owned());
                 let spawned = std::thread::Builder::new().name("cd-bridge-late".into()).spawn(move || {
-                    let outcome = wait_reply(&core2, &rx, || reply_deadline(&core2, &target, sent))
+                    let outcome = wait_reply(&core2, &rx, || reply_deadline(&core2, &key, sent))
                         .unwrap_or_else(|| Reply::Failed(format!("\"{target}\" não respondeu em 10 minutos")));
                     core2.inner.exchange.remove(request);
-                    deliver_late(&core2, asker, &target, request, outcome);
+                    deliver_late(&core2, &project, asker, &target, request, outcome);
                 });
                 if spawned.is_err() {
                     core.inner.exchange.fail(request, "falha interna da ponte");
@@ -473,7 +519,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     match outcome {
         Reply::Answer(answer) => (200, json!({ "answer": answer })),
         Reply::Failed(text) => {
-            core.feed(FeedEntry::new(FeedKind::Error, Some(&id), Some(from), text.clone()));
+            caller.feed(core, FeedKind::Error, &id, from, text.clone());
             (500, json!({ "error": text }))
         }
     }
@@ -487,9 +533,11 @@ struct TabAsk {
     wait: Option<u64>,
 }
 
-/// Processa um `POST /ask` já decodificado. Retorna (status HTTP, corpo).
+/// Processa um `POST /ask` já decodificado. Retorna (status HTTP, corpo). Tudo acontece no
+/// projeto de quem chama: as instâncias, as perguntas pendentes e as sessões headless.
 fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
     let from = caller.id.as_str();
+    let project = caller.project.as_str();
     let asked = js_string_or(msg.get("to"), "").to_lowercase();
     let depth = js_depth(msg.get("depth"));
     let message = match msg.get("message") {
@@ -500,10 +548,11 @@ fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
 
     // Resposta explícita à pergunta número N (`ask-agent --reply N "texto"`).
     if let Some(id) = msg.get("reply_to").and_then(Value::as_u64) {
-        return match core.inner.exchange.reply_id(id, from, &message) {
+        return match core.inner.exchange.reply_id(id, &caller.key(from), &message) {
             Some(asker) => {
-                core.feed(FeedEntry::new(FeedKind::Answer, Some(from), Some(&asker), message));
-                (200, delivered(&asker))
+                let asker = unscoped(&asker).1;
+                caller.feed(core, FeedKind::Answer, from, asker, message);
+                (200, delivered(asker))
             }
             None => (
                 404,
@@ -513,8 +562,8 @@ fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
     }
     // `from` está respondendo a uma pergunta que `asked` fez: entrega a quem espera. (Uma pergunta
     // nova de `from` para quem o espera fecharia um ciclo de espera; por isso é resposta.)
-    if core.inner.exchange.reply(from, &asked, &message) {
-        core.feed(FeedEntry::new(FeedKind::Answer, Some(from), Some(&asked), message));
+    if core.inner.exchange.reply(&caller.key(from), &caller.key(&asked), &message) {
+        caller.feed(core, FeedKind::Answer, from, &asked, message);
         return (200, delivered(&asked));
     }
     // Com a interface ligada, a pergunta vai para a aba (instância) do agente; sem ela, em headless.
@@ -527,7 +576,7 @@ fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
         return ask_tab(core, caller, &asked, &message, opts);
     }
 
-    let available = core.peers();
+    let available = core.peers(project);
     let models = core.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
     let to = resolve_target(&asked, &available, &models);
     if !available.contains(&to) {
@@ -543,29 +592,35 @@ fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
         return (400, json!({ "error": "profundidade máxima de conversa entre agentes atingida" }));
     }
 
-    core.feed(FeedEntry::new(FeedKind::Ask, Some(from), Some(&to), message.clone()));
+    caller.feed(core, FeedKind::Ask, from, &to, message.clone());
     let prompt = format!(
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
     );
-    let session_key = format!("{from}->{to}");
-    let _live = core.headless_ask_started(from, &to);
+    let session_key = format!("{}->{}", caller.key(from), caller.key(&to));
+    let _live = core.headless_ask_started(project, from, &to);
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
         let kind = Ident::parse(&to).map(|i| i.kind).unwrap_or_else(|| to.clone());
         core.run_headless(
             &kind,
             &prompt,
-            HeadlessOptions { session_key: Some(session_key.clone()), depth: depth + 1, ..Default::default() },
+            HeadlessOptions {
+                session_key: Some(session_key.clone()),
+                depth: depth + 1,
+                project: project.to_owned(),
+                cwd: core.project_path(project).unwrap_or_default(),
+                ..Default::default()
+            },
         )
     };
     match result {
         Ok(answer) => {
-            core.feed(FeedEntry::new(FeedKind::Answer, Some(&to), Some(from), answer.clone()));
+            caller.feed(core, FeedKind::Answer, &to, from, answer.clone());
             (200, json!({ "answer": answer }))
         }
         Err(e) => {
             let text = e.to_string();
-            core.feed(FeedEntry::new(FeedKind::Error, Some(&to), Some(from), text.clone()));
+            caller.feed(core, FeedKind::Error, &to, from, text.clone());
             (500, json!({ "error": text }))
         }
     }

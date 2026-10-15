@@ -50,10 +50,24 @@ descobre **quem** pergunta pelo token, e o campo `from` do corpo é ignorado. As
 passar por outra nem responder no lugar dela. O token mestre (`Core::bridge_token`) não vai para nenhum
 agente: serve a testes e ferramentas de depuração, e com ele o `from` do corpo é aceito se for um id válido.
 
+**Projetos.** Cada aba (instância) pertence a um projeto (`ProjectCfg`: uma pasta, com id `p` + 8 hex), e a
+ponte só enxerga o projeto de quem chama: cada projeto pode ter o seu `claude`, e um `ask-agent claude@dev`
+cria `claude@dev` no projeto de quem perguntou. O projeto vai **no token**: `Core::tab_token(projeto, id)` dá
+um token por par projeto + instância (o mesmo vale para os tokens headless). Com o token mestre, o projeto
+vem do campo `"project"` do corpo (id de um projeto existente; 400 se desconhecido) ou, sem ele, é o
+projeto ativo (400 se não há nenhum). Por dentro, as chaves das perguntas pendentes, da atividade, das
+filas por par e das sessões headless têm escopo: `instances::scoped(projeto, id)` = `"<projeto>#<id>"`
+(`#` nunca aparece num id), então ciclos e profundidade nunca misturam projetos. O que agentes e pessoas
+veem é sempre o id **sem** o projeto: o texto digitado, as mensagens de erro (lista de "Disponíveis"), os
+`FeedEntry.from/to` e o mapa (`PendingInfo { project, asker, target }`, `HeadlessAsk { project, … }`).
+Os eventos levam o projeto: `Delivery.project`, `AgentSignal { project, id, busy }` e `FeedEntry.project`
+(`None` = global, como os avisos do Whisper). As abas de agentes rodam na pasta do projeto, e o AGENTS.md
+de um projeto que não é o ativo é escrito na primeira aba aberta nele.
+
 | Rota | Descrição |
 | :-- | :-- |
-| `GET /agents` | `{"agents": [...]}` com os agentes instalados |
-| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"]}` → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido ou profundidade `>= 2`; 404 para `reply_to` que não está pendente; 409 para ciclo de espera; 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
+| `GET /agents` | `{"agents": [...]}` com os agentes instalados e as instâncias abertas no projeto de quem chama |
+| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido ou profundidade `>= 2`; 404 para `reply_to` que não está pendente; 409 para ciclo de espera; 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
 | `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
@@ -83,7 +97,8 @@ Cada aba é uma **instância** com identidade própria, usada em `COMMANDDECK_AG
 | `claude@main@bia` | segunda instância principal (sem cargo) aberta à mão |
 
 A aba aparece como `Claude`, `Claude · Dev`, `Claude · Dev · Ana`. O id é gerado pelo core
-(`crates/core/src/instances.rs`) e salvo em `Config.open_tabs`, então as abas voltam com o mesmo nome.
+(`crates/core/src/instances.rs`), único dentro do projeto, e salvo em `ProjectCfg.open_tabs` do projeto
+(`Config.projectList`), então as abas voltam com o mesmo nome.
 O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
 
 `ask-agent <id> "msg"` (e `--new` para forçar outra instância) funciona assim:

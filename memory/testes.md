@@ -151,7 +151,7 @@ Com a pasta de trabalho num repositório git:
   - [ ] Botão `+`: seletor de pasta adiciona novo workspace à lista e ativa-o.
   - [ ] Botão `×` (aparece ao passar o mouse, com 2+ projetos): fica visível sob o ponteiro e o clique remove o projeto da lista; se for o ativo, migra automaticamente para o primeiro da lista.
   - [ ] Pasta inexistente ou inacessível: não quebra a aplicação; exibe erro amigável na conversa.
-  - [ ] Lista de projetos persiste no arquivo de configuração (`config.projects`).
+  - [ ] Lista de projetos persiste no arquivo de configuração (`config.projectList`).
 - [ ] **Mapa de agentes em área fixa**:
   - [ ] O mapa nunca alarga a barra lateral direita sobre o terminal; `right_w` permanece intacto.
   - [ ] Rolagem bidirecional fluida (`ScrollArea::both()`) funcionando com 0, 1 e 10+ agentes conectados.

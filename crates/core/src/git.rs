@@ -551,6 +551,9 @@ impl Core {
     fn git_repo(&self) -> Result<Repo, GitError> {
         let git = self.git_exe().ok_or(GitError::NotInstalled)?;
         let ws = self.workspace();
+        if ws.as_os_str().is_empty() {
+            return Err(GitError::NotARepo);
+        }
         let out =
             run(base_command(&git, &ws, &["rev-parse", "--show-toplevel", "--absolute-git-dir", "--show-prefix"]), None, READ_TIMEOUT)?;
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -770,6 +773,9 @@ impl Core {
     pub fn git_init(&self) -> Result<(), GitError> {
         let git = self.git_exe().ok_or(GitError::NotInstalled)?;
         let ws = self.workspace();
+        if ws.as_os_str().is_empty() {
+            return Err(GitError::Failed("nenhum projeto aberto".into()));
+        }
         if crate::util::absolutize(&ws) == crate::util::absolutize(&self.inner.home) {
             return Err(GitError::Failed("não crio um repositório na sua pasta pessoal; escolha uma pasta de projeto".into()));
         }

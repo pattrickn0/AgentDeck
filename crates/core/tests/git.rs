@@ -58,7 +58,7 @@ fn start(with_git: bool) -> Env {
         home_dir: Some(root.join("home")),
         ollama_discovery: false,
         watch_workspace: false,
-        config: Some(Config::default_for(&paths)),
+        config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,
     };
     let (core, _rx) = Core::start_with(paths, opts).expect("start");
