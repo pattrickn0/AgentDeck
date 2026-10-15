@@ -91,9 +91,16 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | Área | O que tem |
 | :-- | :-- |
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
-| Barra esquerda | seletor de workspace no topo (lista de projetos, "Abrir pasta…"), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
+| Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, três abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama) e **Git** (branch). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some na aba Git |
+
+**Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
+que foi aberta (o terminal roda na pasta dele) e só aparece com ele na tela; trocar de projeto esconde as abas do
+anterior, que **continuam rodando**. A árvore, a aba Git, a Conversa e o Mapa são do projeto ativo; o uso na barra
+de título é global (o limite é da conta). Ao abrir o app, voltam só as abas do projeto ativo; as dos outros abrem
+na primeira vez que o projeto é selecionado (ou quando um agente chama alguém de lá). Não existe mais workspace
+padrão: sem projeto, o centro pede uma pasta.
 
 A **tela dividida** organiza as abas por tipo de agente:
 - abas do mesmo tipo ficam na mesma janela (2 Claude = 1 janela com 2 abas; todos os modelos do Ollama juntos;

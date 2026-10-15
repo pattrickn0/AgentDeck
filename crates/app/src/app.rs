@@ -463,7 +463,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,projects-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -513,7 +513,9 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.debug_hold_download = true;
             }
             other => {
-                if let Some(dir) = other.strip_prefix("expand:") {
+                if let Some(id) = other.strip_prefix("project:") {
+                    deck.debug_switch_project = Some(id.to_owned());
+                } else if let Some(dir) = other.strip_prefix("expand:") {
                     deck.tree.expanded.insert(dir.to_owned());
                 } else if let Some(f) = other.strip_prefix("select:") {
                     deck.tree.active_file = Some(f.to_owned());

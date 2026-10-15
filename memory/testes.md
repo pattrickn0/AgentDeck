@@ -23,7 +23,7 @@ Gemini **removido** (item 9).
 - [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
 - [x] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
 - [x] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
-- [ ] Trocar a pasta de trabalho para um projeto seu que seja repositório git (clique no caminho na topbar), ou usar a pasta `workspace/` padrão.
+- [ ] Abrir um projeto seu que seja repositório git ("+" da seção PROJETOS na barra lateral).
 
 ## 1. Barra direita ★
 
@@ -172,6 +172,20 @@ Com a pasta de trabalho num repositório git:
 - [ ] Antigravity aberto: em até ~3 min aparece o uso dele; sem login ou sem rede, anel tracejado e "uso indisponível".
 - [ ] Ollama: anel cinza, "local, sem limite". Fechar a última aba de um modelo tira o item da barra.
 - [ ] Demonstração: `COMMANDDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
-- [ ] Barra lateral: o seletor no topo mostra o nome e o caminho do workspace; o clique abre a lista de projetos (× remove, "Abrir pasta…" adiciona e ativa); Esc ou clique fora fecha.
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
 - [ ] Seção **ORGANIZAÇÃO** na barra lateral: a chave "Tela dividida" liga/desliga a divisão (a chave anima e fica na cor do agente ativo).
+
+## 14. Projetos ★
+
+- [ ] **Migração:** a primeira abertura com a config antiga transforma cada pasta da lista em projeto; as abas que estavam abertas voltam no projeto da pasta ativa.
+- [ ] "+" da seção PROJETOS: escolher uma pasta cria o projeto (nome = pasta) e o ativa; o centro mostra "Nenhum agente aberto".
+- [ ] Abrir o Claude no projeto novo e clicar no projeto anterior: os terminais dele voltam como estavam; o Claude do novo **continua rodando** (o projeto mostra o logo e a contagem).
+- [ ] O projeto ativo lista as abas dele; clicar numa ativa a aba. Os outros mostram os logos dos agentes e a contagem.
+- [ ] Cada terminal roda na pasta do seu projeto (`pwd`/`Get-Location`), e a árvore e a aba Git mudam com o projeto.
+- [ ] A Conversa e o Mapa mostram só o projeto ativo; uma conversa entre agentes de outro projeto aparece quando ele volta à tela.
+- [ ] `ask-agent claude@dev "oi"` num projeto abre `claude@dev` **nesse** projeto (escondido, se não for o da tela); o outro projeto não vê essa instância.
+- [ ] Dois projetos com um `claude` cada: cada um responde só ao seu projeto.
+- [ ] Fechar e reabrir o app: só as abas do projeto ativo abrem; as dos outros abrem ao clicar no projeto (e nada se perde).
+- [ ] Clique direito → Renomear (o nome muda, a pasta não), Abrir pasta, Remover (confirma, fecha as abas do projeto; a pasta fica).
+- [ ] Remover o último projeto: o centro pede "Abrir pasta…".
+- [ ] Captura: `COMMANDDECK_DEBUG_UI=project:<id>` troca para o projeto `<id>` logo ao abrir.

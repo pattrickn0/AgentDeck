@@ -153,6 +153,20 @@ pub struct ProjectView {
     pub agents: Vec<AgentBadge>,
 }
 
+/// O que a Deck lembra de um projeto enquanto ele não está na tela.
+#[derive(Default)]
+struct ProjectState {
+    /// As abas salvas já foram abertas nesta sessão (até lá, só estão registradas no core).
+    loaded: bool,
+    /// A aba ativa quando o projeto saiu da tela.
+    active_uid: Option<u64>,
+    group_order: Vec<String>,
+    split_ratios: split::Ratios,
+    /// Conversa integrada e conversas recentes do mapa (as do projeto ativo ficam em `Deck`).
+    feed: Vec<FeedItem>,
+    recent: VecDeque<Recent>,
+}
+
 /// O que a tela dividida mostra neste quadro.
 pub struct PanePlan {
     pub rect: egui::Rect,
@@ -236,6 +250,8 @@ pub struct Deck {
     pub debug_usage: Option<HashMap<String, commanddeck_core::AgentUsage>>,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
     pub debug_projects: Option<Vec<ProjectView>>,
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=project:<id>`): troca para este projeto logo depois de restaurar as abas.
+    pub debug_switch_project: Option<String>,
     /// O botão de fechar da barra de título foi clicado (o `App` encerra depois do quadro).
     pub quit_requested: bool,
 
@@ -243,8 +259,11 @@ pub struct Deck {
     pub git: crate::git_ui::GitUi,
 
     // Árvore e Projetos
+    /// Pasta do projeto ativo (vazia sem projeto).
     pub workspace: PathBuf,
-    pub projects: Vec<PathBuf>,
+    /// Id do projeto ativo (vazio = nenhum). Só as abas dele aparecem.
+    pub active_project: String,
+    projects: HashMap<String, ProjectState>,
     pub tree: TreeState,
 
     // Conversa integrada
@@ -316,7 +335,8 @@ impl Deck {
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut deck = Self {
             workspace: core.workspace(),
-            projects: cfg.project_list.iter().map(|p| p.path.clone()).collect(),
+            active_project: core.active_project_id(),
+            projects: HashMap::new(),
             core,
             events,
             tx,
@@ -359,6 +379,7 @@ impl Deck {
             debug_map: None,
             debug_usage: None,
             debug_projects: None,
+            debug_switch_project: None,
             quit_requested: false,
             git: crate::git_ui::GitUi::default(),
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
@@ -519,6 +540,9 @@ impl Deck {
                 if !self.initialized {
                     self.initialized = true;
                     self.restore_tabs();
+                    if let Some(id) = self.debug_switch_project.take() {
+                        self.switch_project(&id);
+                    }
                     if self.debug_close_all {
                         while !self.tabs.is_empty() {
                             self.close_tab(0);
@@ -721,35 +745,81 @@ impl Deck {
     // Abas
     // ------------------------------------------------------------------
 
+    /// Ao iniciar: registra no core as abas salvas de todos os projetos (a ponte não cria
+    /// duplicatas delas) e abre só as do projeto ativo; as outras abrem quando o projeto é
+    /// selecionado (ou quando um agente chama alguém de lá).
     fn restore_tabs(&mut self) {
-        // Só as abas do projeto ativo.
-        let Some(project) = self.core.active_project() else {
-            self.refresh_tree();
-            return;
-        };
-        self.group_order = project.pane_order.clone();
-        // Abre só o que estava aberto (nenhum agente abre sozinho, nem na primeira vez).
-        if !project.open_tabs.is_empty() {
-            self.restoring = true;
-            // `active_tab` aponta para `open_tabs`; abas de agentes que sumiram são puladas,
-            // então a ativa é achada pela posição salva, não pelo índice em `self.tabs`.
-            let mut idx = 0;
-            for (i, id) in project.open_tabs.iter().enumerate() {
-                if let Some(ident) = Ident::parse(id).filter(|i| self.agents.knows(&i.kind)) {
-                    if i as i32 == project.active_tab {
-                        idx = self.tabs.len();
-                    }
-                    self.core.restore_instance(&project.id, id);
-                    self.add_tab(project.id.clone(), ident, true, false);
+        for p in self.core.projects() {
+            if p.id != self.active_project {
+                for id in &p.open_tabs {
+                    self.core.restore_instance(&p.id, id);
                 }
             }
-            self.sync_groups();
-            if !self.tabs.is_empty() {
-                self.activate(idx);
-            }
-            self.restoring = false;
+        }
+        let active = self.active_project.clone();
+        if !active.is_empty() {
+            self.load_project(&active);
         }
         self.refresh_tree();
+    }
+
+    /// Abre as abas salvas do projeto `id` (uma vez por sessão). Sendo o ativo, ele assume a ordem
+    /// e as proporções das janelas salvas e ativa a aba salva; senão as abas rodam escondidas.
+    fn load_project(&mut self, id: &str) {
+        if self.projects.get(id).is_some_and(|s| s.loaded) {
+            return;
+        }
+        let Some(project) = self.core.projects().into_iter().find(|p| p.id == id) else { return };
+        let ratios = split::Ratios { rows: project.split_rows.clone(), cols: project.split_cols.clone() };
+        let state = self.projects.entry(id.to_owned()).or_default();
+        state.loaded = true;
+        state.group_order = project.pane_order.clone();
+        state.split_ratios = ratios.clone();
+        let shown = id == self.active_project;
+        if shown {
+            self.group_order = project.pane_order.clone();
+            self.split_ratios = ratios;
+        }
+        // Abre só o que estava aberto (nenhum agente abre sozinho, nem na primeira vez). `active_tab`
+        // aponta para `open_tabs`; abas de agentes que sumiram são puladas.
+        self.restoring = true;
+        let mut active_uid = None;
+        for (i, saved) in project.open_tabs.iter().enumerate() {
+            let Some(ident) = Ident::parse(saved).filter(|i| self.agents.knows(&i.kind)) else { continue };
+            // Já aberta (um agente chamou esta instância antes de o projeto ser carregado).
+            if self.tabs.iter().any(|t| t.project == id && t.ident.id() == *saved) {
+                continue;
+            }
+            self.core.restore_instance(id, saved);
+            self.add_tab(id.to_owned(), ident, true, false);
+            if i as i32 == project.active_tab {
+                active_uid = self.tabs.last().map(|t| t.uid);
+            }
+        }
+        self.restoring = false;
+        if shown {
+            self.sync_groups();
+            self.show_project_tab(active_uid);
+        } else if let Some(state) = self.projects.get_mut(id) {
+            state.active_uid = active_uid;
+        }
+    }
+
+    /// Ativa a aba `uid` do projeto ativo (ou a usada por último nele).
+    fn show_project_tab(&mut self, uid: Option<u64>) {
+        let visible = self.visible();
+        let idx = uid
+            .and_then(|u| visible.iter().copied().find(|&i| self.tabs[i].uid == u))
+            .or_else(|| self.most_recent(visible.iter().copied()));
+        match idx {
+            Some(i) => self.activate(i),
+            None => self.active = None,
+        }
+    }
+
+    /// Índices (em `tabs`) das abas do projeto ativo: só elas aparecem. As outras continuam rodando.
+    pub fn visible(&self) -> Vec<usize> {
+        (0..self.tabs.len()).filter(|&i| self.tabs[i].project == self.active_project).collect()
     }
 
     /// Grade inicial de uma aba: a da janela do grupo dela (ou a da área toda, se o grupo é novo;
@@ -765,7 +835,12 @@ impl Deck {
 
     /// Abre uma aba nova do modelo `kind` (menu "+", Ctrl+T): `claude`, e `claude@main@ana` se já há uma.
     pub fn open_tab(&mut self, kind: &str, restoring: bool) {
-        let project = self.core.active_project_id();
+        let project = self.active_project.clone();
+        if project.is_empty() {
+            self.system("Abra uma pasta como projeto antes de abrir um agente.");
+            self.new_project_dialog();
+            return;
+        }
         let ident = self.core.register_instance(&project, kind);
         self.add_tab(project, ident, restoring, false);
     }
@@ -779,6 +854,10 @@ impl Deck {
     /// aberta e rodando: não reabre nada (a resposta já está na Conversa integrada).
     fn on_deliver(&mut self, d: Delivery) {
         let id = d.ident.id();
+        // Um projeto que ainda não foi aberto nesta sessão abre as abas salvas (escondidas) antes.
+        if !d.answer {
+            self.load_project(&d.project);
+        }
         let found = self.tabs.iter().position(|t| t.project == d.project && t.ident.id() == id);
         if d.answer {
             match found {
@@ -807,7 +886,7 @@ impl Deck {
                 }
                 self.add_tab(d.project.clone(), d.ident.clone(), false, true);
                 let label = self.tabs.last().map(|t| t.label.clone()).unwrap_or_else(|| id.clone());
-                self.system(format!("Abri a aba de {label} para a conversa com outro agente."));
+                self.system_in(&d.project, format!("Abri a aba de {label} para a conversa com outro agente."));
                 self.tabs.len() - 1
             }
         };
@@ -884,12 +963,14 @@ impl Deck {
             pending_resize: None,
         };
         self.next_uid += 1;
+        // A aba de outro projeto roda escondida: não mexe nas janelas nem no foco.
+        let shown = tab.project == self.active_project;
         self.tabs.push(tab);
         let idx = self.tabs.len() - 1;
-        if !self.restoring {
+        if shown && !self.restoring {
             self.sync_groups();
         }
-        if !auto || self.active.is_none() {
+        if shown && (!auto || self.active.is_none()) {
             self.activate(idx);
         }
         if !restoring {
@@ -907,7 +988,8 @@ impl Deck {
             Ok(spec) => Ok(spec),
             Err(e) if self.debug_fake_shell => {
                 log::warn!("COMMANDDECK_DEBUG_FAKE_SHELL: usando shell local no lugar de '{}' ({e})", self.tabs[idx].kind);
-                Ok(debug_fake_spec(&self.tabs[idx].kind, &self.workspace))
+                let cwd = self.core.project_path(&self.tabs[idx].project).unwrap_or_else(|| self.workspace.clone());
+                Ok(debug_fake_spec(&self.tabs[idx].kind, &cwd))
             }
             Err(e) => Err(e),
         };
@@ -941,6 +1023,15 @@ impl Deck {
         if idx >= self.tabs.len() {
             return;
         }
+        // Aba de outro projeto (ex.: clique no mapa): o projeto dela vem para a tela.
+        if self.tabs[idx].project != self.active_project {
+            let (project, uid) = (self.tabs[idx].project.clone(), self.tabs[idx].uid);
+            self.switch_project(&project);
+            if let Some(i) = self.tabs.iter().position(|t| t.uid == uid) {
+                self.activate(i);
+            }
+            return;
+        }
         self.active = Some(idx);
         self.show_seq += 1;
         self.tabs[idx].shown = self.show_seq;
@@ -952,7 +1043,8 @@ impl Deck {
     /// Mantém `group_order` igual aos grupos abertos: um grupo novo entra no fim (vira uma janela
     /// nova) e sai quando a última aba dele fecha.
     fn sync_groups(&mut self) {
-        split::sync_order(&mut self.group_order, self.tabs.iter().map(|t| t.kind.as_str()));
+        let kinds: Vec<String> = self.visible().into_iter().map(|i| self.tabs[i].kind.clone()).collect();
+        split::sync_order(&mut self.group_order, kinds.iter().map(String::as_str));
     }
 
     /// Janelas deste quadro na área `area`: a grade automática com um grupo por janela (ou uma
@@ -968,13 +1060,15 @@ impl Deck {
             (vec![1], vec![area], vec![self.group_order.clone()])
         };
         let one = groups.len() == 1;
-        let keys: Vec<&str> = self.tabs.iter().map(|t| split::group_key(&t.kind)).collect();
+        let visible = self.visible();
+        let keys: Vec<&str> = visible.iter().map(|&i| split::group_key(&self.tabs[i].kind)).collect();
         let plans: Vec<PanePlan> = rects
             .into_iter()
             .zip(groups)
             .map(|(rect, groups)| {
                 // Uma janela só: todas as abas na ordem de abertura (como sem divisão).
-                let tabs: Vec<usize> = if one { (0..keys.len()).collect() } else { split::pane_tabs(&keys, &groups) };
+                let tabs: Vec<usize> =
+                    if one { visible.clone() } else { split::pane_tabs(&keys, &groups).into_iter().map(|k| visible[k]).collect() };
                 let shown = self.most_recent(tabs.iter().copied()).unwrap_or(0);
                 PanePlan { rect, tabs, shown, groups }
             })
@@ -1008,11 +1102,11 @@ impl Deck {
         self.panes[slot].uids.iter().filter_map(|u| self.tabs.iter().position(|t| t.uid == *u)).collect()
     }
 
-    /// Abas da janela focada (todas, se ainda não houve quadro).
+    /// Abas da janela focada (as do projeto, se ainda não houve quadro).
     fn focused_pane_tabs(&self) -> Vec<usize> {
         match self.focused_slot() {
             Some(s) => self.slot_tabs(s),
-            None => (0..self.tabs.len()).collect(),
+            None => self.visible(),
         }
     }
 
@@ -1060,10 +1154,11 @@ impl Deck {
         match self.active {
             Some(a) if a == idx => {
                 // Fica na mesma janela (a aba do grupo usada por último); sem nenhuma, a última usada.
-                let kinds: Vec<&str> = self.tabs.iter().map(|t| t.kind.as_str()).collect();
-                let shown: Vec<u64> = self.tabs.iter().map(|t| t.shown).collect();
+                let visible = self.visible();
+                let kinds: Vec<&str> = visible.iter().map(|&i| self.tabs[i].kind.as_str()).collect();
+                let shown: Vec<u64> = visible.iter().map(|&i| self.tabs[i].shown).collect();
                 match split::after_close(&kinds, &shown, &tab.kind) {
-                    Some(i) => self.activate(i),
+                    Some(k) => self.activate(visible[k]),
                     None => self.active = None,
                 }
             }
@@ -1177,17 +1272,23 @@ impl Deck {
             return;
         }
         self.persist_at = None;
-        // As abas e a ordem das janelas são do projeto ativo.
-        let project = self.core.active_project_id();
-        let mine: Vec<usize> = (0..self.tabs.len()).filter(|&i| self.tabs[i].project == project).collect();
-        let open: Vec<String> = mine.iter().map(|&i| self.tabs[i].ident.id()).collect();
-        let idx = self.active.and_then(|a| mine.iter().position(|&i| i == a)).map(|i| i as i32).unwrap_or(-1);
-        let order = self.group_order.clone();
-        self.core.update_project(&project, |p| {
-            p.open_tabs = open;
-            p.active_tab = idx;
-            p.pane_order = order;
-        });
+        // Cada projeto carregado grava as abas dele; os que ainda não abriram nesta sessão ficam
+        // como estão (senão perderiam as abas salvas).
+        let loaded: Vec<String> = self.projects.iter().filter(|(_, s)| s.loaded).map(|(k, _)| k.clone()).collect();
+        for project in loaded {
+            let shown = project == self.active_project;
+            let mine: Vec<usize> = (0..self.tabs.len()).filter(|&i| self.tabs[i].project == project).collect();
+            let open: Vec<String> = mine.iter().map(|&i| self.tabs[i].ident.id()).collect();
+            let state = &self.projects[&project];
+            let active_uid = if shown { self.active_tab().map(|t| t.uid) } else { state.active_uid };
+            let idx = active_uid.and_then(|u| mine.iter().position(|&i| self.tabs[i].uid == u)).map_or(-1, |i| i as i32);
+            let order = if shown { self.group_order.clone() } else { state.group_order.clone() };
+            self.core.update_project(&project, |p| {
+                p.open_tabs = open;
+                p.active_tab = idx;
+                p.pane_order = order;
+            });
+        }
     }
 
     pub fn persist_layout(&mut self) {
@@ -1456,116 +1557,125 @@ impl Deck {
     }
 
     pub fn pick_workspace(&self) {
-        let start = self.workspace.clone();
+        let start = if self.workspace.as_os_str().is_empty() { dirs_home() } else { self.workspace.clone() };
         self.spawn_bg("pick-workspace", move |_| {
             let dir = rfd::FileDialog::new().set_directory(&start).pick_folder()?;
             Some(UiMsg::WorkspacePicked(dir))
         });
     }
 
-    pub fn switch_workspace(&mut self, path: PathBuf) {
-        if path == self.workspace {
-            return;
-        }
-        // Grava as abas e o layout no projeto que está saindo.
-        self.persist_tabs_now();
-        self.persist_layout_now();
-        if let Err(e) = self.core.set_workspace(path.clone()) {
-            self.system(format!("Não foi possível trocar a pasta de trabalho: {e}"));
-            return;
-        }
-        self.after_project_change();
-        self.system(format!("Projeto ativo alterado para: {}", self.workspace.display()));
+    /// Uma pasta escolhida no "+" da seção PROJETOS: vira projeto (ou volta ao que já é dela).
+    pub fn add_project(&mut self, path: PathBuf) {
+        let project = self.core.create_project(&path, None);
+        self.switch_project(&project.id);
     }
 
-    /// O core trocou o projeto ativo: atualiza a pasta, a árvore e o git, e abre as abas salvas do
-    /// projeto que entrou, se ainda não estão abertas. (PROVISÓRIO: enquanto a Deck não separa as
-    /// abas por projeto, elas se somam às dos outros projetos; sem isso a próxima gravação
-    /// apagaria as abas salvas dele.)
+    /// Troca o projeto da tela. As abas do que sai continuam rodando, escondidas; as do que entra
+    /// aparecem (na primeira vez, as salvas são abertas).
+    pub fn switch_project(&mut self, id: &str) {
+        if id == self.active_project {
+            return;
+        }
+        // Grava as abas e o layout do projeto que está saindo.
+        self.persist_tabs_now();
+        self.persist_layout_now();
+        if let Err(e) = self.core.set_active_project(id) {
+            self.system(format!("Não foi possível abrir o projeto: {e}"));
+            return;
+        }
+        let old = std::mem::replace(&mut self.active_project, id.to_owned());
+        if !old.is_empty() {
+            let uid = self.active.and_then(|i| self.tabs.get(i)).map(|t| t.uid);
+            let state = self.projects.entry(old).or_default();
+            state.active_uid = uid;
+            state.group_order = std::mem::take(&mut self.group_order);
+            state.split_ratios = std::mem::take(&mut self.split_ratios);
+            state.feed = std::mem::take(&mut self.feed);
+            state.recent = std::mem::take(&mut self.recent);
+        }
+        self.active = None;
+        self.unseen = 0;
+        self.feed_scroll_to_bottom = true;
+        match self.projects.get_mut(id) {
+            Some(state) if state.loaded => {
+                self.group_order = std::mem::take(&mut state.group_order);
+                self.split_ratios = std::mem::take(&mut state.split_ratios);
+                self.feed = std::mem::take(&mut state.feed);
+                self.recent = std::mem::take(&mut state.recent);
+                let uid = state.active_uid;
+                self.sync_groups();
+                self.show_project_tab(uid);
+            }
+            Some(state) => {
+                self.feed = std::mem::take(&mut state.feed);
+                self.recent = std::mem::take(&mut state.recent);
+                self.load_project(id);
+            }
+            None => self.load_project(id),
+        }
+        self.after_project_change();
+    }
+
+    /// O projeto da tela mudou: pasta, árvore (do zero) e git.
     fn after_project_change(&mut self) {
         self.workspace = self.core.workspace();
-        self.sync_projects();
-        let project = self.core.active_project_id();
-        if !self.tabs.iter().any(|t| t.project == project) {
-            self.restore_tabs();
-        }
+        self.tree = TreeState { expanded: HashSet::from([String::new()]), ..Default::default() };
         self.refresh_tree();
         self.git.diff = None;
         self.git.view = crate::git_ui::GitView::Loading;
         self.git_refresh();
-    }
-
-    pub fn add_project(&mut self, path: PathBuf) {
-        let path = self.core.create_project(&path, None).path;
-        self.sync_projects();
-        self.switch_workspace(path);
-    }
-
-    pub fn remove_project(&mut self, idx: usize) {
-        if idx < self.projects.len() && self.projects.len() > 1 {
-            let path = self.projects[idx].clone();
-            let Some(project) = self.core.projects().into_iter().find(|p| p.path == path) else { return };
-            // As abas do projeto fecham com ele.
-            while let Some(i) = self.tabs.iter().position(|t| t.project == project.id) {
-                self.close_tab(i);
-            }
-            let was_active = path == self.workspace;
-            // Se era o ativo, o core já ativa o primeiro que sobrar.
-            self.core.remove_project(&project.id);
-            self.sync_projects();
-            if was_active {
-                self.after_project_change();
-            }
-        }
-    }
-
-    /// Recarrega `self.projects` (pastas) da lista de projetos do core.
-    fn sync_projects(&mut self) {
-        self.projects = self.core.projects().into_iter().map(|p| p.path).collect();
+        self.persist_tabs();
     }
 
     // ------------------------------------------------------------------
-    // Projetos (API da barra lateral). ESQUELETO: por enquanto um projeto = uma pasta de
-    // `self.projects` e o id é o caminho; vira o modelo de projetos do core na etapa 2.
+    // Projetos (API da barra lateral)
     // ------------------------------------------------------------------
 
-    /// Projetos para a barra lateral, na ordem salva, com os agentes de cada um.
+    /// Projetos para a barra lateral, na ordem salva, com os agentes de cada um (de um projeto
+    /// ainda não aberto nesta sessão, os salvos, sem aba).
     pub fn project_views(&self) -> Vec<ProjectView> {
         if let Some(demo) = &self.debug_projects {
             return demo.clone();
         }
-        self.projects
-            .iter()
+        self.core
+            .projects()
+            .into_iter()
             .map(|p| {
-                let active = *p == self.workspace;
-                let agents = if active {
-                    self.tabs
-                        .iter()
-                        .enumerate()
-                        .map(|(i, t)| AgentBadge {
-                            kind: t.kind.clone(),
-                            label: t.label.clone(),
-                            color: t.color,
-                            busy: t.busy,
-                            done: t.done,
-                            alive: t.alive,
-                            tab: Some(i),
+                let loaded = self.projects.get(&p.id).is_some_and(|s| s.loaded);
+                let agents = if loaded {
+                    (0..self.tabs.len())
+                        .filter(|&i| self.tabs[i].project == p.id)
+                        .map(|i| {
+                            let t = &self.tabs[i];
+                            AgentBadge {
+                                kind: t.kind.clone(),
+                                label: t.label.clone(),
+                                color: t.color,
+                                busy: t.busy,
+                                done: t.done,
+                                alive: t.alive,
+                                tab: Some(i),
+                            }
                         })
                         .collect()
                 } else {
-                    Vec::new()
+                    p.open_tabs
+                        .iter()
+                        .filter_map(|id| Ident::parse(id))
+                        .map(|ident| AgentBadge {
+                            label: ident.label(&self.agents.name(&ident.kind)),
+                            color: self.agents.tab_color(&ident.kind),
+                            kind: ident.kind,
+                            busy: false,
+                            done: false,
+                            alive: false,
+                            tab: None,
+                        })
+                        .collect()
                 };
-                let id = p.to_string_lossy().into_owned();
-                ProjectView { name: util::folder_name(&id), id, path: p.clone(), active, agents }
+                ProjectView { active: p.id == self.active_project, id: p.id, name: p.name, path: p.path, agents }
             })
             .collect()
-    }
-
-    /// Torna `id` o projeto ativo.
-    pub fn switch_project(&mut self, id: &str) {
-        if let Some(p) = self.projects.iter().find(|p| p.to_string_lossy() == id).cloned() {
-            self.switch_workspace(p);
-        }
     }
 
     /// "+" da seção PROJETOS: escolhe a pasta do projeto novo.
@@ -1574,14 +1684,34 @@ impl Deck {
     }
 
     /// Dá outro nome ao projeto (não muda a pasta).
-    pub fn rename_project(&mut self, _id: &str, _name: &str) {
-        self.system("Renomear projeto: em breve.");
+    pub fn rename_project(&mut self, id: &str, name: &str) {
+        let name = name.trim();
+        if !name.is_empty() {
+            self.core.rename_project(id, name);
+        }
     }
 
-    /// Tira o projeto da lista (e fecha as abas dele).
+    /// Tira o projeto da lista e fecha as abas dele (a pasta fica). Se era o da tela, o core ativa
+    /// o primeiro que sobrar (ou nenhum).
     pub fn remove_project_by_id(&mut self, id: &str) {
-        if let Some(i) = self.projects.iter().position(|p| p.to_string_lossy() == id) {
-            self.remove_project(i);
+        while let Some(i) = self.tabs.iter().position(|t| t.project == id) {
+            self.close_tab(i);
+        }
+        self.projects.remove(id);
+        let was_active = id == self.active_project;
+        self.core.remove_project(id);
+        if was_active {
+            self.active_project.clear();
+            self.active = None;
+            self.group_order.clear();
+            self.feed.clear();
+            self.recent.clear();
+            let next = self.core.active_project_id();
+            if next.is_empty() {
+                self.after_project_change();
+            } else {
+                self.switch_project(&next);
+            }
         }
     }
 
@@ -1590,12 +1720,12 @@ impl Deck {
     // ------------------------------------------------------------------
 
     pub fn add_feed(&mut self, e: FeedEntry) {
-        self.track_for_map(&e);
-        if let Some(from) = &e.from {
-            if let Some(id) = self.thinking.remove(from) {
-                self.feed.retain(|f| f.id != id);
-            }
-        }
+        // Entradas de outro projeto vão para a conversa dele (guardada até ele voltar à tela);
+        // as globais (sem projeto, ex.: o Whisper) e as da interface ficam na do projeto ativo.
+        let elsewhere = e.project.clone().filter(|p| *p != self.active_project && !self.active_project.is_empty());
+        let thinking_key = |from: &str| format!("{}#{from}", e.project.as_deref().unwrap_or(&self.active_project));
+        let thinking_prev = e.from.as_deref().map(thinking_key).and_then(|k| self.thinking.remove(&k));
+        let thinking_new = (e.kind == FeedKind::Thinking).then(|| e.from.as_deref().map(thinking_key)).flatten();
         let to = e.to.as_deref().map(|t| self.agents.who_name(t));
         let item = FeedItem {
             id: self.next_feed_id,
@@ -1604,13 +1734,24 @@ impl Deck {
             to,
             color: self.agents.who_color(e.from.as_deref()),
             time: util::time_pt_br(e.ts),
-            text: e.text,
+            text: e.text.clone(),
         };
         self.next_feed_id += 1;
-        if e.kind == FeedKind::Thinking {
-            if let Some(from) = &e.from {
-                self.thinking.insert(from.clone(), item.id);
+        if let Some(key) = thinking_new {
+            self.thinking.insert(key, item.id);
+        }
+        if let Some(project) = elsewhere {
+            let state = self.projects.entry(project).or_default();
+            track_recent(&mut state.recent, &e);
+            if let Some(id) = thinking_prev {
+                state.feed.retain(|f| f.id != id);
             }
+            state.feed.push(item);
+            return;
+        }
+        track_recent(&mut self.recent, &e);
+        if let Some(id) = thinking_prev {
+            self.feed.retain(|f| f.id != id);
         }
         self.feed.push(item);
         if self.feed_near_bottom {
@@ -1618,25 +1759,6 @@ impl Deck {
         }
         if self.right_view != RightView::Conversa && e.kind != FeedKind::Thinking {
             self.unseen += 1;
-        }
-    }
-
-    /// Alimenta o mapa de conversas a partir de uma entrada da conversa (antes de virar `FeedItem`).
-    fn track_for_map(&mut self, e: &FeedEntry) {
-        match e.kind {
-            // Resposta ou falha de uma pergunta entre dois agentes.
-            FeedKind::Answer | FeedKind::Error => {
-                if let (Some(from), Some(to)) = (&e.from, &e.to) {
-                    let at_ms = commanddeck_core::util::now_ms();
-                    self.recent.push_back(Recent { from: from.clone(), to: to.clone(), ok: e.kind == FeedKind::Answer, at_ms });
-                    while self.recent.len() > 50
-                        || self.recent.front().is_some_and(|r| at_ms.saturating_sub(r.at_ms) > agent_map::RECENT_MS)
-                    {
-                        self.recent.pop_front();
-                    }
-                }
-            }
-            _ => {}
         }
     }
 
@@ -1658,9 +1780,9 @@ impl Deck {
         if let Some(demo) = &self.debug_map {
             return demo.clone();
         }
-        let cm = self.core.conversation_map(&self.core.active_project_id());
-        let nodes = self
-            .tabs
+        let cm = self.core.conversation_map(&self.active_project);
+        let visible: Vec<&Tab> = self.visible().into_iter().map(|i| &self.tabs[i]).collect();
+        let nodes = visible
             .iter()
             .map(|t| {
                 let state = if !t.alive {
@@ -1674,7 +1796,7 @@ impl Deck {
             })
             .collect();
         let queued = |target: &str, request: u64| -> Option<usize> {
-            let tab = self.tabs.iter().find(|t| t.ident.id() == target)?;
+            let tab = visible.iter().find(|t| t.ident.id() == target)?;
             tab.queue.iter().filter(|q| !q.answer).position(|q| q.request == request).map(|i| i + 1)
         };
         let mut links: Vec<Link> = cm
@@ -1693,8 +1815,7 @@ impl Deck {
             since_ms: h.since_ms,
             state: LinkState::Headless,
         }));
-        let answers = self
-            .tabs
+        let answers = visible
             .iter()
             .flat_map(|t| {
                 let to = t.ident.id();
@@ -1712,9 +1833,16 @@ impl Deck {
         self.add_feed(FeedEntry { ts: 0, kind: FeedKind::System, from: None, to: None, text: text.into(), project: None });
     }
 
+    /// Aviso na conversa do projeto `project` (que pode não ser o da tela).
+    fn system_in(&mut self, project: &str, text: impl Into<String>) {
+        self.add_feed(FeedEntry::new(FeedKind::System, None, None, text).in_project(project));
+    }
+
+    /// "Limpar": só a conversa do projeto da tela.
     pub fn clear_feed(&mut self) {
         self.feed.clear();
-        self.thinking.clear();
+        let prefix = format!("{}#", self.active_project);
+        self.thinking.retain(|k, _| !k.starts_with(&prefix));
     }
 
     fn debug_feed(&mut self) {
@@ -1926,6 +2054,25 @@ fn clipboard_text() -> Option<String> {
 
 /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_FAKE_SHELL=1`): abre o shell do sistema quando o
 /// backend ainda não sabe montar o comando do agente, para exercitar o renderizador do terminal.
+/// Alimenta as conversas recentes do mapa com a resposta (ou falha) de uma pergunta entre dois agentes.
+fn track_recent(recent: &mut VecDeque<Recent>, e: &FeedEntry) {
+    if !matches!(e.kind, FeedKind::Answer | FeedKind::Error) {
+        return;
+    }
+    if let (Some(from), Some(to)) = (&e.from, &e.to) {
+        let at_ms = commanddeck_core::util::now_ms();
+        recent.push_back(Recent { from: from.clone(), to: to.clone(), ok: e.kind == FeedKind::Answer, at_ms });
+        while recent.len() > 50 || recent.front().is_some_and(|r| at_ms.saturating_sub(r.at_ms) > agent_map::RECENT_MS) {
+            recent.pop_front();
+        }
+    }
+}
+
+/// Pasta pessoal (início do seletor de pasta quando não há projeto).
+fn dirs_home() -> PathBuf {
+    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
+}
+
 fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
     #[cfg(windows)]
     let program = PathBuf::from("powershell.exe");

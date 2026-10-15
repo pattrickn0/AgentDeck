@@ -340,7 +340,7 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     let ctx_data: Option<(String, PathBuf, String, Pos2)> = ctx.data(|d| d.get_temp(Id::new("proj-ctx-menu")).flatten());
     let Some((id, path, name, pos)) = ctx_data else { return };
 
-    let can_remove = deck.projects.len() > 1;
+    let can_remove = true;
     let w = 170.0;
     let item_h = 26.0;
     let h = item_h * 3.0 + 8.0;

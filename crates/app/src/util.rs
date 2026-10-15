@@ -43,11 +43,6 @@ pub fn time_pt_br(epoch_ms: u64) -> String {
     }
 }
 
-/// Nome da pasta exibido na raiz da árvore (`ws.split(/[\\/]/).filter(Boolean).pop() || 'ARQUIVOS'`).
-pub fn folder_name(path: &str) -> String {
-    path.split(['/', '\\']).rfind(|s| !s.is_empty()).unwrap_or("ARQUIVOS").to_owned()
-}
-
 /// Texto completo enviado: instrução + referências `@anexo` separadas por espaço.
 pub fn compose_full(text: &str, attachments: &[String]) -> String {
     let refs = attachments.iter().map(|a| format!("@{a}")).collect::<Vec<_>>().join(" ");
@@ -74,13 +69,6 @@ mod tests {
         assert_eq!(chip_label("x/abc-def-ghi.txt"), "def-ghi.txt");
         assert_eq!(chip_label("semhifen"), "semhifen");
         assert_eq!(chip_label("C:/Users/x/AB-1.png"), "AB-1.png");
-    }
-
-    #[test]
-    fn folder_names() {
-        assert_eq!(folder_name("/home/u/workspace"), "workspace");
-        assert_eq!(folder_name("C:\\Users\\u\\proj\\"), "proj");
-        assert_eq!(folder_name(""), "ARQUIVOS");
     }
 
     #[test]

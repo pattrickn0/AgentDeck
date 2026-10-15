@@ -33,7 +33,7 @@ enum Click {
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     deck.terminal_rect = Some(pane_body(area));
-    if deck.tabs.is_empty() {
+    if deck.visible().is_empty() {
         deck.panes.clear();
         if deck.initialized {
             deck.pane_drag = None;

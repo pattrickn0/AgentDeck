@@ -8,23 +8,37 @@ use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
 
+/// Botão "Abrir pasta…" do cartão sem projeto.
+const NEW_PROJECT: &str = "#novo-projeto";
+
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::BG);
 
-    let title = galley(&painter, "Nenhum agente aberto", theme::ui_semibold(16.0), theme::TEXT);
+    // Sem projeto não há onde abrir um agente: o cartão pede uma pasta.
+    let no_project = deck.active_project.is_empty();
+    let title = if no_project { "Nenhum projeto aberto" } else { "Nenhum agente aberto" };
+    let title = galley(&painter, title, theme::ui_semibold(16.0), theme::TEXT);
     // <p> com o "+" em destaque, quebrando em até 420px.
     let mut job = LayoutJob::default();
     job.wrap.max_width = 420.0;
     job.halign = egui::Align::Center;
     let fmt = TextFormat { font_id: theme::ui(13.0), color: theme::MUTED, line_height: Some(13.0 * 1.5), ..Default::default() };
-    job.append("Selecione um agente abaixo ou clique no ", 0.0, fmt.clone());
-    job.append("+", 0.0, TextFormat { font_id: theme::ui_bold(13.0), color: theme::TEXT, ..fmt.clone() });
-    job.append(" acima para iniciar uma sessão:", 0.0, fmt);
+    if no_project {
+        job.append("Abra uma pasta como projeto: cada projeto tem os seus agentes.", 0.0, fmt);
+    } else {
+        job.append("Selecione um agente abaixo ou clique no ", 0.0, fmt.clone());
+        job.append("+", 0.0, TextFormat { font_id: theme::ui_bold(13.0), color: theme::TEXT, ..fmt.clone() });
+        job.append(" acima para iniciar uma sessão:", 0.0, fmt);
+    }
     let para = painter.layout_job(job);
 
     // Botões (.empty-agent-btn): padding 7px 14px, 12px/500, gap 10px, quebra de linha.
-    let items = deck.agents.empty_actions.clone();
+    let items = if no_project {
+        vec![crate::agents::MenuItem { kind: NEW_PROJECT.into(), label: "Abrir pasta…".into(), color: theme::MUTED }]
+    } else {
+        deck.agents.empty_actions.clone()
+    };
     let font = theme::ui(12.0);
     let btn_h = 12.0 * theme::LINE_HEIGHT + 14.0 + 2.0;
     let widths: Vec<f32> = items
@@ -94,7 +108,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         }
         y += btn_h + 10.0;
     }
-    if let Some(kind) = open {
-        deck.open_tab(&kind, false);
+    match open.as_deref() {
+        Some(NEW_PROJECT) => deck.new_project_dialog(),
+        Some(kind) => deck.open_tab(kind, false),
+        None => {}
     }
 }
