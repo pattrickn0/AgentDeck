@@ -1644,6 +1644,8 @@ impl Deck {
             };
             self.submit(idx, &full);
             self.set_term_focus(true);
+            let to = self.tabs[idx].ident.id();
+            self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&to), full.clone()));
         } else if mode == "all" {
             let idxs: Vec<usize> = (0..self.tabs.len()).filter(|&i| self.tabs[i].alive && self.tabs[i].kind != "shell").collect();
             if idxs.is_empty() {

@@ -357,8 +357,12 @@ fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
     let r = Rect::from_min_size(Pos2::new(outer.min.x + 14.0, outer.min.y), Vec2::new(w, h));
 
     if !plain {
-        let border = if item.kind == FeedKind::Error { theme::RED } else { item.color };
-        // Borda esquerda de 3px acompanhando o raio de 8px.
+        let border = match item.kind {
+            FeedKind::Error => theme::RED,
+            FeedKind::User => theme::USER,
+            _ => item.color,
+        };
+        // Indicador colorido vertical na borda esquerda de 3px acompanhando o raio de 8px.
         painter.rect_filled(r, 8.0, border);
         let inner = Rect::from_min_max(Pos2::new(r.min.x + 3.0, r.min.y), r.max);
         painter.rect_filled(inner, egui::CornerRadius { nw: 5, sw: 5, ne: 8, se: 8 }, theme::PANEL_2);

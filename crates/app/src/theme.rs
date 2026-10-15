@@ -37,6 +37,8 @@ pub const SEND_IDLE_TEXT: Color32 = rgb(0x55555f);
 pub const STOP_BG: Color32 = rgb(0x444444);
 /// `whoColor()` para remetentes sem cor conhecida (ex.: "você").
 pub const WHO_DEFAULT: Color32 = rgb(0xc9c9d1);
+/// Cor própria para mensagens do usuário na Conversa integrada (verde esmeralda, distinta das IAs).
+pub const USER: Color32 = rgb(0x10b981);
 pub const DROP_BLUE: Color32 = rgb(0x4f8cf7);
 
 // Badges de extensão da árvore (estilo VS Code)
