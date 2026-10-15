@@ -123,6 +123,34 @@ pub struct PaneSlot {
     pub groups: Vec<String>,
 }
 
+/// Um agente (aba) de um projeto, para a lista de projetos da barra lateral.
+#[derive(Debug, Clone)]
+pub struct AgentBadge {
+    /// Modelo (`claude`, `antigravity`, `ollama:…`): escolhe o logo.
+    pub kind: String,
+    /// Nome mostrado (`Claude · Dev`).
+    pub label: String,
+    pub color: Color32,
+    /// Trabalhando agora.
+    pub busy: bool,
+    /// Terminou um turno sem ser vista.
+    pub done: bool,
+    /// O processo continua rodando.
+    pub alive: bool,
+    /// Índice em `Deck::tabs` (clicar ativa a aba); `None` se o projeto ainda não foi carregado.
+    pub tab: Option<usize>,
+}
+
+/// Um projeto na barra lateral.
+#[derive(Debug, Clone)]
+pub struct ProjectView {
+    pub id: String,
+    pub name: String,
+    pub path: PathBuf,
+    pub active: bool,
+    pub agents: Vec<AgentBadge>,
+}
+
 /// O que a tela dividida mostra neste quadro.
 pub struct PanePlan {
     pub rect: egui::Rect,
@@ -204,6 +232,8 @@ pub struct Deck {
     pub debug_map: Option<Snapshot>,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
     pub debug_usage: Option<HashMap<String, commanddeck_core::AgentUsage>>,
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
+    pub debug_projects: Option<Vec<ProjectView>>,
     /// O botão de fechar da barra de título foi clicado (o `App` encerra depois do quadro).
     pub quit_requested: bool,
 
@@ -330,6 +360,7 @@ impl Deck {
             recent: VecDeque::new(),
             debug_map: None,
             debug_usage: None,
+            debug_projects: None,
             quit_requested: false,
             git: crate::git_ui::GitUi::default(),
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
@@ -1458,6 +1489,67 @@ impl Deck {
                 let next = self.projects.first().cloned().unwrap_or_else(|| self.core.paths().default_workspace.clone());
                 self.switch_workspace(next);
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Projetos (API da barra lateral). ESQUELETO: por enquanto um projeto = uma pasta de
+    // `self.projects` e o id é o caminho; vira o modelo de projetos do core na etapa 2.
+    // ------------------------------------------------------------------
+
+    /// Projetos para a barra lateral, na ordem salva, com os agentes de cada um.
+    pub fn project_views(&self) -> Vec<ProjectView> {
+        if let Some(demo) = &self.debug_projects {
+            return demo.clone();
+        }
+        self.projects
+            .iter()
+            .map(|p| {
+                let active = *p == self.workspace;
+                let agents = if active {
+                    self.tabs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| AgentBadge {
+                            kind: t.kind.clone(),
+                            label: t.label.clone(),
+                            color: t.color,
+                            busy: t.busy,
+                            done: t.done,
+                            alive: t.alive,
+                            tab: Some(i),
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let id = p.to_string_lossy().into_owned();
+                ProjectView { name: util::folder_name(&id), id, path: p.clone(), active, agents }
+            })
+            .collect()
+    }
+
+    /// Torna `id` o projeto ativo.
+    pub fn switch_project(&mut self, id: &str) {
+        if let Some(p) = self.projects.iter().find(|p| p.to_string_lossy() == id).cloned() {
+            self.switch_workspace(p);
+        }
+    }
+
+    /// "+" da seção PROJETOS: escolhe a pasta do projeto novo.
+    pub fn new_project_dialog(&self) {
+        self.pick_workspace();
+    }
+
+    /// Dá outro nome ao projeto (não muda a pasta).
+    pub fn rename_project(&mut self, _id: &str, _name: &str) {
+        self.system("Renomear projeto: em breve.");
+    }
+
+    /// Tira o projeto da lista (e fecha as abas dele).
+    pub fn remove_project_by_id(&mut self, id: &str) {
+        if let Some(i) = self.projects.iter().position(|p| p.to_string_lossy() == id) {
+            self.remove_project(i);
         }
     }
 

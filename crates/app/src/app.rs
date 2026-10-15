@@ -414,6 +414,42 @@ fn debug_map() -> crate::agent_map::Snapshot {
     }
 }
 
+/// SOMENTE DEPURAÇÃO: projetos fictícios na barra lateral (`COMMANDDECK_DEBUG_UI=projects-demo`): um ativo com
+/// três agentes (um ocupado), outro com um, outro vazio.
+fn debug_projects() -> Vec<crate::deck::ProjectView> {
+    use crate::deck::{AgentBadge, ProjectView};
+    let agent = |kind: &str, label: &str, color, busy| AgentBadge {
+        kind: kind.into(),
+        label: label.into(),
+        color,
+        busy,
+        done: false,
+        alive: true,
+        tab: None,
+    };
+    let project = |id: &str, name: &str, active, agents| ProjectView {
+        id: id.into(),
+        name: name.into(),
+        path: format!(r"C:\Users\voce\{name}").into(),
+        active,
+        agents,
+    };
+    vec![
+        project(
+            "p1",
+            "commanddeck-dev",
+            true,
+            vec![
+                agent("claude", "Claude", theme::CLAUDE, true),
+                agent("claude", "Claude · Dev", theme::CLAUDE, false),
+                agent("antigravity", "Antigravity", theme::ANTIGRAVITY, false),
+            ],
+        ),
+        project("p2", "jwic", false, vec![agent("claude", "Claude", theme::CLAUDE, false)]),
+        project("p3", "site-novo", false, vec![]),
+    ]
+}
+
 /// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`COMMANDDECK_DEBUG_UI=usage-demo`): Claude no meio
 /// da sessão, Antigravity com a semana esgotada (anel vermelho), Ollama local e Codex sem dados.
 fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsage> {
@@ -427,7 +463,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,projects-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -462,6 +498,7 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.debug_map = Some(debug_map());
             }
             "usage-demo" => deck.debug_usage = Some(debug_usage()),
+            "projects-demo" => deck.debug_projects = Some(debug_projects()),
             "split-drag" => {
                 deck.pane_drag = Some(0);
                 deck.debug_pane_drop = Some(1);
