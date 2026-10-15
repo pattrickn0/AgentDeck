@@ -16,6 +16,21 @@ pub const SEP: char = '@';
 /// Cargo implícito de uma instância sem cargo.
 pub const MAIN_ROLE: &str = "main";
 
+/// Separador entre o projeto e o id nas chaves com escopo (nunca aparece num id).
+pub const SCOPE_SEP: char = '#';
+
+/// Chave de uma instância com o escopo do projeto (`p1a2b3c4d#claude@dev`). É a chave usada nas
+/// perguntas pendentes, na atividade, nas filas e nas sessões headless da ponte: cada projeto
+/// tem as próprias instâncias. O que agentes e pessoas veem é sempre o id sem o projeto.
+pub fn scoped(project: &str, id: &str) -> String {
+    format!("{project}{SCOPE_SEP}{id}")
+}
+
+/// Desfaz [`scoped`]: `(projeto, id)`. Uma chave sem escopo é `("", chave)`.
+pub fn unscoped(key: &str) -> (&str, &str) {
+    key.split_once(SCOPE_SEP).unwrap_or(("", key))
+}
+
 /// Nomes dados a instâncias repetidas (mesmo modelo e cargo), na ordem.
 const NAMES: &[&str] =
     &["ana", "bia", "caio", "davi", "eva", "fabio", "gabi", "hugo", "iris", "joao", "kaua", "lia", "marco", "nina", "otto", "paula"];
@@ -207,6 +222,15 @@ mod tests {
 
     fn id(s: &str) -> Ident {
         Ident::parse(s).expect("id válido")
+    }
+
+    #[test]
+    fn scoped_keys_round_trip() {
+        let key = scoped("p0011aabb", "ollama:user/custom:latest@qa@ana");
+        assert_eq!(key, "p0011aabb#ollama:user/custom:latest@qa@ana");
+        assert_eq!(unscoped(&key), ("p0011aabb", "ollama:user/custom:latest@qa@ana"));
+        assert_eq!(unscoped("claude"), ("", "claude"));
+        assert!(Ident::parse(&key).is_none(), "`#` nunca aparece num id");
     }
 
     #[test]

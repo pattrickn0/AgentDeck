@@ -30,7 +30,7 @@ pub mod util;
 pub mod whisper;
 pub mod workspace;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -40,7 +40,7 @@ use crossbeam_channel::{Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 
 pub use agents::{AgentInfo, SpawnSpec};
-pub use config::Config;
+pub use config::{Config, ProjectCfg};
 pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind};
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
@@ -104,13 +104,16 @@ pub(crate) struct CoreInner {
     pub ollama: ollama::OllamaAgent,
     pub providers: context::Providers,
     pub processes: process::ProcessRegistry,
-    /// Chave do par → id da sessão/conversa headless.
+    /// Chave do par (com o escopo do projeto) → id da sessão/conversa headless.
     pub headless_sessions: Mutex<HashMap<String, String>>,
-    /// Instâncias de agentes (uma por aba) e as perguntas aguardando resposta entre elas.
-    pub instances: Mutex<instances::Instances>,
+    /// Instâncias de agentes (uma por aba) de cada projeto (id do projeto → instâncias).
+    pub instances: Mutex<HashMap<String, instances::Instances>>,
+    /// Perguntas aguardando resposta entre abas (chaves com escopo: `instances::scoped`).
     pub exchange: exchange::Exchange,
-    /// Última atividade de cada aba; o prazo de uma pergunta conta a partir dela.
+    /// Última atividade de cada aba (chave com escopo); o prazo de uma pergunta conta a partir dela.
     pub activity: activity::Activity,
+    /// Projetos fora do ativo cujo AGENTS.md já foi escrito nesta sessão (na primeira aba deles).
+    pub context_written: Mutex<HashSet<String>>,
     /// A interface sabe entregar mensagens nas abas (senão a ponte responde em modo headless).
     pub tab_delivery: std::sync::atomic::AtomicBool,
     /// Token de cada processo de agente → quem ele é (a ponte não confia no `from` do corpo).
@@ -132,6 +135,8 @@ pub(crate) struct CoreInner {
 /// Pergunta da ponte respondida em modo headless (sem aba), em andamento.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadlessAsk {
+    pub project: String,
+    /// Ids sem o projeto.
     pub asker: String,
     pub target: String,
     pub since_ms: u64,
@@ -140,7 +145,7 @@ pub struct HeadlessAsk {
 /// Retrato das conversas entre agentes agora (ver [`Core::conversation_map`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConversationMap {
-    /// Instâncias abertas (abas).
+    /// Instâncias abertas (abas) do projeto, ids sem o projeto.
     pub instances: Vec<String>,
     /// Perguntas entre abas esperando resposta, da mais antiga para a mais nova.
     pub pending: Vec<PendingInfo>,
@@ -163,8 +168,10 @@ impl Drop for HeadlessAskGuard {
 /// Quem chamou a ponte, pelo token que recebeu no ambiente.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Caller {
-    /// Id da instância (`claude`, `claude@dev`…).
+    /// Id da instância (`claude`, `claude@dev`…), sem o projeto.
     pub id: String,
+    /// Projeto da instância: a ponte só enxerga as instâncias dele.
+    pub project: String,
     /// É o processo da aba (interativo). `false` = execução headless (ponte sem abas).
     pub tab: bool,
 }
@@ -275,9 +282,10 @@ impl Core {
             providers,
             processes: process::ProcessRegistry::default(),
             headless_sessions: Mutex::new(HashMap::new()),
-            instances: Mutex::new(instances::Instances::default()),
+            instances: Mutex::new(HashMap::new()),
             exchange: exchange::Exchange::default(),
             activity: activity::Activity::default(),
+            context_written: Mutex::new(HashSet::new()),
             tab_delivery: std::sync::atomic::AtomicBool::new(false),
             callers: Mutex::new(HashMap::new()),
             headless_asks: Mutex::new(Vec::new()),
@@ -322,9 +330,10 @@ impl Core {
         *self.inner.waker.write() = Some(waker);
     }
 
-    /// A aba `id` está trabalhando agora (a interface chama enquanto ela produz saída ou está num turno).
-    pub fn touch_activity(&self, id: &str, at: std::time::Instant) {
-        self.inner.activity.touch(id, at);
+    /// A aba `id` do projeto `project` está trabalhando agora (a interface chama enquanto ela
+    /// produz saída ou está num turno).
+    pub fn touch_activity(&self, project: &str, id: &str, at: std::time::Instant) {
+        self.inner.activity.touch(&instances::scoped(project, id), at);
     }
 
     /// Emite um evento para a UI (e acorda o loop).
@@ -388,17 +397,17 @@ impl Core {
         self.inner.agents.list()
     }
 
-    /// Monta o comando para abrir um terminal interativo do agente `kind`
-    /// (`claude`, `antigravity`, `ollama`, `ollama:<modelo>`, `shell`, ...).
-    /// Erro = mensagem amigável de "não instalado" a ser escrita no terminal.
-    pub fn spawn_spec(&self, kind: &str) -> Result<SpawnSpec, String> {
-        agents::spawn_spec(self, kind)
+    /// Monta o comando para abrir, na pasta do projeto `project`, um terminal interativo do agente
+    /// `kind` (`claude`, `antigravity`, `ollama`, `ollama:<modelo>`, `shell`, ...).
+    /// Erro = mensagem amigável ("não instalado", projeto desconhecido) a ser escrita no terminal.
+    pub fn spawn_spec(&self, project: &str, kind: &str) -> Result<SpawnSpec, String> {
+        agents::spawn_spec(self, project, kind)
     }
 
     /// Como [`Core::spawn_spec`] para uma instância (modelo + cargo + nome): o id dela vai em
-    /// `COMMANDDECK_AGENT` e o cargo em `COMMANDDECK_ROLE`.
-    pub fn spawn_spec_for(&self, ident: &Ident) -> Result<SpawnSpec, String> {
-        agents::spawn_spec_for(self, ident)
+    /// `COMMANDDECK_AGENT` e o cargo em `COMMANDDECK_ROLE`. O token da aba é do par projeto + id.
+    pub fn spawn_spec_for(&self, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
+        agents::spawn_spec_for(self, project, ident)
     }
 
     // ---------- Instâncias (abas) e perguntas entre elas ----------
@@ -413,43 +422,55 @@ impl Core {
         self.inner.tab_delivery.load(Ordering::SeqCst) && self.config().auto_open_agent_tabs
     }
 
-    /// Nova instância aberta pelo usuário (menu "+"): `claude`, e `claude@main@ana` se já há uma.
-    pub fn register_instance(&self, kind: &str) -> Ident {
-        self.inner.instances.lock().allocate(kind, None, None)
+    /// Aplica `f` às instâncias do projeto `project` (criadas na primeira vez).
+    pub(crate) fn with_instances<R>(&self, project: &str, f: impl FnOnce(&mut instances::Instances) -> R) -> R {
+        f(self.inner.instances.lock().entry(project.to_owned()).or_default())
     }
 
-    /// Reabre uma instância com o id que ela tinha (restauração das abas). `None` se o id é inválido.
-    pub fn restore_instance(&self, id: &str) -> Option<Ident> {
+    /// Nova instância aberta pelo usuário no projeto (menu "+"): `claude`, e `claude@main@ana` se
+    /// o projeto já tem uma. Outro projeto pode ter o seu `claude` sem conflito.
+    pub fn register_instance(&self, project: &str, kind: &str) -> Ident {
+        self.with_instances(project, |list| list.allocate(kind, None, None))
+    }
+
+    /// Reabre uma instância do projeto com o id que ela tinha (restauração das abas). `None` se o
+    /// id é inválido.
+    pub fn restore_instance(&self, project: &str, id: &str) -> Option<Ident> {
         let ident = Ident::parse(id)?;
-        self.inner.instances.lock().register(ident.clone());
+        self.with_instances(project, |list| list.register(ident.clone()));
         Some(ident)
     }
 
-    /// A aba da instância fechou: esquece a instância e o token dela, avisa quem esperava
-    /// resposta dela e descarta as perguntas que ela fez (ninguém mais lê as respostas).
-    pub fn close_instance(&self, id: &str) {
-        self.inner.instances.lock().remove(id);
-        self.inner.callers.lock().retain(|_, c| !(c.tab && c.id == id));
-        self.inner.exchange.fail_target(id, &format!("a aba de \"{id}\" foi fechada antes de responder"));
-        self.inner.exchange.fail_asker(id, &format!("a aba de \"{id}\" foi fechada"));
+    /// A aba da instância fechou: esquece a instância, o token e a atividade dela, avisa quem
+    /// esperava resposta dela e descarta as perguntas que ela fez (ninguém mais lê as respostas).
+    pub fn close_instance(&self, project: &str, id: &str) {
+        if let Some(list) = self.inner.instances.lock().get_mut(project) {
+            list.remove(id);
+        }
+        self.inner.callers.lock().retain(|_, c| !(c.tab && c.project == project && c.id == id));
+        let key = instances::scoped(project, id);
+        self.inner.exchange.fail_target(&key, &format!("a aba de \"{id}\" foi fechada antes de responder"));
+        self.inner.exchange.fail_asker(&key, &format!("a aba de \"{id}\" foi fechada"));
+        self.inner.activity.forget(&key);
     }
 
-    /// Renomeia uma instância aberta (atualiza instâncias, callers e perguntas pendentes).
-    pub fn rename_instance(&self, old_id: &str, new_ident: &Ident) -> Result<(), String> {
-        self.inner.instances.lock().rename(old_id, new_ident.clone())?;
+    /// Renomeia uma instância aberta do projeto (atualiza instâncias, callers e perguntas pendentes).
+    pub fn rename_instance(&self, project: &str, old_id: &str, new_ident: &Ident) -> Result<(), String> {
+        self.with_instances(project, |list| list.rename(old_id, new_ident.clone()))?;
         let new_id = new_ident.id();
         for caller in self.inner.callers.lock().values_mut() {
-            if caller.id == old_id {
+            if caller.project == project && caller.id == old_id {
                 caller.id = new_id.clone();
             }
         }
-        self.inner.exchange.rename(old_id, &new_id);
+        self.inner.exchange.rename(&instances::scoped(project, old_id), &instances::scoped(project, &new_id));
+        self.inner.activity.forget(&instances::scoped(project, old_id));
         Ok(())
     }
 
     /// O processo da instância terminou (a aba continua aberta): quem esperava a resposta dela é liberado.
-    pub fn instance_ended(&self, id: &str) {
-        self.inner.exchange.fail_target(id, &format!("o processo de \"{id}\" encerrou antes de responder"));
+    pub fn instance_ended(&self, project: &str, id: &str) {
+        self.inner.exchange.fail_target(&instances::scoped(project, id), &format!("o processo de \"{id}\" encerrou antes de responder"));
     }
 
     /// A entrega não pôde ser feita (aba morreu, não subiu…): libera quem espera.
@@ -457,34 +478,50 @@ impl Core {
         self.inner.exchange.fail(request, reason);
     }
 
-    /// Quem está conversando com quem agora: instâncias abertas, perguntas entre abas pendentes
-    /// (inclusive as de resposta atrasada) e perguntas em modo headless. Barato: dois locks e
-    /// listas pequenas, pode ser chamado a cada quadro.
-    pub fn conversation_map(&self) -> ConversationMap {
+    /// Quem está conversando com quem agora no projeto `project`: instâncias abertas, perguntas
+    /// entre abas pendentes (inclusive as de resposta atrasada) e perguntas em modo headless, com
+    /// ids sem o projeto. Barato: três locks e listas pequenas, pode ser chamado a cada quadro.
+    pub fn conversation_map(&self, project: &str) -> ConversationMap {
         ConversationMap {
-            instances: self.instance_ids(),
-            pending: self.inner.exchange.snapshot(),
-            headless: self.inner.headless_asks.lock().iter().map(|(_, a)| a.clone()).collect(),
+            instances: self.project_instance_ids(project),
+            pending: self.inner.exchange.snapshot().into_iter().filter(|p| p.project == project).collect(),
+            headless: self.inner.headless_asks.lock().iter().map(|(_, a)| a).filter(|a| a.project == project).cloned().collect(),
         }
     }
 
-    /// Registra uma pergunta headless em andamento (some do mapa quando o guarda cai).
-    pub(crate) fn headless_ask_started(&self, asker: &str, target: &str) -> HeadlessAskGuard {
+    /// Registra uma pergunta headless em andamento (some do mapa quando o guarda cai). Ids sem o projeto.
+    pub(crate) fn headless_ask_started(&self, project: &str, asker: &str, target: &str) -> HeadlessAskGuard {
         let key = self.inner.headless_seq.fetch_add(1, Ordering::Relaxed);
-        let ask = HeadlessAsk { asker: asker.to_owned(), target: target.to_owned(), since_ms: util::now_ms() };
+        let ask = HeadlessAsk { project: project.to_owned(), asker: asker.to_owned(), target: target.to_owned(), since_ms: util::now_ms() };
         self.inner.headless_asks.lock().push((key, ask));
         HeadlessAskGuard { inner: self.inner.clone(), key }
     }
 
-    /// Ids das instâncias abertas.
+    /// Ids das instâncias abertas em todos os projetos, sem o projeto e sem repetição (o
+    /// `claude` de dois projetos aparece uma vez). Serve a quem só olha o modelo (uso dos planos).
     pub fn instance_ids(&self) -> Vec<String> {
-        self.inner.instances.lock().ids()
+        let all = self.inner.instances.lock();
+        let mut projects: Vec<&String> = all.keys().collect();
+        projects.sort();
+        let mut out = Vec::new();
+        for id in projects.into_iter().flat_map(|p| all[p].ids()) {
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+        out
     }
 
-    /// Ids que podem ser usados com `ask-agent`: os agentes instalados e as instâncias abertas.
-    pub fn peers(&self) -> Vec<String> {
+    /// Ids das instâncias abertas no projeto.
+    pub fn project_instance_ids(&self, project: &str) -> Vec<String> {
+        self.inner.instances.lock().get(project).map(instances::Instances::ids).unwrap_or_default()
+    }
+
+    /// Ids que podem ser usados com `ask-agent` no projeto: os agentes instalados e as instâncias
+    /// abertas nele (as de outros projetos não aparecem).
+    pub fn peers(&self, project: &str) -> Vec<String> {
         let mut out = self.inner.agents.peers();
-        for id in self.inner.instances.lock().ids() {
+        for id in self.project_instance_ids(project) {
             if !out.contains(&id) && Ident::parse(&id).is_some_and(|i| out.contains(&i.kind)) {
                 out.push(id);
             }
@@ -497,30 +534,166 @@ impl Core {
         self.inner.agents.bridge_instructions(self_id)
     }
 
-    // ---------- Workspace ----------
+    // ---------- Projetos ----------
 
-    pub fn workspace(&self) -> PathBuf {
-        self.inner.config.read().workspace.clone()
+    /// Projetos, na ordem da barra lateral.
+    pub fn projects(&self) -> Vec<ProjectCfg> {
+        self.inner.config.read().project_list.clone()
     }
 
-    /// Troca a pasta de trabalho (persistida), recria AGENTS.md e o watcher.
-    pub fn set_workspace(&self, dir: PathBuf) -> anyhow::Result<()> {
-        let dir = util::absolutize(&dir);
-        std::fs::create_dir_all(&dir)?;
-        self.update_config(|c| c.workspace = dir);
+    /// O projeto ativo (`None` = nenhum projeto).
+    pub fn active_project(&self) -> Option<ProjectCfg> {
+        self.inner.config.read().active().cloned()
+    }
+
+    /// Id do projeto ativo (vazio = nenhum).
+    pub fn active_project_id(&self) -> String {
+        self.inner.config.read().active_project.clone()
+    }
+
+    /// Pasta do projeto `id`.
+    pub fn project_path(&self, id: &str) -> Option<PathBuf> {
+        self.inner.config.read().project(id).map(|p| p.path.clone())
+    }
+
+    /// Cria (e grava) um projeto na pasta `path`; sem `name`, o nome é o da pasta. Se a pasta já
+    /// é de um projeto, devolve esse. Não troca o projeto ativo, a não ser que não haja nenhum:
+    /// aí o novo fica ativo.
+    pub fn create_project(&self, path: &Path, name: Option<&str>) -> ProjectCfg {
+        let path = util::absolutize(path);
+        let mut out = None;
+        self.update_config(|c| {
+            let project = match c.project_list.iter().find(|p| util::same_path(&p.path, &path)) {
+                Some(p) => p.clone(),
+                None => {
+                    let p = ProjectCfg::new(path, name, &c.project_list);
+                    c.project_list.push(p.clone());
+                    p
+                }
+            };
+            out = Some(project);
+        });
+        let project = out.expect("update_config roda o fechamento");
+        if self.active_project().is_none() {
+            if let Err(e) = self.set_active_project(&project.id) {
+                log::warn!("falha ao ativar o projeto {}: {e}", project.path.display());
+            }
+        }
+        project
+    }
+
+    /// Dá outro nome ao projeto (a pasta não muda). `false` se o projeto não existe ou o nome é vazio.
+    pub fn rename_project(&self, id: &str, name: &str) -> bool {
+        let name = name.trim();
+        !name.is_empty() && self.update_project(id, |p| p.name = name.to_owned())
+    }
+
+    /// Altera os dados de um projeto e grava (abas abertas, aba ativa, ordem e proporções das
+    /// janelas). O id e a pasta não mudam. `false` se o projeto não existe.
+    pub fn update_project(&self, id: &str, f: impl FnOnce(&mut ProjectCfg)) -> bool {
+        if self.inner.config.read().project(id).is_none() {
+            return false;
+        }
+        self.update_config(|c| {
+            if let Some(p) = c.project_list.iter_mut().find(|p| p.id == id) {
+                let (id, path) = (p.id.clone(), p.path.clone());
+                f(p);
+                p.id = id;
+                p.path = path;
+            }
+        });
+        true
+    }
+
+    /// Tira o projeto da lista: fecha as instâncias dele e falha as perguntas pendentes nele. Se
+    /// era o ativo, ativa o primeiro que sobrar (ou nenhum). `false` se o projeto não existe.
+    /// A pasta não é apagada.
+    pub fn remove_project(&self, id: &str) -> bool {
+        if self.project_path(id).is_none() {
+            return false;
+        }
+        let ids = self.inner.instances.lock().remove(id).map(|list| list.ids()).unwrap_or_default();
+        for instance in &ids {
+            self.close_instance(id, instance);
+        }
+        // Perguntas que sobraram no projeto (ex.: feitas pelo token mestre).
+        for p in self.inner.exchange.snapshot().into_iter().filter(|p| p.project == id) {
+            self.inner.exchange.fail(p.id, "o projeto foi removido");
+        }
+        self.inner.callers.lock().retain(|_, c| c.project != id);
+        let prefix = instances::scoped(id, "");
+        self.inner.headless_sessions.lock().retain(|k, _| !k.starts_with(&prefix));
+        self.inner.context_written.lock().remove(id);
+        let was_active = self.active_project_id() == id;
+        self.update_config(|c| {
+            c.project_list.retain(|p| p.id != id);
+            if c.active_project == id {
+                c.active_project = c.project_list.first().map(|p| p.id.clone()).unwrap_or_default();
+                c.workspace = c.active().map(|p| p.path.clone()).unwrap_or_default();
+            }
+        });
+        if was_active {
+            self.prepare_workspace();
+        }
+        true
+    }
+
+    /// Torna `id` o projeto ativo (persistido): a pasta dele vira o workspace (árvore, git,
+    /// anexos), e o AGENTS.md e o watcher são refeitos.
+    pub fn set_active_project(&self, id: &str) -> anyhow::Result<()> {
+        let Some(path) = self.project_path(id) else { anyhow::bail!("projeto desconhecido: {id}") };
+        std::fs::create_dir_all(&path)?;
+        self.update_config(|c| {
+            c.active_project = id.to_owned();
+            c.workspace = path;
+        });
         self.prepare_workspace();
         Ok(())
     }
 
+    /// Escreve o AGENTS.md na pasta de um projeto que não é o ativo, na primeira aba aberta nele
+    /// (o do ativo é mantido por [`Core::prepare_workspace`]).
+    fn ensure_project_context(&self, project: &str, path: &Path) {
+        if project == self.active_project_id() || !self.inner.context_written.lock().insert(project.to_owned()) {
+            return;
+        }
+        if let Err(e) = std::fs::create_dir_all(path) {
+            log::warn!("falha ao criar a pasta do projeto {}: {e}", path.display());
+        }
+        let instructions = self.bridge_instructions(None);
+        if let Err(e) = workspace::ensure_agent_context(path, &self.paths().app_dir, &self.inner.home, &instructions) {
+            log::warn!("falha ao atualizar AGENTS.md em {}: {e}", path.display());
+        }
+    }
+
+    // ---------- Workspace (a pasta do projeto ativo) ----------
+
+    /// Pasta do projeto ativo (vazia = nenhum projeto).
+    pub fn workspace(&self) -> PathBuf {
+        self.inner.config.read().workspace.clone()
+    }
+
+    /// Atalho: cria (se preciso) o projeto da pasta `dir` e o torna ativo.
+    pub fn set_workspace(&self, dir: PathBuf) -> anyhow::Result<()> {
+        let dir = util::absolutize(&dir);
+        std::fs::create_dir_all(&dir)?;
+        let project = self.create_project(&dir, None);
+        self.set_active_project(&project.id)
+    }
+
     /// Cria a pasta, atualiza o AGENTS.md e (re)inicia o watcher. Equivalente a `prepareWorkspace`.
+    /// Sem projeto ativo, só solta o watcher.
     fn prepare_workspace(&self) {
         let ws = self.workspace();
+        let mut guard = self.inner.watcher.lock();
+        *guard = None; // solta o watcher anterior antes de criar o novo
+        if ws.as_os_str().is_empty() {
+            return;
+        }
         if let Err(e) = std::fs::create_dir_all(&ws) {
             log::warn!("falha ao criar o workspace {}: {e}", ws.display());
         }
         self.refresh_agent_context();
-        let mut guard = self.inner.watcher.lock();
-        *guard = None; // solta o watcher anterior antes de criar o novo
         if self.inner.watch_workspace && ws.is_dir() {
             match workspace::start_watcher(&ws, Arc::downgrade(&self.inner)) {
                 Ok(w) => *guard = Some(w),
@@ -529,24 +702,38 @@ impl Core {
         }
     }
 
-    /// Reescreve o bloco do CommandDeck no AGENTS.md (respeitando as regras de onde criar).
+    /// Reescreve o bloco do CommandDeck no AGENTS.md do projeto ativo (respeitando as regras de
+    /// onde criar). Os outros projetos são reescritos na próxima aba aberta neles.
     fn refresh_agent_context(&self) {
+        self.inner.context_written.lock().clear();
+        let ws = self.workspace();
+        if ws.as_os_str().is_empty() {
+            return;
+        }
         let instructions = self.bridge_instructions(None);
-        if let Err(e) = workspace::ensure_agent_context(&self.workspace(), &self.paths().app_dir, &self.inner.home, &instructions) {
+        if let Err(e) = workspace::ensure_agent_context(&ws, &self.paths().app_dir, &self.inner.home, &instructions) {
             log::warn!("falha ao atualizar AGENTS.md: {e}");
         }
     }
 
     /// Lista uma pasta relativa ao workspace (`""` = raiz), já filtrada e ordenada
     /// (pastas primeiro, nome case-insensitive). Mesmo filtro de `workspace:readDir`.
+    /// Sem projeto ativo, nada.
     pub fn read_dir(&self, rel_dir: &str) -> Vec<DirEntry> {
-        workspace::read_dir(&self.workspace(), rel_dir)
+        let ws = self.workspace();
+        if ws.as_os_str().is_empty() {
+            return Vec::new();
+        }
+        workspace::read_dir(&ws, rel_dir)
     }
 
     /// Abre um arquivo do workspace no app padrão do sistema. Aceita caminhos relativos ao
     /// workspace ou absolutos dentro do workspace / da pasta `dados` (anexos).
     pub fn open_path(&self, rel_path: &str) -> anyhow::Result<()> {
         let ws = self.workspace();
+        if ws.as_os_str().is_empty() {
+            anyhow::bail!("nenhum projeto aberto");
+        }
         let full = match ollama::resolve_workspace_path(rel_path, &ws) {
             Ok(p) => p,
             Err(e) => {
@@ -607,21 +794,22 @@ impl Core {
         &self.inner.state.bridge_token
     }
 
-    /// Token da aba da instância `id` (o mesmo enquanto a instância existir).
-    pub(crate) fn tab_token(&self, id: &str) -> String {
+    /// Token da aba da instância `id` do projeto `project` (o mesmo enquanto a instância existir;
+    /// o `claude` de cada projeto tem o seu).
+    pub(crate) fn tab_token(&self, project: &str, id: &str) -> String {
         let mut callers = self.inner.callers.lock();
-        if let Some((token, _)) = callers.iter().find(|(_, c)| c.tab && c.id == id) {
+        if let Some((token, _)) = callers.iter().find(|(_, c)| c.tab && c.project == project && c.id == id) {
             return token.clone();
         }
         let token = random_token();
-        callers.insert(token.clone(), Caller { id: id.to_owned(), tab: true });
+        callers.insert(token.clone(), Caller { id: id.to_owned(), project: project.to_owned(), tab: true });
         token
     }
 
-    /// Token de uma execução headless de `id`, válido enquanto o guarda existir.
-    pub(crate) fn headless_token(&self, id: &str) -> TokenGuard {
+    /// Token de uma execução headless de `id` no projeto `project`, válido enquanto o guarda existir.
+    pub(crate) fn headless_token(&self, project: &str, id: &str) -> TokenGuard {
         let token = random_token();
-        self.inner.callers.lock().insert(token.clone(), Caller { id: id.to_owned(), tab: false });
+        self.inner.callers.lock().insert(token.clone(), Caller { id: id.to_owned(), project: project.to_owned(), tab: false });
         TokenGuard { inner: self.inner.clone(), token }
     }
 

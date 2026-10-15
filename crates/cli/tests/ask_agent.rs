@@ -30,7 +30,7 @@ fn start_core(root: &std::path::Path) -> Core {
         home_dir: Some(root.join("home")),
         ollama_discovery: false,
         watch_workspace: false,
-        config: Some(Config::default_for(&paths)),
+        config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,
     };
     Core::start_with(paths, opts).expect("start").0
@@ -167,7 +167,7 @@ fn usage_statusline_posts_and_prints() {
         std::fs::write(bin.join("claude.exe"), b"").expect("write");
     }
     let ident = commanddeck_core::Ident::parse("claude@dev").expect("id");
-    let token = core.spawn_spec_for(&ident).expect("spec").env["COMMANDDECK_TOKEN"].clone();
+    let token = core.spawn_spec_for(&core.active_project_id(), &ident).expect("spec").env["COMMANDDECK_TOKEN"].clone();
     let out = statusline(Some(&core), Some(&token), &config, &input);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let usage = core.usage_snapshot();

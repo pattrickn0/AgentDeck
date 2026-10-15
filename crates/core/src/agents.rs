@@ -734,13 +734,15 @@ pub fn ollama_agent_exe(bin_dir: &Path) -> PathBuf {
 }
 
 /// Monta o comando de uma aba interativa (equivalente a `pty:spawn`).
-pub(crate) fn spawn_spec(core: &Core, kind: &str) -> Result<SpawnSpec, String> {
-    spawn_spec_for(core, &Ident::main(kind))
+pub(crate) fn spawn_spec(core: &Core, project: &str, kind: &str) -> Result<SpawnSpec, String> {
+    spawn_spec_for(core, project, &Ident::main(kind))
 }
 
 /// Como [`spawn_spec`], para uma instância: `COMMANDDECK_AGENT` leva o id dela e o cargo vai
-/// em `COMMANDDECK_ROLE` e no prompt de sistema.
-pub(crate) fn spawn_spec_for(core: &Core, ident: &Ident) -> Result<SpawnSpec, String> {
+/// em `COMMANDDECK_ROLE` e no prompt de sistema. O terminal abre na pasta do projeto `project`
+/// (na primeira aba de um projeto que não é o ativo, o AGENTS.md dele é escrito).
+pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
+    let cwd = core.project_path(project).ok_or_else(|| format!("Projeto desconhecido: {project}"))?;
     let kind = ident.kind.as_str();
     let id = ident.id();
     let reg = &core.inner.agents;
@@ -748,7 +750,7 @@ pub(crate) fn spawn_spec_for(core: &Core, ident: &Ident) -> Result<SpawnSpec, St
     let base = if sub_model.is_some() { "ollama" } else { kind };
     let def = agent_def(base).ok_or_else(|| format!("Agente desconhecido: {kind}"))?;
     let data_dir = core.paths().data_dir.to_string_lossy().into_owned();
-    let mut env = agent_env(core, &id, 0, &core.tab_token(&id));
+    let mut env = agent_env(core, &id, 0, &core.tab_token(project, &id));
     if let Some(role) = &ident.role {
         env.insert("COMMANDDECK_ROLE".into(), role.clone());
     }
@@ -797,10 +799,11 @@ pub(crate) fn spawn_spec_for(core: &Core, ident: &Ident) -> Result<SpawnSpec, St
         (resolved.program, full, def.label.to_owned())
     };
 
+    core.ensure_project_context(project, &cwd);
     Ok(SpawnSpec {
         program,
         args,
-        cwd: core.workspace(),
+        cwd,
         env,
         label,
         color: def.color.to_owned(),

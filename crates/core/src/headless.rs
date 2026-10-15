@@ -21,8 +21,13 @@ pub const HEADLESS_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Opções de [`Core::run_headless`].
 #[derive(Debug, Clone, Default)]
 pub struct HeadlessOptions {
-    /// Chave da conversa (`"<de>-><para>"`); `None` = sem histórico.
+    /// Chave da conversa (`"<de>-><para>"`, com o escopo do projeto: ver `instances::scoped`);
+    /// `None` = sem histórico.
     pub session_key: Option<String>,
+    /// Projeto de quem pergunta: o `ask-agent` do agente só enxerga as instâncias dele.
+    pub project: String,
+    /// Pasta onde o agente roda (a do projeto); vazia = a do projeto ativo.
+    pub cwd: std::path::PathBuf,
     pub depth: i64,
     /// Substitui as instruções da ponte no prompt de sistema (Claude/Ollama).
     pub extra_system: Option<String>,
@@ -128,23 +133,27 @@ impl Core {
         let base = if sub_model.is_some() { "ollama" } else { resolve_alias(agent) };
         let def = agent_def(base).ok_or_else(|| anyhow::anyhow!("Agente desconhecido: {agent}"))?;
         let reg = &self.inner.agents;
+        let workspace = if opts.cwd.as_os_str().is_empty() { self.workspace() } else { opts.cwd.clone() };
+        let project = opts.project.clone();
 
         if base == "ollama" {
             let resolved = reg.resolve_ollama(sub_model).ok_or_else(|| anyhow::anyhow!("{}", def.missing))?;
             let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
             let model = if model.is_empty() { DEFAULT_OLLAMA_MODEL.to_owned() } else { model };
-            let mut ro = RunOptions::new(model, prompt, self.workspace());
+            let mut ro = RunOptions::new(model, prompt, workspace.clone());
             ro.session_key = opts.session_key;
             ro.extra_system = opts.extra_system;
             ro.attachments = opts.attachments;
             // `ask-agent` chamado pelo modelo enxerga a ponte (com a profundidade correta).
             // Token próprio desta execução: a ponte sabe quem pergunta, sem confiar no `from`.
-            let guard = self.headless_token(agent);
+            let guard = self.headless_token(&project, agent);
             ro.command_env = Some(agents::agent_env(self, agent, opts.depth, &guard.token));
             let core = self.clone();
             let out = self.inner.ollama.run(ro, cancel, &mut |ev| {
                 if let AgentEvent::ToolCall { name, summary } = ev {
-                    core.feed(FeedEntry::new(FeedKind::Thinking, Some("ollama"), None, format!("⚙️ [{name}] {summary}")));
+                    core.feed(
+                        FeedEntry::new(FeedKind::Thinking, Some("ollama"), None, format!("⚙️ [{name}] {summary}")).in_project(&project),
+                    );
                 }
             })?;
             if out.cancelled {
@@ -155,7 +164,6 @@ impl Core {
 
         let resolved = reg.resolve(base).ok_or_else(|| anyhow::anyhow!("{}", def.missing))?;
         let data_dir = self.paths().data_dir.to_string_lossy().into_owned();
-        let workspace = self.workspace();
 
         // Ponto de extensão (RAG futuro): nenhum provedor registrado hoje.
         let chunks = context::gather(&self.inner.providers, &ContextRequest { agent, prompt, workspace: &workspace });
@@ -190,7 +198,7 @@ impl Core {
             "antigravity" => {
                 args.extend([
                     "-p".into(),
-                    self.prompt_arg(prompt, via_cmd),
+                    self.prompt_arg(&workspace, prompt, via_cmd),
                     "--output-format".into(),
                     "json".into(),
                     "--print-timeout".into(),
@@ -219,21 +227,21 @@ impl Core {
                 stdin.clear();
             }
             "copilot" => {
-                args.extend(["explain".into(), self.prompt_arg(prompt, via_cmd)]);
+                args.extend(["explain".into(), self.prompt_arg(&workspace, prompt, via_cmd)]);
                 stdin.clear();
             }
             "q" => {
-                args.extend(["chat".into(), "--message".into(), self.prompt_arg(prompt, via_cmd)]);
+                args.extend(["chat".into(), "--message".into(), self.prompt_arg(&workspace, prompt, via_cmd)]);
                 stdin.clear();
             }
             "interpreter" => {
-                args.extend(["-y".into(), "--prompt".into(), self.prompt_arg(prompt, via_cmd)]);
+                args.extend(["-y".into(), "--prompt".into(), self.prompt_arg(&workspace, prompt, via_cmd)]);
                 stdin.clear();
             }
             // `codex exec -`: o prompt vem pela entrada padrão; só a resposta final vai ao stdout.
             "codex" => args.extend(["exec", "--skip-git-repo-check", "-"].map(String::from)),
             "opencode" => {
-                args.extend(["run".into(), self.prompt_arg(prompt, via_cmd)]);
+                args.extend(["run".into(), self.prompt_arg(&workspace, prompt, via_cmd)]);
                 stdin.clear();
             }
             _ => {}
@@ -243,7 +251,7 @@ impl Core {
             // Arquivos em lote não recebem quebras de linha nos argumentos (ex.: o prompt de sistema).
             args = args.into_iter().map(|a| a.replace("\r\n", " ").replace(['\r', '\n'], " ")).collect();
         }
-        let guard = self.headless_token(agent);
+        let guard = self.headless_token(&project, agent);
         let mut cmd = std::process::Command::new(&program);
         cmd.args(&args).current_dir(&workspace).env_clear().envs(agents::agent_env(self, agent, opts.depth, &guard.token));
         let captured = run_captured(cmd, Some(stdin.into_bytes()), HEADLESS_TIMEOUT, None, Some(&self.inner.processes))
@@ -313,11 +321,11 @@ impl Core {
 
     /// O prompt como argumento, ou a instrução de ler o arquivo dele (ver [`Core::prompt_file_if`]).
     /// Equivalente a `agyPromptArg`.
-    fn prompt_arg(&self, prompt: &str, force: bool) -> String {
+    fn prompt_arg(&self, workspace: &std::path::Path, prompt: &str, force: bool) -> String {
         match self.prompt_file_if(prompt, force) {
             Some(file) => format!(
                 "A mensagem completa está no arquivo {}. Leia o arquivo inteiro e responda seguindo o que ele pede.",
-                crate::util::ref_path(&self.workspace(), std::path::Path::new(&file))
+                crate::util::ref_path(workspace, std::path::Path::new(&file))
             ),
             None => prompt.to_owned(),
         }

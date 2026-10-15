@@ -32,9 +32,13 @@ struct Pending {
 }
 
 /// Retrato de uma pergunta pendente (para o mapa de conversas da interface).
+///
+/// As chaves internas têm o escopo do projeto (`<projeto>#<id>`, ver [`crate::instances::scoped`]);
+/// aqui vêm separadas: `project` e os ids sem o projeto. Uma chave sem escopo dá `project` vazio.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingInfo {
     pub id: u64,
+    pub project: String,
     pub asker: String,
     pub target: String,
     pub depth: i64,
@@ -194,13 +198,17 @@ impl Exchange {
             .lock()
             .list
             .iter()
-            .map(|p| PendingInfo {
-                id: p.id,
-                asker: p.asker.clone(),
-                target: p.target.clone(),
-                depth: p.depth,
-                since_ms: p.since_ms,
-                detached: p.detached,
+            .map(|p| {
+                let (project, asker) = crate::instances::unscoped(&p.asker);
+                PendingInfo {
+                    id: p.id,
+                    project: project.to_owned(),
+                    asker: asker.to_owned(),
+                    target: crate::instances::unscoped(&p.target).1.to_owned(),
+                    depth: p.depth,
+                    since_ms: p.since_ms,
+                    detached: p.detached,
+                }
             })
             .collect()
     }
@@ -340,6 +348,7 @@ mod tests {
         assert!(ex.snapshot()[0].detached);
         ex.reply("b", "a", "ok");
         assert_eq!(ex.snapshot().len(), 1);
+        assert_eq!(ex.snapshot()[0].project, "", "chave sem escopo");
         ex.detach(a); // já removida: nada acontece
         assert_eq!(ex.snapshot().len(), 1);
     }
@@ -357,6 +366,23 @@ mod tests {
         assert!(ex.register("antigravity", "claude").is_ok());
         // A profundidade continua contando a pergunta destacada.
         assert_eq!(ex.chain_depth("claude@dev"), 1);
+    }
+
+    #[test]
+    fn scoped_keys_keep_projects_apart_and_the_snapshot_splits_them() {
+        use crate::instances::scoped;
+        let ex = Exchange::default();
+        let (a, b) = ("p00000001", "p00000002");
+        ex.register_at(&scoped(a, "claude"), &scoped(a, "claude@dev"), 0).unwrap();
+        // O mesmo par em outro projeto não é ciclo nem conta na profundidade de lá.
+        assert!(!ex.would_cycle(&scoped(b, "claude@dev"), &scoped(b, "claude")));
+        assert!(ex.would_cycle(&scoped(a, "claude@dev"), &scoped(a, "claude")));
+        assert_eq!(ex.chain_depth(&scoped(b, "claude@dev")), 0);
+        assert_eq!(ex.chain_depth(&scoped(a, "claude@dev")), 1);
+        // Responder no projeto errado não entrega.
+        assert!(!ex.reply(&scoped(b, "claude@dev"), &scoped(b, "claude"), "x"));
+        let snap = ex.snapshot();
+        assert_eq!((snap[0].project.as_str(), snap[0].asker.as_str(), snap[0].target.as_str()), (a, "claude", "claude@dev"));
     }
 
     #[test]
