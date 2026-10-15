@@ -98,6 +98,19 @@ impl Exchange {
         asker == target || reaches(&self.state.lock().list, target, asker)
     }
 
+    /// Renomeia uma instância nas perguntas pendentes.
+    pub fn rename(&self, old_id: &str, new_id: &str) {
+        let mut st = self.state.lock();
+        for p in &mut st.list {
+            if p.asker == old_id {
+                p.asker = new_id.to_owned();
+            }
+            if p.target == old_id {
+                p.target = new_id.to_owned();
+            }
+        }
+    }
+
     /// Profundidade de uma pergunta nova feita por `asker`: 0 se ninguém espera resposta dele;
     /// senão, uma a mais que a pergunta mais profunda que ele está respondendo. Com abas, a
     /// profundidade não viaja pelo ambiente (a pergunta é digitada), então é medida aqui.

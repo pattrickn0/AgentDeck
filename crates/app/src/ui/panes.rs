@@ -128,6 +128,8 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     match tabs::strip(deck, ui, strip_rect, &plan.tabs, plan.shown, focused || !multi, Id::new(("pane-tabs", &group))) {
         Some(StripClick::Activate(i)) => clicks.push(Click::Focus(i)),
         Some(StripClick::Close(i)) => clicks.push(Click::Close(i)),
+        Some(StripClick::Rename(i)) => deck.start_rename_tab(i),
+        Some(StripClick::ContextMenu(i, pos)) => deck.tab_context_menu = Some((i, pos)),
         None => {}
     }
 

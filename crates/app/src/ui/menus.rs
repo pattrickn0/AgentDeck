@@ -1,6 +1,6 @@
 //! Menus suspensos: nova aba (+), configurações (engrenagem) e lista do "Enviar para".
 
-use egui::{Align2, Area, Id, Order, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{Align2, Area, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::{dot, frame, galley_trunc, place, shadow, text_in, text_w};
 use crate::deck::Deck;
@@ -254,3 +254,178 @@ pub fn target_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         deck.target_menu_open = false;
     }
 }
+
+/// Menu de contexto ao clicar com botão direito numa aba.
+pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
+    let Some((idx, pos)) = deck.tab_context_menu else { return };
+    if idx >= deck.tabs.len() {
+        deck.tab_context_menu = None;
+        return;
+    }
+    let w = 130.0;
+    let item_h = 26.0;
+    let h = item_h * 2.0 + 8.0;
+    let pos = keep_on_screen(ctx, pos, Vec2::new(w, h));
+    let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
+    let mut action = None;
+    Area::new(Id::new("tab-context-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
+        let p = ui.painter();
+        shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.55));
+        frame(p, rect, 6.0, theme::PANEL_2, theme::BORDER);
+        let font = theme::ui(12.5);
+
+        // "Renomear"
+        let r1 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, rect.min.y + 4.0), Vec2::new(w - 8.0, item_h));
+        let resp1 = super::clickable(ui, r1, Id::new("tab-ctx-rename"));
+        if resp1.hovered() {
+            p.rect_filled(r1, 4.0, theme::BORDER);
+        }
+        text_in(p, r1.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Renomear", font.clone(), theme::TEXT);
+        if resp1.clicked() {
+            action = Some(1);
+        }
+
+        // "Fechar"
+        let r2 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, r1.max.y), Vec2::new(w - 8.0, item_h));
+        let resp2 = super::clickable(ui, r2, Id::new("tab-ctx-close"));
+        if resp2.hovered() {
+            p.rect_filled(r2, 4.0, theme::BORDER);
+        }
+        text_in(p, r2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Fechar", font, theme::TEXT);
+        if resp2.clicked() {
+            action = Some(2);
+        }
+    });
+
+    match action {
+        Some(1) => {
+            deck.tab_context_menu = None;
+            deck.start_rename_tab(idx);
+        }
+        Some(2) => {
+            deck.tab_context_menu = None;
+            deck.close_tab(idx);
+        }
+        _ => {
+            if ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu_rect.contains(p))) {
+                deck.tab_context_menu = None;
+            }
+        }
+    }
+}
+
+/// Modal para renomear um agente / instância (formato modelo@cargo@nome).
+pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
+    let Some((idx, mut buffer, error)) = deck.rename_tab.clone() else { return };
+    if idx >= deck.tabs.len() {
+        deck.rename_tab = None;
+        return;
+    }
+    let screen = ctx.content_rect();
+    // Backdrop escuro
+    ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("rename-backdrop")))
+        .rect_filled(screen, 0.0, theme::rgba(0, 0, 0, 0.5));
+
+    let w = 360.0;
+    let h = if error.is_some() { 165.0 } else { 145.0 };
+    let center = screen.center();
+    let rect = Rect::from_center_size(center, Vec2::new(w, h));
+    let mut close = false;
+    let mut apply = false;
+
+    Area::new(Id::new("rename-tab-modal"))
+        .order(Order::Tooltip)
+        .fixed_pos(rect.min)
+        .show(ctx, |ui| {
+            let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
+            let p = ui.painter().clone();
+            shadow(&p, r, 0, 8, 30, theme::rgba(0, 0, 0, 0.7));
+            frame(&p, r, 10.0, theme::PANEL_2, theme::BORDER);
+
+            let mut y = r.min.y + 16.0;
+            // Título
+            let title_g = super::galley(&p, "Renomear Agente", theme::ui_semibold(15.0), theme::TEXT);
+            super::place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 20.0)), Align2::LEFT_CENTER, title_g, theme::TEXT);
+            y += 24.0;
+
+            // Explicação
+            let hint_g = super::galley(&p, "Formato: modelo@cargo@nome (ex: claude@dev ou antigravity@lead)", theme::ui(11.5), theme::MUTED);
+            super::place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)), Align2::LEFT_CENTER, hint_g, theme::MUTED);
+            y += 22.0;
+
+            // Caixa de texto
+            let input_r = Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 28.0));
+            p.rect_filled(input_r, 6.0, theme::BG);
+            p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink2(Vec2::new(8.0, 4.0))));
+            let input_id = Id::new("rename-tab-input");
+            let te = egui::TextEdit::singleline(&mut buffer)
+                .id(input_id)
+                .frame(egui::Frame::NONE)
+                .font(theme::mono(13.0))
+                .text_color(theme::TEXT)
+                .desired_width(input_r.width() - 16.0);
+            let out = te.show(&mut child);
+            out.response.request_focus();
+            if out.response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                apply = true;
+            }
+            if ui.input(|i| i.key_pressed(Key::Enter)) {
+                apply = true;
+            }
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                close = true;
+            }
+            y += 34.0;
+
+            // Erro se houver
+            if let Some(err) = &error {
+                let err_g = super::galley_trunc(&p, err, theme::ui(11.5), theme::RED_TEXT, w - 40.0);
+                super::place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)), Align2::LEFT_CENTER, err_g, theme::RED_TEXT);
+                y += 20.0;
+            }
+
+            // Botões Cancelar e Salvar
+            let btn_w = 80.0;
+            let btn_h = 26.0;
+            let save_r = Rect::from_min_size(Pos2::new(r.max.x - 20.0 - btn_w, y), Vec2::new(btn_w, btn_h));
+            let cancel_r = Rect::from_min_size(Pos2::new(save_r.min.x - 10.0 - btn_w, y), Vec2::new(btn_w, btn_h));
+
+            let cr = super::clickable(ui, cancel_r, Id::new("rename-cancel-btn"));
+            if cr.hovered() {
+                p.rect_filled(cancel_r, 6.0, theme::BORDER);
+            } else {
+                p.rect_filled(cancel_r, 6.0, theme::PANEL);
+            }
+            text_in(&p, cancel_r, Align2::CENTER_CENTER, "Cancelar", theme::ui(12.5), theme::MUTED);
+            if cr.clicked() {
+                close = true;
+            }
+
+            let sr = super::clickable(ui, save_r, Id::new("rename-save-btn"));
+            if sr.hovered() {
+                p.rect_filled(save_r, 6.0, theme::brighten(theme::ACCENT, 1.15));
+            } else {
+                p.rect_filled(save_r, 6.0, theme::ACCENT);
+            }
+            text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::WHITE);
+            if sr.clicked() {
+                apply = true;
+            }
+        });
+
+    if close {
+        deck.rename_tab = None;
+    } else if apply {
+        match deck.apply_rename_tab(idx, &buffer) {
+            Ok(()) => {}
+            Err(e) => {
+                deck.rename_tab = Some((idx, buffer, Some(e)));
+            }
+        }
+    } else {
+        deck.rename_tab = Some((idx, buffer, error));
+    }
+}
+

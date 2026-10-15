@@ -9,6 +9,8 @@ use crate::theme;
 pub enum StripClick {
     Activate(usize),
     Close(usize),
+    Rename(usize),
+    ContextMenu(usize, Pos2),
 }
 
 const TAB_FONT: f32 = 13.0;
@@ -112,7 +114,12 @@ pub fn strip(deck: &Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize, foc
 
         if tip(close_resp, "Fechar").clicked() {
             click = Some(StripClick::Close(i));
-        } else if tip(resp, tab.label.clone()).clicked() {
+        } else if resp.double_clicked() {
+            click = Some(StripClick::Rename(i));
+        } else if resp.secondary_clicked() {
+            let pos = ui.input(|inp| inp.pointer.latest_pos()).unwrap_or_else(|| r.center());
+            click = Some(StripClick::ContextMenu(i, pos));
+        } else if tip(resp, format!("{}\nDuplo clique ou botão direito para renomear", tab.label)).clicked() {
             click = Some(StripClick::Activate(i));
         }
     }

@@ -132,6 +132,20 @@ impl Instances {
         self.list.len() != before
     }
 
+    /// Renomeia uma instância existente. Retorna erro se o id novo já estiver em uso
+    /// ou se a instância original não for encontrada.
+    pub fn rename(&mut self, old_id: &str, new_ident: Ident) -> Result<(), String> {
+        let new_id = new_ident.id();
+        if old_id != new_id && self.contains(&new_id) {
+            return Err(format!("já existe uma instância com o id \"{new_id}\""));
+        }
+        let Some(pos) = self.list.iter().position(|i| i.id() == old_id) else {
+            return Err(format!("instância \"{old_id}\" não encontrada"));
+        };
+        self.list[pos] = new_ident;
+        Ok(())
+    }
+
     /// Cria e registra uma instância **nova** do modelo/cargo: sem nome se o par modelo+cargo
     /// está livre; senão com o primeiro nome livre. `preferred` é um nome pedido, usado se estiver livre.
     pub fn allocate(&mut self, kind: &str, role: Option<&str>, preferred: Option<&str>) -> Ident {
@@ -323,4 +337,16 @@ mod tests {
         assert_eq!((a.id().as_str(), c), ("ollama:qwen3.5:4b@qa", true));
         assert_eq!(a.kind, "ollama:qwen3.5:4b");
     }
+
+    #[test]
+    fn rename_instance_works_and_checks_duplicates() {
+        let mut r = Instances::default();
+        r.register(id("claude@dev"));
+        r.register(id("claude@design"));
+        assert!(r.rename("claude@inexistente", id("claude@test")).is_err());
+        assert!(r.rename("claude@dev", id("claude@design")).is_err());
+        assert!(r.rename("claude@dev", id("claude@lead")).is_ok());
+        assert_eq!(r.ids(), vec!["claude@lead", "claude@design"]);
+    }
 }
+

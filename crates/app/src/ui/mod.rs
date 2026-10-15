@@ -99,6 +99,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     menus::new_tab_menu(deck, &ctx, menus.new_tab_anchor);
     menus::settings_menu(deck, &ctx, menus.settings_anchor);
     menus::target_menu(deck, &ctx, composer_anchor);
+    menus::tab_context_menu(deck, &ctx);
+    menus::rename_tab_modal(deck, &ctx);
     overlay::drop_overlay(deck, &ctx, full);
 
     // O compositor tem foco de teclado → o terminal não.

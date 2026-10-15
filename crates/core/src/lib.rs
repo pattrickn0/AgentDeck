@@ -432,6 +432,19 @@ impl Core {
         self.inner.exchange.fail_asker(id, &format!("a aba de \"{id}\" foi fechada"));
     }
 
+    /// Renomeia uma instância aberta (atualiza instâncias, callers e perguntas pendentes).
+    pub fn rename_instance(&self, old_id: &str, new_ident: &Ident) -> Result<(), String> {
+        self.inner.instances.lock().rename(old_id, new_ident.clone())?;
+        let new_id = new_ident.id();
+        for caller in self.inner.callers.lock().values_mut() {
+            if caller.id == old_id {
+                caller.id = new_id.clone();
+            }
+        }
+        self.inner.exchange.rename(old_id, &new_id);
+        Ok(())
+    }
+
     /// O processo da instância terminou (a aba continua aberta): quem esperava a resposta dela é liberado.
     pub fn instance_ended(&self, id: &str) {
         self.inner.exchange.fail_target(id, &format!("o processo de \"{id}\" encerrou antes de responder"));

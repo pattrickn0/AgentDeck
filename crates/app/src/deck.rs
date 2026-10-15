@@ -245,6 +245,10 @@ pub struct Deck {
     pub new_tab_menu_open: bool,
     pub settings_open: bool,
     pub target_menu_open: bool,
+    /// Aba sendo renomeada pelo usuário (índice, buffer de edição, erro opcional).
+    pub rename_tab: Option<(usize, String, Option<String>)>,
+    /// Menu de contexto aberto em uma aba (índice da aba, posição do clique).
+    pub tab_context_menu: Option<(usize, egui::Pos2)>,
     pub sound_enabled: bool,
     /// Espelho de `Config.auto_open_agent_tabs` (item do menu de configurações).
     pub auto_open_agent_tabs: bool,
@@ -349,6 +353,8 @@ impl Deck {
             new_tab_menu_open: false,
             settings_open: false,
             target_menu_open: false,
+            rename_tab: None,
+            tab_context_menu: None,
             sound_enabled: cfg.sound_enabled,
             auto_open_agent_tabs: cfg.auto_open_agent_tabs,
             drop_hover: false,
@@ -1030,6 +1036,66 @@ impl Deck {
             _ => {}
         }
         self.persist_tabs_now();
+    }
+
+    pub fn start_rename_tab(&mut self, idx: usize) {
+        if idx < self.tabs.len() {
+            let id = self.tabs[idx].ident.id();
+            self.rename_tab = Some((idx, id, None));
+            self.tab_context_menu = None;
+        }
+    }
+
+    pub fn apply_rename_tab(&mut self, idx: usize, new_text: &str) -> Result<(), String> {
+        if idx >= self.tabs.len() {
+            return Err("aba não encontrada".into());
+        }
+        let old_id = self.tabs[idx].ident.id();
+        let kind = self.tabs[idx].kind.clone();
+        let trimmed = new_text.trim();
+        let full_text = if trimmed.starts_with(&format!("{kind}@")) || trimmed == kind {
+            trimmed.to_owned()
+        } else if trimmed.contains('@') {
+            trimmed.to_owned()
+        } else if trimmed.is_empty() {
+            kind.clone()
+        } else {
+            format!("{kind}@{trimmed}")
+        };
+        let Some(new_ident) = Ident::parse(&full_text) else {
+            return Err(format!("formato inválido: \"{trimmed}\". Use modelo@cargo@nome (ex.: {kind}@dev ou {kind}@dev@ana)"));
+        };
+        if new_ident.kind != kind {
+            return Err(format!("o modelo não pode ser alterado de \"{kind}\" para \"{}\"", new_ident.kind));
+        }
+        let new_id = new_ident.id();
+        if new_id != old_id {
+            self.core.rename_instance(&old_id, &new_ident)?;
+            let new_label = new_ident.label(&self.agents.name(&kind));
+            self.tabs[idx].ident = new_ident;
+            self.tabs[idx].label = new_label;
+            // Atualiza itens existentes na conversa integrada
+            for item in &mut self.feed {
+                if item.who.as_deref() == Some(&old_id) {
+                    item.who = Some(new_id.clone());
+                }
+                if item.to.as_deref() == Some(&old_id) {
+                    item.to = Some(new_id.clone());
+                }
+            }
+            // Atualiza histórico recente do mapa
+            for r in &mut self.recent {
+                if r.from == old_id {
+                    r.from = new_id.clone();
+                }
+                if r.to == old_id {
+                    r.to = new_id.clone();
+                }
+            }
+            self.persist_tabs();
+        }
+        self.rename_tab = None;
+        Ok(())
     }
 
     pub fn active_tab(&self) -> Option<&Tab> {
