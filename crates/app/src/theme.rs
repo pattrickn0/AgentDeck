@@ -35,7 +35,7 @@ pub const PLACEHOLDER: Color32 = rgb(0x85858e);
 pub const SEND_DEFAULT: Color32 = rgb(0x7cc4fa);
 /// Cor do texto do botão Enviar/Commit desabilitado (contraste >= 4.5:1 sobre PANEL e PANEL_2, mais apagado que MUTED).
 pub const SEND_IDLE_TEXT: Color32 = rgb(0x82828c);
-pub const STOP_BG: Color32 = rgb(0x444444);
+
 /// `whoColor()` para remetentes sem cor conhecida (ex.: "você").
 pub const WHO_DEFAULT: Color32 = rgb(0xc9c9d1);
 /// Cor própria para mensagens do usuário na Conversa integrada (verde esmeralda, distinta das IAs).

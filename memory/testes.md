@@ -19,39 +19,37 @@ Gemini **removido** (item 9).
 
 ## 0. Preparação
 
-- [ ] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\commanddeck.exe` (os três `.exe` na mesma pasta).
-- [ ] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
-- [ ] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
+- [x] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\commanddeck.exe` (os três `.exe` na mesma pasta).
+- [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
+- [x] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
+- [ ] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
 - [ ] Trocar a pasta de trabalho para um projeto seu que seja repositório git (clique no caminho na topbar), ou usar a pasta `workspace/` padrão.
 
 ## 1. Barra direita ★
 
-- [ ] A Conversa integrada e o compositor aparecem à **direita**, ocupando a altura toda; as janelas dos terminais ocupam a altura toda no centro.
-- [ ] Arrastar a borda esquerda da barra muda a largura (entre ~280 px e ~metade da janela; o padrão agora é 330 px, um pouco mais estreito); **não existe** como recolher.
-- [ ] Fechar e reabrir o app: a largura escolhida volta igual.
-- [ ] Diminuir a janela até o mínimo (~820 px de largura): nada se sobrepõe; o terminal continua usável.
-- [ ] Compositor: "Enviar para" + seletor na 1ª linha, anexos embaixo, caixa de texto na largura toda, microfone/anexo à esquerda e **Enviar** à direita.
-- [ ] Abrir o seletor "Enviar para" com a barra estreita: a lista fica **inteira dentro da tela** e dá para escolher um item (o menu não fecha sozinho no clique).
-- [ ] Menu "+" (nova aba) perto da borda direita da janela: abre dentro da tela e a escolha funciona.
-- [ ] Download do Whisper (se aparecer): a faixa de progresso fica logo abaixo do topo da barra.
+- [x] A Conversa integrada e o compositor aparecem à **direita**, ocupando a altura toda; as janelas dos terminais ocupam a altura toda no centro.
+- [x] Arrastar a borda esquerda da barra muda a largura (entre ~280 px e ~metade da janela; o padrão agora é 330 px, um pouco mais estreito); **não existe** como recolher.
+- [x] Fechar e reabrir o app: a largura escolhida volta igual.
+- [x] Diminuir a janela até o mínimo (~820 px de largura): nada se sobrepõe; o terminal continua usável.
+- [ ] Compositor: **sem** o seletor "Enviar para"; anexos (se houver) em cima, caixa de texto na largura toda, microfone/anexo à esquerda e **Enviar** à direita. A mensagem vai **só para a aba ativa** (sem aba ativa viva: aviso na Conversa).
+- [x] Menu "+" (nova aba) perto da borda direita da janela: abre dentro da tela e a escolha funciona.
+- [x] Download do Whisper (se aparecer): a faixa de progresso fica logo abaixo do topo da barra.
 
 ## 2. Ícones do topo da barra ★
 
-- [ ] Três ícones: **balões** (Conversa), **diagrama** (Mapa), **branch** (Git). Passar o mouse mostra o nome de cada um.
-- [ ] Os ícones ficam nítidos (sem serrilhado estranho) e o ícone de branch mostra os **círculos vazados**.
-- [ ] Ficar no Mapa ou no Git enquanto chegam mensagens: aparece um **número** sobre o ícone da Conversa; voltar à Conversa zera.
-- [ ] "Limpar" só aparece na Conversa.
+- [x] Três ícones: **balões** (Conversa), **diagrama** (Mapa), **branch** (Git). Passar o mouse mostra o nome de cada um.
+- [x] Os ícones ficam nítidos (sem serrilhado estranho) e o ícone de branch mostra os **círculos vazados**.
+- [X] Ficar no Mapa ou no Git enquanto chegam mensagens: aparece um **número** sobre o ícone da Conversa; voltar à Conversa zera.
+- [X] "Limpar" só aparece na Conversa.
 
 ## 3. Tela dividida ★
 
-Comece com uma aba do Claude e uma do Antigravity.
 
-- [ ] Claude e Antigravity aparecem **lado a lado**, cada um com o próprio cabeçalho de abas.
-- [ ] "+" no cabeçalho do Claude: a 2ª aba do Claude entra **na mesma janela** (não divide de novo).
-- [ ] Abrir um Ollama (ou Codex, ou Terminal) pelo "+" da topbar: a tela vira **2 em cima + 1 largo embaixo**. Com o 4º tipo, 2×2.
-- [ ] Dois modelos do Ollama ficam na **mesma janela**, um em cada aba. `claude@dev` fica na janela do Claude.
-- [ ] Clicar numa janela: ela ganha o **contorno na cor do agente** e o que você digita vai para ela; "Enviar para → Aba ativa" manda para ela.
-- [ ] A rolagem do mouse funciona na janela sob o ponteiro, mesmo sem foco.
+- [x] "+" no cabeçalho do Claude: a 2ª aba do Claude entra **na mesma janela** (não divide de novo).
+- [x] Abrir um Ollama (ou Codex, ou Terminal) pelo "+" da topbar: a tela vira **2 em cima + 1 largo embaixo**. Com o 4º tipo, 2×2.
+- [x] Dois modelos do Ollama ficam na **mesma janela**, um em cada aba. `claude@dev` fica na janela do Claude.
+- [x] Clicar numa janela: ela ganha o **contorno na cor do agente** e o que você digita vai para ela; o compositor manda para ela.
+- [] A rolagem do mouse funciona na janela sob o ponteiro, mesmo sem foco.
 - [ ] Ctrl+Tab troca de aba **só dentro** da janela focada; Ctrl+Alt+← → ↑ ↓ passa o foco para a janela vizinha (anotar se o driver de vídeo girar a tela com esse atalho).
 - [ ] Arrastar o divisor entre janelas muda o tamanho; duplo clique iguala; fechar e reabrir o app mantém.
 - [ ] Arrastar a alça **⋮⋮** de uma janela sobre outra: aparece "Soltar para trocar de lugar" e, ao soltar, as duas trocam. A ordem volta igual ao reabrir.
@@ -91,7 +89,6 @@ Abra uma aba do Claude e uma do Antigravity.
 - [ ] Agentes sem conversa aparecem em `SEM CONVERSA` com ● ocupado / ○ livre / × encerrado.
 - [ ] Clicar num agente no mapa abre a aba dele.
 - [ ] Os traços `─│├└►` e os símbolos `●○×` ficam **alinhados** (colunas certas) na fonte do Windows.
-- [ ] Rodar uma **mesa** (Enviar para → mesa): aparece `MESA · rodada x/y` com quem está falando.
 
 ## 7. Git ★
 
@@ -124,10 +121,10 @@ Com a pasta de trabalho num repositório git:
 
 ## 9. Agentes novos e shims do Windows
 
-- [ ] O **Gemini não aparece** mais no "+", no "Enviar para" nem no `ask-agent --list` (o Antigravity é o agente do Google).
+- [ ] O **Gemini não aparece** mais no "+" nem no `ask-agent --list` (o Antigravity é o agente do Google).
 - [ ] **Codex**: abre pela aba "+"; ao terminar um turno, a fila de perguntas anda (aviso `notify`). Se ele pedir aprovação para rodar `ask-agent`, anotar.
 - [ ] **OpenCode**: abre pela aba "+" e responde a um `ask-agent opencode "oi"`.
-- [ ] Agente instalado **via npm sem `.exe`** (ex.: Codex ou OpenCode, `codex.cmd`/`opencode.cmd`): responder a uma pergunta numa **mesa** com uma mensagem com aspas, `&`, `|` e várias linhas → a resposta vem e **nada é executado** no cmd.
+- [ ] Agente instalado **via npm sem `.exe`** (ex.: Codex ou OpenCode, `codex.cmd`/`opencode.cmd`): responder a um `ask-agent` sem aba aberta (headless) com uma mensagem com aspas, `&`, `|` e várias linhas → a resposta vem e **nada é executado** no cmd.
 - [ ] Codex, OpenCode, Aider, Goose, Copilot, Amazon Q, Open Interpreter (os que tiver): ao receber uma pergunta numa aba, pedem aprovação para rodar `ask-agent`? Anotar quais pedem.
 
 ## 10. Teclado e entrada
@@ -154,7 +151,7 @@ Com a pasta de trabalho num repositório git:
 - [ ] **Gestão de Projetos no explorador lateral**:
   - [ ] Seção `PROJETOS` colapsável no topo da árvore de arquivos, com ponto indicador no projeto ativo.
   - [ ] Botão `+`: seletor de pasta adiciona novo workspace à lista e ativa-o.
-  - [ ] Botão `×`: remove o projeto da lista; se for o ativo, migra automaticamente para o primeiro da lista.
+  - [ ] Botão `×` (aparece ao passar o mouse, com 2+ projetos): fica visível sob o ponteiro e o clique remove o projeto da lista; se for o ativo, migra automaticamente para o primeiro da lista.
   - [ ] Pasta inexistente ou inacessível: não quebra a aplicação; exibe erro amigável na conversa.
   - [ ] Lista de projetos persiste no arquivo de configuração (`config.projects`).
 - [ ] **Mapa de agentes em área fixa**:

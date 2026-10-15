@@ -25,7 +25,6 @@ pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
 pub mod sessions;
-pub mod table;
 pub mod util;
 pub mod whisper;
 pub mod workspace;
@@ -50,18 +49,6 @@ pub use workspace::DirEntry;
 /// Função chamada sempre que um [`CoreEvent`] é emitido, para acordar o loop da UI
 /// (ex.: `EventLoopProxy::send_event`). Pode ser chamada de qualquer thread.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
-
-/// Opções de uma mesa de orquestração (equivalente a `table:run`).
-#[derive(Debug, Clone)]
-pub struct TableRequest {
-    pub task: String,
-    /// Ids dos agentes participantes, na ordem de fala (ex.: `["claude", "ollama:qwen3.5:9b"]`).
-    pub agents: Vec<String>,
-    /// 1..=6
-    pub rounds: u32,
-    /// Referências de anexos (como devolvidas por `attach_*`).
-    pub attachments: Vec<String>,
-}
 
 /// Resultado de uma transcrição.
 #[derive(Debug, Clone)]
@@ -174,7 +161,7 @@ impl Drop for HeadlessAskGuard {
 pub(crate) struct Caller {
     /// Id da instância (`claude`, `claude@dev`…).
     pub id: String,
-    /// É o processo da aba (interativo). `false` = execução headless (mesa ou ponte sem abas).
+    /// É o processo da aba (interativo). `false` = execução headless (ponte sem abas).
     pub tab: bool,
 }
 
@@ -229,7 +216,6 @@ pub(crate) mod state {
         pub bridge_port: parking_lot::Mutex<u16>,
         pub bridge_token: String,
         pub session_id: String,
-        pub table_abort: std::sync::atomic::AtomicBool,
         /// Sinal de encerramento (interrompe execuções do Ollama na ponte).
         pub shutdown: std::sync::atomic::AtomicBool,
     }
@@ -361,7 +347,7 @@ impl Core {
         self.inner.providers.write().push(provider);
     }
 
-    /// Motor do agente Ollama compartilhado (conversas da ponte/mesas).
+    /// Motor do agente Ollama compartilhado (conversas da ponte).
     pub fn ollama_agent(&self) -> &ollama::OllamaAgent {
         &self.inner.ollama
     }
@@ -504,20 +490,6 @@ impl Core {
         self.inner.agents.bridge_instructions(self_id)
     }
 
-    // ---------- Mesas (table:run / table:stop) ----------
-
-    /// Executa uma mesa de orquestração. BLOQUEIA até terminar: chame numa thread.
-    /// Progresso chega via [`CoreEvent::Feed`]; ao final emite [`CoreEvent::TableFinished`].
-    pub fn run_table(&self, req: TableRequest) {
-        table::run_table(self, req);
-    }
-
-    /// Interrompe a mesa em andamento e mata processos headless.
-    pub fn stop_table(&self) {
-        self.inner.state.table_abort.store(true, Ordering::SeqCst);
-        self.inner.processes.kill_all();
-    }
-
     // ---------- Workspace ----------
 
     pub fn workspace(&self) -> PathBuf {
@@ -657,7 +629,6 @@ impl Core {
     /// Encerra processos filhos headless (chamado ao fechar a janela), a ponte e o watcher.
     pub fn shutdown(&self) {
         self.inner.state.shutdown.store(true, Ordering::SeqCst);
-        self.inner.state.table_abort.store(true, Ordering::SeqCst);
         self.inner.processes.kill_all();
         if let Some(server) = self.inner.bridge_server.lock().take() {
             server.unblock();

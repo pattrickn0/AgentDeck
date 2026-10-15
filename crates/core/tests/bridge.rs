@@ -1,4 +1,4 @@
-//! Testes de ponta a ponta da ponte HTTP, do executor headless e da mesa, com `Core`
+//! Testes de ponta a ponta da ponte HTTP, e do executor headless, com `Core`
 //! em pastas temporárias e (no Unix) um "claude" falso no PATH de busca.
 
 use std::io::{Read, Write};
@@ -9,7 +9,7 @@ use std::time::Duration;
 use commanddeck_core::paths::AppPaths;
 use commanddeck_core::{Config, Core, CoreEvent, StartOptions};
 #[cfg(unix)]
-use commanddeck_core::{FeedKind, TableRequest};
+use commanddeck_core::FeedKind;
 use crossbeam_channel::Receiver;
 use serde_json::{json, Value};
 
@@ -278,59 +278,6 @@ fn same_pair_requests_are_serialized() {
     let text = std::fs::read_to_string(tmp_log.path()).expect("log");
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines, ["start", "end", "start", "end", "start", "end"], "execuções sobrepostas");
-    env.core.shutdown();
-}
-
-#[cfg(unix)]
-#[test]
-fn table_runs_rounds_and_finishes() {
-    let env = start(&[("claude", "cat >/dev/null; echo 'contribuição'"), ("aider", "exit 1")]);
-    env.core.run_table(TableRequest {
-        task: "Planeje".into(),
-        agents: vec!["claude".into(), "aider".into()],
-        rounds: 1,
-        attachments: vec!["a.png".into()],
-    });
-    let events: Vec<CoreEvent> = env.rx.try_iter().collect();
-    let feed: Vec<_> = events
-        .iter()
-        .filter_map(|e| match e {
-            CoreEvent::Feed(f) => Some((f.kind, f.from.clone().unwrap_or_default(), f.text.clone())),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(feed[0], (FeedKind::User, "você".into(), "Planeje\n@a.png".into()));
-    assert_eq!(feed[1], (FeedKind::Thinking, "claude".into(), "rodada 1/1…".into()));
-    assert_eq!(feed[2], (FeedKind::Table, "claude".into(), "contribuição".into()));
-    assert_eq!(feed[3], (FeedKind::Thinking, "aider".into(), "rodada 1/1…".into()));
-    assert_eq!((feed[4].0, feed[4].1.as_str(), feed[4].2.as_str()), (FeedKind::Error, "aider", "processo saiu com código 1"));
-    assert_eq!(feed[5], (FeedKind::System, String::new(), "Mesa encerrada.".into()));
-    assert!(matches!(events.last(), Some(CoreEvent::TableFinished)));
-    env.core.shutdown();
-}
-
-#[cfg(unix)]
-#[test]
-fn stop_table_kills_running_agent() {
-    let env = std::sync::Arc::new(start(&[("claude", "sleep 30; echo tarde")]));
-    let e2 = env.clone();
-    let h = std::thread::spawn(move || {
-        e2.core.run_table(TableRequest { task: "t".into(), agents: vec!["claude".into()], rounds: 3, attachments: vec![] })
-    });
-    std::thread::sleep(Duration::from_millis(500));
-    let t = std::time::Instant::now();
-    env.core.stop_table();
-    h.join().expect("thread");
-    assert!(t.elapsed() < Duration::from_secs(10));
-    let texts: Vec<String> = env
-        .rx
-        .try_iter()
-        .filter_map(|e| match e {
-            CoreEvent::Feed(f) if f.kind == FeedKind::System => Some(f.text),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(texts, ["Mesa interrompida."]);
     env.core.shutdown();
 }
 

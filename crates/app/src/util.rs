@@ -48,14 +48,6 @@ pub fn folder_name(path: &str) -> String {
     path.split(['/', '\\']).rfind(|s| !s.is_empty()).unwrap_or("ARQUIVOS").to_owned()
 }
 
-/// Valor de "Rodadas" limitado a 1..=6 (`Math.max(1, Math.min(6, Number(v) || 1))`).
-pub fn clamp_rounds(text: &str) -> u32 {
-    match text.trim().parse::<f64>() {
-        Ok(v) if v.is_finite() && v != 0.0 => v.clamp(1.0, 6.0) as u32,
-        _ => 1,
-    }
-}
-
 /// Texto completo enviado: instrução + referências `@anexo` separadas por espaço.
 pub fn compose_full(text: &str, attachments: &[String]) -> String {
     let refs = attachments.iter().map(|a| format!("@{a}")).collect::<Vec<_>>().join(" ");
@@ -89,16 +81,6 @@ mod tests {
         assert_eq!(folder_name("/home/u/workspace"), "workspace");
         assert_eq!(folder_name("C:\\Users\\u\\proj\\"), "proj");
         assert_eq!(folder_name(""), "ARQUIVOS");
-    }
-
-    #[test]
-    fn rounds_clamp() {
-        assert_eq!(clamp_rounds("2"), 2);
-        assert_eq!(clamp_rounds("0"), 1);
-        assert_eq!(clamp_rounds("99"), 6);
-        assert_eq!(clamp_rounds("-3"), 1);
-        assert_eq!(clamp_rounds("abc"), 1);
-        assert_eq!(clamp_rounds("3.7"), 3);
     }
 
     #[test]

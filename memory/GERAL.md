@@ -112,7 +112,7 @@ A **tela dividida** organiza as abas por tipo de agente:
 
 O **Mapa** mostra, em texto de terminal, quem está conversando com quem agora: a árvore de quem pergunta a quem
 (pergunta na fila, digitada, com resposta atrasada ou em modo headless, com o tempo de espera), as respostas a
-caminho, a mesa em andamento, as conversas concluídas no último minuto (esmaecidas) e os agentes sem conversa.
+caminho, as conversas concluídas no último minuto (esmaecidas) e os agentes sem conversa.
 Com o Mapa aberto, a barra se alarga sobre o terminal (sem redimensioná-lo). Clicar num agente abre a aba dele.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
@@ -140,7 +140,7 @@ pasta muda e quando a janela volta a ter foco. Nada de agentes por enquanto: tud
 
 ### Modo headless
 
-Nas **mesas** e quando "Abrir abas dos agentes" está desligado, os agentes rodam sem janela (`claude -p`,
+Quando "Abrir abas dos agentes" está desligado, os agentes rodam sem janela (`claude -p`,
 `agy -p`, `codex exec`…) e a resposta é capturada. Cada execução tem um token próprio, que vale só enquanto
 ela dura.
 
@@ -153,8 +153,7 @@ ela dura.
 - Abrir abas de agentes: Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q,
   Open Interpreter, modelos Ollama e um terminal comum.
 - Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente).
-- Mandar uma mensagem para a aba ativa, para todos os agentes abertos ou para uma **mesa** (vários agentes em
-  rodadas, com síntese no fim).
+- Mandar uma mensagem (com anexos ou áudio transcrito) para a aba ativa pelo compositor.
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
 - Ver no **Mapa** quem está conversando com quem neste momento.
 - Usar o **git** do projeto pela aba Git: ver alterações e diffs, preparar, fazer commit, trocar/criar branch,

@@ -1,5 +1,5 @@
 //! Execução de processos filhos com captura de saída, timeout, cancelamento e registro
-//! para encerramento em massa (`table:stop` / fechamento da janela).
+//! para encerramento em massa (fechamento da janela).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};

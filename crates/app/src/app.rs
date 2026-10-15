@@ -399,11 +399,10 @@ fn debug_map() -> crate::agent_map::Snapshot {
         ],
         answers: vec![AnswerInFlight { request: 9, from: "ollama:qwen3.5:9b".into(), to: "claude".into() }],
         recent: vec![Recent { from: "antigravity".into(), to: "claude@dev".into(), ok: true, at_ms: now - 20_000 }],
-        table: None,
     }
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,target,drop,map,map-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -411,7 +410,6 @@ fn apply_debug_ui(deck: &mut Deck) {
         match item {
             "settings" => deck.settings_open = true,
             "newtab" => deck.new_tab_menu_open = true,
-            "target" => deck.target_menu_open = true,
             "drop" => deck.drop_hover = true,
             "map" => deck.set_right_view(crate::deck::RightView::Mapa),
             "git" => deck.set_right_view(crate::deck::RightView::Git),

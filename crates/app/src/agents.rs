@@ -1,5 +1,5 @@
-//! Registro de agentes do lado da UI: cores/nomes (COLORS/NAMES do renderer), listas dos
-//! menus e opções do seletor "Enviar para" (`buildMenus` / `renderTargetDropdown`).
+//! Registro de agentes do lado da UI: cores/nomes (COLORS/NAMES do renderer) e listas dos
+//! menus (`buildMenus`).
 
 use std::collections::HashMap;
 
@@ -18,84 +18,8 @@ pub fn shell_label(core_label: Option<&str>) -> String {
     }
 }
 
-/// Opção do `<select id="target">`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TargetOption {
-    pub label: String,
-    pub value: String,
-}
-
-/// `<optgroup>` do seletor.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TargetGroup {
-    pub label: String,
-    pub options: Vec<TargetOption>,
-}
-
-fn opt(label: impl Into<String>, value: impl Into<String>) -> TargetOption {
-    TargetOption { label: label.into(), value: value.into() }
-}
-
 fn is_ollama(id: &str) -> bool {
     id == "ollama" || id.starts_with("ollama:")
-}
-
-/// Porta fiel de `renderTargetDropdown(agents, mainAgents, ollamaModels)`.
-pub fn build_target_groups(main_agents: &[AgentInfo], ollama_models: &[AgentInfo]) -> Vec<TargetGroup> {
-    let mut groups = vec![TargetGroup {
-        label: "Destinatários Diretos".into(),
-        options: vec![opt("Aba ativa", "active"), opt("Todos os agentes abertos", "all")],
-    }];
-
-    let main_peers: Vec<&AgentInfo> = main_agents.iter().filter(|a| a.peer && a.installed).collect();
-    let ollama_peers: Vec<&AgentInfo> = ollama_models.iter().filter(|a| a.peer && a.installed).collect();
-    let mut tables = Vec::new();
-
-    // 1. Mesas entre agentes principais de nuvem/CLI (ex: Claude ↔ Antigravity)
-    for a in &main_peers {
-        for b in &main_peers {
-            if a.id != b.id {
-                tables.push(opt(format!("Mesa: {} → {}", a.label, b.label), format!("table:{},{}", a.id, b.id)));
-            }
-        }
-    }
-
-    // 2. Mesas com Ollama: utiliza o modelo local preferencial (ex: 9b > 4b)
-    let preferred = |id: &str| {
-        let l = id.to_lowercase();
-        ["9b", "7b", "14b", "32b"].iter().any(|s| l.contains(s))
-    };
-    let primary = ollama_peers.iter().find(|o| preferred(&o.id)).or(ollama_peers.first()).copied();
-    if let Some(p) = primary {
-        let o_name = p.model.clone().unwrap_or_else(|| "Local".into());
-        for m in &main_peers {
-            tables.push(opt(format!("Mesa: {} ↔ Ollama ({o_name})", m.label), format!("table:{},{}", m.id, p.id)));
-        }
-    }
-
-    // 3. Se houver apenas modelos locais sem agentes de nuvem: mesa entre os 2 primeiros modelos
-    if main_peers.is_empty() && ollama_peers.len() >= 2 {
-        let (o1, o2) = (ollama_peers[0], ollama_peers[1]);
-        let m = |o: &AgentInfo| o.model.clone().unwrap_or_else(|| "undefined".into());
-        tables.push(opt(format!("Mesa: Ollama ({}) ↔ Ollama ({})", m(o1), m(o2)), format!("table:{},{}", o1.id, o2.id)));
-    }
-
-    // 4. Mesa Geral (todos os agentes principais + Ollama)
-    let mut all: Vec<&AgentInfo> = main_peers.clone();
-    if let Some(p) = primary {
-        all.push(p);
-    }
-    if all.len() > 2 {
-        let summary =
-            main_peers.iter().map(|p| p.label.as_str()).collect::<Vec<_>>().join(" + ") + if primary.is_some() { " + Ollama" } else { "" };
-        let ids = all.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(",");
-        tables.push(opt(format!("Mesa Geral ({summary})"), format!("table:{ids}")));
-    }
-
-    if !tables.is_empty() {
-        groups.push(TargetGroup { label: "Mesas de Orquestração".into(), options: tables });
-    }
-    groups
 }
 
 /// Item de menu (nova aba / estado vazio).
@@ -118,12 +42,11 @@ pub struct Agents {
     pub new_tab_menu: Vec<MenuItem>,
     /// Botões do estado vazio (`renderEmptyStateActions`).
     pub empty_actions: Vec<MenuItem>,
-    pub targets: Vec<TargetGroup>,
 }
 
 impl Agents {
     pub fn new() -> Self {
-        Self { targets: build_target_groups(&[], &[]), ..Self::default() }
+        Self::default()
     }
 
     /// Porta de `buildMenus(agents)`.
@@ -144,9 +67,6 @@ impl Agents {
 
         self.available =
             agents.iter().filter(|a| a.installed || a.id == "shell" || a.id == "claude" || a.id == "antigravity").cloned().collect();
-        let main: Vec<AgentInfo> = self.available.iter().filter(|a| !is_ollama(&a.id)).cloned().collect();
-        let ollama: Vec<AgentInfo> = self.available.iter().filter(|a| is_ollama(&a.id)).cloned().collect();
-
         let ai: Vec<&AgentInfo> =
             self.available.iter().filter(|a| a.id != "shell" && (a.installed || a.id == "claude" || a.id == "antigravity")).collect();
         let shell_color = shell_core.map(color_of).unwrap_or(theme::SHELL);
@@ -166,7 +86,6 @@ impl Agents {
             .map(|a| MenuItem { kind: a.id.clone(), label: format!("Abrir {}", a.label), color: color_of(a) })
             .chain(std::iter::once(MenuItem { kind: "shell".into(), label: format!("Abrir {shell_name}"), color: shell_color }))
             .collect();
-        self.targets = build_target_groups(&main, &ollama);
         self.loaded = true;
     }
 
@@ -235,14 +154,6 @@ impl Agents {
     pub fn fallback_kind(&self) -> String {
         self.available.iter().find(|a| a.id != "shell").or(self.available.first()).map(|a| a.id.clone()).unwrap_or_else(|| "shell".into())
     }
-
-    pub fn has_option(&self, value: &str) -> bool {
-        self.targets.iter().any(|g| g.options.iter().any(|o| o.value == value))
-    }
-
-    pub fn option_label(&self, value: &str) -> Option<&str> {
-        self.targets.iter().flat_map(|g| g.options.iter()).find(|o| o.value == value).map(|o| o.label.as_str())
-    }
 }
 
 #[cfg(test)]
@@ -251,60 +162,6 @@ mod tests {
 
     fn agent(id: &str, label: &str, installed: bool, peer: bool, model: Option<&str>) -> AgentInfo {
         AgentInfo { id: id.into(), label: label.into(), color: "#d97757".into(), installed, peer, model: model.map(Into::into) }
-    }
-
-    fn values(groups: &[TargetGroup]) -> Vec<(String, String)> {
-        groups.iter().flat_map(|g| g.options.iter().map(|o| (o.label.clone(), o.value.clone()))).collect()
-    }
-
-    #[test]
-    fn direct_group_always_present() {
-        let g = build_target_groups(&[], &[]);
-        assert_eq!(g.len(), 1);
-        assert_eq!(g[0].label, "Destinatários Diretos");
-        assert_eq!(values(&g), vec![("Aba ativa".into(), "active".into()), ("Todos os agentes abertos".into(), "all".into())]);
-    }
-
-    #[test]
-    fn tables_between_main_agents_and_preferred_ollama() {
-        let main = vec![
-            agent("claude", "Claude", true, true, None),
-            agent("antigravity", "Antigravity", true, true, None),
-            agent("shell", "Terminal", true, false, None),
-        ];
-        let ollama = vec![
-            agent("ollama:qwen3.5:4b", "Ollama (qwen3.5:4b)", true, true, Some("qwen3.5:4b")),
-            agent("ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", true, true, Some("qwen3.5:9b")),
-        ];
-        let g = build_target_groups(&main, &ollama);
-        assert_eq!(g.len(), 2);
-        assert_eq!(g[1].label, "Mesas de Orquestração");
-        let v: Vec<(String, String)> = g[1].options.iter().map(|o| (o.label.clone(), o.value.clone())).collect();
-        assert_eq!(
-            v,
-            vec![
-                ("Mesa: Claude → Antigravity".into(), "table:claude,antigravity".into()),
-                ("Mesa: Antigravity → Claude".into(), "table:antigravity,claude".into()),
-                ("Mesa: Claude ↔ Ollama (qwen3.5:9b)".into(), "table:claude,ollama:qwen3.5:9b".into()),
-                ("Mesa: Antigravity ↔ Ollama (qwen3.5:9b)".into(), "table:antigravity,ollama:qwen3.5:9b".into()),
-                ("Mesa Geral (Claude + Antigravity + Ollama)".into(), "table:claude,antigravity,ollama:qwen3.5:9b".into()),
-            ]
-        );
-    }
-
-    #[test]
-    fn only_local_models() {
-        let ollama = vec![agent("ollama:a", "Ollama (a)", true, true, Some("a")), agent("ollama:b", "Ollama (b)", true, true, Some("b"))];
-        let g = build_target_groups(&[], &ollama);
-        assert_eq!(values(&g)[2], ("Mesa: Ollama (a) ↔ Ollama (b)".into(), "table:ollama:a,ollama:b".into()));
-        assert_eq!(values(&g).len(), 3);
-    }
-
-    #[test]
-    fn uninstalled_or_non_peer_are_ignored() {
-        let main = vec![agent("claude", "Claude", false, true, None), agent("antigravity", "Antigravity", true, true, None)];
-        let g = build_target_groups(&main, &[]);
-        assert_eq!(g.len(), 1);
     }
 
     #[test]

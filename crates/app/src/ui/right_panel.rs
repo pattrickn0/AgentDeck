@@ -15,9 +15,8 @@ use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
 /// Altura da faixa de download (abaixo do cabeçalho, só durante um download).
 const DOWNLOAD_H: f32 = 22.0;
 
-/// Desenha a barra em `rect` (cabeçalho da altura da topbar, corpo e compositor). Devolve a
-/// âncora do seletor "Enviar para".
-pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) -> Rect {
+/// Desenha a barra em `rect` (cabeçalho da altura da topbar, corpo e compositor).
+pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) {
     ui.painter().rect_filled(rect, 0.0, theme::BG);
     let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), theme::TOPBAR_H));
     draw_head(deck, ui, head);
@@ -37,10 +36,9 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) -> Rect
             RightView::Git => super::git::draw(deck, ui, body),
         }
     }
-    if comp_h <= 0.0 {
-        return Rect::NOTHING;
+    if comp_h > 0.0 {
+        composer::draw(deck, ui, comp);
     }
-    composer::draw(deck, ui, comp)
 }
 
 /// Uma aba do cabeçalho: ícone, dica (tooltip) e o número de não vistas.
@@ -313,7 +311,7 @@ fn empty_text(ui: &mut Ui, w: f32) {
         TextFormat { font_id: theme::ui(13.0), color: theme::MUTED, line_height: Some(13.0 * theme::LINE_HEIGHT), ..Default::default() };
     job.append("Aqui aparecem as conversas entre os agentes (via ", 0.0, base.clone());
     job.append(" ask-agent ", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::PANEL_2, ..base.clone() });
-    job.append(") e as mesas de orquestração.", 0.0, base);
+    job.append(") e as mensagens que você envia.", 0.0, base);
     let g = ui.painter().layout_job(job);
     let (r, _) = ui.allocate_exact_size(Vec2::new(w + 28.0, g.size().y + 16.0), Sense::hover());
     ui.painter().galley(Pos2::new(r.min.x + 14.0, r.min.y + 8.0), g, theme::MUTED);

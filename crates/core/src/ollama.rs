@@ -1,7 +1,7 @@
 //! Motor de agente autônomo para Ollama com ferramentas de workspace (porta de `ollamaAgent.js`).
 //!
 //! Permite que modelos locais (qwen3.5:9b, qwen2.5-coder, ...) leiam, editem e executem
-//! qualquer coisa dentro do workspace configurado. Usado pela ponte/mesas (modo headless,
+//! qualquer coisa dentro do workspace configurado. Usado pela ponte (modo headless,
 //! sem streaming) e pelo CLI interativo `ollama-agent` (com streaming de tokens).
 
 use std::collections::{BTreeMap, HashMap};

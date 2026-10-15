@@ -40,7 +40,6 @@ crates/
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
 │   ├── ollama.rs     agente Ollama: ferramentas, sandbox do workspace, loop de tool calling
-│   ├── table.rs      mesas de orquestração (rodadas entre agentes)
 │   ├── whisper.rs    transcrição de voz (whisper.cpp)
 │   ├── attachments.rs, sessions.rs, workspace.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── context.rs    ponto de extensão para RAG (vazio hoje)
@@ -90,7 +89,7 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
 
 **Mudar o Mapa de agentes.** O conteúdo é a função pura `agent_map::render_map` (com testes de largura e de
 caracteres); os dados vêm de `Deck::map_snapshot`, que junta `Core::conversation_map` (perguntas pendentes no
-core) com o que só a interface sabe (filas das abas, quem está ocupado, recentes, mesa). Use só caracteres que
+core) com o que só a interface sabe (filas das abas, quem está ocupado, recentes). Use só caracteres que
 existem nas fontes monoespaçadas do Windows (o teste confere). Para ver sem agentes reais:
 `COMMANDDECK_DEBUG_UI=map-demo`.
 

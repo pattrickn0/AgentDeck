@@ -1,7 +1,7 @@
 //! Mapa de conversas entre agentes em texto (estilo terminal), sem egui.
 //!
 //! A interface monta um [`Snapshot`] (o que o core sabe das perguntas pendentes + o que só a
-//! interface sabe: filas das abas, quem está ocupado, conversas recentes, mesa) e [`render_map`]
+//! interface sabe: filas das abas, quem está ocupado, conversas recentes) e [`render_map`]
 //! devolve as linhas já cortadas na largura, cada pedaço com um [`Style`] para colorir. A pintura
 //! fica em `ui/map.rs`.
 //!
@@ -69,16 +69,6 @@ pub struct Recent {
     pub at_ms: u64,
 }
 
-/// Mesa em andamento.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TableInfo {
-    /// "1/2" (vazio se ainda não começou a primeira rodada).
-    pub round: String,
-    pub agents: Vec<String>,
-    /// Quem está falando agora.
-    pub speaking: Option<String>,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Snapshot {
     /// Agentes com aba aberta, na ordem das abas.
@@ -87,7 +77,6 @@ pub struct Snapshot {
     pub links: Vec<Link>,
     pub answers: Vec<AnswerInFlight>,
     pub recent: Vec<Recent>,
-    pub table: Option<TableInfo>,
 }
 
 impl Snapshot {
@@ -95,7 +84,6 @@ impl Snapshot {
     pub fn is_live(&self, now_ms: u64) -> bool {
         !self.links.is_empty()
             || !self.answers.is_empty()
-            || self.table.is_some()
             || self.recent.iter().any(|r| now_ms.saturating_sub(r.at_ms) < RECENT_MS)
     }
 
@@ -319,30 +307,6 @@ pub fn render_map(snap: &Snapshot, cols: usize, now_ms: u64) -> Vec<Line> {
         }
     }
 
-    if let Some(t) = &snap.table {
-        let round = if t.round.is_empty() { String::new() } else { format!(" · rodada {}", t.round) };
-        out.push(heading(&format!("MESA{round}")));
-        let n = t.agents.len();
-        for (i, a) in t.agents.iter().enumerate() {
-            let arrow = match (i, n) {
-                (_, 1) => "você ═══► ",
-                (0, _) => "você ═╦═► ",
-                (i, n) if i + 1 == n => "     ╚═► ",
-                _ => "     ╠═► ",
-            };
-            let speaking = t.speaking.as_deref() == Some(a.as_str());
-            let mut l = Line { node: Some(a.clone()), ..Default::default() };
-            let (mark, style) = if speaking { ("●", Style::Busy) } else { ("○", Style::Idle) };
-            let tail = if speaking { "  (falando)" } else { "" };
-            let room = cols.saturating_sub(arrow.chars().count() + 2 + tail.chars().count());
-            l.push(arrow, Style::Muted).push(mark, style).push(" ", Style::Muted).push(fit_name(a, room.max(4)), Style::Name);
-            if speaking {
-                l.push(tail, Style::Muted);
-            }
-            out.push(l);
-        }
-    }
-
     if !recent.is_empty() {
         out.push(heading("RECENTES"));
         for r in &recent {
@@ -371,7 +335,6 @@ pub fn render_map(snap: &Snapshot, cols: usize, now_ms: u64) -> Vec<Line> {
         .iter()
         .flat_map(|l| [l.from.as_str(), l.to.as_str()])
         .chain(snap.answers.iter().flat_map(|a| [a.from.as_str(), a.to.as_str()]))
-        .chain(snap.table.iter().flat_map(|t| t.agents.iter().map(String::as_str)))
         .collect();
     let idle: Vec<&(String, NodeState)> = snap.nodes.iter().filter(|(n, _)| !busy_ids.contains(n.as_str())).collect();
     if !idle.is_empty() {
@@ -427,7 +390,6 @@ mod tests {
                 Recent { from: "claude@dev".into(), to: "claude".into(), ok: true, at_ms: NOW - 20_000 },
                 Recent { from: "codex".into(), to: "claude".into(), ok: false, at_ms: NOW - 90_000 },
             ],
-            table: None,
         }
     }
 
@@ -487,11 +449,6 @@ mod tests {
     fn no_line_is_wider_than_the_panel_and_only_safe_symbols_are_used() {
         let mut snap = sample();
         snap.links.push(link(99, "ollama:user/um-modelo-com-nome-enorme:latest", "claude@revisao@ana", 3_700_000, LinkState::Headless));
-        snap.table = Some(TableInfo {
-            round: "1/2".into(),
-            agents: vec!["claude".into(), "antigravity".into(), "ollama:qwen3.5:9b".into()],
-            speaking: Some("claude".into()),
-        });
         for cols in 20..=60 {
             for line in render_map(&snap, cols, NOW) {
                 assert!(line.width() <= cols, "{cols} colunas: {:?} ({})", line.text(), line.width());
@@ -511,19 +468,6 @@ mod tests {
         assert!(snap.is_live(NOW));
         assert!(!texts(&render_map(&snap, 40, NOW + 2)).contains(&"RECENTES".to_owned()));
         assert!(!snap.is_live(NOW + 2));
-    }
-
-    #[test]
-    fn a_table_lists_its_agents() {
-        let snap = Snapshot {
-            table: Some(TableInfo {
-                round: "1/2".into(),
-                agents: vec!["claude".into(), "antigravity".into()],
-                speaking: Some("claude".into()),
-            }),
-            ..Default::default()
-        };
-        assert_eq!(texts(&render_map(&snap, 40, NOW)), ["MESA · rodada 1/2", "você ═╦═► ● claude  (falando)", "     ╚═► ○ antigravity"]);
     }
 
     #[test]

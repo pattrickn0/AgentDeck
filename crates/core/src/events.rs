@@ -9,11 +9,9 @@ pub enum FeedKind {
     Ask,
     /// Resposta do agente consultado.
     Answer,
-    /// Mensagem do usuário (envio para "todos" ou mesa).
+    /// Mensagem do usuário para a aba ativa.
     User,
-    /// Fala de um agente numa mesa.
-    Table,
-    /// Indicador transitório ("rodada 1/2…", "⚙️ [read_file] x"). É substituído
+    /// Indicador transitório ("⚙️ [read_file] x"). É substituído
     /// pela próxima mensagem do mesmo `from`.
     Thinking,
     /// Mensagem do sistema (cinza, sem moldura).
@@ -28,7 +26,7 @@ pub struct FeedEntry {
     pub ts: u64,
     pub kind: FeedKind,
     pub from: Option<String>,
-    /// Destinatário(s); vários separados por " + ".
+    /// Destinatário.
     pub to: Option<String>,
     pub text: String,
 }
@@ -84,8 +82,6 @@ pub enum CoreEvent {
     /// O repositório git do workspace mudou (`.git/HEAD`, índice, refs…: commit, checkout, fetch
     /// feitos pelo terminal ou por um agente) — reler o status.
     GitChanged,
-    /// A mesa terminou (normalmente ou interrompida).
-    TableFinished,
     /// A lista de agentes/modelos Ollama foi atualizada em background.
     AgentsChanged,
     /// Progresso de um download em segundo plano.

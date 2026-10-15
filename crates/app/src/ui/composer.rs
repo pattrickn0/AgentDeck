@@ -1,8 +1,8 @@
-//! Compositor (embaixo da barra lateral direita): "Enviar para", "Rodadas", chips de anexo, campo
-//! de texto na largura toda e, embaixo dele, microfone/anexo à esquerda e Enviar à direita.
+//! Compositor (embaixo da barra lateral direita): chips de anexo, campo de texto na largura toda
+//! e, embaixo dele, microfone/anexo à esquerda e Enviar à direita. Envia sempre para a aba ativa.
 
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
-use egui::{Align2, Color32, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use super::{clickable, frame, galley_trunc, place, text_in, text_w, tip};
 use crate::audio;
@@ -12,22 +12,15 @@ use crate::theme;
 use crate::util;
 
 pub const COMPOSER_INPUT_ID: &str = "composer-input";
-const ROUNDS_ID: &str = "composer-rounds";
 
 const INPUT_FONT: f32 = 13.5;
 const INPUT_LINE: f32 = INPUT_FONT * theme::LINE_HEIGHT;
 const INPUT_MAX_H: f32 = 200.0;
-const SELECT_H: f32 = 23.0;
 const CHIP_H: f32 = 21.0;
 const BTN: f32 = 31.0;
 const PLACEHOLDER: &str = "Mensagem…  (Enter envia, Shift+Enter quebra linha)";
 
 struct Layout {
-    opts_h: f32,
-    select: Rect,
-    select_label: Rect,
-    rounds_label: Option<Rect>,
-    rounds: Option<Rect>,
     chips: Vec<Rect>,
     row: Rect,
     input: Rect,
@@ -36,14 +29,6 @@ struct Layout {
     attach: Rect,
     send: Rect,
     total_h: f32,
-}
-
-fn select_width(deck: &Deck, painter: &egui::Painter) -> f32 {
-    // O <select> do Chromium tem a largura da maior opção (+ padding, seta e borda).
-    let font = theme::ui(12.5);
-    let widest =
-        deck.agents.targets.iter().flat_map(|g| g.options.iter()).map(|o| text_w(painter, &o.label, font.clone())).fold(0.0, f32::max);
-    widest + 12.0 + 20.0 + 2.0
 }
 
 fn chip_width(painter: &egui::Painter, reference: &str) -> f32 {
@@ -78,44 +63,25 @@ fn layout(deck: &Deck, painter: &egui::Painter, rect: Rect) -> Layout {
     let x0 = rect.min.x + 10.0;
     let x1 = rect.max.x - 10.0;
     let mut y = rect.min.y + 8.0;
-    let label_font = theme::ui(13.0);
 
-    // ---------- #composer-opts (flex-wrap, gap 14px) ----------
-    let lw = text_w(painter, "Enviar para", label_font.clone());
-    let select_label = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(lw, SELECT_H));
-    // A largura da maior opção, mas sem passar da barra (o texto é cortado com "…").
-    let sw = select_width(deck, painter).min(x1 - select_label.max.x - 6.0).max(60.0);
-    let select = Rect::from_min_size(Pos2::new(select_label.max.x + 6.0, y), Vec2::new(sw, SELECT_H));
-    let mut cx = select.max.x + 14.0;
-    let mut line_top = y;
-    let mut rounds_label = None;
-    let mut rounds = None;
-    if deck.target.starts_with("table:") {
-        let rw = text_w(painter, "Rodadas", label_font.clone()) + 6.0 + 52.0;
-        if cx + rw > x1 {
-            line_top += SELECT_H + 6.0;
-            cx = x0;
-        }
-        let rl = Rect::from_min_size(Pos2::new(cx, line_top), Vec2::new(rw - 58.0, SELECT_H));
-        rounds_label = Some(rl);
-        rounds = Some(Rect::from_min_size(Pos2::new(rl.max.x + 6.0, line_top), Vec2::new(52.0, SELECT_H)));
-        cx += rw + 14.0;
-    }
+    // ---------- Chips de anexo (só quando há anexos; quebram linha) ----------
     let mut chips = Vec::new();
+    let mut cx = x0;
     for (i, a) in deck.attachments.iter().enumerate() {
         let w = chip_width(painter, a).min(x1 - x0);
         let gap = if i == 0 { 0.0 } else { 6.0 };
         if cx + gap + w > x1 && cx > x0 {
-            line_top += SELECT_H + 6.0;
+            y += CHIP_H + 6.0;
             cx = x0;
         } else {
             cx += gap;
         }
-        chips.push(Rect::from_min_size(Pos2::new(cx, line_top + (SELECT_H - CHIP_H) / 2.0), Vec2::new(w, CHIP_H)));
+        chips.push(Rect::from_min_size(Pos2::new(cx, y), Vec2::new(w, CHIP_H)));
         cx += w;
     }
-    let opts_h = line_top + SELECT_H - y;
-    y += opts_h + 6.0;
+    if !chips.is_empty() {
+        y += CHIP_H + 6.0;
+    }
 
     // ---------- Moldura: campo de texto na largura toda; botões numa linha embaixo dele ----------
     let recording = deck.is_recording();
@@ -136,40 +102,20 @@ fn layout(deck: &Deck, painter: &egui::Painter, rect: Rect) -> Layout {
     let send = Rect::from_min_size(Pos2::new(input.max.x - send_w, by), Vec2::new(send_w, BTN));
     let row = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, send.max.y + 6.0 + 1.0));
     let total_h = (row.max.y + 10.0) - rect.min.y;
-    Layout { opts_h, select, select_label, rounds_label, rounds, chips, row, input, cancel, mic, attach, send, total_h }
+    Layout { chips, row, input, cancel, mic, attach, send, total_h }
 }
 
 /// Altura total do compositor para a largura dada.
 pub fn measure(deck: &Deck, ui: &Ui, width: f32) -> f32 {
     let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(width, 1000.0));
-    let l = layout(deck, ui.painter(), rect);
-    let _ = l.opts_h;
-    l.total_h
+    layout(deck, ui.painter(), rect).total_h
 }
 
-/// Pinta e trata o compositor. Devolve o retângulo do seletor "Enviar para".
-pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Rect {
+/// Pinta e trata o compositor.
+pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
     let l = layout(deck, &painter, rect);
     let ctx = ui.ctx().clone();
-
-    // ---------- Enviar para ----------
-    text_in(&painter, l.select_label, Align2::LEFT_CENTER, "Enviar para", theme::ui(13.0), theme::MUTED);
-    let sr = clickable(ui, l.select, Id::new("target-select"));
-    frame(&painter, l.select, 6.0, theme::PANEL_2, if deck.target_menu_open { theme::MUTED } else { theme::BORDER });
-    let label = deck.agents.option_label(&deck.target).unwrap_or("Aba ativa").to_owned();
-    let g = galley_trunc(&painter, &label, theme::ui(12.5), theme::SELECT_TEXT, l.select.width() - 34.0);
-    place(&painter, l.select.shrink2(Vec2::new(7.0, 0.0)), Align2::LEFT_CENTER, g, theme::SELECT_TEXT);
-    chevron_down(&painter, Pos2::new(l.select.max.x - 13.0, l.select.center().y), theme::SELECT_TEXT);
-    if sr.clicked() {
-        deck.target_menu_open = !deck.target_menu_open;
-    }
-
-    // ---------- Rodadas ----------
-    if let (Some(rl), Some(rr)) = (l.rounds_label, l.rounds) {
-        text_in(&painter, rl, Align2::LEFT_CENTER, "Rodadas", theme::ui(13.0), theme::MUTED);
-        rounds_input(deck, ui, rr);
-    }
 
     // ---------- Chips de anexo ----------
     let mut remove = None;
@@ -250,75 +196,21 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Rect {
         deck.pick_attachments();
     }
 
-    // Enviar / Parar / Enviando…
+    // Enviar / Enviando…
     let ready = deck.send_ready();
-    let stop = deck.table_running;
-    let sr = if ready || stop { clickable(ui, l.send, Id::new("send")) } else { ui.interact(l.send, Id::new("send"), Sense::click()) };
-    let (mut bg, fg) = if stop {
-        (theme::STOP_BG, theme::WHITE)
-    } else if ready {
+    let sr = if ready { clickable(ui, l.send, Id::new("send")) } else { ui.interact(l.send, Id::new("send"), Sense::click()) };
+    let (mut bg, fg) = if ready {
         (deck.send_color(), theme::WHITE)
     } else {
         (theme::PANEL_2, theme::SEND_IDLE_TEXT)
     };
-    if (ready || stop) && sr.hovered() {
+    if ready && sr.hovered() {
         bg = theme::brighten(bg, 1.15);
     }
     painter.rect_filled(l.send, 7.0, bg);
     text_in(&painter, l.send, Align2::CENTER_CENTER, deck.send_label(), theme::ui_semibold(12.0), fg);
     if sr.clicked() {
         deck.send_message();
-    }
-
-    l.select
-}
-
-/// Seta do `<select>` (chevron para baixo).
-fn chevron_down(painter: &egui::Painter, c: Pos2, color: Color32) {
-    let s = Stroke::new(1.4, color);
-    painter.line_segment([Pos2::new(c.x - 3.5, c.y - 1.8), Pos2::new(c.x, c.y + 1.8)], s);
-    painter.line_segment([Pos2::new(c.x, c.y + 1.8), Pos2::new(c.x + 3.5, c.y - 1.8)], s);
-}
-
-/// `<input id="rounds" type="number" min="1" max="6">`
-fn rounds_input(deck: &mut Deck, ui: &mut Ui, r: Rect) {
-    let painter = ui.painter().clone();
-    frame(&painter, r, 6.0, theme::PANEL_2, theme::BORDER);
-    let hover = ui.rect_contains_pointer(r);
-    let spin_w = 14.0;
-    let text_rect = Rect::from_min_max(Pos2::new(r.min.x + 6.0, r.min.y + 1.0), Pos2::new(r.max.x - spin_w - 2.0, r.max.y - 1.0));
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
-    let te = egui::TextEdit::singleline(&mut deck.rounds)
-        .id(Id::new(ROUNDS_ID))
-        .frame(egui::Frame::NONE)
-        .margin(egui::Margin::ZERO)
-        .font(theme::ui(12.5))
-        .text_color(theme::SELECT_TEXT)
-        .char_limit(2)
-        .desired_width(text_rect.width())
-        .vertical_align(egui::Align::Center)
-        .min_size(text_rect.size());
-    let out = te.show(&mut child);
-    deck.rounds.retain(|c| c.is_ascii_digit() || c == '-');
-    // Setas do campo numérico (aparecem ao passar o mouse, como no Chromium).
-    if hover || out.response.has_focus() {
-        let up = Rect::from_min_size(Pos2::new(r.max.x - spin_w - 1.0, r.min.y + 1.0), Vec2::new(spin_w, (r.height() - 2.0) / 2.0));
-        let down = up.translate(Vec2::new(0.0, up.height()));
-        for (rect, delta, id) in [(up, 1i32, "rounds-up"), (down, -1, "rounds-down")] {
-            let resp = clickable(ui, rect, Id::new(id));
-            painter.rect_filled(rect, 2.0, if resp.hovered() { theme::BORDER } else { theme::PANEL_2 });
-            let c = rect.center();
-            let dir = if delta > 0 { -1.0 } else { 1.0 };
-            painter.add(egui::Shape::convex_polygon(
-                vec![Pos2::new(c.x - 3.0, c.y - dir * 1.5), Pos2::new(c.x + 3.0, c.y - dir * 1.5), Pos2::new(c.x, c.y + dir * 2.0)],
-                theme::SELECT_TEXT,
-                Stroke::NONE,
-            ));
-            if resp.clicked() {
-                let cur: i32 = deck.rounds.trim().parse().unwrap_or(1);
-                deck.rounds = (cur + delta).clamp(1, 6).to_string();
-            }
-        }
     }
 }
 

@@ -57,12 +57,16 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let mut remove_idx = None;
     if deck.projects_expanded {
         let projects = deck.projects.clone();
+        let dragging = ctx.dragged_id().is_some() || deck.pane_drag.is_some() || deck.drop_hover;
         for (i, p) in projects.iter().enumerate() {
             let row = Rect::from_min_size(Pos2::new(rect.min.x, top_y), Vec2::new(rect.width(), ROW_H));
             top_y += ROW_H;
             let is_active = *p == deck.workspace;
             let row_resp = ui.interact(row, Id::new(("proj-row", i)), Sense::click());
-            let hovered = row_resp.hovered();
+            // Pelo ponteiro, não por `hovered()`: o "×" fica por cima e tiraria o hover da linha,
+            // sumindo no quadro seguinte (e o clique nele nunca chegava). Durante um arraste
+            // (divisor, alça de janela, arquivo) a linha não reage, como faria `hovered()`.
+            let hovered = ui.rect_contains_pointer(row) && !dragging;
             if is_active || hovered {
                 painter.rect_filled(row, 0.0, if is_active { theme::PANEL_2 } else { theme::BG });
             }
@@ -102,10 +106,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     if add_clicked {
         deck.pick_project();
     }
-    if let Some(p) = switch_to {
-        deck.switch_workspace(p);
-    } else if let Some(i) = remove_idx {
+    if let Some(i) = remove_idx {
         deck.remove_project(i);
+    } else if let Some(p) = switch_to {
+        deck.switch_workspace(p);
     }
 
     // ---------- Linha raiz do workspace ativo (26px, negrito, borda inferior) ----------

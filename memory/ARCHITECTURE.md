@@ -29,7 +29,7 @@ Sem Node/Electron em runtime: `ask-agent` e `ollama-agent` viram binários Rust 
 
 A UI fala com o backend apenas via `commanddeck_core::Core` (métodos ≈ canais IPC) e recebe
 `CoreEvent` por um `crossbeam_channel::Receiver`, com um `Waker` que acorda o loop do winit
-(`EventLoopProxy`). Operações bloqueantes (listar agentes, mesa, transcrição) rodam em threads.
+(`EventLoopProxy`). Operações bloqueantes (listar agentes, transcrição) rodam em threads.
 
 ## Ponto de extensão para RAG (futuro)
 
@@ -138,7 +138,7 @@ instâncias abertas, perguntas pendentes entre abas (`PendingInfo`: id, quem per
 desde quando e se o `ask-agent` já voltou com 202) e perguntas sendo respondidas em headless. Uma pergunta
 com resposta atrasada (`detached`) não entra na detecção de ciclos (quem perguntou não está bloqueado), mas
 continua contando na profundidade. A interface completa o retrato com o que só ela sabe (filas das abas,
-respostas a caminho, recentes, mesa) em `Deck::map_snapshot` e desenha com `agent_map::render_map`.
+respostas a caminho, recentes) em `Deck::map_snapshot` e desenha com `agent_map::render_map`.
 
 **Quando digitar** (`crates/core/src/delivery.rs`, regra pura com testes; a interface só consulta):
 
@@ -159,6 +159,6 @@ abas, os argumentos (gerados pelo app) passam por `cmd_safe_arg`.
 Tudo fica visível nas abas (raciocínio, ferramentas, aprovações) e o usuário pode intervir digitando.
 O Claude abre com `--allowedTools "Bash(ask-agent:*)"`, para responder sem pedir aprovação.
 
-O **modo headless** (`claude -p`, `agy -p`) continua em dois casos: nas **mesas** (`table.rs`) e quando a
+O **modo headless** (`claude -p`, `agy -p`) continua quando a
 interface não ligou a entrega em abas ou o usuário desligou "Abrir abas dos agentes" nas Configurações.
 Limites: no máximo 8 abas abertas automaticamente.

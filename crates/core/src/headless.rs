@@ -1,4 +1,4 @@
-//! Execução headless (modo `-p`) dos agentes, usada pela ponte e pelas mesas
+//! Execução headless (modo `-p`) dos agentes, usada pela ponte
 //! (equivalente a `runHeadless`, `agyPromptArg`, `parseAgyOutput` e `cleanAgentOutput`).
 
 use std::sync::atomic::AtomicBool;

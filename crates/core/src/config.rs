@@ -86,6 +86,11 @@ impl Config {
             Some(text) => Self::from_json_over_defaults(&text, paths),
             None => Self::default_for(paths),
         };
+        // Da configuração legada não vêm as abas: a primeira abertura começa sem agentes.
+        if file.is_some_and(|f| *f != paths.config_file) {
+            cfg.open_tabs.clear();
+            cfg.active_tab_index = -1;
+        }
         cfg.fix_workspace(paths, home);
         cfg
     }
@@ -191,9 +196,11 @@ mod tests {
         let p = paths(tmp.path());
         let legacy = tmp.path().join("orquestra").join("config.json");
         std::fs::create_dir_all(legacy.parent().expect("pai")).expect("mkdir");
-        std::fs::write(&legacy, r#"{"whisperLang":"es"}"#).expect("write");
+        std::fs::write(&legacy, r#"{"whisperLang":"es","openTabs":["antigravity","claude"],"activeTabIndex":1}"#).expect("write");
         let cfg = Config::load_from(&[p.config_file.clone(), legacy], &p, Path::new("/nonexistent-home"));
         assert_eq!(cfg.whisper_lang, "es");
+        assert!(cfg.open_tabs.is_empty(), "as abas da config legada não são abertas");
+        assert_eq!(cfg.active_tab_index, -1);
     }
 
     #[test]

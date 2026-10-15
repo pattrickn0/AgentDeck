@@ -9,14 +9,14 @@ use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
 use commanddeck_core::delivery::{self, Gate, Mailbox, TabState};
 use commanddeck_core::{
-    AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec, TableRequest,
+    AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec,
 };
 use crossbeam_channel::{Receiver, Sender};
 use egui::Color32;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
-use crate::agent_map::{self, AnswerInFlight, Link, LinkState, NodeState, Recent, Snapshot, TableInfo};
+use crate::agent_map::{self, AnswerInFlight, Link, LinkState, NodeState, Recent, Snapshot};
 use crate::agents::Agents;
 use crate::audio;
 use crate::icons::IconCache;
@@ -34,7 +34,6 @@ pub enum UiMsg {
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
-    TableDone,
     Git(crate::git_ui::GitReply),
 }
 
@@ -201,10 +200,6 @@ pub struct Deck {
     // Mapa de conversas
     /// Conversas concluídas há pouco (o "Limpar" da conversa não apaga).
     recent: VecDeque<Recent>,
-    /// Mesa em andamento: participantes, rodada ("1/2") e quem está falando.
-    table_agents: Vec<String>,
-    table_round: String,
-    table_speaking: Option<String>,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=map-demo`): mapa fictício para capturas de tela.
     pub debug_map: Option<Snapshot>,
 
@@ -232,10 +227,7 @@ pub struct Deck {
     // Compositor
     pub input: String,
     pub attachments: Vec<String>,
-    pub target: String,
-    pub rounds: String,
     pub needs_text: bool,
-    pub table_running: bool,
     recorder: Option<audio::Recorder>,
     pub recording_since: Option<Instant>,
     pub transcribing: bool,
@@ -248,7 +240,6 @@ pub struct Deck {
     // Menus e diversos
     pub new_tab_menu_open: bool,
     pub settings_open: bool,
-    pub target_menu_open: bool,
     /// Aba sendo renomeada pelo usuário (índice, buffer de edição, erro opcional).
     pub rename_tab: Option<(usize, String, Option<String>)>,
     /// Menu de contexto aberto em uma aba (índice da aba, posição do clique).
@@ -335,9 +326,6 @@ impl Deck {
             debug_pane_drop: None,
             show_seq: 0,
             recent: VecDeque::new(),
-            table_agents: Vec::new(),
-            table_round: String::new(),
-            table_speaking: None,
             debug_map: None,
             git: crate::git_ui::GitUi::default(),
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
@@ -351,10 +339,7 @@ impl Deck {
             feed_near_bottom: true,
             input: String::new(),
             attachments: Vec::new(),
-            target: "active".into(),
-            rounds: "2".into(),
             needs_text: false,
-            table_running: false,
             recorder: None,
             recording_since: None,
             transcribing: false,
@@ -365,7 +350,6 @@ impl Deck {
             composer_cursor_end: false,
             new_tab_menu_open: false,
             settings_open: false,
-            target_menu_open: false,
             rename_tab: None,
             tab_context_menu: None,
             sound_enabled: cfg.sound_enabled,
@@ -465,7 +449,7 @@ impl Deck {
     fn on_core_event(&mut self, ev: CoreEvent) {
         match ev {
             CoreEvent::Feed(entry) => {
-                let chime = entry.kind == FeedKind::Answer || (entry.kind == FeedKind::System && entry.text.contains("Mesa encerrada"));
+                let chime = entry.kind == FeedKind::Answer;
                 self.add_feed(entry);
                 if chime {
                     self.play_sound(false);
@@ -476,7 +460,6 @@ impl Deck {
                 self.git_refresh_soon();
             }
             CoreEvent::GitChanged => self.git_refresh_soon(),
-            CoreEvent::TableFinished => self.finish_table(),
             CoreEvent::AgentsChanged => self.refresh_agents(),
             CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Deliver(d) => self.on_deliver(d),
@@ -496,9 +479,6 @@ impl Deck {
         match msg {
             UiMsg::Agents(list) => {
                 self.agents.build(&list);
-                if !self.agents.has_option(&self.target) {
-                    self.target = "active".into();
-                }
                 for t in &mut self.tabs {
                     t.color = self.agents.tab_color(&t.kind);
                 }
@@ -542,16 +522,8 @@ impl Deck {
             UiMsg::WorkspacePicked(dir) => {
                 self.add_project(dir);
             }
-            UiMsg::TableDone => self.finish_table(),
             UiMsg::Git(reply) => self.on_git(reply),
         }
-    }
-
-    fn finish_table(&mut self) {
-        self.table_running = false;
-        self.table_agents.clear();
-        self.table_round.clear();
-        self.table_speaking = None;
     }
 
     /// Temporizadores (setTimeout do renderer).
@@ -718,30 +690,26 @@ impl Deck {
     fn restore_tabs(&mut self) {
         let cfg = self.core.config();
         self.group_order = cfg.pane_order.clone();
+        // Abre só o que estava aberto (nenhum agente abre sozinho, nem na primeira vez).
         if !cfg.open_tabs.is_empty() {
             self.restoring = true;
-            for id in &cfg.open_tabs {
+            // `active_tab_index` aponta para `open_tabs`; abas de agentes que sumiram são puladas,
+            // então a ativa é achada pela posição salva, não pelo índice em `self.tabs`.
+            let mut idx = 0;
+            for (i, id) in cfg.open_tabs.iter().enumerate() {
                 if let Some(ident) = Ident::parse(id).filter(|i| self.agents.knows(&i.kind)) {
+                    if i as i32 == cfg.active_tab_index {
+                        idx = self.tabs.len();
+                    }
                     self.core.restore_instance(id);
                     self.add_tab(ident, true, false);
                 }
             }
-            let idx = if cfg.active_tab_index >= 0 && (cfg.active_tab_index as usize) < self.tabs.len() {
-                cfg.active_tab_index as usize
-            } else {
-                0
-            };
             self.sync_groups();
             if !self.tabs.is_empty() {
                 self.activate(idx);
             }
             self.restoring = false;
-        } else {
-            self.open_tab("claude", false);
-            self.open_tab("antigravity", false);
-            if !self.tabs.is_empty() {
-                self.activate(0);
-            }
         }
         self.refresh_tree();
     }
@@ -1489,7 +1457,7 @@ impl Deck {
                 self.feed.retain(|f| f.id != id);
             }
         }
-        let to = e.to.as_ref().map(|t| t.split(" + ").map(|n| self.agents.who_name(n)).collect::<Vec<_>>().join(" + "));
+        let to = e.to.as_deref().map(|t| self.agents.who_name(t));
         let item = FeedItem {
             id: self.next_feed_id,
             kind: e.kind,
@@ -1517,28 +1485,18 @@ impl Deck {
     /// Alimenta o mapa de conversas a partir de uma entrada da conversa (antes de virar `FeedItem`).
     fn track_for_map(&mut self, e: &FeedEntry) {
         match e.kind {
-            // Resposta ou falha de uma pergunta entre dois agentes (um destinatário só).
+            // Resposta ou falha de uma pergunta entre dois agentes.
             FeedKind::Answer | FeedKind::Error => {
                 if let (Some(from), Some(to)) = (&e.from, &e.to) {
-                    if !to.contains(" + ") {
-                        let at_ms = commanddeck_core::util::now_ms();
-                        self.recent.push_back(Recent { from: from.clone(), to: to.clone(), ok: e.kind == FeedKind::Answer, at_ms });
-                        while self.recent.len() > 50
-                            || self.recent.front().is_some_and(|r| at_ms.saturating_sub(r.at_ms) > agent_map::RECENT_MS)
-                        {
-                            self.recent.pop_front();
-                        }
+                    let at_ms = commanddeck_core::util::now_ms();
+                    self.recent.push_back(Recent { from: from.clone(), to: to.clone(), ok: e.kind == FeedKind::Answer, at_ms });
+                    while self.recent.len() > 50
+                        || self.recent.front().is_some_and(|r| at_ms.saturating_sub(r.at_ms) > agent_map::RECENT_MS)
+                    {
+                        self.recent.pop_front();
                     }
                 }
             }
-            // Mesa: "rodada 1/2…" de quem vai falar.
-            FeedKind::Thinking if self.table_running => {
-                if let Some(round) = e.text.strip_prefix("rodada ") {
-                    self.table_round = round.trim_end_matches('…').to_owned();
-                    self.table_speaking = e.from.clone();
-                }
-            }
-            FeedKind::Table if self.table_running => self.table_speaking = None,
             _ => {}
         }
     }
@@ -1550,17 +1508,13 @@ impl Deck {
         if view == RightView::Conversa {
             self.unseen = 0;
         }
-        if view == RightView::Git {
-            // O compositor some na aba Git: o menu "Enviar para" não pode ficar aberto.
-            self.target_menu_open = false;
-        }
         if opening_git {
             self.git_refresh();
         }
     }
 
     /// Quem está conversando com quem agora, para o mapa: o core sabe as perguntas pendentes; a
-    /// interface sabe as filas das abas, quem está ocupado, as conversas recentes e a mesa.
+    /// interface sabe as filas das abas, quem está ocupado, e as conversas recentes.
     pub fn map_snapshot(&self) -> Snapshot {
         if let Some(demo) = &self.debug_map {
             return demo.clone();
@@ -1612,12 +1566,7 @@ impl Deck {
                     .collect::<Vec<_>>()
             })
             .collect();
-        let table = self.table_running.then(|| TableInfo {
-            round: self.table_round.clone(),
-            agents: self.table_agents.clone(),
-            speaking: self.table_speaking.clone(),
-        });
-        Snapshot { nodes, links, answers, recent: self.recent.iter().cloned().collect(), table }
+        Snapshot { nodes, links, answers, recent: self.recent.iter().cloned().collect() }
     }
 
     pub fn system(&mut self, text: impl Into<String>) {
@@ -1631,7 +1580,7 @@ impl Deck {
 
     fn debug_feed(&mut self) {
         let mk = |kind, from: Option<&str>, to: Option<&str>, text: &str| FeedEntry::new(kind, from, to, text);
-        self.add_feed(mk(FeedKind::User, Some("você"), Some("claude + antigravity"), "Revisem o @README.md e proponham melhorias."));
+        self.add_feed(mk(FeedKind::User, Some("você"), Some("claude"), "Revise o @README.md e proponha melhorias."));
         self.add_feed(mk(
             FeedKind::Ask,
             Some("claude"),
@@ -1644,9 +1593,9 @@ impl Deck {
             Some("claude"),
             "Sim — portable-pty usa ConPTY no Windows 10+.\nNada a mudar.",
         ));
-        self.add_feed(mk(FeedKind::System, None, None, "Mesa iniciada: Claude → Antigravity (2 rodadas)."));
+        self.add_feed(mk(FeedKind::System, None, None, "Projeto ativo alterado para: workspace"));
         self.add_feed(mk(FeedKind::Error, Some("ollama:qwen3.5:9b"), None, "Falha ao contatar o Ollama em 127.0.0.1:11434."));
-        self.add_feed(mk(FeedKind::Thinking, Some("claude"), None, "rodada 1/2…"));
+        self.add_feed(mk(FeedKind::Thinking, Some("claude"), None, "⚙️ [read_file] README.md"));
     }
 
     // ------------------------------------------------------------------
@@ -1675,14 +1624,12 @@ impl Deck {
             || self.send_after_transcribe
     }
 
-    /// `--send-color`: cor da aba ativa quando o alvo é "Aba ativa" e não é um shell.
+    /// `--send-color`: cor da aba ativa, se não for um shell.
     pub fn send_color(&self) -> Color32 {
-        if self.target == "active" {
-            if let Some(t) = self.active_tab() {
-                if t.kind != "shell" {
-                    if let Some(c) = self.agents.color(&t.kind) {
-                        return c;
-                    }
+        if let Some(t) = self.active_tab() {
+            if t.kind != "shell" {
+                if let Some(c) = self.agents.color(&t.kind) {
+                    return c;
                 }
             }
         }
@@ -1692,15 +1639,9 @@ impl Deck {
     pub fn send_label(&self) -> &'static str {
         if self.send_after_transcribe && (self.is_recording() || self.transcribing) {
             "Enviando…"
-        } else if self.table_running {
-            "Parar"
         } else {
             "Enviar"
         }
-    }
-
-    pub fn set_target(&mut self, value: String) {
-        self.target = value;
     }
 
     pub fn pick_attachments(&self) {
@@ -1760,12 +1701,8 @@ impl Deck {
         self.request_composer_focus();
     }
 
-    /// Porta de `sendMessage()`.
+    /// Porta de `sendMessage()`: o compositor envia sempre para a aba ativa.
     pub fn send_message(&mut self) {
-        if self.table_running {
-            self.core.stop_table();
-            return;
-        }
         if self.recorder.is_some() || self.transcribing {
             self.send_after_transcribe = true;
             if self.recorder.is_some() {
@@ -1785,45 +1722,14 @@ impl Deck {
             return;
         }
         let full = util::compose_full(&text, &self.attachments);
-        let mode = self.target.clone();
-
-        if mode == "active" {
-            let Some(idx) = self.active.filter(|&i| self.tabs[i].alive) else {
-                self.system("A aba ativa não tem um processo rodando.");
-                return;
-            };
-            self.submit(idx, &full);
-            self.set_term_focus(true);
-            let to = self.tabs[idx].ident.id();
-            self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&to), full.clone()));
-        } else if mode == "all" {
-            let idxs: Vec<usize> = (0..self.tabs.len()).filter(|&i| self.tabs[i].alive && self.tabs[i].kind != "shell").collect();
-            if idxs.is_empty() {
-                self.system("Nenhum agente aberto.");
-                return;
-            }
-            for &i in &idxs {
-                self.submit(i, &full);
-            }
-            let to = idxs.iter().map(|&i| self.tabs[i].kind.clone()).collect::<Vec<_>>().join(" + ");
-            self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&to), full.clone()));
-        } else if let Some(ids) = mode.strip_prefix("table:") {
-            let agents: Vec<String> = ids.split(',').map(str::to_owned).collect();
-            let rounds = util::clamp_rounds(&self.rounds);
-            let files = std::mem::take(&mut self.attachments);
-            self.input.clear();
-            self.set_right_view(RightView::Conversa);
-            self.table_running = true;
-            self.table_agents = agents.clone();
-            self.table_round.clear();
-            self.table_speaking = None;
-            let req = TableRequest { task: text, agents, rounds, attachments: files };
-            self.spawn_bg("table", move |core| {
-                core.run_table(req);
-                Some(UiMsg::TableDone)
-            });
+        let Some(idx) = self.active.filter(|&i| self.tabs[i].alive) else {
+            self.system("A aba ativa não tem um processo rodando.");
             return;
-        }
+        };
+        self.submit(idx, &full);
+        self.set_term_focus(true);
+        let to = self.tabs[idx].ident.id();
+        self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&to), full.clone()));
         self.input.clear();
         self.attachments.clear();
     }

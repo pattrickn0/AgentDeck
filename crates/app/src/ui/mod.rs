@@ -83,7 +83,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
 
     // ---------- Barra direita: numa camada acima, para o diff alargado cobrir o terminal sem que
     // ele receba os cliques (o terminal só reage ao mouse quando está sob o ponteiro). ----------
-    let composer_anchor = egui::Area::new(Id::new("right-panel"))
+    egui::Area::new(Id::new("right-panel"))
         .order(Order::Middle)
         .fixed_pos(panel.min)
         .show(&ctx, |ui| {
@@ -92,14 +92,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
                 shadow(ui.painter(), rect, 0, 0, 18, theme::rgba(0, 0, 0, 0.55));
                 ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(1.0, rect.height())), 0.0, theme::BORDER);
             }
-            right_panel::draw_panel(deck, ui, rect, comp_h)
-        })
-        .inner;
+            right_panel::draw_panel(deck, ui, rect, comp_h);
+        });
 
     // ---------- Menus suspensos e overlay ----------
     menus::new_tab_menu(deck, &ctx, menus.new_tab_anchor);
     menus::settings_menu(deck, &ctx, menus.settings_anchor);
-    menus::target_menu(deck, &ctx, composer_anchor);
     menus::tab_context_menu(deck, &ctx);
     menus::rename_tab_modal(deck, &ctx);
     shortcuts::shortcuts_modal(deck, &ctx);

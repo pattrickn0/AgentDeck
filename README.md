@@ -1,8 +1,8 @@
 # ⚡ CommandDeck Terminal
 
 Terminal desktop nativo (Rust + winit) que conecta agentes de IA: **Claude Code**, **Antigravity CLI**,
-**Codex**, **OpenCode**, **modelos locais via Ollama** e outros CLIs. Os agentes conversam entre si (`ask-agent`), colaboram em
-mesas de orquestração e trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada**.
+**Codex**, **OpenCode**, **modelos locais via Ollama** e outros CLIs. Os agentes conversam entre si (`ask-agent`) e
+trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada**.
 
 ![Tela principal](docs/screenshots/main.png)
 
@@ -13,7 +13,7 @@ mesas de orquestração e trabalham na mesma pasta, enquanto você acompanha tud
   abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar ou desligar a divisão.
 - **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real, e o
   **Mapa** (em texto de terminal) de quem está conversando com quem agora.
-- **Enviar para**: aba ativa, todos os agentes abertos ou **mesas** (vários agentes em rodadas, com síntese final).
+- **Compositor** na barra direita: a mensagem (com anexos e áudio transcrito) vai para a **aba ativa**.
 - **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
 - Explorador de arquivos do workspace: clique insere `@arquivo` na mensagem, duplo clique abre no sistema.
 - Anexos por botão, arrastar e soltar ou colar imagem (Ctrl+V).
