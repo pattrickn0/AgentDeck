@@ -8,6 +8,7 @@ mod map;
 mod menus;
 mod overlay;
 mod panes;
+mod projects;
 mod right_panel;
 mod shortcuts;
 mod sidebar;
