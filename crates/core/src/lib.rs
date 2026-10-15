@@ -8,6 +8,7 @@
 //! `agents.rs` (tipos `AgentInfo`/`SpawnSpec`), `config.rs` (`Config`) e
 //! `workspace.rs` (`DirEntry`) são consumidos pela UI. Não mude sem alinhar com o lead.
 
+pub mod activity;
 pub mod agents;
 pub mod attachments;
 pub mod bridge;
@@ -119,6 +120,8 @@ pub(crate) struct CoreInner {
     /// Instâncias de agentes (uma por aba) e as perguntas aguardando resposta entre elas.
     pub instances: Mutex<instances::Instances>,
     pub exchange: exchange::Exchange,
+    /// Última atividade de cada aba; o prazo de uma pergunta conta a partir dela.
+    pub activity: activity::Activity,
     /// A interface sabe entregar mensagens nas abas (senão a ponte responde em modo headless).
     pub tab_delivery: std::sync::atomic::AtomicBool,
     /// Token de cada processo de agente → quem ele é (a ponte não confia no `from` do corpo).
@@ -284,6 +287,7 @@ impl Core {
             headless_sessions: Mutex::new(HashMap::new()),
             instances: Mutex::new(instances::Instances::default()),
             exchange: exchange::Exchange::default(),
+            activity: activity::Activity::default(),
             tab_delivery: std::sync::atomic::AtomicBool::new(false),
             callers: Mutex::new(HashMap::new()),
             headless_asks: Mutex::new(Vec::new()),
@@ -323,6 +327,11 @@ impl Core {
     /// Define a função que acorda a UI a cada evento emitido.
     pub fn set_waker(&self, waker: Waker) {
         *self.inner.waker.write() = Some(waker);
+    }
+
+    /// A aba `id` está trabalhando agora (a interface chama enquanto ela produz saída ou está num turno).
+    pub fn touch_activity(&self, id: &str, at: std::time::Instant) {
+        self.inner.activity.touch(id, at);
     }
 
     /// Emite um evento para a UI (e acorda o loop).
