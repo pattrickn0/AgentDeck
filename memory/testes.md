@@ -84,7 +84,7 @@ Abra uma aba do Claude e uma do Antigravity.
 
 ## 6. Mapa de agentes ★
 
-- [ ] Abrir o Mapa: a barra **se alarga sobre o terminal** e o terminal **não muda de tamanho** (o texto do agente não se reorganiza).
+- [ ] Abrir o Mapa: a barra **permanece na sua largura fixa** (não cresce nem se alarga sobre o terminal). O mapa tem rolagem interna horizontal e vertical (`ScrollArea::both()`), comportando 0, 1 ou 10+ agentes sem alterar a largura da barra lateral.
 - [ ] Clicar no terminal visível ao lado do mapa funciona; clicar sobre o mapa não vaza clique para o terminal.
 - [ ] Com dois agentes conversando: aparece `AO VIVO`, a árvore `claude ─► antigravity #n`, o estado (na fila / digitada / 202) e o tempo correndo.
 - [ ] Ao terminar, a conversa aparece em `RECENTES` (esmaecida) e some depois de ~1 minuto.
@@ -97,7 +97,7 @@ Abra uma aba do Claude e uma do Antigravity.
 
 Com a pasta de trabalho num repositório git:
 
-- [ ] O **chip da branch** aparece na topbar (`main •3`, com ↑/↓ quando houver); clicar nele abre a aba Git.
+- [ ] O botão redundante da branch foi **removido da topbar**. O status da branch e contagem de alterações aparecem no topo da aba Git (`dev · N ▾`), no tooltip do ícone Git e no badge de alterações do ícone.
 - [ ] A aba Git lista as alterações em seções; as letras têm cores (M âmbar, A verde, D vermelho…).
 - [ ] Clicar num arquivo abre o **diff** (a barra se alarga), com linhas numeradas e cores; **←** volta.
 - [ ] Preparar (+) e tirar (−) um arquivo e "tudo" pelos botões das seções.
@@ -105,10 +105,11 @@ Com a pasta de trabalho num repositório git:
 - [ ] Commit com mensagem (botão e **Ctrl+Enter**); "Corrigir último commit" traz a última mensagem.
 - [ ] Commit sem `user.name`/`user.email` configurados: aparece a explicação de como configurar.
 - [ ] Menu da branch: buscar, trocar de branch, criar branch nova (digitar o nome + Enter).
+- [ ] HEAD destacado (detached HEAD): o botão da branch mostra `{hash} (destacado)` com a contagem de alterações.
 - [ ] **Push** num repositório do GitHub por HTTPS: abre o login do **Git Credential Manager** e o envio conclui. Sem credencial: mensagem de erro, **sem travar**.
 - [ ] Branch nova: o botão vira **Publicar** e cria o upstream.
 - [ ] Buscar (⟳) e Puxar (↓n) depois de um commit feito em outro lugar.
-- [ ] Fazer um commit **pelo terminal** (ou um agente fazer): a aba Git e o chip se atualizam sozinhos.
+- [ ] Fazer um commit **pelo terminal** (ou um agente fazer): a aba Git se atualiza sozinha.
 - [ ] Caminhos com **acentos e espaços** aparecem certos e o diff abre.
 - [ ] Pasta que não é repositório: aparece "Inicializar repositório" e funciona.
 - [ ] (Se possível) sem git instalado / fora do PATH: aparece a mensagem com o link de instalação.
@@ -137,3 +138,30 @@ Com a pasta de trabalho num repositório git:
 ## 11. Para fechar
 
 - [ ] Tirar um print da tela principal (com a barra direita) para substituir `docs/screenshots/main.png`.
+
+## 12. UI/UX: Novidades da Rodada (5 Tarefas) ★
+
+- [ ] **Conversa integrada (mensagens do usuário)**:
+  - [ ] Mensagens enviadas pelo usuário na aba ativa entram no feed com indicador vertical verde (`theme::USER = #10b981`), distinguindo de pronto das mensagens de IA.
+  - [ ] Mensagens longas e multilinhas: quebra automática no card sem vazar a largura do painel e com altura dinâmica do indicador colorido.
+- [ ] **Renomeação de agentes / abas**:
+  - [ ] Duplo clique no título da aba ou clique direito → "Renomear".
+  - [ ] Digitar novo cargo/nome (ex.: `dev`, `dev@ana` ou `claude@dev@ana`).
+  - [ ] Nome vazio: restaura para o modelo original sem quebrar.
+  - [ ] Nome duplicado: modal recusa com aviso em vermelho.
+  - [ ] Nome com acento (`josé`) ou caracteres especiais (`!`, espaços): recusado amigavelmente com mensagem de formato esperado (`modelo@cargo@nome`).
+  - [ ] Persistência: novo nome persiste na reinicialização (`config.custom_names`) e propaga no feed, no mapa e no `ask-agent`.
+- [ ] **Gestão de Projetos no explorador lateral**:
+  - [ ] Seção `PROJETOS` colapsável no topo da árvore de arquivos, com ponto indicador no projeto ativo.
+  - [ ] Botão `+`: seletor de pasta adiciona novo workspace à lista e ativa-o.
+  - [ ] Botão `×`: remove o projeto da lista; se for o ativo, migra automaticamente para o primeiro da lista.
+  - [ ] Pasta inexistente ou inacessível: não quebra a aplicação; exibe erro amigável na conversa.
+  - [ ] Lista de projetos persiste no arquivo de configuração (`config.projects`).
+- [ ] **Mapa de agentes em área fixa**:
+  - [ ] O mapa nunca alarga a barra lateral direita sobre o terminal; `right_w` permanece intacto.
+  - [ ] Rolagem bidirecional fluida (`ScrollArea::both()`) funcionando com 0, 1 e 10+ agentes conectados.
+- [ ] **Aba Git desacoplada da topbar**:
+  - [ ] Topbar limpa (sem chip redundante da branch).
+  - [ ] Status e contagem de alterações visíveis no botão da branch no topo da aba Git (`dev · N ▾`), com badge de alterações no ícone Git da lateral.
+  - [ ] Repositório sem git: exibe aviso explicativo e botão para inicializar.
+  - [ ] HEAD destacado: exibe `{hash} (destacado) · N ▾`.

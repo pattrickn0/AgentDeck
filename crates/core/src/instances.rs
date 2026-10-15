@@ -231,7 +231,20 @@ mod tests {
 
     #[test]
     fn malformed_ids_are_rejected() {
-        for s in ["", "@dev", "claude@", "claude@Dev", "claude@d ev", "claude@dev@ana@x", "claude@dev@", "claude@dev;rm", "claude@@ana"] {
+        for s in [
+            "",
+            "@dev",
+            "claude@",
+            "claude@Dev",
+            "claude@d ev",
+            "claude@dev@ana@x",
+            "claude@dev@",
+            "claude@dev;rm",
+            "claude@@ana",
+            "claude@dev@josé",
+            "claude@dev@ana!",
+            "claude@cárgo",
+        ] {
             assert!(Ident::parse(s).is_none(), "{s:?}");
         }
         assert!(Ident::parse(&format!("claude@{}", "a".repeat(33))).is_none());
