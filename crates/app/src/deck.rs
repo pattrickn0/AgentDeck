@@ -621,12 +621,17 @@ impl Deck {
             if seq != tab.seen_output {
                 tab.seen_output = seq;
                 let last = (*tab.session.shared.last_output.lock()).unwrap_or(now);
+                self.core.touch_activity(&tab.ident.id(), last);
                 if tab.busy && tab.turn_confirmed {
                     // Quem libera é o hook de fim de turno; isto só cobre um aviso perdido.
                     tab.idle_deadline = Some(last + HOOK_STALE);
                 } else if tab.busy {
                     tab.idle_deadline = Some(last + IDLE_CHIME);
                 }
+            }
+            if tab.busy {
+                // Num turno longo o prazo das perguntas a esta aba só começa a correr quando ele acabar.
+                self.core.touch_activity(&tab.ident.id(), now);
             }
             if let Some(at) = tab.idle_deadline {
                 if now >= at {

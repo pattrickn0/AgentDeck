@@ -247,7 +247,24 @@ pub(crate) fn resolve_target(asked: &str, available: &[String], ollama_models: &
 }
 
 /// Quanto tempo uma pergunta entregue numa aba espera pela resposta.
+/// O prazo conta a partir da última atividade da aba (ver [`reply_deadline`]).
 const TAB_REPLY_TIMEOUT: Duration = Duration::from_secs(600);
+/// Teto absoluto, mesmo que a aba continue ativa: evita esperar para sempre um agente travado.
+const TAB_REPLY_MAX: Duration = Duration::from_secs(3600);
+
+/// Até quando esperar a resposta de `target` a uma pergunta entregue em `sent`.
+///
+/// São [`TAB_REPLY_TIMEOUT`] depois da pergunta *ou* depois da última atividade da aba (saída no
+/// terminal ou turno em andamento), o que for mais tarde: um agente ocupado numa tarefa longa não
+/// estoura o prazo, que só começa a correr quando ele sossega. Limitado a [`TAB_REPLY_MAX`].
+fn reply_deadline(core: &Core, target: &str, sent: Instant) -> Instant {
+    deadline_after(sent, core.inner.activity.last(target))
+}
+
+fn deadline_after(sent: Instant, last_activity: Option<Instant>) -> Instant {
+    let quiet_since = last_activity.map_or(sent, |a| a.max(sent));
+    (quiet_since + TAB_REPLY_TIMEOUT).min(sent + TAB_REPLY_MAX)
+}
 
 /// Mensagem que acompanha uma resposta entregue a quem perguntou.
 fn delivered(to: &str) -> Value {
@@ -301,10 +318,11 @@ envie pela entrada padrão: ask-agent --reply {request} -). O usuário acompanha
     )
 }
 
-/// Espera a resposta até `until`. `None` = o prazo acabou sem resposta.
-fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: Instant) -> Option<Reply> {
+/// Espera a resposta até `until()` (reavaliado a cada volta, pois o prazo pode se estender).
+/// `None` = o prazo acabou sem resposta.
+fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl Fn() -> Instant) -> Option<Reply> {
     loop {
-        let left = until.saturating_duration_since(Instant::now());
+        let left = until().saturating_duration_since(Instant::now());
         if left.is_zero() {
             return None;
         }
@@ -389,7 +407,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     let prompt = tab_prompt(from, request, message);
     core.emit(CoreEvent::Deliver(Delivery { request, ident, create: created, from: from.to_owned(), prompt, answer: false }));
 
-    let deadline = Instant::now() + TAB_REPLY_TIMEOUT;
+    let sent = Instant::now();
     // Só um agente recebe uma resposta atrasada digitada: num terminal comum (`shell`) o texto
     // seria executado como comando. Ali o `ask-agent` espera até o fim.
     let asker = Ident::parse(from).filter(|i| caller.tab && i.kind != "shell");
@@ -397,15 +415,18 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         (Some(w), Some(_)) if w > 0 => Some(Instant::now() + Duration::from_secs(w)),
         _ => None,
     };
-    let outcome = match wait_reply(core, &rx, detach_at.map_or(deadline, |d| d.min(deadline))) {
+    let outcome = match wait_reply(core, &rx, || {
+        let deadline = reply_deadline(core, &id, sent);
+        detach_at.map_or(deadline, |d| d.min(deadline))
+    }) {
         Some(reply) => reply,
         None => match (detach_at, asker) {
-            (Some(_), Some(asker)) if Instant::now() < deadline => {
+            (Some(_), Some(asker)) if Instant::now() < reply_deadline(core, &id, sent) => {
                 core.inner.exchange.detach(request);
                 let core2 = core.clone();
                 let target = id.clone();
                 let spawned = std::thread::Builder::new().name("cd-bridge-late".into()).spawn(move || {
-                    let outcome = wait_reply(&core2, &rx, deadline)
+                    let outcome = wait_reply(&core2, &rx, || reply_deadline(&core2, &target, sent))
                         .unwrap_or_else(|| Reply::Failed(format!("\"{target}\" não respondeu em 10 minutos")));
                     core2.inner.exchange.remove(request);
                     deliver_late(&core2, asker, &target, request, outcome);
@@ -599,5 +620,24 @@ mod tests {
             h.join().expect("thread");
         }
         assert_eq!(*order.lock(), vec![0, 1, 2, 3, 4]);
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+
+    #[test]
+    fn prazo_conta_do_fim_da_atividade() {
+        let t0 = Instant::now();
+        let min = |n: u64| Duration::from_secs(n * 60);
+        // sem atividade: 10 min depois da pergunta
+        assert_eq!(deadline_after(t0, None), t0 + min(10));
+        // atividade antes da pergunta não adia
+        assert_eq!(deadline_after(t0 + min(5), Some(t0)), t0 + min(15));
+        // aba ainda trabalhando 30 min depois: o prazo vai para 40 min
+        assert_eq!(deadline_after(t0, Some(t0 + min(30))), t0 + min(40));
+        // teto de 60 min mesmo com atividade contínua
+        assert_eq!(deadline_after(t0, Some(t0 + min(55))), t0 + min(60));
     }
 }
