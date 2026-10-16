@@ -668,8 +668,11 @@ impl Deck {
             if tab.session.take_bell() {
                 chime = true;
             }
+            // OSC 52 das outras abas é descartado.
             if let Some(text) = tab.session.take_clipboard() {
-                ctx.copy_text(text);
+                if crate::terminal::clipboard_allowed(i, active, &tab.project, &self.active_project) {
+                    ctx.copy_text(text);
+                }
             }
             // Enters agendados por `submit`; as teclas seguradas nesse meio-tempo vão logo depois.
             while let Some(&at) = tab.pending_enter.front() {

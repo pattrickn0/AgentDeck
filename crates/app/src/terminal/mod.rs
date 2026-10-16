@@ -169,6 +169,12 @@ impl Shared {
     }
 }
 
+/// OSC 52 (o programa pede para gravar na área de transferência) só vale para a aba ativa e
+/// visível, do projeto ativo: uma aba em segundo plano não troca o que o usuário copiou.
+pub fn clipboard_allowed(tab: usize, active: Option<usize>, tab_project: &str, active_project: &str) -> bool {
+    active == Some(tab) && tab_project == active_project
+}
+
 struct PtyHandle {
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
@@ -426,6 +432,22 @@ mod tests {
         s.print("\x1b[6n");
         s.kill();
         s.write(b"nada");
+    }
+
+    #[test]
+    fn osc52_only_for_the_active_tab_of_the_active_project() {
+        assert!(clipboard_allowed(1, Some(1), "p1", "p1"));
+        assert!(!clipboard_allowed(0, Some(1), "p1", "p1"), "aba em segundo plano");
+        assert!(!clipboard_allowed(1, Some(1), "p2", "p1"), "aba de outro projeto");
+        assert!(!clipboard_allowed(1, None, "p1", "p1"));
+    }
+
+    #[test]
+    fn osc52_from_the_program_is_captured_for_the_ui_to_decide() {
+        let s = Session::new(GridSize { cols: 20, rows: 4 });
+        s.print("\x1b]52;c;b2k=\x07");
+        assert_eq!(s.take_clipboard().as_deref(), Some("oi"));
+        assert_eq!(s.take_clipboard(), None);
     }
 
     #[test]
