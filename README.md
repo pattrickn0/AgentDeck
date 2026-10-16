@@ -22,7 +22,9 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
 - Som de notificação quando um agente termina.
 
 Atalhos: `Ctrl+T` nova aba · `Ctrl+Tab` / `Ctrl+Shift+Tab` alternar · `Ctrl+B` barra lateral ·
-`Ctrl+L` focar mensagem · `Enter` envia · `Shift+Enter` quebra linha.
+`Ctrl+L` focar mensagem · `Enter` envia · `Shift+Enter` quebra linha · `Ctrl+/` lista os atalhos.
+Com o terminal focado, `Ctrl+B` e `Ctrl+L` vão para o terminal (tmux, limpar a tela); a opção
+"Atalhos do app acima do terminal" (☰) os devolve ao app.
 
 ## Compilar e rodar (Windows)
 

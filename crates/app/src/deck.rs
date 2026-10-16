@@ -2,7 +2,7 @@
 //! A pintura fica em [`crate::ui`]; a janela/loop em [`crate::app`].
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
@@ -30,10 +30,15 @@ use crate::util;
 /// Mensagens de tarefas em segundo plano para a UI.
 pub enum UiMsg {
     Agents(Vec<AgentInfo>),
-    Attached(Vec<String>),
+    /// Anexos copiados (caminhos absolutos em `dados/anexos`) para o rascunho do projeto (id).
+    Attached(String, Vec<PathBuf>),
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
+    /// Resultado da abertura do microfone (feita fora da thread da interface).
+    MicOpened(Result<audio::Recorder, String>),
+    /// O usuário confirmou remover o projeto (id) da lista.
+    RemoveProject(String),
     /// Resposta do Git, com a geração do projeto em que foi pedida (ver `GitUi::generation`).
     Git(u64, crate::git_ui::GitReply),
 }
@@ -174,6 +179,9 @@ struct ProjectState {
     /// Conversa integrada e conversas recentes do mapa (as do projeto ativo ficam em `Deck`).
     feed: Vec<FeedItem>,
     recent: VecDeque<Recent>,
+    /// Rascunho do compositor e anexos (os do projeto ativo ficam em `Deck`).
+    input: String,
+    attachments: Vec<PathBuf>,
 }
 
 /// O que a tela dividida mostra neste quadro.
@@ -289,10 +297,15 @@ pub struct Deck {
 
     // Compositor
     pub input: String,
-    pub attachments: Vec<String>,
+    /// Anexos do rascunho, em caminho absoluto: a referência `@...` é feita no envio, relativa ao
+    /// projeto em que a mensagem sai.
+    pub attachments: Vec<PathBuf>,
     pub needs_text: bool,
     recorder: Option<audio::Recorder>,
     pub recording_since: Option<Instant>,
+    /// O microfone está sendo aberto numa thread (pode levar segundos); `false` no meio do caminho
+    /// = o usuário desistiu, e o gravador que chegar é descartado.
+    pub mic_opening: bool,
     pub transcribing: bool,
     pub send_after_transcribe: bool,
     /// Aba ativa quando o Enviar foi clicado durante a gravação: a transcrição só sai sozinha se
@@ -313,6 +326,12 @@ pub struct Deck {
     pub sound_enabled: bool,
     /// Espelho de `Config.auto_open_agent_tabs` (item do menu de configurações).
     pub auto_open_agent_tabs: bool,
+    /// Espelho de `Config.app_shortcuts_first` (item do menu de configurações).
+    pub app_shortcuts_first: bool,
+    /// Há um modal aberto (do último quadro): o teclado não vai ao terminal nem aos atalhos.
+    pub modal_open: bool,
+    /// Ctrl+/ pedido pelo teclado (abre/fecha o modal de atalhos no próximo quadro).
+    pub toggle_shortcuts: bool,
     pub drop_hover: bool,
     pub term_focus: bool,
     /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
@@ -349,6 +368,51 @@ const FEED_MAX: usize = 1000;
 fn cap_feed(feed: &mut Vec<FeedItem>) {
     if feed.len() > FEED_MAX {
         feed.drain(..feed.len() - FEED_MAX);
+    }
+}
+
+/// Fecha o microfone numa thread (esperar a captura terminar não é coisa da thread da interface).
+fn discard_recorder(rec: audio::Recorder) {
+    let _ = std::thread::Builder::new().name("mic-close".into()).spawn(move || rec.cancel());
+}
+
+/// Caminhos absolutos dos anexos a partir das referências do core (relativas ao workspace da hora
+/// da cópia, ou absolutas). Todo anexo fica em `dados/anexos` com nome único, então o nome basta
+/// e não depende de qual projeto estava ativo.
+fn attachment_paths(core: &Core, refs: Vec<String>) -> Vec<PathBuf> {
+    let dir = core.paths().data_dir.join("anexos");
+    refs.iter().filter_map(|r| Path::new(r).file_name()).map(|name| dir.join(name)).collect()
+}
+
+/// O arquivo é uma cópia nossa em `dados/anexos` (só essas o "×" apaga).
+fn in_attachments_dir(data_dir: &Path, path: &Path) -> bool {
+    path.parent().is_some_and(|p| p == data_dir.join("anexos"))
+}
+
+/// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+L (limpar a tela no shell) e Ctrl+B (prefixo
+/// do tmux) vão ao terminal quando ele tem o foco, a não ser que o usuário dê prioridade ao app.
+fn app_claims_ctrl(key: &str, term_focused: bool, app_first: bool) -> bool {
+    match key {
+        "l" | "b" => !term_focused || app_first,
+        _ => true,
+    }
+}
+
+/// Troca o nome de exibição de quem fala/para quem nos itens da Conversa (aba renomeada).
+fn rename_in_feed(feed: &mut [FeedItem], old_who: &str, new_who: &str) {
+    for item in feed {
+        for who in [&mut item.who, &mut item.to] {
+            if who.as_deref() == Some(old_who) {
+                *who = Some(new_who.to_owned());
+            }
+        }
+    }
+}
+
+/// O "pensando" de `old_id` no projeto passa a ser de `new_id` (chave `projeto#id`, ver `add_feed`).
+fn rename_thinking(thinking: &mut HashMap<String, u64>, project: &str, old_id: &str, new_id: &str) {
+    if let Some(item) = thinking.remove(&format!("{project}#{old_id}")) {
+        thinking.insert(format!("{project}#{new_id}"), item);
     }
 }
 const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
@@ -420,6 +484,7 @@ impl Deck {
             needs_text: false,
             recorder: None,
             recording_since: None,
+            mic_opening: false,
             transcribing: false,
             send_after_transcribe: false,
             send_target: None,
@@ -433,6 +498,9 @@ impl Deck {
             tab_context_menu: None,
             sound_enabled: cfg.sound_enabled,
             auto_open_agent_tabs: cfg.auto_open_agent_tabs,
+            app_shortcuts_first: cfg.app_shortcuts_first,
+            modal_open: false,
+            toggle_shortcuts: false,
             drop_hover: false,
             term_focus: false,
             ime_preedit: String::new(),
@@ -581,9 +649,12 @@ impl Deck {
                     }
                 }
             }
-            UiMsg::Attached(refs) => {
-                if !refs.is_empty() {
-                    self.attachments.extend(refs);
+            UiMsg::Attached(project, files) => {
+                if project != self.active_project {
+                    // O projeto mudou durante a cópia: o anexo fica no rascunho de quem o pediu.
+                    self.projects.entry(project).or_default().attachments.extend(files);
+                } else if !files.is_empty() {
+                    self.attachments.extend(files);
                     self.request_composer_focus();
                 }
             }
@@ -614,6 +685,8 @@ impl Deck {
             UiMsg::WorkspacePicked(dir) => {
                 self.add_project(dir);
             }
+            UiMsg::RemoveProject(id) => self.remove_project_by_id(&id),
+            UiMsg::MicOpened(res) => self.on_mic_opened(res),
             UiMsg::Git(generation, reply) => self.on_git(generation, reply),
         }
     }
@@ -643,6 +716,18 @@ impl Deck {
                 self.persist_layout_now();
             } else {
                 want(at);
+            }
+        }
+        if let Some(since) = self.recording_since {
+            let end = since + Duration::from_secs(audio::MAX_RECORDING_SECS.into());
+            if now >= end {
+                self.stop_recording();
+                self.system(format!(
+                    "A gravação chegou ao limite de {} minutos: parei e estou transcrevendo o que foi gravado.",
+                    audio::MAX_RECORDING_SECS / 60
+                ));
+            } else {
+                want(end);
             }
         }
         if let Some((rel, at)) = self.tree.pending_click.clone() {
@@ -1110,8 +1195,8 @@ impl Deck {
     pub fn plan_panes(&mut self, area: egui::Rect) -> (Vec<usize>, Vec<PanePlan>) {
         let (shape, rects, groups) = if self.split_enabled && self.group_order.len() > 1 {
             let shape = split::grid_shape(self.group_order.len(), area.width(), area.height());
-            self.split_ratios.conform(&shape);
-            let rects = split::layout(area, &shape, &self.split_ratios);
+            // Só ajusta para desenhar: as proporções salvas mudam apenas quando o usuário arrasta.
+            let rects = split::layout(area, &shape, &self.split_ratios.fitted(&shape));
             let groups = split::assign(&self.group_order, rects.len());
             (shape, rects, groups)
         } else {
@@ -1269,15 +1354,14 @@ impl Deck {
             let new_label = new_ident.label(&self.agents.name(&kind));
             self.tabs[idx].ident = new_ident;
             self.tabs[idx].label = new_label;
-            // Atualiza itens existentes na conversa integrada
-            for item in &mut self.feed {
-                if item.who.as_deref() == Some(&old_id) {
-                    item.who = Some(new_id.clone());
-                }
-                if item.to.as_deref() == Some(&old_id) {
-                    item.to = Some(new_id.clone());
-                }
-            }
+            // Atualiza a conversa integrada do projeto da aba: os itens guardam o nome de exibição
+            // (`who_name`), e o "pensando" passa para o id novo (a próxima mensagem dele o apaga).
+            let project = self.tabs[idx].project.clone();
+            let (old_who, new_who) = (self.agents.who_name(&old_id), self.agents.who_name(&new_id));
+            let feed =
+                if project == self.active_project { &mut self.feed } else { &mut self.projects.entry(project.clone()).or_default().feed };
+            rename_in_feed(feed, &old_who, &new_who);
+            rename_thinking(&mut self.thinking, &project, &old_id, &new_id);
             // Atualiza histórico recente do mapa
             for r in &mut self.recent {
                 if r.from == old_id {
@@ -1428,14 +1512,26 @@ impl Deck {
 
     /// Trata uma tecla vinda do winit. Retorna `true` se consumiu (não repassar ao egui).
     pub fn handle_key(&mut self, ev: &KeyEvent, mods: ModifiersState, egui_has_focus: bool) -> bool {
+        let term_keys = !egui_has_focus && self.term_focus && self.active.is_some() && !self.modal_open;
         if ev.state != ElementState::Pressed {
-            return !egui_has_focus && self.term_focus && self.active.is_some();
+            return term_keys;
         }
         let ctrl = mods.control_key();
         let lower = match &ev.logical_key {
             Key::Character(s) => s.to_lowercase(),
             _ => String::new(),
         };
+        // Ctrl+/ (ou Ctrl+?) abre/fecha os atalhos de qualquer lugar, inclusive do terminal.
+        if ctrl && !mods.alt_key() && (lower == "/" || lower == "?") {
+            if !ev.repeat {
+                self.toggle_shortcuts = true;
+            }
+            return true;
+        }
+        // Com um modal aberto, o teclado é só dele (Esc, Enter, a caixa de texto).
+        if self.modal_open {
+            return false;
+        }
         if ctrl && mods.alt_key() && !mods.shift_key() {
             let dir = match &ev.logical_key {
                 Key::Named(NamedKey::ArrowLeft) => Some((-1, 0)),
@@ -1450,16 +1546,17 @@ impl Deck {
             }
         }
         if ctrl && !mods.alt_key() {
+            let app_key = app_claims_ctrl(&lower, term_keys, self.app_shortcuts_first);
             match lower.as_str() {
                 "t" if !ev.repeat => {
                     self.push_action(Action::NewTabShortcut);
                     return true;
                 }
-                "b" if !ev.repeat => {
+                "b" if !ev.repeat && app_key => {
                     self.push_action(Action::ToggleSidebar);
                     return true;
                 }
-                "l" if !self.composer_focused => {
+                "l" if !self.composer_focused && app_key => {
                     self.push_action(Action::FocusComposer);
                     return true;
                 }
@@ -1564,8 +1661,9 @@ impl Deck {
         }
         let Ok(img) = cb.get_image() else { return };
         let (width, height, bytes) = (img.width as u32, img.height as u32, img.bytes.into_owned());
+        let project = self.active_project.clone();
         self.spawn_bg("clipboard-image", move |core| match core.attach_rgba_png(width, height, &bytes) {
-            Ok(r) => Some(UiMsg::Attached(vec![r])),
+            Ok(r) => Some(UiMsg::Attached(project, attachment_paths(&core, vec![r]))),
             Err(e) => {
                 log::warn!("colar imagem: {e}");
                 None
@@ -1639,6 +1737,19 @@ impl Deck {
         });
     }
 
+    /// Pergunta (numa thread, sem congelar o quadro) se o projeto sai da lista.
+    pub fn confirm_remove_project(&self, id: String, name: String) {
+        self.spawn_bg("confirm-remove-project", move |_| {
+            let ok = rfd::MessageDialog::new()
+                .set_title("Remover projeto")
+                .set_description(format!("Deseja remover \"{name}\" da lista de projetos?"))
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show()
+                == rfd::MessageDialogResult::Yes;
+            ok.then_some(UiMsg::RemoveProject(id))
+        });
+    }
+
     /// Uma pasta escolhida no "+" da seção PROJETOS: vira projeto (ou volta ao que já é dela).
     pub fn add_project(&mut self, path: PathBuf) {
         let project = self.core.create_project(&path, None);
@@ -1672,6 +1783,16 @@ impl Deck {
             state.split_ratios = std::mem::take(&mut self.split_ratios);
             state.feed = std::mem::take(&mut self.feed);
             state.recent = std::mem::take(&mut self.recent);
+            state.input = std::mem::take(&mut self.input);
+            state.attachments = std::mem::take(&mut self.attachments);
+        } else {
+            self.input.clear();
+            self.attachments.clear();
+        }
+        // O rascunho é de cada projeto (os anexos citados ficam relativos à pasta dele).
+        if let Some(state) = self.projects.get_mut(id) {
+            self.input = std::mem::take(&mut state.input);
+            self.attachments = std::mem::take(&mut state.attachments);
         }
         self.active = None;
         self.unseen = 0;
@@ -2027,9 +2148,27 @@ impl Deck {
     }
 
     pub fn pick_attachments(&self) {
-        self.spawn_bg("pick-attachments", |core| {
+        let project = self.active_project.clone();
+        self.spawn_bg("pick-attachments", move |core| {
             let files = rfd::FileDialog::new().pick_files()?;
-            Some(UiMsg::Attached(core.attach_files(&files)))
+            Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&files))))
+        });
+    }
+
+    /// "×" do chip: tira o anexo do rascunho e apaga a cópia em `dados/anexos`.
+    pub fn remove_attachment(&mut self, i: usize) {
+        if i >= self.attachments.len() {
+            return;
+        }
+        let path = self.attachments.remove(i);
+        if !in_attachments_dir(&self.core.paths().data_dir, &path) {
+            return;
+        }
+        self.spawn_bg("remove-attachment", move |_| {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("apagar anexo {}: {e}", path.display());
+            }
+            None
         });
     }
 
@@ -2040,21 +2179,33 @@ impl Deck {
         if self.right_view == RightView::Git {
             self.set_right_view(RightView::Conversa);
         }
-        self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(core.attach_files(&paths))));
+        let project = self.active_project.clone();
+        self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&paths)))));
     }
 
-    /// Clique no microfone.
+    /// Clique no microfone. Abrir o dispositivo pode levar até 5 s: vai para uma thread, e um
+    /// segundo clique enquanto isso desiste.
     pub fn toggle_mic(&mut self) {
         if self.recorder.is_some() {
             self.stop_recording();
-            return;
+        } else if self.mic_opening {
+            self.mic_opening = false;
+        } else {
+            self.mic_opening = true;
+            self.spawn_bg("mic-open", |_| Some(UiMsg::MicOpened(audio::Recorder::start())));
         }
-        match audio::Recorder::start() {
-            Ok(r) => {
+    }
+
+    fn on_mic_opened(&mut self, res: Result<audio::Recorder, String>) {
+        let wanted = std::mem::take(&mut self.mic_opening);
+        match res {
+            Ok(r) if wanted && self.recorder.is_none() => {
                 self.recorder = Some(r);
                 self.recording_since = Some(Instant::now());
             }
-            Err(e) => self.system(format!("Microfone indisponível: {e}")),
+            Ok(r) => discard_recorder(r),
+            Err(e) if wanted => self.system(format!("Microfone indisponível: {e}")),
+            Err(_) => {}
         }
     }
 
@@ -2076,8 +2227,9 @@ impl Deck {
 
     pub fn cancel_recording(&mut self) {
         if let Some(rec) = self.recorder.take() {
-            rec.cancel();
+            discard_recorder(rec);
         }
+        self.mic_opening = false;
         self.recording_since = None;
         self.send_after_transcribe = false;
         self.request_composer_focus();
@@ -2104,7 +2256,8 @@ impl Deck {
             self.request_composer_focus();
             return;
         }
-        let full = util::compose_full(&text, &self.attachments);
+        let refs: Vec<String> = self.attachments.iter().map(|a| commanddeck_core::util::ref_path(&self.workspace, a)).collect();
+        let full = util::compose_full(&text, &refs);
         let Some(idx) = self.active.filter(|&i| self.tabs[i].alive) else {
             self.system("A aba ativa não tem um processo rodando.");
             return;
@@ -2208,5 +2361,56 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         color: commanddeck_core::agents::COLOR_SHELL.into(),
         kind: kind.to_owned(),
         double_enter_on_mention: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: u64, who: &str, to: Option<&str>) -> FeedItem {
+        FeedItem {
+            id,
+            kind: FeedKind::Thinking,
+            who: Some(who.into()),
+            to: to.map(Into::into),
+            text: String::new(),
+            time: String::new(),
+            color: Color32::WHITE,
+        }
+    }
+
+    #[test]
+    fn ctrl_l_and_ctrl_b_go_to_the_focused_terminal_unless_the_app_comes_first() {
+        // Terminal focado: Ctrl+L limpa a tela, Ctrl+B é do tmux; Ctrl+T continua do app.
+        assert!(!app_claims_ctrl("l", true, false));
+        assert!(!app_claims_ctrl("b", true, false));
+        assert!(app_claims_ctrl("t", true, false));
+        // Fora do terminal, ou com a opção ligada, todos são do app.
+        assert!(app_claims_ctrl("l", false, false) && app_claims_ctrl("b", false, false));
+        assert!(app_claims_ctrl("l", true, true) && app_claims_ctrl("b", true, true));
+    }
+
+    #[test]
+    fn only_our_copies_in_the_attachments_folder_are_deleted() {
+        let data = Path::new("/dados");
+        assert!(in_attachments_dir(data, &data.join("anexos").join("s_x_1-foto.png")));
+        assert!(!in_attachments_dir(data, &data.join("anexos").join("sub").join("a.png")));
+        assert!(!in_attachments_dir(data, Path::new("/home/ana/foto.png")));
+    }
+
+    #[test]
+    fn renaming_a_tab_renames_its_feed_items_and_thinking_entry() {
+        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Ollama", None)];
+        rename_in_feed(&mut feed, "Claude", "Claude@dev");
+        let names: Vec<_> = feed.iter().map(|f| (f.who.as_deref().unwrap(), f.to.as_deref())).collect();
+        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Ollama", None)]);
+
+        let mut thinking = HashMap::from([("p#claude".to_owned(), 1), ("q#claude".to_owned(), 9)]);
+        rename_thinking(&mut thinking, "p", "claude", "claude@dev");
+        assert_eq!(thinking.get("p#claude@dev"), Some(&1));
+        assert!(!thinking.contains_key("p#claude"));
+        // O mesmo id em outro projeto não é dele.
+        assert_eq!(thinking.get("q#claude"), Some(&9));
     }
 }
