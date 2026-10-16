@@ -105,6 +105,9 @@ pub struct Config {
     pub ollama_host: String,
     /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
     pub auto_open_agent_tabs: bool,
+    /// Com o terminal focado, Ctrl+L e Ctrl+B são do app (focar a mensagem / barra lateral) em vez
+    /// de irem ao terminal (limpar a tela / prefixo do tmux). Ctrl+T é sempre do app.
+    pub app_shortcuts_first: bool,
     // --- Formato antigo (antes dos projetos): lido só para a migração, nunca gravado. Agora
     // cada projeto guarda as próprias abas e o próprio layout (ver `ProjectCfg`). ---
     /// Pastas conhecidas (`projects`); os projetos agora ficam em `projectList`.
@@ -138,6 +141,7 @@ impl Default for Config {
             window_height: 860.0,
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
             auto_open_agent_tabs: true,
+            app_shortcuts_first: false,
             projects: Vec::new(),
             open_tabs: Vec::new(),
             active_tab_index: -1,

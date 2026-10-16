@@ -34,6 +34,8 @@ pub enum UiMsg {
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
+    /// O usuário confirmou remover o projeto (id) da lista.
+    RemoveProject(String),
     /// Resposta do Git, com a geração do projeto em que foi pedida (ver `GitUi::generation`).
     Git(u64, crate::git_ui::GitReply),
 }
@@ -313,6 +315,12 @@ pub struct Deck {
     pub sound_enabled: bool,
     /// Espelho de `Config.auto_open_agent_tabs` (item do menu de configurações).
     pub auto_open_agent_tabs: bool,
+    /// Espelho de `Config.app_shortcuts_first` (item do menu de configurações).
+    pub app_shortcuts_first: bool,
+    /// Há um modal aberto (do último quadro): o teclado não vai ao terminal nem aos atalhos.
+    pub modal_open: bool,
+    /// Ctrl+/ pedido pelo teclado (abre/fecha o modal de atalhos no próximo quadro).
+    pub toggle_shortcuts: bool,
     pub drop_hover: bool,
     pub term_focus: bool,
     /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
@@ -349,6 +357,15 @@ const FEED_MAX: usize = 1000;
 fn cap_feed(feed: &mut Vec<FeedItem>) {
     if feed.len() > FEED_MAX {
         feed.drain(..feed.len() - FEED_MAX);
+    }
+}
+
+/// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+L (limpar a tela no shell) e Ctrl+B (prefixo
+/// do tmux) vão ao terminal quando ele tem o foco, a não ser que o usuário dê prioridade ao app.
+fn app_claims_ctrl(key: &str, term_focused: bool, app_first: bool) -> bool {
+    match key {
+        "l" | "b" => !term_focused || app_first,
+        _ => true,
     }
 }
 
@@ -451,6 +468,9 @@ impl Deck {
             tab_context_menu: None,
             sound_enabled: cfg.sound_enabled,
             auto_open_agent_tabs: cfg.auto_open_agent_tabs,
+            app_shortcuts_first: cfg.app_shortcuts_first,
+            modal_open: false,
+            toggle_shortcuts: false,
             drop_hover: false,
             term_focus: false,
             ime_preedit: String::new(),
@@ -632,6 +652,7 @@ impl Deck {
             UiMsg::WorkspacePicked(dir) => {
                 self.add_project(dir);
             }
+            UiMsg::RemoveProject(id) => self.remove_project_by_id(&id),
             UiMsg::Git(generation, reply) => self.on_git(generation, reply),
         }
     }
@@ -1436,14 +1457,26 @@ impl Deck {
 
     /// Trata uma tecla vinda do winit. Retorna `true` se consumiu (não repassar ao egui).
     pub fn handle_key(&mut self, ev: &KeyEvent, mods: ModifiersState, egui_has_focus: bool) -> bool {
+        let term_keys = !egui_has_focus && self.term_focus && self.active.is_some() && !self.modal_open;
         if ev.state != ElementState::Pressed {
-            return !egui_has_focus && self.term_focus && self.active.is_some();
+            return term_keys;
         }
         let ctrl = mods.control_key();
         let lower = match &ev.logical_key {
             Key::Character(s) => s.to_lowercase(),
             _ => String::new(),
         };
+        // Ctrl+/ (ou Ctrl+?) abre/fecha os atalhos de qualquer lugar, inclusive do terminal.
+        if ctrl && !mods.alt_key() && (lower == "/" || lower == "?") {
+            if !ev.repeat {
+                self.toggle_shortcuts = true;
+            }
+            return true;
+        }
+        // Com um modal aberto, o teclado é só dele (Esc, Enter, a caixa de texto).
+        if self.modal_open {
+            return false;
+        }
         if ctrl && mods.alt_key() && !mods.shift_key() {
             let dir = match &ev.logical_key {
                 Key::Named(NamedKey::ArrowLeft) => Some((-1, 0)),
@@ -1458,16 +1491,17 @@ impl Deck {
             }
         }
         if ctrl && !mods.alt_key() {
+            let app_key = app_claims_ctrl(&lower, term_keys, self.app_shortcuts_first);
             match lower.as_str() {
                 "t" if !ev.repeat => {
                     self.push_action(Action::NewTabShortcut);
                     return true;
                 }
-                "b" if !ev.repeat => {
+                "b" if !ev.repeat && app_key => {
                     self.push_action(Action::ToggleSidebar);
                     return true;
                 }
-                "l" if !self.composer_focused => {
+                "l" if !self.composer_focused && app_key => {
                     self.push_action(Action::FocusComposer);
                     return true;
                 }
@@ -1644,6 +1678,19 @@ impl Deck {
         self.spawn_bg("pick-workspace", move |_| {
             let dir = rfd::FileDialog::new().set_directory(&start).pick_folder()?;
             Some(UiMsg::WorkspacePicked(dir))
+        });
+    }
+
+    /// Pergunta (numa thread, sem congelar o quadro) se o projeto sai da lista.
+    pub fn confirm_remove_project(&self, id: String, name: String) {
+        self.spawn_bg("confirm-remove-project", move |_| {
+            let ok = rfd::MessageDialog::new()
+                .set_title("Remover projeto")
+                .set_description(format!("Deseja remover \"{name}\" da lista de projetos?"))
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show()
+                == rfd::MessageDialogResult::Yes;
+            ok.then_some(UiMsg::RemoveProject(id))
         });
     }
 
@@ -2233,6 +2280,17 @@ mod tests {
             time: String::new(),
             color: Color32::WHITE,
         }
+    }
+
+    #[test]
+    fn ctrl_l_and_ctrl_b_go_to_the_focused_terminal_unless_the_app_comes_first() {
+        // Terminal focado: Ctrl+L limpa a tela, Ctrl+B é do tmux; Ctrl+T continua do app.
+        assert!(!app_claims_ctrl("l", true, false));
+        assert!(!app_claims_ctrl("b", true, false));
+        assert!(app_claims_ctrl("t", true, false));
+        // Fora do terminal, ou com a opção ligada, todos são do app.
+        assert!(app_claims_ctrl("l", false, false) && app_claims_ctrl("b", false, false));
+        assert!(app_claims_ctrl("l", true, true) && app_claims_ctrl("b", true, true));
     }
 
     #[test]
