@@ -2,7 +2,7 @@
 //! A pintura fica em [`crate::ui`]; a janela/loop em [`crate::app`].
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Scroll;
@@ -30,7 +30,8 @@ use crate::util;
 /// Mensagens de tarefas em segundo plano para a UI.
 pub enum UiMsg {
     Agents(Vec<AgentInfo>),
-    Attached(Vec<String>),
+    /// Anexos copiados (caminhos absolutos em `dados/anexos`) para o rascunho do projeto (id).
+    Attached(String, Vec<PathBuf>),
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
@@ -176,6 +177,9 @@ struct ProjectState {
     /// Conversa integrada e conversas recentes do mapa (as do projeto ativo ficam em `Deck`).
     feed: Vec<FeedItem>,
     recent: VecDeque<Recent>,
+    /// Rascunho do compositor e anexos (os do projeto ativo ficam em `Deck`).
+    input: String,
+    attachments: Vec<PathBuf>,
 }
 
 /// O que a tela dividida mostra neste quadro.
@@ -291,7 +295,9 @@ pub struct Deck {
 
     // Compositor
     pub input: String,
-    pub attachments: Vec<String>,
+    /// Anexos do rascunho, em caminho absoluto: a referência `@...` é feita no envio, relativa ao
+    /// projeto em que a mensagem sai.
+    pub attachments: Vec<PathBuf>,
     pub needs_text: bool,
     recorder: Option<audio::Recorder>,
     pub recording_since: Option<Instant>,
@@ -358,6 +364,19 @@ fn cap_feed(feed: &mut Vec<FeedItem>) {
     if feed.len() > FEED_MAX {
         feed.drain(..feed.len() - FEED_MAX);
     }
+}
+
+/// Caminhos absolutos dos anexos a partir das referências do core (relativas ao workspace da hora
+/// da cópia, ou absolutas). Todo anexo fica em `dados/anexos` com nome único, então o nome basta
+/// e não depende de qual projeto estava ativo.
+fn attachment_paths(core: &Core, refs: Vec<String>) -> Vec<PathBuf> {
+    let dir = core.paths().data_dir.join("anexos");
+    refs.iter().filter_map(|r| Path::new(r).file_name()).map(|name| dir.join(name)).collect()
+}
+
+/// O arquivo é uma cópia nossa em `dados/anexos` (só essas o "×" apaga).
+fn in_attachments_dir(data_dir: &Path, path: &Path) -> bool {
+    path.parent().is_some_and(|p| p == data_dir.join("anexos"))
 }
 
 /// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+L (limpar a tela no shell) e Ctrl+B (prefixo
@@ -619,9 +638,12 @@ impl Deck {
                     }
                 }
             }
-            UiMsg::Attached(refs) => {
-                if !refs.is_empty() {
-                    self.attachments.extend(refs);
+            UiMsg::Attached(project, files) => {
+                if project != self.active_project {
+                    // O projeto mudou durante a cópia: o anexo fica no rascunho de quem o pediu.
+                    self.projects.entry(project).or_default().attachments.extend(files);
+                } else if !files.is_empty() {
+                    self.attachments.extend(files);
                     self.request_composer_focus();
                 }
             }
@@ -1606,8 +1628,9 @@ impl Deck {
         }
         let Ok(img) = cb.get_image() else { return };
         let (width, height, bytes) = (img.width as u32, img.height as u32, img.bytes.into_owned());
+        let project = self.active_project.clone();
         self.spawn_bg("clipboard-image", move |core| match core.attach_rgba_png(width, height, &bytes) {
-            Ok(r) => Some(UiMsg::Attached(vec![r])),
+            Ok(r) => Some(UiMsg::Attached(project, attachment_paths(&core, vec![r]))),
             Err(e) => {
                 log::warn!("colar imagem: {e}");
                 None
@@ -1727,6 +1750,16 @@ impl Deck {
             state.split_ratios = std::mem::take(&mut self.split_ratios);
             state.feed = std::mem::take(&mut self.feed);
             state.recent = std::mem::take(&mut self.recent);
+            state.input = std::mem::take(&mut self.input);
+            state.attachments = std::mem::take(&mut self.attachments);
+        } else {
+            self.input.clear();
+            self.attachments.clear();
+        }
+        // O rascunho é de cada projeto (os anexos citados ficam relativos à pasta dele).
+        if let Some(state) = self.projects.get_mut(id) {
+            self.input = std::mem::take(&mut state.input);
+            self.attachments = std::mem::take(&mut state.attachments);
         }
         self.active = None;
         self.unseen = 0;
@@ -2082,9 +2115,27 @@ impl Deck {
     }
 
     pub fn pick_attachments(&self) {
-        self.spawn_bg("pick-attachments", |core| {
+        let project = self.active_project.clone();
+        self.spawn_bg("pick-attachments", move |core| {
             let files = rfd::FileDialog::new().pick_files()?;
-            Some(UiMsg::Attached(core.attach_files(&files)))
+            Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&files))))
+        });
+    }
+
+    /// "×" do chip: tira o anexo do rascunho e apaga a cópia em `dados/anexos`.
+    pub fn remove_attachment(&mut self, i: usize) {
+        if i >= self.attachments.len() {
+            return;
+        }
+        let path = self.attachments.remove(i);
+        if !in_attachments_dir(&self.core.paths().data_dir, &path) {
+            return;
+        }
+        self.spawn_bg("remove-attachment", move |_| {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("apagar anexo {}: {e}", path.display());
+            }
+            None
         });
     }
 
@@ -2095,7 +2146,8 @@ impl Deck {
         if self.right_view == RightView::Git {
             self.set_right_view(RightView::Conversa);
         }
-        self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(core.attach_files(&paths))));
+        let project = self.active_project.clone();
+        self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&paths)))));
     }
 
     /// Clique no microfone.
@@ -2159,7 +2211,8 @@ impl Deck {
             self.request_composer_focus();
             return;
         }
-        let full = util::compose_full(&text, &self.attachments);
+        let refs: Vec<String> = self.attachments.iter().map(|a| commanddeck_core::util::ref_path(&self.workspace, a)).collect();
+        let full = util::compose_full(&text, &refs);
         let Some(idx) = self.active.filter(|&i| self.tabs[i].alive) else {
             self.system("A aba ativa não tem um processo rodando.");
             return;
@@ -2291,6 +2344,14 @@ mod tests {
         // Fora do terminal, ou com a opção ligada, todos são do app.
         assert!(app_claims_ctrl("l", false, false) && app_claims_ctrl("b", false, false));
         assert!(app_claims_ctrl("l", true, true) && app_claims_ctrl("b", true, true));
+    }
+
+    #[test]
+    fn only_our_copies_in_the_attachments_folder_are_deleted() {
+        let data = Path::new("/dados");
+        assert!(in_attachments_dir(data, &data.join("anexos").join("s_x_1-foto.png")));
+        assert!(!in_attachments_dir(data, &data.join("anexos").join("sub").join("a.png")));
+        assert!(!in_attachments_dir(data, Path::new("/home/ana/foto.png")));
     }
 
     #[test]
