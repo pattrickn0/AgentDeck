@@ -356,7 +356,10 @@ const SECOND_ENTER: Duration = Duration::from_millis(600);
 /// Com hooks, a aba só deixa de estar ocupada pelo aviso de fim de turno. Se o aviso se perder,
 /// ela é liberada depois deste tempo sem nenhuma saída.
 const HOOK_STALE: Duration = Duration::from_secs(600);
-const RESIZE_DEBOUNCE: Duration = Duration::from_millis(60);
+/// Cada largura nova faz o Claude Code reimprimir a conversa, e no Windows sem `ESC[3J`: a cópia
+/// anterior fica no histórico. Por isso o PTY só muda com o tamanho parado e o mouse solto
+/// (ver [`resize_due`]): um arrasto do divisor ou da borda vira um redimensionamento só.
+const RESIZE_DEBOUNCE: Duration = Duration::from_millis(150);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
 /// Enter (ou envio) que não produziu saída nenhuma (prompt vazio, menu): a aba é liberada depois
 /// deste tempo, em silêncio. Sem isso ela ficava "trabalhando" para sempre e prendia a fila da ponte.
@@ -391,6 +394,11 @@ fn in_attachments_dir(data_dir: &Path, path: &Path) -> bool {
 
 /// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+L (limpar a tela no shell) e Ctrl+B (prefixo
 /// do tmux) vão ao terminal quando ele tem o foco, a não ser que o usuário dê prioridade ao app.
+/// O redimensionamento pendente do PTY já pode ser aplicado: tamanho parado e mouse solto.
+fn resize_due(now: Instant, at: Instant, dragging: bool) -> bool {
+    now >= at && !dragging
+}
+
 fn app_claims_ctrl(key: &str, term_focused: bool, app_first: bool) -> bool {
     match key {
         "l" | "b" => !term_focused || app_first,
@@ -744,6 +752,7 @@ impl Deck {
 
         let mut chime = false;
         let metrics = self.metrics.clone();
+        let dragging = ctx.input(|i| i.pointer.primary_down());
         let mut exits = Vec::new();
         let active = self.active;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
@@ -809,13 +818,16 @@ impl Deck {
                 want(at);
             }
             if let Some((size, at)) = tab.pending_resize {
-                if now >= at {
+                if resize_due(now, at, dragging) {
                     tab.pending_resize = None;
                     if let Some(m) = &metrics {
                         tab.session.resize(size, m.cell_w, m.cell_h);
                     }
-                } else {
+                } else if now < at {
                     want(at);
+                } else {
+                    // Mouse ainda pressionado: soltar já pede um quadro; isto é só a garantia.
+                    want(now + RESIZE_DEBOUNCE);
                 }
             }
         }
@@ -2389,6 +2401,15 @@ mod tests {
         // Fora do terminal, ou com a opção ligada, todos são do app.
         assert!(app_claims_ctrl("l", false, false) && app_claims_ctrl("b", false, false));
         assert!(app_claims_ctrl("l", true, true) && app_claims_ctrl("b", true, true));
+    }
+
+    #[test]
+    fn a_drag_resizes_the_pty_once_when_the_mouse_is_released() {
+        let at = Instant::now();
+        let later = at + RESIZE_DEBOUNCE;
+        assert!(!resize_due(at - Duration::from_millis(1), at, false), "tamanho ainda mudando");
+        assert!(!resize_due(later, at, true), "arrastando: espera soltar o mouse");
+        assert!(resize_due(later, at, false), "parado e solto: aplica");
     }
 
     #[test]

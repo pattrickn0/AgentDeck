@@ -239,6 +239,7 @@ Com a pasta de trabalho num repositório git:
 - [ ] Numa aba em segundo plano ou de outro projeto, `printf '\e]52;c;%s\a' $(printf teste|base64)` não muda a área de transferência; na aba ativa, muda.
 - [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o commanddeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
 - [ ] No vim/htop com mouse ligado, Ctrl+roda e Alt+roda chegam ao programa com o modificador. Shift+roda rola o histórico do terminal, com ou sem programa usando o mouse.
+- [ ] Arrastar devagar a borda da barra direita ou o divisor com o Claude aberto: durante o arrasto a aba não se redesenha; ao soltar, o Claude se redesenha uma vez na largura nova (no histórico fica no máximo uma cópia antiga por arrasto).
 - [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
 - [x] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.
   - Conferido no `commanddeck-dev`: o conteúdo tem o mesmo hash do HEAD. O `M` que ainda aparecia era o índice desatualizado; um `git add AGENTS.md`, sem mudar nada, limpou.

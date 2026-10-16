@@ -58,7 +58,7 @@ Proposta:
 
 ## 3. Terminal
 
-Nada pendente.
+- [ ] **Claude Code duplica a conversa no histórico a cada mudança de largura** (Windows). Ao mudar de largura, ele limpa só a tela e reimprime a conversa, sem `ESC[3J` (que ele só manda fora do Windows). A cópia anterior fica no histórico, na largura antiga. Medido numa sonda (portable-pty + alacritty_terminal + o claude.exe real): uma cópia a mais por largura; o mesmo com o `OpenConsole.exe` do Windows Terminal. Limpar o nosso histórico antes não serve: ao alargar, ele redesenha só a tela e a conversa sumiria. Hoje o PTY só muda com o mouse solto e o tamanho parado por 150 ms (um arrasto = uma cópia). Ideia para depois: marcar onde começa a reimpressão e descartar o trecho antigo do histórico.
 
 ## 4. Interface
 
