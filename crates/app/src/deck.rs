@@ -35,6 +35,8 @@ pub enum UiMsg {
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
+    /// Resultado da abertura do microfone (feita fora da thread da interface).
+    MicOpened(Result<audio::Recorder, String>),
     /// O usuário confirmou remover o projeto (id) da lista.
     RemoveProject(String),
     /// Resposta do Git, com a geração do projeto em que foi pedida (ver `GitUi::generation`).
@@ -301,6 +303,9 @@ pub struct Deck {
     pub needs_text: bool,
     recorder: Option<audio::Recorder>,
     pub recording_since: Option<Instant>,
+    /// O microfone está sendo aberto numa thread (pode levar segundos); `false` no meio do caminho
+    /// = o usuário desistiu, e o gravador que chegar é descartado.
+    pub mic_opening: bool,
     pub transcribing: bool,
     pub send_after_transcribe: bool,
     /// Aba ativa quando o Enviar foi clicado durante a gravação: a transcrição só sai sozinha se
@@ -364,6 +369,11 @@ fn cap_feed(feed: &mut Vec<FeedItem>) {
     if feed.len() > FEED_MAX {
         feed.drain(..feed.len() - FEED_MAX);
     }
+}
+
+/// Fecha o microfone numa thread (esperar a captura terminar não é coisa da thread da interface).
+fn discard_recorder(rec: audio::Recorder) {
+    let _ = std::thread::Builder::new().name("mic-close".into()).spawn(move || rec.cancel());
 }
 
 /// Caminhos absolutos dos anexos a partir das referências do core (relativas ao workspace da hora
@@ -474,6 +484,7 @@ impl Deck {
             needs_text: false,
             recorder: None,
             recording_since: None,
+            mic_opening: false,
             transcribing: false,
             send_after_transcribe: false,
             send_target: None,
@@ -675,6 +686,7 @@ impl Deck {
                 self.add_project(dir);
             }
             UiMsg::RemoveProject(id) => self.remove_project_by_id(&id),
+            UiMsg::MicOpened(res) => self.on_mic_opened(res),
             UiMsg::Git(generation, reply) => self.on_git(generation, reply),
         }
     }
@@ -704,6 +716,18 @@ impl Deck {
                 self.persist_layout_now();
             } else {
                 want(at);
+            }
+        }
+        if let Some(since) = self.recording_since {
+            let end = since + Duration::from_secs(audio::MAX_RECORDING_SECS.into());
+            if now >= end {
+                self.stop_recording();
+                self.system(format!(
+                    "A gravação chegou ao limite de {} minutos: parei e estou transcrevendo o que foi gravado.",
+                    audio::MAX_RECORDING_SECS / 60
+                ));
+            } else {
+                want(end);
             }
         }
         if let Some((rel, at)) = self.tree.pending_click.clone() {
@@ -2150,18 +2174,29 @@ impl Deck {
         self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&paths)))));
     }
 
-    /// Clique no microfone.
+    /// Clique no microfone. Abrir o dispositivo pode levar até 5 s: vai para uma thread, e um
+    /// segundo clique enquanto isso desiste.
     pub fn toggle_mic(&mut self) {
         if self.recorder.is_some() {
             self.stop_recording();
-            return;
+        } else if self.mic_opening {
+            self.mic_opening = false;
+        } else {
+            self.mic_opening = true;
+            self.spawn_bg("mic-open", |_| Some(UiMsg::MicOpened(audio::Recorder::start())));
         }
-        match audio::Recorder::start() {
-            Ok(r) => {
+    }
+
+    fn on_mic_opened(&mut self, res: Result<audio::Recorder, String>) {
+        let wanted = std::mem::take(&mut self.mic_opening);
+        match res {
+            Ok(r) if wanted && self.recorder.is_none() => {
                 self.recorder = Some(r);
                 self.recording_since = Some(Instant::now());
             }
-            Err(e) => self.system(format!("Microfone indisponível: {e}")),
+            Ok(r) => discard_recorder(r),
+            Err(e) if wanted => self.system(format!("Microfone indisponível: {e}")),
+            Err(_) => {}
         }
     }
 
@@ -2183,8 +2218,9 @@ impl Deck {
 
     pub fn cancel_recording(&mut self) {
         if let Some(rec) = self.recorder.take() {
-            rec.cancel();
+            discard_recorder(rec);
         }
+        self.mic_opening = false;
         self.recording_since = None;
         self.send_after_transcribe = false;
         self.request_composer_focus();

@@ -171,13 +171,15 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         opacity = super::right_panel::blink_alpha(ctx.input(|i| i.time), 1.2);
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
-    if busy || !audio::AVAILABLE {
+    if busy || !audio::AVAILABLE || deck.mic_opening {
         opacity = 0.5;
     }
     painter.rect_filled(l.mic, 7.0, theme::with_opacity(bg, opacity));
     deck.icons.paint(&painter, Icon::Mic, l.mic.center(), 17.0, theme::with_opacity(fg, opacity), 0.0);
     let mic_title = if recording {
-        "Parar gravação".to_owned()
+        format!("Parar gravação (até {} min)", audio::MAX_RECORDING_SECS / 60)
+    } else if deck.mic_opening {
+        "Abrindo o microfone… (clique para desistir)".to_owned()
     } else if !audio::AVAILABLE {
         "Gravar áudio (indisponível: compilado sem o recurso de áudio)".to_owned()
     } else {
