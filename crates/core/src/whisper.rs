@@ -28,6 +28,7 @@ pub const WHISPER_PROMPT: &str = "CommandDeck Terminal, Claude, Antigravity, agy
 pub const UNAVAILABLE: &str = "indisponível";
 const NOT_READY: &str = "a transcrição local ainda não está pronta (veja a Conversa integrada)";
 const NO_SPEECH: &str = "nenhuma fala detectada";
+const CANCELLED: &str = "transcrição interrompida: o app está fechando";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
@@ -310,10 +311,17 @@ fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String
             }
         }
     }
-    let out = run_captured(cmd, None, Duration::from_secs(600), None, None).map_err(|e| e.to_string())?;
+    // Fechar o app (`Core::shutdown`) interrompe a transcrição: o processo fica no registro e
+    // o sinal de encerramento o mata, em vez de seguir órfão até o timeout.
+    let shutdown = &core.inner.state.shutdown;
+    if shutdown.load(Ordering::SeqCst) {
+        return Err(CANCELLED.into());
+    }
+    let out = run_captured(cmd, None, Duration::from_secs(600), Some(shutdown), Some(&core.inner.processes)).map_err(|e| e.to_string())?;
     let text = out.stdout.replace("[BLANK_AUDIO]", " ").split_whitespace().collect::<Vec<_>>().join(" ");
     match out.exit {
         Exit::Code(Some(0)) => Ok(normalize_transcription(&text)),
+        Exit::Cancelled => Err(CANCELLED.into()),
         exit => {
             let last = out.stderr.trim().lines().last().map(str::to_owned).filter(|l| !l.is_empty());
             Err(last.unwrap_or_else(|| match exit {
@@ -341,7 +349,7 @@ pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<
             let res = run_whisper(core, *engine, &wav).and_then(|t| if t.is_empty() { Err(NO_SPEECH.to_owned()) } else { Ok(t) });
             match res {
                 Ok(text) => return Ok(Transcription { text, engine: engine.label().to_owned() }),
-                Err(e) if e == NO_SPEECH || i + 1 == list.len() => anyhow::bail!(e),
+                Err(e) if e == NO_SPEECH || e == CANCELLED || i + 1 == list.len() => anyhow::bail!(e),
                 Err(e) => core.feed(FeedEntry::system(format!("Whisper em {} falhou ({e}); tentando a próxima opção.", engine.label()))),
             }
         }

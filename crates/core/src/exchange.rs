@@ -149,6 +149,11 @@ impl Exchange {
         self.state.lock().list.iter().any(|p| p.asker == asker && p.target == target)
     }
 
+    /// O pedido `id` ainda espera resposta (não foi respondido, cancelado nem expirou).
+    pub fn is_pending(&self, id: u64) -> bool {
+        self.state.lock().list.iter().any(|p| p.id == id)
+    }
+
     /// Encerra um pedido sem resposta (timeout ou falha). Idempotente.
     pub fn fail(&self, id: u64, reason: &str) {
         let mut st = self.state.lock();

@@ -237,6 +237,8 @@ fn js_depth(v: Option<&Value>) -> i64 {
         Some(Value::Bool(true)) => 1,
         _ => 0,
     }
+    // Negativa furaria o limite de profundidade.
+    .max(0)
 }
 
 /// Resolve o destino pedido: apelidos, `ollama` → primeiro modelo, e nomes parciais de
@@ -450,15 +452,15 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         }
     };
     let id = ident.id();
-    if id == from {
-        return (400, json!({ "error": "um agente não pode perguntar a si mesmo" }));
-    }
     let forget = |status: u16, error: Value| {
         if created {
             core.with_instances(project, |list| list.remove(&id));
         }
         (status, error)
     };
+    if id == from {
+        return forget(400, json!({ "error": "um agente não pode perguntar a si mesmo" }));
+    }
     // Com abas a profundidade não viaja no ambiente (a pergunta é digitada): mede-se pela cadeia
     // de perguntas pendentes de quem pergunta. Um ciclo de espera é recusado primeiro (409).
     let (from_key, target_key) = (caller.key(from), caller.key(&id));

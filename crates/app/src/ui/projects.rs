@@ -247,6 +247,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     if deck.sidebar_collapsed {
         ctx.data_mut(|d| {
             d.insert_temp(anchor_key(), None::<Rect>);
+            d.insert_temp(drag_key(), None::<(String, String, String)>);
             d.insert_temp(Id::new("proj-ctx-menu"), None::<(String, PathBuf, String, Pos2)>);
             d.insert_temp(Id::new("proj-rename-modal"), None::<(String, String)>);
         });
@@ -346,7 +347,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     p.rect_filled(ind_bar, 0.0, active_color);
                 }
                 // Soltar sobre o próprio projeto devolve o agente à raiz (responde ao usuário).
-                if agent_drag.as_ref().is_some_and(|(dp, ..)| *dp == proj.id) && pointer.is_some_and(|ptr| row_r.contains(ptr)) {
+                // Só o que está à vista na lista conta (as linhas roladas para fora ficam por baixo de outras seções).
+                let clip = ui.clip_rect();
+                let visible = |r: Rect| pointer.is_some_and(|ptr| r.contains(ptr) && clip.contains(ptr));
+                if agent_drag.as_ref().is_some_and(|(dp, ..)| *dp == proj.id) && visible(row_r) {
                     paint_drop_target(&p, row_r, true, active_color);
                     drop_target = Some(DropTarget { boss: None, ok: true });
                 }
@@ -476,7 +480,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     }
                     // Alvo de soltar: vira o chefe do arrastado (no mesmo projeto, sem ciclo).
                     if let Some((_, dragged, _)) = agent_drag.as_ref().filter(|(dp, ..)| *dp == proj.id) {
-                        if !being_dragged && pointer.is_some_and(|ptr| tab_r.contains(ptr)) {
+                        if !being_dragged && visible(tab_r) {
                             let ok = !in_subtree(&proj.agents, &ag.id, dragged);
                             paint_drop_target(&p, tab_r, ok, active_color);
                             drop_target = Some(DropTarget { boss: Some(ag.id.clone()), ok });
@@ -574,7 +578,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 if ui.is_rect_visible(add_r) {
                     new_agent_anchor = Some(add_r);
                 }
-                if tip(add_resp, "Novo agente neste projeto (Ctrl+T)").clicked() {
+                if tip(add_resp, "Escolher um agente para abrir neste projeto").clicked() {
                     new_agent_click = true;
                 }
             }

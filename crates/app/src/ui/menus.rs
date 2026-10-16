@@ -6,12 +6,16 @@ use super::{dot, frame, place, shadow, text_in, text_w};
 use crate::deck::Deck;
 use crate::theme;
 
-/// Posição do canto superior esquerdo para um menu `size` não sair da tela pela direita/esquerda.
+/// Posição do canto superior esquerdo para um menu `size` não sair da tela (pelos lados e por
+/// baixo: ancorado embaixo na barra lateral, um menu comprido sobe).
 /// (Não usar `Area::constrain`: ele desloca o menu depois que `closes_on_outside` já calculou o
 /// retângulo, e o clique num item passa a contar como "fora", fechando o menu antes de escolher.)
 pub(super) fn keep_on_screen(ctx: &egui::Context, pos: Pos2, size: Vec2) -> Pos2 {
     let screen = ctx.content_rect();
-    Pos2::new(pos.x.min(screen.max.x - size.x - 4.0).max(screen.min.x + 4.0), pos.y)
+    Pos2::new(
+        pos.x.min(screen.max.x - size.x - 4.0).max(screen.min.x + 4.0),
+        pos.y.min(screen.max.y - size.y - 4.0).max(screen.min.y + 4.0),
+    )
 }
 
 /// Fecha o menu se houve clique fora dele e da âncora (`document.addEventListener('click')`).

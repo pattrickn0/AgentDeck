@@ -150,6 +150,9 @@ pub struct GitUi {
     pub collapsed: HashSet<Section>,
     /// SOMENTE DEPURAÇÃO: estado fictício que as releituras não substituem.
     pub debug_hold: bool,
+    /// Muda a cada troca de projeto: respostas de operações pedidas no projeto anterior chegam
+    /// com a geração velha e são descartadas (não podem aparecer nem agir no projeto novo).
+    pub generation: u64,
 }
 
 impl Default for GitUi {
@@ -170,6 +173,7 @@ impl Default for GitUi {
             confirm: None,
             notice: None,
             collapsed: HashSet::new(),
+            generation: 0,
             debug_hold: false,
         }
     }
@@ -189,6 +193,14 @@ fn err_text(e: &GitError) -> String {
 }
 
 impl Deck {
+    /// O projeto da tela mudou: esquece tudo do anterior (confirmação de descarte, branches,
+    /// mensagem, operação em andamento) e ignora as respostas que ainda vierem dele.
+    pub fn git_reset_for_project(&mut self) {
+        let generation = self.git.generation + 1;
+        let collapsed = std::mem::take(&mut self.git.collapsed);
+        self.git = GitUi { generation, collapsed, ..GitUi::default() };
+    }
+
     /// Relê o status (um por vez; um pedido no meio repete a leitura ao terminar).
     pub fn git_refresh(&mut self) {
         if self.git.debug_hold {
@@ -200,7 +212,8 @@ impl Deck {
         }
         self.git.status_running = true;
         self.git.last_poll = Instant::now();
-        self.spawn_bg("git-status", |core| Some(UiMsg::Git(GitReply::Status(core.git_status()))));
+        let generation = self.git.generation;
+        self.spawn_bg("git-status", move |core| Some(UiMsg::Git(generation, GitReply::Status(core.git_status()))));
     }
 
     /// Agenda uma releitura (avisos de mudança chegam em rajadas).
@@ -230,7 +243,10 @@ impl Deck {
         None
     }
 
-    pub fn on_git(&mut self, reply: GitReply) {
+    pub fn on_git(&mut self, generation: u64, reply: GitReply) {
+        if generation != self.git.generation {
+            return; // pedida no projeto anterior
+        }
         match reply {
             GitReply::Status(res) => {
                 self.git.status_running = false;
@@ -283,6 +299,11 @@ impl Deck {
                 self.git.busy = None;
                 match result {
                     Ok(text) => {
+                        // A mensagem do commit só sai da caixa quando ele deu certo.
+                        if label == "Commit" {
+                            self.git.message.clear();
+                            self.git.amend = false;
+                        }
                         let text =
                             if text.trim().is_empty() { format!("{label}: concluído.") } else { format!("{label}: {}", text.trim()) };
                         self.git.notice = Some((text, false));
@@ -302,7 +323,8 @@ impl Deck {
         }
         self.git.busy = Some(busy);
         self.git.notice = None;
-        self.spawn_bg("git-op", move |core| Some(UiMsg::Git(GitReply::Done { label, result: op(core) })));
+        let generation = self.git.generation;
+        self.spawn_bg("git-op", move |core| Some(UiMsg::Git(generation, GitReply::Done { label, result: op(core) })));
     }
 
     pub fn git_open_diff(&mut self, entry: GitEntry, staged: bool) {
@@ -311,9 +333,10 @@ impl Deck {
     }
 
     fn git_load_diff(&mut self, entry: GitEntry, staged: bool) {
+        let generation = self.git.generation;
         self.spawn_bg("git-diff", move |core| {
             let result = core.git_diff(&entry, staged);
-            Some(UiMsg::Git(GitReply::Diff { entry, staged, result }))
+            Some(UiMsg::Git(generation, GitReply::Diff { entry, staged, result }))
         });
     }
 
@@ -325,10 +348,6 @@ impl Deck {
         self.git_run("Removido da preparação", "Removendo da preparação…", move |core| {
             core.git_unstage(&paths).map(|_| String::new())
         });
-    }
-
-    pub fn git_stage_all(&mut self) {
-        self.git_run("Tudo preparado", "Preparando…", |core| core.git_stage_all().map(|_| String::new()));
     }
 
     pub fn git_unstage_all(&mut self) {
@@ -347,8 +366,6 @@ impl Deck {
         if msg.trim().is_empty() || self.git.busy.is_some() {
             return;
         }
-        self.git.message.clear();
-        self.git.amend = false;
         self.git_run("Commit", "Fazendo commit…", move |core| core.git_commit(&msg, amend));
     }
 
@@ -356,7 +373,8 @@ impl Deck {
     pub fn git_toggle_amend(&mut self) {
         self.git.amend = !self.git.amend;
         if self.git.amend && self.git.message.trim().is_empty() {
-            self.spawn_bg("git-last-msg", |core| Some(UiMsg::Git(GitReply::LastMessage(core.git_last_message()))));
+            let generation = self.git.generation;
+            self.spawn_bg("git-last-msg", move |core| Some(UiMsg::Git(generation, GitReply::LastMessage(core.git_last_message()))));
         }
     }
 
@@ -380,7 +398,8 @@ impl Deck {
         self.git.branch_menu = !self.git.branch_menu;
         self.git.branch_filter.clear();
         if self.git.branch_menu && !self.git.debug_hold {
-            self.spawn_bg("git-branches", |core| Some(UiMsg::Git(GitReply::Branches(core.git_branches()))));
+            let generation = self.git.generation;
+            self.spawn_bg("git-branches", move |core| Some(UiMsg::Git(generation, GitReply::Branches(core.git_branches()))));
         }
     }
 

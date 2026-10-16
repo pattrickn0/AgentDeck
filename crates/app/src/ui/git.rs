@@ -10,7 +10,7 @@ use commanddeck_core::git::{valid_branch_name, DiffKind, EntryKind, GitBranch, G
 
 use super::{clickable, frame, galley, galley_trunc, place, shadow, text_in, tip};
 use crate::deck::Deck;
-use crate::git_ui::{sections, GitView, OpenDiff, Section};
+use crate::git_ui::{sections, GitView, OpenDiff, Row, Section};
 use crate::icons::Icon;
 use crate::theme;
 
@@ -35,7 +35,6 @@ enum Act {
     BranchMenu,
     Stage(Vec<String>),
     Unstage(Vec<String>),
-    StageAll,
     UnstageAll,
     AskDiscard(GitEntry),
     OpenDiff(GitEntry, bool),
@@ -126,7 +125,6 @@ fn apply(deck: &mut Deck, ctx: &egui::Context, act: Act) {
         Act::BranchMenu => deck.git_open_branch_menu(),
         Act::Stage(p) => deck.git_stage(p),
         Act::Unstage(p) => deck.git_unstage(p),
-        Act::StageAll => deck.git_stage_all(),
         Act::UnstageAll => deck.git_unstage_all(),
         Act::AskDiscard(e) => deck.git.confirm = Some(e),
         Act::OpenDiff(e, staged) => deck.git_open_diff(e, staged),
@@ -393,7 +391,7 @@ fn lists(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, busy: bool, a
             ui.painter().galley(Pos2::new(r.min.x + 14.0, r.min.y + 14.0), g, theme::MUTED);
         }
         for (section, rows) in &groups {
-            section_header(deck, ui, *section, rows.len(), busy, acts);
+            section_header(deck, ui, *section, rows, busy, acts);
             if deck.git.collapsed.contains(section) {
                 continue;
             }
@@ -405,7 +403,8 @@ fn lists(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, busy: bool, a
     });
 }
 
-fn section_header(deck: &mut Deck, ui: &mut Ui, section: Section, count: usize, busy: bool, acts: &mut Vec<Act>) {
+fn section_header(deck: &mut Deck, ui: &mut Ui, section: Section, rows: &[Row], busy: bool, acts: &mut Vec<Act>) {
+    let count = rows.len();
     let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H + 2.0), Sense::click());
     let painter = ui.painter();
     let collapsed = deck.git.collapsed.contains(&section);
@@ -429,7 +428,9 @@ fn section_header(deck: &mut Deck, ui: &mut Ui, section: Section, count: usize, 
     // Ação em lote à direita.
     let (label, tooltip, act) = match section {
         Section::Staged => ("−", "Tirar tudo da preparação", Some(Act::UnstageAll)),
-        Section::Changes | Section::Untracked => ("+", "Preparar tudo", Some(Act::StageAll)),
+        // Só os arquivos desta seção (o "+" das alterações não prepara os não rastreados e vice-versa).
+        Section::Changes => ("+", "Preparar as alterações", Some(Act::Stage(rows.iter().map(|r| r.entry.path.clone()).collect()))),
+        Section::Untracked => ("+", "Preparar os não rastreados", Some(Act::Stage(rows.iter().map(|r| r.entry.path.clone()).collect()))),
         Section::Conflicts => ("", "", None),
     };
     if let Some(act) = act {

@@ -123,7 +123,53 @@ Nada pendente.
 - [ ] Stash, preparar por trecho (hunk), editor de conflitos, histórico (log), merge/rebase pela interface.
 - [ ] Integração com o GitHub (PRs, issues, Actions) — ver a seção 6.
 
+## 8. Auditoria de 2026-10-15 — achados confirmados ainda abertos
+
+Revisão com quatro revisores Claude (core da ponte, Deck/interface, terminal/CLIs, barra direita/Ollama) e o
+Antigravity (git, workspace, download, Whisper, uso; relatório em `dados/anexos/revisao-antigravity.md`). O que
+foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
+
+**Ponte e equipe**
+- [ ] Renomear uma aba no meio de uma pergunta: o prazo lê a atividade da chave velha, a resposta atrasada vai para o id antigo e é descartada. Ler quem perguntou/destino do `Exchange` pelo número na hora de usar (ou recusar renomear com pergunta pendente).
+- [ ] Depois de um 202 (pergunta destacada), uma pergunta nova do destino para quem perguntou é tomada como resposta pela forma antiga (`ask-agent <quem> "..."`). Mudar quebraria quem ainda responde assim; avaliar só aceitar `--reply N` para perguntas destacadas.
+- [ ] A forma antiga de resposta não resolve apelidos (`agy`, `qwen3.5`): dá 409 ou vira pergunta nova.
+- [ ] Remover projeto com pergunta em andamento: `with_instances` recria a entrada do projeto removido; revogar tokens antes e não criar entrada de projeto inexistente. `PairQueues`, `team_changed` e `activity` só crescem.
+- [ ] Aviso de equipe some se a UI descartar a entrega; o chefe que perde um subordinado sem equipe não é avisado.
+- [ ] Resposta que chega entre o fim da espera e o `exchange.remove` é descartada (quem respondeu recebeu "entregue").
+- [ ] Enquanto `bridge_port` é 0 (logo ao iniciar) o `Host` não é validado; 16 MB × 128 requisições = até 2 GB; threads `cd-bridge-late` fora do `MAX_ACTIVE`.
+- [ ] `ollama-agent` responde pelo nome de quem perguntou (`/reply` com `to`): responder pelo número (`--reply N`, que está no prompt) aguentaria renomeação e perguntas paralelas.
+
+**Terminal e processos**
+- [ ] Escrita no PTY bloqueante na thread da interface (com o lock `writer`); colagem grande + consulta DA/DSR pode travar. Uma thread de escrita por aba.
+- [ ] `cmd_safe_arg` apaga `& % ! ^` também dos caminhos que o app gera (`--add-dir`, `--settings`): perfil `C:\Users\Ana&Bia` quebra o Claude via shim. Escapar em vez de apagar.
+- [ ] OSC 52 de qualquer aba escreve na área de transferência (a colagem já não deixa escapar, mas avaliar restringir à aba focada). Job Object (KILL_ON_JOB_CLOSE) nos headless. Roda do mouse ignora Shift/modificadores.
+
+**Interface**
+- [ ] `plan_panes` chama `conform` a cada quadro: estreitar a janela por um instante zera as proporções salvas.
+- [ ] Ao renomear, a Conversa compara `who` (nome de exibição) com o id antigo: nunca bate; entradas "pensando" do id antigo ficam.
+- [ ] Modais (renomear aba/projeto, atalhos) não bloqueiam o clique de fora nem o teclado; "Remover projeto" usa `rfd` síncrono e congela o quadro; Ctrl+/ não abre com o terminal focado.
+- [ ] Rascunho do compositor e anexos passam de um projeto para o outro (o caminho do anexo pode ficar relativo ao projeto errado); o "×" do chip não apaga o anexo copiado.
+- [ ] Microfone: `Recorder::start` na thread da interface (até 5 s) e gravação sem limite de tamanho.
+- [ ] Círculo de uso continua com a % antiga depois que o `resets_at` passa sem dados novos.
+- [ ] Ctrl+L, Ctrl+B e Ctrl+T são capturados mesmo com o terminal focado (Ctrl+L limpa no shell, Ctrl+B é o prefixo do tmux): avaliar configurar.
+- [ ] `crash.log` só cresce e registra exceções de primeira chance tratadas pelo driver.
+
+**Git, workspace, download, Whisper e uso** (itens do relatório do Antigravity não corrigidos nesta rodada)
+- [ ] Descartar arquivo em conflito (`Unmerged`) falha; pasta não rastreada com `.git` dentro precisa de `-ffd`; `diff --cc` (conflito) mal interpretado.
+- [ ] Watcher: prefixo verbatim `\\?\` não tratado; `.git` fora de `workspace/.git` (worktree, submódulo, workspace numa subpasta do repositório) não dispara `GitChanged`.
+- [ ] `commit.gpgsign` sem agente gráfico: o commit espera o timeout de 120 s (o erro já é explicado depois).
+- [ ] Download: thread órfã até 4 h depois de um travamento de conexão; `rename` do `.part` sem nova tentativa (antivírus segura o arquivo).
+- [ ] Whisper: extração do motor direto na pasta final (falha no meio deixa o motor CUDA quebrado de vez) e o pacote é apagado mesmo se a extração falhar; nome do `.wav` temporário só com milissegundos.
+- [ ] Uso: credencial vencida no Credential Manager impede o fallback para `oauth_creds.json`; janelas com `resetTime` no passado não zeram; 401 no primeiro host não tenta o segundo; Codex lê só o `rollout` mais novo (sem `rate_limits` numa aba nova).
+
 ## Concluído
+
+- [x] **Auditoria de 2026-10-15 (regressão + correções).** Quatro revisores Claude, o Antigravity e capturas de todos os estados de depuração; 235 testes, clippy e fmt limpos. Corrigido:
+  - **Dados:** config gravada por arquivo temporário + `rename`, uma gravação por vez e na ordem (a ponte e a interface gravavam juntas); config ilegível guarda uma cópia `.json.ilegivel-*` antes de voltar aos padrões. Capturas e `COMMANDDECK_DEBUG_UI` não gravam mais a config (o estado `empty` apagava as abas salvas).
+  - **Git:** trocar de projeto zera o estado do Git e descarta respostas do projeto anterior (geração): uma confirmação de "Descartar" aberta rodava `git restore/clean` no outro repositório. Checkout de branch remota com a local existente; `unstage` de renomeado; `unstage_all` sem HEAD; `git init` comparando com a home sem diferença de caixa; `GCM_INTERACTIVE=never`; a mensagem do commit só sai da caixa se ele der certo; o "+" de cada seção prepara só aquela seção.
+  - **Abas e ponte:** Enter sem saída não deixa a aba "trabalhando" para sempre (prendia a fila e o prazo das perguntas); pergunta cancelada na fila não é mais digitada; renomear/menu de contexto seguem a aba certa depois de fechar outra; Mapa só ativa abas do projeto ativo; `set_boss` confere ciclo e grava sob a mesma trava; profundidade negativa recusada; instância órfã na "pergunta a si mesmo".
+  - **Terminal e CLIs:** colagem filtra ESC/C1 (marcador aninhado escapava do *bracketed paste*); Ctrl+letra pela tecla física (layouts não latinos); `ask-agent` não trava lendo o stdin de um terminal, aceita cp1252 e recusa `--new --boss`; `ollama-agent` sabe o próprio nome/cargo, responde à ponte mesmo quando falha e não imprime controles vindos do modelo; headless não reabre processo ao encerrar o app; `MSYS_NO_PATHCONV` para o Git Bash não reescrever `/comando`.
+  - **Outros:** `read_file` do Ollama lê no máximo 1 MB; aviso honesto ao parar no limite de passos; anexos com o mesmo nome não se sobrescrevem; Conversa limitada a 1000 mensagens; ditado só envia sozinho se a aba de destino ainda for a ativa; watcher com teto de 1 s sob eventos contínuos e comparação de caminho sem caixa; `AGENTS.md` mantém CRLF e é gravado atomicamente; caminhos relativos endurecidos (`safe_rel`, árvore); Whisper encerra com o app; Ctrl+T com a barra recolhida abre o menu de agentes; menus não saem da tela por baixo; o chip `ask-agent` da Conversa não quebra de linha.
 
 - [x] **Equipe de agentes reorganizável e conhecida pelos agentes.** Arrastar um agente sobre outro o põe na equipe dele; soltar no projeto o devolve à raiz (ciclos recusados, fantasma com o destino). Hierarquia no core (`team.rs`, `Core::set_boss`), `GET /team`, `ask-agent --team` e `--boss`, aviso "sua posição na equipe mudou" na próxima mensagem, linha nas instruções da ponte. Fechar passa a equipe ao avô; renomear leva a equipe junto. Skills do projeto em `.claude/skills/` (`commanddeck-ui`, `rust-desktop-applications`, `game-ui-design`).
 - [x] **Agentes de todos os projetos, em árvore, com logo.** Seta ▸/▾ em cada projeto e "expandir/recolher todos" no cabeçalho PROJETOS (estado em `ProjectCfg.collapsed`); clicar num agente de outro projeto troca de projeto e ativa a aba. A aba aberta por `ask-agent` fica sob quem a chamou (`ProjectCfg.tab_parents`), com linhas-guia; o ponto virou o logo do modelo (halo trabalhando, anel ao concluir). Ordem da árvore testada em `ui/projects.rs`.

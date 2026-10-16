@@ -19,7 +19,7 @@ pub struct ShortcutItem {
 
 /// Lista de atalhos do CommandDeck (conforme README).
 pub const SHORTCUTS: &[ShortcutItem] = &[
-    ShortcutItem { keys: &["Ctrl+T"], desc: "Nova aba" },
+    ShortcutItem { keys: &["Ctrl+T"], desc: "Nova aba do mesmo agente (barra lateral recolhida: escolher o agente)" },
     ShortcutItem { keys: &["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: "Alternar abas (próxima / anterior)" },
     ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral" },
     ShortcutItem { keys: &["Ctrl+L"], desc: "Focar caixa de mensagem" },

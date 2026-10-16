@@ -705,6 +705,10 @@ pub(crate) fn build_agent_env(
     if cfg!(windows) {
         env.insert("PYTHONUTF8".into(), "1".into());
         env.insert("PYTHONIOENCODING".into(), "utf-8".into());
+        // O Git Bash (o do Claude Code) reescreve argumentos que começam com "/" como caminhos
+        // (`ask-agent claude@dev "/review src"` viraria `C:/Program Files/Git/review src`).
+        env.insert("MSYS_NO_PATHCONV".into(), "1".into());
+        env.insert("MSYS2_ARG_CONV_EXCL".into(), "*".into());
     }
     env
 }
@@ -904,5 +908,7 @@ mod tests {
         let env = build_agent_env(base, Path::new("C:\\app"), 1, "t", "shell", 0);
         assert!(!env.contains_key("Path"));
         assert_eq!(env["PATH"], "C:\\app;C:\\Windows");
+        // O Git Bash não converte "/review" em caminho.
+        assert_eq!((env["MSYS_NO_PATHCONV"].as_str(), env["MSYS2_ARG_CONV_EXCL"].as_str()), ("1", "*"));
     }
 }

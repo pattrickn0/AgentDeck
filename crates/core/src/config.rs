@@ -173,8 +173,17 @@ impl Config {
     /// Como [`Config::load`], com a lista de arquivos candidatos e a pasta pessoal explícitas.
     pub(crate) fn load_from(candidates: &[PathBuf], paths: &AppPaths, home: &Path) -> Self {
         let file = candidates.iter().find(|p| p.is_file());
-        let mut cfg = match file.and_then(|f| std::fs::read_to_string(f).ok()) {
-            Some(text) => Self::from_json_over_defaults(&text, paths),
+        let mut cfg = match file.and_then(|f| std::fs::read_to_string(f).ok().map(|t| (f, t))) {
+            Some((f, text)) => Self::try_from_json_over_defaults(&text, paths).unwrap_or_else(|| {
+                // Ilegível: guarda uma cópia antes que a próxima gravação ponha os padrões por cima
+                // (senão a lista de projetos se perde sem aviso).
+                let backup = f.with_extension(format!("json.ilegivel-{}", crate::util::now_ms()));
+                match std::fs::copy(f, &backup) {
+                    Ok(_) => log::error!("configuração ilegível em {}; cópia guardada em {}", f.display(), backup.display()),
+                    Err(e) => log::error!("configuração ilegível em {} (e a cópia falhou: {e})", f.display()),
+                }
+                Self::default_for(paths)
+            }),
             None => Self::default_for(paths),
         };
         // Da configuração legada não vêm as abas: a primeira abertura começa sem agentes.
@@ -192,11 +201,16 @@ impl Config {
 
     /// Aplica o JSON salvo sobre os padrões. JSON inválido = padrões.
     pub fn from_json_over_defaults(text: &str, paths: &AppPaths) -> Self {
+        Self::try_from_json_over_defaults(text, paths).unwrap_or_else(|| Self::default_for(paths))
+    }
+
+    /// Como [`Config::from_json_over_defaults`], mas `None` se o JSON não pôde ser lido.
+    pub fn try_from_json_over_defaults(text: &str, paths: &AppPaths) -> Option<Self> {
         let defaults = Self::default_for(paths);
         let (Ok(serde_json::Value::Object(loaded)), Ok(serde_json::Value::Object(mut base))) =
             (serde_json::from_str::<serde_json::Value>(text), serde_json::to_value(&defaults))
         else {
-            return defaults;
+            return None;
         };
         for (k, v) in loaded {
             // `null` não sobrescreve um padrão tipado (o serde rejeitaria o objeto inteiro).
@@ -204,7 +218,7 @@ impl Config {
                 base.insert(k, v);
             }
         }
-        serde_json::from_value(serde_json::Value::Object(base)).unwrap_or(defaults)
+        serde_json::from_value(serde_json::Value::Object(base)).ok()
     }
 
     /// Migra o formato antigo, normaliza as pastas dos projetos (relativa → relativa à pasta do
@@ -295,7 +309,10 @@ impl Config {
             std::fs::create_dir_all(dir)?;
         }
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(file, text)
+        // Grava ao lado e troca: uma queda no meio não deixa o arquivo pela metade.
+        let tmp = file.with_extension("json.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, file)
     }
 }
 
@@ -350,6 +367,19 @@ mod tests {
         assert_eq!(back.active_project, project.id);
         assert_eq!(back.sidebar_width, 300.0);
         assert_eq!(back.workspace, tmp.path().join("proj"));
+        assert!(!p.config_file.with_extension("json.tmp").exists(), "o temporário vira o arquivo");
+
+        // Arquivo ilegível: volta aos padrões, mas guarda uma cópia antes que alguém grave por cima.
+        std::fs::write(&p.config_file, "{\"projectList\": [ quebrado").expect("write");
+        let broken = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
+        assert!(broken.project_list.is_empty());
+        let dir = p.config_file.parent().expect("dir");
+        let kept: Vec<_> = std::fs::read_dir(dir)
+            .expect("ls")
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .filter(|n| n.contains("ilegivel"))
+            .collect();
+        assert_eq!(kept.len(), 1, "cópia do arquivo ilegível: {kept:?}");
     }
 
     #[test]

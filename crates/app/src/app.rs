@@ -110,6 +110,11 @@ impl App {
                 let _ = w.request_inner_size(winit::dpi::LogicalSize::new(cfg.window_width as f64, cfg.window_height as f64));
             }
         }
+        // SOMENTE DEPURAÇÃO: capturas e estados fictícios não gravam na configuração (um "empty" ou
+        // "sidebar-collapsed" ficaria salvo e apagaria as abas de verdade).
+        if self.smoke.is_some() || std::env::var_os("COMMANDDECK_DEBUG_UI").is_some() {
+            core.disable_config_writes();
+        }
         let mut deck = Deck::new(core.clone(), events, Self::waker(&self.proxy));
         apply_debug_ui(&mut deck);
         self.deck = Some(deck);

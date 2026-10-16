@@ -88,7 +88,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     });
 
     if let Some(id) = clicked {
-        if let Some(idx) = deck.tabs.iter().position(|t| t.ident.id() == id) {
+        // O Mapa é do projeto ativo: o mesmo id em outro projeto é outra aba.
+        if let Some(idx) = deck.tabs.iter().position(|t| t.project == deck.active_project && t.ident.id() == id) {
             deck.activate(idx);
         }
     }

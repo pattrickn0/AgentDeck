@@ -359,6 +359,30 @@ fn reply_to_bridge(asker: &str, answer: &str) -> Result<bool, String> {
     }
 }
 
+/// Resposta à ponte quando o turno não produziu texto: quem perguntou não fica esperando à toa.
+fn failure_reply(model: &str, why: &str) -> String {
+    format!("[ollama:{model}] não consegui responder: {why}")
+}
+
+/// Quem é esta instância, para o prompt de sistema: o modelo não lê `COMMANDDECK_AGENT`.
+fn identity_prompt(id: Option<&str>, role: Option<&str>) -> Option<String> {
+    let id = id.filter(|s| !s.is_empty())?;
+    let mut text = format!(
+        "Seu nome de instância no CommandDeck é \"{id}\": é por esse nome que os outros agentes falam com você (ask-agent {id} \"mensagem\")."
+    );
+    if let Some(role) = role.filter(|s| !s.is_empty()) {
+        text.push_str(&format!(" Seu cargo na equipe é \"{role}\"."));
+    }
+    text.push_str(" Para ver o seu chefe e a sua equipe, rode `ask-agent --team`.");
+    Some(text)
+}
+
+/// Texto vindo do modelo ou das ferramentas, seguro para o terminal: sem ESC, C1 e outros
+/// controles (mantém `\n` e `\t`).
+fn printable(text: &str) -> String {
+    text.chars().filter(|&c| c == '\n' || c == '\t' || !c.is_control()).collect()
+}
+
 fn env_nonempty(k: &str) -> Option<String> {
     std::env::var(k).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
@@ -526,13 +550,14 @@ impl App {
     }
 
     /// Envia uma mensagem ao modelo, mostrando o progresso em tempo real. Devolve a resposta final
-    /// (`None` se foi interrompida ou falhou).
-    fn turn(&mut self, prompt: &str) -> Option<String> {
+    /// ou o motivo de não haver uma (interrompida ou erro).
+    fn turn(&mut self, prompt: &str) -> Result<String, String> {
         let c = self.c;
         let term = self.term.clone();
         let mut opts = RunOptions::new(self.model.clone(), prompt, self.workspace.clone());
         opts.session_key = Some(self.session_key.clone());
         opts.stream = true;
+        opts.extra_system = identity_prompt(env_nonempty("COMMANDDECK_AGENT").as_deref(), env_nonempty("COMMANDDECK_ROLE").as_deref());
 
         self.cancel.store(false, Ordering::SeqCst);
         self.generating.store(true, Ordering::SeqCst);
@@ -546,16 +571,18 @@ impl App {
                     term.write(&bullet);
                 }
                 printed = true;
-                term.write(&t);
+                term.write(&printable(&t));
             }
             AgentEvent::ThinkingDelta(_) => term.spin("raciocinando"),
             AgentEvent::ToolCall { name, summary } => {
+                let (name, summary) = (printable(&name), printable(&summary));
                 let (s, cut) = commanddeck_core::util::truncate_chars(summary.lines().next().unwrap_or(""), 110);
                 let more = if cut || summary.lines().count() > 1 { "…" } else { "" };
                 term.line(&format!("{}●{} {}{name}{}{}({s}{more}){}", c.green, c.reset, c.bold, c.reset, c.dim, c.reset));
                 term.spin(&format!("executando {name}"));
             }
             AgentEvent::ToolResult { preview, .. } => {
+                let preview = printable(&preview);
                 let first = preview.lines().find(|l| !l.trim().is_empty()).unwrap_or("(vazio)");
                 let (s, cut) = commanddeck_core::util::truncate_chars(first.trim(), 120);
                 let extra = preview.lines().count().saturating_sub(1);
@@ -575,14 +602,18 @@ impl App {
         term.stop();
 
         let elapsed = started.elapsed().as_secs_f32();
-        let mut answer = None;
+        let answer;
         match result {
             Ok(out) => {
-                if !out.cancelled {
-                    answer = Some(out.text.clone());
-                }
+                answer = if out.cancelled {
+                    Err("a geração foi interrompida.".to_owned())
+                } else if out.text.trim().is_empty() {
+                    Err("o modelo terminou sem nenhum texto.".to_owned())
+                } else {
+                    Ok(out.text.clone())
+                };
                 if !printed && !out.cancelled {
-                    term.write(&format!("{bullet}{}", out.text));
+                    term.write(&format!("{bullet}{}", printable(&out.text)));
                 }
                 term.newline_if_needed();
                 if out.cancelled {
@@ -597,8 +628,9 @@ impl App {
             }
             Err(e) => {
                 term.newline_if_needed();
-                let msg = e.to_string();
+                let msg = printable(&e.to_string());
                 term.line(&format!("{}✖ Erro: {msg}{}", c.red, c.reset));
+                answer = Err(msg.clone());
                 if msg.contains("não está rodando") {
                     term.line(&format!(
                         "{}Dica: inicie o Ollama (`ollama serve` ou o app) — host: {}{}",
@@ -740,8 +772,9 @@ fn main() -> ExitCode {
             _ => {
                 let answer = app.turn(text);
                 // Pergunta de outro agente (digitada pela ponte): a resposta volta sozinha, sem
-                // depender de o modelo lembrar de rodar `ask-agent`.
-                if let (Some(asker), Some(answer)) = (bridge_asker(text), answer) {
+                // depender de o modelo lembrar de rodar `ask-agent`. Sem resposta, vai o motivo.
+                if let Some(asker) = bridge_asker(text) {
+                    let answer = answer.unwrap_or_else(|why| failure_reply(&app.model, &why));
                     match reply_to_bridge(&asker, &answer) {
                         Ok(true) => println!("{}↩ resposta enviada a {asker}.{}\n", c.dim, c.reset),
                         Ok(false) => {} // o modelo já respondeu por conta própria
@@ -822,5 +855,30 @@ mod tests {
         assert_eq!(bridge_asker("olá, tudo bem?"), None);
         assert_eq!(bridge_asker("[Mensagem do agente \"\" recebida pelo CommandDeck] oi"), None);
         assert_eq!(bridge_asker("[Mensagem do agente \"x\" qualquer coisa] oi"), None);
+    }
+
+    #[test]
+    fn a_failed_turn_still_answers_the_bridge() {
+        assert_eq!(
+            failure_reply("qwen3.5:4b", "a geração foi interrompida."),
+            "[ollama:qwen3.5:4b] não consegui responder: a geração foi interrompida."
+        );
+    }
+
+    #[test]
+    fn the_model_knows_its_instance_name_and_role() {
+        let t = identity_prompt(Some("ollama:qwen3.5:4b@dev"), Some("dev")).expect("id");
+        assert!(
+            t.contains("\"ollama:qwen3.5:4b@dev\"") && t.contains("cargo na equipe é \"dev\"") && t.contains("ask-agent --team"),
+            "{t}"
+        );
+        assert!(!identity_prompt(Some("ollama"), None).expect("id").contains("cargo"));
+        assert_eq!(identity_prompt(None, Some("dev")), None);
+    }
+
+    #[test]
+    fn model_text_cannot_drive_the_terminal() {
+        assert_eq!(printable("a\x1b]52;c;eA==\x07b\u{9b}2J\r\nc\td"), "a]52;c;eA==b2J\nc\td");
+        assert_eq!(printable("ação ✓"), "ação ✓");
     }
 }

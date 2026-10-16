@@ -5,7 +5,7 @@
 //! sem streaming) e pelo CLI interativo `ollama-agent` (com streaming de tokens).
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -22,6 +22,8 @@ pub const MAX_STEPS: usize = 25;
 pub const MAX_SESSION_MESSAGES: usize = 30;
 /// Arquivos maiores que isso são truncados nas primeiras 1000 linhas.
 pub const READ_LIMIT_BYTES: u64 = 250 * 1024;
+/// Quanto de um arquivo grande é lido para tirar as primeiras linhas (o resto nem entra na memória).
+const READ_SCAN_BYTES: u64 = 1024 * 1024;
 /// Limite de caracteres da saída de `run_command`.
 pub const OUTPUT_LIMIT_CHARS: usize = 20_000;
 /// Timeout de `run_command` (comandos comuns / `ask-agent`).
@@ -254,10 +256,13 @@ fn tool_read_file(args: &Value, ws: &Path) -> Result<String, String> {
             "[Arquivo binário detectado: \"{p}\" ({size} bytes)]. A ferramenta read_file opera apenas com texto UTF-8. Para inspecionar ou processar este arquivo, execute comandos ou scripts no terminal com run_command."
         ));
     }
-    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
+    // Lê no máximo o limite: um .log de vários GB não pode ir inteiro para a memória (o Ollama
+    // headless roda dentro do app).
+    let mut bytes = Vec::new();
+    std::fs::File::open(&full).and_then(|f| f.take(READ_SCAN_BYTES).read_to_end(&mut bytes)).map_err(|e| e.to_string())?;
     let content = String::from_utf8_lossy(&bytes);
     if size > READ_LIMIT_BYTES {
-        // Arquivo muito grande: primeiras 1000 linhas.
+        // Arquivo muito grande: primeiras 1000 linhas do trecho lido.
         let lines: Vec<&str> = content.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).take(1000).collect();
         return Ok(format!("[Arquivo grande - exibindo primeiras 1000 linhas]\n{}\n... [conteúdo restante truncado]", lines.join("\n")));
     }
@@ -654,6 +659,8 @@ impl OllamaAgent {
         let url = format!("{}/api/chat", base_url(host));
         let tool_ctx = ToolContext { workspace: &opts.workspace, cancel, command_env: opts.command_env.as_ref() };
         let mut out = RunOutput { text: String::new(), steps: 0, tool_calls: 0, cancelled: false };
+        // O modelo encerrou (sem mais ferramentas); `false` no fim = parou pelo limite de passos.
+        let mut finished = false;
 
         while out.steps < opts.max_steps {
             if cancel.load(Ordering::SeqCst) {
@@ -667,7 +674,10 @@ impl OllamaAgent {
             } else {
                 (chat_once(&agent, &url, &payload)?, false)
             };
-            let Some(assistant) = assistant else { break };
+            let Some(assistant) = assistant else {
+                finished = true;
+                break;
+            };
             messages.push(assistant.clone());
             if cancelled {
                 out.cancelled = true;
@@ -679,6 +689,7 @@ impl OllamaAgent {
             if calls.is_empty() {
                 // O modelo concluiu a resposta final.
                 out.text = assistant.get("content").and_then(Value::as_str).unwrap_or("").trim().to_owned();
+                finished = true;
                 break;
             }
             for call in calls {
@@ -708,7 +719,11 @@ impl OllamaAgent {
             }
         }
         if out.text.is_empty() {
-            out.text = "(tarefa concluída)".into();
+            out.text = if finished {
+                "(tarefa concluída)".into()
+            } else {
+                format!("(parei no limite de {} passos sem uma resposta final: a tarefa pode estar incompleta)", opts.max_steps)
+            };
         }
         Ok(out)
     }

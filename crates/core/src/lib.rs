@@ -126,6 +126,10 @@ pub(crate) struct CoreInner {
     /// Instâncias (chaves com escopo) cuja posição na equipe mudou desde a última mensagem que
     /// receberam: a próxima leva o aviso (ver `team::notice`).
     pub team_changed: Mutex<HashSet<String>>,
+    /// Serializa as gravações da configuração (ver `Core::update_config`).
+    pub config_save: Mutex<()>,
+    /// As alterações da configuração ficam só na memória (capturas de tela e estados de depuração).
+    pub config_read_only: std::sync::atomic::AtomicBool,
     pub bridge_queues: bridge::PairQueues,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
@@ -296,6 +300,8 @@ impl Core {
             headless_asks: Mutex::new(Vec::new()),
             headless_seq: std::sync::atomic::AtomicU64::new(0),
             team_changed: Mutex::new(HashSet::new()),
+            config_save: Mutex::new(()),
+            config_read_only: std::sync::atomic::AtomicBool::new(false),
             bridge_queues: bridge::PairQueues::default(),
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
@@ -381,12 +387,24 @@ impl Core {
     }
 
     /// Aplica uma alteração e persiste em disco.
+    /// Daqui em diante a configuração muda só na memória, sem gravar o arquivo (depuração).
+    pub fn disable_config_writes(&self) {
+        self.inner.config_read_only.store(true, Ordering::SeqCst);
+    }
+
     pub fn update_config(&self, f: impl FnOnce(&mut Config)) {
+        // Uma gravação por vez e na ordem das alterações (a ponte e a interface gravam de threads
+        // diferentes): sem isso uma cópia velha podia ficar por cima da nova.
+        let _saving = self.inner.config_save.lock();
         let snapshot = {
             let mut cfg = self.inner.config.write();
             f(&mut cfg);
             cfg.clone()
         };
+        if self.inner.config_read_only.load(Ordering::SeqCst) {
+            self.inner.ollama.set_host(snapshot.ollama_host.clone());
+            return;
+        }
         self.inner.ollama.set_host(snapshot.ollama_host.clone());
         if let Err(e) = snapshot.save(&self.paths().config_file) {
             log::warn!("falha ao salvar a configuração em {}: {e}", self.paths().config_file.display());
@@ -482,22 +500,24 @@ impl Core {
                 return Err(format!("\"{who}\" não está aberto neste projeto"));
             }
         }
-        let parents = self.inner.config.read().project(project).map(|p| p.tab_parents.clone()).unwrap_or_default();
-        if let Some(b) = boss.filter(|b| team::would_cycle(&parents, id, b)) {
-            return Err(format!("\"{b}\" já faz parte da equipe de \"{id}\": não pode ser o chefe dele"));
-        }
-        let old = parents.get(id).cloned();
-        if old.as_deref() == boss {
-            return Ok(());
-        }
-        self.update_project(project, |p| match boss {
-            Some(b) => {
-                p.tab_parents.insert(id.to_owned(), b.to_owned());
+        // Confere e grava sob a mesma trava: um arrasto e a ponte ao mesmo tempo não formam ciclo.
+        let mut outcome: Result<Option<Option<String>>, String> = Ok(None);
+        self.update_project(project, |p| {
+            if let Some(b) = boss.filter(|b| team::would_cycle(&p.tab_parents, id, b)) {
+                outcome = Err(format!("\"{b}\" já faz parte da equipe de \"{id}\": não pode ser o chefe dele"));
+                return;
             }
-            None => {
-                p.tab_parents.remove(id);
+            let old = p.tab_parents.get(id).cloned();
+            if old.as_deref() == boss {
+                return;
             }
+            match boss {
+                Some(b) => p.tab_parents.insert(id.to_owned(), b.to_owned()),
+                None => p.tab_parents.remove(id),
+            };
+            outcome = Ok(Some(old));
         });
+        let Some(old) = outcome? else { return Ok(()) };
         let touched: Vec<String> = std::iter::once(id.to_owned()).chain(old).chain(boss.map(str::to_owned)).collect();
         self.mark_team_changed(project, &touched);
         Ok(())
@@ -536,6 +556,12 @@ impl Core {
     /// O processo da instância terminou (a aba continua aberta): quem esperava a resposta dela é liberado.
     pub fn instance_ended(&self, project: &str, id: &str) {
         self.inner.exchange.fail_target(&instances::scoped(project, id), &format!("o processo de \"{id}\" encerrou antes de responder"));
+    }
+
+    /// A pergunta número `request` ainda espera resposta. Uma pergunta que expirou ou cuja aba de
+    /// origem fechou enquanto estava na fila não deve mais ser digitada.
+    pub fn question_pending(&self, request: u64) -> bool {
+        self.inner.exchange.is_pending(request)
     }
 
     /// A entrega não pôde ser feita (aba morreu, não subiu…): libera quem espera.

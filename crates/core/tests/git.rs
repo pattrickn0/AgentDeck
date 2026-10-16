@@ -103,6 +103,8 @@ fn stage_commit_discard_branches_renames_and_conflicts() {
     // O app grava o AGENTS.md no workspace ao iniciar; aqui ele só atrapalharia as contas.
     let _ = std::fs::remove_file(ws.join("AGENTS.md"));
     core.git_init().expect("init");
+    // Sem HEAD e com o índice vazio, tirar tudo do stage não é erro.
+    core.git_unstage_all().expect("unstage all com índice vazio");
     std::fs::write(ws.join("a b.txt"), "um\ndois\n").expect("w");
     std::fs::create_dir_all(ws.join("ção")).expect("mkdir");
     std::fs::write(ws.join("ção").join("ü.txt"), "x\n").expect("w");
@@ -168,6 +170,12 @@ fn stage_commit_discard_branches_renames_and_conflicts() {
     let st = core.git_status().expect("st");
     assert_eq!(st.entries[0].kind, EntryKind::Renamed);
     assert_eq!((st.entries[0].path.as_str(), st.entries[0].orig_path.as_deref()), ("novo nome.txt", Some("a b.txt")));
+    // Tirar do stage só o nome novo leva junto o antigo (que não fica preparado como apagado).
+    core.git_unstage(&["novo nome.txt".into()]).expect("unstage renomeado");
+    let st = core.git_status().expect("st");
+    assert_eq!(paths(&st), [("a b.txt".into(), '.', 'D', EntryKind::Ordinary), ("novo nome.txt".into(), '?', '?', EntryKind::Untracked)]);
+    core.git_stage_all().expect("stage");
+    assert_eq!(core.git_status().expect("st").entries[0].kind, EntryKind::Renamed);
     core.git_unstage_all().expect("unstage all");
     assert!(core.git_status().expect("st").entries.iter().all(|e| !e.staged()));
     let _ = git(ws, &["reset", "-q", "--hard"]);
@@ -228,5 +236,35 @@ fn push_pull_and_ahead_behind_with_a_local_remote() {
     assert_eq!((st.ahead, st.behind), (0, 0));
     assert!(ws.join("y.txt").exists());
     assert!(core.git_branches().expect("b").iter().any(|b| b.remote && b.name == "origin/main"));
+    env.core.shutdown();
+}
+
+#[test]
+fn checkout_of_a_remote_branch_reuses_the_local_one() {
+    need_git!();
+    let env = start(true);
+    let (core, ws) = (&env.core, &env.ws);
+    let bare = env.root.join("remoto.git");
+    assert!(git(&env.root, &["init", "-q", "--bare", bare.to_str().expect("utf8")]).status.success());
+    core.git_init().expect("init");
+    std::fs::write(ws.join("x.txt"), "1\n").expect("w");
+    core.git_stage_all().expect("stage");
+    core.git_commit("c1", false).expect("commit");
+    assert!(git(ws, &["remote", "add", "origin", bare.to_str().expect("utf8")]).status.success());
+    // `feat` só existe no remoto.
+    assert!(git(ws, &["push", "-q", "origin", "main", "main:feat"]).status.success());
+    core.git_fetch().expect("fetch");
+    let remote = |name: &str| core.git_branches().expect("b").into_iter().find(|b| b.remote && b.name == name).expect("remota");
+
+    // Primeira vez: cria a local que acompanha a remota.
+    core.git_checkout(&remote("origin/feat")).expect("checkout origin/feat");
+    let st = core.git_status().expect("st");
+    assert_eq!((st.branch.as_deref(), st.upstream.as_deref()), (Some("feat"), Some("origin/feat")));
+
+    // De volta à main; de novo na remota: a local `feat` já existe, então só troca para ela.
+    let main = core.git_branches().expect("b").into_iter().find(|b| !b.remote && b.name == "main").expect("main");
+    core.git_checkout(&main).expect("checkout main");
+    core.git_checkout(&remote("origin/feat")).expect("checkout origin/feat de novo");
+    assert_eq!(core.git_status().expect("st").branch.as_deref(), Some("feat"));
     env.core.shutdown();
 }

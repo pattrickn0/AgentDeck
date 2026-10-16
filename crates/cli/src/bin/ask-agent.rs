@@ -18,7 +18,7 @@
 //! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do CommandDeck.
 //! `--signal` e `--usage` saem sempre com 0 (um hook que falha não pode atrapalhar o agente).
 
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
@@ -128,6 +128,11 @@ fn main() -> ExitCode {
         };
     }
     if args.first().is_some_and(|a| a == "--boss") {
+        // O chefe é uma instância que já existe: `--new` abriria outra em vez de falar com ele.
+        // Recusar é mais claro que ignorar em silêncio.
+        if force_new {
+            return fail(format!("--new não combina com --boss (o chefe é uma instância que já existe).\n{USAGE}"), 2);
+        }
         match team(&bridge) {
             Ok((_, Some(boss), _)) => args[0] = boss,
             Ok((_, None, _)) => {
@@ -156,11 +161,14 @@ fn main() -> ExitCode {
     }
 
     let mut message = args.get(1..).map(|a| a.join(" ")).unwrap_or_default();
-    if message.is_empty() || message == "-" {
-        message.clear();
-        if let Err(e) = std::io::stdin().read_to_string(&mut message) {
+    // O stdin só é lido com "-" ou quando vem de um pipe/arquivo: num terminal, sem mensagem,
+    // a leitura travaria sem aviso. Bytes + `from_utf8_lossy`: arquivos em cp1252 não dão erro.
+    if message == "-" || (message.is_empty() && !std::io::stdin().is_terminal()) {
+        let mut raw = Vec::new();
+        if let Err(e) = std::io::stdin().read_to_end(&mut raw) {
             return fail(format!("falha ao ler o stdin: {e}"), 1);
         }
+        message = String::from_utf8_lossy(&raw).into_owned();
     }
     if message.trim().is_empty() {
         return fail("mensagem vazia.", 2);
@@ -312,15 +320,28 @@ fn shell(cmd: &str) -> Command {
                 c.args(["-c", cmd]);
                 c
             }
-            None => {
-                let mut c = Command::new("cmd");
-                c.args(["/D", "/S", "/C", cmd]);
-                c
-            }
+            None => cmd_shell(cmd),
         }
     } else {
         let mut c = Command::new("sh");
         c.args(["-c", cmd]);
         c
     }
+}
+
+/// `cmd /D /S /C "<comando>"` com a linha crua: a citação do Rust trocaria `"` por `\"`, que o
+/// `cmd` não entende. Com `/S`, o `cmd` tira só as aspas de fora.
+#[cfg(windows)]
+fn cmd_shell(cmd: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut c = Command::new("cmd");
+    c.raw_arg(format!("/D /S /C \"{cmd}\""));
+    c
+}
+
+#[cfg(not(windows))]
+fn cmd_shell(cmd: &str) -> Command {
+    let mut c = Command::new("cmd");
+    c.args(["/D", "/S", "/C", cmd]);
+    c
 }

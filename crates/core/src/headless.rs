@@ -1,7 +1,7 @@
 //! Execução headless (modo `-p`) dos agentes, usada pela ponte
 //! (equivalente a `runHeadless`, `agyPromptArg`, `parseAgyOutput` e `cleanAgentOutput`).
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -254,11 +254,14 @@ impl Core {
         let guard = self.headless_token(&project, agent);
         let mut cmd = std::process::Command::new(&program);
         cmd.args(&args).current_dir(&workspace).env_clear().envs(agents::agent_env(self, agent, opts.depth, &guard.token));
-        let captured = run_captured(cmd, Some(stdin.into_bytes()), HEADLESS_TIMEOUT, None, Some(&self.inner.processes))
+        let captured = run_captured(cmd, Some(stdin.into_bytes()), HEADLESS_TIMEOUT, Some(cancel), Some(&self.inner.processes))
             .map_err(|e| anyhow::anyhow!("falha ao iniciar \"{}\": {e}", program.display()))?;
         drop(guard);
         if captured.exit == Exit::TimedOut {
             anyhow::bail!("agente \"{agent}\" excedeu o tempo limite de resposta (timeout de 10 minutos)");
+        }
+        if captured.exit == Exit::Cancelled {
+            anyhow::bail!("execução interrompida");
         }
 
         let resumed = opts.session_key.is_some() && !is_new;
@@ -282,6 +285,10 @@ impl Core {
             }
         }
         if resumed {
+            // Encerrando (ou cancelado): refazer abriria um processo órfão depois do `kill_all`.
+            if self.stopping(cancel) {
+                anyhow::bail!("execução interrompida");
+            }
             // Sessão expirada/inválida: descarta e tenta de novo, limpa.
             if let Some(key) = &opts.session_key {
                 self.inner.headless_sessions.lock().remove(key);
@@ -299,6 +306,11 @@ impl Core {
             anyhow::bail!("processo saiu com código {code}");
         }
         anyhow::bail!("{msg}")
+    }
+
+    /// Cancelado ou o app encerrando (`Core::shutdown`): não se abre mais nenhum processo.
+    fn stopping(&self, cancel: &AtomicBool) -> bool {
+        cancel.load(Ordering::SeqCst) || self.inner.state.shutdown.load(Ordering::SeqCst)
     }
 
     /// Grava o prompt em `dados/prompts` quando ele não pode ir na linha de comando: longo demais

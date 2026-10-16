@@ -34,7 +34,8 @@ pub enum UiMsg {
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
-    Git(crate::git_ui::GitReply),
+    /// Resposta do Git, com a geração do projeto em que foi pedida (ver `GitUi::generation`).
+    Git(u64, crate::git_ui::GitReply),
 }
 
 /// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
@@ -110,6 +111,8 @@ pub struct Tab {
     held_keys: Vec<u8>,
     seen_output: u64,
     idle_deadline: Option<Instant>,
+    /// Houve saída desde que a aba ficou ocupada (só então o fim do turno toca e marca "concluído").
+    busy_output: bool,
     spec: Option<SpawnSpec>,
     pending_resize: Option<(GridSize, Instant)>,
 }
@@ -292,6 +295,9 @@ pub struct Deck {
     pub recording_since: Option<Instant>,
     pub transcribing: bool,
     pub send_after_transcribe: bool,
+    /// Aba ativa quando o Enviar foi clicado durante a gravação: a transcrição só sai sozinha se
+    /// ela ainda for a ativa (senão a mensagem iria para outro agente ou projeto).
+    send_target: Option<u64>,
     pub engine_label: String,
     pub focus_composer: bool,
     pub composer_focused: bool,
@@ -333,6 +339,18 @@ const SECOND_ENTER: Duration = Duration::from_millis(600);
 const HOOK_STALE: Duration = Duration::from_secs(600);
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(60);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
+/// Enter (ou envio) que não produziu saída nenhuma (prompt vazio, menu): a aba é liberada depois
+/// deste tempo, em silêncio. Sem isso ela ficava "trabalhando" para sempre e prendia a fila da ponte.
+const NO_OUTPUT_IDLE: Duration = Duration::from_secs(8);
+/// Mensagens guardadas na Conversa integrada de cada projeto (as mais antigas saem): a lista é
+/// redesenhada a cada quadro e, sem limite, uma sessão longa deixava a interface lenta.
+const FEED_MAX: usize = 1000;
+
+fn cap_feed(feed: &mut Vec<FeedItem>) {
+    if feed.len() > FEED_MAX {
+        feed.drain(..feed.len() - FEED_MAX);
+    }
+}
 const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
 
 impl Deck {
@@ -404,6 +422,7 @@ impl Deck {
             recording_since: None,
             transcribing: false,
             send_after_transcribe: false,
+            send_target: None,
             engine_label: String::new(),
             focus_composer: false,
             composer_focused: false,
@@ -485,6 +504,12 @@ impl Deck {
 
     fn apply_action(&mut self, ctx: &egui::Context, a: Action) {
         match a {
+            Action::NewTabShortcut if self.sidebar_collapsed => {
+                // Sem a barra lateral não há "+ Novo agente": o atalho abre o menu de agentes.
+                self.new_tab_menu_open = true;
+                self.settings_open = false;
+                self.refresh_agents();
+            }
             Action::NewTabShortcut => {
                 let kind = self.active.map(|i| self.tabs[i].kind.clone()).unwrap_or_else(|| self.agents.fallback_kind());
                 self.open_tab(&kind, false);
@@ -578,15 +603,18 @@ impl Deck {
                 self.refresh_engine();
                 let send = self.send_after_transcribe && ok;
                 self.send_after_transcribe = false;
-                if send {
+                let target = self.send_target.take();
+                if send && target == self.active_tab().map(|t| t.uid) {
                     self.send_message();
+                } else if send {
+                    self.system("A aba mudou durante a transcrição: o texto ficou na caixa de mensagem para você conferir e enviar.");
                 }
             }
             UiMsg::Engine(label) => self.engine_label = label,
             UiMsg::WorkspacePicked(dir) => {
                 self.add_project(dir);
             }
-            UiMsg::Git(reply) => self.on_git(reply),
+            UiMsg::Git(generation, reply) => self.on_git(generation, reply),
         }
     }
 
@@ -661,6 +689,7 @@ impl Deck {
                 tab.seen_output = seq;
                 let last = (*tab.session.shared.last_output.lock()).unwrap_or(now);
                 self.core.touch_activity(&tab.project, &tab.ident.id(), last);
+                tab.busy_output |= tab.busy;
                 if tab.busy && tab.turn_confirmed {
                     // Quem libera é o hook de fim de turno; isto só cobre um aviso perdido.
                     tab.idle_deadline = Some(last + HOOK_STALE);
@@ -677,10 +706,12 @@ impl Deck {
                     tab.idle_deadline = None;
                     if tab.busy {
                         tab.busy = false;
-                        if active != Some(i) {
-                            tab.done = true;
+                        if std::mem::take(&mut tab.busy_output) {
+                            if active != Some(i) {
+                                tab.done = true;
+                            }
+                            chime = true;
                         }
-                        chime = true;
                     }
                 } else {
                     want(at);
@@ -720,8 +751,14 @@ impl Deck {
                 }
                 Gate::Ready => {
                     if let Some(q) = self.tabs[i].queue.pop() {
-                        self.submit(i, &q.prompt);
-                        want(now + FIRST_ENTER);
+                        // Pergunta cancelada na fila (expirou, quem perguntou fechou): não faz o agente
+                        // trabalhar à toa nem pedir um `--reply` que daria 404.
+                        if !q.answer && !self.core.question_pending(q.request) {
+                            log::info!("pergunta #{} descartada antes de ser digitada: não espera mais resposta", q.request);
+                        } else {
+                            self.submit(i, &q.prompt);
+                            want(now + FIRST_ENTER);
+                        }
                     }
                     if !self.tabs[i].queue.is_empty() {
                         want(now + delivery::POLL);
@@ -925,6 +962,8 @@ impl Deck {
         tab.turn_confirmed = busy;
         // Ocupada: se o aviso de fim de turno se perder, a aba é liberada após HOOK_STALE.
         tab.idle_deadline = busy.then(|| Instant::now() + HOOK_STALE);
+        // Turno confirmado pelo hook: se o aviso de fim se perder, a liberação ainda conta como fim.
+        tab.busy_output |= busy;
         let finished = tab.busy && !busy;
         tab.busy = busy;
         if busy {
@@ -965,6 +1004,7 @@ impl Deck {
             held_keys: Vec::new(),
             seen_output: 0,
             idle_deadline: None,
+            busy_output: false,
             spec: None,
             pending_resize: None,
         };
@@ -1156,6 +1196,14 @@ impl Deck {
         }
         // Esquece a instância e libera quem esperava resposta dela.
         self.core.close_instance(&tab.project, &tab.ident.id());
+        // Índices guardados entre quadros (modal de renomear, menu de contexto) seguem a aba deles.
+        let shift = |i: usize| match i.cmp(&idx) {
+            std::cmp::Ordering::Less => Some(i),
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => Some(i - 1),
+        };
+        self.rename_tab = self.rename_tab.take().and_then(|(i, buf, err)| Some((shift(i)?, buf, err)));
+        self.tab_context_menu = self.tab_context_menu.and_then(|(i, pos)| Some((shift(i)?, pos)));
         self.sync_groups();
         match self.active {
             Some(a) if a == idx => {
@@ -1311,7 +1359,11 @@ impl Deck {
             c.right_panel_width = rw;
             c.split_enabled = split_on;
         });
-        self.core.update_project(&self.core.active_project_id(), |p| {
+        // O projeto da tela (o do core pode já ter mudado, ex.: ao remover o ativo).
+        if self.active_project.is_empty() {
+            return;
+        }
+        self.core.update_project(&self.active_project, |p| {
             p.split_rows = ratios.rows;
             p.split_cols = ratios.cols;
         });
@@ -1438,7 +1490,7 @@ impl Deck {
         };
         let m = Mods { shift: mods.shift_key(), ctrl, alt: mods.alt_key(), meta: mods.super_key() };
         let text = ev.text.as_ref().map(|t| t.as_str());
-        let Some(bytes) = input::encode_key(&ev.logical_key, text, m, app_cursor) else { return true };
+        let Some(bytes) = input::encode_key_physical(&ev.logical_key, Some(&ev.physical_key), text, m, app_cursor) else { return true };
         self.terminal_data(idx, &bytes);
         true
     }
@@ -1447,9 +1499,14 @@ impl Deck {
     fn terminal_data(&mut self, idx: usize, bytes: &[u8]) {
         if self.tabs[idx].alive {
             if bytes == b"\r" {
-                self.tabs[idx].busy = true;
-                self.tabs[idx].turn_confirmed = false;
-                self.tabs[idx].done = false;
+                let tab = &mut self.tabs[idx];
+                if !tab.busy {
+                    tab.busy_output = false;
+                    tab.idle_deadline = Some(Instant::now() + NO_OUTPUT_IDLE);
+                }
+                tab.busy = true;
+                tab.turn_confirmed = false;
+                tab.done = false;
             }
             {
                 let mut emu = self.tabs[idx].session.shared.emu.lock();
@@ -1590,6 +1647,11 @@ impl Deck {
             return;
         }
         let old = std::mem::replace(&mut self.active_project, id.to_owned());
+        // Menus e modais apontam para abas do projeto que saiu.
+        self.rename_tab = None;
+        self.tab_context_menu = None;
+        self.new_tab_menu_open = false;
+        self.pane_drag = None;
         if !old.is_empty() {
             let uid = self.active.and_then(|i| self.tabs.get(i)).map(|t| t.uid);
             let state = self.projects.entry(old).or_default();
@@ -1627,8 +1689,7 @@ impl Deck {
         self.workspace = self.core.workspace();
         self.tree = TreeState { expanded: HashSet::from([String::new()]), ..Default::default() };
         self.refresh_tree();
-        self.git.diff = None;
-        self.git.view = crate::git_ui::GitView::Loading;
+        self.git_reset_for_project();
         self.git_refresh();
         self.persist_tabs();
     }
@@ -1743,6 +1804,7 @@ impl Deck {
             self.active_project.clear();
             self.active = None;
             self.group_order.clear();
+            self.split_ratios = split::Ratios::default();
             self.feed.clear();
             self.recent.clear();
             let next = self.core.active_project_id();
@@ -1786,6 +1848,7 @@ impl Deck {
                 state.feed.retain(|f| f.id != id);
             }
             state.feed.push(item);
+            cap_feed(&mut state.feed);
             return;
         }
         track_recent(&mut self.recent, &e);
@@ -1793,6 +1856,7 @@ impl Deck {
             self.feed.retain(|f| f.id != id);
         }
         self.feed.push(item);
+        cap_feed(&mut self.feed);
         if self.feed_near_bottom {
             self.feed_scroll_to_bottom = true;
         }
@@ -2011,6 +2075,7 @@ impl Deck {
     pub fn send_message(&mut self) {
         if self.recorder.is_some() || self.transcribing {
             self.send_after_transcribe = true;
+            self.send_target = self.active_tab().map(|t| t.uid);
             if self.recorder.is_some() {
                 self.stop_recording();
             }
@@ -2055,6 +2120,10 @@ impl Deck {
         if !tab.held_keys.is_empty() {
             let held = std::mem::take(&mut tab.held_keys);
             tab.session.write(&held);
+        }
+        if !tab.busy {
+            tab.busy_output = false;
+            tab.idle_deadline = Some(now + NO_OUTPUT_IDLE);
         }
         tab.busy = true;
         tab.turn_confirmed = false;

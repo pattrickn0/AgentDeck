@@ -31,9 +31,20 @@ pub(crate) fn attachments_dir(data_dir: &Path) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-/// Destino `s_<sessão>_<ms base36>-<nome>`.
-fn dest_for(dir: &Path, session: &str, name: &str) -> PathBuf {
-    dir.join(format!("s_{session}_{}-{name}", base36(now_ms())))
+/// Cria o destino `s_<sessão>_<ms base36>-<nome>` sem sobrescrever nada: dois anexos com o mesmo
+/// nome no mesmo milissegundo (ou nomes que viram o mesmo `safe_name`) ganham um sufixo.
+fn create_dest(dir: &Path, session: &str, name: &str) -> std::io::Result<(PathBuf, std::fs::File)> {
+    let stamp = base36(now_ms());
+    for n in 0u32.. {
+        let suffix = if n == 0 { String::new() } else { format!("_{n}") };
+        let path = dir.join(format!("s_{session}_{stamp}{suffix}-{name}"));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("o laço só termina retornando")
 }
 
 /// Copia arquivos (ignorando pastas e inexistentes) e devolve as referências.
@@ -44,8 +55,13 @@ pub(crate) fn attach_files(data_dir: &Path, workspace: &Path, session: &str, fil
         .filter(|src| src.is_file())
         .filter_map(|src| {
             let base = src.file_name()?.to_string_lossy().into_owned();
-            let dest = dest_for(&dir, session, &safe_name(&base));
-            std::fs::copy(src, &dest).ok()?;
+            let (dest, mut out) = create_dest(&dir, session, &safe_name(&base)).ok()?;
+            let copied = std::fs::File::open(src).and_then(|mut f| std::io::copy(&mut f, &mut out));
+            if copied.is_err() {
+                drop(out);
+                let _ = std::fs::remove_file(&dest);
+                return None;
+            }
             Some(ref_path(workspace, &dest))
         })
         .collect()
@@ -64,8 +80,8 @@ pub(crate) fn attach_bytes(data_dir: &Path, workspace: &Path, session: &str, nam
         }
         None => (file.clone(), ".png".to_owned()),
     };
-    let dest = dest_for(&dir, session, &format!("{}{ext}", safe_name(&stem)));
-    std::fs::write(&dest, bytes)?;
+    let (dest, mut out) = create_dest(&dir, session, &format!("{}{ext}", safe_name(&stem)))?;
+    std::io::Write::write_all(&mut out, bytes)?;
     Ok(ref_path(workspace, &dest))
 }
 
@@ -96,8 +112,8 @@ pub(crate) fn attach_rgba_png(
 ) -> anyhow::Result<String> {
     let png = encode_png(width, height, rgba)?;
     let dir = attachments_dir(data_dir)?;
-    let dest = dest_for(&dir, session, "screenshot.png");
-    std::fs::write(&dest, png)?;
+    let (dest, mut out) = create_dest(&dir, session, "screenshot.png")?;
+    std::io::Write::write_all(&mut out, &png)?;
     Ok(ref_path(workspace, &dest))
 }
 
@@ -137,6 +153,25 @@ mod tests {
         // Dentro do workspace a referência é relativa.
         let r = attach_bytes(&ws.join("d"), &ws, "s", "a.txt", b"x").expect("ok");
         assert!(r.starts_with("d/anexos/s_s_"), "{r}");
+
+        // Dois anexos com o mesmo nome em seguida (mesmo milissegundo, em geral) não se sobrescrevem.
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        for (dir, body) in [(&a, "primeiro"), (&b, "segundo")] {
+            std::fs::create_dir_all(dir).expect("mkdir");
+            std::fs::write(dir.join("foto.txt"), body).expect("write");
+        }
+        let refs = attach_files(&data, &ws, "dup", &[a.join("foto.txt"), b.join("foto.txt")]);
+        assert_eq!(refs.len(), 2);
+        assert_ne!(refs[0], refs[1]);
+        let anexos = data.join("anexos");
+        let mut bodies: Vec<String> = std::fs::read_dir(&anexos)
+            .expect("ls")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("s_dup_"))
+            .map(|e| std::fs::read_to_string(e.path()).expect("read"))
+            .collect();
+        bodies.sort();
+        assert_eq!(bodies, ["primeiro", "segundo"]);
     }
 
     #[test]

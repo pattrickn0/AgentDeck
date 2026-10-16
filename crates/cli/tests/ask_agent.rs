@@ -37,6 +37,10 @@ fn start_core(root: &std::path::Path) -> Core {
 }
 
 fn ask_agent(core: Option<&Core>, args: &[&str], stdin: Option<&str>) -> Output {
+    ask_agent_bytes(core, args, stdin.unwrap_or("").as_bytes())
+}
+
+fn ask_agent_bytes(core: Option<&Core>, args: &[&str], stdin: &[u8]) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
     cmd.args(args)
         .env_remove("COMMANDDECK_PORT")
@@ -51,7 +55,7 @@ fn ask_agent(core: Option<&Core>, args: &[&str], stdin: Option<&str>) -> Output 
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
     if let Some(mut pipe) = child.stdin.take() {
-        let _ = pipe.write_all(stdin.unwrap_or("").as_bytes());
+        let _ = pipe.write_all(stdin);
     }
     child.wait_with_output().expect("output")
 }
@@ -91,6 +95,19 @@ fn list_help_and_errors() {
     let out = ask_agent(Some(&core), &["claude", "-"], Some("   \n"));
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(text(&out.stderr).trim(), "ask-agent: mensagem vazia.");
+
+    // Stdin que não é UTF-8 (arquivo em cp1252): vira texto com substituições, sem erro de leitura.
+    let out = ask_agent_bytes(Some(&core), &["bogus", "-"], b"a\xe7\xe3o");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("agente desconhecido"), "{}", text(&out.stderr));
+    // Sem mensagem, o stdin (aqui um pipe) é a mensagem.
+    let out = ask_agent(Some(&core), &["bogus"], Some("pelo stdin"));
+    assert!(text(&out.stderr).contains("agente desconhecido"), "{}", text(&out.stderr));
+
+    // `--boss` fala com o chefe que já existe: `--new` não combina com ele.
+    let out = ask_agent(Some(&core), &["--new", "--boss", "oi"], None);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("--new não combina com --boss"), "{}", text(&out.stderr));
 
     #[cfg(unix)]
     {

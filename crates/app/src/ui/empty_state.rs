@@ -27,9 +27,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     if no_project {
         job.append("Abra uma pasta como projeto: cada projeto tem os seus agentes.", 0.0, fmt);
     } else {
+        // Com a barra lateral recolhida o "+ Novo agente" não está à vista: o atalho é o Ctrl+T.
+        let (key, place) = if deck.sidebar_collapsed { ("Ctrl+T", "") } else { ("+ Novo agente", " na barra lateral") };
         job.append("Selecione um agente abaixo ou use ", 0.0, fmt.clone());
-        job.append("+ Novo agente", 0.0, TextFormat { font_id: theme::ui_bold(13.0), color: theme::TEXT, ..fmt.clone() });
-        job.append(" na barra lateral para iniciar uma sessão:", 0.0, fmt);
+        job.append(key, 0.0, TextFormat { font_id: theme::ui_bold(13.0), color: theme::TEXT, ..fmt.clone() });
+        job.append(&format!("{place} para iniciar uma sessão:"), 0.0, fmt);
     }
     let para = painter.layout_job(job);
 

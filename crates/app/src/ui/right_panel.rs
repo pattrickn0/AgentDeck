@@ -310,7 +310,8 @@ fn empty_text(ui: &mut Ui, w: f32) {
     let base =
         TextFormat { font_id: theme::ui(13.0), color: theme::MUTED, line_height: Some(13.0 * theme::LINE_HEIGHT), ..Default::default() };
     job.append("Aqui aparecem as conversas entre os agentes (via ", 0.0, base.clone());
-    job.append(" ask-agent ", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::PANEL_2, ..base.clone() });
+    // Espaços que não quebram: o chip não se parte entre duas linhas (o fundo ficava solto).
+    job.append("\u{a0}ask-agent\u{a0}", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::PANEL_2, ..base.clone() });
     job.append(") e as mensagens que você envia.", 0.0, base);
     let g = ui.painter().layout_job(job);
     let (r, _) = ui.allocate_exact_size(Vec2::new(w + 28.0, g.size().y + 16.0), Sense::hover());

@@ -203,3 +203,15 @@ Com a pasta de trabalho num repositório git:
 - [ ] Na aba de um agente reorganizado, `ask-agent --team` mostra o chefe e a equipe certos; `ask-agent --boss "oi"` chega ao chefe; sem chefe, o `--boss` explica que ele responde ao usuário.
 - [ ] Depois de reorganizar, a próxima mensagem entregue ao agente termina com "[CommandDeck] Sua posição na equipe mudou…" (uma vez só; se ele rodou `--team` antes, não vem).
 - [ ] Fechar a aba de um chefe: a equipe dele sobe para o chefe dele (ou para a raiz). Renomear uma aba com equipe mantém a árvore.
+
+## 16. Auditoria de 2026-10-15: conferir no Windows ★
+
+- [ ] Git: abrir "Descartar" num arquivo do projeto A e trocar para o projeto B pela barra lateral: a confirmação some e nada é descartado em B.
+- [ ] Git: na lista de branches, clicar numa remota (`origin/x`) cuja local já existe: troca para a local, sem erro.
+- [ ] Enter num prompt vazio do Claude/terminal: a aba não fica "trabalhando" (o halo para em ~8 s, sem campainha).
+- [ ] Ctrl+C com o teclado em layout russo/grego interrompe o programa do terminal.
+- [ ] Colar (Ctrl+V) num shell com *bracketed paste* um texto com `ESC[201~` no meio: tudo chega como colagem, nada é executado.
+- [ ] Aba do Ollama: "quem é você?" responde com o nome da instância (`ollama:<modelo>`); com o Ollama parado, quem perguntou recebe "não consegui responder" em vez de esperar 10 min.
+- [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
+- [ ] Ditado: gravar, clicar Enviar e trocar de aba durante a transcrição: o texto fica na caixa com o aviso, não vai para a outra aba.
+- [ ] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.

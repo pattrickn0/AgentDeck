@@ -1,8 +1,8 @@
 //! Pasta de trabalho: listagem para a árvore, AGENTS.md com instruções da ponte e watcher.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Weak;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
@@ -21,6 +21,10 @@ pub struct DirEntry {
 pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", "dados", "$RECYCLE.BIN", "target"];
 
 pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
+    // Só subpastas do workspace (`""` = a raiz): nada de `..`, absoluto ou `C:` no Windows.
+    if !rel_dir.is_empty() && !crate::git::safe_rel(rel_dir) {
+        return Vec::new();
+    }
     let target = workspace.join(rel_dir);
     let Ok(rd) = std::fs::read_dir(&target) else { return Vec::new() };
     let mut items: Vec<DirEntry> = rd
@@ -84,20 +88,37 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
     if !is_app_workspace && !file.exists() {
         return Ok(AgentContext::SkippedForeign);
     }
-    let block = format!("{MARKER_START}\n{instructions}\n{MARKER_END}");
     let old = if file.exists() { std::fs::read_to_string(&file)? } else { String::new() };
+    // Mantém o fim de linha do arquivo (CRLF em repositórios com `core.autocrlf`): EOL misto
+    // sujaria o `git status` a cada abertura.
+    let eol = if old.contains("\r\n") { "\r\n" } else { "\n" };
+    let instructions = instructions.replace("\r\n", "\n").replace('\n', eol);
+    let block = format!("{MARKER_START}{eol}{instructions}{eol}{MARKER_END}");
     let new = if marker_re().is_match(&old) {
         marker_re().replace(&old, regex::NoExpand(&block)).into_owned()
     } else if old.is_empty() {
-        format!("{block}\n")
+        format!("{block}{eol}")
     } else {
-        format!("{}\n\n{block}\n", old.trim_end())
+        format!("{}{eol}{eol}{block}{eol}", old.trim_end())
     };
     if new == old {
         return Ok(AgentContext::Unchanged);
     }
-    std::fs::write(&file, new)?;
+    write_atomic(&file, new.as_bytes())?;
     Ok(AgentContext::Written)
+}
+
+/// Grava ao lado e troca: um agente lendo o AGENTS.md ao mesmo tempo nunca o vê pela metade.
+/// Se a troca falhar (no Windows, arquivo aberto sem permissão de troca), grava direto.
+fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
+    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = file.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, data)?;
+    if std::fs::rename(&tmp, file).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        std::fs::write(file, data)?;
+    }
+    Ok(())
 }
 
 // ---------- Watcher ----------
@@ -105,25 +126,77 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
 /// Mudanças nestas pastas não recarregam a árvore (`.gemini`: configuração do Antigravity).
 const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", "dados", "target"];
 
-/// `true` se a mudança em `path` deve ser ignorada.
+/// `path` relativo a `base`, comparando por componentes (sem diferença de caixa no Windows:
+/// `c:\x` e `C:\x` são a mesma pasta). `None` se estiver fora.
+fn rel_within(base: &Path, path: &Path) -> Option<PathBuf> {
+    crate::util::path_within(path, base).then(|| path.components().skip(base.components().count()).collect())
+}
+
+/// `true` se a mudança em `path` deve ser ignorada. Fora do workspace não se ignora: as pastas
+/// acima dele (um projeto em `C:\dados\app`, por exemplo) não contam.
 pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
-    let rel = path.strip_prefix(workspace).unwrap_or(path);
+    let Some(rel) = rel_within(workspace, path) else { return false };
     rel.components().any(|c| match c {
         Component::Normal(s) => WATCH_IGNORED.iter().any(|i| s == *i),
         _ => false,
     })
 }
 
-/// A mudança em `path` é no estado do repositório git do workspace (`.git/HEAD`, `index`, refs…)?
-/// Os arquivos `*.lock` (temporários do próprio git) não contam.
+/// A mudança em `path` é no estado do repositório git do workspace (`.git/HEAD`, `index`, refs,
+/// merge/rebase/cherry-pick/revert em andamento…)? Os `*.lock` (temporários do git) não contam.
 pub(crate) fn git_state_change(workspace: &Path, path: &Path) -> bool {
-    let Ok(rel) = path.strip_prefix(workspace.join(".git")) else { return false };
+    let Some(rel) = rel_within(&workspace.join(".git"), path) else { return false };
     let name = rel.to_string_lossy();
     if name.ends_with(".lock") {
         return false;
     }
     let first = rel.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
-    matches!(first.as_str(), "HEAD" | "index" | "FETCH_HEAD" | "MERGE_HEAD" | "ORIG_HEAD" | "packed-refs" | "refs")
+    matches!(
+        first.as_str(),
+        "HEAD"
+            | "index"
+            | "FETCH_HEAD"
+            | "MERGE_HEAD"
+            | "ORIG_HEAD"
+            | "CHERRY_PICK_HEAD"
+            | "REVERT_HEAD"
+            | "rebase-merge"
+            | "rebase-apply"
+            | "packed-refs"
+            | "refs"
+    )
+}
+
+/// Silêncio que encerra uma rajada de eventos.
+const DEBOUNCE_QUIET: Duration = Duration::from_millis(300);
+/// Teto da espera: sob eventos contínuos (um build, um log) emite ao menos nesse intervalo.
+const DEBOUNCE_MAX: Duration = Duration::from_millis(1000);
+
+/// Junta os eventos (`true` = git, `false` = árvore) e chama `emit(árvore, git)` depois de
+/// `quiet` sem eventos ou, no máximo, `max` depois do primeiro. Termina quando o canal fecha
+/// (emitindo o que estava pendente) ou quando `emit` devolve `false`.
+fn debounce(rx: &crossbeam_channel::Receiver<bool>, quiet: Duration, max: Duration, mut emit: impl FnMut(bool, bool) -> bool) {
+    while let Ok(first) = rx.recv() {
+        let (mut tree, mut git) = (!first, first);
+        let deadline = Instant::now() + max;
+        let mut open = true;
+        while let Some(left) = deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()) {
+            match rx.recv_timeout(quiet.min(left)) {
+                Ok(is_git) => {
+                    git |= is_git;
+                    tree |= !is_git;
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => break,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                    open = false;
+                    break;
+                }
+            }
+        }
+        if !emit(tree, git) || !open {
+            return;
+        }
+    }
 }
 
 /// Inicia um watcher recursivo com debounce de 300 ms que emite
@@ -152,19 +225,8 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
         .name("cd-watch-debounce".into())
         .spawn(move || {
             // Termina quando o watcher (dono do `tx`) é solto.
-            while let Ok(first) = rx.recv() {
-                let (mut tree, mut git) = (!first, first);
-                loop {
-                    match rx.recv_timeout(Duration::from_millis(300)) {
-                        Ok(is_git) => {
-                            git |= is_git;
-                            tree |= !is_git;
-                        }
-                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => break,
-                        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                    }
-                }
-                let Some(inner) = core.upgrade() else { return };
+            debounce(&rx, DEBOUNCE_QUIET, DEBOUNCE_MAX, |tree, git| {
+                let Some(inner) = core.upgrade() else { return false };
                 let core = crate::Core { inner };
                 if tree {
                     core.emit(crate::CoreEvent::WorkspaceChanged);
@@ -172,7 +234,8 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
                 if git {
                     core.emit(crate::CoreEvent::GitChanged);
                 }
-            }
+                true
+            });
         })
         .map_err(|e| notify::Error::generic(&e.to_string()))?;
     Ok(watcher)
@@ -201,6 +264,21 @@ mod tests {
         let sub = read_dir(ws, "zeta");
         assert_eq!(sub[0].rel_path, "zeta/in.json");
         assert!(read_dir(ws, "nao-existe").is_empty());
+    }
+
+    #[test]
+    fn read_dir_stays_inside_the_workspace() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(ws.join("sub")).expect("mkdir");
+        std::fs::write(tmp.path().join("fora.txt"), "x").expect("write");
+        std::fs::write(ws.join("sub").join("dentro.txt"), "x").expect("write");
+        for bad in ["..", "../", "../x", "a/../b", "sub/../sub", "/x", "C:..\\x", "sub/../.."] {
+            assert!(read_dir(&ws, bad).is_empty(), "{bad:?}");
+        }
+        let abs = tmp.path().to_string_lossy().into_owned();
+        assert!(read_dir(&ws, &abs).is_empty(), "absoluto");
+        assert_eq!(read_dir(&ws, "./sub")[0].name, "dentro.txt");
     }
 
     #[test]
@@ -245,12 +323,86 @@ mod tests {
     }
 
     #[test]
+    fn agents_md_keeps_crlf() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        let file = ws.join("AGENTS.md");
+        let only_crlf = |t: &str| t.matches('\n').count() == t.matches("\r\n").count();
+        for start in ["# Regras\r\n\r\nfim\r\n", "# Regras\r\n\r\n<!-- commanddeck:start -->\r\nvelho\r\n<!-- commanddeck:end -->\r\n"] {
+            std::fs::write(&file, start).expect("write");
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Written);
+            let text = std::fs::read_to_string(&file).expect("read");
+            assert!(only_crlf(&text), "{text:?}");
+            assert!(text.contains(&format!("{MARKER_START}\r\nlinha 1\r\nlinha 2\r\n{MARKER_END}\r\n")), "{text:?}");
+            // Segunda vez: nada muda.
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Unchanged);
+            assert_eq!(std::fs::read_to_string(&file).expect("read"), text);
+        }
+        // Nenhum temporário fica para trás.
+        let names: Vec<String> =
+            std::fs::read_dir(&ws).expect("ls").flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["AGENTS.md"]);
+    }
+
+    #[test]
+    fn debounce_emits_under_a_continuous_stream_and_on_disconnect() {
+        let (tx, rx) = crossbeam_channel::unbounded::<bool>();
+        let feeder = std::thread::spawn(move || {
+            // Um evento a cada 20 ms por ~700 ms: nunca há 100 ms de silêncio.
+            for i in 0..35 {
+                let _ = tx.send(i % 5 == 0);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // Último evento e o canal fecha logo em seguida: não pode se perder.
+            let _ = tx.send(false);
+        });
+        let started = Instant::now();
+        let mut emitted = Vec::new();
+        debounce(&rx, Duration::from_millis(100), Duration::from_millis(250), |tree, git| {
+            emitted.push((started.elapsed(), tree, git));
+            true
+        });
+        feeder.join().expect("feeder");
+        assert!(emitted.len() >= 2, "{emitted:?}");
+        assert!(emitted[0].0 < Duration::from_millis(600), "o teto vale sob fluxo contínuo: {emitted:?}");
+        assert!(emitted[0].1 && emitted[0].2);
+        // `emit` devolvendo `false` encerra.
+        let (tx, rx) = crossbeam_channel::unbounded::<bool>();
+        tx.send(true).expect("send");
+        let mut calls = 0;
+        debounce(&rx, Duration::from_millis(10), Duration::from_millis(50), |_, _| {
+            calls += 1;
+            false
+        });
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
     fn watcher_filter() {
         let ws = Path::new("/w");
         assert!(watch_ignored(ws, Path::new("/w/.git/index")));
         // …mas o estado do repositório vira um aviso próprio (GitChanged), sem os `.lock` do git.
-        for p in ["/w/.git/HEAD", "/w/.git/index", "/w/.git/refs/heads/main", "/w/.git/FETCH_HEAD", "/w/.git/packed-refs"] {
+        for p in [
+            "/w/.git/HEAD",
+            "/w/.git/index",
+            "/w/.git/refs/heads/main",
+            "/w/.git/FETCH_HEAD",
+            "/w/.git/packed-refs",
+            "/w/.git/CHERRY_PICK_HEAD",
+            "/w/.git/REVERT_HEAD",
+            "/w/.git/rebase-merge/done",
+            "/w/.git/rebase-apply",
+        ] {
             assert!(git_state_change(ws, Path::new(p)), "{p}");
+        }
+        // Fora do workspace nada é ignorado (uma pasta-mãe chamada `dados` não conta).
+        assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/outro/dados/x")));
+        assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/dados/app/src/x")));
+        if cfg!(windows) {
+            // Letra da unidade com outra caixa: é o mesmo repositório.
+            assert!(git_state_change(Path::new(r"c:\w"), Path::new(r"C:\W\.git\HEAD")));
+            assert!(watch_ignored(Path::new(r"c:\w"), Path::new(r"C:\w\target\x")));
         }
         for p in ["/w/.git/index.lock", "/w/.git/objects/ab/cd", "/w/.git/logs/HEAD", "/w/src/HEAD", "/w/.gitignore"] {
             assert!(!git_state_change(ws, Path::new(p)), "{p}");

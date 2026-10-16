@@ -2,14 +2,14 @@
 //!
 //! Tudo passa pelo executável `git` instalado, sempre com `Command::new(git).args([...])` (nunca
 //! por um shell) e um ambiente que não trava: sem prompt de senha no terminal (`GIT_TERMINAL_PROMPT=0`,
-//! ssh em `BatchMode`), sem pager, mensagens em inglês (`LC_ALL=C`, para reconhecer os erros) e
+//! ssh em `BatchMode`, Git Credential Manager sem janela: `GCM_INTERACTIVE=never`), sem pager, mensagens em inglês (`LC_ALL=C`, para reconhecer os erros) e
 //! caminhos literais (`GIT_LITERAL_PATHSPECS=1`). Listas de caminhos e a mensagem de commit vão pela
 //! entrada padrão (sem limite de linha de comando no Windows, sem interpretação de nada).
 //!
 //! A saída é lida pelas funções puras deste módulo (`parse_*`), testadas sem git; as operações
 //! (`impl Core`) são bloqueantes: a interface as chama numa thread.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -361,9 +361,16 @@ pub fn classify_error(stderr: &str) -> GitError {
         || low.contains("could not read password")
         || low.contains("permission denied (publickey")
         || low.contains("terminal prompts disabled")
+        || low.contains("user interactivity has been disabled")
         || low.contains("host key verification failed")
     {
         return GitError::Auth(short);
+    }
+    // `commit.gpgsign` sem agente/pinentry que peça a senha: o gpg não consegue assinar.
+    if low.contains("gpg failed to sign") {
+        return GitError::Failed(format!(
+            "o git não conseguiu assinar o commit (commit.gpgsign). Destrave a chave no seu agente GPG ou desative a assinatura neste repositório: git config commit.gpgsign false\n{short}"
+        ));
     }
     if low.contains("[rejected]")
         || low.contains("non-fast-forward")
@@ -393,14 +400,15 @@ pub fn valid_branch_name(name: &str) -> bool {
         && !name.split('/').any(|part| part.starts_with('.'))
 }
 
-/// Caminho relativo seguro para passar ao git (sem `..`, sem ser absoluto, sem NUL).
+/// Caminho relativo seguro para passar ao git (sem `..`, sem ser absoluto, sem NUL). Só aceita
+/// componentes comuns (e `.`); no Windows, nenhum `:` (`C:..\x` é relativo à unidade e sai da raiz).
 pub fn safe_rel(path: &str) -> bool {
     !path.is_empty()
         && !path.contains('\0')
-        && !Path::new(path).is_absolute()
-        && !path.starts_with('/')
-        && !path.starts_with('\\')
+        && !(cfg!(windows) && path.contains(':'))
+        && !path.starts_with(['/', '\\'])
         && !path.split(['/', '\\']).any(|p| p == "..")
+        && Path::new(path).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
 // ---------- Execução ----------
@@ -430,6 +438,9 @@ fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
         ("LC_ALL", "C"),
         ("LANGUAGE", "C"),
         ("GIT_TERMINAL_PROMPT", "0"),
+        // O Git Credential Manager abriria uma janela de login e o comando ficaria parado até o
+        // timeout; sem credencial salva, falha logo (vira `GitError::Auth`).
+        ("GCM_INTERACTIVE", "never"),
         ("GIT_OPTIONAL_LOCKS", "0"),
         ("GIT_MERGE_AUTOEDIT", "no"),
         ("GIT_PAGER", "cat"),
@@ -625,16 +636,24 @@ impl Core {
         Ok(())
     }
 
-    /// Tira do stage.
+    /// Tira do stage. Um arquivo renomeado leva junto o nome antigo (senão este continuaria
+    /// preparado como apagado).
     pub fn git_unstage(&self, paths: &[String]) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
-        let stdin = Some(nul_paths(paths)?);
+        let stdin = nul_paths(paths)?;
         if repo.has_head() {
-            repo.write(&["restore", "--staged", "--pathspec-from-file=-", "--pathspec-file-nul"], stdin)?;
+            let st = parse_status_v2(&repo.read(&["status", "--porcelain=v2", "-z", "--untracked-files=no"])?.stdout);
+            let mut all = paths.to_vec();
+            for e in st.entries.iter().filter(|e| paths.contains(&e.path)) {
+                if let Some(orig) = e.orig_path.as_ref().filter(|o| !all.contains(o)) {
+                    all.push(orig.clone());
+                }
+            }
+            repo.write(&["restore", "--staged", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(nul_paths(&all)?))?;
         } else {
             // Sem nenhum commit não há HEAD para restaurar: só sai do índice.
-            repo.write(&["rm", "--cached", "-r", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"], stdin)?;
+            repo.write(&["rm", "--cached", "-r", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(stdin))?;
         }
         Ok(())
     }
@@ -646,7 +665,8 @@ impl Core {
         if repo.has_head() {
             repo.write(&["reset", "-q"], None)?;
         } else {
-            repo.write(&["rm", "--cached", "-r", "-q", "--", "."], None)?;
+            // Índice vazio: nada a tirar (sem `--ignore-unmatch` o git falharia com "did not match").
+            repo.write(&["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", "."], None)?;
         }
         Ok(())
     }
@@ -739,7 +759,8 @@ impl Core {
         Ok(parse_branches(&out.stdout))
     }
 
-    /// Troca de branch. Uma remota (`origin/x`) vira uma branch local que a acompanha.
+    /// Troca de branch. Uma remota (`origin/x`) vira uma branch local que a acompanha; se a local
+    /// (`x`) já existe, só troca para ela.
     pub fn git_checkout(&self, branch: &GitBranch) -> Result<(), GitError> {
         if !valid_branch_name(&branch.name) {
             return Err(GitError::Failed(format!("nome de branch inválido: {}", branch.name)));
@@ -747,7 +768,20 @@ impl Core {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
         if branch.remote {
-            repo.write(&["switch", "--track", &branch.name], None)?;
+            // Nome local: o que vem depois do remoto (o mais longo que casa; remotos podem ter `/`).
+            let remotes = repo.remotes()?;
+            let local = remotes
+                .iter()
+                .filter_map(|r| branch.name.strip_prefix(r.as_str())?.strip_prefix('/').map(|l| (r.len(), l)))
+                .max_by_key(|(len, _)| *len)
+                .map(|(_, l)| l)
+                .or_else(|| branch.name.split_once('/').map(|(_, l)| l))
+                .filter(|l| valid_branch_name(l));
+            let exists = |l: &str| run(repo.cmd(&["rev-parse", "--verify", "-q", &format!("refs/heads/{l}")]), None, READ_TIMEOUT).is_ok();
+            match local {
+                Some(l) if exists(l) => repo.write(&["switch", l], None)?,
+                _ => repo.write(&["switch", "--track", &branch.name], None)?,
+            };
         } else {
             repo.write(&["switch", &branch.name], None)?;
         }
@@ -776,7 +810,7 @@ impl Core {
         if ws.as_os_str().is_empty() {
             return Err(GitError::Failed("nenhum projeto aberto".into()));
         }
-        if crate::util::absolutize(&ws) == crate::util::absolutize(&self.inner.home) {
+        if crate::util::same_path(&crate::util::absolutize(&ws), &crate::util::absolutize(&self.inner.home)) {
             return Err(GitError::Failed("não crio um repositório na sua pasta pessoal; escolha uma pasta de projeto".into()));
         }
         run(base_command(&git, &ws, &["init", "-q"]), None, WRITE_TIMEOUT)?;
@@ -932,6 +966,14 @@ mod tests {
         ));
         assert!(matches!(classify_error(" ! [rejected]        main -> main (fetch first)\nerror: failed to push"), GitError::Rejected(_)));
         assert!(matches!(classify_error("fatal: Not possible to fast-forward, aborting."), GitError::Rejected(_)));
+        assert!(matches!(
+            classify_error("fatal: Cannot prompt because user interactivity has been disabled.\nfatal: could not read Username"),
+            GitError::Auth(_)
+        ));
+        let GitError::Failed(m) = classify_error("error: gpg failed to sign the data\nfatal: failed to write commit object") else {
+            panic!("gpg")
+        };
+        assert!(m.contains("commit.gpgsign"), "{m}");
         assert_eq!(classify_error("error: pathspec 'x' did not match"), GitError::Failed("error: pathspec 'x' did not match".into()));
     }
 
@@ -943,9 +985,15 @@ mod tests {
         for bad in ["", "-f", "a b", "a..b", "a~1", "a^", "x:y", "a.lock", "a/", "/a", ".hidden", "a/.b", "@", "a@{1}", "a\\b", "a*"] {
             assert!(!valid_branch_name(bad), "{bad:?}");
         }
-        assert!(safe_rel("src/main.rs") && safe_rel("a b/ção.txt"));
-        for bad in ["", "/etc/passwd", "../x", "a/../../x", "\\\\server\\x", "a\0b"] {
+        assert!(safe_rel("src/main.rs") && safe_rel("a b/ção.txt") && safe_rel("./a") && safe_rel("dir/"));
+        for bad in ["", "/etc/passwd", "/x", "../x", "a/../b", "a/../../x", "a\\..\\b", "\\\\server\\x", "\\x", "a\0b"] {
             assert!(!safe_rel(bad), "{bad:?}");
+        }
+        // Relativo à unidade: `C:..\x` sairia da raiz do repositório.
+        if cfg!(windows) {
+            for bad in ["C:..\\x", "C:x", "C:\\x", "a:b"] {
+                assert!(!safe_rel(bad), "{bad:?}");
+            }
         }
     }
 

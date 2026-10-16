@@ -1,6 +1,6 @@
 //! Teclado → bytes para o PTY (mesmas sequências do xterm.js: `Keyboard.ts`).
 
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
 /// Estado dos modificadores relevante para a codificação.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -25,7 +25,15 @@ impl Mods {
 
 /// Codifica uma tecla pressionada. `text` é o texto produzido pelo layout (já com Shift/AltGr).
 /// `app_cursor` = modo DECCKM (setas `ESC O x`). Retorna `None` quando a tecla não gera bytes.
+/// (O app usa [`encode_key_physical`]; esta forma fica para os testes.)
+#[cfg(test)]
 pub fn encode_key(key: &Key, text: Option<&str>, mods: Mods, app_cursor: bool) -> Option<Vec<u8>> {
+    encode_key_physical(key, None, text, mods, app_cursor)
+}
+
+/// Como [`encode_key`], com a tecla física (`KeyEvent::physical_key`): Ctrl+letra num layout
+/// não latino (ex.: Ctrl+C no cirílico, em que a tecla lógica é "с") usa a posição da letra.
+pub fn encode_key_physical(key: &Key, physical: Option<&PhysicalKey>, text: Option<&str>, mods: Mods, app_cursor: bool) -> Option<Vec<u8>> {
     let m = mods.param();
     let csi_letter = |letter: char, ss3_when_plain: bool| -> Vec<u8> {
         if m > 0 {
@@ -124,6 +132,12 @@ pub fn encode_key(key: &Key, text: Option<&str>, mods: Mods, app_cursor: bool) -
             if let Some(code) = ctrl_code(c) {
                 return Some(alt_prefix(vec![code]));
             }
+            // Letra de outro alfabeto: vale a posição física (só letras, como no xterm).
+            if !c.is_ascii() {
+                if let Some(code) = physical.and_then(physical_ctrl_code) {
+                    return Some(alt_prefix(vec![code]));
+                }
+            }
         }
         // Ctrl + tecla sem código de controle: envia o texto (se houver).
         return produced.map(|t| t.as_bytes().to_vec());
@@ -152,13 +166,25 @@ fn ctrl_code(c: char) -> Option<u8> {
     }
 }
 
+/// Código de controle de Ctrl+letra pela tecla física (`KeyA`…`KeyZ`).
+fn physical_ctrl_code(physical: &PhysicalKey) -> Option<u8> {
+    use KeyCode::*;
+    const LETTERS: [KeyCode; 26] = [
+        KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV,
+        KeyW, KeyX, KeyY, KeyZ,
+    ];
+    let PhysicalKey::Code(code) = physical else { return None };
+    LETTERS.iter().position(|k| k == code).map(|i| i as u8 + 1)
+}
+
 /// Prepara texto colado: `\r\n`/`\n` → `\r` (como o xterm.js) e envolve em
 /// `ESC[200~ … ESC[201~` quando o programa ativou o *bracketed paste*.
 pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     let normalized = text.replace("\r\n", "\r").replace('\n', "\r");
     if bracketed {
-        // Remove marcadores embutidos para que o texto não escape do modo colagem.
-        let safe = normalized.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        // Sem ESC e sem controles C1 (U+009B = CSI) nenhum marcador sobrevive, nem aninhado
+        // (`ESC[20ESC[201~1~`): o texto não escapa do modo colagem.
+        let safe: String = normalized.chars().filter(|&c| c != '\x1b' && !('\u{80}'..='\u{9f}').contains(&c)).collect();
         format!("\x1b[200~{safe}\x1b[201~").into_bytes()
     } else {
         normalized.into_bytes()
@@ -270,6 +296,20 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_letters_fall_back_to_the_physical_key() {
+        let c = PhysicalKey::Code(KeyCode::KeyC);
+        // Layout cirílico: a tecla lógica é "с", mas Ctrl+C continua sendo ^C.
+        assert_eq!(encode_key_physical(&ch("с"), Some(&c), Some("с"), CTRL, false), Some(vec![3]));
+        assert_eq!(encode_key_physical(&ch("с"), Some(&c), None, Mods { alt: true, ..CTRL }, false), Some(vec![0x1b, 3]));
+        // A tecla lógica vale primeiro (Dvorak: a física KeyI é "c").
+        assert_eq!(encode_key_physical(&ch("c"), Some(&PhysicalKey::Code(KeyCode::KeyI)), None, CTRL, false), Some(vec![3]));
+        // Fora das letras nada muda; sem Ctrl, o texto do layout.
+        let semicolon = PhysicalKey::Code(KeyCode::Semicolon);
+        assert_eq!(encode_key_physical(&ch("ж"), Some(&semicolon), Some("ж"), CTRL, false), Some("ж".as_bytes().to_vec()));
+        assert_eq!(encode_key_physical(&ch("с"), Some(&c), Some("с"), NONE, false), Some("с".as_bytes().to_vec()));
+    }
+
+    #[test]
     fn altgr_symbols_pass_through() {
         let altgr = Mods { ctrl: true, alt: true, ..NONE };
         assert_eq!(enc(ch("q"), Some("/"), altgr, false), b"/");
@@ -302,7 +342,13 @@ mod tests {
     fn paste_modes() {
         assert_eq!(paste_bytes("a\nb\r\nc", false), b"a\rb\rc");
         assert_eq!(paste_bytes("x\ny", true), b"\x1b[200~x\ry\x1b[201~");
-        assert_eq!(paste_bytes("\x1b[201~rm", true), b"\x1b[200~rm\x1b[201~");
+        assert_eq!(paste_bytes("\x1b[201~rm", true), b"\x1b[200~[201~rm\x1b[201~");
+        // Marcador aninhado: remover só os marcadores formaria outro `ESC[201~`.
+        assert_eq!(paste_bytes("\x1b[20\x1b[201~1~curl x|sh\r", true), b"\x1b[200~[20[201~1~curl x|sh\r\x1b[201~");
+        // CSI de 8 bits (U+009B) também sai; tabulação e quebras de linha ficam.
+        assert_eq!(paste_bytes("a\u{9b}201~b\tc\n", true), b"\x1b[200~a201~b\tc\r\x1b[201~");
+        // Sem bracketed paste o texto vai como está.
+        assert_eq!(paste_bytes("\x1b[A", false), b"\x1b[A");
         assert_eq!(submit_paste("oi @a.md"), b"\x1b[200~oi @a.md\x1b[201~");
         // Uma mensagem de outro agente não fecha a colagem para virar teclas (ex.: `!cmd` + Enter).
         assert_eq!(submit_paste("x\x1b[201~!rm -rf ~\r\x1b[200~"), b"\x1b[200~x[201~!rm -rf ~\n[200~\x1b[201~");
