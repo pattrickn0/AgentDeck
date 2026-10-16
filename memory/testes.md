@@ -217,6 +217,12 @@ Com a pasta de trabalho num repositório git:
 - [ ] Aba do Ollama: "quem é você?" responde com o nome da instância (`ollama:<modelo>`); com o Ollama parado, quem perguntou recebe "não consegui responder" em vez de esperar 10 min.
 - [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
 - [ ] Ditado: gravar, clicar Enviar e trocar de aba durante a transcrição: o texto fica na caixa com o aviso, não vai para a outra aba.
+- [ ] Colagem grande (~5 MB) numa aba de shell rodando `timeout /t 30`, que não lê a entrada: a janela continua respondendo e as outras abas funcionam. Quando o comando termina, o texto chega inteiro.
+- [ ] Enviar pelo compositor para o Claude e digitar logo em seguida: a ordem é colagem → Enter → teclas.
+- [ ] Pasta de dados com `&` no caminho (`COMMANDDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.
+- [ ] Numa aba em segundo plano ou de outro projeto, `printf '\e]52;c;%s\a' $(printf teste|base64)` não muda a área de transferência; na aba ativa, muda.
+- [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o commanddeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
+- [ ] No vim/htop com mouse ligado, Ctrl+roda e Alt+roda chegam ao programa com o modificador. Shift+roda rola o histórico do terminal, com ou sem programa usando o mouse.
 - [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
 - [x] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.
   - Conferido no `commanddeck-dev`: o conteúdo tem o mesmo hash do HEAD. O `M` que ainda aparecia era o índice desatualizado; um `git add AGENTS.md`, sem mudar nada, limpou.

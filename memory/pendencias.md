@@ -137,11 +137,6 @@ foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 - [ ] Enquanto `bridge_port` é 0 (logo ao iniciar) o `Host` não é validado; 16 MB × 128 requisições = até 2 GB; threads `cd-bridge-late` fora do `MAX_ACTIVE`.
 - [ ] `ollama-agent` responde pelo nome de quem perguntou (`/reply` com `to`): responder pelo número (`--reply N`, que está no prompt) aguentaria renomeação e perguntas paralelas.
 
-**Terminal e processos**
-- [ ] Escrita no PTY bloqueante na thread da interface (com o lock `writer`); colagem grande + consulta DA/DSR pode travar. Uma thread de escrita por aba.
-- [ ] `cmd_safe_arg` apaga `& % ! ^` também dos caminhos que o app gera (`--add-dir`, `--settings`): perfil `C:\Users\Ana&Bia` quebra o Claude via shim. Escapar em vez de apagar.
-- [ ] OSC 52 de qualquer aba escreve na área de transferência (a colagem já não deixa escapar, mas avaliar restringir à aba focada). Job Object (KILL_ON_JOB_CLOSE) nos headless. Roda do mouse ignora Shift/modificadores.
-
 **Interface**
 - [ ] `plan_panes` chama `conform` a cada quadro: estreitar a janela por um instante zera as proporções salvas.
 - [ ] Ao renomear, a Conversa compara `who` (nome de exibição) com o id antigo: nunca bate; entradas "pensando" do id antigo ficam.
@@ -162,6 +157,12 @@ foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
 ## Concluído
 
+- [x] **Auditoria, terminal e processos** (branch `fix/terminal`, claude@terminal):
+  - A escrita no PTY passa por uma fila com thread própria por aba (`pty-write`), e as respostas do emulador (DA/DSR/cores) vão pela mesma fila. Nem a interface nem a leitora bloqueiam numa colagem grande, e a ordem continua igual.
+  - `cmd_safe_arg` escapa para o cmd em vez de apagar `& % ! ^`. O shim roda com `cmd.exe /d /e:on /v:off /c`, testado com o cmd.exe real.
+  - OSC 52 só vale para a aba ativa do projeto ativo.
+  - No Windows, os headless (e o whisper-cli) entram num Job Object com KILL_ON_JOB_CLOSE e morrem junto com o app.
+  - A roda do mouse manda Ctrl/Alt ao programa, e Shift+roda rola o histórico local.
 - [x] **Terminal congelava ao redimensionar as janelas** (visto na aba do Claude, que ficou preta). O Claude Code usa a atualização sincronizada (`ESC[?2026h` … `ESC[?2026l`), e o parser (`vte`) retém a saída até o fim dela, mas o prazo de 150 ms fica a cargo de quem o usa: nada o cobrava, então um fim perdido no redesenho segurava a tela até chegarem 2 MB. `Emulator::expire_sync` solta o que estava retido quando o prazo vence, chamado pela leitora antes de cada bloco e pelo `tick` da interface (testes em `terminal/mod.rs`).
 - [x] **Conferido em uso (2026-10-15 e 16).** O que o usuário testou no app e o que o Claude verificou ao vivo pela ponte:
   - **Usuário:** projetos (cada um lista os seus agentes abertos, migração da config antiga com as abas), botão de recolher a barra lateral, chave da tela dividida na ORGANIZAÇÃO, barra de título própria, círculos de uso (Claude e Antigravity) e o "+ Novo agente" do projeto.
