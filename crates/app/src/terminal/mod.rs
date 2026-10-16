@@ -1,7 +1,8 @@
 //! Terminais das abas: emulação VT (alacritty_terminal) + pseudo-terminal (portable-pty).
 //!
 //! Cada aba tem uma [`Session`]. A thread leitora do PTY alimenta o parser sob um mutex e
-//! acorda o loop do winit; a UI só lê a grade para pintar (ver [`view`]).
+//! acorda o loop do winit; a UI só lê a grade para pintar (ver [`view`]). A escrita no processo
+//! vai por uma fila com thread própria (`pty-write`): nem a UI nem a leitora bloqueiam escrevendo.
 
 pub mod colors;
 pub mod input;
@@ -17,6 +18,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use commanddeck_core::SpawnSpec;
+use crossbeam_channel::Sender;
 use parking_lot::Mutex;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize};
 
@@ -45,7 +47,20 @@ impl Dimensions for GridSize {
     }
 }
 
-type SharedWriter = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
+/// Fila de escrita do processo atual. Quem escreve (interface e respostas do emulador) só
+/// enfileira; a thread `pty-write` da aba faz a escrita, que bloqueia enquanto o programa não lê
+/// (ex.: colagem grande). Uma fila só por aba mantém a ordem das teclas, colagens e Enters.
+type SharedWriter = Arc<Mutex<Option<Sender<Vec<u8>>>>>;
+
+/// Enfileira bytes para o processo (no-op se não houver processo). Nunca bloqueia.
+fn enqueue(writer: &SharedWriter, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    if let Some(tx) = writer.lock().as_ref() {
+        let _ = tx.send(bytes.to_vec());
+    }
+}
 
 /// Recebe eventos do emulador (chamado com o terminal travado — não pode travá-lo de novo).
 #[derive(Clone)]
@@ -59,11 +74,9 @@ pub struct Listener {
 }
 
 impl Listener {
+    /// Respostas ao programa (DA/DSR/cores): pela fila, para a leitora nunca bloquear escrevendo.
     fn write(&self, s: &str) {
-        if let Some(w) = self.writer.lock().as_mut() {
-            let _ = w.write_all(s.as_bytes());
-            let _ = w.flush();
-        }
+        enqueue(&self.writer, s.as_bytes());
     }
 }
 
@@ -131,12 +144,28 @@ pub struct Shared {
 }
 
 impl Shared {
-    /// Escreve no processo atual (no-op se não houver processo).
+    /// Escreve no processo atual (no-op se não houver processo). Só enfileira: nunca bloqueia.
     pub fn write_input(&self, bytes: &[u8]) {
-        if let Some(w) = self.writer.lock().as_mut() {
-            let _ = w.write_all(bytes);
-            let _ = w.flush();
-        }
+        enqueue(&self.writer, bytes);
+    }
+
+    /// Liga `w` à fila de escrita, com uma thread própria que escreve na ordem de chegada. A
+    /// thread termina quando a fila é trocada ou solta (`kill`, fim do processo) ou a escrita falha.
+    fn attach_writer(&self, mut w: Box<dyn Write + Send>, name: String) -> std::io::Result<()> {
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        std::thread::Builder::new().name(name).spawn(move || {
+            while let Ok(mut bytes) = rx.recv() {
+                // Junta o que já está na fila: menos escritas numa colagem em pedaços.
+                while let Ok(more) = rx.try_recv() {
+                    bytes.extend_from_slice(&more);
+                }
+                if w.write_all(&bytes).and_then(|()| w.flush()).is_err() {
+                    break;
+                }
+            }
+        })?;
+        *self.writer.lock() = Some(tx);
+        Ok(())
     }
 }
 
@@ -223,7 +252,7 @@ impl Session {
         let killer = child.clone_killer();
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
-        *self.shared.writer.lock() = Some(writer);
+        self.shared.attach_writer(writer, format!("pty-write-{}", spec.kind))?;
         *self.shared.exit.lock() = None;
 
         // Leitora: alimenta o emulador e acorda a UI.
@@ -339,6 +368,64 @@ mod tests {
 
         assert_eq!(s.shared.emu.lock().expire_sync(at + Duration::from_millis(1)), None);
         assert_eq!(first_char(&s), 'x', "o prazo vencido solta a saída retida");
+    }
+
+    /// Processo que não lê a entrada até `open` ser liberado (como um programa ocupado).
+    struct Stuck {
+        open: crossbeam_channel::Receiver<()>,
+        opened: bool,
+        got: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Write for Stuck {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if !self.opened {
+                let _ = self.open.recv();
+                self.opened = true;
+            }
+            self.got.lock().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn writes_never_block_and_keep_their_order() {
+        let s = Session::new(GridSize { cols: 20, rows: 4 });
+        let (release, open) = crossbeam_channel::bounded(1);
+        let got = Arc::new(Mutex::new(Vec::new()));
+        s.shared.attach_writer(Box::new(Stuck { open, opened: false, got: got.clone() }), "pty-write-teste".into()).expect("thread");
+
+        let started = Instant::now();
+        s.write(b"a");
+        let paste = vec![b'x'; 4 * 1024 * 1024];
+        s.write(&paste);
+        // Consulta DA do programa: a resposta sai do emulador (leitora) sem esperar a escrita.
+        s.print("\x1b[c");
+        s.write(b"\r");
+        assert!(started.elapsed() < Duration::from_secs(2), "nada bloqueou com o processo sem ler");
+
+        release.send(()).expect("libera");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while got.lock().last() != Some(&b'\r') && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let got = got.lock();
+        assert_eq!(got[0], b'a');
+        assert_eq!(&got[1..1 + paste.len()], &paste[..]);
+        let tail = &got[1 + paste.len()..];
+        assert!(tail.starts_with(b"\x1b[?") && tail.ends_with(b"c\r"), "resposta DA na ordem, antes do Enter: {tail:?}");
+    }
+
+    #[test]
+    fn without_a_process_writes_are_dropped() {
+        let mut s = Session::new(GridSize { cols: 20, rows: 4 });
+        s.write(b"nada");
+        s.print("\x1b[6n");
+        s.kill();
+        s.write(b"nada");
     }
 
     #[test]
