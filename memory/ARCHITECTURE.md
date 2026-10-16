@@ -74,7 +74,8 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 
 Toda requisição exige o cabeçalho `x-commanddeck-token` (comparado em tempo constante) e um `Host`
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
-mesmo tempo (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
+mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupando a vaga até a resposta chegar), e
+os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
 mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e memória em
 processo no Ollama.
 
@@ -104,8 +105,9 @@ A aba aparece como `Claude`, `Claude · Dev`, `Claude · Dev · Ana`. O id é ge
 o chefe dela; o usuário reorganiza arrastando agentes na barra lateral (`Core::set_boss`, que recusa ciclos).
 Fechar uma instância passa a equipe dela ao chefe dela; renomear leva a equipe junto. Os agentes sabem da
 equipe sem turno extra: as instruções mandam consultar `ask-agent --team` (`GET /team`, pelo token) e quem
-mudou de posição recebe o aviso anexado à **próxima** mensagem entregue (`Core::take_team_notice`; consultar o
-`--team` já dá o aviso por lido). `ask-agent --boss "msg"` pergunta ao chefe. A barra lateral desenha a árvore
+mudou de posição recebe o aviso anexado à **próxima** mensagem digitada na aba dele (a interface chama
+`Core::take_team_notice` na hora de digitar, então uma entrega descartada não gasta o aviso; consultar o `--team`
+já dá o aviso por lido). O chefe de quem fecha também é avisado, mesmo que a equipe dela fosse vazia. `ask-agent --boss "msg"` pergunta ao chefe. A barra lateral desenha a árvore
 (`ui/projects.rs::agent_tree`). A equipe orienta, não restringe: qualquer agente continua podendo chamar qualquer outro.
 O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
 
@@ -117,16 +119,19 @@ O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
    espera o terminal ficar parado e **digita a mensagem nele**, uma por vez por aba (fila).
 3. A mensagem digitada ensina a responder: `ask-agent --reply <n> "resposta"`, com o número da pergunta.
    Só a instância que recebeu a pergunta consegue respondê-la (`crates/core/src/exchange.rs`). A forma
-   antiga, `ask-agent <quem-perguntou> "resposta"`, continua valendo: uma pergunta nova para quem está
-   esperando você fecharia um ciclo de espera, então só pode ser resposta. Nada de raspar a tela.
+   antiga, `ask-agent <quem-perguntou> "resposta"` (o nome passa pelos apelidos, como `agy`), continua valendo
+   enquanto o `ask-agent` de quem perguntou ainda espera: uma pergunta nova para ele fecharia um ciclo de espera,
+   então só pode ser resposta. Depois do 202 (item 4) quem perguntou está livre, e a forma antiga vira uma
+   pergunta nova; a resposta vai pelo número. Quem perguntou e o destino são lidos pelo número na hora de usar,
+   então renomear uma aba no meio da pergunta não perde a resposta. Nada de raspar a tela.
 4. **Resposta síncrona ou atrasada.** O `ask-agent` de quem perguntou espera até `COMMANDDECK_ASK_WAIT`
    segundos (padrão 90, abaixo do timeout padrão do Bash do Claude Code). Se a resposta não chegou, ele
    termina com HTTP 202 e um aviso, e a resposta, quando chegar (até 10 minutos), é **digitada no terminal
    de quem perguntou** como uma mensagem nova (`Delivery { answer: true }`). Isso só vale para abas de
    agentes: num terminal comum (`shell`) o texto seria executado como comando, então ali o `ask-agent`
    espera até o fim, assim como nas execuções headless e no `ollama-agent` (`COMMANDDECK_ASK_WAIT=0`).
-5. O `ollama-agent` devolve a resposta sozinho (`POST /reply`, que só conclui perguntas pendentes e
-   nunca cria uma nova), porque modelos pequenos esquecem de rodar o comando.
+5. O `ollama-agent` devolve a resposta sozinho (`POST /reply` com o número lido da instrução, que só conclui
+   perguntas pendentes e nunca cria uma nova), porque modelos pequenos esquecem de rodar o comando.
 6. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**
    descarta as perguntas dela. Ciclos de espera (A espera B, B espera C, C espera A) são recusados na hora
    (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é

@@ -759,7 +759,13 @@ impl Deck {
                         if !q.answer && !self.core.question_pending(q.request) {
                             log::info!("pergunta #{} descartada antes de ser digitada: não espera mais resposta", q.request);
                         } else {
-                            self.submit(i, &q.prompt);
+                            // O aviso de equipe só é gasto quando a mensagem é digitada de fato.
+                            let mut prompt = q.prompt;
+                            if let Some(notice) = self.core.take_team_notice(&self.tabs[i].project, &self.tabs[i].ident.id()) {
+                                prompt.push_str("\n\n");
+                                prompt.push_str(&notice);
+                            }
+                            self.submit(i, &prompt);
                             want(now + FIRST_ENTER);
                         }
                     }

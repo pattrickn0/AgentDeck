@@ -1051,9 +1051,124 @@ fn an_agent_becomes_the_boss_of_the_role_it_opens_and_the_new_one_is_told() {
     let asker = std::thread::spawn(move || ask_raw(port, &chefe, json!({"to": "claude@dev", "message": "tarefa"})));
     let d = next_delivery(&env);
     assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev", true));
-    assert!(d.prompt.contains("você responde a \"claude\""), "{}", d.prompt);
+    // O aviso vai quando a interface digita a mensagem.
+    let notice = env.core.take_team_notice(&p, "claude@dev").expect("aviso");
+    assert!(notice.contains("você responde a \"claude\""), "{notice}");
     assert_eq!(env.core.team(&p, "claude").crew, ["claude@dev"]);
     env.core.close_instance(&p, "claude@dev");
     let _ = asker.join();
+    env.core.shutdown();
+}
+
+/// Projeto ativo com o `claude` "instalado", entrega nas abas ligada e a aba `claude` aberta.
+fn start_with_claude_tab() -> (Env, String) {
+    let env = start(&[]);
+    fake_claude(&env);
+    env.core.enable_tab_delivery();
+    let p = env.core.active_project_id();
+    env.core.restore_instance(&p, "claude");
+    (env, p)
+}
+
+/// `POST /ask` com o token de uma aba, numa thread.
+fn ask_in_thread(env: &Env, token: String, body: Value) -> std::thread::JoinHandle<(u16, Value)> {
+    let port = env.core.bridge_port();
+    std::thread::spawn(move || ask_raw(port, &token, body))
+}
+
+#[test]
+fn renaming_both_tabs_mid_question_still_delivers_the_late_answer() {
+    let (env, p) = start_with_claude_tab();
+    let asking = ask_in_thread(&env, tab_token(&env, "claude"), json!({"to": "claude@dev", "message": "tarefa", "wait": 1}));
+    let q = next_delivery(&env);
+    assert_eq!(asking.join().expect("thread").0, 202);
+    // As duas abas mudam de nome enquanto a resposta não chega.
+    let ident = |s: &str| commanddeck_core::Ident::parse(s).expect("id");
+    env.core.rename_instance(&p, "claude", &ident("claude@lead")).expect("renomeia");
+    env.core.rename_instance(&p, "claude@dev", &ident("claude@dev@ana")).expect("renomeia");
+    let pending = env.core.conversation_map(&p).pending;
+    assert_eq!((pending[0].asker.as_str(), pending[0].target.as_str()), ("claude@lead", "claude@dev@ana"));
+    // O token da aba segue a instância; a resposta vai pelo número e chega ao nome novo.
+    let reply = json!({"to": "", "message": "pronto", "reply_to": q.request});
+    assert_eq!(ask_raw(env.core.bridge_port(), &tab_token(&env, "claude@dev@ana"), reply).0, 200);
+    let late = next_delivery(&env);
+    assert!(late.answer);
+    assert_eq!((late.ident.id().as_str(), late.from.as_str()), ("claude@lead", "claude@dev@ana"));
+    env.core.shutdown();
+}
+
+#[test]
+fn after_a_202_asking_the_asker_back_is_a_new_question() {
+    let (env, p) = start_with_claude_tab();
+    let asking = ask_in_thread(&env, tab_token(&env, "claude"), json!({"to": "claude@dev", "message": "tarefa", "wait": 1}));
+    let q = next_delivery(&env);
+    assert_eq!(asking.join().expect("thread").0, 202);
+    // claude não espera mais: `ask-agent claude "…"` de claude@dev é uma pergunta nova, digitada na aba dele.
+    let back = ask_in_thread(&env, tab_token(&env, "claude@dev"), json!({"to": "claude", "message": "qual branch?"}));
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.from.as_str(), d.answer), ("claude", "claude@dev", false));
+    assert_ne!(d.request, q.request);
+    assert!(env.core.question_pending(q.request), "a pergunta original segue esperando o --reply");
+    env.core.fail_delivery(d.request, "teste");
+    assert_eq!(back.join().expect("thread").0, 500);
+    assert_eq!(env.core.conversation_map(&p).pending.len(), 1);
+    env.core.shutdown();
+}
+
+#[test]
+fn the_old_reply_form_resolves_aliases() {
+    let (env, _p) = start_with_claude_tab();
+    let asking = ask_in_thread(&env, tab_token(&env, "claude"), json!({"to": "claude@dev", "message": "tarefa"}));
+    next_delivery(&env);
+    // `claudecode` é apelido de `claude`: é a resposta a quem espera, não um ciclo (409).
+    let (st, b) = ask_raw(env.core.bridge_port(), &tab_token(&env, "claude@dev"), json!({"to": "claudecode", "message": "feito"}));
+    assert_eq!((st, b["answer"].as_str()), (200, Some("Resposta entregue a \"claude\".")), "{b}");
+    let (st, b) = asking.join().expect("thread");
+    assert_eq!((st, b["answer"].as_str()), (200, Some("feito")));
+    env.core.shutdown();
+}
+
+#[test]
+fn removing_a_project_mid_question_leaves_nothing_behind() {
+    let env = start(&[]);
+    fake_claude(&env);
+    env.core.enable_tab_delivery();
+    let b = env.core.create_project(&env.root.join("b"), None).id;
+    env.core.restore_instance(&b, "claude");
+    let tb = tab_token_in(&env, &b, "claude");
+    let asking = ask_in_thread(&env, tb.clone(), json!({"to": "claude@dev", "message": "tarefa"}));
+    assert_eq!(next_delivery(&env).project, b);
+    assert!(env.core.remove_project(&b));
+    let (st, body) = asking.join().expect("thread");
+    assert_eq!(st, 500, "{body}");
+    assert_eq!(ask_raw(env.core.bridge_port(), &tb, json!({"to": "claude@qa", "message": "oi"})).0, 403);
+    assert!(env.core.conversation_map(&b).pending.is_empty());
+    // Nada recria a entrada do projeto removido.
+    env.core.restore_instance(&b, "claude@qa");
+    assert!(env.core.project_instance_ids(&b).is_empty());
+    assert!(env.core.instance_ids().is_empty());
+    env.core.shutdown();
+}
+
+#[test]
+fn the_team_notice_waits_for_a_message_that_is_really_typed() {
+    let (env, p) = start_with_claude_tab();
+    for id in ["claude@dev", "claude@qa"] {
+        env.core.restore_instance(&p, id);
+    }
+    env.core.set_boss(&p, "claude@dev", Some("claude")).expect("reorganiza");
+    env.core.set_boss(&p, "claude@qa", Some("claude")).expect("reorganiza");
+    let asking = ask_in_thread(&env, tab_token(&env, "claude"), json!({"to": "claude@dev", "message": "tarefa"}));
+    let d = next_delivery(&env);
+    assert!(!d.prompt.contains("posição na equipe"), "a interface anexa quando digita: {}", d.prompt);
+    // A interface descartou a entrega: o aviso continua lá para a próxima mensagem.
+    env.core.fail_delivery(d.request, "descartada");
+    assert_eq!(asking.join().expect("thread").0, 500);
+    assert!(env.core.take_team_notice(&p, "claude@dev").expect("aviso").contains("você responde a \"claude\""));
+    assert_eq!(env.core.take_team_notice(&p, "claude@dev"), None, "uma vez só");
+    // O chefe que perde um subordinado sem equipe também é avisado.
+    let _ = env.core.take_team_notice(&p, "claude");
+    env.core.close_instance(&p, "claude@qa");
+    assert!(env.core.take_team_notice(&p, "claude").expect("aviso").contains("sua equipe: claude@dev"));
     env.core.shutdown();
 }
