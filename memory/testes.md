@@ -217,6 +217,12 @@ Com a pasta de trabalho num repositório git:
 - [ ] Aba do Ollama: "quem é você?" responde com o nome da instância (`ollama:<modelo>`); com o Ollama parado, quem perguntou recebe "não consegui responder" em vez de esperar 10 min.
 - [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
 - [ ] Ditado: gravar, clicar Enviar e trocar de aba durante a transcrição: o texto fica na caixa com o aviso, não vai para a outra aba.
+- [ ] Ponte: pergunta com resposta atrasada (202); renomear a aba de quem perguntou e a do destino antes da resposta. A resposta é digitada na aba renomeada de quem perguntou.
+- [ ] Ponte: depois de um 202, o destino roda `ask-agent <quem perguntou> "pergunta"`. Chega como pergunta nova, e a original continua esperando o `--reply N`.
+- [ ] Ponte: responder pela forma antiga com apelido (`ask-agent agy "..."` para uma pergunta do Antigravity) entrega a resposta, sem 409.
+- [ ] Projetos: remover um projeto com pergunta em andamento entre abas dele. Quem perguntou recebe erro, e nada reaparece no projeto removido nem no Mapa.
+- [ ] Equipe: mudar o chefe de um agente e fechar a aba dele antes da próxima mensagem não gasta o aviso. Fechar um subordinado sem equipe avisa o chefe na próxima mensagem.
+- [ ] Ollama: duas perguntas para a mesma aba do Ollama (de agentes diferentes, ou com renomeação no meio) voltam cada uma a quem perguntou.
 - [ ] Colagem grande (~5 MB) numa aba de shell rodando `timeout /t 30`, que não lê a entrada: a janela continua respondendo e as outras abas funcionam. Quando o comando termina, o texto chega inteiro.
 - [ ] Enviar pelo compositor para o Claude e digitar logo em seguida: a ordem é colagem → Enter → teclas.
 - [ ] Pasta de dados com `&` no caminho (`COMMANDDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.

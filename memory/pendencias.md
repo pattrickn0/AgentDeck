@@ -127,16 +127,6 @@ Revisão com quatro revisores Claude (core da ponte, Deck/interface, terminal/CL
 Antigravity (git, workspace, download, Whisper, uso; relatório em `dados/anexos/revisao-antigravity.md`). O que
 foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
-**Ponte e equipe**
-- [ ] Renomear uma aba no meio de uma pergunta: o prazo lê a atividade da chave velha, a resposta atrasada vai para o id antigo e é descartada. Ler quem perguntou/destino do `Exchange` pelo número na hora de usar (ou recusar renomear com pergunta pendente).
-- [ ] Depois de um 202 (pergunta destacada), uma pergunta nova do destino para quem perguntou é tomada como resposta pela forma antiga (`ask-agent <quem> "..."`). Mudar quebraria quem ainda responde assim; avaliar só aceitar `--reply N` para perguntas destacadas.
-- [ ] A forma antiga de resposta não resolve apelidos (`agy`, `qwen3.5`): dá 409 ou vira pergunta nova.
-- [ ] Remover projeto com pergunta em andamento: `with_instances` recria a entrada do projeto removido; revogar tokens antes e não criar entrada de projeto inexistente. `PairQueues`, `team_changed` e `activity` só crescem.
-- [ ] Aviso de equipe some se a UI descartar a entrega; o chefe que perde um subordinado sem equipe não é avisado.
-- [ ] Resposta que chega entre o fim da espera e o `exchange.remove` é descartada (quem respondeu recebeu "entregue").
-- [ ] Enquanto `bridge_port` é 0 (logo ao iniciar) o `Host` não é validado; 16 MB × 128 requisições = até 2 GB; threads `cd-bridge-late` fora do `MAX_ACTIVE`.
-- [ ] `ollama-agent` responde pelo nome de quem perguntou (`/reply` com `to`): responder pelo número (`--reply N`, que está no prompt) aguentaria renomeação e perguntas paralelas.
-
 **Interface**
 - [ ] `plan_panes` chama `conform` a cada quadro: estreitar a janela por um instante zera as proporções salvas.
 - [ ] Ao renomear, a Conversa compara `who` (nome de exibição) com o id antigo: nunca bate; entradas "pensando" do id antigo ficam.
@@ -157,6 +147,13 @@ foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
 ## Concluído
 
+- [x] **Auditoria, ponte e equipe** (branch `fix/ponte`, claude@ponte):
+  - Quem perguntou e o destino são lidos do `Exchange` pelo número na hora de usar, o que aguenta renomear no meio de uma pergunta. A resposta que chega no instante do prazo não se perde.
+  - Depois de um 202, a forma antiga (`ask-agent <quem> "..."`) vira pergunta nova, e a resposta vai por `--reply N` ou `/reply`. Antes do 202 a forma antiga resolve apelidos.
+  - Remover projeto revoga os tokens primeiro e não recria a entrada. `PairQueues`, `team_changed` e `activity` são limpos.
+  - O aviso de equipe é anexado pela interface na hora de digitar, e o chefe que perde um subordinado é avisado.
+  - `Host` validado desde a primeira requisição; orçamento de 64 MB de corpos em andamento (503 acima); a thread da resposta atrasada segura a vaga em `MAX_ACTIVE`.
+  - O `ollama-agent` responde pelo número da pergunta.
 - [x] **Auditoria, terminal e processos** (branch `fix/terminal`, claude@terminal):
   - A escrita no PTY passa por uma fila com thread própria por aba (`pty-write`), e as respostas do emulador (DA/DSR/cores) vão pela mesma fila. Nem a interface nem a leitora bloqueiam numa colagem grande, e a ordem continua igual.
   - `cmd_safe_arg` escapa para o cmd em vez de apagar `& % ! ^`. O shim roda com `cmd.exe /d /e:on /v:off /c`, testado com o cmd.exe real.
