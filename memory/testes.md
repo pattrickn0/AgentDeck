@@ -217,6 +217,16 @@ Com a pasta de trabalho num repositório git:
 - [ ] Aba do Ollama: "quem é você?" responde com o nome da instância (`ollama:<modelo>`); com o Ollama parado, quem perguntou recebe "não consegui responder" em vez de esperar 10 min.
 - [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
 - [ ] Ditado: gravar, clicar Enviar e trocar de aba durante a transcrição: o texto fica na caixa com o aviso, não vai para a outra aba.
+- [ ] Tela dividida: arrastar um divisor, estreitar a janela até a grade mudar de formato e alargar de novo. As proporções arrastadas voltam, também depois de reabrir o app.
+- [ ] Renomear uma aba (claude → claude@dev) enquanto ela está "pensando" na Conversa: as mensagens antigas mostram o nome novo, e o "pensando" some com a próxima mensagem dela.
+- [ ] Com um modal aberto (renomear aba ou projeto, Ctrl+/), clicar nas abas, na barra lateral ou no terminal não faz nada, e o que se digita não vai ao terminal. Esc fecha e devolve o foco.
+- [ ] Ctrl+/ com o terminal focado abre e fecha a tela de atalhos.
+- [ ] Clique direito num projeto → Remover: a janela continua desenhando com a pergunta aberta. "Sim" remove, "Não" mantém.
+- [ ] Shell focado: Ctrl+L limpa a tela, Ctrl+B chega ao programa (tmux) e Ctrl+T abre aba. Com "Atalhos do app acima do terminal" ligado, Ctrl+L foca a mensagem e Ctrl+B recolhe a barra. A opção continua depois de reabrir.
+- [ ] Rascunho e anexo no projeto A, trocar para o B (compositor vazio) e voltar: rascunho e anexo estão lá, e o `@` enviado aponta para o arquivo certo. O "×" apaga a cópia em `dados/anexos`.
+- [ ] Microfone: a janela não congela enquanto ele abre, e um segundo clique desiste. Gravar mais de 5 min para sozinho com aviso e transcreve.
+- [ ] Uso: passado o horário de renovação da sessão sem o agente rodar, o círculo mostra 0% esmaecido e "sessão renovada (sem dados novos)".
+- [ ] crash.log: usar o app normalmente não acrescenta nada; `COMMANDDECK_DEBUG_CRASH=heap` ainda registra a queda; um crash.log acima de 256 KB vira crash.log.1 ao abrir.
 - [ ] Ponte: pergunta com resposta atrasada (202); renomear a aba de quem perguntou e a do destino antes da resposta. A resposta é digitada na aba renomeada de quem perguntou.
 - [ ] Ponte: depois de um 202, o destino roda `ask-agent <quem perguntou> "pergunta"`. Chega como pergunta nova, e a original continua esperando o `--reply N`.
 - [ ] Ponte: responder pela forma antiga com apelido (`ask-agent agy "..."` para uma pergunta do Antigravity) entrega a resposta, sem 409.

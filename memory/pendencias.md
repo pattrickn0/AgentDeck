@@ -127,16 +127,6 @@ Revisão com quatro revisores Claude (core da ponte, Deck/interface, terminal/CL
 Antigravity (git, workspace, download, Whisper, uso; relatório em `dados/anexos/revisao-antigravity.md`). O que
 foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
-**Interface**
-- [ ] `plan_panes` chama `conform` a cada quadro: estreitar a janela por um instante zera as proporções salvas.
-- [ ] Ao renomear, a Conversa compara `who` (nome de exibição) com o id antigo: nunca bate; entradas "pensando" do id antigo ficam.
-- [ ] Modais (renomear aba/projeto, atalhos) não bloqueiam o clique de fora nem o teclado; "Remover projeto" usa `rfd` síncrono e congela o quadro; Ctrl+/ não abre com o terminal focado.
-- [ ] Rascunho do compositor e anexos passam de um projeto para o outro (o caminho do anexo pode ficar relativo ao projeto errado); o "×" do chip não apaga o anexo copiado.
-- [ ] Microfone: `Recorder::start` na thread da interface (até 5 s) e gravação sem limite de tamanho.
-- [ ] Círculo de uso continua com a % antiga depois que o `resets_at` passa sem dados novos.
-- [ ] Ctrl+L, Ctrl+B e Ctrl+T são capturados mesmo com o terminal focado (Ctrl+L limpa no shell, Ctrl+B é o prefixo do tmux): avaliar configurar.
-- [ ] `crash.log` só cresce e registra exceções de primeira chance tratadas pelo driver.
-
 **Git, workspace, download, Whisper e uso** (itens do relatório do Antigravity não corrigidos nesta rodada)
 - [ ] Descartar arquivo em conflito (`Unmerged`) falha; pasta não rastreada com `.git` dentro precisa de `-ffd`; `diff --cc` (conflito) mal interpretado.
 - [ ] Watcher: prefixo verbatim `\\?\` não tratado; `.git` fora de `workspace/.git` (worktree, submódulo, workspace numa subpasta do repositório) não dispara `GitChanged`.
@@ -147,6 +137,15 @@ foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
 ## Concluído
 
+- [x] **Auditoria, interface** (branch `fix/interface`, claude@interface):
+  - Estreitar a janela não apaga as proporções salvas da tela dividida (`Ratios::fitted` só ajusta para desenhar).
+  - Renomear uma aba atualiza a Conversa e o "pensando".
+  - Os modais seguram o clique e o teclado (`ui::modal_backdrop`). Ctrl+/ abre com o terminal focado. "Remover projeto" pergunta numa thread.
+  - Rascunho e anexos do compositor ficam por projeto, e o "×" apaga a cópia em `dados/anexos`.
+  - O microfone abre fora da thread da interface e grava no máximo 5 min.
+  - O círculo de uso zera a janela vencida sem dados novos.
+  - Com o terminal focado, Ctrl+L e Ctrl+B vão ao terminal. A opção "Atalhos do app acima do terminal" (☰) inverte isso.
+  - O `crash.log` só registra o que derruba o app e gira acima de 256 KB.
 - [x] **Auditoria, ponte e equipe** (branch `fix/ponte`, claude@ponte):
   - Quem perguntou e o destino são lidos do `Exchange` pelo número na hora de usar, o que aguenta renomear no meio de uma pergunta. A resposta que chega no instante do prazo não se perde.
   - Depois de um 202, a forma antiga (`ask-agent <quem> "..."`) vira pergunta nova, e a resposta vai por `--reply N` ou `/reply`. Antes do 202 a forma antiga resolve apelidos.
