@@ -351,6 +351,24 @@ fn cap_feed(feed: &mut Vec<FeedItem>) {
         feed.drain(..feed.len() - FEED_MAX);
     }
 }
+
+/// Troca o nome de exibição de quem fala/para quem nos itens da Conversa (aba renomeada).
+fn rename_in_feed(feed: &mut [FeedItem], old_who: &str, new_who: &str) {
+    for item in feed {
+        for who in [&mut item.who, &mut item.to] {
+            if who.as_deref() == Some(old_who) {
+                *who = Some(new_who.to_owned());
+            }
+        }
+    }
+}
+
+/// O "pensando" de `old_id` no projeto passa a ser de `new_id` (chave `projeto#id`, ver `add_feed`).
+fn rename_thinking(thinking: &mut HashMap<String, u64>, project: &str, old_id: &str, new_id: &str) {
+    if let Some(item) = thinking.remove(&format!("{project}#{old_id}")) {
+        thinking.insert(format!("{project}#{new_id}"), item);
+    }
+}
 const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
 
 impl Deck {
@@ -1260,15 +1278,14 @@ impl Deck {
             let new_label = new_ident.label(&self.agents.name(&kind));
             self.tabs[idx].ident = new_ident;
             self.tabs[idx].label = new_label;
-            // Atualiza itens existentes na conversa integrada
-            for item in &mut self.feed {
-                if item.who.as_deref() == Some(&old_id) {
-                    item.who = Some(new_id.clone());
-                }
-                if item.to.as_deref() == Some(&old_id) {
-                    item.to = Some(new_id.clone());
-                }
-            }
+            // Atualiza a conversa integrada do projeto da aba: os itens guardam o nome de exibição
+            // (`who_name`), e o "pensando" passa para o id novo (a próxima mensagem dele o apaga).
+            let project = self.tabs[idx].project.clone();
+            let (old_who, new_who) = (self.agents.who_name(&old_id), self.agents.who_name(&new_id));
+            let feed =
+                if project == self.active_project { &mut self.feed } else { &mut self.projects.entry(project.clone()).or_default().feed };
+            rename_in_feed(feed, &old_who, &new_who);
+            rename_thinking(&mut self.thinking, &project, &old_id, &new_id);
             // Atualiza histórico recente do mapa
             for r in &mut self.recent {
                 if r.from == old_id {
@@ -2199,5 +2216,37 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         color: commanddeck_core::agents::COLOR_SHELL.into(),
         kind: kind.to_owned(),
         double_enter_on_mention: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: u64, who: &str, to: Option<&str>) -> FeedItem {
+        FeedItem {
+            id,
+            kind: FeedKind::Thinking,
+            who: Some(who.into()),
+            to: to.map(Into::into),
+            text: String::new(),
+            time: String::new(),
+            color: Color32::WHITE,
+        }
+    }
+
+    #[test]
+    fn renaming_a_tab_renames_its_feed_items_and_thinking_entry() {
+        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Ollama", None)];
+        rename_in_feed(&mut feed, "Claude", "Claude@dev");
+        let names: Vec<_> = feed.iter().map(|f| (f.who.as_deref().unwrap(), f.to.as_deref())).collect();
+        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Ollama", None)]);
+
+        let mut thinking = HashMap::from([("p#claude".to_owned(), 1), ("q#claude".to_owned(), 9)]);
+        rename_thinking(&mut thinking, "p", "claude", "claude@dev");
+        assert_eq!(thinking.get("p#claude@dev"), Some(&1));
+        assert!(!thinking.contains_key("p#claude"));
+        // O mesmo id em outro projeto não é dele.
+        assert_eq!(thinking.get("q#claude"), Some(&9));
     }
 }
