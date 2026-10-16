@@ -717,6 +717,9 @@ impl Deck {
                     want(at);
                 }
             }
+            if let Some(at) = tab.session.shared.emu.lock().expire_sync(now) {
+                want(at);
+            }
             if let Some((size, at)) = tab.pending_resize {
                 if now >= at {
                     tab.pending_resize = None;

@@ -29,6 +29,8 @@ dados/anexos/*
 dados/prompts/*
 !dados/prompts/.gitkeep
 dados/sessions.json
+dados/hooks/
+dados/.commanddeck.lock
 !dados/README.md
 
 # Logs e variáveis de ambiente locais

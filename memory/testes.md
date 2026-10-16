@@ -12,8 +12,8 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - Os números entre parênteses (ex.: 202, 409) são só referência para quem for corrigir.
 - Itens com ★ são os mais importantes (mudanças grandes que ainda não rodaram no Windows).
 
-**Novidades desta rodada** (comece por elas): **3. Tela dividida**, a barra direita **mais estreita** (item 1) e o
-Gemini **removido** (item 9).
+**Novidades desta rodada** (comece por elas): **15. Agentes em árvore e equipe** e **16. Auditoria de 2026-10-15**.
+Depois, o que falta em **13. Barra de título** e **14. Projetos**.
 
 ---
 
@@ -23,7 +23,7 @@ Gemini **removido** (item 9).
 - [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
 - [x] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
 - [x] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
-- [ ] Abrir um projeto seu que seja repositório git ("+" da seção PROJETOS na barra lateral).
+- [x] Abrir um projeto seu que seja repositório git ("+" da seção PROJETOS na barra lateral).
 
 ## 1. Barra direita ★
 
@@ -62,11 +62,11 @@ Gemini **removido** (item 9).
 
 ## 4. Conversa entre agentes (ponte) ★
 
-- [ ] Peça ao Claude: *"pergunte ao antigravity qual é a capital da França"*. A pergunta é **digitada na aba do Antigravity** e a resposta volta ao Claude.
-- [ ] A mensagem digitada termina com `ask-agent --reply <número> "sua resposta"`, e o agente responde assim (a resposta chega).
-- [ ] **Resposta lenta:** peça uma tarefa demorada (mais de 90 s) a outro agente. O `ask-agent` do Claude termina avisando que a resposta virá depois; quando ela chega, é **digitada na aba do Claude** como mensagem nova.
+- [x] Peça ao Claude: *"pergunte ao antigravity qual é a capital da França"*. A pergunta é **digitada na aba do Antigravity** e a resposta volta ao Claude.
+- [x] A mensagem digitada termina com `ask-agent --reply <número> "sua resposta"`, e o agente responde assim (a resposta chega).
+- [x] **Resposta lenta:** peça uma tarefa demorada (mais de 90 s) a outro agente. O `ask-agent` do Claude termina avisando que a resposta virá depois; quando ela chega, é **digitada na aba do Claude** como mensagem nova.
 - [ ] Numa aba **Terminal** (shell), rode `ask-agent claude "oi"` e deixe o Claude demorar: o comando **espera até o fim** (nada é digitado no seu shell).
-- [ ] Delegação por cargo: `ask-agent claude@dev "tarefa"` abre a aba **Claude · Dev** em segundo plano.
+- [x] Delegação por cargo: `ask-agent claude@dev "tarefa"` abre a aba **Claude · Dev** em segundo plano.
 - [ ] Fechar a aba de quem perguntou no meio da espera: nada trava; a outra aba segue normal.
 - [ ] Cadeia longa: A pergunta a B, B a C, e C tenta perguntar a um quarto agente → recusado com "profundidade máxima" (o limite é 2 saltos).
 
@@ -163,24 +163,25 @@ Com a pasta de trabalho num repositório git:
 
 ## 13. Barra de título, uso dos agentes e barra lateral ★
 
-- [ ] A janela não tem mais a barra do Windows: no topo, ☰, o botão de painel (recolhe/expande a barra lateral), "CommandDeck" (sem logo) e +; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
+- [x] A janela não tem mais a barra do Windows: no topo, ☰, o botão de painel (recolhe/expande a barra lateral), "CommandDeck" (sem logo) e +; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
 - [ ] Arrastar pela barra move a janela; duplo clique maximiza/restaura; arrastar até a borda da tela encaixa (snap); Win+setas funcionam.
 - [ ] Redimensionar pelas 4 bordas e pelos 4 cantos (o cursor muda); maximizada, as bordas não reagem e a janela não cobre a barra de tarefas.
 - [ ] Fechar pelo × salva o tamanho da janela, como antes.
 - [ ] ☰ abre as configurações alinhadas à esquerda.
-- [ ] Uso: com uma aba do Claude, depois da primeira resposta aparece o logo + círculo com o % da sessão; o tooltip mostra sessão, semana e quando renovam. A statusline do Claude mostra "sessão N% · semana M%".
+- [x] Uso: com uma aba do Claude, depois da primeira resposta aparece o logo + círculo com o % da sessão; o tooltip mostra sessão, semana e quando renovam. A statusline do Claude mostra "sessão N% · semana M%".
 - [ ] Antigravity aberto: em até ~3 min aparece o uso dele; sem login ou sem rede, anel tracejado e "uso indisponível".
+  - Conferido: com login, o uso do Antigravity aparece. Falta o caso sem login/sem rede.
 - [ ] Ollama: anel cinza, "local, sem limite". Fechar a última aba de um modelo tira o item da barra.
 - [ ] Demonstração: `COMMANDDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
-- [ ] Seção **ORGANIZAÇÃO** na barra lateral: a chave "Tela dividida" liga/desliga a divisão (a chave anima e fica na cor do agente ativo).
+- [x] Seção **ORGANIZAÇÃO** na barra lateral: a chave "Tela dividida" liga/desliga a divisão (a chave anima e fica na cor do agente ativo).
 
 ## 14. Projetos ★
 
-- [ ] **Migração:** a primeira abertura com a config antiga transforma cada pasta da lista em projeto; as abas que estavam abertas voltam no projeto da pasta ativa.
+- [x] **Migração:** a primeira abertura com a config antiga transforma cada pasta da lista em projeto; as abas que estavam abertas voltam no projeto da pasta ativa.
 - [ ] "+" da seção PROJETOS: escolher uma pasta cria o projeto (nome = pasta) e o ativa; o centro mostra "Nenhum agente aberto".
 - [ ] Abrir o Claude no projeto novo e clicar no projeto anterior: os terminais dele voltam como estavam; o Claude do novo **continua rodando** (o projeto mostra o logo e a contagem).
-- [ ] O projeto ativo lista as abas dele; clicar numa ativa a aba. Os outros mostram os logos dos agentes e a contagem.
+- [x] O projeto ativo lista as abas dele; clicar numa ativa a aba. Os outros mostram os logos dos agentes e a contagem.
 - [ ] Cada terminal roda na pasta do seu projeto (`pwd`/`Get-Location`), e a árvore e a aba Git mudam com o projeto.
 - [ ] A Conversa e o Mapa mostram só o projeto ativo; uma conversa entre agentes de outro projeto aparece quando ele volta à tela.
 - [ ] `ask-agent claude@dev "oi"` num projeto abre `claude@dev` **nesse** projeto (escondido, se não for o da tela); o outro projeto não vê essa instância.
@@ -193,6 +194,7 @@ Com a pasta de trabalho num repositório git:
 ## 15. Barra lateral: agentes em árvore e equipe ★
 
 - [ ] "+ Novo agente" no fim da lista do projeto ativo abre o menu de agentes; Ctrl+T com a barra recolhida abre o menu sob a barra de título.
+  - Conferido: o "+ Novo agente". Falta o Ctrl+T com a barra recolhida.
 - [ ] Seta ▸/▾ de cada projeto e o botão de setas duplas do cabeçalho mostram/escondem os agentes; o estado volta igual ao reabrir o app.
 - [ ] Clicar num agente de outro projeto troca de projeto e ativa a aba (inclusive de projeto ainda não aberto nesta sessão).
 - [ ] Logo do modelo no lugar do ponto: halo pulsando trabalhando, anel ao concluir sem ser visto, apagado quando encerrado.
@@ -201,6 +203,7 @@ Com a pasta de trabalho num repositório git:
 - [ ] Arrastar o chefe sobre alguém da própria equipe: contorno vermelho, cursor de proibido, nada muda. Esc cancela o arrasto.
 - [ ] Soltar sobre a linha do projeto devolve o agente à raiz.
 - [ ] Na aba de um agente reorganizado, `ask-agent --team` mostra o chefe e a equipe certos; `ask-agent --boss "oi"` chega ao chefe; sem chefe, o `--boss` explica que ele responde ao usuário.
+  - Conferido: no chefe, `--team` mostra a equipe e `--boss` explica que ele responde ao usuário. Falta conferir na aba do subordinado.
 - [ ] Depois de reorganizar, a próxima mensagem entregue ao agente termina com "[CommandDeck] Sua posição na equipe mudou…" (uma vez só; se ele rodou `--team` antes, não vem).
 - [ ] Fechar a aba de um chefe: a equipe dele sobe para o chefe dele (ou para a raiz). Renomear uma aba com equipe mantém a árvore.
 
@@ -214,4 +217,6 @@ Com a pasta de trabalho num repositório git:
 - [ ] Aba do Ollama: "quem é você?" responde com o nome da instância (`ollama:<modelo>`); com o Ollama parado, quem perguntou recebe "não consegui responder" em vez de esperar 10 min.
 - [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
 - [ ] Ditado: gravar, clicar Enviar e trocar de aba durante a transcrição: o texto fica na caixa com o aviso, não vai para a outra aba.
-- [ ] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.
+- [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
+- [x] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.
+  - Conferido no `commanddeck-dev`: o conteúdo tem o mesmo hash do HEAD. O `M` que ainda aparecia era o índice desatualizado; um `git add AGENTS.md`, sem mudar nada, limpou.

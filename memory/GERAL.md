@@ -159,7 +159,13 @@ ela dura.
 
 - Abrir abas de agentes: Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q,
   Open Interpreter, modelos Ollama e um terminal comum.
-- Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente).
+- Organizar o trabalho em **projetos** (uma pasta cada): cada projeto tem as suas abas, que continuam rodando
+  escondidas quando se troca de projeto.
+- Ver os agentes de todos os projetos **em árvore** na barra lateral e reorganizar a **equipe** arrastando um
+  agente sobre outro.
+- Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente), com a chave na seção
+  ORGANIZAÇÃO da barra lateral.
+- Acompanhar o **uso** de cada agente aberto (sessão e semana) na barra de título.
 - Mandar uma mensagem (com anexos ou áudio transcrito) para a aba ativa pelo compositor.
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
 - Ver no **Mapa** quem está conversando com quem neste momento.

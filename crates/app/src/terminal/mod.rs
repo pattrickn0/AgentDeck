@@ -98,7 +98,21 @@ impl Emulator {
     }
 
     pub fn feed(&mut self, bytes: &[u8]) {
+        self.expire_sync(Instant::now());
         self.parser.advance(&mut self.term, bytes);
+    }
+
+    /// Atualização sincronizada (`ESC[?2026h`, usada pelo Claude Code): o parser retém a saída até o
+    /// `ESC[?2026l`, mas o prazo de 150 ms fica a cargo de quem o usa (no Alacritty, o laço do PTY).
+    /// Sem isto, um fim perdido (ex.: no redesenho do ConPTY ao redimensionar) congela a tela.
+    /// Solta o que estava retido se o prazo venceu; devolve o prazo se ainda falta.
+    pub fn expire_sync(&mut self, now: Instant) -> Option<Instant> {
+        let at = self.parser.sync_timeout().sync_timeout()?;
+        if now < at {
+            return Some(at);
+        }
+        self.parser.stop_sync(&mut self.term);
+        None
     }
 }
 
@@ -301,5 +315,37 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alacritty_terminal::index::{Column, Line};
+    use std::time::Duration;
+
+    fn first_char(s: &Session) -> char {
+        s.shared.emu.lock().term.grid()[Line(0)][Column(0)].c
+    }
+
+    #[test]
+    fn a_synchronized_update_without_its_end_is_released_after_the_deadline() {
+        let s = Session::new(GridSize { cols: 20, rows: 4 });
+        s.print("\x1b[?2026hx");
+        assert_eq!(first_char(&s), ' ', "retido durante a atualização sincronizada");
+
+        let at = s.shared.emu.lock().expire_sync(Instant::now()).expect("prazo pendente");
+        assert_eq!(first_char(&s), ' ');
+
+        assert_eq!(s.shared.emu.lock().expire_sync(at + Duration::from_millis(1)), None);
+        assert_eq!(first_char(&s), 'x', "o prazo vencido solta a saída retida");
+    }
+
+    #[test]
+    fn a_synchronized_update_with_its_end_shows_at_once() {
+        let s = Session::new(GridSize { cols: 20, rows: 4 });
+        s.print("\x1b[?2026hy\x1b[?2026l");
+        assert_eq!(first_char(&s), 'y');
+        assert_eq!(s.shared.emu.lock().expire_sync(Instant::now()), None);
     }
 }

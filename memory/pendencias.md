@@ -82,7 +82,6 @@ Nada pendente.
 - [ ] **Uso do Antigravity depende de API interna** (`v1internal:retrieveUserQuotaSummary`): pode mudar sem aviso; hoje qualquer falha vira "sem dados". Avaliar um aviso discreto quando falhar por muito tempo.
 - [ ] **Uso do Codex só testado com arquivos de exemplo** (o Codex não estava instalado): conferir o formato real de `rate_limits` nos `rollout-*.jsonl`.
 - [ ] **Statusline do usuário perde o `padding`**: a nossa (`ask-agent --usage`) fixa 0 e repassa a dele.
-- [ ] **Acentos trocados por `?` nas respostas do Antigravity** pela ponte (as do Claude chegam certas). Causa provável: o PowerShell 5.1 do Antigravity converte o texto ao passar para o `ask-agent` (`$OutputEncoding`/`Get-Content` sem `-Encoding UTF8`). Orientar nas instruções da ponte ou aceitar `ask-agent --reply <n> --file <caminho>` lido em UTF-8.
 - [ ] **Janela sem decoração:** validar no Windows real (arrastar, snap, Win+setas, redimensionar pelas bordas, maximizada sem cobrir a barra de tarefas); no Linux, conferir X11/Wayland ([testes.md](testes.md), seção 13).
 
 ## 5. Testes automáticos
@@ -114,11 +113,10 @@ Nada pendente.
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
 - [ ] No headless, aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] A ponte sem interface ainda usa o modo headless: não aparece nas abas.
-- [ ] Não há como o usuário dar cargo a uma aba aberta à mão (hoje só duplicatas ganham nome, tipo `claude@main@ana`).
 
 ## 7. Git
 
-- [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário (o bloco é reescrito ao iniciar). Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
+- [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). Continua aparecendo quando a lista de agentes muda (outra máquina, outros modelos do Ollama) e, em repositório sem `AGENTS.md`, como não rastreado. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
 - [ ] Ssh com senha na chave: hoje o push/pull falha com "falha de autenticação" (o `BatchMode` evita travar); orientar a usar o ssh-agent.
 - [ ] Stash, preparar por trecho (hunk), editor de conflitos, histórico (log), merge/rebase pela interface.
 - [ ] Integração com o GitHub (PRs, issues, Actions) — ver a seção 6.
@@ -163,6 +161,13 @@ foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 - [ ] Uso: credencial vencida no Credential Manager impede o fallback para `oauth_creds.json`; janelas com `resetTime` no passado não zeram; 401 no primeiro host não tenta o segundo; Codex lê só o `rollout` mais novo (sem `rate_limits` numa aba nova).
 
 ## Concluído
+
+- [x] **Terminal congelava ao redimensionar as janelas** (visto na aba do Claude, que ficou preta). O Claude Code usa a atualização sincronizada (`ESC[?2026h` … `ESC[?2026l`), e o parser (`vte`) retém a saída até o fim dela, mas o prazo de 150 ms fica a cargo de quem o usa: nada o cobrava, então um fim perdido no redesenho segurava a tela até chegarem 2 MB. `Emulator::expire_sync` solta o que estava retido quando o prazo vence, chamado pela leitora antes de cada bloco e pelo `tick` da interface (testes em `terminal/mod.rs`).
+- [x] **Conferido em uso (2026-10-15 e 16).** O que o usuário testou no app e o que o Claude verificou ao vivo pela ponte:
+  - **Usuário:** projetos (cada um lista os seus agentes abertos, migração da config antiga com as abas), botão de recolher a barra lateral, chave da tela dividida na ORGANIZAÇÃO, barra de título própria, círculos de uso (Claude e Antigravity) e o "+ Novo agente" do projeto.
+  - **Ponte, ao vivo:** pergunta digitada na aba do Antigravity e resposta de volta por `--reply`; resposta atrasada (202) digitada depois na aba do Claude como mensagem nova; delegação por cargo em paralelo (`claude@dev`, `antigravity@sidebar`, `antigravity@design`, `antigravity@quota`); `ask-agent --team` mostra a equipe e `--boss` sem chefe explica que se responde ao usuário.
+  - **Resolvidos sem mudança de código:** os acentos das respostas do Antigravity chegam certos pela ponte (`ação, coração, você, já, pendências` intacto). Se voltar em respostas longas, reabrir o item. A aba aberta à mão já ganha cargo pelo "Renomear" (duplo clique ou clique direito: `dev`, `dev@ana`).
+  - `dados/hooks/` e `dados/.commanddeck.lock` (gerados pelo app) entraram no `.gitignore`.
 
 - [x] **Auditoria de 2026-10-15 (regressão + correções).** Quatro revisores Claude, o Antigravity e capturas de todos os estados de depuração; 235 testes, clippy e fmt limpos. Corrigido:
   - **Dados:** config gravada por arquivo temporário + `rename`, uma gravação por vez e na ordem (a ponte e a interface gravavam juntas); config ilegível guarda uma cópia `.json.ilegivel-*` antes de voltar aos padrões. Capturas e `COMMANDDECK_DEBUG_UI` não gravam mais a config (o estado `empty` apagava as abas salvas).
