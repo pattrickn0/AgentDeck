@@ -19,7 +19,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let no_project = deck.active_project.is_empty();
     let title = if no_project { "Nenhum projeto aberto" } else { "Nenhum agente aberto" };
     let title = galley(&painter, title, theme::ui_semibold(16.0), theme::TEXT);
-    // <p> com o "+" em destaque, quebrando em até 420px.
+    // <p> com o "+ Novo agente" em destaque, quebrando em até 420px.
     let mut job = LayoutJob::default();
     job.wrap.max_width = 420.0;
     job.halign = egui::Align::Center;
@@ -27,9 +27,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     if no_project {
         job.append("Abra uma pasta como projeto: cada projeto tem os seus agentes.", 0.0, fmt);
     } else {
-        job.append("Selecione um agente abaixo ou clique no ", 0.0, fmt.clone());
-        job.append("+", 0.0, TextFormat { font_id: theme::ui_bold(13.0), color: theme::TEXT, ..fmt.clone() });
-        job.append(" acima para iniciar uma sessão:", 0.0, fmt);
+        job.append("Selecione um agente abaixo ou use ", 0.0, fmt.clone());
+        job.append("+ Novo agente", 0.0, TextFormat { font_id: theme::ui_bold(13.0), color: theme::TEXT, ..fmt.clone() });
+        job.append(" na barra lateral para iniciar uma sessão:", 0.0, fmt);
     }
     let para = painter.layout_job(job);
 

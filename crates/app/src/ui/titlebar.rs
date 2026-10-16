@@ -1,15 +1,16 @@
 //! Barra de título própria (a janela não tem decoração do sistema): menu ☰, botão da barra
-//! lateral, nome, "+", área de arrastar, uso dos agentes e minimizar/maximizar/fechar.
+//! lateral, nome, área de arrastar, uso dos agentes e minimizar/maximizar/fechar.
 
 use egui::{Align2, CursorIcon, Id, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand};
 
-use super::{clickable, galley, place, text_in, tip};
+use super::{clickable, text_in, tip};
 use crate::deck::Deck;
 use crate::theme;
 
 pub struct Anchors {
-    pub new_tab_anchor: Rect,
     pub settings_anchor: Rect,
+    /// Âncora do menu de novo agente quando a linha da barra lateral não está à vista (Ctrl+T com a barra recolhida).
+    pub fallback_anchor: Rect,
 }
 
 /// Largura de cada botão da janela (minimizar, maximizar, fechar).
@@ -76,23 +77,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         theme::TEXT,
     );
 
-    // ---------- Nova aba (+) (as abas ficam no cabeçalho de cada janela; ver `panes.rs`) ----------
-    let plus = Rect::from_min_size(Pos2::new(title_r.max.x + 12.0, inner.min.y), Vec2::new(34.0, inner.height()));
-    let r = clickable(ui, plus, Id::new("new-tab"));
-    let hot = r.hovered() || deck.new_tab_menu_open;
-    if hot {
-        painter.rect_filled(plus, 0.0, theme::PANEL_2);
-    }
-    let pg = galley(&painter, "+", theme::ui(18.0), theme::MUTED);
-    place(&painter, plus, Align2::CENTER_CENTER, pg, if hot { theme::TEXT } else { theme::MUTED });
-    if tip(r, "Nova aba (Ctrl+T)").clicked() {
-        deck.new_tab_menu_open = !deck.new_tab_menu_open;
-        deck.settings_open = false;
-        if deck.new_tab_menu_open {
-            deck.refresh_agents();
-        }
-    }
-
     // ---------- Botões da janela ----------
     let close = Rect::from_min_max(Pos2::new(inner.max.x - WIN_BTN_W, inner.min.y), inner.max);
     let max_btn = close.translate(Vec2::new(-WIN_BTN_W, 0.0));
@@ -109,7 +93,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     }
 
     // ---------- Uso dos agentes (à esquerda dos botões da janela) ----------
-    let usage = Rect::from_min_max(Pos2::new(plus.max.x + 12.0, inner.min.y), Pos2::new(min_btn.min.x - 10.0, inner.max.y));
+    let usage = Rect::from_min_max(Pos2::new(title_r.max.x + 12.0, inner.min.y), Pos2::new(min_btn.min.x - 10.0, inner.max.y));
     if usage.width() > 0.0 {
         super::usage::draw(deck, ui, usage);
     }
@@ -118,7 +102,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         resize_edges(&ctx);
     }
 
-    Anchors { new_tab_anchor: plus, settings_anchor: menu }
+    Anchors { settings_anchor: menu, fallback_anchor: Rect::from_min_size(Pos2::new(toggle.max.x, inner.max.y), Vec2::new(34.0, 0.0)) }
 }
 
 /// Ícone "painel lateral": janela arredondada com a coluna da esquerda, preenchida conforme a

@@ -82,7 +82,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     });
 
     // ---------- Menus suspensos e overlay ----------
-    menus::new_tab_menu(deck, &ctx, menus.new_tab_anchor);
+    menus::new_tab_menu(deck, &ctx, projects::new_agent_anchor(&ctx, menus.fallback_anchor));
     menus::settings_menu(deck, &ctx, menus.settings_anchor);
     menus::tab_context_menu(deck, &ctx);
     menus::rename_tab_modal(deck, &ctx);

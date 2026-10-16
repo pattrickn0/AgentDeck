@@ -128,6 +128,10 @@ pub struct PaneSlot {
 /// Um agente (aba) de um projeto, para a lista de projetos da barra lateral.
 #[derive(Debug, Clone)]
 pub struct AgentBadge {
+    /// Id da instância (`claude@dev`).
+    pub id: String,
+    /// Chefe da instância (`None` = responde ao usuário). Vem do core (`Core::set_boss`).
+    pub parent: Option<String>,
     /// Modelo (`claude`, `antigravity`, `ollama:…`): escolhe o logo.
     pub kind: String,
     /// Nome mostrado (`Claude · Dev`).
@@ -150,6 +154,8 @@ pub struct ProjectView {
     pub name: String,
     pub path: PathBuf,
     pub active: bool,
+    /// A lista de agentes aparece embaixo do projeto.
+    pub expanded: bool,
     pub agents: Vec<AgentBadge>,
 }
 
@@ -1648,6 +1654,8 @@ impl Deck {
                         .map(|i| {
                             let t = &self.tabs[i];
                             AgentBadge {
+                                id: t.ident.id(),
+                                parent: p.tab_parents.get(&t.ident.id()).cloned(),
                                 kind: t.kind.clone(),
                                 label: t.label.clone(),
                                 color: t.color,
@@ -1663,6 +1671,8 @@ impl Deck {
                         .iter()
                         .filter_map(|id| Ident::parse(id))
                         .map(|ident| AgentBadge {
+                            id: ident.id(),
+                            parent: p.tab_parents.get(&ident.id()).cloned(),
                             label: ident.label(&self.agents.name(&ident.kind)),
                             color: self.agents.tab_color(&ident.kind),
                             kind: ident.kind,
@@ -1673,9 +1683,38 @@ impl Deck {
                         })
                         .collect()
                 };
-                ProjectView { active: p.id == self.active_project, id: p.id, name: p.name, path: p.path, agents }
+                ProjectView { active: p.id == self.active_project, expanded: !p.collapsed, id: p.id, name: p.name, path: p.path, agents }
             })
             .collect()
+    }
+
+    /// Mostra ou esconde a lista de agentes do projeto `id` na barra lateral (gravado na config).
+    pub fn toggle_project_expanded(&mut self, id: &str) {
+        self.core.update_project(id, |p| p.collapsed = !p.collapsed);
+    }
+
+    /// Mostra (`true`) ou esconde a lista de agentes de todos os projetos.
+    pub fn set_all_projects_expanded(&mut self, expanded: bool) {
+        for p in self.core.projects() {
+            self.core.update_project(&p.id, |p| p.collapsed = !expanded);
+        }
+    }
+
+    /// Agente arrastado na barra lateral: passa a responder a `boss` (`None` = ao usuário). O core
+    /// recusa ciclos; o aviso de equipe vai na próxima mensagem dos afetados.
+    pub fn set_agent_boss(&mut self, project: &str, id: &str, boss: Option<&str>) {
+        if let Err(e) = self.core.set_boss(project, id, boss) {
+            self.system(format!("Não foi possível mudar a equipe: {e}."));
+        }
+    }
+
+    /// Clique num agente da barra lateral: traz o projeto dele para a tela (abrindo as abas salvas,
+    /// se ainda não abriram) e ativa a aba.
+    pub fn focus_agent(&mut self, project: &str, id: &str) {
+        self.switch_project(project);
+        if let Some(i) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == id) {
+            self.activate(i);
+        }
     }
 
     /// "+" da seção PROJETOS: escolhe a pasta do projeto novo.

@@ -1,5 +1,6 @@
 //! Configuração persistida (equivalente ao `config.json` do Electron, com campos extras de layout).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,11 @@ pub struct ProjectCfg {
     /// o formato da grade ainda for o mesmo.
     pub split_rows: Vec<f32>,
     pub split_cols: Vec<Vec<f32>>,
+    /// Quem abriu cada aba (id da aba → id de quem a chamou pelo `ask-agent`): a hierarquia da
+    /// lista de agentes na barra lateral. Abas abertas pelo usuário não entram.
+    pub tab_parents: BTreeMap<String, String>,
+    /// A lista de agentes do projeto está recolhida na barra lateral.
+    pub collapsed: bool,
 }
 
 impl Default for ProjectCfg {
@@ -37,6 +43,8 @@ impl Default for ProjectCfg {
             pane_order: Vec::new(),
             split_rows: Vec::new(),
             split_cols: Vec::new(),
+            tab_parents: BTreeMap::new(),
+            collapsed: false,
         }
     }
 }

@@ -176,6 +176,8 @@ ela dura.
 | `ask-agent --reply <n> "resposta"` | responde à pergunta número `n` |
 | `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão |
 | `ask-agent --list` | lista os agentes disponíveis |
+| `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora) |
+| `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --signal busy\|idle` | uso interno dos hooks (sai sempre com 0) |
 
 ---

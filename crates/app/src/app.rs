@@ -418,7 +418,9 @@ fn debug_map() -> crate::agent_map::Snapshot {
 /// três agentes (um ocupado), outro com um, outro vazio.
 fn debug_projects() -> Vec<crate::deck::ProjectView> {
     use crate::deck::{AgentBadge, ProjectView};
-    let agent = |kind: &str, label: &str, color, busy| AgentBadge {
+    let agent = |id: &str, parent: Option<&str>, kind: &str, label: &str, color, busy| AgentBadge {
+        id: id.into(),
+        parent: parent.map(Into::into),
         kind: kind.into(),
         label: label.into(),
         color,
@@ -432,6 +434,7 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
         name: name.into(),
         path: format!(r"C:\Users\voce\{name}").into(),
         active,
+        expanded: true,
         agents,
     };
     vec![
@@ -440,12 +443,14 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
             "commanddeck-dev",
             true,
             vec![
-                agent("claude", "Claude", theme::CLAUDE, true),
-                agent("claude", "Claude · Dev", theme::CLAUDE, false),
-                agent("antigravity", "Antigravity", theme::ANTIGRAVITY, false),
+                agent("claude", None, "claude", "Claude", theme::CLAUDE, true),
+                agent("claude@dev", Some("claude"), "claude", "Claude · Dev", theme::CLAUDE, false),
+                agent("ollama:qwen3.5:9b", Some("claude@dev"), "ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", theme::OLLAMA, false),
+                agent("antigravity@sidebar", Some("claude"), "antigravity", "Antigravity · Sidebar", theme::ANTIGRAVITY, false),
+                agent("claude@review", None, "claude", "Claude · Review", theme::CLAUDE, false),
             ],
         ),
-        project("p2", "jwic", false, vec![agent("claude", "Claude", theme::CLAUDE, false)]),
+        project("p2", "jwic", false, vec![agent("claude", None, "claude", "Claude", theme::CLAUDE, false)]),
         project("p3", "site-novo", false, vec![]),
     ]
 }

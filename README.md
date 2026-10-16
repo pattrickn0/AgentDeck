@@ -76,6 +76,8 @@ Dentro de qualquer aba:
 ask-agent antigravity "Revise a estrutura de pastas proposta"
 ask-agent --reply 7 "Feito: a pasta src/ foi dividida"   # responde à pergunta nº 7
 ask-agent --list
+ask-agent --team                                        # seu chefe e sua equipe
+ask-agent --boss "Terminei a revisão"                   # reporta ao chefe
 cat relatorio.txt | ask-agent claude -
 ```
 

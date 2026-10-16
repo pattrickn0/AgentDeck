@@ -69,7 +69,11 @@ Nada pendente.
 - [ ] Select, spinner e tooltips desenhados à mão imitando o Chromium; desfoque atrás do overlay de arrastar é aproximado.
 - [ ] Animação suave (hover) nos botões do estado vazio.
 - [ ] **Destacar o agente selecionado** (seção ORGANIZAÇÃO da barra lateral): realçar a janela/aba do agente escolhido e o que é dele (pedido do usuário; a seção já existe com a chave da tela dividida).
-- [ ] **Onde criar terminais ("+")**: em debate. Proposta: tirar o "+" da barra de título e fazer o "+" de cada janela abrir o menu de agentes ("Novo <agente desta janela>" primeiro); o Antigravity sugere também uma seção AGENTES na barra lateral.
+- [ ] **Tela dividida com destaque**: terceiro modo de organização (além de aba única e tela dividida), em que a janela do agente/projeto selecionado fica grande e as outras menores ao lado. Entra na seção ORGANIZAÇÃO (que continua seção, não vira ícone).
+- [ ] **Mapa de agentes: avaliar remoção.** A árvore de agentes na barra lateral já mostra quem abriu quem; o que sobra do Mapa (quem conversa com quem agora, contagem por par) pode virar detalhe ao passar o mouse no agente.
+- [ ] **Equipe: as instruções da ponte são fixadas na partida.** Um agente aberto antes desta versão não sabe do `--team`/`--boss` até reabrir a aba. O aviso de equipe só chega com a próxima mensagem (de propósito, para não gastar turno).
+- [ ] **Equipe: teste de integração do "chefe na criação" só roda em Unix** (`an_agent_becomes_the_boss_of_the_role_it_opens_and_the_new_one_is_told`, usa agente falso em shell); ver a seção 5.
+- [ ] **Contexto de curto/longo prazo** (injeção de contexto + memória): só discutir por enquanto (ver seção 2).
 - [ ] **Projetos: lógica da Deck sem teste automático** (filtro das abas visíveis, gravação por projeto, carga sob demanda); hoje só o core tem testes. Extrair para funções puras testáveis, no estilo de `split.rs`.
 - [ ] **Projetos: o AGENTS.md de projetos não ativos** só é reescrito quando se abre a próxima aba deles (a lista de agentes pode ficar velha até lá).
 - [ ] **Projetos: a árvore e o Git não guardam o estado por projeto** (pastas abertas, arquivo selecionado): voltam do zero a cada troca.
@@ -120,6 +124,10 @@ Nada pendente.
 - [ ] Integração com o GitHub (PRs, issues, Actions) — ver a seção 6.
 
 ## Concluído
+
+- [x] **Equipe de agentes reorganizável e conhecida pelos agentes.** Arrastar um agente sobre outro o põe na equipe dele; soltar no projeto o devolve à raiz (ciclos recusados, fantasma com o destino). Hierarquia no core (`team.rs`, `Core::set_boss`), `GET /team`, `ask-agent --team` e `--boss`, aviso "sua posição na equipe mudou" na próxima mensagem, linha nas instruções da ponte. Fechar passa a equipe ao avô; renomear leva a equipe junto. Skills do projeto em `.claude/skills/` (`commanddeck-ui`, `rust-desktop-applications`, `game-ui-design`).
+- [x] **Agentes de todos os projetos, em árvore, com logo.** Seta ▸/▾ em cada projeto e "expandir/recolher todos" no cabeçalho PROJETOS (estado em `ProjectCfg.collapsed`); clicar num agente de outro projeto troca de projeto e ativa a aba. A aba aberta por `ask-agent` fica sob quem a chamou (`ProjectCfg.tab_parents`), com linhas-guia; o ponto virou o logo do modelo (halo trabalhando, anel ao concluir). Ordem da árvore testada em `ui/projects.rs`.
+- [x] **Novo agente dentro do projeto.** O "+" solto da barra de título saiu; o projeto ativo ganhou a linha "+ Novo agente" no fim da lista de agentes (abre o menu de agentes; Ctrl+T continua e, com a barra recolhida, abre sob a barra de título). O "+" do cabeçalho PROJETOS segue criando projeto.
 
 - [x] **Projetos como unidade principal.** Cada aba pertence a um projeto (pasta) e só aparece com ele; as de outros projetos continuam rodando escondidas. Instâncias, tokens e `ask-agent` por projeto (`instances::scoped`), config por projeto (`projectList`, com migração), Conversa e Mapa do projeto ativo, abas dos outros projetos abertas sob demanda. Sem workspace padrão. Seção PROJETOS na barra lateral.
 

@@ -4,6 +4,8 @@
 //!      ask-agent --new <agente> "mensagem"   (abre outra instância, mesmo se já houver uma)
 //!      ask-agent --reply <n> "resposta"       (responde à pergunta número n)
 //!      ask-agent --list
+//!      ask-agent --team                       (seu chefe e sua equipe)
+//!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
 //!
@@ -26,7 +28,7 @@ use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list";
+    "Uso: ask-agent [--new] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -107,6 +109,33 @@ fn main() -> ExitCode {
         args.drain(..2);
         args.insert(0, String::new());
     }
+    if args.first().is_some_and(|a| a == "--team") {
+        return match team(&bridge) {
+            Ok((id, boss, crew)) => {
+                println!("Você: {id}");
+                match boss {
+                    Some(b) => println!("Chefe: {b} (reporte a ele com: ask-agent --boss \"mensagem\")"),
+                    None => println!("Chefe: nenhum (você responde diretamente ao usuário)"),
+                }
+                if crew.is_empty() {
+                    println!("Equipe: nenhum agente");
+                } else {
+                    println!("Equipe: {}", crew.join(", "));
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e, 1),
+        };
+    }
+    if args.first().is_some_and(|a| a == "--boss") {
+        match team(&bridge) {
+            Ok((_, Some(boss), _)) => args[0] = boss,
+            Ok((_, None, _)) => {
+                return fail("você não tem chefe: responde diretamente ao usuário (escreva a resposta no seu terminal).", 1)
+            }
+            Err(e) => return fail(e, 1),
+        }
+    }
     let to = args.first().map(String::as_str).unwrap_or("");
     if reply_to.is_none() && (to.is_empty() || to == "-h" || to == "--help") {
         println!("{USAGE}");
@@ -156,6 +185,18 @@ fn main() -> ExitCode {
         Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
         Err(e) => fail(e, 1),
     }
+}
+
+/// `GET /team`: (eu, chefe, equipe).
+fn team(bridge: &Bridge) -> Result<(String, Option<String>, Vec<String>), String> {
+    let (status, json) = bridge.request("GET", "/team", None, Some(Duration::from_secs(10)))?;
+    if status != 200 {
+        return Err(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido").to_owned());
+    }
+    let id = json.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let boss = json.get("boss").and_then(Value::as_str).map(str::to_owned);
+    let crew = json.get("crew").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect());
+    Ok((id, boss, crew.unwrap_or_default()))
 }
 
 // ---------- Statusline do Claude Code (`--usage`) ----------

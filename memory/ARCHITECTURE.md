@@ -91,7 +91,7 @@ Cada aba é uma **instância** com identidade própria, usada em `COMMANDDECK_AG
 
 | Id | Significado |
 | :-- | :-- |
-| `claude` | a instância principal (sem cargo), a que o usuário abre pelo "+" |
+| `claude` | a instância principal (sem cargo), a que o usuário abre pelo "+ Novo agente" |
 | `claude@dev`, `claude@design` | instâncias com cargo, abertas por um agente (ou pelo usuário) |
 | `claude@dev@ana` | quando já existe outra do mesmo modelo **e** cargo, a nova ganha um nome |
 | `claude@main@bia` | segunda instância principal (sem cargo) aberta à mão |
@@ -99,6 +99,14 @@ Cada aba é uma **instância** com identidade própria, usada em `COMMANDDECK_AG
 A aba aparece como `Claude`, `Claude · Dev`, `Claude · Dev · Ana`. O id é gerado pelo core
 (`crates/core/src/instances.rs`), único dentro do projeto, e salvo em `ProjectCfg.open_tabs` do projeto
 (`Config.projectList`), então as abas voltam com o mesmo nome.
+**Equipe (chefe e subordinados).** O core guarda o chefe de cada instância em `ProjectCfg.tab_parents`
+(lógica pura em `crates/core/src/team.rs`). Quando um agente abre uma instância nova pelo `ask-agent`, vira
+o chefe dela; o usuário reorganiza arrastando agentes na barra lateral (`Core::set_boss`, que recusa ciclos).
+Fechar uma instância passa a equipe dela ao chefe dela; renomear leva a equipe junto. Os agentes sabem da
+equipe sem turno extra: as instruções mandam consultar `ask-agent --team` (`GET /team`, pelo token) e quem
+mudou de posição recebe o aviso anexado à **próxima** mensagem entregue (`Core::take_team_notice`; consultar o
+`--team` já dá o aviso por lido). `ask-agent --boss "msg"` pergunta ao chefe. A barra lateral desenha a árvore
+(`ui/projects.rs::agent_tree`). A equipe orienta, não restringe: qualquer agente continua podendo chamar qualquer outro.
 O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
 
 `ask-agent <id> "msg"` (e `--new` para forçar outra instância) funciona assim:

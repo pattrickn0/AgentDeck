@@ -156,6 +156,15 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         };
         return reply(req, 200, json!({ "agents": core.peers(&project) }));
     }
+    if *req.method() == Method::Get && req.url() == "/team" {
+        let Auth::Agent(c) = &auth else {
+            return reply(req, 400, json!({ "error": "só um agente tem chefe e equipe" }));
+        };
+        // Quem pergunta já está ciente: o aviso pendente não precisa ir na próxima mensagem.
+        core.inner.team_changed.lock().remove(&c.key(&c.id));
+        let team = core.team(&c.project, &c.id);
+        return reply(req, 200, json!({ "id": c.id, "boss": team.boss, "crew": team.crew }));
+    }
     let route = req.url().to_owned();
     if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
@@ -385,7 +394,7 @@ fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl 
 /// Resposta que chegou depois de o `ask-agent` de quem perguntou já ter terminado: é digitada
 /// no terminal de quem perguntou, como uma mensagem nova. `target` é o id sem o projeto.
 fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request: u64, outcome: Reply) {
-    let prompt = match outcome {
+    let mut prompt = match outcome {
         Reply::Answer(text) => format!(
             "[Resposta do agente \"{target}\" à sua pergunta #{request}, recebida pelo CommandDeck]\n\n{}\n\n\
 Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Conversa integrada.",
@@ -396,6 +405,10 @@ Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Co
             format!("[CommandDeck] A pergunta #{request} para \"{target}\" ficou sem resposta: {}", terminal_text(&text))
         }
     };
+    if let Some(notice) = core.take_team_notice(project, &asker.id()) {
+        prompt.push_str("\n\n");
+        prompt.push_str(&notice);
+    }
     core.emit(CoreEvent::Deliver(Delivery {
         request,
         project: project.to_owned(),
@@ -462,7 +475,17 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     };
 
     caller.feed(core, FeedKind::Ask, from, &id, message.to_owned());
-    let prompt = tab_prompt(from, request, message);
+    // Quem abriu a instância passa a ser o chefe dela (o usuário, pelo token mestre, não conta).
+    if created && core.project_instance_ids(project).iter().any(|o| o == from) {
+        if let Err(e) = core.set_boss(project, &id, Some(from)) {
+            log::warn!("chefe de \"{id}\": {e}");
+        }
+    }
+    let mut prompt = tab_prompt(from, request, message);
+    if let Some(notice) = core.take_team_notice(project, &id) {
+        prompt.push_str("\n\n");
+        prompt.push_str(&notice);
+    }
     core.emit(CoreEvent::Deliver(Delivery {
         request,
         project: project.to_owned(),

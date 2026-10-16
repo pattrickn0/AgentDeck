@@ -532,6 +532,7 @@ impl Registry {
             "Ao colaborar com outro agente (ex: Antigravity), mantenha o diálogo diretamente com ele (iterando, tirando dúvidas e alinhando) até concluir a tarefa, em vez de parar no meio para fazer perguntas ao usuário.".to_owned(),
             "Cada aba é uma instância com nome <modelo>[@<cargo>[@<nome>]] (ex.: claude, claude@dev, claude@dev@ana). Para delegar a uma instância com cargo, chame-a pelo nome: ask-agent claude@dev \"tarefa\" (a aba é aberta se não existir); use --new para abrir outra instância do mesmo cargo.".to_owned(),
             "Quando outro agente lhe mandar uma mensagem, responda executando o comando indicado nela (ask-agent --reply <número> \"sua resposta\"): é só assim que a resposta chega a ele.".to_owned(),
+            "Os agentes formam uma equipe: cada um pode ter um chefe e subordinados, e o usuário pode reorganizá-la a qualquer momento. Antes de delegar ou de reportar, consulte a sua posição com ask-agent --team; delegue de preferência à sua equipe e, ao concluir algo que o seu chefe pediu, reporte a ele com ask-agent --boss \"mensagem\".".to_owned(),
         ]
         .join("\n")
     }

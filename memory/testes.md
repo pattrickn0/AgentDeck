@@ -189,3 +189,17 @@ Com a pasta de trabalho num repositório git:
 - [ ] Clique direito → Renomear (o nome muda, a pasta não), Abrir pasta, Remover (confirma, fecha as abas do projeto; a pasta fica).
 - [ ] Remover o último projeto: o centro pede "Abrir pasta…".
 - [ ] Captura: `COMMANDDECK_DEBUG_UI=project:<id>` troca para o projeto `<id>` logo ao abrir.
+
+## 15. Barra lateral: agentes em árvore e equipe ★
+
+- [ ] "+ Novo agente" no fim da lista do projeto ativo abre o menu de agentes; Ctrl+T com a barra recolhida abre o menu sob a barra de título.
+- [ ] Seta ▸/▾ de cada projeto e o botão de setas duplas do cabeçalho mostram/escondem os agentes; o estado volta igual ao reabrir o app.
+- [ ] Clicar num agente de outro projeto troca de projeto e ativa a aba (inclusive de projeto ainda não aberto nesta sessão).
+- [ ] Logo do modelo no lugar do ponto: halo pulsando trabalhando, anel ao concluir sem ser visto, apagado quando encerrado.
+- [ ] Um agente que chama `ask-agent claude@xyz` (cargo novo) faz a aba nova aparecer sob ele; a primeira mensagem dela diz "você responde a …".
+- [ ] Arrastar um agente sobre outro: contorno na cor do projeto e fantasma "→ equipe de …"; ao soltar, a árvore muda e continua assim depois de reabrir o app.
+- [ ] Arrastar o chefe sobre alguém da própria equipe: contorno vermelho, cursor de proibido, nada muda. Esc cancela o arrasto.
+- [ ] Soltar sobre a linha do projeto devolve o agente à raiz.
+- [ ] Na aba de um agente reorganizado, `ask-agent --team` mostra o chefe e a equipe certos; `ask-agent --boss "oi"` chega ao chefe; sem chefe, o `--boss` explica que ele responde ao usuário.
+- [ ] Depois de reorganizar, a próxima mensagem entregue ao agente termina com "[CommandDeck] Sua posição na equipe mudou…" (uma vez só; se ele rodou `--team` antes, não vem).
+- [ ] Fechar a aba de um chefe: a equipe dele sobe para o chefe dele (ou para a raiz). Renomear uma aba com equipe mantém a árvore.

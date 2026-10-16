@@ -25,6 +25,7 @@ pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
 pub mod sessions;
+pub mod team;
 pub mod usage;
 pub mod util;
 pub mod whisper;
@@ -45,6 +46,7 @@ pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
+pub use team::Team;
 pub use usage::{AgentUsage, UsageWindow};
 pub use workspace::DirEntry;
 
@@ -121,6 +123,9 @@ pub(crate) struct CoreInner {
     /// Perguntas da ponte sendo respondidas em modo headless agora (para o mapa de conversas).
     pub headless_asks: Mutex<Vec<(u64, HeadlessAsk)>>,
     pub headless_seq: std::sync::atomic::AtomicU64,
+    /// Instâncias (chaves com escopo) cuja posição na equipe mudou desde a última mensagem que
+    /// receberam: a próxima leva o aviso (ver `team::notice`).
+    pub team_changed: Mutex<HashSet<String>>,
     pub bridge_queues: bridge::PairQueues,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
@@ -290,6 +295,7 @@ impl Core {
             callers: Mutex::new(HashMap::new()),
             headless_asks: Mutex::new(Vec::new()),
             headless_seq: std::sync::atomic::AtomicU64::new(0),
+            team_changed: Mutex::new(HashSet::new()),
             bridge_queues: bridge::PairQueues::default(),
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
@@ -452,6 +458,60 @@ impl Core {
         self.inner.exchange.fail_target(&key, &format!("a aba de \"{id}\" foi fechada antes de responder"));
         self.inner.exchange.fail_asker(&key, &format!("a aba de \"{id}\" foi fechada"));
         self.inner.activity.forget(&key);
+        // A equipe de quem fechou passa ao chefe dele.
+        let mut touched = Vec::new();
+        self.update_project(project, |p| touched = team::remove(&mut p.tab_parents, id));
+        self.mark_team_changed(project, &touched);
+    }
+
+    // ---------- Hierarquia (chefe e equipe) ----------
+
+    /// Chefe e equipe da instância `id` do projeto (só instâncias abertas).
+    pub fn team(&self, project: &str, id: &str) -> Team {
+        let parents = self.inner.config.read().project(project).map(|p| p.tab_parents.clone()).unwrap_or_default();
+        team::team_of(&parents, id, &self.project_instance_ids(project))
+    }
+
+    /// Põe a instância `id` sob `boss` (`None` = responde ao usuário). Recusa instâncias que não
+    /// estão abertas no projeto e ciclos. Quem foi afetado (ela, o chefe antigo e o novo) recebe o
+    /// aviso na próxima mensagem.
+    pub fn set_boss(&self, project: &str, id: &str, boss: Option<&str>) -> Result<(), String> {
+        let open = self.project_instance_ids(project);
+        for who in std::iter::once(id).chain(boss) {
+            if !open.iter().any(|o| o == who) {
+                return Err(format!("\"{who}\" não está aberto neste projeto"));
+            }
+        }
+        let parents = self.inner.config.read().project(project).map(|p| p.tab_parents.clone()).unwrap_or_default();
+        if let Some(b) = boss.filter(|b| team::would_cycle(&parents, id, b)) {
+            return Err(format!("\"{b}\" já faz parte da equipe de \"{id}\": não pode ser o chefe dele"));
+        }
+        let old = parents.get(id).cloned();
+        if old.as_deref() == boss {
+            return Ok(());
+        }
+        self.update_project(project, |p| match boss {
+            Some(b) => {
+                p.tab_parents.insert(id.to_owned(), b.to_owned());
+            }
+            None => {
+                p.tab_parents.remove(id);
+            }
+        });
+        let touched: Vec<String> = std::iter::once(id.to_owned()).chain(old).chain(boss.map(str::to_owned)).collect();
+        self.mark_team_changed(project, &touched);
+        Ok(())
+    }
+
+    fn mark_team_changed(&self, project: &str, ids: &[String]) {
+        let mut changed = self.inner.team_changed.lock();
+        changed.extend(ids.iter().map(|id| instances::scoped(project, id)));
+    }
+
+    /// O aviso de equipe pendente da instância (uma vez: some ao ser lido).
+    pub(crate) fn take_team_notice(&self, project: &str, id: &str) -> Option<String> {
+        let had = self.inner.team_changed.lock().remove(&instances::scoped(project, id));
+        had.then(|| team::notice(&self.team(project, id)))
     }
 
     /// Renomeia uma instância aberta do projeto (atualiza instâncias, callers e perguntas pendentes).
@@ -465,6 +525,11 @@ impl Core {
         }
         self.inner.exchange.rename(&instances::scoped(project, old_id), &instances::scoped(project, &new_id));
         self.inner.activity.forget(&instances::scoped(project, old_id));
+        self.update_project(project, |p| team::rename(&mut p.tab_parents, old_id, &new_id));
+        let mut changed = self.inner.team_changed.lock();
+        if changed.remove(&instances::scoped(project, old_id)) {
+            changed.insert(instances::scoped(project, &new_id));
+        }
         Ok(())
     }
 

@@ -1003,3 +1003,57 @@ fn a_headless_question_shows_in_the_map_while_it_runs() {
     assert!(env.core.conversation_map(&p).headless.is_empty(), "some quando a resposta chega");
     env.core.shutdown();
 }
+
+#[test]
+fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
+    let env = start(&[]);
+    let p = env.core.active_project_id();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    for id in ["shell", "shell@dev", "shell@qa"] {
+        env.core.restore_instance(&p, id);
+    }
+    env.core.set_boss(&p, "shell@dev", Some("shell")).expect("reorganiza");
+    env.core.set_boss(&p, "shell@qa", Some("shell@dev")).expect("reorganiza");
+
+    // Cada aba consulta a própria posição pelo token.
+    let (st, b) = http(port, "GET", "/team", &host, &tab_token(&env, "shell@dev"), "");
+    assert_eq!((st, b), (200, json!({"id": "shell@dev", "boss": "shell", "crew": ["shell@qa"]})));
+    let (st, _) = http(port, "GET", "/team", &host, env.core.bridge_token(), "");
+    assert_eq!(st, 400, "o token mestre não é um agente");
+
+    // Ciclos e instâncias fechadas são recusados.
+    assert!(env.core.set_boss(&p, "shell", Some("shell@qa")).is_err(), "o chefe não pode ficar sob a própria equipe");
+    assert!(env.core.set_boss(&p, "shell@qa", Some("shell@nada")).is_err());
+
+    // Renomear leva a equipe junto; fechar passa a equipe ao avô; soltar na raiz tira o chefe.
+    let ana = commanddeck_core::Ident::parse("shell@dev@ana").expect("id");
+    env.core.rename_instance(&p, "shell@dev", &ana).expect("renomeia");
+    assert_eq!(env.core.team(&p, "shell@qa").boss.as_deref(), Some("shell@dev@ana"));
+    env.core.close_instance(&p, "shell@dev@ana");
+    assert_eq!(env.core.team(&p, "shell@qa").boss.as_deref(), Some("shell"));
+    assert_eq!(env.core.team(&p, "shell").crew, ["shell@qa"]);
+    env.core.set_boss(&p, "shell@qa", None).expect("raiz");
+    assert_eq!(env.core.team(&p, "shell"), commanddeck_core::Team::default());
+    assert!(env.core.projects()[0].tab_parents.is_empty(), "gravado na config do projeto");
+    env.core.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_agent_becomes_the_boss_of_the_role_it_opens_and_the_new_one_is_told() {
+    let env = start(&[("claude", "echo headless")]);
+    let p = env.core.active_project_id();
+    env.core.enable_tab_delivery();
+    let port = env.core.bridge_port();
+    env.core.restore_instance(&p, "claude");
+    let chefe = tab_token(&env, "claude");
+    let asker = std::thread::spawn(move || ask_raw(port, &chefe, json!({"to": "claude@dev", "message": "tarefa"})));
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev", true));
+    assert!(d.prompt.contains("você responde a \"claude\""), "{}", d.prompt);
+    assert_eq!(env.core.team(&p, "claude").crew, ["claude@dev"]);
+    env.core.close_instance(&p, "claude@dev");
+    let _ = asker.join();
+    env.core.shutdown();
+}
