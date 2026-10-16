@@ -196,7 +196,9 @@ respostas a caminho, recentes) em `Deck::map_snapshot` e desenha com `agent_map:
 **Windows e shims `.cmd`.** Um agente instalado como shim do npm/pip roda como `cmd.exe /d /c <nome>`, e o
 cmd interpreta `& | < > ^ % "` e quebras de linha. No headless o shim é chamado direto (a std do Rust aplica
 o escape de arquivos em lote) e o prompt vai por arquivo em `dados/prompts`, nunca na linha de comando; nas
-abas, os argumentos (gerados pelo app) passam por `cmd_safe_arg`.
+abas, os argumentos (gerados pelo app) passam por `cmd_safe_arg`, que os escapa para as duas passagens do cmd
+(`cmd.exe /d /e:on /v:off /c` e o `%*` do shim) em vez de apagar caracteres: um perfil `C:\Users\Ana&Bia` funciona.
+No Windows, os processos headless entram num Job Object com `KILL_ON_JOB_CLOSE` e morrem junto com o app, mesmo se ele cair.
 
 Tudo fica visível nas abas (raciocínio, ferramentas, aprovações) e o usuário pode intervir digitando.
 O Claude abre com `--allowedTools "Bash(ask-agent:*)"`, para responder sem pedir aprovação.

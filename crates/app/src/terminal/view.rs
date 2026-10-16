@@ -10,7 +10,9 @@ use alacritty_terminal::vte::ansi::CursorShape;
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
-use super::input::{mouse_mods, mouse_report, MOUSE_LEFT, MOUSE_MIDDLE, MOUSE_MOTION, MOUSE_NO_BUTTON, MOUSE_RIGHT};
+use super::input::{
+    mouse_mods, mouse_report, MOUSE_LEFT, MOUSE_MIDDLE, MOUSE_MOTION, MOUSE_NO_BUTTON, MOUSE_RIGHT, MOUSE_WHEEL_DOWN, MOUSE_WHEEL_UP,
+};
 use super::{colors, GridSize, Session};
 use crate::theme;
 
@@ -191,12 +193,14 @@ pub fn show(
     if response.hovered() {
         let events = ui.input(|i| i.events.clone());
         for ev in events {
-            if let egui::Event::MouseWheel { unit, delta, .. } = ev {
+            if let egui::Event::MouseWheel { unit, delta, modifiers, .. } = ev {
+                // Shift+roda pode chegar como rolagem horizontal (macOS).
+                let dy = if delta.y == 0.0 && modifiers.shift { delta.x } else { delta.y };
                 // Uma "linha" de roda ≈ 100 px no Chromium; o xterm converte pixels em linhas pela altura da célula.
                 let px = match unit {
-                    egui::MouseWheelUnit::Point => delta.y,
-                    egui::MouseWheelUnit::Line => delta.y * 100.0,
-                    egui::MouseWheelUnit::Page => delta.y * rect.height(),
+                    egui::MouseWheelUnit::Point => dy,
+                    egui::MouseWheelUnit::Line => dy * 100.0,
+                    egui::MouseWheelUnit::Page => dy * rect.height(),
                 };
                 state.wheel_accum += px / m.cell_h;
                 let lines = state.wheel_accum.trunc() as i32;
@@ -204,17 +208,17 @@ pub fn show(
                     continue;
                 }
                 state.wheel_accum -= lines as f32;
-                if mode.intersects(TermMode::MOUSE_MODE) {
+                if modifiers.shift {
+                    // Shift devolve a roda ao terminal (como na seleção): rola o histórico local.
+                    emu.term.scroll_display(Scroll::Delta(lines));
+                } else if mode.intersects(TermMode::MOUSE_MODE) {
                     if let Some(p) = pointer {
                         let (pt, _) = to_point(p, 0);
-                        let (c, r) = (pt.column.0 + 1, pt.line.0 + 1);
-                        let button = if lines > 0 { 64 } else { 65 };
+                        let (c, r) = (pt.column.0 + 1, pt.line.0 as usize + 1);
+                        let code = if lines > 0 { MOUSE_WHEEL_UP } else { MOUSE_WHEEL_DOWN } + mouse_mods(modifiers.alt, modifiers.ctrl);
+                        let sgr = mode.contains(TermMode::SGR_MOUSE);
                         for _ in 0..lines.unsigned_abs().min(10) {
-                            if mode.contains(TermMode::SGR_MOUSE) {
-                                out.to_pty.extend(format!("\x1b[<{button};{c};{r}M").into_bytes());
-                            } else if c < 224 && r < 224 {
-                                out.to_pty.extend([0x1b, b'[', b'M', 32 + button as u8, 32 + c as u8, 32 + r as u8]);
-                            }
+                            out.to_pty.extend(mouse_report(sgr, code, c, r, false).unwrap_or_default());
                         }
                     }
                 } else if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) {
@@ -579,6 +583,38 @@ mod tests {
         let outside = Pos2::new(500.0, 100.0);
         h.moved(outside);
         assert!(h.button(outside, true, Modifiers::NONE).is_empty());
+    }
+
+    /// Uma linha de roda para cima (+) ou para baixo (−) sobre a célula `at`.
+    fn wheel(h: &mut Harness, at: Pos2, lines: f32, modifiers: Modifiers) -> Vec<u8> {
+        h.moved(at);
+        let ev = Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, lines * 20.0),
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        };
+        h.frame(vec![ev], modifiers).to_pty
+    }
+
+    #[test]
+    fn wheel_reports_carry_the_modifiers() {
+        let mut h = Harness::new("\x1b[?1000h\x1b[?1006h");
+        assert_eq!(wheel(&mut h, cell(1, 1), 1.0, Modifiers::NONE), b"\x1b[<64;2;2M");
+        assert_eq!(wheel(&mut h, cell(1, 1), -1.0, Modifiers::CTRL), b"\x1b[<81;2;2M");
+        assert_eq!(wheel(&mut h, cell(1, 1), 1.0, Modifiers::ALT), b"\x1b[<72;2;2M");
+
+        let mut legacy = Harness::new("\x1b[?1000h");
+        assert_eq!(wheel(&mut legacy, cell(0, 0), 1.0, Modifiers::CTRL), vec![0x1b, b'[', b'M', 32 + 64 + 16, 33, 33]);
+    }
+
+    #[test]
+    fn shift_wheel_scrolls_the_local_history_even_in_mouse_mode() {
+        let mut h = Harness::new(&"linha\r\n".repeat(40));
+        h.session.shared.emu.lock().feed(b"\x1b[?1000h\x1b[?1006h");
+        assert!(wheel(&mut h, cell(1, 1), 2.0, Modifiers::SHIFT).is_empty(), "nada vai ao programa");
+        assert_eq!(h.session.shared.emu.lock().term.grid().display_offset(), 2);
+        assert_eq!(wheel(&mut h, cell(1, 1), 1.0, Modifiers::NONE), b"\x1b[<64;2;2M");
     }
 
     #[test]

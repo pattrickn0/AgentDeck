@@ -207,6 +207,9 @@ pub const MOUSE_RIGHT: u8 = 2;
 pub const MOUSE_MOTION: u8 = 32;
 /// Movimento sem nenhum botão pressionado (`3 + 32`).
 pub const MOUSE_NO_BUTTON: u8 = 3;
+/// Roda do mouse para cima e para baixo (somam os modificadores como os botões).
+pub const MOUSE_WHEEL_UP: u8 = 64;
+pub const MOUSE_WHEEL_DOWN: u8 = 65;
 
 /// Relatório de mouse (clique, soltar, movimento, roda) para o PTY.
 ///
