@@ -1101,8 +1101,8 @@ impl Deck {
     pub fn plan_panes(&mut self, area: egui::Rect) -> (Vec<usize>, Vec<PanePlan>) {
         let (shape, rects, groups) = if self.split_enabled && self.group_order.len() > 1 {
             let shape = split::grid_shape(self.group_order.len(), area.width(), area.height());
-            self.split_ratios.conform(&shape);
-            let rects = split::layout(area, &shape, &self.split_ratios);
+            // Só ajusta para desenhar: as proporções salvas mudam apenas quando o usuário arrasta.
+            let rects = split::layout(area, &shape, &self.split_ratios.fitted(&shape));
             let groups = split::assign(&self.group_order, rects.len());
             (shape, rects, groups)
         } else {
