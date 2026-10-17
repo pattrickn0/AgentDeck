@@ -48,6 +48,11 @@ Cada aba é uma **instância** com nome `modelo[@cargo[@nome]]`:
 - `claude@dev`: uma instância com cargo;
 - `claude@dev@ana`: a segunda instância do mesmo modelo e cargo, que ganha um nome.
 
+Além do nome, cada instância tem o **modelo de LLM** (`sonnet`, `opus`…), que não faz parte do id: aparece em cinza
+ao lado do nome na aba e na barra lateral, e escolhe-se por `ask-agent --model`, pelo menu "+ Novo agente" (a seta
+`›` do Claude, do Antigravity e do OpenCode lista os modelos) ou pelo padrão `roleModels` da configuração
+(`{"claude@dev": "sonnet", "opencode": "opencode/glm-5.3-flash-free"}`; `modelo@cargo` vale mais que `modelo`).
+
 O nome é o endereço usado pelo `ask-agent`. As abas voltam com o mesmo nome quando o app reabre.
 
 ### O ambiente de cada aba
@@ -199,10 +204,11 @@ ela dura.
 | :-- | :-- |
 | `ask-agent <agente> "mensagem"` | pergunta a outro agente (ou instância: `claude@dev`) |
 | `ask-agent --new <agente> "mensagem"` | abre outra instância do mesmo cargo |
+| `ask-agent --model <modelo> <agente> "mensagem"` | escolhe o LLM da instância ao abri-la (`sonnet`, `opencode/glm-5.3-flash-free`…); combina com `--new`; erro 409 se a aba já está aberta com outro modelo |
 | `ask-agent --reply <n> "resposta"` | responde à pergunta número `n` |
 | `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão |
-| `ask-agent --list` | lista os agentes disponíveis |
-| `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora) |
+| `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
+| `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --signal busy\|idle` | uso interno dos hooks (sai sempre com 0) |
 

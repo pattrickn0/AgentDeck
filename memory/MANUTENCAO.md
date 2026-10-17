@@ -37,6 +37,7 @@ crates/
 │   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /ask, /reply, /signal)
 │   ├── exchange.rs   perguntas entre abas esperando resposta (ciclos, profundidade, resposta por número)
 │   ├── instances.rs  nomes das instâncias (modelo@cargo@nome) e resolução do destino
+│   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
 │   ├── ollama.rs     agente Ollama: ferramentas, sandbox do workspace, loop de tool calling
@@ -86,7 +87,10 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
    por arquivo quando o agente é um shim `.cmd` no Windows (o `cmd.exe` executaria `&`, `|`… do texto).
 3. Se o CLI tiver hooks de início/fim de turno, ligue-os a `ask-agent --signal busy|idle` no `spawn_spec_for`
    (como o Claude e o Codex): a entrega nas abas fica mais precisa (`delivery.rs`).
-4. Opcionalmente, crie um alias em `ALIASES`, e atualize a lista de ids no teste `workspace_agents_md_and_spawn_specs`.
+4. Se o CLI escolhe o modelo, ensine `models::accepts_model`, `cli_args` (aba) e `headless_args` (headless); se não houver
+   opção no modo interativo (como o TUI do OpenCode), ache outro caminho (configuração por variável de ambiente) e confira
+   o resultado observando o CLI de verdade. Para listar modelos no menu, acrescente o agente em `Core::known_models`.
+5. Opcionalmente, crie um alias em `ALIASES`, e atualize a lista de ids no teste `workspace_agents_md_and_spawn_specs`.
 
 **Mudar uma cor ou tamanho.** Edite `crates/app/src/theme.rs` (larguras da barra direita: `RIGHT_*_W`).
 
@@ -134,7 +138,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`map`, `map-demo`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`newtab`, `newtab-models:<agente>`, `map`, `map-demo`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas
