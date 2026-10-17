@@ -17,8 +17,9 @@ pub struct DirEntry {
     pub ext: String,
 }
 
-/// Nomes ignorados na árvore (`.gemini` é a pasta de configuração do Antigravity, `~/.gemini/antigravity`).
-pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", "dados", "$RECYCLE.BIN", "target"];
+/// Nomes ignorados na árvore (`.gemini` é a pasta de configuração do Antigravity, `~/.gemini/antigravity`;
+/// `.agentdeck` guarda as worktrees das tarefas).
+pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".agentdeck", "dados", "$RECYCLE.BIN", "target"];
 
 fn is_ignored_entry(name: &str) -> bool {
     if cfg!(windows) {
@@ -137,7 +138,7 @@ fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
 // ---------- Watcher ----------
 
 /// Mudanças nestas pastas não recarregam a árvore (`.gemini`: configuração do Antigravity).
-const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", "dados", "target"];
+const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".agentdeck", "dados", "target"];
 
 /// `path` relativo a `base`, comparando por componentes (sem diferença de caixa nem prefixo
 /// verbatim `\\?\` no Windows: `c:\x`, `C:\x` e `\\?\C:\x` são a mesma pasta). `None` se estiver fora.

@@ -109,6 +109,17 @@ pub enum CoreEvent {
     UsageChanged,
     /// Resultado de uma operação assíncrona do GitHub (PRs, issues, Actions, logs).
     Github(crate::github::GithubEvent),
+    /// As tarefas do projeto mudaram (criação, início, relatório, mesclagem…): reler com
+    /// `Core::tasks`. Emitido a cada gravação, também quando a mudança veio da ponte (`ask-agent --task`).
+    TasksChanged {
+        project: String,
+    },
+    /// O core encerrou a instância `id` do projeto (tarefa mesclada ou descartada): a interface fecha
+    /// a aba dela, se estiver aberta.
+    CloseInstance {
+        project: String,
+        id: String,
+    },
 }
 
 /// Mensagem a digitar no terminal de uma instância de agente.
