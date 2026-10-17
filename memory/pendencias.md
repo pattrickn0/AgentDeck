@@ -127,15 +127,17 @@ Revisão com quatro revisores Claude (core da ponte, Deck/interface, terminal/CL
 Antigravity (git, workspace, download, Whisper, uso; relatório em `dados/anexos/revisao-antigravity.md`). O que
 foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
-**Git, workspace, download, Whisper e uso** (itens do relatório do Antigravity não corrigidos nesta rodada)
+**Git** (em andamento na branch `claude/git`)
 - [ ] Descartar arquivo em conflito (`Unmerged`) falha; pasta não rastreada com `.git` dentro precisa de `-ffd`; `diff --cc` (conflito) mal interpretado.
-- [ ] Watcher: prefixo verbatim `\\?\` não tratado; `.git` fora de `workspace/.git` (worktree, submódulo, workspace numa subpasta do repositório) não dispara `GitChanged`.
 - [ ] `commit.gpgsign` sem agente gráfico: o commit espera o timeout de 120 s (o erro já é explicado depois).
-- [ ] Download: thread órfã até 4 h depois de um travamento de conexão; `rename` do `.part` sem nova tentativa (antivírus segura o arquivo).
-- [ ] Whisper: extração do motor direto na pasta final (falha no meio deixa o motor CUDA quebrado de vez) e o pacote é apagado mesmo se a extração falhar; nome do `.wav` temporário só com milissegundos.
-- [ ] Uso: credencial vencida no Credential Manager impede o fallback para `oauth_creds.json`; janelas com `resetTime` no passado não zeram; 401 no primeiro host não tenta o segundo; Codex lê só o `rollout` mais novo (sem `rate_limits` numa aba nova).
 
 ## Concluído
+
+- [x] **Auditoria: workspace, download, Whisper e uso** (branch `claude/infra`, dev Sonnet a partir do wip do antigravity@infra):
+  - O watcher acompanha o git dir real (worktree, submódulo, subpasta) e trata `\\?\` e a caixa da unidade.
+  - O download tem leitura do socket com prazo perto do `stall_timeout` (sem thread órfã por horas), e o `rename` do `.part` tenta de novo.
+  - O motor do Whisper é extraído numa pasta de preparo e só troca no fim. O pacote só é apagado depois do sucesso, e o `.wav` tem nome único.
+  - Uso: fica a primeira credencial não vencida; janela com `resetTime` no passado zera; com vários buckets, fica o de maior uso; 401 tenta o segundo host; o Codex consulta até 5 rollouts; `rfc3339_ms` é estrito; nova tentativa em 20 s depois de falha.
 
 - [x] **Auditoria, interface** (branch `fix/interface`, claude@interface):
   - Estreitar a janela não apaga as proporções salvas da tela dividida (`Ratios::fitted` só ajusta para desenhar).

@@ -239,6 +239,13 @@ Com a pasta de trabalho num repositório git:
 - [ ] Numa aba em segundo plano ou de outro projeto, `printf '\e]52;c;%s\a' $(printf teste|base64)` não muda a área de transferência; na aba ativa, muda.
 - [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o commanddeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
 - [ ] No vim/htop com mouse ligado, Ctrl+roda e Alt+roda chegam ao programa com o modificador. Shift+roda rola o histórico do terminal, com ou sem programa usando o mouse.
+- [ ] Projeto que é uma worktree git (`git worktree add`) ou subpasta de repositório: commit, `git cherry-pick`/`git revert` com conflito e `git rebase -i` pelo terminal atualizam a aba Git sem reabrir o projeto.
+- [ ] Abrir o projeto por um caminho com outra caixa na unidade (`c:\...`): a árvore e o Git atualizam.
+- [ ] Download do Whisper: desconectar o Wi-Fi no meio. A nova tentativa aparece em ~30 s, sem travar por horas. Com o antivírus ativo, o download de 1,6 GB termina sem erro de rename.
+- [ ] Whisper CUDA: matar o app durante a extração. Na próxima abertura não existe `bin-cuda` pela metade, o `bin-cuda.staging` some e o `.zip` em `whisper\` é reaproveitado.
+- [ ] Ditado duas vezes seguidas, rápido: nenhum `audio-*.wav` sobra em `dados\anexos`. Fechar o app durante uma transcrição não deixa `whisper-cli.exe` rodando.
+- [ ] Antigravity com token vencido no Credential Manager e válido em `~\.gemini\oauth_creds.json`: a cota aparece. Sem login, o círculo reaparece em até 20 s depois do login.
+- [ ] Codex: abrir uma aba nova (rollout sem `rate_limits`): o uso da sessão anterior continua visível.
 - [ ] Arrastar devagar a borda da barra direita ou o divisor com o Claude aberto: durante o arrasto a aba não se redesenha; ao soltar, o Claude se redesenha uma vez na largura nova (no histórico fica no máximo uma cópia antiga por arrasto).
 - [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
 - [x] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.
