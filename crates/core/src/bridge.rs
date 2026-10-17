@@ -216,26 +216,17 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         return reply(req, 200, json!({ "id": c.id, "boss": team.boss, "crew": team.crew, "models": models }));
     }
     let route = req.url().to_owned();
+    if route == "/tasks" || route.starts_with("/tasks/") || route.starts_with("/tasks?") {
+        return tasks_route(&core, req, &auth, bodies);
+    }
     if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
     }
 
-    // Reserva o tamanho anunciado (sem `Content-Length`, o máximo) antes de ler.
-    let announced = req.body_length().map_or(MAX_BODY + 1, |n| (n as u64).min(MAX_BODY + 1));
-    let Some(_budget) = BodyBudget::reserve(bodies, announced) else {
-        return reply(req, 503, json!({ "error": "ponte ocupada: mensagens grandes demais em andamento" }));
+    let (msg, _budget) = match read_json(&mut req, bodies, false) {
+        Ok(v) => v,
+        Err((status, body)) => return reply(req, status, body),
     };
-    let mut body = Vec::new();
-    if req.as_reader().take(MAX_BODY + 1).read_to_end(&mut body).is_err() {
-        return reply(req, 400, json!({ "error": "JSON inválido" }));
-    }
-    if body.len() as u64 > MAX_BODY {
-        return reply(req, 413, json!({ "error": "mensagem grande demais (máximo de 16 MB)" }));
-    }
-    let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
-        return reply(req, 400, json!({ "error": "JSON inválido" }));
-    };
-    drop(body);
     let default_from = if route == "/ask" { "usuário" } else { "" };
     let caller = match caller(&core, &auth, &msg, default_from) {
         Ok(c) => c,
@@ -248,6 +239,31 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         _ => ask(&core, &caller, &msg, slot),
     };
     reply(req, status, out);
+}
+
+/// Lê o corpo JSON da requisição, reservando antes o tamanho anunciado no orçamento de corpos (o
+/// `BodyBudget` devolvido precisa viver até o fim do atendimento). Com `allow_empty`, um corpo vazio
+/// vale `{}`. Erro = (status, corpo da resposta).
+fn read_json(req: &mut Request, bodies: &Arc<AtomicU64>, allow_empty: bool) -> Result<(Value, BodyBudget), (u16, Value)> {
+    // Reserva o tamanho anunciado (sem `Content-Length`, o máximo) antes de ler.
+    let announced = req.body_length().map_or(MAX_BODY + 1, |n| (n as u64).min(MAX_BODY + 1));
+    let Some(budget) = BodyBudget::reserve(bodies, announced) else {
+        return Err((503, json!({ "error": "ponte ocupada: mensagens grandes demais em andamento" })));
+    };
+    let mut body = Vec::new();
+    if req.as_reader().take(MAX_BODY + 1).read_to_end(&mut body).is_err() {
+        return Err((400, json!({ "error": "JSON inválido" })));
+    }
+    if body.len() as u64 > MAX_BODY {
+        return Err((413, json!({ "error": "mensagem grande demais (máximo de 16 MB)" })));
+    }
+    if allow_empty && body.iter().all(u8::is_ascii_whitespace) {
+        return Ok((json!({}), budget));
+    }
+    match serde_json::from_slice::<Value>(&body) {
+        Ok(msg) => Ok((msg, budget)),
+        Err(_) => Err((400, json!({ "error": "JSON inválido" }))),
+    }
 }
 
 /// Quem está chamando. Com o token de um agente, é ele, no projeto dele (o `from` e o `project`
@@ -819,6 +835,174 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
     }
 }
 
+// ---------- Tarefas (`/tasks`) ----------
+
+/// O que uma chamada à rota de tarefas quer fazer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskAction {
+    List,
+    Show,
+    Create,
+    Start,
+    Done,
+    Return,
+    Merge,
+    Discard,
+}
+
+/// O que se lê do método e do caminho: `(ação, id da tarefa, project da query)`.
+type TaskRoute = (TaskAction, Option<String>, Option<String>);
+
+/// Lê método e caminho. Erro = (status, mensagem).
+fn parse_task_route(method: &Method, url: &str) -> Result<TaskRoute, (u16, String)> {
+    let (path, query) = url.split_once('?').unwrap_or((url, ""));
+    let project = query.split('&').find_map(|kv| kv.strip_prefix("project=")).filter(|p| !p.is_empty()).map(str::to_owned);
+    let rest = path.strip_prefix("/tasks").unwrap_or("").trim_matches('/');
+    let parts: Vec<&str> = if rest.is_empty() { Vec::new() } else { rest.split('/').collect() };
+    let unknown = || (404, "rota desconhecida".to_owned());
+    let id =
+        |text: &str| crate::tasks::parse_task_id(text).ok_or_else(|| (400, format!("id de tarefa inválido: \"{}\"", text.escape_debug())));
+    match (method, parts.as_slice()) {
+        (Method::Get, []) => Ok((TaskAction::List, None, project)),
+        (Method::Post, []) => Ok((TaskAction::Create, None, project)),
+        (Method::Get, [t]) => Ok((TaskAction::Show, Some(id(t)?), project)),
+        (Method::Post, [t, verb]) => {
+            let action = match *verb {
+                "start" => TaskAction::Start,
+                "done" => TaskAction::Done,
+                "return" => TaskAction::Return,
+                "merge" => TaskAction::Merge,
+                "discard" => TaskAction::Discard,
+                _ => return Err(unknown()),
+            };
+            Ok((action, Some(id(t)?), project))
+        }
+        _ => Err(unknown()),
+    }
+}
+
+/// Quem pode o quê. O agente de uma tarefa (`own` = o id dela) só consulta e entrega o relatório da
+/// própria tarefa; qualquer outro agente faz o resto, menos entregar o relatório de uma tarefa. O token
+/// mestre (testes e depuração; nenhum agente o recebe) pode tudo.
+fn task_permission(action: TaskAction, target: Option<&str>, master: bool, own: Option<&str>) -> Result<(), String> {
+    if master {
+        return Ok(());
+    }
+    match (action, own) {
+        (TaskAction::List | TaskAction::Show, _) => Ok(()),
+        (TaskAction::Done, Some(own)) if target == Some(own) => Ok(()),
+        (TaskAction::Done, _) => Err("só o agente da própria tarefa entrega o relatório (ask-agent --task done)".into()),
+        (_, Some(_)) => Err("o agente de uma tarefa só consulta tarefas e entrega o relatório da própria (ask-agent --task done)".into()),
+        (_, None) => Ok(()),
+    }
+}
+
+/// `GET /tasks`, `GET /tasks/<id>`, `POST /tasks` e `POST /tasks/<id>/start|done|return|merge|discard`.
+/// O projeto vem do token (com o mestre, do corpo ou de `?project=`).
+fn tasks_route(core: &Core, mut req: Request, auth: &Auth, bodies: &Arc<AtomicU64>) {
+    let method = req.method().clone();
+    let (action, id, query_project) = match parse_task_route(&method, req.url()) {
+        Ok(v) => v,
+        Err((status, error)) => return reply(req, status, json!({ "error": error })),
+    };
+    let mut msg = json!({});
+    let mut _budget = None;
+    if method == Method::Post {
+        match read_json(&mut req, bodies, true) {
+            Ok((m, b)) => (msg, _budget) = (m, Some(b)),
+            Err((status, body)) => return reply(req, status, body),
+        }
+    }
+    let Some(fields) = msg.as_object_mut() else {
+        return reply(req, 400, json!({ "error": "o corpo precisa ser um objeto JSON" }));
+    };
+    if let Some(p) = query_project.filter(|_| !fields.contains_key("project")) {
+        fields.insert("project".into(), Value::String(p));
+    }
+    let caller = match caller(core, auth, &msg, "usuário") {
+        Ok(c) => c,
+        Err(e) => return reply(req, 400, json!({ "error": e })),
+    };
+    let own = core.task_of_instance(&caller.project, &caller.id).map(|t| t.id);
+    if let Err(e) = task_permission(action, id.as_deref(), matches!(auth, Auth::Master), own.as_deref()) {
+        return reply(req, 403, json!({ "error": e }));
+    }
+    let (status, out) = run_task_action(core, &caller, action, id.as_deref(), &msg);
+    reply(req, status, out);
+}
+
+fn task_json(task: &crate::tasks::Task) -> Value {
+    serde_json::to_value(task).unwrap_or(Value::Null)
+}
+
+/// Texto opcional do corpo: ausente, `null` ou vazio = `None`; algo que não é texto = erro.
+fn body_text(msg: &Value, key: &str) -> Result<Option<String>, (u16, Value)> {
+    match msg.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s.clone()).filter(|s| !s.trim().is_empty())),
+        Some(_) => Err((400, json!({ "error": format!("\"{key}\" precisa ser um texto") }))),
+    }
+}
+
+/// Os campos de `POST /tasks`.
+fn task_spec(msg: &Value, creator: &str) -> Result<crate::tasks::TaskSpec, (u16, Value)> {
+    Ok(crate::tasks::TaskSpec {
+        title: body_text(msg, "title")?.unwrap_or_default(),
+        brief: body_text(msg, "brief")?.unwrap_or_default(),
+        kind: body_text(msg, "kind")?.unwrap_or_default(),
+        model: body_text(msg, "model")?,
+        base: body_text(msg, "base")?,
+        creator: Some(creator.to_owned()),
+    })
+}
+
+fn run_task_action(core: &Core, caller: &Caller, action: TaskAction, id: Option<&str>, msg: &Value) -> (u16, Value) {
+    use crate::tasks::TaskError;
+    let project = caller.project.as_str();
+    let id = id.unwrap_or_default();
+    let outcome = match action {
+        TaskAction::List => {
+            let tasks: Vec<Value> = core.tasks(project).iter().map(crate::tasks::Task::summary_json).collect();
+            return (200, json!({ "tasks": tasks }));
+        }
+        TaskAction::Show => {
+            core.task(project, id).ok_or_else(|| TaskError::NotFound(format!("tarefa \"{id}\" não encontrada neste projeto")))
+        }
+        TaskAction::Create => {
+            let spec = match task_spec(msg, &caller.id) {
+                Ok(spec) => spec,
+                Err(e) => return e,
+            };
+            match core.task_create(project, spec) {
+                Ok(task) if msg.get("start").and_then(Value::as_bool).unwrap_or(false) => match core.task_start(project, &task.id) {
+                    Ok(started) => Ok(started),
+                    Err(e) => {
+                        let task = core.task(project, &task.id).unwrap_or(task);
+                        let error = format!("a tarefa {} foi criada, mas não iniciou: {e}", task.id);
+                        return (e.http_status(), json!({ "error": error, "task": task_json(&task) }));
+                    }
+                },
+                other => other,
+            }
+        }
+        TaskAction::Start => core.task_start(project, id),
+        TaskAction::Merge => core.task_merge(project, id),
+        TaskAction::Discard => core.task_discard(project, id),
+        TaskAction::Done => match body_text(msg, "report") {
+            Ok(report) => core.task_done(project, id, &report.unwrap_or_default()),
+            Err(e) => return e,
+        },
+        TaskAction::Return => match body_text(msg, "feedback") {
+            Ok(feedback) => core.task_return(project, id, &feedback.unwrap_or_default()),
+            Err(e) => return e,
+        },
+    };
+    match outcome {
+        Ok(task) => (200, json!({ "task": task_json(&task) })),
+        Err(e) => (e.http_status(), json!({ "error": e.message() })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -911,6 +1095,60 @@ mod tests {
         // E volta a funcionar depois de esquecido.
         drop(queues.enter("a->b"));
         assert_eq!(queues.len(), 0);
+    }
+
+    #[test]
+    fn task_routes_are_parsed() {
+        let ok = |m: Method, url: &str| parse_task_route(&m, url).expect("rota");
+        assert_eq!(ok(Method::Get, "/tasks"), (TaskAction::List, None, None));
+        assert_eq!(ok(Method::Get, "/tasks?project=p1"), (TaskAction::List, None, Some("p1".into())));
+        assert_eq!(ok(Method::Post, "/tasks"), (TaskAction::Create, None, None));
+        assert_eq!(ok(Method::Get, "/tasks/t3"), (TaskAction::Show, Some("t3".into()), None));
+        assert_eq!(ok(Method::Get, "/tasks/3/"), (TaskAction::Show, Some("t3".into()), None));
+        for (verb, action) in [
+            ("start", TaskAction::Start),
+            ("done", TaskAction::Done),
+            ("return", TaskAction::Return),
+            ("merge", TaskAction::Merge),
+            ("discard", TaskAction::Discard),
+        ] {
+            assert_eq!(ok(Method::Post, &format!("/tasks/t3/{verb}?project=p9")), (action, Some("t3".into()), Some("p9".into())));
+        }
+        for (m, url, status) in [
+            (Method::Get, "/tasks/t3/start", 404),
+            (Method::Post, "/tasks/t3/explode", 404),
+            (Method::Post, "/tasks/t3", 404),
+            (Method::Get, "/tasks/t3/a/b", 404),
+            (Method::Get, "/tasks/abc", 400),
+            (Method::Post, "/tasks/../merge", 400),
+        ] {
+            assert_eq!(parse_task_route(&m, url).map_err(|e| e.0), Err(status), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_task_agent_only_reads_and_reports_its_own_task() {
+        use TaskAction::*;
+        // O agente da tarefa t1: consulta e entrega a própria.
+        for (action, target, ok) in [
+            (List, None, true),
+            (Show, Some("t2"), true),
+            (Done, Some("t1"), true),
+            (Done, Some("t2"), false),
+            (Create, None, false),
+            (Start, Some("t1"), false),
+            (Return, Some("t1"), false),
+            (Merge, Some("t1"), false),
+            (Discard, Some("t1"), false),
+        ] {
+            assert_eq!(task_permission(action, target, false, Some("t1")).is_ok(), ok, "{action:?} {target:?}");
+        }
+        // Qualquer outro agente faz o resto, menos entregar relatório.
+        for (action, ok) in [(List, true), (Create, true), (Start, true), (Return, true), (Merge, true), (Discard, true), (Done, false)] {
+            assert_eq!(task_permission(action, Some("t1"), false, None).is_ok(), ok, "{action:?}");
+        }
+        // O token mestre pode tudo.
+        assert!(task_permission(Done, Some("t1"), true, None).is_ok() && task_permission(Merge, Some("t1"), true, Some("t1")).is_ok());
     }
 
     #[test]
