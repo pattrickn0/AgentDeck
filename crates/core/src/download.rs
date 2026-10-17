@@ -826,10 +826,7 @@ mod tests {
             std::thread::sleep(Duration::from_secs(3));
         });
         let started = Instant::now();
-        let resp = agent(&format!("http://{addr}/x"), Duration::from_millis(200))
-            .get(&format!("http://{addr}/x"))
-            .call()
-            .expect("headers");
+        let resp = agent(&format!("http://{addr}/x"), Duration::from_millis(200)).get(&format!("http://{addr}/x")).call().expect("headers");
         let mut buf = [0u8; 64];
         let res = resp.into_body().into_reader().read(&mut buf);
         assert!(res.is_err(), "leitura deveria falhar por timeout");
