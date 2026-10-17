@@ -6,6 +6,7 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 
 | Documento | Leia quando |
 | :-- | :-- |
+| [AGENTDECK.md](AGENTDECK.md) | quiser saber para onde o produto vai, os princípios e a ordem do que vem a seguir |
 | [GERAL.md](GERAL.md) (este) | quiser o mapa geral |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | for mexer na ponte, nas abas, nas instâncias ou no protocolo entre agentes |
 | [MANUTENCAO.md](MANUTENCAO.md) | for compilar, testar, achar um arquivo ou seguir uma receita (ex.: novo agente) |
