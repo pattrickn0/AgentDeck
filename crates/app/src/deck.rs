@@ -668,6 +668,14 @@ impl Deck {
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { project, id, busy } => self.on_agent_signal(&project, &id, busy),
             CoreEvent::UsageChanged => {}
+            // A mesa de tarefas (fase B) relê `Core::tasks` quando ganhar a tela; por ora só o repaint do waker.
+            CoreEvent::TasksChanged { .. } => {}
+            CoreEvent::CloseInstance { project, id } => {
+                // Tarefa mesclada ou descartada: o core já esqueceu a instância; a aba (se aberta) fecha aqui.
+                if let Some(idx) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == id) {
+                    self.close_tab(idx);
+                }
+            }
             CoreEvent::Github(ev) => self.on_github_event(ev),
             CoreEvent::Download(p) => {
                 self.download = match p.state {
@@ -1082,9 +1090,11 @@ impl Deck {
         let idx = match found {
             Some(i) => i,
             None => {
+                // A aba de uma tarefa não conta no limite das abas abertas por outros agentes: o usuário a pediu.
+                let task = self.core.task_of_instance(&d.project, &id);
                 let reason = if !self.agents.knows(&d.ident.kind) {
                     Some(format!("o agente \"{}\" não está disponível", d.ident.kind))
-                } else if self.tabs.iter().filter(|t| t.auto).count() >= MAX_AUTO_TABS {
+                } else if task.is_none() && self.tabs.iter().filter(|t| t.auto).count() >= MAX_AUTO_TABS {
                     Some(format!("limite de {MAX_AUTO_TABS} abas abertas automaticamente; feche alguma"))
                 } else {
                     None
@@ -1096,7 +1106,10 @@ impl Deck {
                 }
                 self.add_tab(d.project.clone(), d.ident.clone(), false, true);
                 let label = self.tabs.last().map(|t| t.label.clone()).unwrap_or_else(|| id.clone());
-                self.system_in(&d.project, format!("Abri a aba de {label} para a conversa com outro agente."));
+                match &task {
+                    Some(t) => self.system_in(&d.project, format!("Abri a aba de {label} para a tarefa {}: {}.", t.id, t.title)),
+                    None => self.system_in(&d.project, format!("Abri a aba de {label} para a conversa com outro agente.")),
+                }
                 self.tabs.len() - 1
             }
         };

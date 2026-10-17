@@ -27,6 +27,7 @@ pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
 pub mod sessions;
+pub mod tasks;
 pub mod team;
 pub mod usage;
 pub mod util;
@@ -48,6 +49,7 @@ pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
+pub use tasks::{Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 pub use team::Team;
 pub use usage::{AgentUsage, UsageWindow};
 pub use workspace::DirEntry;
@@ -142,6 +144,8 @@ pub(crate) struct CoreInner {
     pub github: github::GithubState,
     /// Uso dos planos dos agentes (barra de título).
     pub usage: usage::UsageStore,
+    /// Tarefas (mesa de tarefas) de cada projeto, em `dados/tarefas/<projeto>.json`.
+    pub tasks: tasks::TaskStore,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
     _data_lock: Option<std::fs::File>,
 }
@@ -315,6 +319,7 @@ impl Core {
             git: git::GitState::default(),
             github: github::GithubState::default(),
             usage: usage::UsageStore::default(),
+            tasks: tasks::TaskStore::default(),
             _data_lock: Some(data_lock),
             paths,
         };

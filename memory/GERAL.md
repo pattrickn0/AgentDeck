@@ -211,6 +211,11 @@ ela dura.
 | `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
 | `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
+| `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -` | cria uma tarefa (o pedido vem pela entrada padrão, ou como último argumento): uma worktree + branch + agente próprios; `--start` já a inicia |
+| `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
+| `ask-agent --task start <id>` / `merge <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e limpa / descarta e limpa |
+| `ask-agent --task done <id> -` | o agente da tarefa entrega o relatório (pela entrada padrão) e a põe em revisão |
+| `ask-agent --task return <id> "feedback"` | devolve a tarefa em revisão ao agente com ajustes a fazer |
 | `ask-agent --signal busy\|idle` | uso interno dos hooks (sai sempre com 0) |
 
 ---

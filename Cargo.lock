@@ -521,6 +521,7 @@ dependencies = [
  "tempfile",
  "terminal_size",
  "ureq",
+ "which",
 ]
 
 [[package]]

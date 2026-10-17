@@ -34,10 +34,11 @@ crates/
 ├── core/   (commanddeck-core)   "backend": nada de interface gráfica
 │   ├── lib.rs        Core: a API que a interface usa (como os canais IPC)
 │   ├── agents.rs     lista de agentes, onde achar cada CLI, comando de cada aba
-│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /ask, /reply, /signal)
+│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /ask, /reply, /signal, /tasks)
 │   ├── exchange.rs   perguntas entre abas esperando resposta (ciclos, profundidade, resposta por número)
 │   ├── instances.rs  nomes das instâncias (modelo@cargo@nome) e resolução do destino
 │   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos
+│   ├── tasks.rs      mesa de tarefas: Task, ciclo de vida (criar/iniciar/relatório/devolver/mesclar/descartar), worktrees, armazenamento em dados/tarefas
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
 │   ├── ollama.rs     agente Ollama: ferramentas, sandbox do workspace, loop de tool calling
@@ -48,6 +49,9 @@ crates/
 │   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
 │   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
+│   ├── tests/tasks.rs    ciclo de vida das tarefas com o git real (pula se o git não estiver instalado)
+│   ├── tests/tasks_bridge.rs   rotas /tasks e permissões do agente de uma tarefa
+│   ├── tests/support/tasks_env.rs   cenário compartilhado dos dois (repositório, agente falso, git isolado)
 │   └── tests/github.rs   remoto origin com o git real; um teste `--ignored` com a rede e a credencial reais
 ├── app/    (commanddeck)        interface gráfica (o .exe principal)
 │   ├── main.rs / app.rs / window.rs   janela winit, OpenGL, loop de eventos
@@ -123,6 +127,13 @@ entregue por `Deck::send_to_instance` (abre a aba se não existir e enfileira co
 agente, com `request: 0`). Para ver sem rede: `COMMANDDECK_DEBUG_UI=github-demo` (ou `github-issues`,
 `github-actions`, `github-menu`, `github-norepo`, `github-error`). Para testar a rede e o login reais:
 `cargo test -p commanddeck-core --test github -- --ignored --nocapture`.
+
+**Mexer nas tarefas.** O modelo e o ciclo de vida ficam em `crates/core/src/tasks.rs` (`impl Core`: `task_create`, `task_start`,
+`task_done`, `task_return`, `task_merge`, `task_discard`; o git usa o executor seguro de `git.rs`); as rotas e as permissões, em
+`bridge.rs` (`tasks_route`, `task_permission`); o comando, em `crates/cli/src/bin/ask-agent.rs` (`parse_task`, com testes). Textos
+puros (slug, branch, mensagens ao agente, `exclude`) têm testes no próprio `tasks.rs`; o fluxo com o git real, em
+`tests/tasks.rs` e `tests/tasks_bridge.rs` (cenário em `tests/support/tasks_env.rs`; a identidade do git vem de um
+`GIT_CONFIG_GLOBAL` do teste). Mudou o que o agente recebe ao iniciar? É `tasks::start_message`.
 
 **Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
 

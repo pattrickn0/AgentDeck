@@ -19,15 +19,15 @@ use crate::process::{run_captured_raw, CapturedRaw, Exit};
 use crate::Core;
 
 /// Leituras rápidas (status, diff, branches).
-const READ_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Operações locais que escrevem (stage, checkout…).
-const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Commit (hooks e assinatura GPG podem demorar).
-const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Rede (fetch, pull, push).
 const NET_TIMEOUT: Duration = Duration::from_secs(60);
 /// Saída máxima guardada de um comando (o diff de um arquivo enorme é cortado).
-const MAX_OUT: usize = 4 << 20;
+pub(crate) const MAX_OUT: usize = 4 << 20;
 /// Diff mostrado: no máximo isto de bytes e de linhas.
 pub const DIFF_MAX_BYTES: usize = 1 << 20;
 pub const DIFF_MAX_LINES: usize = 10_000;
@@ -734,18 +734,18 @@ pub(crate) struct GitState {
     /// uma instalação feita com o app aberto).
     exe: Mutex<Option<(Instant, Option<PathBuf>)>>,
     /// Uma operação que escreve no repositório por vez (o git usa `index.lock`).
-    op: Mutex<()>,
+    pub(crate) op: Mutex<()>,
 }
 
 /// Repositório encontrado a partir do workspace.
-struct Repo {
-    git: PathBuf,
-    root: PathBuf,
-    git_dir: PathBuf,
+pub(crate) struct Repo {
+    pub(crate) git: PathBuf,
+    pub(crate) root: PathBuf,
+    pub(crate) git_dir: PathBuf,
     prefix: String,
 }
 
-fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
+pub(crate) fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
     let mut c = Command::new(git);
     c.current_dir(cwd).args(["-c", "core.quotepath=false", "-c", "color.ui=false"]).args(args);
     for (k, v) in [
@@ -775,7 +775,7 @@ fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
     c
 }
 
-fn run(cmd: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<CapturedRaw, GitError> {
+pub(crate) fn run(cmd: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<CapturedRaw, GitError> {
     let out = run_captured_raw(cmd, stdin, timeout, None, None, MAX_OUT).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             GitError::NotInstalled
@@ -809,19 +809,19 @@ fn nul_paths(paths: &[String]) -> Result<Vec<u8>, GitError> {
 }
 
 impl Repo {
-    fn cmd(&self, args: &[&str]) -> Command {
+    pub(crate) fn cmd(&self, args: &[&str]) -> Command {
         base_command(&self.git, &self.root, args)
     }
 
-    fn read(&self, args: &[&str]) -> Result<CapturedRaw, GitError> {
+    pub(crate) fn read(&self, args: &[&str]) -> Result<CapturedRaw, GitError> {
         run(self.cmd(args), None, READ_TIMEOUT)
     }
 
-    fn write(&self, args: &[&str], stdin: Option<Vec<u8>>) -> Result<CapturedRaw, GitError> {
+    pub(crate) fn write(&self, args: &[&str], stdin: Option<Vec<u8>>) -> Result<CapturedRaw, GitError> {
         run(self.cmd(args), stdin, WRITE_TIMEOUT)
     }
 
-    fn state(&self) -> RepoState {
+    pub(crate) fn state(&self) -> RepoState {
         let has = |p: &str| self.git_dir.join(p).exists();
         if has("rebase-merge") || has("rebase-apply") {
             RepoState::Rebasing
@@ -850,7 +850,7 @@ impl Repo {
     /// chave travada (ou sem agente/pinentry utilizável) o gpg falha na hora, em vez de deixar o
     /// commit esperar o `COMMIT_TIMEOUT` por um pedido de senha que ninguém vê. Devolve a explicação
     /// e NÃO mexe na configuração do usuário. Só vale para assinatura OpenPGP.
-    fn check_gpg_ready(&self) -> Result<(), GitError> {
+    pub(crate) fn check_gpg_ready(&self) -> Result<(), GitError> {
         if !self.is_gpgsign_enabled() {
             return Ok(());
         }
@@ -911,7 +911,7 @@ fn summary(out: &CapturedRaw) -> String {
 
 impl Core {
     /// Caminho do executável do git (ou `None`).
-    fn git_exe(&self) -> Option<PathBuf> {
+    pub(crate) fn git_exe(&self) -> Option<PathBuf> {
         let state = &self.inner.git;
         let mut cache = state.exe.lock();
         if let Some((at, exe)) = cache.as_ref() {
@@ -929,13 +929,19 @@ impl Core {
 
     /// Acha o repositório do workspace.
     fn git_repo(&self) -> Result<Repo, GitError> {
+        self.git_repo_at(&self.workspace())
+    }
+
+    /// Acha o repositório que contém a pasta `dir` (o das tarefas, que são por projeto e não só
+    /// do projeto ativo).
+    pub(crate) fn git_repo_at(&self, dir: &Path) -> Result<Repo, GitError> {
         let git = self.git_exe().ok_or(GitError::NotInstalled)?;
-        let ws = self.workspace();
+        let ws = dir;
         if ws.as_os_str().is_empty() {
             return Err(GitError::NotARepo);
         }
         let out =
-            run(base_command(&git, &ws, &["rev-parse", "--show-toplevel", "--absolute-git-dir", "--show-prefix"]), None, READ_TIMEOUT)?;
+            run(base_command(&git, ws, &["rev-parse", "--show-toplevel", "--absolute-git-dir", "--show-prefix"]), None, READ_TIMEOUT)?;
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         let mut lines = text.lines();
         let root = lines.next().map(PathBuf::from).ok_or(GitError::NotARepo)?;
