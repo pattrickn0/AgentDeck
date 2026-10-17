@@ -207,13 +207,36 @@ pub enum GithubError {
     NoGit,
     NotARepo,
     NoRemote,
-    NotGithubRemote { url: String },
+    NotGithubRemote {
+        url: String,
+    },
     Unauthorized,
-    RateLimited { reset_in_secs: Option<u64>, authenticated: bool },
+    RateLimited {
+        reset_in_secs: Option<u64>,
+        authenticated: bool,
+    },
     Forbidden(String),
-    NotFound { repo: String, authenticated: bool },
+    NotFound {
+        repo: String,
+        authenticated: bool,
+    },
+    /// HTTP 410: o recurso foi desativado no repositório (ex.: issues desligadas).
+    Gone,
     Network(String),
     Failed(String),
+}
+
+/// Tira usuário e senha/token de uma URL de remoto (`https://user:token@host/...` vira
+/// `https://***@host/...`) antes de ela ir para uma mensagem. A forma scp (`git@host:dono/repo`)
+/// não carrega segredo e fica como está.
+fn redact_remote_url(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else { return url.to_owned() };
+    let rest = &url[scheme_end + 3..];
+    let host_end = rest.find('/').unwrap_or(rest.len());
+    match rest[..host_end].rfind('@') {
+        Some(at) => format!("{}***@{}", &url[..scheme_end + 3], &rest[at + 1..]),
+        None => url.to_owned(),
+    }
 }
 
 impl fmt::Display for GithubError {
@@ -258,6 +281,7 @@ impl fmt::Display for GithubError {
                     )
                 }
             }
+            GithubError::Gone => write!(f, "Recurso desativado neste repositório do GitHub (HTTP 410)."),
             GithubError::Network(msg) => write!(f, "Falha de conexão com o GitHub: {msg}"),
             GithubError::Failed(msg) => write!(f, "{msg}"),
         }
@@ -719,7 +743,9 @@ pub(crate) struct GithubState {
     gh_exe: Mutex<Option<(Instant, Option<PathBuf>)>>,
     /// Token em memória (`Some(None)` = já procurou recentemente e não havia).
     token: Mutex<Option<(Instant, Option<SecretToken>)>>,
-    rate_limit: Mutex<Option<RateLimitInfo>>,
+    /// Limite da API por cota: `[sem login (60/h), com login (5.000/h)]`. São cotas separadas no
+    /// GitHub: esgotar uma não pode barrar a outra (ex.: entrar depois de gastar as 60 sem login).
+    rate_limit: Mutex<[Option<RateLimitInfo>; 2]>,
     overview_cache: Mutex<HashMap<RepoSlug, (Instant, GithubOverview)>>,
     pr_cache: Mutex<PrCacheMap>,
     run_jobs_cache: Mutex<RunJobsCacheMap>,
@@ -812,7 +838,7 @@ impl Core {
         match out.exit {
             Exit::Code(Some(0)) => {
                 let url = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-                parse_github_remote(&url).ok_or(GithubError::NotGithubRemote { url })
+                parse_github_remote(&url).ok_or_else(|| GithubError::NotGithubRemote { url: redact_remote_url(&url) })
             }
             Exit::TimedOut => Err(GithubError::Failed("o git demorou demais ao ler o remoto origin.".into())),
             _ => {
@@ -880,7 +906,7 @@ impl Core {
     }
 
     fn check_rate_limit(&self, authenticated: bool) -> Result<(), GithubError> {
-        let Some(rl) = *self.inner.github.rate_limit.lock() else { return Ok(()) };
+        let Some(rl) = self.inner.github.rate_limit.lock()[authenticated as usize] else { return Ok(()) };
         if rl.remaining == Some(0) {
             let now = now_epoch_s();
             if let Some(reset) = rl.reset_at_epoch_s {
@@ -892,7 +918,7 @@ impl Core {
         Ok(())
     }
 
-    fn record_rate_limit(&self, headers: &ureq::http::HeaderMap) -> RateLimitInfo {
+    fn record_rate_limit(&self, headers: &ureq::http::HeaderMap, authenticated: bool) -> RateLimitInfo {
         let get_u64 = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse::<u64>().ok());
         let info = RateLimitInfo {
             remaining: get_u64("x-ratelimit-remaining").map(|v| v as u32),
@@ -900,7 +926,7 @@ impl Core {
             reset_at_epoch_s: get_u64("x-ratelimit-reset"),
         };
         if info.remaining.is_some() || info.limit.is_some() {
-            *self.inner.github.rate_limit.lock() = Some(info);
+            self.inner.github.rate_limit.lock()[authenticated as usize] = Some(info);
         }
         info
     }
@@ -917,7 +943,7 @@ impl Core {
         }
         let mut resp = req.call().map_err(|e| GithubError::Network(e.to_string()))?;
         let status = resp.status().as_u16();
-        let rl = self.record_rate_limit(resp.headers());
+        let rl = self.record_rate_limit(resp.headers(), authenticated);
 
         match status {
             200 => resp.body_mut().read_json::<Value>().map_err(|e| GithubError::Failed(format!("resposta JSON inválida do GitHub: {e}"))),
@@ -941,6 +967,7 @@ impl Core {
                 }
             }
             404 => Err(GithubError::NotFound { repo: repo.full_name(), authenticated }),
+            410 => Err(GithubError::Gone),
             other => Err(GithubError::Failed(format!("o GitHub respondeu com HTTP {other}"))),
         }
     }
@@ -967,7 +994,7 @@ impl Core {
             .map_err(|e| GithubError::Network(e.to_string()))?;
 
         let status = resp.status().as_u16();
-        let rl = self.record_rate_limit(resp.headers());
+        let rl = self.record_rate_limit(resp.headers(), true);
 
         let final_resp = if matches!(status, 301 | 302 | 303 | 307 | 308) {
             let loc = resp
@@ -1032,7 +1059,7 @@ impl Core {
         };
         // Issues desativadas no repositório respondem 410: a aba mostra a lista vazia em vez de falhar.
         let issues_json = match self.github_get_json(&repo, &format!("{base}/issues?state=open&per_page=50"), token.as_ref()) {
-            Err(GithubError::Failed(_)) => Value::Array(Vec::new()),
+            Err(GithubError::Gone) => Value::Array(Vec::new()),
             other => other?,
         };
         let runs_json = self
@@ -1046,7 +1073,8 @@ impl Core {
 
         // Para os primeiros PRs abertos cujo commit não estava nas últimas 30 execuções, consulta
         // os check-runs do commit se houver folga no rate limit.
-        let remaining = self.inner.github.rate_limit.lock().and_then(|r| r.remaining).unwrap_or(60);
+        let bucket = token.is_some() as usize;
+        let remaining = self.inner.github.rate_limit.lock()[bucket].and_then(|r| r.remaining).unwrap_or(60);
         if remaining > 10 {
             for pr in prs.iter_mut().filter(|p| p.checks == CheckStatus::Neutral && !p.head_sha.is_empty()).take(5) {
                 if let Ok(checks_json) =
@@ -1063,7 +1091,7 @@ impl Core {
             prs,
             issues,
             runs,
-            rate_limit: *self.inner.github.rate_limit.lock(),
+            rate_limit: self.inner.github.rate_limit.lock()[bucket],
         };
         self.inner.github.overview_cache.lock().insert(repo, (Instant::now(), overview.clone()));
         Ok(overview)
@@ -1284,6 +1312,48 @@ mod tests {
         assert_eq!(parse_github_remote("https://github.com/dono/repo/extra"), None);
         assert_eq!(parse_github_remote("C:\\repos\\local"), None);
         assert_eq!(parse_github_remote("/var/git/repo.git"), None);
+    }
+
+    #[test]
+    fn a_remote_that_is_not_github_never_shows_its_credentials() {
+        assert_eq!(redact_remote_url("https://oauth2:glpat-XYZ@gitlab.com/org/repo.git"), "https://***@gitlab.com/org/repo.git");
+        assert_eq!(redact_remote_url("https://ghp_ABC@github.com/org"), "https://***@github.com/org");
+        assert_eq!(redact_remote_url("https://gitlab.com/org/repo.git"), "https://gitlab.com/org/repo.git");
+        assert_eq!(redact_remote_url("git@gitlab.com:org/repo.git"), "git@gitlab.com:org/repo.git");
+        // `@` no caminho não é credencial.
+        assert_eq!(redact_remote_url("https://host/org/a@b.git"), "https://host/org/a@b.git");
+        let shown = GithubError::NotGithubRemote { url: redact_remote_url("https://u:segredo@gitlab.com/o/r") }.to_string();
+        assert!(!shown.contains("segredo"), "{shown}");
+    }
+
+    #[test]
+    fn exhausting_the_anonymous_quota_does_not_block_the_token() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let root = tmp.path();
+        let paths = crate::paths::AppPaths {
+            app_dir: root.to_path_buf(),
+            bin_dir: root.join("bin"),
+            data_dir: root.join("dados"),
+            default_workspace: root.join("ws"),
+            whisper_dir: root.join("whisper"),
+            config_file: root.join("cfg").join("config.json"),
+        };
+        let opts = crate::StartOptions {
+            search_path: Some(Default::default()),
+            home_dir: Some(root.join("home")),
+            ollama_discovery: false,
+            watch_workspace: false,
+            config: Some(crate::Config::with_project(paths.default_workspace.clone())),
+            system_dirs: false,
+        };
+        let core = Core::start_with(paths, opts).expect("core").0;
+        let mut headers = ureq::http::HeaderMap::new();
+        headers.insert("x-ratelimit-remaining", "0".parse().unwrap());
+        headers.insert("x-ratelimit-reset", (now_epoch_s() + 3600).to_string().parse().unwrap());
+        core.record_rate_limit(&headers, false);
+        assert!(matches!(core.check_rate_limit(false), Err(GithubError::RateLimited { authenticated: false, .. })));
+        assert!(core.check_rate_limit(true).is_ok(), "a cota com login é outra");
+        core.shutdown();
     }
 
     #[test]

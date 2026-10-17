@@ -28,7 +28,12 @@ use commanddeck_core::Core;
 use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // O `ureq-proto` despeja os cabeçalhos da requisição em TRACE, inclusive o `Authorization` com o
+    // token do GitHub: ele e o `ureq` ficam no máximo em DEBUG, mesmo com RUST_LOG=trace.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .filter_module("ureq_proto", log::LevelFilter::Debug)
+        .filter_module("ureq", log::LevelFilter::Debug)
+        .init();
     crash::install(&AppPaths::detect().data_dir);
 
     let event_loop = EventLoop::<app::UserEvent>::with_user_event().build()?;

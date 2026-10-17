@@ -511,9 +511,33 @@ mod tests {
         assert_eq!(token.as_deref(), Some("ya29.file"));
     }
 
+    /// Lê a requisição HTTP inteira (cabeçalhos + corpo pelo Content-Length). Responder e fechar com
+    /// bytes ainda não lidos faz o Windows mandar RST em vez de FIN, e o cliente vê "conexão
+    /// redefinida" no lugar da resposta (o teste falhava só com a máquina carregada).
+    fn read_request(s: &mut std::net::TcpStream) {
+        use std::io::Read;
+        let mut data = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            let Ok(n) = s.read(&mut buf) else { return };
+            if n == 0 {
+                return;
+            }
+            data.extend_from_slice(&buf[..n]);
+            if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&data[..end]).to_lowercase();
+                let len =
+                    head.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
+                if data.len() >= end + 4 + len {
+                    return;
+                }
+            }
+        }
+    }
+
     #[test]
     fn http_401_on_first_host_tries_second_host() {
-        use std::io::{Read, Write};
+        use std::io::Write;
         use std::net::TcpListener;
 
         let l1 = TcpListener::bind("127.0.0.1:0").expect("bind 1");
@@ -523,15 +547,13 @@ mod tests {
 
         let t1 = std::thread::spawn(move || {
             if let Ok((mut s, _)) = l1.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = s.read(&mut buf);
+                read_request(&mut s);
                 let _ = s.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             }
         });
         let t2 = std::thread::spawn(move || {
             if let Ok((mut s, _)) = l2.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = s.read(&mut buf);
+                read_request(&mut s);
                 let body = r#"{"groups":[{"displayName":"Gemini Models","buckets":[{"window":"5h","remainingFraction":0.25}]}]}"#;
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
