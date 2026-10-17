@@ -26,3 +26,4 @@ ctrlc = "3"
 
 [dev-dependencies]
 tempfile.workspace = true
+which.workspace = true

@@ -9,6 +9,10 @@
 //!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
+//!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|"pedido"
+//!      ask-agent --task list | show <id> | start <id> | merge <id> | discard <id>
+//!      ask-agent --task done <id> -|"relatório"   (só o agente da própria tarefa)
+//!      ask-agent --task return <id> "feedback"
 //!
 //! `<agente>` é `modelo[@cargo[@nome]]`: `claude`, `claude@dev`, `claude@dev@ana`.
 //!
@@ -30,7 +34,7 @@ use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"   |   ask-agent --task new|list|show|start|merge|discard|done|return ... (tarefas: ask-agent --task)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -96,6 +100,9 @@ fn main() -> ExitCode {
         let state = args.get(1).map(String::as_str).unwrap_or("");
         let _ = bridge.request("POST", "/signal", Some(&json!({ "state": state })), Some(std::time::Duration::from_secs(3)));
         return ExitCode::SUCCESS;
+    }
+    if args.first().is_some_and(|a| a == "--task") {
+        return task_command(&bridge, &args[1..]);
     }
     let (force_new, model) = match take_flags(&mut args) {
         Ok(v) => v,
@@ -268,6 +275,264 @@ fn team(bridge: &Bridge) -> Result<Team, String> {
     Ok(Team { id, boss, crew: crew.unwrap_or_default(), models: models_of(&json) })
 }
 
+// ---------- Tarefas (`--task`) ----------
+
+const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|\"pedido\"   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|discard <id>   |   ask-agent --task done <id> -|\"relatório\"   |   ask-agent --task return <id> \"feedback\"";
+
+/// De onde vem um texto longo (pedido, relatório, feedback).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Body {
+    /// Escrito na linha de comando.
+    Inline(String),
+    /// `-`: entrada padrão.
+    Stdin,
+    /// Não foi dado: vale a entrada padrão se ela for um pipe/arquivo.
+    Missing,
+}
+
+/// Um subcomando de `--task`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TaskCmd {
+    New { title: String, brief: Body, agent: Option<String>, model: Option<String>, base: Option<String>, start: bool },
+    List,
+    Show(String),
+    Start(String),
+    Merge(String),
+    Discard(String),
+    Done { id: String, report: Body },
+    Return { id: String, feedback: Body },
+}
+
+/// `-` sozinho = entrada padrão; texto = linha de comando; nada = `Missing`.
+fn body_of(words: &[String]) -> Body {
+    match words {
+        [] => Body::Missing,
+        [dash] if dash == "-" => Body::Stdin,
+        words => Body::Inline(words.join(" ")),
+    }
+}
+
+/// O id de tarefa (`t3`, `3`) como a ponte o espera.
+fn task_id(arg: Option<&String>) -> Result<String, String> {
+    let arg = arg.ok_or("falta o id da tarefa (ex.: t3).")?;
+    commanddeck_core::tasks::parse_task_id(arg).ok_or_else(|| format!("id de tarefa inválido: \"{arg}\" (use t3 ou 3)."))
+}
+
+/// Lê o que vem depois de `--task`.
+fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
+    let Some(sub) = args.first().map(String::as_str) else { return Err("falta o subcomando de --task.".into()) };
+    let rest = &args[1..];
+    match sub {
+        "list" | "ls" => match rest {
+            [] => Ok(TaskCmd::List),
+            _ => Err("--task list não recebe argumentos.".into()),
+        },
+        "show" | "start" | "merge" | "discard" => {
+            if rest.len() > 1 {
+                return Err(format!("--task {sub} recebe só o id da tarefa."));
+            }
+            let id = task_id(rest.first())?;
+            Ok(match sub {
+                "show" => TaskCmd::Show(id),
+                "start" => TaskCmd::Start(id),
+                "merge" => TaskCmd::Merge(id),
+                _ => TaskCmd::Discard(id),
+            })
+        }
+        "done" => Ok(TaskCmd::Done { id: task_id(rest.first())?, report: body_of(&rest[1..]) }),
+        "return" => Ok(TaskCmd::Return { id: task_id(rest.first())?, feedback: body_of(&rest[1..]) }),
+        "new" => {
+            let (mut agent, mut model, mut base, mut start) = (None, None, None, false);
+            let mut words: Vec<String> = Vec::new();
+            let mut it = rest.iter();
+            while let Some(a) = it.next() {
+                let mut value = |name: &str, inline: Option<&str>| -> Result<String, String> {
+                    let v = match inline {
+                        Some(v) => Some(v.to_owned()),
+                        None => it.next().cloned(),
+                    };
+                    v.filter(|v| !v.is_empty() && !v.starts_with("--")).ok_or_else(|| format!("{name} precisa de um valor."))
+                };
+                match a.as_str() {
+                    "--start" => start = true,
+                    "--agent" => agent = Some(value("--agent", None)?),
+                    "--model" => model = Some(value("--model", None)?),
+                    "--base" => base = Some(value("--base", None)?),
+                    s if s.starts_with("--agent=") => agent = Some(value("--agent", Some(&s["--agent=".len()..]))?),
+                    s if s.starts_with("--model=") => model = Some(value("--model", Some(&s["--model=".len()..]))?),
+                    s if s.starts_with("--base=") => base = Some(value("--base", Some(&s["--base=".len()..]))?),
+                    s if s.starts_with("--") && s.len() > 2 => return Err(format!("opção desconhecida de --task new: {s}")),
+                    _ => words.push(a.clone()),
+                }
+            }
+            if words.is_empty() || words[0].trim().is_empty() || words[0] == "-" {
+                return Err("falta o título da tarefa: ask-agent --task new \"título\" ... -".into());
+            }
+            let title = words.remove(0);
+            Ok(TaskCmd::New { title, brief: body_of(&words), agent, model, base, start })
+        }
+        other => Err(format!("subcomando desconhecido de --task: {other}")),
+    }
+}
+
+/// Texto de um `Body`: a linha de comando ou a entrada padrão. Sem nada e num terminal, erro (ler
+/// travaria sem aviso).
+fn read_body(body: Body, what: &str) -> Result<String, String> {
+    let text = match body {
+        Body::Inline(text) => text,
+        Body::Stdin => read_stdin()?,
+        Body::Missing if !std::io::stdin().is_terminal() => read_stdin()?,
+        Body::Missing => return Err(format!("falta {what}: passe o texto como argumento ou pela entrada padrão (-).")),
+    };
+    Ok(text)
+}
+
+fn read_stdin() -> Result<String, String> {
+    let mut raw = Vec::new();
+    std::io::stdin().read_to_end(&mut raw).map_err(|e| format!("falha ao ler o stdin: {e}"))?;
+    Ok(String::from_utf8_lossy(&raw).into_owned())
+}
+
+/// Texto de um campo da tarefa na resposta da ponte.
+fn field<'a>(task: &'a Value, key: &str) -> &'a str {
+    task.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+fn status_label(status: &str) -> &str {
+    match status {
+        "draft" => "rascunho",
+        "running" => "andamento",
+        "review" => "revisão",
+        "merged" => "mesclada",
+        "discarded" => "descartada",
+        "failed" => "erro",
+        other => other,
+    }
+}
+
+/// `claude@t3 (sonnet)` ou só a instância.
+fn who(task: &Value) -> String {
+    match task.get("model").and_then(Value::as_str) {
+        Some(m) => format!("{} ({m})", field(task, "instance")),
+        None => field(task, "instance").to_owned(),
+    }
+}
+
+/// Uma linha de `--task list`: id, estado, agente com modelo e título.
+fn task_line(task: &Value) -> String {
+    format!("{:<5} {:<10} {:<26} {}", field(task, "id"), status_label(field(task, "status")), who(task), field(task, "title"))
+}
+
+/// `--task show`: tudo o que a pessoa (ou o agente) precisa para revisar.
+fn task_detail(task: &Value) -> String {
+    let mut out = format!("Tarefa {}: {}\n", field(task, "id"), field(task, "title"));
+    out.push_str(&format!("Estado: {}\n", status_label(field(task, "status"))));
+    out.push_str(&format!("Agente: {}\n", who(task)));
+    out.push_str(&format!("Base: {} · branch: {}\n", field(task, "base"), field(task, "branch")));
+    let wt = field(task, "worktree");
+    if !wt.is_empty() {
+        out.push_str(&format!("Worktree: {wt}\n"));
+    }
+    if let Some(c) = task.get("creator").and_then(Value::as_str) {
+        out.push_str(&format!("Criada por: {c}\n"));
+    }
+    if let Some(e) = task.get("error").and_then(Value::as_str) {
+        out.push_str(&format!("Erro: {e}\n"));
+    }
+    if let Some(stat) = task.get("diff_stat").and_then(Value::as_str) {
+        out.push_str(&format!("\nAlterações (git diff --stat {}...{}):\n{stat}\n", field(task, "base"), field(task, "branch")));
+    }
+    if let Some(report) = task.get("report").and_then(Value::as_str) {
+        out.push_str(&format!("\nRelatório:\n{report}\n"));
+    }
+    if let Some(events) = task.get("events").and_then(Value::as_array) {
+        out.push_str("\nHistórico:\n");
+        let skip = events.len().saturating_sub(10);
+        for e in events.iter().skip(skip) {
+            out.push_str(&format!("  - {}\n", field(e, "text")));
+        }
+    }
+    out
+}
+
+/// `ask-agent --task ...`: fala com `/tasks` da ponte.
+fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
+    let cmd = match parse_task(args) {
+        Ok(c) => c,
+        Err(e) => return fail(format!("{e}\n{TASK_USAGE}"), 2),
+    };
+    // Corpo já lido (a entrada padrão antes de falar com a ponte) e o pedido HTTP.
+    let (method, route, body) = match cmd {
+        TaskCmd::List => ("GET", "/tasks".to_owned(), None),
+        TaskCmd::Show(id) => ("GET", format!("/tasks/{id}"), None),
+        TaskCmd::Start(id) => ("POST", format!("/tasks/{id}/start"), Some(json!({}))),
+        TaskCmd::Merge(id) => ("POST", format!("/tasks/{id}/merge"), Some(json!({}))),
+        TaskCmd::Discard(id) => ("POST", format!("/tasks/{id}/discard"), Some(json!({}))),
+        TaskCmd::Done { id, report } => match read_body(report, "o relatório") {
+            Ok(r) if r.trim().is_empty() => return fail("relatório vazio: diga o que foi feito, os arquivos, os testes e o que falta.", 2),
+            Ok(r) => ("POST", format!("/tasks/{id}/done"), Some(json!({ "report": r }))),
+            Err(e) => return fail(e, 2),
+        },
+        TaskCmd::Return { id, feedback } => match read_body(feedback, "o feedback") {
+            Ok(f) if f.trim().is_empty() => return fail("feedback vazio: diga o que precisa mudar.", 2),
+            Ok(f) => ("POST", format!("/tasks/{id}/return"), Some(json!({ "feedback": f }))),
+            Err(e) => return fail(e, 2),
+        },
+        TaskCmd::New { title, brief, agent, model, base, start } => match read_body(brief, "o pedido da tarefa") {
+            Ok(b) => {
+                let mut body = json!({ "title": title, "brief": b, "start": start });
+                for (key, value) in [("kind", agent), ("model", model), ("base", base)] {
+                    if let Some(v) = value {
+                        body[key] = json!(v);
+                    }
+                }
+                ("POST", "/tasks".to_owned(), Some(body))
+            }
+            Err(e) => return fail(e, 2),
+        },
+    };
+    let new = route == "/tasks" && method == "POST";
+    let verb = route.rsplit('/').next().unwrap_or("").to_owned();
+    // Iniciar ou mesclar roda o git (pode levar um tempo): o limite é folgado.
+    let (status, json) = match bridge.request(method, &route, body.as_ref(), Some(Duration::from_secs(600))) {
+        Ok(v) => v,
+        Err(e) => return fail(e, 1),
+    };
+    if status != 200 {
+        return fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1);
+    }
+    if let Some(list) = json.get("tasks").and_then(Value::as_array) {
+        if list.is_empty() {
+            println!("Nenhuma tarefa neste projeto.");
+        }
+        for task in list {
+            println!("{}", task_line(task));
+        }
+        return ExitCode::SUCCESS;
+    }
+    let task = json.get("task").cloned().unwrap_or(Value::Null);
+    let id = field(&task, "id").to_owned();
+    match (new, verb.as_str()) {
+        (true, _) => {
+            println!("Tarefa {id} criada: {}", field(&task, "title"));
+            println!("  agente: {} · base: {} · branch: {}", who(&task), field(&task, "base"), field(&task, "branch"));
+            if field(&task, "status") == "running" {
+                println!("  iniciada na worktree {}", field(&task, "worktree"));
+                println!("  o agente avisa com: ask-agent --task done {id} -  (o relatório fica em: ask-agent --task show {id})");
+            } else {
+                println!("  inicie com: ask-agent --task start {id}");
+            }
+        }
+        (_, "start") => println!("Tarefa {id} iniciada: {} trabalha na worktree {}", who(&task), field(&task, "worktree")),
+        (_, "merge") => println!("Tarefa {id} mesclada em {}; worktree e branch removidas.", field(&task, "base")),
+        (_, "discard") => println!("Tarefa {id} descartada; worktree e branch removidas."),
+        (_, "done") => println!("Relatório da tarefa {id} entregue; ela está em revisão."),
+        (_, "return") => println!("Tarefa {id} devolvida a {} com o seu feedback.", field(&task, "instance")),
+        _ => print!("{}", task_detail(&task)),
+    }
+    ExitCode::SUCCESS
+}
+
 // ---------- Statusline do Claude Code (`--usage`) ----------
 
 /// `--usage`: lê o JSON que o Claude Code passa à statusline, manda o uso do plano à ponte
@@ -420,6 +685,112 @@ mod tests {
 
     fn rest(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn words(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn task(args: &[&str]) -> Result<TaskCmd, String> {
+        parse_task(&words(args))
+    }
+
+    #[test]
+    fn task_new_forms_are_parsed() {
+        let new = |title: &str, brief: Body, agent: Option<&str>, model: Option<&str>, base: Option<&str>, start: bool| TaskCmd::New {
+            title: title.into(),
+            brief,
+            agent: agent.map(String::from),
+            model: model.map(String::from),
+            base: base.map(String::from),
+            start,
+        };
+        assert_eq!(task(&["new", "Corrigir login", "-"]), Ok(new("Corrigir login", Body::Stdin, None, None, None, false)));
+        assert_eq!(task(&["new", "Corrigir login"]), Ok(new("Corrigir login", Body::Missing, None, None, None, false)));
+        assert_eq!(
+            task(&["new", "T", "Faça", "isto", "agora"]),
+            Ok(new("T", Body::Inline("Faça isto agora".into()), None, None, None, false))
+        );
+        assert_eq!(
+            task(&["new", "T", "--agent", "opencode", "--model", "opencode/glm", "--base", "dev", "--start", "-"]),
+            Ok(new("T", Body::Stdin, Some("opencode"), Some("opencode/glm"), Some("dev"), true))
+        );
+        // As opções valem em qualquer posição e com `=`.
+        assert_eq!(
+            task(&["new", "--start", "--agent=claude", "T", "--model=sonnet", "--base=main", "pedido"]),
+            Ok(new("T", Body::Inline("pedido".into()), Some("claude"), Some("sonnet"), Some("main"), true))
+        );
+        for bad in [
+            &["new"][..],
+            &["new", "-"],
+            &["new", "  "],
+            &["new", "T", "--agent"],
+            &["new", "T", "--model", "--start"],
+            &["new", "T", "--base="],
+            &["new", "T", "--agente", "x"],
+        ] {
+            assert!(task(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn task_other_forms_are_parsed() {
+        assert_eq!(task(&["list"]), Ok(TaskCmd::List));
+        assert_eq!(task(&["ls"]), Ok(TaskCmd::List));
+        assert_eq!(task(&["show", "t3"]), Ok(TaskCmd::Show("t3".into())));
+        assert_eq!(task(&["show", "3"]), Ok(TaskCmd::Show("t3".into())));
+        assert_eq!(task(&["start", "T4"]), Ok(TaskCmd::Start("t4".into())));
+        assert_eq!(task(&["merge", "t5"]), Ok(TaskCmd::Merge("t5".into())));
+        assert_eq!(task(&["discard", "t6"]), Ok(TaskCmd::Discard("t6".into())));
+        assert_eq!(task(&["done", "t3", "-"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::Stdin }));
+        assert_eq!(task(&["done", "t3"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::Missing }));
+        assert_eq!(
+            task(&["done", "t3", "feito", "tudo"]),
+            Ok(TaskCmd::Done { id: "t3".into(), report: Body::Inline("feito tudo".into()) })
+        );
+        assert_eq!(
+            task(&["return", "t3", "Faltou o teste."]),
+            Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Inline("Faltou o teste.".into()) })
+        );
+        assert_eq!(task(&["return", "t3", "-"]), Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Stdin }));
+        for bad in [
+            &[][..],
+            &["explodir"],
+            &["list", "x"],
+            &["show"],
+            &["show", "claude@t3"],
+            &["start", "t1", "t2"],
+            &["done"],
+            &["done", "xyz", "-"],
+            &["return"],
+        ] {
+            assert!(task(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn task_output_is_readable() {
+        let t = json!({
+            "id": "t3", "title": "Corrigir login", "status": "review", "base": "main", "branch": "tarefa/t3-corrigir-login",
+            "instance": "claude@t3", "model": "sonnet", "creator": "claude", "worktree": "/r/.agentdeck/worktrees/t3",
+            "diff_stat": " a.rs | 2 +-", "report": "Feito.", "events": [{ "at_ms": 1, "text": "criada" }, { "at_ms": 2, "text": "iniciada" }]
+        });
+        assert_eq!(task_line(&t), "t3    revisão    claude@t3 (sonnet)         Corrigir login");
+        let d = task_detail(&t);
+        for needle in [
+            "Tarefa t3: Corrigir login",
+            "Estado: revisão",
+            "Agente: claude@t3 (sonnet)",
+            "Base: main · branch: tarefa/t3-corrigir-login",
+            "Criada por: claude",
+            "a.rs | 2 +-",
+            "Relatório:\nFeito.",
+            "  - iniciada",
+        ] {
+            assert!(d.contains(needle), "{needle}\n{d}");
+        }
+        let draft = json!({ "id": "t4", "title": "T", "status": "draft", "instance": "ollama:qwen3.5:4b@t4" });
+        assert_eq!(task_line(&draft), "t4    rascunho   ollama:qwen3.5:4b@t4       T");
     }
 
     #[test]
