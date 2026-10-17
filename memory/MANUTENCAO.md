@@ -44,17 +44,20 @@ crates/
 │   ├── attachments.rs, sessions.rs, workspace.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── context.rs    ponto de extensão para RAG (vazio hoje)
 │   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
+│   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
-│   └── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
+│   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
+│   └── tests/github.rs   remoto origin com o git real; um teste `--ignored` com a rede e a credencial reais
 ├── app/    (commanddeck)        interface gráfica (o .exe principal)
 │   ├── main.rs / app.rs / window.rs   janela winit, OpenGL, loop de eventos
 │   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
 │   ├── terminal/     emulador de terminal (pty + alacritty_terminal + desenho + teclado)
 │   ├── agent_map.rs  mapa de conversas entre agentes em texto (render_map: função pura, com testes)
 │   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
+│   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
 │   ├── ui/           titlebar (barra de título + uso dos agentes em usage.rs), panes (janelas da tela dividida) + tabs (abas de cada janela), sidebar
-│   │                 (árvore), right_panel (barra direita: Conversa/Mapa/Git), map, git, compositor, menus
+│   │                 (árvore), right_panel (barra direita: Conversa/Mapa/Git/GitHub), map, git, github, compositor, menus
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas)
 │   └── audio.rs      som de notificação e microfone (cpal)
 └── cli/    (commanddeck-cli)    ask-agent e ollama-agent
@@ -105,6 +108,18 @@ arrasto) e `ui/tabs.rs` (faixa de abas). Para ver o arrasto sem mouse: `COMMANDD
 caminhos, nunca um shell; teste a interpretação da saída com bytes de exemplo e o fluxo em `tests/git.rs`. Para ver
 sem um repositório: `COMMANDDECK_DEBUG_UI=git-demo` (ou `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
 
+**Mexer na aba GitHub.** A leitura fica em `crates/core/src/github.rs` (`impl Core`: `github_refresh`,
+`github_load_pr`, `github_load_run_jobs`, `github_load_job_log`, todas em thread própria e devolvendo
+`CoreEvent::Github`); o parse da API é puro e testado com JSON de exemplo (`parse_pulls`, `parse_issues`,
+`parse_workflow_runs`, `parse_workflow_jobs`, `tail_log`, `parse_github_remote`, `parse_credential_fill`).
+O token nunca sai de `SecretToken`: não o coloque em log, `format!` de erro nem config. O estado e o tratamento
+dos eventos ficam em `crates/app/src/github_ui.rs`; a pintura, em `crates/app/src/ui/github.rs`. A mensagem
+enviada ao agente é montada no core (`format_pr_prompt`, `format_issue_prompt`, `format_failed_job_prompt`) e
+entregue por `Deck::send_to_instance` (abre a aba se não existir e enfileira como qualquer mensagem de outro
+agente, com `request: 0`). Para ver sem rede: `COMMANDDECK_DEBUG_UI=github-demo` (ou `github-issues`,
+`github-actions`, `github-menu`, `github-norepo`, `github-error`). Para testar a rede e o login reais:
+`cargo test -p commanddeck-core --test github -- --ignored --nocapture`.
+
 **Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
 
 **Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O agente Ollama já consulta os provedores registrados.
@@ -119,7 +134,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app. Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`map`, `map-demo`, `usage-demo`, `git`, `git-demo`, `git-diff`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app. Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`map`, `map-demo`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas

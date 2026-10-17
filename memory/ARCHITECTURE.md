@@ -151,6 +151,22 @@ bloqueantes; a UI chama numa thread):
   acima da pasta de trabalho (o `.git` não é vigiado), a aba relê a cada 10 s enquanto está aberta;
 - pull só por avanço direto (`--ff-only`); push sem upstream publica no único remoto (`push -u`).
 
+**GitHub** (`crates/core/src/github.rs`, aba GitHub da interface). PRs abertos (com o estado dos checks), issues
+abertas (sem os PRs) e execuções do Actions do repositório do remoto `origin` (`https://`, `git@github.com:` e
+`ssh://`; outro host = a aba explica e não faz nada):
+- API REST (`ureq`, só `https://api.github.com`) em threads de segundo plano; o resultado volta por
+  `CoreEvent::Github` (`GithubPayload::Overview`, `PrDetail`, `RunJobs`, `JobLog`), com cache em memória de 60 s
+  por repositório/PR/execução/job e atualização manual (`force`) pelo botão da aba;
+- **sem guardar token**: o token vem de `git credential fill` (`protocol=https`, `host=github.com`, com
+  `GCM_INTERACTIVE=never` e `GIT_TERMINAL_PROMPT=0`: nunca abre janela nem trava) ou, se o `gh` existir, de
+  `gh auth token`; vive só na memória (`SecretToken`, cujo `Debug` não o mostra) e nunca vai para log, config ou
+  mensagem de erro. Sem credencial, repositório público funciona (60 consultas/h; o log dos jobs exige login). Um
+  token recusado (401) é esquecido e a leitura tenta de novo sem ele;
+- o fim do log de um job que falhou: no máximo 200 linhas / 32 KiB (lê no máximo 8 MiB do fluxo); o redirecionamento
+  do GitHub para o armazenamento do log é seguido sem o cabeçalho `Authorization`;
+- erros 401/403/404/limite/rede viram `GithubError` com mensagem em português que diz o que fazer;
+- "Abrir no navegador" só aceita `https://github.com/…` (`Core::open_github_url`).
+
 **Janela e barra de título.** A janela é criada sem decoração (`with_decorations(false)`, com a sombra de volta
 no Windows por `with_undecorated_shadow`); `ui/titlebar.rs` desenha a barra e manda ao winit os comandos do egui
 (`ViewportCommand::StartDrag`, `Minimized`, `Maximized`, `BeginResize` nas faixas de 5 px das bordas), que o

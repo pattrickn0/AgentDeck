@@ -93,7 +93,7 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
-| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, três abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama) e **Git** (branch). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some na aba Git |
+| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some nas abas Git e GitHub |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
 que foi aberta (o terminal roda na pasta dele) e só aparece com ele na tela; trocar de projeto esconde as abas do
@@ -133,6 +133,16 @@ A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado
 Atualiza sozinha quando o `.git/` muda (commit ou checkout feitos pelo terminal ou por um agente), quando a
 pasta muda e quando a janela volta a ter foco. Nada de agentes por enquanto: tudo é manual.
 
+A aba **GitHub** mostra o repositório do remoto `origin` do projeto ativo (sem remoto do GitHub, ela só explica):
+- **PRs** abertos (número, título, autor, branch, rascunho e o estado dos checks), **Issues** abertas (sem os PRs) e
+  as últimas execuções do **Actions**; clicar abre o detalhe embaixo, com os checks/jobs e, para o job vermelho, o
+  fim do log (rola dentro da barra);
+- **Abrir no navegador** e **Enviar para agente**: um menu com os agentes abertos do projeto e a opção de abrir (ou
+  reaproveitar) uma instância com cargo (`claude@review`); a mensagem já vem pronta ("Revise o PR #12…", "Corrija o
+  job … que falhou…, com o fim do log") e entra na aba como qualquer mensagem de outro agente;
+- sem guardar token: usa o login do Git Credential Manager (o mesmo do `git push`) ou o `gh`, se estiver instalado;
+  sem login só lê repositórios públicos (60 consultas por hora). Atualiza ao abrir a aba (cache de 60 s) e pelo botão.
+
 ### Limites e proteções
 
 | Regra | Valor |
@@ -171,6 +181,8 @@ ela dura.
 - Ver no **Mapa** quem está conversando com quem neste momento.
 - Usar o **git** do projeto pela aba Git: ver alterações e diffs, preparar, fazer commit, trocar/criar branch,
   buscar, puxar e enviar.
+- Ver **PRs, issues e execuções do Actions** do GitHub pela aba GitHub e mandar um PR, uma issue ou um job que
+  falhou (com o fim do log) para um agente.
 - Citar arquivos do workspace (`@arquivo`), anexar arquivos e imagens, ditar por voz (whisper.cpp local).
 
 **Como agente, dentro de uma aba:**
