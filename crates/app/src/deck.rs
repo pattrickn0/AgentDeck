@@ -60,8 +60,9 @@ pub enum Action {
     CopyText(String),
 }
 
-/// Mensagem de outro agente esperando para ser digitada no terminal da aba.
+/// Mensagem de outro agente (ou da UI) esperando para ser digitada no terminal da aba.
 struct Queued {
+    /// Número da pergunta no core; 0 = mensagem da própria interface (ex.: aba GitHub), sem resposta a devolver.
     request: u64,
     prompt: String,
     /// Quem mandou (quem perguntou; ou quem respondeu, se `answer`).
@@ -77,6 +78,8 @@ pub enum RightView {
     Mapa,
     /// Repositório git do workspace (ver `git_ui.rs`).
     Git,
+    /// PRs, issues e Actions do GitHub (ver `github_ui.rs`).
+    GitHub,
 }
 
 pub struct Tab {
@@ -274,6 +277,8 @@ pub struct Deck {
 
     /// Aba Git (ver `git_ui.rs`).
     pub git: crate::git_ui::GitUi,
+    /// Aba GitHub (ver `github_ui.rs`).
+    pub github: crate::github_ui::GithubUi,
 
     // Árvore e Projetos
     /// Pasta do projeto ativo (vazia sem projeto).
@@ -478,6 +483,7 @@ impl Deck {
             debug_switch_project: None,
             quit_requested: false,
             git: crate::git_ui::GitUi::default(),
+            github: crate::github_ui::GithubUi::default(),
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
             feed: Vec::new(),
             thinking: HashMap::new(),
@@ -626,6 +632,7 @@ impl Deck {
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { project, id, busy } => self.on_agent_signal(&project, &id, busy),
             CoreEvent::UsageChanged => {}
+            CoreEvent::Github(ev) => self.on_github_event(ev),
             CoreEvent::Download(p) => {
                 self.download = match p.state {
                     DownloadState::Done => None,
@@ -837,7 +844,9 @@ impl Deck {
             tab.busy = false;
             tab.done = false;
             for q in tab.queue.drain() {
-                self.core.fail_delivery(q.request, "a aba encerrou antes de receber a mensagem");
+                if q.request != 0 {
+                    self.core.fail_delivery(q.request, "a aba encerrou antes de receber a mensagem");
+                }
             }
             self.core.instance_ended(&tab.project, &tab.ident.id());
             tab.session.print(&format!("\r\n\x1b[90m[processo encerrado (código {code}) — pressione Enter para reiniciar]\x1b[0m\r\n"));
@@ -849,14 +858,16 @@ impl Deck {
             match delivery::gate(&self.tab_state(i), since, now) {
                 Gate::Fail => {
                     for q in self.tabs[i].queue.drain() {
-                        self.core.fail_delivery(q.request, "a aba não está rodando");
+                        if q.request != 0 {
+                            self.core.fail_delivery(q.request, "a aba não está rodando");
+                        }
                     }
                 }
                 Gate::Ready => {
                     if let Some(q) = self.tabs[i].queue.pop() {
                         // Pergunta cancelada na fila (expirou, quem perguntou fechou): não faz o agente
                         // trabalhar à toa nem pedir um `--reply` que daria 404.
-                        if !q.answer && !self.core.question_pending(q.request) {
+                        if q.request != 0 && !q.answer && !self.core.question_pending(q.request) {
                             log::info!("pergunta #{} descartada antes de ser digitada: não espera mais resposta", q.request);
                         } else {
                             // O aviso de equipe só é gasto quando a mensagem é digitada de fato.
@@ -1046,6 +1057,40 @@ impl Deck {
             self.start(idx); // o processo tinha encerrado: sobe de novo para receber a pergunta
         }
         self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, from: d.from, answer: false });
+    }
+
+    /// Mensagem da própria interface (aba GitHub) para uma instância do projeto ativo: abre a aba
+    /// se ela não existir (ou, com `force_new`, abre outra do mesmo cargo) e enfileira o texto,
+    /// que é digitado quando a aba fica livre (mesma regra de `ask-agent`, em `delivery`).
+    /// Devolve o rótulo da aba de destino ou o motivo da recusa.
+    pub fn send_to_instance(&mut self, want: &Ident, force_new: bool, prompt: String) -> Result<String, String> {
+        let project = self.active_project.clone();
+        if project.is_empty() {
+            return Err("Abra uma pasta como projeto antes de enviar para um agente.".into());
+        }
+        if !self.agents.knows(&want.kind) || want.kind == "shell" {
+            return Err(format!("O agente \"{}\" não está disponível.", want.kind));
+        }
+        self.load_project(&project);
+        let ident = match self.core.resolve_instance(&project, want, force_new) {
+            Ok((ident, _)) => ident,
+            Err(options) => return Err(format!("\"{}\" é ambíguo: {}. Escolha uma delas.", want.id(), options.join(", "))),
+        };
+        let id = ident.id();
+        let idx = match self.tabs.iter().position(|t| t.project == project && t.ident.id() == id) {
+            Some(i) => i,
+            None => {
+                self.add_tab(project.clone(), ident, false, false);
+                self.tabs.len() - 1
+            }
+        };
+        if !self.tabs[idx].alive {
+            self.start(idx);
+        }
+        self.activate(idx);
+        self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), from: "você".into(), answer: false });
+        self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&id), prompt));
+        Ok(self.tabs[idx].label.clone())
     }
 
     /// O que a regra de entrega precisa saber da aba.
@@ -1301,7 +1346,9 @@ impl Deck {
         let mut tab = self.tabs.remove(idx);
         tab.session.kill();
         for q in tab.queue.drain() {
-            self.core.fail_delivery(q.request, "a aba foi fechada antes de receber a mensagem");
+            if q.request != 0 {
+                self.core.fail_delivery(q.request, "a aba foi fechada antes de receber a mensagem");
+            }
         }
         // Esquece a instância e libera quem esperava resposta dela.
         self.core.close_instance(&tab.project, &tab.ident.id());
@@ -1829,13 +1876,14 @@ impl Deck {
         self.after_project_change();
     }
 
-    /// O projeto da tela mudou: pasta, árvore (do zero) e git.
+    /// O projeto da tela mudou: pasta, árvore (do zero), git e github.
     fn after_project_change(&mut self) {
         self.workspace = self.core.workspace();
         self.tree = TreeState { expanded: HashSet::from([String::new()]), ..Default::default() };
         self.refresh_tree();
         self.git_reset_for_project();
         self.git_refresh();
+        self.github_reset_for_project();
         self.persist_tabs();
     }
 
@@ -2013,12 +2061,16 @@ impl Deck {
     /// Troca o que a barra direita mostra (voltar à Conversa zera as não vistas).
     pub fn set_right_view(&mut self, view: RightView) {
         let opening_git = view == RightView::Git && self.right_view != RightView::Git;
+        let opening_github = view == RightView::GitHub && self.right_view != RightView::GitHub;
         self.right_view = view;
         if view == RightView::Conversa {
             self.unseen = 0;
         }
         if opening_git {
             self.git_refresh();
+        }
+        if opening_github {
+            self.github_refresh();
         }
     }
 
@@ -2045,7 +2097,7 @@ impl Deck {
             .collect();
         let queued = |target: &str, request: u64| -> Option<usize> {
             let tab = visible.iter().find(|t| t.ident.id() == target)?;
-            tab.queue.iter().filter(|q| !q.answer).position(|q| q.request == request).map(|i| i + 1)
+            tab.queue.iter().filter(|q| !q.answer && q.request != 0).position(|q| q.request == request).map(|i| i + 1)
         };
         let mut links: Vec<Link> = cm
             .pending
@@ -2069,7 +2121,7 @@ impl Deck {
                 let to = t.ident.id();
                 t.queue
                     .iter()
-                    .filter(|q| q.answer)
+                    .filter(|q| q.answer && q.request != 0)
                     .map(move |q| AnswerInFlight { request: q.request, from: q.from.clone(), to: to.clone() })
                     .collect::<Vec<_>>()
             })
@@ -2118,8 +2170,8 @@ impl Deck {
     // ------------------------------------------------------------------
 
     pub fn request_composer_focus(&mut self) {
-        // Na aba Git o compositor fica escondido: volta para a Conversa.
-        if self.right_view == RightView::Git {
+        // Nas abas Git e GitHub o compositor fica escondido: volta para a Conversa.
+        if matches!(self.right_view, RightView::Git | RightView::GitHub) {
             self.set_right_view(RightView::Conversa);
         }
         self.focus_composer = true;
@@ -2188,7 +2240,7 @@ impl Deck {
         if paths.is_empty() {
             return;
         }
-        if self.right_view == RightView::Git {
+        if matches!(self.right_view, RightView::Git | RightView::GitHub) {
             self.set_right_view(RightView::Conversa);
         }
         let project = self.active_project.clone();

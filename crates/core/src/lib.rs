@@ -19,6 +19,7 @@ pub mod download;
 pub mod events;
 pub mod exchange;
 pub mod git;
+pub mod github;
 pub mod headless;
 pub mod instances;
 pub mod ollama;
@@ -135,6 +136,7 @@ pub(crate) struct CoreInner {
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub whisper: whisper::WhisperState,
     pub git: git::GitState,
+    pub github: github::GithubState,
     /// Uso dos planos dos agentes (barra de título).
     pub usage: usage::UsageStore,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
@@ -307,6 +309,7 @@ impl Core {
             watcher: Mutex::new(None),
             whisper: whisper::WhisperState::default(),
             git: git::GitState::default(),
+            github: github::GithubState::default(),
             usage: usage::UsageStore::default(),
             _data_lock: Some(data_lock),
             paths,
@@ -470,6 +473,12 @@ impl Core {
         let ident = Ident::parse(id)?;
         self.with_instances(project, |list| list.register(ident.clone()));
         Some(ident)
+    }
+
+    /// Resolve uma instância (modelo/cargo/nome) no projeto, criando-a se não existir (ou se
+    /// `force_new`). Retorna `(ident, created)` ou a lista de candidatos ambíguos.
+    pub fn resolve_instance(&self, project: &str, want: &Ident, force_new: bool) -> Result<(Ident, bool), Vec<String>> {
+        self.with_instances(project, |list| list.resolve_or_create(want, force_new))
     }
 
     /// A aba da instância fechou: esquece a instância, o token e a atividade dela, avisa quem

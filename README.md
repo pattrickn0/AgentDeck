@@ -15,6 +15,8 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
   **Mapa** (em texto de terminal) de quem está conversando com quem agora.
 - **Compositor** na barra direita: a mensagem (com anexos e áudio transcrito) vai para a **aba ativa**.
 - **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
+- **GitHub** do projeto noutra aba: PRs abertos com os checks, issues, execuções do Actions e o fim do log do job que
+  falhou; um clique manda o PR ou a falha para um agente.
 - Explorador de arquivos do workspace: clique insere `@arquivo` na mensagem, duplo clique abre no sistema.
 - Anexos por botão, arrastar e soltar ou colar imagem (Ctrl+V).
 - Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU); o áudio é apagado logo após transcrever.

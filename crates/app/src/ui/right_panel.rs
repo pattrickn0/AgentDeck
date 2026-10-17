@@ -34,6 +34,7 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) {
             RightView::Conversa => draw_feed(deck, ui, body),
             RightView::Mapa => map::draw(deck, ui, body),
             RightView::Git => super::git::draw(deck, ui, body),
+            RightView::GitHub => super::github::draw(deck, ui, body),
         }
     }
     if comp_h > 0.0 {
@@ -92,10 +93,13 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         Some(st) => format!("Git · {}", crate::git_ui::chip_text(st)),
         None => "Git".to_string(),
     };
+    let gh_badge = deck.github.open_prs_count();
+    let gh_tip = deck.github.tab_tooltip();
     let tabs = [
         (RightView::Conversa, HeadTab { id: "conversa", icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
         (RightView::Mapa, HeadTab { id: "mapa", icon: Icon::Diagram, tip: "Mapa de agentes", badge: 0 }),
         (RightView::Git, HeadTab { id: "git", icon: Icon::GitBranch, tip: &git_tip, badge: git_badge }),
+        (RightView::GitHub, HeadTab { id: "github", icon: Icon::GitHub, tip: &gh_tip, badge: gh_badge }),
     ];
     let mut x = rect.min.x + 6.0;
     for (target, tab) in tabs {
