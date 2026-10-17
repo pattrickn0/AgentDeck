@@ -191,28 +191,36 @@ impl Instances {
     /// - nada encontrado (ou `force_new`) → cria.
     pub fn resolve_or_create(&mut self, want: &Ident, force_new: bool) -> Result<(Ident, bool), Vec<String>> {
         if !force_new {
-            if let Some(found) = self.get(&want.id()) {
-                return Ok((found.clone(), false));
-            }
-            if want.name.is_none() {
-                let same_role: Vec<&Ident> = self.list.iter().filter(|i| i.kind == want.kind && i.role == want.role).collect();
-                match same_role.len() {
-                    1 => return Ok((same_role[0].clone(), false)),
-                    n if n > 1 => return Err(same_role.iter().map(|i| i.id()).collect()),
-                    _ => {}
-                }
-                // Só o modelo: sem principal, serve a única instância dele.
-                if want.role.is_none() {
-                    let any: Vec<&Ident> = self.list.iter().filter(|i| i.kind == want.kind).collect();
-                    match any.len() {
-                        1 => return Ok((any[0].clone(), false)),
-                        n if n > 1 => return Err(any.iter().map(|i| i.id()).collect()),
-                        _ => {}
-                    }
-                }
+            if let Some(found) = self.find(want)? {
+                return Ok((found, false));
             }
         }
         Ok((self.allocate(&want.kind, want.role.as_deref(), want.name.as_deref()), true))
+    }
+
+    /// Como [`Instances::resolve_or_create`], sem criar: `Ok(None)` se nenhuma instância serve.
+    pub fn find(&self, want: &Ident) -> Result<Option<Ident>, Vec<String>> {
+        if let Some(found) = self.get(&want.id()) {
+            return Ok(Some(found.clone()));
+        }
+        if want.name.is_none() {
+            let same_role: Vec<&Ident> = self.list.iter().filter(|i| i.kind == want.kind && i.role == want.role).collect();
+            match same_role.len() {
+                1 => return Ok(Some(same_role[0].clone())),
+                n if n > 1 => return Err(same_role.iter().map(|i| i.id()).collect()),
+                _ => {}
+            }
+            // Só o modelo: sem principal, serve a única instância dele.
+            if want.role.is_none() {
+                let any: Vec<&Ident> = self.list.iter().filter(|i| i.kind == want.kind).collect();
+                match any.len() {
+                    1 => return Ok(Some(any[0].clone())),
+                    n if n > 1 => return Err(any.iter().map(|i| i.id()).collect()),
+                    _ => {}
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -365,6 +373,18 @@ mod tests {
         assert_eq!(r.resolve_or_create(&id("claude@dev"), false).unwrap(), (id("claude@dev@ana"), false), "uma só: serve");
         r.register(id("claude@dev@bia"));
         assert_eq!(r.resolve_or_create(&id("claude@dev"), false).unwrap_err().len(), 2);
+    }
+
+    #[test]
+    fn finding_never_creates() {
+        let mut r = Instances::default();
+        assert_eq!(r.find(&Ident::main("claude")), Ok(None));
+        assert!(r.ids().is_empty());
+        r.register(id("antigravity@dev"));
+        assert_eq!(r.find(&Ident::main("antigravity")), Ok(Some(id("antigravity@dev"))), "a única do modelo");
+        assert_eq!(r.find(&id("antigravity@qa")), Ok(None));
+        r.register(id("antigravity@qa"));
+        assert_eq!(r.find(&Ident::main("antigravity")).unwrap_err().len(), 2);
     }
 
     #[test]

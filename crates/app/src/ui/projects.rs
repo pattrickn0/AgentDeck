@@ -738,15 +738,7 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         ctx.data_mut(|d| d.insert_temp(Id::new("proj-ctx-menu"), None::<(String, PathBuf, String, Pos2)>));
     } else if action_remove {
         ctx.data_mut(|d| d.insert_temp(Id::new("proj-ctx-menu"), None::<(String, PathBuf, String, Pos2)>));
-        let ok = rfd::MessageDialog::new()
-            .set_title("Remover projeto")
-            .set_description(format!("Deseja remover \"{name}\" da lista de projetos?"))
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .show()
-            == rfd::MessageDialogResult::Yes;
-        if ok {
-            deck.remove_project_by_id(&id);
-        }
+        deck.confirm_remove_project(id, name);
     } else if ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu_rect.contains(p)))
         || ctx.input(|i| i.key_pressed(egui::Key::Escape))
     {
@@ -760,12 +752,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
     let Some((id, mut buffer)) = modal_data else { return };
 
     let screen = ctx.content_rect();
-    // Backdrop escuro
-    ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("proj-rename-backdrop"))).rect_filled(
-        screen,
-        0.0,
-        theme::rgba(0, 0, 0, 0.5),
-    );
+    super::modal_backdrop(deck, ctx, "proj-rename-backdrop");
 
     let w = 360.0;
     let h = 145.0;

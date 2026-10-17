@@ -224,6 +224,8 @@ fn dividers(deck: &mut Deck, ui: &mut Ui, area: Rect, shape: &[usize], plans: &[
     }
     let mut changed = false;
     let mut stopped = false;
+    // As salvas só se adaptam ao formato atual quando o usuário mexe num divisor.
+    let touched = |deck: &mut Deck| deck.split_ratios.conform(shape);
     // Entre linhas.
     for (r, row) in rows.iter().enumerate().take(rows.len().saturating_sub(1)) {
         let Some(above) = row.first() else { continue };
@@ -231,6 +233,9 @@ fn dividers(deck: &mut Deck, ui: &mut Ui, area: Rect, shape: &[usize], plans: &[
         let resp = ui.interact(line.expand2(Vec2::new(0.0, 3.0)), Id::new(("split-row", r)), Sense::click_and_drag());
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+        }
+        if resp.dragged() || resp.double_clicked() {
+            touched(deck);
         }
         if resp.dragged() {
             split::drag(&mut deck.split_ratios.rows, r, resp.drag_delta().y, area.height(), split::MIN_H);
@@ -252,6 +257,9 @@ fn dividers(deck: &mut Deck, ui: &mut Ui, area: Rect, shape: &[usize], plans: &[
             let resp = ui.interact(line.expand2(Vec2::new(3.0, 0.0)), Id::new(("split-col", r, c)), Sense::click_and_drag());
             if resp.hovered() || resp.dragged() {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+            }
+            if resp.dragged() || resp.double_clicked() {
+                touched(deck);
             }
             if let Some(cols) = deck.split_ratios.cols.get_mut(r) {
                 if resp.dragged() {

@@ -8,6 +8,16 @@
 /// Taxa exigida pelo whisper.cpp.
 pub const WHISPER_RATE: u32 = 16_000;
 
+/// Duração máxima de uma gravação: a interface para e transcreve ao chegar nela, e a captura
+/// não guarda mais do que isso (48 kHz estéreo ≈ 115 MB), mesmo se a interface não parar.
+pub const MAX_RECORDING_SECS: u32 = 300;
+
+/// Acrescenta amostras sem passar de `max` no total (o resto é descartado).
+pub fn push_capped(buf: &mut Vec<f32>, data: impl Iterator<Item = f32>, max: usize) {
+    let room = max.saturating_sub(buf.len());
+    buf.extend(data.take(room));
+}
+
 /// Sintetiza o chime de 2 tons (D5 587 Hz → A5 880 Hz) em mono, na taxa `rate`:
 /// seno 587,33→880 Hz (rampa exponencial em 0,12 s) + triângulo 880 Hz a partir de 0,06 s,
 /// ganho 0,001 → 0,2 (0,04 s) → 0,001 (0,45 s), exatamente como no Web Audio.
@@ -217,21 +227,22 @@ mod imp {
         let format = supported.sample_format();
         let config: StreamConfig = supported.into();
         let (ch, rate) = (config.channels as usize, config.sample_rate);
+        let max = ch * rate as usize * super::MAX_RECORDING_SECS as usize;
         let stream = match format {
-            SampleFormat::F32 => build_in::<f32>(&device, config, buf),
-            SampleFormat::I16 => build_in::<i16>(&device, config, buf),
-            SampleFormat::U16 => build_in::<u16>(&device, config, buf),
-            SampleFormat::I32 => build_in::<i32>(&device, config, buf),
-            SampleFormat::I8 => build_in::<i8>(&device, config, buf),
-            SampleFormat::U8 => build_in::<u8>(&device, config, buf),
-            SampleFormat::F64 => build_in::<f64>(&device, config, buf),
+            SampleFormat::F32 => build_in::<f32>(&device, config, buf, max),
+            SampleFormat::I16 => build_in::<i16>(&device, config, buf, max),
+            SampleFormat::U16 => build_in::<u16>(&device, config, buf, max),
+            SampleFormat::I32 => build_in::<i32>(&device, config, buf, max),
+            SampleFormat::I8 => build_in::<i8>(&device, config, buf, max),
+            SampleFormat::U8 => build_in::<u8>(&device, config, buf, max),
+            SampleFormat::F64 => build_in::<f64>(&device, config, buf, max),
             other => Err(format!("formato de captura não suportado: {other}")),
         }?;
         stream.play().map_err(|e| e.to_string())?;
         Ok((stream, ch, rate))
     }
 
-    fn build_in<T>(device: &cpal::Device, config: StreamConfig, buf: Arc<Mutex<Vec<f32>>>) -> Result<cpal::Stream, String>
+    fn build_in<T>(device: &cpal::Device, config: StreamConfig, buf: Arc<Mutex<Vec<f32>>>, max: usize) -> Result<cpal::Stream, String>
     where
         T: SizedSample,
         f32: FromSample<T>,
@@ -241,7 +252,7 @@ mod imp {
                 config,
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     let mut b = buf.lock();
-                    b.extend(data.iter().map(|s| s.to_sample::<f32>()));
+                    super::push_capped(&mut b, data.iter().map(|s| s.to_sample::<f32>()), max);
                 },
                 |e| log::warn!("stream de entrada: {e}"),
                 None,
@@ -284,6 +295,15 @@ mod tests {
         // Começa quase mudo e termina quase mudo.
         assert!(s[..10].iter().all(|v| v.abs() < 0.01));
         assert!(s[s.len() - 10..].iter().all(|v| v.abs() < 0.01));
+    }
+
+    #[test]
+    fn recording_stops_growing_at_the_limit() {
+        let mut buf = vec![0.0; 3];
+        push_capped(&mut buf, [1.0, 2.0, 3.0].into_iter(), 5);
+        assert_eq!(buf, [0.0, 0.0, 0.0, 1.0, 2.0]);
+        push_capped(&mut buf, [4.0].into_iter(), 5);
+        assert_eq!(buf.len(), 5);
     }
 
     #[test]
