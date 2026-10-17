@@ -30,8 +30,21 @@ pub fn absolutize(p: &Path) -> PathBuf {
     normalize_lexical(&joined)
 }
 
+/// Remove o prefixo verbatim do Windows (`\\?\C:\…` → `C:\…`, `\\?\UNC\srv\…` → `\\srv\…`).
+pub fn strip_verbatim(p: &Path) -> PathBuf {
+    let Some(s) = p.to_str() else { return p.to_path_buf() };
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\").or_else(|| s.strip_prefix(r"\\?\unc\")) {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    p.to_path_buf()
+}
+
 /// Normalização puramente lexical: remove `.`, aplica `..` (sem passar da raiz).
 pub fn normalize_lexical(p: &Path) -> PathBuf {
+    let p = strip_verbatim(p);
     let mut out = PathBuf::new();
     for comp in p.components() {
         match comp {
@@ -52,10 +65,17 @@ pub fn normalize_lexical(p: &Path) -> PathBuf {
     out
 }
 
-/// Compara componentes de caminho (case-insensitive no Windows, como o sistema de arquivos).
-fn same_component(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
+/// Compara componentes de caminho (case-insensitive e sem prefixo verbatim `\\?\` no Windows).
+pub(crate) fn same_component(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
     if cfg!(windows) {
-        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+        fn norm(s: &std::ffi::OsStr) -> String {
+            let s = s.to_string_lossy();
+            if let Some(r) = s.strip_prefix(r"\\?\UNC\").or_else(|| s.strip_prefix(r"\\?\unc\")) {
+                return format!(r"\\{}", r.to_lowercase());
+            }
+            s.strip_prefix(r"\\?\").unwrap_or(&s).to_lowercase()
+        }
+        norm(a) == norm(b)
     } else {
         a == b
     }

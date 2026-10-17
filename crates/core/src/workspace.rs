@@ -20,6 +20,14 @@ pub struct DirEntry {
 /// Nomes ignorados na árvore (`.gemini` é a pasta de configuração do Antigravity, `~/.gemini/antigravity`).
 pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", "dados", "$RECYCLE.BIN", "target"];
 
+fn is_ignored_entry(name: &str) -> bool {
+    if cfg!(windows) {
+        IGNORED.iter().any(|i| i.eq_ignore_ascii_case(name))
+    } else {
+        IGNORED.contains(&name)
+    }
+}
+
 pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
     // Só subpastas do workspace (`""` = a raiz): nada de `..`, absoluto ou `C:` no Windows.
     if !rel_dir.is_empty() && !crate::git::safe_rel(rel_dir) {
@@ -27,15 +35,20 @@ pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
     }
     let target = workspace.join(rel_dir);
     let Ok(rd) = std::fs::read_dir(&target) else { return Vec::new() };
+    let rel_norm = rel_dir.replace('\\', "/");
+    let rel_norm = rel_norm.trim_start_matches("./").trim_matches('/');
     let mut items: Vec<DirEntry> = rd
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            if IGNORED.contains(&name.as_str()) {
+            if is_ignored_entry(&name) {
                 return None;
             }
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            let rel_path = if rel_dir.is_empty() { name.clone() } else { format!("{}/{}", rel_dir.trim_end_matches('/'), name) };
+            let is_dir = e
+                .file_type()
+                .map(|t| if t.is_symlink() { std::fs::metadata(e.path()).is_ok_and(|m| m.is_dir()) } else { t.is_dir() })
+                .unwrap_or(false);
+            let rel_path = if rel_norm.is_empty() || rel_norm == "." { name.clone() } else { format!("{rel_norm}/{name}") };
             let ext = if is_dir {
                 String::new()
             } else {
@@ -126,10 +139,12 @@ fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
 /// Mudanças nestas pastas não recarregam a árvore (`.gemini`: configuração do Antigravity).
 const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", "dados", "target"];
 
-/// `path` relativo a `base`, comparando por componentes (sem diferença de caixa no Windows:
-/// `c:\x` e `C:\x` são a mesma pasta). `None` se estiver fora.
+/// `path` relativo a `base`, comparando por componentes (sem diferença de caixa nem prefixo
+/// verbatim `\\?\` no Windows: `c:\x`, `C:\x` e `\\?\C:\x` são a mesma pasta). `None` se estiver fora.
 fn rel_within(base: &Path, path: &Path) -> Option<PathBuf> {
-    crate::util::path_within(path, base).then(|| path.components().skip(base.components().count()).collect())
+    let base = crate::util::strip_verbatim(base);
+    let path = crate::util::strip_verbatim(path);
+    crate::util::path_within(&path, &base).then(|| path.components().skip(base.components().count()).collect())
 }
 
 /// `true` se a mudança em `path` deve ser ignorada. Fora do workspace não se ignora: as pastas
@@ -137,7 +152,7 @@ fn rel_within(base: &Path, path: &Path) -> Option<PathBuf> {
 pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
     let Some(rel) = rel_within(workspace, path) else { return false };
     rel.components().any(|c| match c {
-        Component::Normal(s) => WATCH_IGNORED.iter().any(|i| s == *i),
+        Component::Normal(s) => WATCH_IGNORED.iter().any(|i| crate::util::same_component(s, std::ffi::OsStr::new(i))),
         _ => false,
     })
 }
@@ -145,7 +160,13 @@ pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
 /// A mudança em `path` é no estado do repositório git do workspace (`.git/HEAD`, `index`, refs,
 /// merge/rebase/cherry-pick/revert em andamento…)? Os `*.lock` (temporários do git) não contam.
 pub(crate) fn git_state_change(workspace: &Path, path: &Path) -> bool {
-    let Some(rel) = rel_within(&workspace.join(".git"), path) else { return false };
+    git_state_change_in(&workspace.join(".git"), path)
+}
+
+/// Como [`git_state_change`], mas comparando diretamente com a pasta `git_dir` (que pode ficar
+/// fora de `workspace/.git` em worktrees, submódulos ou subpastas do repositório).
+pub(crate) fn git_state_change_in(git_dir: &Path, path: &Path) -> bool {
+    let Some(rel) = rel_within(git_dir, path) else { return false };
     let name = rel.to_string_lossy();
     if name.ends_with(".lock") {
         return false;
@@ -165,6 +186,81 @@ pub(crate) fn git_state_change(workspace: &Path, path: &Path) -> bool {
             | "packed-refs"
             | "refs"
     )
+}
+
+fn resolve_git_path(base: &Path, raw: &str) -> Option<PathBuf> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let p = Path::new(raw);
+    let abs = if p.is_absolute() {
+        crate::util::normalize_lexical(p)
+    } else {
+        crate::util::normalize_lexical(&crate::util::absolutize(base).join(p))
+    };
+    abs.is_dir().then_some(abs)
+}
+
+/// Lê um arquivo `.git` (`gitdir: <caminho>`) de worktree/submódulo quando o binário `git` não
+/// está disponível (ex.: ambientes de teste isolados).
+fn git_dirs_from_dotgit_file(workspace: &Path) -> Vec<PathBuf> {
+    let dotgit = workspace.join(".git");
+    if !dotgit.is_file() {
+        return Vec::new();
+    }
+    let Ok(text) = std::fs::read_to_string(&dotgit) else { return Vec::new() };
+    let Some(raw) = text.lines().find_map(|l| l.strip_prefix("gitdir:")) else { return Vec::new() };
+    let Some(gd) = resolve_git_path(workspace, raw) else { return Vec::new() };
+    let mut out = vec![gd.clone()];
+    if let Ok(common) = std::fs::read_to_string(gd.join("commondir")) {
+        if let Some(cd) = resolve_git_path(&gd, &common) {
+            if !crate::util::same_path(&cd, &gd) {
+                out.push(cd);
+            }
+        }
+    }
+    out
+}
+
+/// Descobre o `.git` real do workspace (`git rev-parse --absolute-git-dir --git-common-dir`, sem
+/// shell). Chamado fora da thread da interface.
+pub(crate) fn discover_git_dirs(core: &crate::Core, workspace: &Path) -> Vec<PathBuf> {
+    let mut git = core.inner.agents.which(if cfg!(windows) { "git.exe" } else { "git" });
+    if git.is_none() && cfg!(windows) {
+        git = core
+            .inner
+            .agents
+            .system_dir("ProgramFiles")
+            .map(|p| p.join("Git").join("cmd").join("git.exe"))
+            .filter(|p| p.is_file());
+    }
+    let mut out = Vec::new();
+    if let Some(git) = git {
+        let mut cmd = std::process::Command::new(git);
+        cmd.current_dir(workspace)
+            .args(["-c", "core.quotepath=false", "rev-parse", "--absolute-git-dir", "--git-common-dir"])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_OPTIONAL_LOCKS", "0");
+        for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"] {
+            cmd.env_remove(k);
+        }
+        if let Ok(res) = crate::process::run_captured(cmd, None, Duration::from_secs(5), None, None) {
+            if res.exit == crate::process::Exit::Code(Some(0)) {
+                for line in res.stdout.lines() {
+                    if let Some(p) = resolve_git_path(workspace, line) {
+                        if !out.iter().any(|e: &PathBuf| crate::util::same_path(e, &p)) {
+                            out.push(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        out = git_dirs_from_dotgit_file(workspace);
+    }
+    out
 }
 
 /// Silêncio que encerra uma rajada de eventos.
@@ -206,24 +302,51 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
     // `true` = mudança no repositório git; `false` = na árvore de arquivos.
     let (tx, rx) = crossbeam_channel::unbounded::<bool>();
     let ws = workspace.to_path_buf();
+    let extra_git: std::sync::Arc<parking_lot::RwLock<Vec<PathBuf>>> = std::sync::Arc::default();
+    let extra_for_cb = extra_git.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(ev) = res else { return };
         // Leituras (Access) não alteram a árvore — evita laço com a própria listagem.
         if matches!(ev.kind, EventKind::Access(_)) {
             return;
         }
-        if ev.paths.iter().any(|p| git_state_change(&ws, p)) {
+        let extra = extra_for_cb.read();
+        if ev.paths.iter().any(|p| git_state_change(&ws, p) || extra.iter().any(|gd| git_state_change_in(gd, p))) {
             let _ = tx.send(true);
         }
-        if !ev.paths.is_empty() && ev.paths.iter().all(|p| watch_ignored(&ws, p)) {
+        let in_extra = |p: &Path| extra.iter().any(|gd| rel_within(gd, p).is_some());
+        if !ev.paths.is_empty() && ev.paths.iter().all(|p| watch_ignored(&ws, p) || in_extra(p)) {
             return;
         }
         let _ = tx.send(false);
     })?;
     watcher.watch(workspace, RecursiveMode::Recursive)?;
+    let ws_for_thread = workspace.to_path_buf();
     std::thread::Builder::new()
         .name("cd-watch-debounce".into())
         .spawn(move || {
+            // Descobre o `.git` real fora da thread da UI (worktrees, submódulos, subpasta de repo).
+            if let Some(inner) = core.upgrade() {
+                let c = crate::Core { inner: inner.clone() };
+                let default_git = ws_for_thread.join(".git");
+                let dirs: Vec<PathBuf> = discover_git_dirs(&c, &ws_for_thread)
+                    .into_iter()
+                    .filter(|gd| !crate::util::same_path(gd, &default_git))
+                    .collect();
+                if !dirs.is_empty() {
+                    *extra_git.write() = dirs.clone();
+                    let mut guard = inner.watcher.lock();
+                    if crate::util::same_path(&c.workspace(), &ws_for_thread) {
+                        if let Some(w) = guard.as_mut() {
+                            for gd in &dirs {
+                                if !crate::util::path_within(gd, &ws_for_thread) {
+                                    let _ = w.watch(gd, RecursiveMode::Recursive);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             // Termina quando o watcher (dono do `tx`) é solto.
             debounce(&rx, DEBOUNCE_QUIET, DEBOUNCE_MAX, |tree, git| {
                 let Some(inner) = core.upgrade() else { return false };
@@ -252,6 +375,9 @@ mod tests {
         for d in ["zeta", "Alpha", "node_modules", ".git", "dados", "target"] {
             std::fs::create_dir_all(ws.join(d)).expect("mkdir");
         }
+        if cfg!(windows) {
+            std::fs::create_dir_all(ws.join("$Recycle.Bin")).expect("mkdir");
+        }
         for f in ["b.TXT", "a.rs", "C.md"] {
             std::fs::write(ws.join(f), "x").expect("write");
         }
@@ -263,6 +389,8 @@ mod tests {
         assert!(items[0].is_dir && items[0].ext.is_empty());
         let sub = read_dir(ws, "zeta");
         assert_eq!(sub[0].rel_path, "zeta/in.json");
+        let sub_bs = read_dir(ws, "zeta\\");
+        assert_eq!(sub_bs[0].rel_path, "zeta/in.json");
         assert!(read_dir(ws, "nao-existe").is_empty());
     }
 
@@ -396,13 +524,22 @@ mod tests {
         ] {
             assert!(git_state_change(ws, Path::new(p)), "{p}");
         }
+        // `.git` externo (worktree, submódulo ou subpasta de repositório).
+        let ext_git = Path::new("/repo/.git/worktrees/wt");
+        assert!(git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/HEAD")));
+        assert!(git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/CHERRY_PICK_HEAD")));
+        assert!(!git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/index.lock")));
         // Fora do workspace nada é ignorado (uma pasta-mãe chamada `dados` não conta).
         assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/outro/dados/x")));
         assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/dados/app/src/x")));
         if cfg!(windows) {
-            // Letra da unidade com outra caixa: é o mesmo repositório.
+            // Letra da unidade com outra caixa e prefixo verbatim `\\?\`: é o mesmo repositório.
             assert!(git_state_change(Path::new(r"c:\w"), Path::new(r"C:\W\.git\HEAD")));
+            assert!(git_state_change(Path::new(r"c:\w"), Path::new(r"\\?\C:\W\.git\HEAD")));
+            assert!(git_state_change(Path::new(r"\\?\C:\w"), Path::new(r"c:\w\.git\CHERRY_PICK_HEAD")));
             assert!(watch_ignored(Path::new(r"c:\w"), Path::new(r"C:\w\target\x")));
+            assert!(watch_ignored(Path::new(r"c:\w"), Path::new(r"\\?\C:\w\Target\x")));
+            assert!(git_state_change_in(Path::new(r"c:\repo\.git"), Path::new(r"\\?\C:\REPO\.git\REVERT_HEAD")));
         }
         for p in ["/w/.git/index.lock", "/w/.git/objects/ab/cd", "/w/.git/logs/HEAD", "/w/src/HEAD", "/w/.gitignore"] {
             assert!(!git_state_change(ws, Path::new(p)), "{p}");
@@ -411,5 +548,57 @@ mod tests {
         assert!(watch_ignored(ws, Path::new("/w/target/debug/x")));
         assert!(!watch_ignored(ws, Path::new("/w/src/main.rs")));
         assert!(!watch_ignored(ws, Path::new("/w/.gitignore")));
+    }
+
+    #[test]
+    fn watcher_observes_external_git_dir() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let root = tmp.path();
+        let ws = root.join("worktree");
+        let real_git = root.join("repo-git").join("worktrees").join("wt");
+        let common_git = root.join("repo-git");
+        std::fs::create_dir_all(&ws).expect("mkdir ws");
+        std::fs::create_dir_all(real_git.join("rebase-merge")).expect("mkdir git");
+        std::fs::create_dir_all(common_git.join("refs").join("heads")).expect("mkdir refs");
+        // Simula uma worktree sem depender do binário `git` instalado na máquina.
+        std::fs::write(ws.join(".git"), format!("gitdir: {}\n", real_git.display())).expect("dotgit");
+        std::fs::write(real_git.join("commondir"), "../..\n").expect("commondir");
+
+        let dirs = git_dirs_from_dotgit_file(&ws);
+        assert_eq!(dirs.len(), 2, "{dirs:?}");
+        assert!(crate::util::same_path(&dirs[0], &real_git));
+        assert!(crate::util::same_path(&dirs[1], &common_git));
+
+        let paths = crate::paths::AppPaths {
+            app_dir: root.join("app"),
+            bin_dir: root.join("bin"),
+            data_dir: root.join("dados"),
+            default_workspace: ws.clone(),
+            whisper_dir: root.join("whisper"),
+            config_file: root.join("cfg").join("config.json"),
+        };
+        let opts = crate::StartOptions {
+            search_path: Some(root.join("vazio").into_os_string()),
+            home_dir: Some(root.join("home")),
+            ollama_discovery: false,
+            watch_workspace: true,
+            config: Some(crate::Config::with_project(ws.clone())),
+            system_dirs: false,
+        };
+        let (core, rx) = crate::Core::start_with(paths, opts).expect("start");
+        // Aguarda a thread `cd-watch-debounce` registrar o `git_dir` externo no watcher.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut got_git = false;
+        while Instant::now() < deadline && !got_git {
+            std::fs::write(real_git.join("CHERRY_PICK_HEAD"), "deadbeef\n").expect("write head");
+            while let Ok(ev) = rx.recv_timeout(Duration::from_millis(450)) {
+                if matches!(ev, crate::CoreEvent::GitChanged) {
+                    got_git = true;
+                    break;
+                }
+            }
+        }
+        core.shutdown();
+        assert!(got_git, "mudança no git_dir externo deveria emitir GitChanged");
     }
 }

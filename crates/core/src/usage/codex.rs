@@ -19,6 +19,10 @@ const TAIL_BYTES: u64 = 256 * 1024;
 /// Janelas até um dia são a "sessão" (5 h); acima disso, a semana.
 const SESSION_MAX_MINUTES: u64 = 24 * 60;
 
+/// Quantos `rollout-*.jsonl` mais recentes são inspecionados (uma sessão recém-aberta ainda
+/// não tem `token_count`, então caímos para a anterior).
+const MAX_ROLLOUTS: usize = 5;
+
 /// Lê o uso mais recente do Codex (`None` se não há sessão ou o formato não bate).
 pub(crate) fn read(home: &Path) -> Option<AgentUsage> {
     let codex_home = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
@@ -27,38 +31,46 @@ pub(crate) fn read(home: &Path) -> Option<AgentUsage> {
 
 /// [`read`] a partir da pasta `sessions` e de um "agora" fixo (testes).
 fn read_sessions(dir: &Path, now_ms: u64) -> Option<AgentUsage> {
-    let (path, mtime) = newest_rollout(dir)?;
-    let text = read_tail(&path)?;
-    let mtime_ms = mtime.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as u64;
-    // Do fim para o começo: o último evento com `rate_limits` preenchido.
-    text.lines().rev().filter(|l| l.contains("\"rate_limits\"")).find_map(|line| parse_line(line, mtime_ms, now_ms))
+    for (path, mtime) in newest_rollouts(dir, MAX_ROLLOUTS) {
+        let Some(text) = read_tail(&path) else { continue };
+        let Ok(dur) = mtime.duration_since(SystemTime::UNIX_EPOCH) else { continue };
+        let mtime_ms = dur.as_millis() as u64;
+        // Do fim para o começo: o último evento com `rate_limits` preenchido.
+        let found = text.lines().rev().filter(|l| l.contains("\"rate_limits\"")).find_map(|line| parse_line(line, mtime_ms, now_ms));
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
 }
 
-/// O `rollout-*.jsonl` modificado mais recentemente em `sessions/AAAA/MM/DD/` (qualquer
-/// profundidade até 4, pois uma sessão retomada volta a gravar no arquivo do dia em que começou).
-fn newest_rollout(dir: &Path) -> Option<(PathBuf, SystemTime)> {
-    fn walk(dir: &Path, depth: u32, best: &mut Option<(PathBuf, SystemTime)>) {
+/// Os até `limit` arquivos `rollout-*.jsonl` modificados mais recentemente em `sessions/AAAA/MM/DD/`
+/// (qualquer profundidade até 4, pois uma sessão retomada volta a gravar no arquivo do dia em que começou).
+fn newest_rollouts(dir: &Path, limit: usize) -> Vec<(PathBuf, SystemTime)> {
+    fn walk(dir: &Path, depth: u32, all: &mut Vec<(PathBuf, SystemTime)>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for e in entries.flatten() {
             let Ok(ft) = e.file_type() else { continue };
             let name = e.file_name();
             let name = name.to_string_lossy();
             if ft.is_dir() && depth < 4 {
-                walk(&e.path(), depth + 1, best);
+                walk(&e.path(), depth + 1, all);
             } else if ft.is_file() && name.starts_with("rollout-") && name.ends_with(".jsonl") {
                 let Ok(mtime) = e.metadata().and_then(|m| m.modified()) else { continue };
-                if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
-                    *best = Some((e.path(), mtime));
-                }
+                all.push((e.path(), mtime));
             }
         }
     }
-    let mut best = None;
-    walk(dir, 0, &mut best);
-    best
+    let mut all = Vec::new();
+    walk(dir, 0, &mut all);
+    all.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+    all.truncate(limit);
+    all
 }
 
-/// Os últimos [`TAIL_BYTES`] do arquivo, sem a primeira linha (cortada no meio).
+/// Os últimos [`TAIL_BYTES`] do arquivo, sem a primeira linha (se cortada no meio).
+/// Se a última linha sozinha tiver `>= TAIL_BYTES` (sem `\n` antes do fim), mantém o trecho
+/// lido em vez de esvaziar `text`.
 fn read_tail(path: &Path) -> Option<String> {
     let mut f = File::open(path).ok()?;
     let len = f.metadata().ok()?.len();
@@ -68,8 +80,10 @@ fn read_tail(path: &Path) -> Option<String> {
     f.take(TAIL_BYTES).read_to_end(&mut buf).ok()?;
     let mut text = String::from_utf8_lossy(&buf).into_owned();
     if start > 0 {
-        let cut = text.find('\n').map_or(text.len(), |i| i + 1);
-        text.drain(..cut);
+        let trimmed = text.trim_end_matches(['\r', '\n']);
+        if let Some(i) = trimmed.find('\n') {
+            text.drain(..=i);
+        }
     }
     Some(text)
 }
@@ -158,6 +172,42 @@ mod tests {
         assert_eq!(u.weekly, Some(UsageWindow { used: 0.555, resets_at_ms: Some(1_758_800_000_000) }));
         assert_eq!(u.updated_ms, NOW);
         assert!(!u.local);
+    }
+
+    #[test]
+    fn falls_back_to_previous_rollout_when_newest_has_no_rate_limits() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let prev = write(
+            tmp.path(),
+            "2025/09/18/rollout-prev.jsonl",
+            &[token_count("2025-09-18T12:00:00Z", r#"{"primary":{"used_percent":45.0,"window_minutes":300}}"#)],
+        );
+        let f_prev = std::fs::File::options().write(true).open(&prev).expect("abrir prev");
+        f_prev.set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(2_000)).expect("mtime prev");
+
+        // Sessão recém-aberta: só tem session_meta, sem rate_limits.
+        let cur = write(
+            tmp.path(),
+            "2025/09/18/rollout-cur.jsonl",
+            &[r#"{"timestamp":"2025-09-18T12:05:00Z","type":"session_meta","payload":{}}"#.to_owned()],
+        );
+        let f_cur = std::fs::File::options().write(true).open(&cur).expect("abrir cur");
+        f_cur.set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(3_000)).expect("mtime cur");
+
+        let u = read_sessions(tmp.path(), NOW).expect("uso da sessão anterior");
+        assert_eq!(u.session, Some(UsageWindow { used: 0.45, resets_at_ms: None }));
+    }
+
+    #[test]
+    fn read_tail_does_not_empty_text_when_last_line_exceeds_tail_bytes() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let huge = "a".repeat((TAIL_BYTES as usize) + 1024);
+        let path = write(tmp.path(), "2025/09/18/rollout-huge.jsonl", &[
+            r#"{"type":"session_meta"}"#.to_owned(),
+            huge,
+        ]);
+        let tail = read_tail(&path).expect("tail");
+        assert!(!tail.is_empty(), "read_tail não pode esvaziar text quando a última linha excede 256 KB");
     }
 
     #[test]

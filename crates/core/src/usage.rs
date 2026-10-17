@@ -25,6 +25,8 @@ use crate::{util, Core, CoreEvent};
 const CODEX_EVERY: Duration = Duration::from_secs(60);
 /// De quanto em quanto tempo a cota do Antigravity é consultada (rede).
 const ANTIGRAVITY_EVERY: Duration = Duration::from_secs(180);
+/// Intervalo curto de nova tentativa quando uma leitura/consulta de uso falha (`None`).
+const RETRY_EVERY: Duration = Duration::from_secs(15);
 
 /// Uma janela de limite (sessão de 5 h, semana…).
 #[derive(Debug, Clone, Copy, PartialEq)]

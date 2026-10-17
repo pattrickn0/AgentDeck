@@ -8,10 +8,13 @@
 //! O WAV temporário é SEMPRE apagado após a transcrição.
 
 use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
+
+use sha2::{Digest, Sha256};
 
 use crate::download::{download_file, DownloadOpts};
 use crate::events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry};
