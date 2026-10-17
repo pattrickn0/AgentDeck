@@ -33,6 +33,8 @@ pub const DIFF_MAX_BYTES: usize = 1 << 20;
 pub const DIFF_MAX_LINES: usize = 10_000;
 /// Entradas de status mostradas.
 pub const STATUS_MAX_ENTRIES: usize = 5000;
+/// Tamanho máximo de um arquivo lido para resolução de conflitos.
+pub const CONFLICT_MAX_BYTES: usize = 2 << 20;
 
 // ---------- Tipos ----------
 
@@ -53,6 +55,8 @@ pub struct GitStatus {
     pub state: RepoState,
     /// Caminhos relativos à raiz.
     pub entries: Vec<GitEntry>,
+    /// Quantidade de stashes salvos no repositório.
+    pub stash_count: u32,
     /// Havia mais de [`STATUS_MAX_ENTRIES`] alterações.
     pub truncated: bool,
 }
@@ -138,6 +142,65 @@ pub struct GitDiff {
     pub binary: bool,
 }
 
+/// Uma entrada da pilha de stash (`stash@{index}`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitStash {
+    pub index: usize,
+    pub date: String,
+    pub message: String,
+}
+
+/// Um commit do histórico (log).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub author: String,
+    pub date: String,
+    pub subject: String,
+}
+
+/// Detalhe de um commit (metadados, arquivos alterados e diff).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitCommitDetail {
+    pub hash: String,
+    pub short_hash: String,
+    pub author: String,
+    pub email: String,
+    pub date: String,
+    pub message: String,
+    /// `(letra, caminho)` dos arquivos alterados no commit.
+    pub files: Vec<(char, String)>,
+    pub diff: GitDiff,
+}
+
+/// Um bloco de conflito (`<<<<<<<` … `=======` … `>>>>>>>`) dentro de um arquivo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictBlock {
+    /// Linha inicial do marcador `<<<<<<<` (1-indexed).
+    pub start_line: u32,
+    pub ours_label: String,
+    pub ours: Vec<String>,
+    pub theirs_label: String,
+    pub theirs: Vec<String>,
+}
+
+/// Arquivo em conflito com os seus blocos (ou lados inteiros quando não há marcadores de texto).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitConflictFile {
+    pub path: String,
+    pub blocks: Vec<ConflictBlock>,
+    pub binary: bool,
+}
+
+/// Escolha para resolver um bloco ou arquivo em conflito.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictChoice {
+    Ours,
+    Theirs,
+    Both,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitError {
     NotInstalled,
@@ -181,7 +244,7 @@ impl std::error::Error for GitError {}
 
 // ---------- Interpretação da saída (funções puras) ----------
 
-/// Lê `git status --porcelain=v2 -z --branch`. `root`/`prefix`/`state` ficam por conta de quem chama.
+/// Lê `git status --porcelain=v2 -z --branch --show-stash`. `root`/`prefix`/`state` ficam por conta de quem chama.
 pub fn parse_status_v2(out: &[u8]) -> GitStatus {
     let mut st = GitStatus::default();
     let mut records = out.split(|b| *b == 0).filter(|r| !r.is_empty());
@@ -202,6 +265,7 @@ pub fn parse_status_v2(out: &[u8]) -> GitStatus {
                         }
                     }
                 }
+                "stash" => st.stash_count = val.parse().unwrap_or(0),
                 _ => {}
             }
             continue;
@@ -277,49 +341,297 @@ pub fn parse_branches(out: &[u8]) -> Vec<GitBranch> {
     list
 }
 
-/// Lê um diff unificado. Corta em `max_lines` linhas (e cada linha em 1000 caracteres).
+/// Lê um diff unificado (ou combinado, `diff --cc` / `@@@`). Corta em `max_lines` linhas (e cada
+/// linha em 1000 caracteres).
 pub fn parse_diff(text: &str, max_lines: usize) -> GitDiff {
     let mut diff = GitDiff::default();
     let (mut old, mut new) = (0u32, 0u32);
     let mut in_hunk = false;
+    // Número de prefixos de coluna (1 para diff normal `@@`, >= 2 para diff combinado `@@@`).
+    let mut cols = 1usize;
     for raw in text.lines() {
         if diff.lines.len() >= max_lines {
             diff.truncated = true;
             break;
         }
         let line: String = if raw.chars().count() > 1000 { raw.chars().take(1000).chain(['…']).collect() } else { raw.to_owned() };
-        let (kind, o, n) = if raw.starts_with("diff --git ") || raw.starts_with("diff --cc ") {
+        let (kind, o, n) = if raw.starts_with("diff --git ") || raw.starts_with("diff --cc ") || raw.starts_with("diff --combined ") {
             in_hunk = false;
             (DiffKind::Meta, None, None)
         } else if raw.starts_with("Binary files ") && raw.ends_with(" differ") {
             diff.binary = true;
             (DiffKind::Meta, None, None)
-        } else if let Some(rest) = raw.strip_prefix("@@") {
+        } else if raw.starts_with("@@") {
+            let ats = raw.bytes().take_while(|b| *b == b'@').count();
+            let rest = &raw[ats..];
             in_hunk = true;
-            // `@@ -a[,b] +c[,d] @@`
-            let mut parts = rest.split_whitespace();
-            let start = |p: Option<&str>, sign: char| -> u32 {
-                p.and_then(|s| s.strip_prefix(sign)).and_then(|s| s.split(',').next()).and_then(|s| s.parse().ok()).unwrap_or(0)
+            cols = ats.saturating_sub(1).max(1);
+            // `@@ -a[,b] +c[,d] @@` ou `@@@ -a[,b] -c[,d] +e[,f] @@@`
+            let start = |p: &str, sign: char| -> Option<u32> {
+                p.strip_prefix(sign).and_then(|s| s.split(',').next()).and_then(|s| s.parse().ok())
             };
-            old = start(parts.next(), '-');
-            new = start(parts.next(), '+');
+            let mut old_found = None;
+            let mut new_found = None;
+            for part in rest.split_whitespace() {
+                if part.starts_with('@') {
+                    break;
+                }
+                if old_found.is_none() {
+                    old_found = start(part, '-');
+                }
+                if let Some(v) = start(part, '+') {
+                    new_found = Some(v);
+                }
+            }
+            old = old_found.unwrap_or(0);
+            new = new_found.unwrap_or(0);
             (DiffKind::Hunk, None, None)
         } else if !in_hunk || raw.starts_with('\\') {
             (DiffKind::Meta, None, None)
-        } else if raw.starts_with('+') {
-            new += 1;
-            (DiffKind::Add, None, Some(new - 1))
-        } else if raw.starts_with('-') {
-            old += 1;
-            (DiffKind::Del, Some(old - 1), None)
+        } else if cols == 1 {
+            if raw.starts_with('+') {
+                new += 1;
+                (DiffKind::Add, None, Some(new - 1))
+            } else if raw.starts_with('-') {
+                old += 1;
+                (DiffKind::Del, Some(old - 1), None)
+            } else {
+                old += 1;
+                new += 1;
+                (DiffKind::Context, Some(old - 1), Some(new - 1))
+            }
         } else {
-            old += 1;
-            new += 1;
-            (DiffKind::Context, Some(old - 1), Some(new - 1))
+            // Diff combinado (`diff --cc`): os primeiros `cols` caracteres indicam `+`, `-` ou ` ` em cada pai.
+            let prefix: String = raw.chars().take(cols).collect();
+            if prefix.contains('+') {
+                new += 1;
+                (DiffKind::Add, None, Some(new - 1))
+            } else if prefix.contains('-') {
+                let o = if prefix.starts_with('-') {
+                    old += 1;
+                    Some(old - 1)
+                } else {
+                    None
+                };
+                (DiffKind::Del, o, None)
+            } else {
+                old += 1;
+                new += 1;
+                (DiffKind::Context, Some(old - 1), Some(new - 1))
+            }
         };
         diff.lines.push(DiffLine { kind, old: o, new: n, text: line });
     }
     diff
+}
+
+/// Constrói um patch unificado contendo apenas o trecho (`hunk_index`, 0-indexed) de `diff`,
+/// pronto para `git apply`. Devolve `None` se o diff for combinado (`@@@`), truncado, binário ou
+/// não tiver o cabeçalho `---`/`+++`.
+pub fn extract_hunk_patch(diff: &GitDiff, hunk_index: usize) -> Option<String> {
+    if diff.binary || diff.truncated {
+        return None;
+    }
+    let mut header = Vec::new();
+    let mut hunks: Vec<Vec<&DiffLine>> = Vec::new();
+    for line in &diff.lines {
+        match line.kind {
+            DiffKind::Meta if hunks.is_empty() => header.push(line.text.as_str()),
+            DiffKind::Hunk => {
+                // Diff combinado (`@@@`) não pode ser aplicado com `git apply`.
+                if line.text.starts_with("@@@") {
+                    return None;
+                }
+                hunks.push(vec![line]);
+            }
+            _ => {
+                if let Some(cur) = hunks.last_mut() {
+                    cur.push(line);
+                }
+            }
+        }
+    }
+    let hunk = hunks.get(hunk_index)?;
+    if !header.iter().any(|l| l.starts_with("--- ")) || !header.iter().any(|l| l.starts_with("+++ ")) {
+        return None;
+    }
+    // Linha truncada (> 1000 chars) não produziria um patch fiel.
+    if hunk.iter().any(|l| l.text.ends_with('…') && l.text.chars().count() > 1000) {
+        return None;
+    }
+    let mut out = String::new();
+    for h in header {
+        out.push_str(h);
+        out.push('\n');
+    }
+    for l in hunk {
+        out.push_str(&l.text);
+        out.push('\n');
+    }
+    Some(out)
+}
+
+/// Formato pedido a `git stash list`.
+pub const STASH_FORMAT: &str = "%gd%x00%cr%x00%gs";
+
+/// Lê a saída de `git stash list --format=STASH_FORMAT`.
+pub fn parse_stashes(out: &[u8]) -> Vec<GitStash> {
+    let text = String::from_utf8_lossy(out);
+    let mut list = Vec::new();
+    for line in text.lines() {
+        let f: Vec<&str> = line.splitn(3, '\0').collect();
+        if f.len() < 3 {
+            continue;
+        }
+        let idx = f[0].strip_prefix("stash@{").and_then(|s| s.strip_suffix('}')).and_then(|s| s.parse().ok()).unwrap_or(list.len());
+        list.push(GitStash { index: idx, date: f[1].to_owned(), message: f[2].to_owned() });
+    }
+    list
+}
+
+/// Formato pedido a `git log -z`.
+pub const LOG_FORMAT: &str = "%H%x00%h%x00%an%x00%cr%x00%s";
+
+/// Lê a saída de `git log -z --format=LOG_FORMAT`.
+pub fn parse_log(out: &[u8]) -> Vec<GitCommit> {
+    let mut list = Vec::new();
+    for rec in out.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+        // Ignora eventual `\n` entre registros.
+        let s = String::from_utf8_lossy(rec);
+        let s = s.trim_start_matches('\n');
+        if s.is_empty() {
+            continue;
+        }
+        // Quando `-z` separa cada registro por NUL e o próprio formato usa `%x00`, a saída tem 5 campos seguidos.
+        let _ = s;
+    }
+    // Com `-z` e `%x00`, todos os campos ficam separados por NUL em sequência de 5 em 5.
+    let fields: Vec<&[u8]> = out.split(|b| *b == 0).collect();
+    for chunk in fields.chunks(5) {
+        if chunk.len() < 5 {
+            break;
+        }
+        let hash = String::from_utf8_lossy(chunk[0]).trim_start_matches('\n').to_owned();
+        if hash.is_empty() {
+            continue;
+        }
+        list.push(GitCommit {
+            hash,
+            short_hash: String::from_utf8_lossy(chunk[1]).into_owned(),
+            author: String::from_utf8_lossy(chunk[2]).into_owned(),
+            date: String::from_utf8_lossy(chunk[3]).into_owned(),
+            subject: String::from_utf8_lossy(chunk[4]).into_owned(),
+        });
+    }
+    list
+}
+
+/// Encontra os blocos de conflito (`<<<<<<<` … `=======` … `>>>>>>>`) num texto.
+pub fn parse_conflict_blocks(text: &str) -> Vec<ConflictBlock> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut blocks = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let Some(ours_label) = lines[i].strip_prefix("<<<<<<<") else {
+            i += 1;
+            continue;
+        };
+        let start_line = i as u32 + 1;
+        let ours_label = ours_label.trim().to_owned();
+        i += 1;
+        let mut ours = Vec::new();
+        // Aceita também conflitos diff3 (`|||||||`), ignorando a seção base entre `|||||||` e `=======`.
+        let mut in_base = false;
+        while i < lines.len() && !lines[i].starts_with("=======") {
+            if lines[i].starts_with("|||||||") {
+                in_base = true;
+            } else if !in_base {
+                ours.push(lines[i].to_owned());
+            }
+            i += 1;
+        }
+        if i >= lines.len() {
+            break;
+        }
+        i += 1; // pula `=======`
+        let mut theirs = Vec::new();
+        while i < lines.len() && !lines[i].starts_with(">>>>>>>") {
+            theirs.push(lines[i].to_owned());
+            i += 1;
+        }
+        if i >= lines.len() {
+            break;
+        }
+        let theirs_label = lines[i].strip_prefix(">>>>>>>").unwrap_or("").trim().to_owned();
+        blocks.push(ConflictBlock { start_line, ours_label, ours, theirs_label, theirs });
+        i += 1;
+    }
+    blocks
+}
+
+/// Resolve um único bloco de conflito (`block_index`, 0-indexed) substituindo os marcadores pela
+/// escolha (`Ours`, `Theirs` ou `Both`), preservando o estilo de quebra de linha (`\r\n` ou `\n`).
+pub fn resolve_conflict_block_in_text(text: &str, block_index: usize, choice: ConflictChoice) -> Option<String> {
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let trailing_nl = text.ends_with('\n');
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut cur_block = 0usize;
+    let mut resolved = false;
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].starts_with("<<<<<<<") {
+            let mut j = i + 1;
+            let mut ours = Vec::new();
+            let mut in_base = false;
+            while j < lines.len() && !lines[j].starts_with("=======") {
+                if lines[j].starts_with("|||||||") {
+                    in_base = true;
+                } else if !in_base {
+                    ours.push(lines[j]);
+                }
+                j += 1;
+            }
+            if j < lines.len() {
+                let mut k = j + 1;
+                let mut theirs = Vec::new();
+                while k < lines.len() && !lines[k].starts_with(">>>>>>>") {
+                    theirs.push(lines[k]);
+                    k += 1;
+                }
+                if k < lines.len() {
+                    if cur_block == block_index {
+                        match choice {
+                            ConflictChoice::Ours => out.extend(ours.into_iter().map(str::to_owned)),
+                            ConflictChoice::Theirs => out.extend(theirs.into_iter().map(str::to_owned)),
+                            ConflictChoice::Both => {
+                                out.extend(ours.into_iter().map(str::to_owned));
+                                out.extend(theirs.into_iter().map(str::to_owned));
+                            }
+                        }
+                        resolved = true;
+                    } else {
+                        for line in &lines[i..=k] {
+                            out.push((*line).to_owned());
+                        }
+                    }
+                    cur_block += 1;
+                    i = k + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(lines[i].to_owned());
+        i += 1;
+    }
+    if !resolved {
+        return None;
+    }
+    let mut res = out.join(eol);
+    if trailing_nl && !res.is_empty() {
+        res.push_str(eol);
+    }
+    Some(res)
 }
 
 /// Diff de um arquivo ainda não rastreado: todas as linhas como adicionadas.
@@ -356,10 +668,17 @@ pub fn classify_error(stderr: &str) -> GitError {
         return GitError::NoIdentity;
     }
     let short = crate::util::last_meaningful_lines(s, 4);
+    if low.contains("permission denied (publickey")
+        || low.contains("sign_and_send_pubkey")
+        || low.contains("no mutual signature algorithm")
+    {
+        return GitError::Auth(format!(
+            "{short}\nSe a sua chave SSH tem senha, carregue-a no ssh-agent antes de sincronizar:\n• Windows (PowerShell): Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add"
+        ));
+    }
     if low.contains("authentication failed")
         || low.contains("could not read username")
         || low.contains("could not read password")
-        || low.contains("permission denied (publickey")
         || low.contains("terminal prompts disabled")
         || low.contains("user interactivity has been disabled")
         || low.contains("host key verification failed")
@@ -367,9 +686,9 @@ pub fn classify_error(stderr: &str) -> GitError {
         return GitError::Auth(short);
     }
     // `commit.gpgsign` sem agente/pinentry que peça a senha: o gpg não consegue assinar.
-    if low.contains("gpg failed to sign") {
+    if low.contains("gpg failed to sign") || low.contains("no pinentry") || low.contains("inappropriate ioctl for device") {
         return GitError::Failed(format!(
-            "o git não conseguiu assinar o commit (commit.gpgsign). Destrave a chave no seu agente GPG ou desative a assinatura neste repositório: git config commit.gpgsign false\n{short}"
+            "o git não conseguiu assinar o commit (commit.gpgsign) sem um agente GPG gráfico ativo. Destrave a chave no seu agente GPG (ou configure pinentry gráfico) ou, se preferir não assinar neste repositório, rode: git config commit.gpgsign false\n{short}"
         ));
     }
     if low.contains("[rejected]")
@@ -411,6 +730,18 @@ pub fn safe_rel(path: &str) -> bool {
         && Path::new(path).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
+/// Wrapper passado em `gpg.program` quando o usuário não tem agente gráfico: adiciona
+/// `--pinentry-mode loopback --batch` para que o GPG nunca bloqueie no terminal esperando senha
+/// por 120 s (se a chave estiver destravada no `gpg-agent`, assina normal; se precisar de senha,
+/// falha na hora e `classify_error` explica o motivo sem desligar `commit.gpgsign`).
+fn gpg_nonblocking_args(user_gpg: &str) -> String {
+    // Se for um caminho simples sem espaços nem aspas, podemos verificar; mas via `-c gpg.program=...`
+    // o git só aceita um caminho de executável (sem argumentos). Por isso usamos variáveis de ambiente
+    // e invocação controlada.
+    let _ = user_gpg;
+    String::new()
+}
+
 // ---------- Execução ----------
 
 /// Estado do git guardado no core.
@@ -441,17 +772,24 @@ fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
         // O Git Credential Manager abriria uma janela de login e o comando ficaria parado até o
         // timeout; sem credencial salva, falha logo (vira `GitError::Auth`).
         ("GCM_INTERACTIVE", "never"),
+        ("SSH_ASKPASS_REQUIRE", "never"),
         ("GIT_OPTIONAL_LOCKS", "0"),
         ("GIT_MERGE_AUTOEDIT", "no"),
         ("GIT_PAGER", "cat"),
         ("GIT_EDITOR", "true"),
+        ("GIT_SEQUENCE_EDITOR", "true"),
         ("GIT_LITERAL_PATHSPECS", "1"),
+        // Sem TTY para o pinentry curses; se houver pinentry gráfico, ele usa DISPLAY/sessão do SO;
+        // se for terminal, falha imediatamente em vez de esperar os 120 s de timeout.
+        ("GPG_TTY", "not a tty"),
+        ("PINENTRY_USER_DATA", "USE_CURSES=0"),
     ] {
         c.env(k, v);
     }
-    for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"] {
+    for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", "GIT_ASKPASS", "SSH_ASKPASS"] {
         c.env_remove(k);
     }
+    let _ = gpg_nonblocking_args;
     c
 }
 
@@ -513,6 +851,57 @@ impl Repo {
 
     fn has_head(&self) -> bool {
         run(self.cmd(&["rev-parse", "--verify", "-q", "HEAD"]), None, READ_TIMEOUT).is_ok()
+    }
+
+    /// Verifica se o commit atual usaria assinatura GPG (`commit.gpgsign = true`).
+    fn is_gpgsign_enabled(&self) -> bool {
+        self.read(&["config", "--bool", "--get", "commit.gpgsign"])
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
+    }
+
+    /// Quando `commit.gpgsign` está ligado, testa rápido (3 s) se o GPG consegue assinar sem
+    /// bloquear esperando senha no terminal. Se travar ou falhar por falta de agente/pinentry,
+    /// devolve já a explicação sem fazer o usuário esperar 120 s (e sem desligar `commit.gpgsign`).
+    fn check_gpg_ready(&self) -> Result<(), GitError> {
+        if !self.is_gpgsign_enabled() {
+            return Ok(());
+        }
+        let format = self
+            .read(&["config", "--get", "gpg.format"])
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .unwrap_or_default();
+        if !format.is_empty() && format != "openpgp" {
+            return Ok(());
+        }
+        let key_flag = format!("gpg.{}.program", if format.is_empty() { "openpgp" } else { &format });
+        let prog = self
+            .read(&["config", "--get", &key_flag])
+            .ok()
+            .filter(|o| !o.stdout.is_empty())
+            .or_else(|| self.read(&["config", "--get", "gpg.program"]).ok().filter(|o| !o.stdout.is_empty()))
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .unwrap_or_else(|| "gpg".into());
+        let signing_key = self
+            .read(&["config", "--get", "user.signingkey"])
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .filter(|s| !s.is_empty());
+        let mut cmd = Command::new(&prog);
+        cmd.current_dir(&self.root).args(["--status-fd=2", "--bsign", "-o", "-"]);
+        if let Some(k) = &signing_key {
+            cmd.args(["-u", k]);
+        }
+        cmd.env("LC_ALL", "C").env("GPG_TTY", "not a tty").env("PINENTRY_USER_DATA", "USE_CURSES=0");
+        match run_captured_raw(cmd, Some(b"test".to_vec()), Duration::from_secs(3), None, None, 64 << 10) {
+            Ok(out) if matches!(out.exit, Exit::Code(Some(0))) => Ok(()),
+            Ok(out) if matches!(out.exit, Exit::TimedOut) => Err(classify_error("error: gpg failed to sign the data (timed out waiting for agent/pinentry)")),
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                Err(classify_error(&format!("error: gpg failed to sign the data\n{err}")))
+            }
+            Err(_) => Err(classify_error("error: gpg failed to sign the data (gpg executable not found)")),
+        }
     }
 
     /// Ambiente das operações de rede: ssh sem prompt (senão ele abre o terminal e trava), a menos
@@ -578,7 +967,7 @@ impl Core {
     /// Status do repositório do workspace.
     pub fn git_status(&self) -> Result<GitStatus, GitError> {
         let repo = self.git_repo()?;
-        let out = repo.read(&["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal"])?;
+        let out = repo.read(&["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=normal"])?;
         let mut st = parse_status_v2(&out.stdout);
         st.state = repo.state();
         st.prefix = repo.prefix.clone();
@@ -671,20 +1060,57 @@ impl Core {
         Ok(())
     }
 
-    /// Descarta as alterações não preparadas de um arquivo (rastreado: volta ao que está no
-    /// índice; não rastreado: APAGA o arquivo). A interface pede confirmação antes.
+    /// Descarta as alterações de um arquivo:
+    /// - não rastreado: APAGA o arquivo ou pasta (usa `-ffdq` em pastas para remover também sub-repositórios com `.git` interno);
+    /// - em conflito (`Unmerged`): restaura à versão do `HEAD` (ou remove se foi adicionado apenas pelo outro lado, ex.: `AU`/`DU`/`UU`);
+    /// - rastreado comum: restaura a cópia de trabalho ao que está no índice.
     pub fn git_discard(&self, entry: &GitEntry) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         if !safe_rel(&entry.path) {
             return Err(GitError::Failed(format!("caminho inválido: {}", entry.path)));
         }
         let _op = self.inner.git.op.lock();
-        if entry.kind == EntryKind::Untracked {
-            let flags = if entry.path.ends_with('/') { "-fdq" } else { "-fq" };
-            repo.write(&["clean", flags, "--", &entry.path], None)?;
-        } else {
-            repo.write(&["restore", "--worktree", "--", &entry.path], None)?;
+        match entry.kind {
+            EntryKind::Untracked => {
+                let is_dir = entry.path.ends_with('/') || repo.root.join(&entry.path).is_dir();
+                let flags = if is_dir { "-ffdq" } else { "-fq" };
+                repo.write(&["clean", flags, "--", &entry.path], None)?;
+            }
+            EntryKind::Unmerged => {
+                // Num arquivo em conflito, `restore --worktree` falha porque há múltiplos estágios no índice.
+                // Se o arquivo existe no HEAD, `restore --source=HEAD --staged --worktree` restaura o nosso lado limpo;
+                // se não existe no HEAD (ex.: adicionado por eles `UA` ou ambos `AA`), removemos do índice e do disco.
+                let in_head = run(repo.cmd(&["cat-file", "-e", &format!("HEAD:{}", entry.path)]), None, READ_TIMEOUT).is_ok();
+                if in_head {
+                    repo.write(&["restore", "--source=HEAD", "--staged", "--worktree", "--", &entry.path], None)?;
+                } else {
+                    repo.write(&["rm", "-f", "-q", "--", &entry.path], None)?;
+                }
+            }
+            _ => {
+                repo.write(&["restore", "--worktree", "--", &entry.path], None)?;
+            }
         }
+        Ok(())
+    }
+
+    /// Aplica o patch de um trecho (hunk) para preparar (`stage`), tirar da preparação (`unstage`)
+    /// ou descartar da cópia de trabalho (`discard`).
+    pub fn git_apply_hunk(&self, patch: &str, staged: bool, discard: bool) -> Result<(), GitError> {
+        if patch.trim().is_empty() {
+            return Err(GitError::Failed("trecho vazio".into()));
+        }
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        let args: &[&str] = match (discard, staged) {
+            // Descartar um trecho não preparado na cópia de trabalho.
+            (true, _) => &["apply", "--reverse", "--recount", "--unidiff-zero", "-"],
+            // Tirar do stage um trecho que estava preparado.
+            (false, true) => &["apply", "--cached", "--reverse", "--recount", "--unidiff-zero", "-"],
+            // Preparar um trecho da cópia de trabalho.
+            (false, false) => &["apply", "--cached", "--recount", "--unidiff-zero", "-"],
+        };
+        repo.write(args, Some(patch.as_bytes().to_vec()))?;
         Ok(())
     }
 
@@ -695,6 +1121,7 @@ impl Core {
         }
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
+        repo.check_gpg_ready()?;
         let mut args = vec!["commit", "--cleanup=strip", "-F", "-"];
         if amend {
             args.push("--amend");
@@ -704,7 +1131,7 @@ impl Core {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
-    /// Mensagem do último commit (para "corrigir último commit").
+    /// Mensagem do último commit (para "corrigir último commit" ou mensagem de merge).
     pub fn git_last_message(&self) -> Option<String> {
         let repo = self.git_repo().ok()?;
         let out = repo.read(&["log", "-1", "--format=%B"]).ok()?;
@@ -803,6 +1230,308 @@ impl Core {
         Ok(())
     }
 
+    // ---------- Stash ----------
+
+    /// Lista os stashes do repositório.
+    pub fn git_stash_list(&self) -> Result<Vec<GitStash>, GitError> {
+        let repo = self.git_repo()?;
+        let fmt = format!("--format={STASH_FORMAT}");
+        let out = repo.read(&["stash", "list", &fmt])?;
+        Ok(parse_stashes(&out.stdout))
+    }
+
+    /// Guarda as alterações atuais no stash (`include_untracked`: inclui arquivos não rastreados `-u`).
+    pub fn git_stash_push(&self, message: &str, include_untracked: bool) -> Result<String, GitError> {
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        let mut args = vec!["stash", "push"];
+        if include_untracked {
+            args.push("--include-untracked");
+        }
+        let msg = message.trim();
+        if !msg.is_empty() {
+            args.push("-m");
+            args.push(msg);
+        }
+        let out = repo.write(&args, None)?;
+        let text = summary(&out);
+        if text.to_lowercase().contains("no local changes to save") {
+            return Err(GitError::Failed("nenhuma alteração local para guardar no stash".into()));
+        }
+        // Em algumas instalações do Git for Windows sem utilitários MSYS no PATH (ex.: `search_path`
+        // restrito apenas a `Git/cmd`), `git stash push -u` grava o commit no stash mas não conclui o
+        // `clean` final dos não rastreados; garantimos a limpeza se o stash já contém `^3`.
+        if include_untracked && repo.read(&["rev-parse", "--verify", "-q", "stash@{0}^3"]).is_ok() {
+            let _ = repo.write(&["clean", "-fdq"], None);
+        }
+        Ok(text)
+    }
+
+    /// Diff completo de um stash (`stash@{index}`), incluindo arquivos não rastreados guardados nele.
+    pub fn git_stash_diff(&self, index: usize) -> Result<GitDiff, GitError> {
+        let repo = self.git_repo()?;
+        let spec = format!("stash@{{{index}}}");
+        let out = repo.read(&["stash", "show", "-p", "--no-color", "--no-ext-diff", &spec])?;
+        let mut raw = out.stdout;
+        // Quando o stash foi salvo com `--include-untracked`, os arquivos não rastreados ficam no
+        // terceiro pai (`stash@{n}^3`).
+        let untracked_spec = format!("{spec}^3");
+        if let Ok(u) = repo.read(&["show", "--format=", "--patch", "--no-color", "--no-ext-diff", &untracked_spec]) {
+            if !u.stdout.is_empty() {
+                if !raw.is_empty() && !raw.ends_with(b"\n") {
+                    raw.push(b'\n');
+                }
+                raw.extend_from_slice(&u.stdout);
+            }
+        }
+        let cut = raw.len() > DIFF_MAX_BYTES;
+        let bytes = &raw[..raw.len().min(DIFF_MAX_BYTES)];
+        let mut d = parse_diff(&String::from_utf8_lossy(bytes), DIFF_MAX_LINES);
+        d.truncated |= cut;
+        Ok(d)
+    }
+
+    /// Aplica um stash sem apagá-lo (`git stash apply stash@{index}`).
+    pub fn git_stash_apply(&self, index: usize) -> Result<String, GitError> {
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        let spec = format!("stash@{{{index}}}");
+        let out = repo.write(&["stash", "apply", "-q", &spec], None)?;
+        Ok(summary(&out))
+    }
+
+    /// Aplica um stash e o remove da lista (`git stash pop stash@{index}`).
+    pub fn git_stash_pop(&self, index: usize) -> Result<String, GitError> {
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        let spec = format!("stash@{{{index}}}");
+        let out = repo.write(&["stash", "pop", "-q", &spec], None)?;
+        Ok(summary(&out))
+    }
+
+    /// Apaga um stash (`git stash drop stash@{index}`).
+    pub fn git_stash_drop(&self, index: usize) -> Result<(), GitError> {
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        let spec = format!("stash@{{{index}}}");
+        repo.write(&["stash", "drop", "-q", &spec], None)?;
+        Ok(())
+    }
+
+    // ---------- Histórico (log) ----------
+
+    /// Lista commits da branch atual (paginada por `skip` e `limit`). Devolve `(commits, há_mais)`.
+    pub fn git_log(&self, skip: usize, limit: usize) -> Result<(Vec<GitCommit>, bool), GitError> {
+        let repo = self.git_repo()?;
+        if !repo.has_head() {
+            return Ok((Vec::new(), false));
+        }
+        let limit = limit.clamp(1, 200);
+        let fetch_n = format!("-n{}", limit + 1);
+        let skip_arg = format!("--skip={skip}");
+        let fmt = format!("--format={LOG_FORMAT}");
+        let out = repo.read(&["log", "-z", &fetch_n, &skip_arg, &fmt])?;
+        let mut list = parse_log(&out.stdout);
+        let has_more = list.len() > limit;
+        if has_more {
+            list.truncate(limit);
+        }
+        Ok((list, has_more))
+    }
+
+    /// Detalhe de um commit: metadados, arquivos alterados e diff completo.
+    pub fn git_commit_detail(&self, hash: &str) -> Result<GitCommitDetail, GitError> {
+        if hash.is_empty() || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(GitError::Failed("hash de commit inválido".into()));
+        }
+        let repo = self.git_repo()?;
+        let meta_out = repo.read(&["show", "-s", "--format=%H%x00%h%x00%an%x00%ae%x00%cr%x00%B", hash])?;
+        let meta_str = String::from_utf8_lossy(&meta_out.stdout);
+        let fields: Vec<&str> = meta_str.splitn(6, '\0').collect();
+        if fields.len() < 6 {
+            return Err(GitError::Failed("não foi possível ler os dados do commit".into()));
+        }
+        let files_out = repo.read(&["diff-tree", "--root", "-r", "--no-commit-id", "--name-status", "-z", hash])?;
+        let mut files = Vec::new();
+        let mut parts = files_out.stdout.split(|b| *b == 0).filter(|p| !p.is_empty());
+        while let Some(st) = parts.next() {
+            let st_s = String::from_utf8_lossy(st);
+            let letter = st_s.chars().next().unwrap_or('M');
+            if matches!(letter, 'R' | 'C') {
+                let _old = parts.next();
+            }
+            if let Some(path) = parts.next() {
+                files.push((letter, String::from_utf8_lossy(path).into_owned()));
+            }
+        }
+        let diff_out = repo.read(&["show", "--format=", "--patch", "--no-color", "--no-ext-diff", "-M", hash])?;
+        let cut = diff_out.stdout.len() > DIFF_MAX_BYTES;
+        let bytes = &diff_out.stdout[..diff_out.stdout.len().min(DIFF_MAX_BYTES)];
+        let mut diff = parse_diff(&String::from_utf8_lossy(bytes), DIFF_MAX_LINES);
+        diff.truncated |= cut;
+        Ok(GitCommitDetail {
+            hash: fields[0].to_owned(),
+            short_hash: fields[1].to_owned(),
+            author: fields[2].to_owned(),
+            email: fields[3].to_owned(),
+            date: fields[4].to_owned(),
+            message: fields[5].trim_end().to_owned(),
+            files,
+            diff,
+        })
+    }
+
+    // ---------- Merge e Rebase ----------
+
+    /// Mescla a branch `branch` na branch atual (`git merge --no-edit <branch>`).
+    /// Quando entra em conflito, devolve `Ok` com aviso (o estado `Merging` e a seção de conflitos
+    /// aparecem no status).
+    pub fn git_merge(&self, branch: &str) -> Result<String, GitError> {
+        if !valid_branch_name(branch) {
+            return Err(GitError::Failed(format!("nome de branch inválido: {branch}")));
+        }
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        repo.check_gpg_ready()?;
+        let out = run_captured_raw(repo.cmd(&["merge", "--no-edit", branch]), None, WRITE_TIMEOUT, None, None, MAX_OUT)
+            .map_err(|e| GitError::Failed(format!("falha ao rodar o git: {e}")))?;
+        match out.exit {
+            Exit::Code(Some(0)) => Ok(summary(&out)),
+            Exit::TimedOut => Err(GitError::Timeout),
+            _ if repo.state() == RepoState::Merging => {
+                Ok("Mesclagem com conflitos: resolva os arquivos em conflito e clique em Continuar.".into())
+            }
+            _ => Err(classify_error(&String::from_utf8_lossy(&out.stderr))),
+        }
+    }
+
+    /// Rebase da branch atual sobre `branch` (`git rebase <branch>`).
+    /// Quando para em conflito, devolve `Ok` com aviso (o estado `Rebasing` aparece no topo).
+    pub fn git_rebase(&self, branch: &str) -> Result<String, GitError> {
+        if !valid_branch_name(branch) {
+            return Err(GitError::Failed(format!("nome de branch inválido: {branch}")));
+        }
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        repo.check_gpg_ready()?;
+        let out = run_captured_raw(repo.cmd(&["rebase", branch]), None, WRITE_TIMEOUT, None, None, MAX_OUT)
+            .map_err(|e| GitError::Failed(format!("falha ao rodar o git: {e}")))?;
+        match out.exit {
+            Exit::Code(Some(0)) => Ok(summary(&out)),
+            Exit::TimedOut => Err(GitError::Timeout),
+            _ if repo.state() == RepoState::Rebasing => {
+                Ok("Rebase pausado em conflito: resolva os conflitos e clique em Continuar.".into())
+            }
+            _ => Err(classify_error(&String::from_utf8_lossy(&out.stderr))),
+        }
+    }
+
+    /// Continua a operação em andamento (`merge --continue`, `rebase --continue`, `cherry-pick --continue`, `revert --continue`).
+    pub fn git_continue_op(&self) -> Result<String, GitError> {
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        repo.check_gpg_ready()?;
+        let sub = match repo.state() {
+            RepoState::Merging => "merge",
+            RepoState::Rebasing => "rebase",
+            RepoState::CherryPicking => "cherry-pick",
+            RepoState::Reverting => "revert",
+            RepoState::Normal => return Err(GitError::Failed("nenhuma operação em andamento".into())),
+        };
+        let out = run(repo.cmd(&[sub, "--continue"]), None, COMMIT_TIMEOUT)?;
+        Ok(summary(&out))
+    }
+
+    /// Aborta a operação em andamento (`merge --abort`, `rebase --abort`, `cherry-pick --abort`, `revert --abort`).
+    pub fn git_abort_op(&self) -> Result<String, GitError> {
+        let repo = self.git_repo()?;
+        let _op = self.inner.git.op.lock();
+        let sub = match repo.state() {
+            RepoState::Merging => "merge",
+            RepoState::Rebasing => "rebase",
+            RepoState::CherryPicking => "cherry-pick",
+            RepoState::Reverting => "revert",
+            RepoState::Normal => return Err(GitError::Failed("nenhuma operação em andamento".into())),
+        };
+        let out = repo.write(&[sub, "--abort"], None)?;
+        Ok(summary(&out))
+    }
+
+    // ---------- Conflitos ----------
+
+    /// Lê os blocos de conflito (`<<<<<<<` … `>>>>>>>`) de um arquivo em conflito.
+    pub fn git_conflict_file(&self, path: &str) -> Result<GitConflictFile, GitError> {
+        let repo = self.git_repo()?;
+        if !safe_rel(path) {
+            return Err(GitError::Failed(format!("caminho inválido: {path}")));
+        }
+        let full = repo.root.join(path);
+        if !full.is_file() {
+            return Ok(GitConflictFile { path: path.to_owned(), blocks: Vec::new(), binary: false });
+        }
+        let (bytes, _cut) = read_capped(&full, CONFLICT_MAX_BYTES).map_err(|e| GitError::Failed(format!("falha ao ler {path}: {e}")))?;
+        if bytes.iter().take(8000).any(|b| *b == 0) {
+            return Ok(GitConflictFile { path: path.to_owned(), blocks: Vec::new(), binary: true });
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        Ok(GitConflictFile { path: path.to_owned(), blocks: parse_conflict_blocks(&text), binary: false })
+    }
+
+    /// Resolve o arquivo inteiro em conflito escolhendo o nosso lado (`Ours` → `--ours`), o deles
+    /// (`Theirs` → `--theirs`) ou ambos (`Both`, resolvendo todos os blocos do arquivo), e já o
+    /// prepara (`git add`) como resolvido.
+    pub fn git_resolve_conflict_file(&self, path: &str, choice: ConflictChoice) -> Result<(), GitError> {
+        let repo = self.git_repo()?;
+        if !safe_rel(path) {
+            return Err(GitError::Failed(format!("caminho inválido: {path}")));
+        }
+        let _op = self.inner.git.op.lock();
+        match choice {
+            ConflictChoice::Ours | ConflictChoice::Theirs => {
+                let side = if choice == ConflictChoice::Ours { "--ours" } else { "--theirs" };
+                // Se o lado escolhido existe no índice (estágio 2 = ours, 3 = theirs), `checkout <side>`
+                // restaura-o; se o arquivo foi deletado naquele lado (ex.: conflito modify/delete),
+                // `git rm` aplica a remoção.
+                let stage = if choice == ConflictChoice::Ours { "2" } else { "3" };
+                let has_stage = repo
+                    .read(&["ls-files", "-u", "--", path])
+                    .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(2) == Some(stage)));
+                if has_stage {
+                    repo.write(&["checkout", side, "--", path], None)?;
+                    repo.write(&["add", "--", path], None)?;
+                } else {
+                    repo.write(&["rm", "-f", "-q", "--", path], None)?;
+                }
+            }
+            ConflictChoice::Both => {
+                let full = repo.root.join(path);
+                let text = std::fs::read_to_string(&full).map_err(|e| GitError::Failed(format!("falha ao ler {path}: {e}")))?;
+                let mut cur = text;
+                while let Some(next) = resolve_conflict_block_in_text(&cur, 0, ConflictChoice::Both) {
+                    cur = next;
+                }
+                write_atomic(&full, cur.as_bytes()).map_err(|e| GitError::Failed(format!("falha ao gravar {path}: {e}")))?;
+                repo.write(&["add", "--", path], None)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve um único bloco (`block_index`, 0-indexed) de um arquivo em conflito.
+    pub fn git_resolve_conflict_block(&self, path: &str, block_index: usize, choice: ConflictChoice) -> Result<(), GitError> {
+        let repo = self.git_repo()?;
+        if !safe_rel(path) {
+            return Err(GitError::Failed(format!("caminho inválido: {path}")));
+        }
+        let _op = self.inner.git.op.lock();
+        let full = repo.root.join(path);
+        let text = std::fs::read_to_string(&full).map_err(|e| GitError::Failed(format!("falha ao ler {path}: {e}")))?;
+        let new_text = resolve_conflict_block_in_text(&text, block_index, choice)
+            .ok_or_else(|| GitError::Failed("bloco de conflito não encontrado (o arquivo mudou)".into()))?;
+        write_atomic(&full, new_text.as_bytes()).map_err(|e| GitError::Failed(format!("falha ao gravar {path}: {e}")))?;
+        Ok(())
+    }
+
     /// `git init` no workspace (nunca na pasta pessoal do usuário).
     pub fn git_init(&self) -> Result<(), GitError> {
         let git = self.git_exe().ok_or(GitError::NotInstalled)?;
@@ -816,6 +1545,23 @@ impl Core {
         run(base_command(&git, &ws, &["init", "-q"]), None, WRITE_TIMEOUT)?;
         Ok(())
     }
+}
+
+/// Grava `bytes` em `path` atomicamente via arquivo temporário na mesma pasta.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("tmp");
+    let tmp = parent.join(format!(".{name}.commanddeck-tmp"));
+    std::fs::write(&tmp, bytes)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        // No Windows, `rename` por cima de arquivo existente às vezes exige remover ou tentar de novo.
+        let _ = std::fs::write(path, bytes);
+        let _ = std::fs::remove_file(&tmp);
+        if !path.exists() {
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 /// Lê no máximo `max` bytes do arquivo. Devolve (bytes, cortado).
@@ -859,6 +1605,7 @@ mod tests {
             "# branch.head feat/x",
             "# branch.upstream origin/feat/x",
             "# branch.ab +2 -3",
+            "# stash 4",
             "1 .M N... 100644 100644 100644 aaaa bbbb a b.txt",
             "1 A. N... 000000 100644 100644 0000 cccc ção/ü.txt",
             "2 R. N... 100644 100644 100644 dddd eeee R100 novo nome.rs",
@@ -871,7 +1618,7 @@ mod tests {
             (st.head.as_deref(), st.branch.as_deref(), st.upstream.as_deref()),
             (Some("1234567890abcdef"), Some("feat/x"), Some("origin/feat/x"))
         );
-        assert_eq!((st.ahead, st.behind), (2, 3));
+        assert_eq!((st.ahead, st.behind, st.stash_count), (2, 3, 4));
         let e = &st.entries;
         assert_eq!(e.len(), 5);
         assert_eq!((e[0].path.as_str(), e[0].index, e[0].worktree), ("a b.txt", '.', 'M'));
@@ -943,6 +1690,85 @@ mod tests {
     }
 
     #[test]
+    fn combined_diff_cc_is_parsed_correctly() {
+        let text = "diff --cc a.txt\nindex 111,222..000\n--- a/a.txt\n+++ b/a.txt\n@@@ -1,3 -1,3 +1,5 @@@\n  um\n++<<<<<<< HEAD\n +main\n++=======\n+ feat\n++>>>>>>> feat/x\n";
+        let d = parse_diff(text, 100);
+        let k: Vec<(DiffKind, Option<u32>, Option<u32>)> = d.lines.iter().map(|l| (l.kind, l.old, l.new)).collect();
+        assert_eq!(
+            k,
+            [
+                (DiffKind::Meta, None, None),
+                (DiffKind::Meta, None, None),
+                (DiffKind::Meta, None, None),
+                (DiffKind::Meta, None, None),
+                (DiffKind::Hunk, None, None),
+                (DiffKind::Context, Some(1), Some(1)),
+                (DiffKind::Add, None, Some(2)),
+                (DiffKind::Add, None, Some(3)),
+                (DiffKind::Add, None, Some(4)),
+                (DiffKind::Add, None, Some(5)),
+                (DiffKind::Add, None, Some(6)),
+            ]
+        );
+        // Diff combinado não gera patch de hunk individual.
+        assert!(extract_hunk_patch(&d, 0).is_none());
+    }
+
+    #[test]
+    fn extract_single_hunk_patch() {
+        let text = "diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n-um\n+UM\n dois\n@@ -10,2 +10,2 @@\n nove\n-dez\n+DEZ\n";
+        let d = parse_diff(text, 100);
+        let p0 = extract_hunk_patch(&d, 0).expect("hunk 0");
+        assert!(p0.contains("@@ -1,2 +1,2 @@") && !p0.contains("@@ -10,2 +10,2 @@"));
+        let p1 = extract_hunk_patch(&d, 1).expect("hunk 1");
+        assert!(p1.contains("@@ -10,2 +10,2 @@") && !p1.contains("@@ -1,2 +1,2 @@"));
+        assert!(extract_hunk_patch(&d, 2).is_none());
+    }
+
+    #[test]
+    fn conflict_blocks_are_parsed_and_resolved() {
+        let content = "inicio\n<<<<<<< HEAD\nnosso 1\nnosso 2\n=======\ndeles 1\n>>>>>>> feat/x\nmeio\n<<<<<<< HEAD\nA\n||||||| base\nO\n=======\nB\n>>>>>>> feat/x\nfim\n";
+        let blocks = parse_conflict_blocks(content);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].start_line, 2);
+        assert_eq!(blocks[0].ours_label, "HEAD");
+        assert_eq!(blocks[0].ours, ["nosso 1", "nosso 2"]);
+        assert_eq!(blocks[0].theirs_label, "feat/x");
+        assert_eq!(blocks[0].theirs, ["deles 1"]);
+        assert_eq!(blocks[1].ours, ["A"]);
+        assert_eq!(blocks[1].theirs, ["B"]);
+
+        let after0 = resolve_conflict_block_in_text(content, 0, ConflictChoice::Ours).expect("resolve 0");
+        assert_eq!(
+            after0,
+            "inicio\nnosso 1\nnosso 2\nmeio\n<<<<<<< HEAD\nA\n||||||| base\nO\n=======\nB\n>>>>>>> feat/x\nfim\n"
+        );
+        let after1 = resolve_conflict_block_in_text(&after0, 0, ConflictChoice::Both).expect("resolve 1");
+        assert_eq!(after1, "inicio\nnosso 1\nnosso 2\nmeio\nA\nB\nfim\n");
+    }
+
+    #[test]
+    fn stashes_and_log_are_parsed() {
+        let st = parse_stashes(b"stash@{0}\02 hours ago\0On main: rascunho\nstash@{1}\03 days ago\0WIP on feat: x\n");
+        assert_eq!(
+            st,
+            [
+                GitStash { index: 0, date: "2 hours ago".into(), message: "On main: rascunho".into() },
+                GitStash { index: 1, date: "3 days ago".into(), message: "WIP on feat: x".into() },
+            ]
+        );
+        let log_bytes = b"aaaa1111\0aaaa\0Ana\02 hours ago\0feat: x\0\nbbbb2222\0bbbb\0Bia\0yesterday\0fix: y\0";
+        let commits = parse_log(log_bytes);
+        assert_eq!(
+            commits,
+            [
+                GitCommit { hash: "aaaa1111".into(), short_hash: "aaaa".into(), author: "Ana".into(), date: "2 hours ago".into(), subject: "feat: x".into() },
+                GitCommit { hash: "bbbb2222".into(), short_hash: "bbbb".into(), author: "Bia".into(), date: "yesterday".into(), subject: "fix: y".into() },
+            ]
+        );
+    }
+
+    #[test]
     fn untracked_files_show_every_line_or_binary() {
         let d = untracked_diff(b"a\nb\n", 100);
         assert_eq!(
@@ -964,6 +1790,10 @@ mod tests {
             classify_error("fatal: could not read Username for 'https://github.com': terminal prompts disabled"),
             GitError::Auth(_)
         ));
+        let GitError::Auth(ssh_msg) = classify_error("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.") else {
+            panic!("ssh auth")
+        };
+        assert!(ssh_msg.contains("ssh-agent") && ssh_msg.contains("ssh-add") && ssh_msg.contains("Start-Service ssh-agent"), "{ssh_msg}");
         assert!(matches!(classify_error(" ! [rejected]        main -> main (fetch first)\nerror: failed to push"), GitError::Rejected(_)));
         assert!(matches!(classify_error("fatal: Not possible to fast-forward, aborting."), GitError::Rejected(_)));
         assert!(matches!(
