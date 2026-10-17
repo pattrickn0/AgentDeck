@@ -193,6 +193,13 @@ pub struct PrChecksDetail {
     pub failed_log: Option<(u64, Result<JobLog, GithubError>)>,
 }
 
+impl PrChecksDetail {
+    /// Resumo dos checks do PR: a execução mais recente de cada workflow.
+    pub fn status(&self) -> CheckStatus {
+        aggregate_check_status(latest_per_workflow(&self.runs).into_iter().map(|r| r.status))
+    }
+}
+
 /// Erros claros da integração com o GitHub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GithubError {
@@ -270,16 +277,9 @@ pub struct GithubEvent {
 #[derive(Debug, Clone)]
 pub enum GithubPayload {
     Overview(Result<GithubOverview, GithubError>),
-    PrDetail(Result<PrChecksDetail, GithubError>),
-    RunJobs {
-        run_id: u64,
-        result: Result<Vec<WorkflowJob>, GithubError>,
-        failed_log: Option<(u64, Result<JobLog, GithubError>)>,
-    },
-    JobLog {
-        job_id: u64,
-        result: Result<JobLog, GithubError>,
-    },
+    PrDetail { pr_number: u64, result: Result<PrChecksDetail, GithubError> },
+    RunJobs { run_id: u64, result: Result<Vec<WorkflowJob>, GithubError>, failed_log: Option<(u64, Result<JobLog, GithubError>)> },
+    JobLog { job_id: u64, result: Result<JobLog, GithubError> },
 }
 
 // ---------- Token protegido em memória ----------
@@ -297,11 +297,7 @@ impl fmt::Debug for SecretToken {
 // ---------- Funções puras de parse e formatação ----------
 
 fn valid_slug_part(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 100
-        && s != "."
-        && s != ".."
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    !s.is_empty() && s.len() <= 100 && s != "." && s != ".." && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// Extrai `dono/repo` de uma URL do remoto `origin` se ela apontar para `github.com`.
@@ -461,7 +457,7 @@ pub fn parse_issues(json: &Value) -> Vec<Issue> {
         let updated_at = item.get("updated_at").and_then(Value::as_str).unwrap_or("").to_owned();
         let raw_body = item.get("body").and_then(Value::as_str).unwrap_or("").trim();
         let clean_body = raw_body.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
-        let (preview, clipped) = truncate_chars(&clean_body, 220);
+        let (preview, clipped) = truncate_chars(&clean_body, 600);
         let body_preview = if clipped { format!("{preview}…") } else { preview.to_owned() };
         out.push(Issue { number, title, author, labels, comments, html_url, updated_at, body_preview });
     }
@@ -522,9 +518,7 @@ pub fn parse_workflow_jobs(json: &Value, default_run_id: u64) -> Vec<WorkflowJob
                 steps
                     .iter()
                     .filter(|s| {
-                        s.get("conclusion")
-                            .and_then(Value::as_str)
-                            .is_some_and(|c| matches!(c, "failure" | "timed_out" | "cancelled"))
+                        s.get("conclusion").and_then(Value::as_str).is_some_and(|c| matches!(c, "failure" | "timed_out" | "cancelled"))
                     })
                     .filter_map(|s| s.get("name").and_then(Value::as_str).map(str::to_owned))
                     .collect()
@@ -547,16 +541,32 @@ pub fn parse_check_runs_status(json: &Value) -> CheckStatus {
     }))
 }
 
+/// Mantém só a execução mais recente de cada workflow (a API devolve da mais nova para a mais
+/// antiga): uma reexecução que passou não deve ficar vermelha por causa da tentativa anterior.
+pub fn latest_per_workflow(runs: &[WorkflowRun]) -> Vec<&WorkflowRun> {
+    let mut seen: Vec<&str> = Vec::new();
+    let mut out = Vec::new();
+    for r in runs {
+        if !seen.contains(&r.name.as_str()) {
+            seen.push(&r.name);
+            out.push(r);
+        }
+    }
+    out
+}
+
 /// Preenche `pr.checks` a partir das execuções do Actions (pelo `head_sha` ou, sem ele, pela branch).
 pub fn attach_pr_checks(prs: &mut [PullRequest], runs: &[WorkflowRun]) {
     for pr in prs {
-        let matching: Vec<CheckStatus> = runs
+        let matching: Vec<WorkflowRun> = runs
             .iter()
-            .filter(|r| (!pr.head_sha.is_empty() && r.head_sha == pr.head_sha) || (r.head_sha.is_empty() && r.head_branch == pr.head_branch))
-            .map(|r| r.status)
+            .filter(|r| {
+                (!pr.head_sha.is_empty() && r.head_sha == pr.head_sha) || (r.head_sha.is_empty() && r.head_branch == pr.head_branch)
+            })
+            .cloned()
             .collect();
         if !matching.is_empty() {
-            pr.checks = aggregate_check_status(matching);
+            pr.checks = aggregate_check_status(latest_per_workflow(&matching).into_iter().map(|r| r.status));
         }
     }
 }
@@ -743,6 +753,7 @@ fn http_agent(follow_redirects: bool) -> ureq::Agent {
     let mut cfg = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .user_agent("commanddeck")
+        .https_only(true)
         .timeout_global(Some(HTTP_TIMEOUT))
         .timeout_connect(Some(CONNECT_TIMEOUT));
     if !follow_redirects {
@@ -788,21 +799,15 @@ impl Core {
             return Err(GithubError::NoProject);
         }
         let git = self.github_git_exe().ok_or(GithubError::NoGit)?;
-        let out = run_captured_raw(
-            non_interactive_git(&git, ws, &["remote", "get-url", "origin"]),
-            None,
-            CMD_TIMEOUT,
-            None,
-            None,
-            64 * 1024,
-        )
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                GithubError::NoGit
-            } else {
-                GithubError::Failed(format!("falha ao executar o git: {e}"))
-            }
-        })?;
+        let out =
+            run_captured_raw(non_interactive_git(&git, ws, &["remote", "get-url", "origin"]), None, CMD_TIMEOUT, None, None, 64 * 1024)
+                .map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        GithubError::NoGit
+                    } else {
+                        GithubError::Failed(format!("falha ao executar o git: {e}"))
+                    }
+                })?;
 
         match out.exit {
             Exit::Code(Some(0)) => {
@@ -906,10 +911,7 @@ impl Core {
         self.check_rate_limit(authenticated)?;
         let url = format!("https://api.github.com{path}");
         let agent = http_agent(true);
-        let mut req = agent
-            .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28");
+        let mut req = agent.get(&url).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28");
         if let Some(tok) = token {
             req = req.header("Authorization", format!("Bearer {}", tok.0));
         }
@@ -1013,11 +1015,26 @@ impl Core {
                 }
             }
         }
-        let token = self.github_token(ws, force);
+        let mut token = self.github_token(ws, force);
         let base = format!("/repos/{}/{}", repo.owner, repo.repo);
 
-        let pulls_json = self.github_get_json(&repo, &format!("{base}/pulls?state=open&per_page=30"), token.as_ref())?;
-        let issues_json = self.github_get_json(&repo, &format!("{base}/issues?state=open&per_page=50"), token.as_ref())?;
+        let pulls_url = format!("{base}/pulls?state=open&per_page=30");
+        let pulls_json = match self.github_get_json(&repo, &pulls_url, token.as_ref()) {
+            // Credencial guardada vencida: um repositório público ainda responde sem ela.
+            Err(GithubError::Unauthorized) if token.is_some() => {
+                token = None;
+                self.github_get_json(&repo, &pulls_url, None).map_err(|e| match e {
+                    GithubError::NotFound { .. } => GithubError::Unauthorized,
+                    other => other,
+                })?
+            }
+            other => other?,
+        };
+        // Issues desativadas no repositório respondem 410: a aba mostra a lista vazia em vez de falhar.
+        let issues_json = match self.github_get_json(&repo, &format!("{base}/issues?state=open&per_page=50"), token.as_ref()) {
+            Err(GithubError::Failed(_)) => Value::Array(Vec::new()),
+            other => other?,
+        };
         let runs_json = self
             .github_get_json(&repo, &format!("{base}/actions/runs?per_page=30"), token.as_ref())
             .unwrap_or_else(|_| serde_json::json!({ "workflow_runs": [] }));
@@ -1074,7 +1091,7 @@ impl Core {
             let Some(inner) = weak.upgrade() else { return };
             let core = Core { inner };
             let result = core.fetch_pr_detail_blocking(&ws, pr_number, &head_sha, force);
-            core.emit(CoreEvent::Github(GithubEvent { project, payload: GithubPayload::PrDetail(result) }));
+            core.emit(CoreEvent::Github(GithubEvent { project, payload: GithubPayload::PrDetail { pr_number, result } }));
         });
     }
 
@@ -1094,20 +1111,17 @@ impl Core {
         let runs = parse_workflow_runs(&runs_json);
 
         let mut jobs = Vec::new();
-        // Busca os jobs das execuções mais recentes deste commit (até 4 workflows diferentes).
-        let mut seen_workflows = Vec::new();
-        for run in &runs {
-            if seen_workflows.contains(&run.name) {
-                continue;
-            }
-            seen_workflows.push(run.name.clone());
+        // Busca os jobs da execução mais recente de cada workflow deste commit (até 4).
+        let mut seen_workflows = 0;
+        for run in latest_per_workflow(&runs) {
+            seen_workflows += 1;
             if let Ok(jobs_json) = self.github_get_json(&repo, &format!("{base}/actions/runs/{}/jobs?per_page=50", run.id), token.as_ref())
             {
                 let parsed = parse_workflow_jobs(&jobs_json, run.id);
                 self.inner.github.run_jobs_cache.lock().insert((repo.clone(), run.id), (Instant::now(), parsed.clone()));
                 jobs.extend(parsed);
             }
-            if seen_workflows.len() >= 4 {
+            if seen_workflows >= 4 {
                 break;
             }
         }
@@ -1204,7 +1218,9 @@ impl Core {
     /// Abre uma URL do GitHub (`https://github.com/...`) no navegador padrão do sistema.
     pub fn open_github_url(&self, url: &str) -> anyhow::Result<()> {
         let u = url.trim();
-        if !u.starts_with("https://github.com/") {
+        if !u.starts_with("https://github.com/")
+            || u.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, '"' | '<' | '>' | '^' | '`'))
+        {
             anyhow::bail!("URL recusada (apenas https://github.com/ é permitido): {u}");
         }
         open::that_detached(u).map_err(|e| anyhow::anyhow!("falha ao abrir o navegador: {e}"))
@@ -1258,10 +1274,7 @@ mod tests {
         assert_eq!(parse_github_remote("ssh://git@github.com/dono/repo.git"), expected);
         assert_eq!(parse_github_remote("ssh://git@github.com:22/dono/repo.git"), expected);
         assert_eq!(parse_github_remote("git://github.com/dono/repo.git"), expected);
-        assert_eq!(
-            parse_github_remote("https://github.com/org-1/meu.repo_2.git"),
-            Some(RepoSlug::new("org-1", "meu.repo_2"))
-        );
+        assert_eq!(parse_github_remote("https://github.com/org-1/meu.repo_2.git"), Some(RepoSlug::new("org-1", "meu.repo_2")));
 
         // Não são do GitHub ou são malformadas.
         assert_eq!(parse_github_remote(""), None);
@@ -1417,10 +1430,7 @@ mod tests {
                    2026-10-16T03:10:03.0000000Z ##[error]Process completed with exit code 101.\r\n";
         let log = tail_log(raw, 2, 4096);
         assert!(log.truncated);
-        assert_eq!(
-            log.lines,
-            vec!["  --> crates/core/src/github.rs:10:5", "##[error]Process completed with exit code 101."]
-        );
+        assert_eq!(log.lines, vec!["  --> crates/core/src/github.rs:10:5", "##[error]Process completed with exit code 101."]);
     }
 
     #[test]
@@ -1456,5 +1466,140 @@ mod tests {
         let j_prompt = format_failed_job_prompt(&repo, Some(&pr), None, &job, Some(&log));
         assert!(j_prompt.contains("Corrija o job \"clippy (windows)\" que falhou no PR #12"));
         assert!(j_prompt.contains("error: unused variable `x`"));
+    }
+
+    #[test]
+    fn rerun_replaces_the_previous_attempt_of_the_same_workflow() {
+        let runs_json = json!({
+            "workflow_runs": [
+                { "id": 3, "name": "CI", "head_sha": "aaa", "head_branch": "x", "status": "completed", "conclusion": "success" },
+                { "id": 2, "name": "Lint", "head_sha": "aaa", "head_branch": "x", "status": "in_progress", "conclusion": null },
+                { "id": 1, "name": "CI", "head_sha": "aaa", "head_branch": "x", "status": "completed", "conclusion": "failure" }
+            ]
+        });
+        let runs = parse_workflow_runs(&runs_json);
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[1].raw_status, "in_progress");
+        assert_eq!(runs[1].conclusion, None);
+        let latest = latest_per_workflow(&runs);
+        assert_eq!(latest.iter().map(|r| r.id).collect::<Vec<_>>(), vec![3, 2]);
+
+        let mut prs = vec![PullRequest {
+            number: 1,
+            title: "t".into(),
+            author: "a".into(),
+            head_branch: "x".into(),
+            base_branch: "dev".into(),
+            head_sha: "aaa".into(),
+            draft: false,
+            html_url: String::new(),
+            updated_at: String::new(),
+            checks: CheckStatus::Neutral,
+        }];
+        attach_pr_checks(&mut prs, &runs);
+        // CI passou na reexecução e o Lint ainda roda: o PR está em andamento, não vermelho.
+        assert_eq!(prs[0].checks, CheckStatus::Pending);
+        let detail = PrChecksDetail { runs, ..Default::default() };
+        assert_eq!(detail.status(), CheckStatus::Pending);
+    }
+
+    #[test]
+    fn maps_check_status_and_aggregates() {
+        use CheckStatus::*;
+        assert_eq!(map_check_status("queued", None), Pending);
+        assert_eq!(map_check_status("completed", Some("success")), Success);
+        assert_eq!(map_check_status("completed", Some("timed_out")), Failure);
+        assert_eq!(map_check_status("completed", Some("skipped")), Neutral);
+        assert_eq!(map_check_status("completed", None), Neutral);
+        assert_eq!(aggregate_check_status([Success, Pending, Failure]), Failure);
+        assert_eq!(aggregate_check_status([Success, Pending]), Pending);
+        assert_eq!(aggregate_check_status([Success, Neutral]), Success);
+        assert_eq!(aggregate_check_status([]), Neutral);
+
+        let checks = json!({ "check_runs": [
+            { "status": "completed", "conclusion": "success" },
+            { "status": "completed", "conclusion": "failure" }
+        ] });
+        assert_eq!(parse_check_runs_status(&checks), Failure);
+        assert_eq!(parse_check_runs_status(&json!({})), Neutral);
+    }
+
+    #[test]
+    fn log_tail_respects_limits_and_utf8() {
+        let raw: String = (0..1000).map(|i| format!("linha {i} çãõ\n")).collect();
+        let log = tail_log(&raw, LOG_MAX_LINES, 2000);
+        assert!(log.truncated);
+        assert!(log.lines.len() < 200);
+        assert_eq!(log.lines.last().map(String::as_str), Some("linha 999 çãõ"));
+        assert!(log.lines.iter().all(|l| l.starts_with("linha ")), "não começa no meio de uma linha");
+        assert_eq!(tail_log("", 10, 10), JobLog::default());
+        let small = tail_log("a\nb\n", 10, 1000);
+        assert_eq!(small.lines, vec!["a", "b"]);
+        assert!(!small.truncated);
+    }
+
+    #[test]
+    fn stream_tail_keeps_only_the_end() {
+        let data: Vec<u8> = (0..100_000u32).map(|i| (i % 251) as u8).collect();
+        let tail = read_stream_tail(&data[..], 1000, 10_000_000).unwrap();
+        assert_eq!(tail.len(), 1000);
+        assert_eq!(tail, data[data.len() - 1000..]);
+        let all = read_stream_tail(&b"curto"[..], 1000, 10_000_000).unwrap();
+        assert_eq!(all, b"curto");
+    }
+
+    #[test]
+    fn github_error_messages_are_clear() {
+        let limited = GithubError::RateLimited { reset_in_secs: Some(125), authenticated: false }.to_string();
+        assert!(limited.contains("3 min") && limited.contains("60/h"), "{limited}");
+        let nf = GithubError::NotFound { repo: "dono/repo".into(), authenticated: false }.to_string();
+        assert!(nf.contains("dono/repo") && nf.contains("privado"), "{nf}");
+        assert!(GithubError::Unauthorized.to_string().contains("401"));
+        for e in [GithubError::Unauthorized, GithubError::Forbidden("x".into()), GithubError::Network("y".into())] {
+            assert!(!e.to_string().to_lowercase().contains("bearer"));
+        }
+    }
+
+    #[test]
+    fn prompts_for_issue_and_failed_job_without_pr() {
+        let repo = RepoSlug::new("dono", "repo");
+        let issue = Issue {
+            number: 7,
+            title: "Quebra \u{1b}[31mao abrir".into(),
+            author: "x".into(),
+            labels: vec!["bug".into()],
+            comments: 0,
+            html_url: "https://github.com/dono/repo/issues/7".into(),
+            updated_at: String::new(),
+            body_preview: "passos".into(),
+        };
+        let m = format_issue_prompt(&repo, &issue);
+        assert!(m.contains("issue #7") && m.contains("Rótulos: bug") && m.contains("Resumo: passos"));
+        assert!(!m.contains('\u{1b}'), "sem caracteres de controle");
+
+        let job = WorkflowJob {
+            id: 1,
+            run_id: 2,
+            name: "test".into(),
+            status: CheckStatus::Failure,
+            conclusion: Some("failure".into()),
+            html_url: "https://github.com/dono/repo/actions/runs/2/job/1".into(),
+            failed_steps: vec![],
+        };
+        let run = WorkflowRun {
+            id: 2,
+            name: "CI".into(),
+            display_title: "Corrige X".into(),
+            head_branch: "fix/x".into(),
+            head_sha: String::new(),
+            event: "push".into(),
+            status: CheckStatus::Failure,
+            raw_status: "completed".into(),
+            conclusion: Some("failure".into()),
+            html_url: String::new(),
+            created_at: String::new(),
+        };
+        let m = format_failed_job_prompt(&repo, None, Some(&run), &job, None);
+        assert!(m.contains("na execução \"Corrige X\" (branch fix/x)"), "{m}");
     }
 }
