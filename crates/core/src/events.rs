@@ -107,6 +107,8 @@ pub enum CoreEvent {
     },
     /// O uso de algum agente mudou (ver `Core::usage_snapshot`).
     UsageChanged,
+    /// Resultado de uma operação assíncrona do GitHub (PRs, issues, Actions, logs).
+    Github(crate::github::GithubEvent),
 }
 
 /// Mensagem a digitar no terminal de uma instância de agente.

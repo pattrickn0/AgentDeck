@@ -4,6 +4,7 @@
 mod composer;
 mod empty_state;
 mod git;
+mod github;
 mod map;
 mod menus;
 mod overlay;
@@ -53,8 +54,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let term_rect = center;
     // A barra tem sempre a mesma largura: o Mapa e o diff do Git rolam dentro dela.
     let panel = Rect::from_min_max(Pos2::new(full.max.x - right_w, full.min.y), full.max);
-    // Na aba Git o compositor some: o commit tem a própria caixa de mensagem.
-    let comp_h = if deck.right_view == RightView::Git { 0.0 } else { composer::measure(deck, ui, right_w) };
+    // Nas abas Git e GitHub o compositor some para dar espaço às listas, diffs e logs.
+    let comp_h = if matches!(deck.right_view, RightView::Git | RightView::GitHub) {
+        0.0
+    } else {
+        composer::measure(deck, ui, right_w)
+    };
 
     // ---------- Terminais (tela dividida por tipo de agente) ----------
     panes::draw(deck, ui, term_rect);

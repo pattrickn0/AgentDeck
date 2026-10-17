@@ -13,6 +13,7 @@ mod audio;
 mod crash;
 mod deck;
 mod git_ui;
+mod github_ui;
 mod icons;
 mod smoke;
 mod split;
