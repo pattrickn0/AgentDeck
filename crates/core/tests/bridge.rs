@@ -22,6 +22,11 @@ struct Env {
 }
 
 fn start(fake_agents: &[(&str, &str)]) -> Env {
+    start_cfg(fake_agents, |_| {})
+}
+
+/// Como [`start`], com a configuração ajustada por `tweak` antes de o `Core` subir.
+fn start_cfg(fake_agents: &[(&str, &str)], tweak: impl FnOnce(&mut Config)) -> Env {
     let tmp = tempfile::tempdir().expect("tmp");
     let root = tmp.path().to_path_buf();
     let paths = AppPaths {
@@ -37,12 +42,14 @@ fn start(fake_agents: &[(&str, &str)]) -> Env {
     for (name, script) in fake_agents {
         write_script(&fake_bin.join(name), script);
     }
+    let mut config = Config::with_project(paths.default_workspace.clone());
+    tweak(&mut config);
     let opts = StartOptions {
         search_path: Some(fake_bin.into_os_string()),
         home_dir: Some(root.join("home")),
         ollama_discovery: false,
         watch_workspace: false,
-        config: Some(Config::with_project(paths.default_workspace.clone())),
+        config: Some(config),
         system_dirs: false,
     };
     let (core, rx) = Core::start_with(paths, opts).expect("start");
@@ -742,12 +749,17 @@ fn hooks_signal_turns_of_a_tab() {
 
 /// Deixa o `claude` "instalado" para o core (o arquivo só precisa existir; nunca roda).
 fn fake_claude(env: &Env) {
+    fake_cli(env, "claude");
+}
+
+/// Deixa o agente `name` (`claude`, `codex`, `opencode`, `agy`…) "instalado" para o core.
+fn fake_cli(env: &Env, name: &str) {
     if cfg!(windows) {
         let bin = env.root.join("home").join(".local").join("bin");
         std::fs::create_dir_all(&bin).expect("mkdir");
-        std::fs::write(bin.join("claude.exe"), b"").expect("write");
+        std::fs::write(bin.join(format!("{name}.exe")), b"").expect("write");
     } else {
-        write_script(&env.root.join("fake-bin").join("claude"), "exit 0");
+        write_script(&env.root.join("fake-bin").join(name), "exit 0");
     }
 }
 
@@ -1018,7 +1030,7 @@ fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
 
     // Cada aba consulta a própria posição pelo token.
     let (st, b) = http(port, "GET", "/team", &host, &tab_token(&env, "shell@dev"), "");
-    assert_eq!((st, b), (200, json!({"id": "shell@dev", "boss": "shell", "crew": ["shell@qa"]})));
+    assert_eq!((st, b), (200, json!({"id": "shell@dev", "boss": "shell", "crew": ["shell@qa"], "models": {}})));
     let (st, _) = http(port, "GET", "/team", &host, env.core.bridge_token(), "");
     assert_eq!(st, 400, "o token mestre não é um agente");
 
@@ -1171,4 +1183,280 @@ fn the_team_notice_waits_for_a_message_that_is_really_typed() {
     env.core.close_instance(&p, "claude@qa");
     assert!(env.core.take_team_notice(&p, "claude").expect("aviso").contains("sua equipe: claude@dev"));
     env.core.shutdown();
+}
+
+/// `POST /ask` com o token mestre (o `from` do corpo vale), numa thread.
+fn master_ask(env: &Env, body: Value) -> std::thread::JoinHandle<(u16, Value)> {
+    let token = env.core.bridge_token().to_owned();
+    ask_in_thread(env, token, body)
+}
+
+#[test]
+fn a_model_conflict_on_an_open_instance_is_an_explicit_409() {
+    let env = start(&[]);
+    for cli in ["claude", "aider"] {
+        fake_cli(&env, cli);
+    }
+    env.core.enable_tab_delivery();
+    let p = env.core.active_project_id();
+    let state = |env: &Env| env.core.projects()[0].tab_models.clone();
+    let port = env.core.bridge_port();
+    let master = env.core.bridge_token().to_owned();
+
+    // Abre `claude@dev` com sonnet: o modelo fica gravado antes de a aba abrir.
+    let first = master_ask(&env, json!({"from": "shell", "to": "claude@dev", "message": "tarefa", "model": "sonnet"}));
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev", true));
+    assert_eq!(env.core.instance_model(&p, &d.ident).as_deref(), Some("sonnet"));
+    assert_eq!(state(&env).get("claude@dev").map(String::as_str), Some("sonnet"), "gravado na config do projeto");
+    assert_eq!(env.core.instance_models(&p).get("claude@dev").map(String::as_str), Some("sonnet"));
+
+    // Outro modelo para a mesma instância: 409 com a saída pelo --new; nada muda.
+    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@dev", "message": "oi", "model": "opus"}));
+    assert_eq!(st, 409, "{body}");
+    assert_eq!(body["error"], "claude@dev já está aberta com sonnet; use --new para abrir outra com opus");
+    assert_eq!(env.core.project_instance_ids(&p), ["claude@dev"]);
+    assert_eq!(state(&env).len(), 1);
+    // Pedir um modelo a uma instância aberta com o padrão do CLI também é conflito.
+    env.core.restore_instance(&p, "claude@qa");
+    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@qa", "message": "oi", "model": "opus"}));
+    assert_eq!(
+        (st, body["error"].as_str()),
+        (409, Some("claude@qa já está aberta com o modelo padrão; use --new para abrir outra com opus"))
+    );
+
+    // O mesmo modelo, ou nenhum, entrega normalmente na aba que já existe.
+    for model in [Some("sonnet"), None] {
+        let mut body = json!({"from": "shell", "to": "claude@dev", "message": "de novo"});
+        if let Some(m) = model {
+            body["model"] = json!(m);
+        }
+        let asking = master_ask(&env, body);
+        let d = next_delivery(&env);
+        assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev", false), "{model:?}");
+        env.core.fail_delivery(d.request, "teste");
+        assert_eq!(asking.join().expect("thread").0, 500);
+    }
+
+    // --new + --model abre outra instância do cargo com o modelo pedido.
+    let second = master_ask(&env, json!({"from": "shell", "to": "claude@dev", "message": "outra", "model": "opus", "new": true}));
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create), ("claude@dev@ana", true));
+    assert_eq!(env.core.instance_model(&p, &d.ident).as_deref(), Some("opus"));
+    assert_eq!(state(&env).get("claude@dev").map(String::as_str), Some("sonnet"), "a primeira não mudou");
+
+    // Modelo fora do padrão, ou agente que não escolhe modelo: 400 antes de criar qualquer coisa.
+    let ids_before = env.core.project_instance_ids(&p);
+    let bad = |to: &str, model: Value| ask_raw(port, &master, json!({"from": "shell", "to": to, "message": "oi", "model": model}));
+    let (st, body) = bad("claude@x", json!("a b"));
+    assert_eq!(st, 400);
+    assert!(body["error"].as_str().expect("erro").starts_with("modelo inválido: \"a b\""), "{body}");
+    assert_eq!(bad("claude@x", json!("a\"; rm")).0, 400);
+    assert_eq!(bad("claude@x", json!("m".repeat(129))).0, 400);
+    assert_eq!(bad("claude@x", json!(7)).0, 400);
+    assert_eq!(bad("aider", json!("gpt")), (400, json!({"error": "o agente aider não aceita escolher modelo"})));
+    assert_eq!(env.core.project_instance_ids(&p), ids_before, "nada foi criado");
+    assert_eq!(state(&env).len(), 2);
+
+    // Fechar esquece o modelo.
+    env.core.close_instance(&p, "claude@dev@ana");
+    assert_eq!(state(&env).keys().collect::<Vec<_>>(), ["claude@dev"]);
+    env.core.shutdown();
+    for t in [first, second] {
+        let _ = t.join();
+    }
+}
+
+#[test]
+fn a_failed_request_does_not_keep_the_model_of_an_instance_that_never_opened() {
+    let env = start(&[]);
+    fake_claude(&env);
+    env.core.enable_tab_delivery();
+    let p = env.core.active_project_id();
+    // Profundidade estourada depois de criar: a instância e o modelo somem juntos.
+    let (st, _) = ask_raw(
+        env.core.bridge_port(),
+        env.core.bridge_token(),
+        json!({"from": "shell", "to": "claude@dev", "message": "oi", "model": "sonnet", "depth": 2}),
+    );
+    assert_eq!(st, 400);
+    assert!(env.core.project_instance_ids(&p).is_empty());
+    assert!(env.core.projects()[0].tab_models.is_empty());
+    env.core.shutdown();
+}
+
+#[test]
+fn the_roster_and_the_team_show_the_models() {
+    let (env, p) = start_with_claude_tab();
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let second = env.core.register_instance_with_model(&p, "claude", Some("opus")).expect("registra");
+    assert_eq!(second.id(), "claude@main@ana");
+    let dev = commanddeck_core::Ident::parse("claude@dev").expect("id");
+    env.core.restore_instance(&p, "claude@dev");
+    env.core.assign_model(&p, &dev, Some("sonnet"));
+    env.core.set_boss(&p, "claude@dev", Some("claude")).expect("equipe");
+
+    let (st, body) = http(port, "GET", "/agents", &host, &tab_token(&env, "claude"), "");
+    assert_eq!(st, 200);
+    assert_eq!(body["models"], json!({"claude@dev": "sonnet", "claude@main@ana": "opus"}));
+    let (st, body) = http(port, "GET", "/team", &host, &tab_token(&env, "claude@dev"), "");
+    assert_eq!(st, 200);
+    // Só quem aparece na resposta (ele; o chefe e a equipe, se tivessem modelo).
+    assert_eq!(body["models"], json!({"claude@dev": "sonnet"}));
+    assert_eq!(body["boss"], "claude");
+    env.core.shutdown();
+}
+
+#[test]
+fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_cli() {
+    let env = start_cfg(&[], |c| {
+        c.role_models.insert("claude@dev".into(), "sonnet".into());
+        c.role_models.insert("claude".into(), "opus".into());
+        c.role_models.insert("opencode".into(), "opencode/glm-5.3-flash-free".into());
+        c.role_models.insert("aider".into(), "nao-vale".into());
+    });
+    for cli in ["claude", "codex", "opencode", "agy", "aider"] {
+        fake_cli(&env, cli);
+    }
+    let p = env.core.active_project_id();
+    let ident = |s: &str| commanddeck_core::Ident::parse(s).expect("id");
+    let saved = |env: &Env| env.core.projects()[0].tab_models.clone();
+    let tail = |args: &[String], n: usize| args[args.len() - n..].to_vec();
+    let data = env.root.join("dados").display().to_string();
+
+    // c) o padrão do cargo vale, e fica gravado ao abrir.
+    let dev = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("claude@dev");
+    assert_eq!(dev.model.as_deref(), Some("sonnet"));
+    assert_eq!(tail(&dev.args, 2), ["--model", "sonnet"]);
+    assert_eq!(saved(&env).get("claude@dev").map(String::as_str), Some("sonnet"));
+    // `modelo@cargo` vence `modelo`; o cargo sem entrada cai no `modelo`.
+    assert_eq!(env.core.spawn_spec_for(&p, &ident("claude@qa")).expect("qa").model.as_deref(), Some("opus"));
+
+    // b) o gravado vence um padrão que mudou depois.
+    env.core.update_config(|c| {
+        c.role_models.insert("claude@dev".into(), "haiku".into());
+    });
+    assert_eq!(env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("de novo").model.as_deref(), Some("sonnet"));
+    // a) o pedido vence o gravado.
+    assert_eq!(env.core.assign_model(&p, &ident("claude@dev"), Some("fable")).as_deref(), Some("fable"));
+    let spec = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("fable");
+    assert_eq!(tail(&spec.args, 2), ["--model", "fable"]);
+
+    // Codex e Antigravity: --model; o Codex mantém o hook de fim de turno.
+    env.core.assign_model(&p, &ident("codex@x"), Some("gpt-5-codex"));
+    let codex = env.core.spawn_spec_for(&p, &ident("codex@x")).expect("codex");
+    assert_eq!(tail(&codex.args, 2), ["--model", "gpt-5-codex"]);
+    assert!(codex.args.iter().any(|a| a.starts_with("notify=")));
+    let agy = env.core.spawn_spec_for(&p, &ident("antigravity@x")).expect("agy");
+    assert_eq!((agy.model, tail(&agy.args, 1)), (None, vec![data]), "sem modelo, sem --model");
+    env.core.assign_model(&p, &ident("antigravity@x"), Some("claude-sonnet-5-5-medium"));
+    let agy = env.core.spawn_spec_for(&p, &ident("antigravity@x")).expect("agy");
+    assert_eq!(tail(&agy.args, 2), ["--model", "claude-sonnet-5-5-medium"]);
+
+    // OpenCode: o TUI não tem --model; vai servidor próprio + configuração no ambiente.
+    let oc = env.core.spawn_spec_for(&p, &ident("opencode")).expect("opencode");
+    assert_eq!(oc.args, ["--standalone"]);
+    let conf: Value = serde_json::from_str(&oc.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
+    assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free"}));
+    // Sem modelo, o OpenCode abre como sempre: sem argumentos e sem a variável.
+    env.core.update_config(|c| {
+        c.role_models.remove("opencode");
+    });
+    let plain = env.core.spawn_spec_for(&p, &ident("opencode@qa")).expect("opencode sem modelo");
+    assert!(plain.args.is_empty() && !plain.env.contains_key("OPENCODE_CONFIG_CONTENT"), "{:?}", plain.args);
+
+    // Quem não escolhe modelo não ganha um, nem do padrão nem do pedido.
+    assert_eq!(env.core.spawn_spec_for(&p, &ident("aider")).expect("aider").model, None);
+    assert_eq!(env.core.assign_model(&p, &ident("aider"), Some("gpt")), None);
+    assert_eq!(env.core.spawn_spec_for(&p, &ident("shell")).expect("shell").model, None);
+    assert!(!saved(&env).contains_key("aider") && !saved(&env).contains_key("shell"));
+    assert!(env.core.register_instance_with_model(&p, "aider", Some("gpt")).is_err());
+    assert!(env.core.register_instance_with_model(&p, "claude", Some("a b")).is_err());
+
+    // Renomear leva o modelo; fechar esquece.
+    env.core.restore_instance(&p, "claude@dev");
+    env.core.rename_instance(&p, "claude@dev", &ident("claude@lead")).expect("renomeia");
+    assert_eq!(saved(&env).get("claude@lead").map(String::as_str), Some("fable"));
+    assert!(!saved(&env).contains_key("claude@dev"));
+    env.core.close_instance(&p, "claude@lead");
+    assert!(!saved(&env).contains_key("claude@lead"));
+    env.core.shutdown();
+}
+
+#[test]
+fn a_saved_model_survives_restarting_the_app() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let paths = paths_in(tmp.path());
+    let opts = |config: Config| StartOptions {
+        search_path: None,
+        home_dir: Some(tmp.path().join("home")),
+        ollama_discovery: false,
+        watch_workspace: false,
+        config: Some(config),
+        system_dirs: false,
+    };
+    let (core, _rx) = Core::start_with(paths.clone(), opts(Config::with_project(paths.default_workspace.clone()))).expect("start");
+    let p = core.active_project_id();
+    let ident = core.register_instance_with_model(&p, "claude", Some("sonnet")).expect("registra");
+    assert_eq!(ident.id(), "claude");
+    let saved = std::fs::read_to_string(&paths.config_file).expect("a config foi gravada");
+    assert!(saved.contains("\"tabModels\"") && saved.contains("\"sonnet\""), "{saved}");
+    core.shutdown();
+    drop(core);
+    // Outra abertura do app lê a mesma config: o modelo está lá, e `restore_instance` o respeita.
+    let again = Config::load(&paths);
+    assert_eq!(again.project(&p).map(|x| x.tab_models.clone()), Some([("claude".to_owned(), "sonnet".to_owned())].into()));
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_runs_get_the_requested_or_default_model() {
+    let env = start_cfg(&[("claude", ECHO_AGENT), ("aider", "echo ok")], |c| {
+        c.role_models.insert("claude".into(), "opus".into());
+    });
+    let ask_model = |model: Option<&str>| {
+        let mut body = json!({"from": "shell", "to": "claude", "message": "oi"});
+        if let Some(m) = model {
+            body["model"] = json!(m);
+        }
+        ask(&env, body)
+    };
+    let (st, b) = ask_model(Some("sonnet"));
+    assert_eq!(st, 200, "{b}");
+    assert!(b["answer"].as_str().expect("answer").starts_with("ARGS: [-p] [--output-format] [text] [--model] [sonnet] ["), "{b}");
+    let (_, b) = ask_model(None);
+    assert!(b["answer"].as_str().expect("answer").contains("[--model] [opus]"), "o padrão do cargo vale sem pedido: {b}");
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "aider", "message": "oi", "model": "gpt"}));
+    assert_eq!((st, b), (400, json!({"error": "o agente aider não aceita escolher modelo"})));
+    env.core.shutdown();
+}
+
+/// Com os CLIs reais instalados: `cargo test -p commanddeck-core --test bridge -- --ignored --nocapture`.
+#[test]
+#[ignore = "usa o agy e o opencode instalados na máquina"]
+fn the_known_models_come_from_the_installed_clis() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let root = tmp.path().to_path_buf();
+    let paths = paths_in(&root);
+    let opts = StartOptions {
+        search_path: None,
+        home_dir: None,
+        ollama_discovery: false,
+        watch_workspace: false,
+        config: Some(Config::with_project(paths.default_workspace.clone())),
+        system_dirs: true,
+    };
+    let (core, _rx) = Core::start_with(paths, opts).expect("start");
+    assert_eq!(core.known_models("claude"), ["opus", "sonnet", "haiku", "fable"]);
+    assert!(core.known_models("shell").is_empty());
+    for kind in ["antigravity", "opencode"] {
+        let started = std::time::Instant::now();
+        let list = core.known_models(kind);
+        println!("{kind}: {} modelos em {:?}; primeiros: {:?}", list.len(), started.elapsed(), &list[..list.len().min(4)]);
+        let again = std::time::Instant::now();
+        assert_eq!(core.known_models(kind), list);
+        assert!(again.elapsed() < Duration::from_millis(50), "a segunda consulta vem do cache");
+    }
+    core.shutdown();
 }

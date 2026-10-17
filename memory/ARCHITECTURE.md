@@ -66,8 +66,9 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 
 | Rota | Descrição |
 | :-- | :-- |
-| `GET /agents` | `{"agents": [...]}` com os agentes instalados e as instâncias abertas no projeto de quem chama |
-| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido ou profundidade `>= 2`; 404 para `reply_to` que não está pendente; 409 para ciclo de espera; 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
+| `GET /agents` | `{"agents": [...], "models": {id: modelo}}` com os agentes instalados e as instâncias abertas no projeto de quem chama, e o modelo de LLM das instâncias que têm um |
+| `GET /team` | `{"id","boss","crew","models"}`: a posição de quem chama na equipe (só token de aba); `models` traz o modelo de quem aparece na resposta |
+| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido, profundidade `>= 2`, `model` fora de `[A-Za-z0-9:._/#@+-]{1,128}` ou agente que não escolhe modelo (`o agente X não aceita escolher modelo`); 404 para `reply_to` que não está pendente; 409 para ciclo de espera ou para `model` diferente do da instância já aberta (`claude@dev já está aberta com sonnet; use --new para abrir outra com opus`); 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
 | `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
@@ -110,6 +111,33 @@ mudou de posição recebe o aviso anexado à **próxima** mensagem digitada na a
 já dá o aviso por lido). O chefe de quem fecha também é avisado, mesmo que a equipe dela fosse vazia. `ask-agent --boss "msg"` pergunta ao chefe. A barra lateral desenha a árvore
 (`ui/projects.rs::agent_tree`). A equipe orienta, não restringe: qualquer agente continua podendo chamar qualquer outro.
 O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
+
+**Modelo de LLM da instância** (`crates/core/src/models.rs`). O modelo (`sonnet`, `opencode/glm-5.3-flash-free`…) é uma
+propriedade da instância, **não** parte do id (que continua `modelo[@cargo[@nome]]`): fica em
+`ProjectCfg.tab_models` (id → modelo), no mesmo molde de `tab_parents` (renomear leva o modelo, fechar o esquece).
+Ao abrir a instância vale, na ordem: o pedido (`ask-agent --model` → `"model"` do `/ask`; o menu "+ Novo agente"),
+o gravado em `tab_models` (reabrir o app mantém), o padrão de `Config.role_models` (chave `modelo@cargo` ou só
+`modelo`; `modelo@cargo` vence) e, por fim, o do próprio CLI (nenhum argumento). O resultado é gravado em
+`tab_models` por `Core::assign_model` (idempotente; chamado pela ponte ao criar a instância e por `spawn_spec_for`).
+Só aceitam modelo `claude`, `antigravity`, `codex` e `opencode` (os modelos do Ollama já vão no tipo); o nome é
+validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims `.cmd` ainda passam por `cmd_safe_arg`.
+- **Nas abas** (`spawn_spec_for`): `claude`, `agy` e `codex` recebem `--model <m>`. O TUI do **OpenCode** não tem
+  `--model` (só `run` e `mini` têm `-m`): a aba abre `opencode --standalone` com `OPENCODE_CONFIG_CONTENT={"model":"<m>"}`
+  no ambiente. A configuração por variável só é lida por quem sobe o servidor, e o TUI normal usa o serviço em segundo
+  plano compartilhado, que ignora o nosso ambiente; por isso o servidor próprio (`--standalone`). A variável vale por
+  cima da configuração do usuário e do projeto (verificado no OpenCode 2.0.32: a linha de status do TUI mostra o modelo
+  pedido). Sem modelo, o OpenCode abre como sempre. A variante (`modelo#alta`) só existe no `run -m`: no TUI vai só o modelo.
+- **No headless** (`headless.rs`): `--model` no `claude`, `agy` e `codex exec`; `opencode run -m <m>`.
+- **Conflito explícito:** `/ask` com `model` para uma instância já aberta com **outro** modelo (ou com o padrão do CLI)
+  devolve 409 com a saída pelo `--new`; o mesmo modelo, ou nenhum pedido, entrega normalmente; `--new` + `--model` abre
+  outra instância com aquele modelo.
+- **Lista de modelos** (`Core::known_models`, para o menu "+ Novo agente"): `claude` = os apelidos
+  `opus, sonnet, haiku, fable`; `antigravity` = `agy models` (primeira coluna); `opencode` = `opencode models`. As duas
+  últimas rodam numa thread (a interface chama por `Deck::request_models`), com limite de 15 s e cache de 10 min (60 s
+  se falhou); sem lista o menu mostra só "Padrão".
+- **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet)`, pelos campos `models` de `/agents` e `/team`), o
+  cabeçalho da aba, a barra lateral e o menu de contexto da aba (só leitura: trocar o modelo de uma aba aberta exige
+  reiniciar o agente e não existe ainda).
 
 `ask-agent <id> "msg"` (e `--new` para forçar outra instância) funciona assim:
 

@@ -212,3 +212,35 @@ fn usage_statusline_posts_and_prints() {
     assert_eq!(text(&statusline(None, None, &config, &input).stdout), "sessão 34% · semana 12%\n");
     core.shutdown();
 }
+
+#[test]
+fn the_model_option_is_checked_and_does_not_mix_with_boss_or_reply() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let core = start_core(tmp.path());
+
+    let out = ask_agent(Some(&core), &["--model"], None);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("--model precisa do nome do modelo"), "{}", text(&out.stderr));
+    let out = ask_agent(Some(&core), &["--model", "sonnet", "--boss", "oi"], None);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("--model não combina com --boss"), "{}", text(&out.stderr));
+    let out = ask_agent(Some(&core), &["--model=sonnet", "--reply", "3", "oi"], None);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("--model não combina com --reply"), "{}", text(&out.stderr));
+
+    // Nome fora do padrão: a ponte recusa antes de qualquer coisa (400 → saída 1).
+    let out = ask_agent(Some(&core), &["--new", "--model", "a b", "claude", "oi"], None);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("modelo inválido: \"a b\""), "{}", text(&out.stderr));
+    // A ajuda cita a opção.
+    let out = ask_agent(Some(&core), &["--help"], None);
+    assert!(text(&out.stdout).contains("[--model <modelo>]"), "{}", text(&out.stdout));
+
+    #[cfg(unix)]
+    {
+        // Sem abas, a pergunta é respondida em headless e o modelo chega ao claude falso sem erro.
+        let out = ask_agent(Some(&core), &["--model", "sonnet", "claude", "oi"], None);
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    }
+    core.shutdown();
+}

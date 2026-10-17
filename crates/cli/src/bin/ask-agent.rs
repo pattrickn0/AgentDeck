@@ -2,6 +2,7 @@
 //!
 //! Uso: ask-agent <agente> "mensagem"     (ou "-" para ler a mensagem do stdin)
 //!      ask-agent --new <agente> "mensagem"   (abre outra instância, mesmo se já houver uma)
+//!      ask-agent --model <modelo> <agente> "mensagem"   (escolhe o LLM da instância ao abri-la; combina com --new)
 //!      ask-agent --reply <n> "resposta"       (responde à pergunta número n)
 //!      ask-agent --list
 //!      ask-agent --team                       (seu chefe e sua equipe)
@@ -18,6 +19,7 @@
 //! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do CommandDeck.
 //! `--signal` e `--usage` saem sempre com 0 (um hook que falha não pode atrapalhar o agente).
 
+use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -28,7 +30,7 @@ use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -95,10 +97,10 @@ fn main() -> ExitCode {
         let _ = bridge.request("POST", "/signal", Some(&json!({ "state": state })), Some(std::time::Duration::from_secs(3)));
         return ExitCode::SUCCESS;
     }
-    let force_new = args.first().is_some_and(|a| a == "--new");
-    if force_new {
-        args.remove(0);
-    }
+    let (force_new, model) = match take_flags(&mut args) {
+        Ok(v) => v,
+        Err(e) => return fail(format!("{e}\n{USAGE}"), 2),
+    };
     let mut reply_to: Option<u64> = None;
     if args.first().is_some_and(|a| a == "--reply") {
         match args.get(1).and_then(|n| n.trim_start_matches('#').parse().ok()) {
@@ -108,19 +110,22 @@ fn main() -> ExitCode {
         // Daqui em diante, `args[0]` faz o papel do destino (ignorado) e o resto é a mensagem.
         args.drain(..2);
         args.insert(0, String::new());
+        if model.is_some() {
+            return fail(format!("--model não combina com --reply (o modelo vale ao abrir uma instância).\n{USAGE}"), 2);
+        }
     }
     if args.first().is_some_and(|a| a == "--team") {
         return match team(&bridge) {
-            Ok((id, boss, crew)) => {
-                println!("Você: {id}");
-                match boss {
-                    Some(b) => println!("Chefe: {b} (reporte a ele com: ask-agent --boss \"mensagem\")"),
+            Ok(t) => {
+                println!("Você: {}", with_model(&t.id, &t.models));
+                match &t.boss {
+                    Some(b) => println!("Chefe: {} (reporte a ele com: ask-agent --boss \"mensagem\")", with_model(b, &t.models)),
                     None => println!("Chefe: nenhum (você responde diretamente ao usuário)"),
                 }
-                if crew.is_empty() {
+                if t.crew.is_empty() {
                     println!("Equipe: nenhum agente");
                 } else {
-                    println!("Equipe: {}", crew.join(", "));
+                    println!("Equipe: {}", t.crew.iter().map(|c| with_model(c, &t.models)).collect::<Vec<_>>().join(", "));
                 }
                 ExitCode::SUCCESS
             }
@@ -133,11 +138,12 @@ fn main() -> ExitCode {
         if force_new {
             return fail(format!("--new não combina com --boss (o chefe é uma instância que já existe).\n{USAGE}"), 2);
         }
+        if model.is_some() {
+            return fail(format!("--model não combina com --boss (o chefe é uma instância que já existe).\n{USAGE}"), 2);
+        }
         match team(&bridge) {
-            Ok((_, Some(boss), _)) => args[0] = boss,
-            Ok((_, None, _)) => {
-                return fail("você não tem chefe: responde diretamente ao usuário (escreva a resposta no seu terminal).", 1)
-            }
+            Ok(Team { boss: Some(boss), .. }) => args[0] = boss,
+            Ok(_) => return fail("você não tem chefe: responde diretamente ao usuário (escreva a resposta no seu terminal).", 1),
             Err(e) => return fail(e, 1),
         }
     }
@@ -150,7 +156,8 @@ fn main() -> ExitCode {
         return match bridge.request("GET", "/agents", None, None) {
             Ok((_, json)) => match json.get("agents").and_then(Value::as_array) {
                 Some(list) => {
-                    let names: Vec<&str> = list.iter().filter_map(Value::as_str).collect();
+                    let models = models_of(&json);
+                    let names: Vec<String> = list.iter().filter_map(Value::as_str).map(|n| with_model(n, &models)).collect();
                     println!("{}", names.join("\n"));
                     ExitCode::SUCCESS
                 }
@@ -179,6 +186,9 @@ fn main() -> ExitCode {
     if let Some(n) = reply_to {
         body["reply_to"] = json!(n);
     }
+    if let Some(m) = &model {
+        body["model"] = json!(m);
+    }
     match bridge.request("POST", "/ask", Some(&body), None) {
         // 202: a resposta ainda não chegou e será digitada depois neste terminal (o texto explica).
         Ok((200 | 202, json)) => {
@@ -195,8 +205,59 @@ fn main() -> ExitCode {
     }
 }
 
-/// `GET /team`: (eu, chefe, equipe).
-fn team(bridge: &Bridge) -> Result<(String, Option<String>, Vec<String>), String> {
+/// Opções do começo da linha de comando, em qualquer ordem: `--new`, `--model <m>` e `--model=<m>`.
+/// Devolve `(--new, modelo)` e deixa em `args` o resto (destino e mensagem).
+fn take_flags(args: &mut Vec<String>) -> Result<(bool, Option<String>), String> {
+    let (mut force_new, mut model) = (false, None);
+    loop {
+        match args.first().map(String::as_str) {
+            Some("--new") => force_new = true,
+            Some("--model") => {
+                if args.len() < 2 || args[1].is_empty() || args[1].starts_with("--") {
+                    return Err("--model precisa do nome do modelo (ex.: --model sonnet).".into());
+                }
+                model = Some(args.remove(1));
+            }
+            Some(a) if a.starts_with("--model=") => {
+                let m = a["--model=".len()..].to_owned();
+                if m.is_empty() {
+                    return Err("--model precisa do nome do modelo (ex.: --model=sonnet).".into());
+                }
+                model = Some(m);
+            }
+            _ => return Ok((force_new, model)),
+        }
+        args.remove(0);
+    }
+}
+
+/// `claude@dev (sonnet)` quando a instância tem modelo.
+fn with_model(id: &str, models: &BTreeMap<String, String>) -> String {
+    match models.get(id) {
+        Some(m) => format!("{id} ({m})"),
+        None => id.to_owned(),
+    }
+}
+
+/// O mapa `models` (id → modelo) de uma resposta da ponte.
+fn models_of(json: &Value) -> BTreeMap<String, String> {
+    json.get("models")
+        .and_then(Value::as_object)
+        .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
+        .unwrap_or_default()
+}
+
+/// Resposta de `GET /team`.
+struct Team {
+    id: String,
+    boss: Option<String>,
+    crew: Vec<String>,
+    /// Modelo de quem aparece acima (id → modelo).
+    models: BTreeMap<String, String>,
+}
+
+/// `GET /team`: eu, chefe, equipe e os modelos.
+fn team(bridge: &Bridge) -> Result<Team, String> {
     let (status, json) = bridge.request("GET", "/team", None, Some(Duration::from_secs(10)))?;
     if status != 200 {
         return Err(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido").to_owned());
@@ -204,7 +265,7 @@ fn team(bridge: &Bridge) -> Result<(String, Option<String>, Vec<String>), String
     let id = json.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
     let boss = json.get("boss").and_then(Value::as_str).map(str::to_owned);
     let crew = json.get("crew").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect());
-    Ok((id, boss, crew.unwrap_or_default()))
+    Ok(Team { id, boss, crew: crew.unwrap_or_default(), models: models_of(&json) })
 }
 
 // ---------- Statusline do Claude Code (`--usage`) ----------
@@ -344,4 +405,48 @@ fn cmd_shell(cmd: &str) -> Command {
     let mut c = Command::new("cmd");
     c.args(["/D", "/S", "/C", cmd]);
     c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Parsed = (Result<(bool, Option<String>), String>, Vec<String>);
+
+    fn flags(args: &[&str]) -> Parsed {
+        let mut v: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        (take_flags(&mut v), v)
+    }
+
+    fn rest(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn model_flag_is_parsed_in_any_order_before_the_target() {
+        assert_eq!(flags(&["claude@dev", "oi"]), (Ok((false, None)), rest(&["claude@dev", "oi"])));
+        assert_eq!(flags(&["--new", "claude", "oi"]).0, Ok((true, None)));
+        assert_eq!(flags(&["--model", "sonnet", "claude@dev", "oi"]), (Ok((false, Some("sonnet".into()))), rest(&["claude@dev", "oi"])));
+        assert_eq!(flags(&["--new", "--model", "opencode/glm-5.3", "opencode", "oi"]).0, Ok((true, Some("opencode/glm-5.3".into()))));
+        assert_eq!(flags(&["--model", "opus", "--new", "claude", "oi"]).0, Ok((true, Some("opus".into()))));
+        assert_eq!(flags(&["--model=haiku", "claude", "oi"]), (Ok((false, Some("haiku".into()))), rest(&["claude", "oi"])));
+        // O que vem depois do destino é mensagem, mesmo que pareça uma opção.
+        assert_eq!(flags(&["claude", "--model", "x"]), (Ok((false, None)), rest(&["claude", "--model", "x"])));
+    }
+
+    #[test]
+    fn model_flag_needs_a_name() {
+        for bad in [&["--model"][..], &["--model", "--new", "claude"], &["--model", "", "claude"], &["--model="]] {
+            assert!(flags(bad).0.is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn models_show_next_to_the_instances() {
+        let json = json!({ "agents": ["claude", "claude@dev"], "models": { "claude@dev": "sonnet", "x": 1 } });
+        let models = models_of(&json);
+        assert_eq!(with_model("claude@dev", &models), "claude@dev (sonnet)");
+        assert_eq!(with_model("claude", &models), "claude");
+        assert!(models_of(&json!({})).is_empty());
+    }
 }

@@ -198,7 +198,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             Auth::Agent(c) => c.project.clone(),
             Auth::Master => core.active_project_id(),
         };
-        return reply(req, 200, json!({ "agents": core.peers(&project) }));
+        return reply(req, 200, json!({ "agents": core.peers(&project), "models": core.instance_models(&project) }));
     }
     if *req.method() == Method::Get && req.url() == "/team" {
         let Auth::Agent(c) = &auth else {
@@ -207,7 +207,13 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         // Quem pergunta já está ciente: o aviso pendente não precisa ir na próxima mensagem.
         core.inner.team_changed.lock().remove(&c.key(&c.id));
         let team = core.team(&c.project, &c.id);
-        return reply(req, 200, json!({ "id": c.id, "boss": team.boss, "crew": team.crew }));
+        // Os modelos de quem aparece na resposta (ele, o chefe e a equipe), para o `--team`.
+        let models: std::collections::BTreeMap<String, String> = core
+            .instance_models(&c.project)
+            .into_iter()
+            .filter(|(id, _)| *id == c.id || team.boss.as_ref() == Some(id) || team.crew.contains(id))
+            .collect();
+        return reply(req, 200, json!({ "id": c.id, "boss": team.boss, "crew": team.crew, "models": models }));
     }
     let route = req.url().to_owned();
     if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
@@ -499,7 +505,7 @@ Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Co
 /// Se quem pergunta é uma aba e pediu `wait` segundos, o `ask-agent` dela volta depois desse
 /// tempo (antes de o Bash do agente estourar o próprio timeout) e a resposta, quando chegar, é
 /// digitada no terminal dela.
-fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAsk, slot: Active) -> (u16, Value) {
+fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAsk<'_>, slot: Active) -> (u16, Value) {
     let from = caller.id.as_str();
     let project = caller.project.as_str();
     let (base, suffix) = match asked.find('@') {
@@ -515,6 +521,20 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
             json!({ "error": format!("agente desconhecido ou não instalado \"{asked}\". Disponíveis: {}", core.peers(project).join(", ")) }),
         );
     };
+    if let Some(m) = opts.model {
+        if !crate::models::accepts_model(&want.kind) {
+            return (400, json!({ "error": format!("o agente {} não aceita escolher modelo", want.kind) }));
+        }
+        // A instância pedida já está aberta com outro modelo: recusa antes de criar ou registrar qualquer coisa.
+        if !opts.force_new {
+            let open = core.with_instances(project, |list| list.find(&want)).ok().flatten();
+            if let Some(open) = open {
+                if let Some(error) = crate::models::conflict(&open.id(), core.instance_model(project, &open).as_deref(), m) {
+                    return (409, json!({ "error": error }));
+                }
+            }
+        }
+    }
     let resolved = core.with_instances(project, |list| list.resolve_or_create(&want, opts.force_new));
     let (ident, created) = match resolved {
         Ok(v) => v,
@@ -523,9 +543,14 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         }
     };
     let id = ident.id();
+    // Instância nova: o modelo pedido (senão o padrão do cargo) fica gravado já, antes de a aba abrir.
+    if created {
+        core.assign_model(project, &ident, opts.model);
+    }
     let forget = |status: u16, error: Value| {
         if created {
             core.with_instances(project, |list| list.remove(&id));
+            core.forget_model(project, &id);
         }
         (status, error)
     };
@@ -659,11 +684,32 @@ fn detach(
 }
 
 /// Opções de uma pergunta a uma aba.
-struct TabAsk {
+struct TabAsk<'a> {
     force_new: bool,
+    /// Modelo pedido (`ask-agent --model`), já validado.
+    model: Option<&'a str>,
     depth: i64,
     /// Segundos que o `ask-agent` de quem pergunta aceita esperar (`None`/0 = até o fim).
     wait: Option<u64>,
+}
+
+/// O campo `model` do `/ask`: ausente ou vazio = nenhum; texto fora do padrão = erro.
+fn requested_model(v: Option<&Value>) -> Result<Option<String>, String> {
+    let m = match v {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(s)) if s.trim().is_empty() => return Ok(None),
+        Some(Value::String(s)) => s.trim(),
+        Some(_) => return Err("modelo inválido: use um texto".into()),
+    };
+    if crate::models::valid_model(m) {
+        Ok(Some(m.to_owned()))
+    } else {
+        Err(format!(
+            "modelo inválido: \"{}\" (use letras, números e : . _ / # @ + -, até {} caracteres)",
+            m.chars().take(40).collect::<String>().escape_debug(),
+            crate::models::MAX_MODEL_LEN
+        ))
+    }
 }
 
 /// Processa um `POST /ask` já decodificado. Retorna (status HTTP, corpo). Tudo acontece no
@@ -701,9 +747,14 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
         caller.feed(core, FeedKind::Answer, from, &asker, message);
         return (200, delivered(&asker));
     }
+    let model = match requested_model(msg.get("model")) {
+        Ok(m) => m,
+        Err(e) => return (400, json!({ "error": e })),
+    };
     // Com a interface ligada, a pergunta vai para a aba (instância) do agente; sem ela, em headless.
     if core.tab_delivery() {
         let opts = TabAsk {
+            model: model.as_deref(),
             force_new: msg.get("new").and_then(Value::as_bool).unwrap_or(false),
             depth,
             wait: msg.get("wait").and_then(Value::as_u64),
@@ -723,9 +774,16 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
     if to == from {
         return (400, json!({ "error": "um agente não pode perguntar a si mesmo" }));
     }
+    let to_ident = Ident::parse(&to);
+    let kind = to_ident.as_ref().map(|i| i.kind.clone()).unwrap_or_else(|| to.clone());
+    if model.is_some() && !crate::models::accepts_model(&kind) {
+        return (400, json!({ "error": format!("o agente {kind} não aceita escolher modelo") }));
+    }
     if depth >= MAX_DEPTH {
         return (400, json!({ "error": "profundidade máxima de conversa entre agentes atingida" }));
     }
+    // Sem abas não há instância viva: vale o pedido, senão o gravado ou o padrão do cargo.
+    let model = model.or_else(|| to_ident.as_ref().and_then(|i| core.instance_model(project, i)));
 
     caller.feed(core, FeedKind::Ask, from, &to, message.clone());
     let prompt = format!(
@@ -735,11 +793,11 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
     let _live = core.headless_ask_started(project, from, &to);
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
-        let kind = Ident::parse(&to).map(|i| i.kind).unwrap_or_else(|| to.clone());
         core.run_headless(
             &kind,
             &prompt,
             HeadlessOptions {
+                model,
                 session_key: Some(session_key.clone()),
                 depth: depth + 1,
                 project: project.to_owned(),

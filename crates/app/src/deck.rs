@@ -41,6 +41,8 @@ pub enum UiMsg {
     RemoveProject(String),
     /// Resposta do Git, com a geração do projeto em que foi pedida (ver `GitUi::generation`).
     Git(u64, crate::git_ui::GitReply),
+    /// Modelos conhecidos de um agente (menu de novo agente); vazio = só o padrão.
+    Models(String, Vec<String>),
 }
 
 /// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
@@ -90,6 +92,8 @@ pub struct Tab {
     /// Id do projeto da instância (as instâncias do core são por projeto).
     pub project: String,
     pub label: String,
+    /// Modelo de LLM da instância (`sonnet`); `None` = o padrão do CLI ou um agente que não escolhe.
+    pub model: Option<String>,
     pub color: Color32,
     pub session: Session,
     pub view: ViewState,
@@ -147,6 +151,8 @@ pub struct AgentBadge {
     pub kind: String,
     /// Nome mostrado (`Claude · Dev`).
     pub label: String,
+    /// Modelo de LLM da instância, quando tem um.
+    pub model: Option<String>,
     pub color: Color32,
     /// Trabalhando agora.
     pub busy: bool,
@@ -323,6 +329,12 @@ pub struct Deck {
 
     // Menus e diversos
     pub new_tab_menu_open: bool,
+    /// Agente cujo segundo passo do menu (escolher o modelo) está aberto.
+    pub new_tab_models_for: Option<String>,
+    /// Modelos conhecidos de cada agente e quando chegaram (buscados fora da thread da interface).
+    model_lists: HashMap<String, (Vec<String>, Instant)>,
+    /// Agentes cuja lista de modelos está sendo buscada agora.
+    models_loading: HashSet<String>,
     pub settings_open: bool,
     /// Aba sendo renomeada pelo usuário (índice, buffer de edição, erro opcional).
     pub rename_tab: Option<(usize, String, Option<String>)>,
@@ -354,6 +366,8 @@ pub struct Deck {
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(120);
 /// Quantas abas o app abre sozinho (a pedido de `ask-agent`) ao mesmo tempo.
 const MAX_AUTO_TABS: usize = 8;
+/// Quanto tempo a lista de modelos recebida de um agente vale antes de pedir de novo.
+const MODEL_LIST_TTL: Duration = Duration::from_secs(300);
 /// Depois de colar um envio, o Enter vai após este tempo (e de novo após `SECOND_ENTER` quando há
 /// menção `@` em CLIs com autocomplete de arquivo).
 const FIRST_ENTER: Duration = Duration::from_millis(250);
@@ -507,6 +521,9 @@ impl Deck {
             composer_focused: false,
             composer_cursor_end: false,
             new_tab_menu_open: false,
+            new_tab_models_for: None,
+            model_lists: HashMap::new(),
+            models_loading: HashSet::new(),
             settings_open: false,
             rename_tab: None,
             tab_context_menu: None,
@@ -553,6 +570,25 @@ impl Deck {
     /// `api.listAgents()` numa thread (pode demorar ~1,5 s consultando o Ollama).
     pub fn refresh_agents(&self) {
         self.spawn_bg("list-agents", |core| Some(UiMsg::Agents(core.list_agents())));
+    }
+
+    /// Pede os modelos conhecidos de `kind` (numa thread; o core guarda em cache). Não repete enquanto
+    /// há um pedido em andamento nem enquanto a lista recebida é recente.
+    pub fn request_models(&mut self, kind: &str) {
+        let fresh = self.model_lists.get(kind).is_some_and(|(_, at)| at.elapsed() < MODEL_LIST_TTL);
+        if fresh || !self.models_loading.insert(kind.to_owned()) {
+            return;
+        }
+        let kind = kind.to_owned();
+        self.spawn_bg("list-models", move |core| {
+            let models = core.known_models(&kind);
+            Some(UiMsg::Models(kind, models))
+        });
+    }
+
+    /// Lista de modelos de `kind` para o menu e se ainda está sendo buscada.
+    pub fn models_of(&self, kind: &str) -> (&[String], bool) {
+        (self.model_lists.get(kind).map_or(&[][..], |(l, _)| l.as_slice()), self.models_loading.contains(kind))
     }
 
     fn refresh_engine(&self) {
@@ -646,6 +682,10 @@ impl Deck {
 
     fn on_msg(&mut self, msg: UiMsg) {
         match msg {
+            UiMsg::Models(kind, list) => {
+                self.models_loading.remove(&kind);
+                self.model_lists.insert(kind, (list, Instant::now()));
+            }
             UiMsg::Agents(list) => {
                 self.agents.build(&list);
                 for t in &mut self.tabs {
@@ -998,14 +1038,21 @@ impl Deck {
 
     /// Abre uma aba nova do modelo `kind` (menu "+", Ctrl+T): `claude`, e `claude@main@ana` se já há uma.
     pub fn open_tab(&mut self, kind: &str, restoring: bool) {
+        self.open_tab_with_model(kind, None, restoring);
+    }
+
+    /// Como [`Deck::open_tab`], com o modelo de LLM escolhido no menu (`None` = o padrão do cargo ou do CLI).
+    pub fn open_tab_with_model(&mut self, kind: &str, model: Option<&str>, restoring: bool) {
         let project = self.active_project.clone();
         if project.is_empty() {
             self.system("Abra uma pasta como projeto antes de abrir um agente.");
             self.new_project_dialog();
             return;
         }
-        let ident = self.core.register_instance(&project, kind);
-        self.add_tab(project, ident, restoring, false);
+        match self.core.register_instance_with_model(&project, kind, model) {
+            Ok(ident) => self.add_tab(project, ident, restoring, false),
+            Err(e) => self.system(format!("Não foi possível abrir {kind}: {e}.")),
+        }
     }
 
     /// Pergunta de outro agente (`ask-agent`) para uma instância: abre a aba dela, se ainda não
@@ -1135,12 +1182,15 @@ impl Deck {
     fn add_tab(&mut self, project: String, ident: Ident, restoring: bool, auto: bool) {
         let kind = ident.kind.clone();
         let label = ident.label(&self.agents.name(&kind));
+        // Pedido > gravado > padrão do cargo: grava para aparecer na barra lateral e voltar com o app.
+        let model = self.core.assign_model(&project, &ident, None);
         let tab = Tab {
             uid: self.next_uid,
             kind: kind.clone(),
             ident,
             project,
             label,
+            model,
             color: self.agents.tab_color(&kind),
             session: Session::new(self.current_grid(&kind)),
             view: ViewState::default(),
@@ -1208,6 +1258,7 @@ impl Deck {
         match spec.and_then(|s| tab.session.spawn(&s, wake).map(|_| s).map_err(|e| e.to_string())) {
             Ok(spec) => {
                 tab.alive = true;
+                tab.model = spec.model.clone();
                 tab.spec = Some(spec);
             }
             Err(msg) => {
@@ -1912,6 +1963,7 @@ impl Deck {
                                 parent: p.tab_parents.get(&t.ident.id()).cloned(),
                                 kind: t.kind.clone(),
                                 label: t.label.clone(),
+                                model: p.tab_models.get(&t.ident.id()).cloned(),
                                 color: t.color,
                                 busy: t.busy,
                                 done: t.done,
@@ -1928,6 +1980,7 @@ impl Deck {
                             id: ident.id(),
                             parent: p.tab_parents.get(&ident.id()).cloned(),
                             label: ident.label(&self.agents.name(&ident.kind)),
+                            model: p.tab_models.get(&ident.id()).cloned(),
                             color: self.agents.tab_color(&ident.kind),
                             kind: ident.kind,
                             busy: false,
@@ -2425,6 +2478,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         color: commanddeck_core::agents::COLOR_SHELL.into(),
         kind: kind.to_owned(),
         double_enter_on_mention: false,
+        model: None,
     }
 }
 

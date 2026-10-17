@@ -2,6 +2,8 @@
 
 use egui::{Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
+use commanddeck_core::models::short_model;
+
 use super::{dot, galley_trunc, place, text_in, text_w, tip};
 use crate::deck::Deck;
 use crate::theme;
@@ -15,6 +17,10 @@ pub enum StripClick {
 
 const TAB_FONT: f32 = 13.0;
 const LABEL_MAX: f32 = 140.0;
+/// Largura máxima do modelo, em cinza depois do nome (`Claude · Dev  sonnet`).
+const MODEL_MAX: f32 = 80.0;
+const MODEL_FONT: f32 = 11.5;
+const MODEL_GAP: f32 = 6.0;
 
 /// Pinta as abas `tabs` (índices de `deck.tabs`) em `rect`, com rolagem horizontal quando não
 /// cabem. `shown` é a aba visível da janela; `focused`, se a janela tem o foco.
@@ -26,8 +32,11 @@ pub fn strip(deck: &Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize, foc
     let widths: Vec<f32> = tabs
         .iter()
         .map(|&i| {
-            let lw = text_w(&painter, &deck.tabs[i].label, font.clone()).min(LABEL_MAX);
-            12.0 + 8.0 + 8.0 + lw + 4.0 + close_w + 6.0 + 1.0
+            let tab = &deck.tabs[i];
+            let lw = text_w(&painter, &tab.label, font.clone()).min(LABEL_MAX);
+            let mw =
+                tab.model.as_deref().map_or(0.0, |m| MODEL_GAP + text_w(&painter, short_model(m), theme::ui(MODEL_FONT)).min(MODEL_MAX));
+            12.0 + 8.0 + 8.0 + lw + mw + 4.0 + close_w + 6.0 + 1.0
         })
         .collect();
     let total: f32 = widths.iter().sum();
@@ -118,6 +127,18 @@ pub fn strip(deck: &Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize, foc
         if !tab.alive {
             painter.hline(lr.min.x..=lr.max.x, lr.center().y + 0.5, Stroke::new(1.0, color));
         }
+        if let Some(model) = tab.model.as_deref() {
+            let mcolor = theme::with_opacity(theme::MUTED, if tab.alive { 0.75 } else { 0.45 });
+            let mg = galley_trunc(&painter, short_model(model), theme::ui(MODEL_FONT), mcolor, MODEL_MAX);
+            let x0 = lr.max.x + MODEL_GAP;
+            place(
+                &painter,
+                Rect::from_min_max(Pos2::new(x0, r.min.y), Pos2::new(x0 + MODEL_MAX, r.max.y)),
+                Align2::LEFT_CENTER,
+                mg,
+                mcolor,
+            );
+        }
 
         let close_hot = close_resp.hovered();
         if close_hot {
@@ -135,9 +156,29 @@ pub fn strip(deck: &Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize, foc
         } else if resp.secondary_clicked() {
             let pos = ui.input(|inp| inp.pointer.latest_pos()).unwrap_or_else(|| r.center());
             click = Some(StripClick::ContextMenu(i, pos));
-        } else if tip(resp, format!("{}\nDuplo clique ou botão direito para renomear", tab.label)).clicked() {
+        } else if tip(resp, tab_tip(&tab.label, tab.model.as_deref())).clicked() {
             click = Some(StripClick::Activate(i));
         }
     }
     click
+}
+
+/// Dica da aba: o nome, o modelo (inteiro) e como renomear.
+fn tab_tip(label: &str, model: Option<&str>) -> String {
+    let model = model.map(|m| format!("\nModelo: {m}")).unwrap_or_default();
+    format!("{label}{model}\nDuplo clique ou botão direito para renomear")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tip_names_the_full_model() {
+        assert_eq!(tab_tip("Claude · Dev", None), "Claude · Dev\nDuplo clique ou botão direito para renomear");
+        assert_eq!(
+            tab_tip("OpenCode", Some("opencode/glm-5.3-flash-free")),
+            "OpenCode\nModelo: opencode/glm-5.3-flash-free\nDuplo clique ou botão direito para renomear"
+        );
+    }
 }

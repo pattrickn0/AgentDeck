@@ -23,10 +23,34 @@ pub(super) fn closes_on_outside(ctx: &egui::Context, menu: Rect, anchor: Rect) -
     ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu.contains(p) && !anchor.contains(p)))
 }
 
-/// `#new-tab-menu`
+/// O agente deixa escolher o modelo no menu de novo agente (o Codex não tem lista para mostrar).
+pub fn picks_model(kind: &str) -> bool {
+    matches!(kind, "claude" | "antigravity" | "opencode")
+}
+
+/// Aviso no lugar da lista quando não há modelos para mostrar.
+fn models_status(loading: bool, empty: bool) -> Option<&'static str> {
+    match (loading, empty) {
+        (true, true) => Some("Carregando modelos…"),
+        (false, true) => Some("Sem lista de modelos: só o padrão"),
+        _ => None,
+    }
+}
+
+/// Altura máxima da lista de modelos (a do OpenCode tem dezenas).
+const MODELS_MAX_H: f32 = 300.0;
+/// Largura da seta "›" que abre a escolha de modelo na linha do agente.
+const CHEVRON_W: f32 = 28.0;
+
+/// `#new-tab-menu`: os agentes; nos que escolhem modelo, a seta à direita abre o segundo passo
+/// (padrão + modelos conhecidos). Clicar no nome abre o agente com o modelo padrão.
 pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     if !deck.new_tab_menu_open {
+        deck.new_tab_models_for = None;
         return;
+    }
+    if let Some(kind) = deck.new_tab_models_for.clone() {
+        return models_step(deck, ctx, anchor, &kind);
     }
     let items = deck.agents.new_tab_menu.clone();
     let items = if items.is_empty() {
@@ -35,26 +59,39 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     } else {
         items
     };
+    let with_arrow: Vec<bool> =
+        items.iter().map(|m| picks_model(&m.kind) && deck.agents.available.iter().any(|a| a.id == m.kind && a.installed)).collect();
     let font = theme::ui(13.0);
     let painter = ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("measure")));
-    let content_w = items.iter().map(|m| 8.0 + 8.0 + text_w(&painter, &m.label, font.clone()) + 20.0).fold(0.0, f32::max);
+    let content_w = items
+        .iter()
+        .zip(&with_arrow)
+        .map(|(m, &arrow)| 8.0 + 8.0 + text_w(&painter, &m.label, font.clone()) + 20.0 + if arrow { CHEVRON_W } else { 0.0 })
+        .fold(0.0, f32::max);
     let w = (content_w + 8.0 + 2.0).max(180.0);
     let item_h = 13.0 * theme::LINE_HEIGHT + 16.0;
     let h = items.len() as f32 * item_h + 8.0 + 2.0;
     let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x, anchor.max.y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut chosen = None;
+    let mut pick_model_of = None;
     Area::new(Id::new("new-tab-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
         shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
         frame(p, rect, 8.0, theme::PANEL_2, theme::BORDER);
         let mut y = rect.min.y + 5.0;
-        for m in &items {
+        for (m, &arrow) in items.iter().zip(&with_arrow) {
             let r = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, y), Vec2::new(w - 10.0, item_h));
             y += item_h;
-            let resp = super::clickable(ui, r, Id::new(("new-tab-item", &m.kind)));
-            if resp.hovered() {
+            let name_r = if arrow { Rect::from_min_max(r.min, Pos2::new(r.max.x - CHEVRON_W, r.max.y)) } else { r };
+            let resp = super::clickable(ui, name_r, Id::new(("new-tab-item", &m.kind)));
+            let arrow_resp = arrow.then(|| {
+                let ar = Rect::from_min_max(Pos2::new(r.max.x - CHEVRON_W, r.min.y), r.max);
+                super::clickable(ui, ar, Id::new(("new-tab-models", &m.kind)))
+            });
+            let arrow_hot = arrow_resp.as_ref().is_some_and(|a| a.hovered());
+            if resp.hovered() || arrow_hot {
                 p.rect_filled(r, 6.0, theme::BORDER);
             }
             dot(p, Pos2::new(r.min.x + 10.0 + 4.0, r.center().y), m.color);
@@ -66,16 +103,123 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
                 font.clone(),
                 theme::TEXT,
             );
+            if let Some(a) = arrow_resp {
+                let ar = Rect::from_min_max(Pos2::new(r.max.x - CHEVRON_W, r.min.y), r.max);
+                text_in(p, ar, Align2::CENTER_CENTER, "›", theme::ui(16.0), if arrow_hot { theme::TEXT } else { theme::MUTED });
+                if super::tip(a, format!("Escolher o modelo de {}", m.label)).clicked() {
+                    pick_model_of = Some(m.kind.clone());
+                }
+            }
             if resp.clicked() {
                 chosen = Some(m.kind.clone());
             }
         }
     });
-    if let Some(kind) = chosen {
+    if let Some(kind) = pick_model_of {
+        deck.request_models(&kind);
+        deck.new_tab_models_for = Some(kind);
+    } else if let Some(kind) = chosen {
         deck.new_tab_menu_open = false;
         deck.open_tab(&kind, false);
     } else if closes_on_outside(ctx, menu_rect, anchor) {
         deck.new_tab_menu_open = false;
+    }
+}
+
+/// Segundo passo do menu de novo agente: "Padrão" e os modelos conhecidos de `kind`.
+fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
+    // A lista chega de uma thread: pede de novo se ainda não veio (ou venceu).
+    deck.request_models(kind);
+    let (models, loading) = deck.models_of(kind);
+    let models: Vec<String> = models.to_vec();
+    let status = models_status(loading, models.is_empty());
+    let name = deck.agents.name(kind);
+    let color = deck.agents.tab_color(kind);
+    let font = theme::ui(13.0);
+    let painter = ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("measure")));
+    let row_h = 26.0;
+    let head_h = 30.0;
+    let widest = models.iter().map(|m| text_w(&painter, m, font.clone())).fold(text_w(&painter, "Padrão", font.clone()), f32::max);
+    let w = (widest + 8.0 + 2.0 + 10.0 * 2.0 + 14.0).clamp(200.0, 380.0);
+    let rows = 1 + models.len() + usize::from(status.is_some());
+    let list_h = (rows as f32 * row_h).min(MODELS_MAX_H);
+    let h = 5.0 + head_h + 1.0 + list_h + 5.0 + 2.0;
+    let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x, anchor.max.y), Vec2::new(w, h));
+    let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
+    let mut back = false;
+    let mut chosen: Option<Option<String>> = None;
+    Area::new(Id::new("new-tab-models-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
+        shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
+        frame(ui.painter(), rect, 8.0, theme::PANEL_2, theme::BORDER);
+        // Cabeçalho: "‹ Claude" volta à lista de agentes.
+        let head = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, rect.min.y + 5.0), Vec2::new(w - 10.0, head_h));
+        let resp = super::clickable(ui, head, Id::new("new-tab-models-back"));
+        if resp.hovered() {
+            ui.painter().rect_filled(head, 6.0, theme::BORDER);
+        }
+        text_in(
+            ui.painter(),
+            Rect::from_min_size(head.min, Vec2::new(24.0, head_h)),
+            Align2::CENTER_CENTER,
+            "‹",
+            theme::ui(16.0),
+            theme::MUTED,
+        );
+        dot(ui.painter(), Pos2::new(head.min.x + 28.0, head.center().y), color);
+        text_in(
+            ui.painter(),
+            Rect::from_min_max(Pos2::new(head.min.x + 40.0, head.min.y), head.max),
+            Align2::LEFT_CENTER,
+            &format!("{name} · modelo"),
+            theme::ui_semibold(12.5),
+            theme::TEXT,
+        );
+        if super::tip(resp, "Voltar à lista de agentes").clicked() {
+            back = true;
+        }
+        ui.painter().rect_filled(
+            Rect::from_min_size(Pos2::new(rect.min.x + 10.0, head.max.y), Vec2::new(w - 20.0, 1.0)),
+            0.0,
+            theme::BORDER,
+        );
+        let list = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, head.max.y + 1.0), Vec2::new(w - 10.0, list_h));
+        let mut lc = ui.new_child(egui::UiBuilder::new().max_rect(list));
+        lc.set_clip_rect(list);
+        egui::ScrollArea::vertical().id_salt("new-tab-models-list").auto_shrink([false, false]).show(&mut lc, |ui| {
+            let row = |ui: &mut egui::Ui, text: &str, text_color, id: Id| -> bool {
+                let (r, _) = ui.allocate_exact_size(Vec2::new(list.width(), row_h), Sense::hover());
+                let resp = super::clickable(ui, r, id);
+                if resp.hovered() {
+                    ui.painter().rect_filled(r, 6.0, theme::BORDER);
+                }
+                let g = super::galley_trunc(ui.painter(), text, font.clone(), text_color, r.width() - 20.0);
+                super::place(ui.painter(), r.shrink2(Vec2::new(10.0, 0.0)), Align2::LEFT_CENTER, g, text_color);
+                resp.clicked()
+            };
+            if row(ui, "Padrão", theme::TEXT, Id::new(("new-tab-model", kind, ""))) {
+                chosen = Some(None);
+            }
+            for m in &models {
+                if row(ui, m, theme::TEXT, Id::new(("new-tab-model", kind, m))) {
+                    chosen = Some(Some(m.clone()));
+                }
+            }
+            if let Some(text) = status {
+                let (r, _) = ui.allocate_exact_size(Vec2::new(list.width(), row_h), Sense::hover());
+                text_in(ui.painter(), r.shrink2(Vec2::new(10.0, 0.0)), Align2::LEFT_CENTER, text, theme::ui(12.0), theme::MUTED);
+            }
+        });
+    });
+    if let Some(model) = chosen {
+        deck.new_tab_menu_open = false;
+        deck.new_tab_models_for = None;
+        deck.open_tab_with_model(kind, model.as_deref(), false);
+    } else if back {
+        deck.new_tab_models_for = None;
+    } else if closes_on_outside(ctx, menu_rect, anchor) || ctx.input(|i| i.key_pressed(Key::Escape)) {
+        deck.new_tab_menu_open = false;
+        deck.new_tab_models_for = None;
     }
 }
 
@@ -216,9 +360,12 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         deck.tab_context_menu = None;
         return;
     }
-    let w = 130.0;
+    // Quando a instância tem modelo de LLM, ele aparece no alto (só leitura: trocar com a aba aberta
+    // exigiria reiniciar o agente).
+    let model = deck.tabs[idx].model.clone();
+    let w = if model.is_some() { 220.0 } else { 130.0 };
     let item_h = 26.0;
-    let h = item_h * 2.0 + 8.0;
+    let h = item_h * (2.0 + if model.is_some() { 1.0 } else { 0.0 }) + 8.0;
     let pos = keep_on_screen(ctx, pos, Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut action = None;
@@ -229,8 +376,20 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         frame(p, rect, 6.0, theme::PANEL_2, theme::BORDER);
         let font = theme::ui(12.5);
 
+        let mut top = rect.min.y + 4.0;
+        if let Some(m) = &model {
+            let r0 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, top), Vec2::new(w - 8.0, item_h));
+            top += item_h;
+            let g = super::galley_trunc(p, &format!("Modelo: {m}"), theme::ui(12.0), theme::MUTED, r0.width() - 16.0);
+            super::place(p, r0.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, g, theme::MUTED);
+            p.rect_filled(
+                Rect::from_min_size(Pos2::new(r0.min.x + 4.0, r0.max.y - 1.0), Vec2::new(r0.width() - 8.0, 1.0)),
+                0.0,
+                theme::BORDER,
+            );
+        }
         // "Renomear"
-        let r1 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, rect.min.y + 4.0), Vec2::new(w - 8.0, item_h));
+        let r1 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, top), Vec2::new(w - 8.0, item_h));
         let resp1 = super::clickable(ui, r1, Id::new("tab-ctx-rename"));
         if resp1.hovered() {
             p.rect_filled(r1, 4.0, theme::BORDER);
@@ -393,5 +552,28 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         }
     } else {
         deck.rename_tab = Some((idx, buffer, error));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_some_agents_offer_models_in_the_menu() {
+        for k in ["claude", "antigravity", "opencode"] {
+            assert!(picks_model(k), "{k}");
+        }
+        for k in ["codex", "shell", "ollama", "ollama:qwen3.5:9b", "aider"] {
+            assert!(!picks_model(k), "{k}");
+        }
+    }
+
+    #[test]
+    fn the_status_line_explains_an_empty_list() {
+        assert_eq!(models_status(true, true), Some("Carregando modelos…"));
+        assert_eq!(models_status(false, true), Some("Sem lista de modelos: só o padrão"));
+        assert_eq!(models_status(false, false), None);
+        assert_eq!(models_status(true, false), None, "com a lista antiga na tela, atualiza em silêncio");
     }
 }

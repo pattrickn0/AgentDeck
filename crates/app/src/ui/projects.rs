@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use commanddeck_core::models::short_model;
+
 use egui::{Align2, Color32, CursorIcon, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use super::{clickable, dot, frame, galley, galley_trunc, menus, place, shadow, text_in, text_w, tip};
@@ -523,6 +525,22 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     if !ag.alive && ag.tab.is_some() {
                         p.hline(placed_r.min.x..=placed_r.max.x, placed_r.center().y + 0.5, Stroke::new(1.0, tab_color));
                     }
+                    // Modelo de LLM em cinza depois do nome, se ainda sobra espaço na linha.
+                    if let Some(model) = ag.model.as_deref() {
+                        let x0 = placed_r.max.x + 6.0;
+                        let room = tab_r.max.x - 10.0 - x0;
+                        if room >= 24.0 {
+                            let mcolor = theme::with_opacity(theme::MUTED, if ag.alive { 0.75 } else { 0.45 });
+                            let mg = galley_trunc(&p, short_model(model), theme::ui(11.0), mcolor, room);
+                            place(
+                                &p,
+                                Rect::from_min_max(Pos2::new(x0, tab_r.min.y), Pos2::new(tab_r.max.x - 10.0, tab_r.max.y)),
+                                Align2::LEFT_CENTER,
+                                mg,
+                                mcolor,
+                            );
+                        }
+                    }
 
                     let mut tooltip = if ag.busy {
                         format!("{} (trabalhando…)", ag.label)
@@ -535,6 +553,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     } else {
                         ag.label.clone()
                     };
+                    if let Some(model) = &ag.model {
+                        tooltip.push_str(&format!("\nModelo: {model}"));
+                    }
                     if let Some(parent) = ag.parent.as_ref().filter(|_| node.depth > 0) {
                         tooltip.push_str(&format!("\nResponde a {parent}"));
                     }
@@ -852,6 +873,7 @@ mod tests {
             parent: parent.map(Into::into),
             kind: "claude".into(),
             label: id.into(),
+            model: None,
             color: Color32::WHITE,
             busy: false,
             done: false,
