@@ -8,13 +8,10 @@
 //! O WAV temporário é SEMPRE apagado após a transcrição.
 
 use std::fs::File;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
-
-use sha2::{Digest, Sha256};
 
 use crate::download::{download_file, DownloadOpts};
 use crate::events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry};
@@ -193,8 +190,13 @@ fn exe_name() -> &'static str {
 
 /// Executável dentro de `whisper/bin-<motor>/` (raiz, `Release/` ou `bin/`).
 fn local_cli(whisper_dir: &Path, engine: Engine) -> Option<PathBuf> {
+    cli_in(&whisper_dir.join(engine.dir()))
+}
+
+/// Executável dentro de uma pasta de motor (raiz, `Release/` ou `bin/`).
+fn cli_in(engine_dir: &Path) -> Option<PathBuf> {
     let subs: &[&str] = if cfg!(windows) { &["", "Release"] } else { &["", "Release", "bin"] };
-    subs.iter().map(|s| whisper_dir.join(engine.dir()).join(s).join(exe_name())).find(|p| p.is_file())
+    subs.iter().map(|s| engine_dir.join(s).join(exe_name())).find(|p| p.is_file())
 }
 
 /// Executável do motor, se presente. Fora do Windows um `whisper-cli` do PATH vale como CPU.
@@ -286,8 +288,10 @@ fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String
     let exe = whisper_cli(dir, engine).ok_or_else(|| format!("whisper-cli ({}) não encontrado", engine.label()))?;
     let lang = Some(core.config().whisper_lang).filter(|l| !l.is_empty()).unwrap_or_else(|| "auto".into());
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(2).max(1);
+    // O processo roda na pasta do executável: caminhos relativos deixariam de valer.
+    let (exe, model, wav) = (crate::util::absolutize(&exe), crate::util::absolutize(&model_path(dir)), crate::util::absolutize(wav));
     let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("-m").arg(model_path(dir)).arg("-f").arg(wav).args([
+    cmd.arg("-m").arg(&model).arg("-f").arg(&wav).args([
         "-l",
         &lang,
         "-nt",
@@ -306,7 +310,7 @@ fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String
     if let Some(parent) = exe.parent() {
         cmd.current_dir(parent);
         // Os binários de Linux trazem as .so ao lado do executável.
-        if !cfg!(windows) && exe.starts_with(dir) {
+        if !cfg!(windows) && crate::util::path_within(&exe, &crate::util::absolutize(dir)) {
             let mut paths = vec![parent.to_path_buf()];
             paths.extend(std::env::var_os("LD_LIBRARY_PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
             if let Ok(joined) = std::env::join_paths(paths) {
@@ -339,13 +343,20 @@ pub(crate) fn transcribe_engine(core: &Core) -> String {
     engines(core).first().map(|e| e.label().to_owned()).unwrap_or_else(|| UNAVAILABLE.into())
 }
 
+/// Nome único do WAV temporário: milissegundos + processo + contador (duas chamadas no mesmo
+/// milissegundo não podem sobrescrever nem apagar o arquivo uma da outra).
+fn unique_wav_name() -> String {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    format!("audio-{}-{}-{}.wav", crate::util::now_ms(), std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed))
+}
+
 pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<Transcription> {
     let list = engines(core);
     if list.is_empty() {
         anyhow::bail!(NOT_READY);
     }
     let dir = crate::attachments::attachments_dir(&core.paths().data_dir)?;
-    let wav = dir.join(format!("audio-{}.wav", crate::util::now_ms()));
+    let wav = dir.join(unique_wav_name());
     std::fs::write(&wav, wav_bytes(samples))?;
     let result = (|| {
         for (i, engine) in list.iter().enumerate() {
@@ -412,28 +423,44 @@ fn download_engine(core: &Core, engine: Engine, label: &str) -> Result<(), Strin
     let url = format!("{RELEASE}/{}", archive.file);
     fetch(core, &url, &file, label, archive.sha256)?;
     let target = dir.join(engine.dir());
-    let existed = target.exists();
     core.emit(CoreEvent::Download(progress(label, DownloadState::Extracting)));
+    // O pacote só é apagado depois do sucesso: numa falha, a próxima tentativa o reaproveita.
+    install_package(&file, &target, archive.tar_gz, archive.strip)?;
+    let _ = std::fs::remove_file(&file);
+    Ok(())
+}
+
+/// Extrai o pacote numa pasta de preparo ao lado de `target`, confere que o `whisper-cli` está
+/// lá e só então a troca por `target`. Uma falha no meio (app fechado, disco cheio) nunca deixa
+/// um motor pela metade no lugar do definitivo.
+fn install_package(file: &Path, target: &Path, tar_gz: bool, strip: usize) -> Result<(), String> {
+    let mut name = target.as_os_str().to_os_string();
+    name.push(".staging");
+    let staging = PathBuf::from(name);
+    let _ = std::fs::remove_dir_all(&staging); // sobra de uma execução interrompida
     let res = (|| {
-        std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
-        if archive.tar_gz {
-            extract_tar_gz(&file, &target, archive.strip)?;
+        std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+        if tar_gz {
+            extract_tar_gz(file, &staging, strip)?;
         } else {
-            extract_zip(&file, &target)?;
+            extract_zip(file, &staging)?;
         }
-        let exe = local_cli(&dir, engine).ok_or_else(|| format!("{} não encontrado no pacote extraído", exe_name()))?;
+        let exe = cli_in(&staging).ok_or_else(|| format!("{} não encontrado no pacote extraído", exe_name()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
         }
         let _ = exe;
-        Ok(())
+        if target.exists() {
+            // Resto de uma instalação antiga/incompleta (sem executável): sai para dar lugar ao novo.
+            std::fs::remove_dir_all(target).map_err(|e| format!("não foi possível substituir {}: {e}", target.display()))?;
+        }
+        crate::download::rename_with_retry(&staging, target).map_err(|e| format!("não foi possível instalar em {}: {e}", target.display()))
     })();
-    if res.is_err() && !existed {
-        let _ = std::fs::remove_dir_all(&target);
+    if res.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
     }
-    let _ = std::fs::remove_file(&file);
     res
 }
 
@@ -525,7 +552,7 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
                     let mut p = progress(label, DownloadState::Error);
                     p.message = Some(e.clone());
                     core.emit(CoreEvent::Download(p));
-                    let resumable = if PathBuf::from(format!("{}.part", keep.display())).exists() {
+                    let resumable = if crate::download::part_path(&keep).exists() {
                         " O que já foi baixado foi mantido e continua na próxima abertura do app."
                     } else {
                         ""
@@ -654,6 +681,53 @@ mod tests {
         assert_eq!(std::fs::read(out.join("whisper-cli")).expect("cli"), b"#!/bin/sh\n");
         assert_eq!(std::fs::read(out.join("lib").join("libwhisper.so")).expect("so"), b"so");
         assert!(!out.join("raiz").exists());
+    }
+
+    fn tar_gz(path: &Path, entries: &[(&str, &[u8])]) {
+        let gz = flate2::write::GzEncoder::new(File::create(path).expect("create"), flate2::Compression::fast());
+        let mut b = tar::Builder::new(gz);
+        for (name, data) in entries {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o755);
+            h.set_cksum();
+            b.append_data(&mut h, name, *data).expect("append");
+        }
+        b.into_inner().expect("gz").finish().expect("finish");
+    }
+
+    #[test]
+    fn instalacao_so_troca_a_pasta_depois_de_extrair_tudo() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let pkg = tmp.path().join("pacote.tar.gz");
+        let target = tmp.path().join("bin-x");
+        // Pacote sem o executável: a pasta final não aparece e a de preparo some.
+        tar_gz(&pkg, &[("raiz/outra.dll", b"dll")]);
+        assert!(install_package(&pkg, &target, true, 1).is_err());
+        assert!(!target.exists());
+        assert!(!tmp.path().join("bin-x.staging").exists());
+        // Pacote truncado no meio: idem, e uma instalação anterior não é tocada.
+        std::fs::create_dir_all(&target).expect("mkdir");
+        std::fs::write(target.join("velho.txt"), "v").expect("write");
+        let bytes = std::fs::read(&pkg).expect("read");
+        std::fs::write(&pkg, &bytes[..bytes.len() / 2]).expect("trunc");
+        assert!(install_package(&pkg, &target, true, 1).is_err());
+        assert!(target.join("velho.txt").is_file());
+        assert!(!tmp.path().join("bin-x.staging").exists());
+        // Pacote bom: troca a pasta (e leva embora o resto antigo) e limpa a preparação.
+        tar_gz(&pkg, &[("raiz/whisper-cli", b"cli"), ("raiz/whisper-cli.exe", b"cli"), ("raiz/ggml.dll", b"dll")]);
+        install_package(&pkg, &target, true, 1).expect("instala");
+        assert!(cli_in(&target).is_some());
+        assert!(target.join("ggml.dll").is_file());
+        assert!(!target.join("velho.txt").exists());
+        assert!(!tmp.path().join("bin-x.staging").exists());
+        assert!(pkg.is_file(), "o pacote não é apagado por install_package");
+    }
+
+    #[test]
+    fn nomes_do_wav_temporario_sao_unicos() {
+        let names: std::collections::HashSet<String> = (0..1000).map(|_| unique_wav_name()).collect();
+        assert_eq!(names.len(), 1000);
     }
 
     #[test]
