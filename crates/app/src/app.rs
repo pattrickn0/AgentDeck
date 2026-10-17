@@ -505,15 +505,17 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.git.view = if item == "git-norepo" { crate::git_ui::GitView::NotRepo } else { crate::git_ui::GitView::NoGit };
             }
             "github" => deck.set_right_view(crate::deck::RightView::GitHub),
-            "github-demo" | "github-issues" | "github-actions" => {
+            "github-demo" | "github-issues" | "github-actions" | "github-menu" => {
                 deck.github.debug_hold = true;
                 deck.set_right_view(crate::deck::RightView::GitHub);
-                deck.github.view = crate::github_ui::GithubView::Ready(crate::github_ui::demo_overview());
+                let ov = crate::github_ui::demo_overview();
+                deck.github.repo = Some(ov.repo.clone());
+                deck.github.view = crate::github_ui::GithubView::Ready(ov);
                 let detail = crate::github_ui::demo_pr_detail();
                 let log = crate::github_ui::demo_job_log();
                 deck.github.run_jobs.insert(9001, detail.jobs.clone());
                 deck.github.pr_details.insert(42, detail);
-                deck.github.job_logs.insert(log.job_id, log.clone());
+                deck.github.job_logs.insert(501, Ok(log));
                 match item {
                     "github-issues" => {
                         deck.github.tab = crate::github_ui::GithubTab::Issues;
@@ -522,21 +524,31 @@ fn apply_debug_ui(deck: &mut Deck) {
                     "github-actions" => {
                         deck.github.tab = crate::github_ui::GithubTab::Actions;
                         deck.github.selected_run = Some(9001);
-                        deck.github.open_log = Some((log.job_id, log.job_name, None));
+                        deck.github.open_log = Some((501, "clippy (windows-latest)".into(), None));
                     }
                     _ => {
                         deck.github.tab = crate::github_ui::GithubTab::Prs;
                         deck.github.selected_pr = Some(42);
-                        deck.github.open_log = Some((log.job_id, log.job_name, Some(42)));
+                        deck.github.open_log = Some((501, "clippy (windows-latest)".into(), Some(42)));
+                        if item == "github-menu" {
+                            let anchor = egui::Rect::from_min_size(egui::pos2(900.0, 330.0), egui::vec2(140.0, 22.0));
+                            deck.open_github_agent_menu(anchor, "PR #42".into(), "review", "Revise o PR #42".into());
+                        }
                     }
                 }
             }
             "github-norepo" => {
                 deck.github.debug_hold = true;
                 deck.set_right_view(crate::deck::RightView::GitHub);
-                deck.github.view = crate::github_ui::GithubView::NotGithub {
-                    reason: "Esta pasta não tem um remoto `origin` apontando para github.com.".into(),
-                };
+                deck.github.view = crate::github_ui::GithubView::Error(commanddeck_core::github::GithubError::NoRemote);
+            }
+            "github-error" => {
+                deck.github.debug_hold = true;
+                deck.set_right_view(crate::deck::RightView::GitHub);
+                deck.github.view = crate::github_ui::GithubView::Error(commanddeck_core::github::GithubError::NotFound {
+                    repo: "pattr/commanddeck".into(),
+                    authenticated: false,
+                });
             }
             "map-demo" => {
                 deck.set_right_view(crate::deck::RightView::Mapa);

@@ -57,11 +57,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     // A barra tem sempre a mesma largura: o Mapa e o diff do Git rolam dentro dela.
     let panel = Rect::from_min_max(Pos2::new(full.max.x - right_w, full.min.y), full.max);
     // Nas abas Git e GitHub o compositor some para dar espaço às listas, diffs e logs.
-    let comp_h = if matches!(deck.right_view, RightView::Git | RightView::GitHub) {
-        0.0
-    } else {
-        composer::measure(deck, ui, right_w)
-    };
+    let comp_h = if matches!(deck.right_view, RightView::Git | RightView::GitHub) { 0.0 } else { composer::measure(deck, ui, right_w) };
 
     // ---------- Terminais (tela dividida por tipo de agente) ----------
     panes::draw(deck, ui, term_rect);

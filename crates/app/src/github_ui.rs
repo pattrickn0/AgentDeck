@@ -1,7 +1,8 @@
 //! Estado da aba "GitHub" na barra direita e ponte entre [`Deck`] e [`commanddeck_core::github`].
 //!
 //! Toda chamada ao GitHub (`git remote`, `git credential fill`, `gh auth token` e API REST) roda
-//! fora da thread da interface e entrega [`GithubEvent`] via [`CoreEvent::Github`].
+//! fora da thread da interface e volta por [`CoreEvent::Github`]; aqui só ficam o estado da tela e
+//! o tratamento desses eventos. A pintura está em `ui/github.rs`.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -10,10 +11,10 @@ use commanddeck_core::github::{
     CheckStatus, GithubError, GithubEvent, GithubOverview, GithubPayload, Issue, JobLog, PrChecksDetail, PullRequest, RateLimitInfo,
     RepoSlug, WorkflowJob, WorkflowRun,
 };
-use commanddeck_core::{FeedEntry, FeedKind, Ident};
+use commanddeck_core::Ident;
 use egui::Rect;
 
-use crate::deck::{Deck, Queued, RightView};
+use crate::deck::{Deck, RightView};
 
 /// Sub-aba ativa dentro da aba GitHub.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -24,83 +25,76 @@ pub enum GithubTab {
     Actions,
 }
 
-/// Estado principal da visão GitHub para o projeto ativo.
+/// O que a aba mostra para o projeto ativo.
 #[derive(Debug, Clone, Default)]
 pub enum GithubView {
     #[default]
     Loading,
     /// Nenhum projeto aberto no CommandDeck.
     NoProject,
-    /// A pasta não tem repositório git ou o remoto `origin` não é do GitHub.
-    NotGithub { reason: String },
-    /// Falha ao carregar os dados iniciais (sem cache anterior).
-    Error { repo: Option<RepoSlug>, error: GithubError },
+    /// Falha sem dados anteriores na tela (sem remoto do GitHub, rede, login recusado, limite...).
+    Error(GithubError),
     /// Dados carregados do repositório.
     Ready(GithubOverview),
 }
 
-/// Alvo do menu "Enviar para agente ▾".
+/// Menu "Enviar para agente": o que será enviado e onde o menu ancora.
 #[derive(Debug, Clone)]
 pub struct AgentMenuTarget {
-    /// Retângulo do botão que abriu o menu (âncora do popup).
+    /// Retângulo do botão que abriu o menu.
     pub anchor: Rect,
-    /// Rótulo curto do que será enviado (ex.: `PR #42` ou `Job "cargo clippy"`).
+    /// Rótulo curto do que será enviado (ex.: `PR #42`).
     pub title: String,
-    /// Cargo sugerido ao abrir uma nova instância (ex.: `review`, `ci`, `fix`).
-    pub suggested_role: &'static str,
-    /// Mensagem pronta a ser enviada para o agente escolhido.
+    /// Mensagem pronta.
     pub prompt: String,
 }
 
-/// Estado da aba GitHub na [`Deck`].
+/// Estado da aba GitHub no [`Deck`].
 #[derive(Default)]
 pub struct GithubUi {
     pub tab: GithubTab,
     pub view: GithubView,
-    /// Operação de atualização geral em andamento.
+    /// Último repositório conhecido (para o título quando a leitura seguinte falha).
+    pub repo: Option<RepoSlug>,
+    /// Há uma leitura geral em andamento.
     pub refreshing: bool,
-    /// Aviso ou erro recente exibido no topo da aba `(texto, é_erro)`.
+    /// A leitura em andamento é forçada (botão Atualizar): refaz também o detalhe aberto.
+    pub forced: bool,
+    /// Aviso ou erro recente no topo da aba `(texto, é_erro)`.
     pub notice: Option<(String, bool)>,
-    /// Quando o último refresh completou para o projeto ativo.
+    /// Quando a última leitura terminou.
     pub last_refresh: Option<Instant>,
 
-    /// PR selecionado na sub-aba PRs (`number`).
     pub selected_pr: Option<u64>,
-    /// Detalhes de checks/jobs por número de PR.
+    /// Checks e jobs por número de PR.
     pub pr_details: HashMap<u64, PrChecksDetail>,
-    /// PR cujo detalhe está carregando no momento.
     pub pr_loading: Option<u64>,
 
-    /// Issue selecionada na sub-aba Issues (`number`).
     pub selected_issue: Option<u64>,
 
-    /// Execução (workflow run) selecionada na sub-aba Actions (`run_id`).
     pub selected_run: Option<u64>,
-    /// Jobs carregados por `run_id`.
+    /// Jobs por execução.
     pub run_jobs: HashMap<u64, Vec<WorkflowJob>>,
-    /// `run_id` cujos jobs estão carregando no momento.
     pub run_loading: Option<u64>,
 
-    /// Logs carregados por `job_id`.
-    pub job_logs: HashMap<u64, JobLog>,
-    /// `job_id` cujo log está sendo baixado no momento.
+    /// Fim do log por job (ou o motivo de não ter vindo).
+    pub job_logs: HashMap<u64, Result<JobLog, GithubError>>,
     pub log_loading: Option<u64>,
-    /// Job cujo log está aberto no painel inferior `(job_id, nome_do_job, pr_number)`.
+    /// Job cujo log está aberto `(job_id, nome, PR de origem)`.
     pub open_log: Option<(u64, String, Option<u64>)>,
 
-    /// Menu "Enviar para agente ▾" aberto.
     pub agent_menu: Option<AgentMenuTarget>,
-    /// Modelo escolhido para abrir uma nova instância com cargo no menu "Enviar para agente".
+    /// Modelo escolhido para abrir/usar uma instância com cargo.
     pub new_role_kind: String,
-    /// Nome do cargo digitado no menu "Enviar para agente" (ex.: `review`, `ci`).
+    /// Cargo digitado (ex.: `review`).
     pub new_role_name: String,
 
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=github*`): ignora eventos reais para manter o estado de demonstração.
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=github*`): ignora eventos reais e leituras.
     pub debug_hold: bool,
 }
 
 impl GithubUi {
-    /// Dados carregados do GitHub, se disponíveis.
+    /// Dados carregados, se houver.
     pub fn overview(&self) -> Option<&GithubOverview> {
         match &self.view {
             GithubView::Ready(ov) => Some(ov),
@@ -108,27 +102,56 @@ impl GithubUi {
         }
     }
 
-    /// Número de PRs abertos (para o badge na aba da barra direita).
+    /// PRs abertos (selo da aba na barra direita).
     pub fn open_prs_count(&self) -> u32 {
-        self.overview().map(|o| o.pulls.len() as u32).unwrap_or(0)
+        self.overview().map(|o| o.prs.len() as u32).unwrap_or(0)
     }
 
-    /// Texto da dica (tooltip) do ícone do GitHub no cabeçalho da barra direita.
+    /// Dica do ícone da aba.
     pub fn tab_tooltip(&self) -> String {
         match &self.view {
             GithubView::Ready(ov) => {
-                let prs = ov.pulls.len();
-                let issues = ov.issues.len();
-                format!("GitHub · {} ({} PR{}, {} issue{})", ov.repo, prs, if prs == 1 { "" } else { "s" }, issues, if issues == 1 { "" } else { "s" })
+                let (prs, issues) = (ov.prs.len(), ov.issues.len());
+                format!(
+                    "GitHub · {} ({} PR{}, {} issue{})",
+                    ov.repo,
+                    prs,
+                    if prs == 1 { "" } else { "s" },
+                    issues,
+                    if issues == 1 { "" } else { "s" }
+                )
             }
-            GithubView::Error { repo: Some(r), .. } => format!("GitHub · {r}"),
-            _ => "GitHub (PRs, issues e Actions)".to_string(),
+            _ => match &self.repo {
+                Some(r) => format!("GitHub · {r}"),
+                None => "GitHub (PRs, issues e Actions)".to_string(),
+            },
         }
     }
 }
 
+/// Cargo digitado pelo usuário vira palavra válida de instância (minúsculas, números, `-`, `_`).
+pub fn normalize_role(text: &str) -> String {
+    text.trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_whitespace() { '-' } else { c })
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
+        .take(32)
+        .collect()
+}
+
+/// `modelo` ou `modelo@cargo` a partir do que o menu tem.
+pub fn instance_spec(kind: &str, role: &str) -> String {
+    let role = normalize_role(role);
+    if role.is_empty() {
+        kind.to_owned()
+    } else {
+        format!("{kind}@{role}")
+    }
+}
+
 impl Deck {
-    /// Limpa o estado da aba GitHub ao trocar de projeto. Se a aba estiver visível, dispara a leitura.
+    /// Limpa o estado ao trocar de projeto; com a aba aberta, já lê o novo.
     pub fn github_reset_for_project(&mut self) {
         if self.github.debug_hold {
             return;
@@ -144,8 +167,17 @@ impl Deck {
         }
     }
 
-    /// Atualiza os dados do GitHub do projeto ativo (em segundo plano).
+    /// Lê os dados do projeto ativo em segundo plano (usa o cache de 60 s do core).
     pub fn github_refresh(&mut self) {
+        self.github_load(false);
+    }
+
+    /// Botão Atualizar: ignora os caches e refaz também o detalhe aberto.
+    pub fn github_refresh_now(&mut self) {
+        self.github_load(true);
+    }
+
+    fn github_load(&mut self, force: bool) {
         if self.github.debug_hold {
             return;
         }
@@ -154,252 +186,216 @@ impl Deck {
             self.github.refreshing = false;
             return;
         }
+        if self.github.refreshing {
+            self.github.forced |= force;
+            return;
+        }
+        if force {
+            self.github.pr_details.clear();
+            self.github.run_jobs.clear();
+            self.github.job_logs.clear();
+        }
         self.github.refreshing = true;
+        self.github.forced = force;
         self.github.notice = None;
-        self.core.github_refresh(&self.active_project);
+        self.core.github_refresh(force);
     }
 
-    /// Seleciona um PR na lista e carrega os checks/jobs dele se ainda não estiverem em cache.
+    /// Seleciona (ou desseleciona) um PR e carrega os checks dele se ainda não os tem.
     pub fn github_select_pr(&mut self, number: u64) {
         if self.github.selected_pr == Some(number) {
             self.github.selected_pr = None;
             return;
         }
         self.github.selected_pr = Some(number);
+        self.github.open_log = None;
         if self.github.debug_hold {
             return;
         }
-        if let Some(detail) = self.github.pr_details.get(&number).cloned() {
-            self.auto_open_failed_job_log(Some(number), &detail.jobs);
-            return;
-        }
-        if let Some(ov) = self.github.overview() {
-            if let Some(pr) = ov.pulls.iter().find(|p| p.number == number) {
-                let repo = ov.repo.clone();
-                let sha = pr.head_sha.clone();
-                let branch = pr.head_ref.clone();
-                self.github.pr_loading = Some(number);
-                self.core.github_load_pr(&self.active_project, repo, number, sha, branch);
-            }
-        }
+        self.github_load_pr_detail(number, false);
     }
 
-    /// Seleciona uma execução (run) na sub-aba Actions e busca os jobs dela.
+    fn github_load_pr_detail(&mut self, number: u64, force: bool) {
+        if self.github.pr_loading == Some(number) {
+            return;
+        }
+        if let Some(detail) = self.github.pr_details.get(&number) {
+            let jobs = detail.jobs.clone();
+            self.auto_open_failed_job_log(Some(number), &jobs);
+            return;
+        }
+        let Some(sha) = self.github.overview().and_then(|ov| ov.prs.iter().find(|p| p.number == number)).map(|p| p.head_sha.clone()) else {
+            return;
+        };
+        self.github.pr_loading = Some(number);
+        self.core.github_load_pr(number, sha, force);
+    }
+
+    /// Seleciona (ou desseleciona) uma execução do Actions e carrega os jobs dela.
     pub fn github_select_run(&mut self, run_id: u64) {
         if self.github.selected_run == Some(run_id) {
             self.github.selected_run = None;
             return;
         }
         self.github.selected_run = Some(run_id);
+        self.github.open_log = None;
         if self.github.debug_hold {
             return;
         }
-        if let Some(jobs) = self.github.run_jobs.get(&run_id).cloned() {
+        self.github_load_run_detail(run_id, false);
+    }
+
+    fn github_load_run_detail(&mut self, run_id: u64, force: bool) {
+        if self.github.run_loading == Some(run_id) {
+            return;
+        }
+        if let Some(jobs) = self.github.run_jobs.get(&run_id) {
+            let jobs = jobs.clone();
             self.auto_open_failed_job_log(None, &jobs);
             return;
         }
-        if let Some(ov) = self.github.overview() {
-            let repo = ov.repo.clone();
-            self.github.run_loading = Some(run_id);
-            self.core.github_load_run_jobs(&self.active_project, repo, run_id);
-        }
+        self.github.run_loading = Some(run_id);
+        self.core.github_load_run_jobs(run_id, force);
     }
 
-    /// Baixa (ou mostra do cache) o fim do log de um job que falhou.
+    /// Abre o painel com o fim do log de um job e o baixa se ainda não o tem.
     pub fn github_request_job_log(&mut self, job_id: u64, job_name: String, pr_number: Option<u64>) {
-        self.github.open_log = Some((job_id, job_name.clone(), pr_number));
+        self.github.open_log = Some((job_id, job_name, pr_number));
         if self.github.debug_hold || self.github.job_logs.contains_key(&job_id) {
             return;
         }
-        if let Some(ov) = self.github.overview() {
-            let repo = ov.repo.clone();
-            self.github.log_loading = Some(job_id);
-            self.core.github_load_job_log(&self.active_project, repo, job_id, job_name);
-        }
+        self.github.log_loading = Some(job_id);
+        self.core.github_load_job_log(job_id, false);
     }
 
-    /// Se houver algum job que falhou na lista, seleciona automaticamente o primeiro e busca o log.
+    /// Com jobs vermelhos na lista, abre o log do primeiro (se nenhum deles já está aberto).
     fn auto_open_failed_job_log(&mut self, pr_number: Option<u64>, jobs: &[WorkflowJob]) {
-        if let Some(failed) = jobs.iter().find(|j| j.status == CheckStatus::Failure) {
-            let keep_current = self
-                .github
-                .open_log
-                .as_ref()
-                .is_some_and(|(id, _, _)| jobs.iter().any(|j| j.id == *id && j.status == CheckStatus::Failure));
-            if !keep_current {
-                self.github_request_job_log(failed.id, failed.name.clone(), pr_number);
-            }
+        let Some(failed) = jobs.iter().find(|j| j.status == CheckStatus::Failure) else { return };
+        let keep_current =
+            self.github.open_log.as_ref().is_some_and(|(id, _, _)| jobs.iter().any(|j| j.id == *id && j.status == CheckStatus::Failure));
+        if !keep_current {
+            self.github_request_job_log(failed.id, failed.name.clone(), pr_number);
         }
     }
 
-    /// Trata um [`GithubEvent`] emitido pelo core.
+    /// Trata um evento do core. Eventos de outro projeto ou de uma leitura antiga são ignorados.
     pub fn on_github_event(&mut self, ev: GithubEvent) {
         if self.github.debug_hold || ev.project != self.active_project {
             return;
         }
         match ev.payload {
-            GithubPayload::NotGithubRepo { reason } => {
-                self.github.refreshing = false;
-                self.github.view = GithubView::NotGithub { reason };
-            }
             GithubPayload::Overview(Ok(overview)) => {
                 self.github.refreshing = false;
                 self.github.last_refresh = Some(Instant::now());
                 self.github.notice = None;
-                // Se o PR selecionado já estava aberto e seus detalhes ainda não foram carregados, dispara.
-                let selected_pr = self.github.selected_pr;
+                self.github.repo = Some(overview.repo.clone());
+                let forced = std::mem::take(&mut self.github.forced);
                 self.github.view = GithubView::Ready(overview);
-                if let Some(num) = selected_pr {
-                    if !self.github.pr_details.contains_key(&num) {
-                        self.github.selected_pr = None;
-                        self.github_select_pr(num);
-                    }
+                // Forçado: recarrega o que estava aberto (os caches da tela foram limpos).
+                if let Some(num) = self.github.selected_pr {
+                    self.github_load_pr_detail(num, forced);
+                }
+                if let Some(id) = self.github.selected_run {
+                    self.github_load_run_detail(id, forced);
                 }
             }
             GithubPayload::Overview(Err(error)) => {
                 self.github.refreshing = false;
-                let msg = error.message_pt();
+                self.github.forced = false;
                 if matches!(self.github.view, GithubView::Ready(_)) {
-                    // Mantém o cache anterior na tela e mostra o erro como faixa de aviso.
-                    self.github.notice = Some((msg, true));
+                    // Mantém o que já estava na tela e avisa na faixa do topo.
+                    self.github.notice = Some((error.to_string(), true));
                 } else {
-                    let repo = self.core.github_repo_at(&self.workspace).ok();
-                    self.github.view = GithubView::Error { repo, error };
+                    self.github.view = GithubView::Error(error);
                 }
             }
-            GithubPayload::PrDetail(Ok(detail)) => {
-                let pr_num = detail.pr_number;
-                if self.github.pr_loading == Some(pr_num) {
-                    self.github.pr_loading = None;
-                }
-                if let GithubView::Ready(ov) = &mut self.github.view {
-                    if let Some(pr) = ov.pulls.iter_mut().find(|p| p.number == pr_num) {
-                        pr.checks = detail.status;
-                    }
-                }
-                let jobs = detail.jobs.clone();
-                self.github.pr_details.insert(pr_num, detail);
-                if self.github.selected_pr == Some(pr_num) {
-                    self.auto_open_failed_job_log(Some(pr_num), &jobs);
-                }
-            }
-            GithubPayload::PrDetail(Err { pr_number, error }) => {
+            GithubPayload::PrDetail { pr_number, result } => {
                 if self.github.pr_loading == Some(pr_number) {
                     self.github.pr_loading = None;
                 }
-                self.github.notice = Some((format!("PR #{pr_number}: {}", error.message_pt()), true));
+                match result {
+                    Ok(mut detail) => {
+                        let status = detail.status();
+                        if let GithubView::Ready(ov) = &mut self.github.view {
+                            if let Some(pr) = ov.prs.iter_mut().find(|p| p.number == pr_number) {
+                                if !detail.runs.is_empty() {
+                                    pr.checks = status;
+                                }
+                            }
+                        }
+                        let failed_log = detail.failed_log.take();
+                        let jobs = detail.jobs.clone();
+                        self.github.pr_details.insert(pr_number, detail);
+                        self.store_preloaded_log(failed_log, &jobs);
+                        if self.github.selected_pr == Some(pr_number) {
+                            self.auto_open_failed_job_log(Some(pr_number), &jobs);
+                        }
+                    }
+                    Err(e) => self.github.notice = Some((format!("PR #{pr_number}: {e}"), true)),
+                }
             }
-            GithubPayload::RunJobs(Ok { run_id, jobs }) => {
+            GithubPayload::RunJobs { run_id, result, failed_log } => {
                 if self.github.run_loading == Some(run_id) {
                     self.github.run_loading = None;
                 }
-                if self.github.selected_run == Some(run_id) {
-                    self.auto_open_failed_job_log(None, &jobs);
+                match result {
+                    Ok(jobs) => {
+                        self.store_preloaded_log(failed_log, &jobs);
+                        self.github.run_jobs.insert(run_id, jobs.clone());
+                        if self.github.selected_run == Some(run_id) {
+                            self.auto_open_failed_job_log(None, &jobs);
+                        }
+                    }
+                    Err(e) => self.github.notice = Some((format!("Execução #{run_id}: {e}"), true)),
                 }
-                self.github.run_jobs.insert(run_id, jobs);
             }
-            GithubPayload::RunJobs(Err { run_id, error }) => {
-                if self.github.run_loading == Some(run_id) {
-                    self.github.run_loading = None;
-                }
-                self.github.notice = Some((format!("Execução #{run_id}: {}", error.message_pt()), true));
-            }
-            GithubPayload::JobLog(Ok(log)) => {
-                if self.github.log_loading == Some(log.job_id) {
-                    self.github.log_loading = None;
-                }
-                self.github.job_logs.insert(log.job_id, log);
-            }
-            GithubPayload::JobLog(Err { job_id, error }) => {
+            GithubPayload::JobLog { job_id, result } => {
                 if self.github.log_loading == Some(job_id) {
                     self.github.log_loading = None;
                 }
-                self.github.notice = Some((format!("Log do job: {}", error.message_pt()), true));
+                self.github.job_logs.insert(job_id, result);
             }
         }
     }
 
-    /// Abre uma URL do GitHub no navegador padrão do sistema.
+    /// Guarda o log que o core já baixou junto com os jobs.
+    fn store_preloaded_log(&mut self, log: Option<(u64, Result<JobLog, GithubError>)>, jobs: &[WorkflowJob]) {
+        if let Some((job_id, result)) = log {
+            if jobs.iter().any(|j| j.id == job_id) {
+                self.github.job_logs.insert(job_id, result);
+            }
+        }
+    }
+
+    /// Abre uma URL do GitHub no navegador padrão.
     pub fn open_github_browser(&mut self, url: &str) {
         if let Err(e) = self.core.open_github_url(url) {
             self.github.notice = Some((format!("Não foi possível abrir o navegador: {e}"), true));
         }
     }
 
-    /// Abre o menu "Enviar para agente ▾" para um PR, issue ou job falho.
-    pub fn open_github_agent_menu(&mut self, anchor: Rect, title: String, suggested_role: &'static str, prompt: String) {
+    /// Abre o menu "Enviar para agente" com a mensagem pronta.
+    pub fn open_github_agent_menu(&mut self, anchor: Rect, title: String, suggested_role: &str, prompt: String) {
         if self.github.new_role_kind.is_empty() {
-            self.github.new_role_kind = self
-                .active_tab()
-                .map(|t| t.kind.clone())
-                .filter(|k| k != "shell")
-                .unwrap_or_else(|| self.agents.fallback_kind());
+            self.github.new_role_kind =
+                self.active_tab().map(|t| t.kind.clone()).filter(|k| k != "shell").unwrap_or_else(|| self.agents.fallback_kind());
         }
         self.github.new_role_name = suggested_role.to_owned();
-        self.github.agent_menu = Some(AgentMenuTarget { anchor, title, suggested_role, prompt });
+        self.github.agent_menu = Some(AgentMenuTarget { anchor, title, prompt });
     }
 
-    /// Envia uma mensagem pronta (de PR, issue ou log de job) para uma instância de agente do
-    /// projeto ativo, abrindo a aba se ela ainda não existir (mesmo fluxo de entrega do `ask-agent`).
-    pub fn send_github_prompt_to_agent(&mut self, target_spec: &str, force_new: bool, prompt: String) {
-        let project = self.active_project.clone();
-        if project.is_empty() {
-            self.system("Abra uma pasta como projeto antes de enviar para um agente.");
-            return;
-        }
-        let Some(want) = Ident::parse(target_spec.trim()) else {
-            self.github.notice = Some((format!("Identificador de agente inválido: \"{target_spec}\"."), true));
-            return;
-        };
-        if !self.agents.knows(&want.kind) {
-            self.github.notice = Some((format!("O agente \"{}\" não está disponível.", want.kind), true));
-            return;
-        }
-        self.load_project(&project);
-        let ident = match self.core.resolve_instance(&project, &want, force_new) {
-            Ok((ident, _)) => ident,
-            Err(candidates) => {
-                // Mais de uma instância do mesmo cargo aberta: usa a primeira encontrada.
-                if let Some(first) = candidates.first().and_then(|id| Ident::parse(id)) {
-                    first
-                } else {
-                    let (ident, _) = self.core.resolve_instance(&project, &want, true).expect("force_new não falha");
-                    ident
-                }
-            }
-        };
-        let id = ident.id();
-        let found = self.tabs.iter().position(|t| t.project == project && t.ident.id() == id);
-        let (idx, newly_opened) = match found {
-            Some(i) => (i, false),
-            None => {
-                self.add_tab(project.clone(), ident.clone(), false, false);
-                (self.tabs.len() - 1, true)
-            }
-        };
-        self.activate(idx);
-        if !self.tabs[idx].alive {
-            self.start(idx);
-        }
-        // Se a aba acabou de ser aberta, reiniciada ou está ocupada, entra na fila da aba (`delivery::gate`
-        // espera o processo iniciar / terminar o turno antes de colar e apertar Enter).
-        let should_queue = newly_opened
-            || self.tabs[idx].busy
-            || !self.tabs[idx].pending_enter.is_empty()
-            || !self.tabs[idx].queue.is_empty()
-            || self.tabs[idx].seen_output == 0;
-        if should_queue {
-            self.tabs[idx].queue.push(
-                Instant::now(),
-                Queued { request: 0, prompt: prompt.clone(), from: "você".to_owned(), answer: false },
-            );
-        } else {
-            self.submit(idx, &prompt);
-        }
-        let label = self.tabs[idx].label.clone();
-        self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&id), prompt));
-        self.github.notice = Some((format!("Enviado para {label}."), false));
+    /// Envia a mensagem pronta para a instância `spec` (`claude`, `claude@review`...), abrindo a aba
+    /// se ela não existir. Fecha o menu e avisa o resultado na faixa do topo.
+    pub fn send_github_prompt_to_agent(&mut self, spec: &str, prompt: String) {
         self.github.agent_menu = None;
+        let Some(want) = Ident::parse(spec) else {
+            self.github.notice = Some((format!("Nome de agente inválido: \"{spec}\"."), true));
+            return;
+        };
+        self.github.notice = Some(match self.send_to_instance(&want, false, prompt) {
+            Ok(label) => (format!("Enviado para {label}."), false),
+            Err(msg) => (msg, true),
+        });
     }
 }
 
@@ -407,169 +403,192 @@ impl Deck {
 // Dados fictícios para capturas de tela (`COMMANDDECK_DEBUG_UI=github-demo`)
 // ---------------------------------------------------------------------------
 
+const DEMO_SHA_42: &str = "61621aa9c4f01b2e3d4a5f60718293a4b5c6d7e8";
+
 pub fn demo_overview() -> GithubOverview {
-    let repo = RepoSlug { owner: "pattr".into(), repo: "commanddeck".into() };
+    let pr = |number, title: &str, author: &str, head: &str, sha: &str, draft, checks| PullRequest {
+        number,
+        title: title.into(),
+        author: author.into(),
+        head_branch: head.into(),
+        base_branch: "dev".into(),
+        head_sha: sha.into(),
+        draft,
+        html_url: format!("https://github.com/pattr/commanddeck/pull/{number}"),
+        updated_at: "2026-10-16T03:30:00Z".into(),
+        checks,
+    };
+    let issue = |number, title: &str, author: &str, labels: &[&str], comments, body: &str| Issue {
+        number,
+        title: title.into(),
+        author: author.into(),
+        labels: labels.iter().map(|l| (*l).to_owned()).collect(),
+        comments,
+        html_url: format!("https://github.com/pattr/commanddeck/issues/{number}"),
+        updated_at: "2026-10-15T21:10:00Z".into(),
+        body_preview: body.into(),
+    };
+    let run = |id, title: &str, branch: &str, sha: &str, status, conclusion: Option<&str>| WorkflowRun {
+        id,
+        name: "CI".into(),
+        display_title: title.into(),
+        head_branch: branch.into(),
+        head_sha: sha.into(),
+        event: "pull_request".into(),
+        status,
+        raw_status: if conclusion.is_some() { "completed".into() } else { "in_progress".into() },
+        conclusion: conclusion.map(str::to_owned),
+        html_url: format!("https://github.com/pattr/commanddeck/actions/runs/{id}"),
+        created_at: "2026-10-16T03:28:00Z".into(),
+    };
     GithubOverview {
-        repo,
+        repo: RepoSlug::new("pattr", "commanddeck"),
         authenticated: true,
-        rate_limit: Some(RateLimitInfo { limit: 5000, remaining: 4892, reset_epoch_s: 0 }),
-        pulls: vec![
-            PullRequest {
-                number: 42,
-                title: "feat(github): integração com PRs, issues e Actions".into(),
-                author: "pattr".into(),
-                head_ref: "feat/github".into(),
-                base_ref: "dev".into(),
-                head_sha: "61621aa9c4f01b2e3d4a5f60718293a4b5c6d7e8".into(),
-                draft: false,
-                html_url: "https://github.com/pattr/commanddeck/pull/42".into(),
-                updated_at: "2026-10-16T03:30:00Z".into(),
-                body: "Adiciona a aba GitHub na barra direita com PRs, issues, Actions e envio direto para agentes.".into(),
-                checks: CheckStatus::Failure,
-            },
-            PullRequest {
-                number: 39,
-                title: "feat(git): histórico de commits, stash e seletor de branch".into(),
-                author: "ana-dev".into(),
-                head_ref: "feat/git-panel".into(),
-                base_ref: "dev".into(),
-                head_sha: "89ab12cd34ef56ab78cd90ef12ab34cd56ef7890".into(),
-                draft: false,
-                html_url: "https://github.com/pattr/commanddeck/pull/39".into(),
-                updated_at: "2026-10-16T02:15:00Z".into(),
-                body: "Expande a aba Git com histórico recente e troca rápida de branch.".into(),
-                checks: CheckStatus::Success,
-            },
-            PullRequest {
-                number: 44,
-                title: "wip(terminal): busca incremental no scrollback (Ctrl+F)".into(),
-                author: "carlos".into(),
-                head_ref: "feat/term-search".into(),
-                base_ref: "dev".into(),
-                head_sha: "11223344556677889900aabbccddeeff00112233".into(),
-                draft: true,
-                html_url: "https://github.com/pattr/commanddeck/pull/44".into(),
-                updated_at: "2026-10-16T01:40:00Z".into(),
-                body: "Rascunho inicial da barra de busca no terminal.".into(),
-                checks: CheckStatus::Pending,
-            },
+        prs: vec![
+            pr(42, "feat(github): integração com PRs, issues e Actions", "pattr", "feat/github", DEMO_SHA_42, false, CheckStatus::Failure),
+            pr(
+                39,
+                "feat(git): histórico de commits e seletor de branch",
+                "ana-dev",
+                "feat/git-panel",
+                "89ab12cd34ef56ab78cd90ef12ab34cd56ef7890",
+                false,
+                CheckStatus::Success,
+            ),
+            pr(
+                44,
+                "wip(terminal): busca incremental no scrollback",
+                "carlos",
+                "feat/term-search",
+                "11223344556677889900aabbccddeeff00112233",
+                true,
+                CheckStatus::Pending,
+            ),
+            pr(45, "docs: guia de contribuição", "bia", "docs/contrib", "", false, CheckStatus::Neutral),
         ],
         issues: vec![
-            Issue {
-                number: 38,
-                title: "Atalho Ctrl+Shift+G para alternar entre Git e GitHub".into(),
-                author: "pattr".into(),
-                labels: vec!["enhancement".into(), "ui".into()],
-                comments: 3,
-                html_url: "https://github.com/pattr/commanddeck/issues/38".into(),
-                updated_at: "2026-10-15T21:10:00Z".into(),
-                body: "Seria útil ter atalhos de teclado dedicados para abrir as abas da barra direita rapidamente.".into(),
-            },
-            Issue {
-                number: 31,
-                title: "ConPTY no Windows 11 24H2: cursor pisca ao redimensionar rápido".into(),
-                author: "marcos".into(),
-                labels: vec!["bug".into(), "windows".into()],
-                comments: 5,
-                html_url: "https://github.com/pattr/commanddeck/issues/31".into(),
-                updated_at: "2026-10-14T18:05:00Z".into(),
-                body: "Ao arrastar o divisor da barra direita rapidamente, o ConPTY emite sequências DECSCUSR extras.".into(),
-            },
+            issue(
+                38,
+                "Atalho para alternar entre as abas Git e GitHub",
+                "pattr",
+                &["enhancement", "ui"],
+                3,
+                "Seria útil ter atalhos de teclado dedicados para abrir as abas da barra direita rapidamente, sem usar o mouse.",
+            ),
+            issue(
+                31,
+                "ConPTY no Windows 11 24H2: cursor pisca ao redimensionar",
+                "marcos",
+                &["bug", "windows"],
+                5,
+                "Ao arrastar o divisor da barra direita rapidamente, o ConPTY emite sequências DECSCUSR extras e o cursor pisca.",
+            ),
         ],
         runs: vec![
-            WorkflowRun {
-                id: 9001,
-                name: "CI".into(),
-                display_title: "feat(github): integração com PRs, issues e Actions".into(),
-                head_branch: "feat/github".into(),
-                head_sha: "61621aa9c4f01b2e3d4a5f60718293a4b5c6d7e8".into(),
-                event: "pull_request".into(),
-                status: CheckStatus::Failure,
-                html_url: "https://github.com/pattr/commanddeck/actions/runs/9001".into(),
-                created_at: "2026-10-16T03:28:00Z".into(),
-                run_number: 184,
-            },
-            WorkflowRun {
-                id: 9000,
-                name: "CI".into(),
-                display_title: "feat(git): histórico de commits, stash e seletor de branch".into(),
-                head_branch: "feat/git-panel".into(),
-                head_sha: "89ab12cd34ef56ab78cd90ef12ab34cd56ef7890".into(),
-                event: "pull_request".into(),
-                status: CheckStatus::Success,
-                html_url: "https://github.com/pattr/commanddeck/actions/runs/9000".into(),
-                created_at: "2026-10-16T02:12:00Z".into(),
-                run_number: 183,
-            },
-            WorkflowRun {
-                id: 8999,
-                name: "CI".into(),
-                display_title: "wip(terminal): busca incremental no scrollback".into(),
-                head_branch: "feat/term-search".into(),
-                head_sha: "11223344556677889900aabbccddeeff00112233".into(),
-                event: "pull_request".into(),
-                status: CheckStatus::Pending,
-                html_url: "https://github.com/pattr/commanddeck/actions/runs/8999".into(),
-                created_at: "2026-10-16T01:39:00Z".into(),
-                run_number: 182,
-            },
+            run(
+                9001,
+                "feat(github): integração com PRs, issues e Actions",
+                "feat/github",
+                DEMO_SHA_42,
+                CheckStatus::Failure,
+                Some("failure"),
+            ),
+            run(
+                9000,
+                "feat(git): histórico de commits e seletor de branch",
+                "feat/git-panel",
+                "89ab12cd34ef56ab78cd90ef12ab34cd56ef7890",
+                CheckStatus::Success,
+                Some("success"),
+            ),
+            run(
+                8999,
+                "wip(terminal): busca incremental no scrollback",
+                "feat/term-search",
+                "11223344556677889900aabbccddeeff00112233",
+                CheckStatus::Pending,
+                None,
+            ),
         ],
+        rate_limit: Some(RateLimitInfo { remaining: Some(4892), limit: Some(5000), reset_at_epoch_s: None }),
     }
 }
 
 pub fn demo_pr_detail() -> PrChecksDetail {
+    let job = |id, name: &str, status, conclusion: &str, steps: &[&str]| WorkflowJob {
+        id,
+        run_id: 9001,
+        name: name.into(),
+        status,
+        conclusion: Some(conclusion.into()),
+        html_url: format!("https://github.com/pattr/commanddeck/actions/runs/9001/job/{id}"),
+        failed_steps: steps.iter().map(|s| (*s).to_owned()).collect(),
+    };
     PrChecksDetail {
         pr_number: 42,
-        head_sha: "61621aa9c4f01b2e3d4a5f60718293a4b5c6d7e8".into(),
-        status: CheckStatus::Failure,
+        head_sha: DEMO_SHA_42.into(),
         runs: vec![demo_overview().runs[0].clone()],
         jobs: vec![
-            WorkflowJob {
-                id: 501,
-                run_id: 9001,
-                name: "cargo clippy (windows-latest)".into(),
-                status: CheckStatus::Failure,
-                html_url: "https://github.com/pattr/commanddeck/actions/runs/9001/job/501".into(),
-                failed_steps: vec!["Run cargo clippy --workspace -- -D warnings".into()],
-            },
-            WorkflowJob {
-                id: 502,
-                run_id: 9001,
-                name: "cargo test (windows-latest)".into(),
-                status: CheckStatus::Success,
-                html_url: "https://github.com/pattr/commanddeck/actions/runs/9001/job/502".into(),
-                failed_steps: vec![],
-            },
-            WorkflowJob {
-                id: 503,
-                run_id: 9001,
-                name: "cargo fmt --check".into(),
-                status: CheckStatus::Success,
-                html_url: "https://github.com/pattr/commanddeck/actions/runs/9001/job/503".into(),
-                failed_steps: vec![],
-            },
+            job(501, "clippy (windows-latest)", CheckStatus::Failure, "failure", &["cargo clippy --workspace -- -D warnings"]),
+            job(502, "test (windows-latest)", CheckStatus::Success, "success", &[]),
+            job(503, "fmt", CheckStatus::Success, "success", &[]),
         ],
+        failed_log: None,
     }
 }
 
 pub fn demo_job_log() -> JobLog {
     JobLog {
-        job_id: 501,
-        job_name: "cargo clippy (windows-latest)".into(),
+        lines: [
+            "Checking commanddeck-core v0.3.0 (D:\\a\\commanddeck\\crates\\core)",
+            "Checking commanddeck v0.3.0 (D:\\a\\commanddeck\\crates\\app)",
+            "error: redundant closure",
+            "  --> crates/core/src/github.rs:312:44",
+            "   |",
+            "312|     let slug = url.and_then(|u| parse_github_remote(&u));",
+            "   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself",
+            "   = note: `-D clippy::redundant-closure` implied by `-D warnings`",
+            "error: could not compile `commanddeck-core` (lib) due to 1 previous error",
+            "##[error]Process completed with exit code 101.",
+        ]
+        .iter()
+        .map(|l| (*l).to_owned())
+        .collect(),
         truncated: true,
-        tail: concat!(
-            "Checking commanddeck-core v0.3.0 (C:\\work\\commanddeck\\crates\\core)\n",
-            "Checking commanddeck v0.3.0 (C:\\work\\commanddeck\\crates\\app)\n",
-            "error: redundant closure\n",
-            "  --> crates/core/src/github.rs:312:44\n",
-            "   |\n",
-            "312|     let slug = url.and_then(|u| parse_github_remote(&u));\n",
-            "   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `parse_github_remote`\n",
-            "   |\n",
-            "   = note: `-D clippy::redundant-closure` implied by `-D warnings`\n",
-            "error: could not compile `commanddeck-core` (lib) due to 1 previous error\n",
-            "##[error]Process completed with exit code 101."
-        )
-        .into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roles_become_valid_words() {
+        assert_eq!(normalize_role("  Review "), "review");
+        assert_eq!(normalize_role("code review!"), "code-review");
+        assert_eq!(normalize_role("@ci"), "ci");
+        assert_eq!(normalize_role("???"), "");
+        assert_eq!(normalize_role(&"a".repeat(50)).len(), 32);
+    }
+
+    #[test]
+    fn instance_specs_parse_as_idents() {
+        assert_eq!(instance_spec("claude", ""), "claude");
+        assert_eq!(instance_spec("claude", "Review"), "claude@review");
+        let id = Ident::parse(&instance_spec("ollama:qwen3.5:4b", "ci")).expect("id válido");
+        assert_eq!(id.kind, "ollama:qwen3.5:4b");
+        assert_eq!(id.role.as_deref(), Some("ci"));
+    }
+
+    #[test]
+    fn demo_data_is_consistent() {
+        let ov = demo_overview();
+        let detail = demo_pr_detail();
+        assert!(ov.prs.iter().any(|p| p.number == detail.pr_number && p.head_sha == detail.head_sha));
+        assert_eq!(detail.status(), CheckStatus::Failure);
+        assert!(detail.jobs.iter().any(|j| j.status == CheckStatus::Failure));
+        let ui = GithubUi { view: GithubView::Ready(ov), ..Default::default() };
+        assert_eq!(ui.open_prs_count(), 4);
+        assert!(ui.tab_tooltip().contains("pattr/commanddeck"));
     }
 }

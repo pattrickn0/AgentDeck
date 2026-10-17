@@ -61,13 +61,14 @@ pub enum Action {
 }
 
 /// Mensagem de outro agente (ou da UI) esperando para ser digitada no terminal da aba.
-pub(crate) struct Queued {
-    pub(crate) request: u64,
-    pub(crate) prompt: String,
+struct Queued {
+    /// Número da pergunta no core; 0 = mensagem da própria interface (ex.: aba GitHub), sem resposta a devolver.
+    request: u64,
+    prompt: String,
     /// Quem mandou (quem perguntou; ou quem respondeu, se `answer`).
-    pub(crate) from: String,
+    from: String,
     /// É uma resposta atrasada a uma pergunta desta aba, não uma pergunta nova.
-    pub(crate) answer: bool,
+    answer: bool,
 }
 
 /// O que a barra lateral direita mostra.
@@ -102,7 +103,7 @@ pub struct Tab {
     /// Aberta pelo app a pedido de `ask-agent` (e não pelo usuário).
     pub auto: bool,
     /// Perguntas de outros agentes aguardando a aba ficar pronta (uma por vez).
-    pub(crate) queue: Mailbox<Queued>,
+    queue: Mailbox<Queued>,
     /// Última tecla do usuário nesta aba e se ela deixou texto começado na linha.
     last_key: Option<Instant>,
     typing: bool,
@@ -112,11 +113,11 @@ pub struct Tab {
     /// confirmação (ex.: Enter num menu, que não abre turno), vale a heurística da saída.
     turn_confirmed: bool,
     /// Enters agendados de um envio (`submit`), em ordem.
-    pub(crate) pending_enter: VecDeque<Instant>,
+    pending_enter: VecDeque<Instant>,
     /// Teclas do usuário que chegaram enquanto um envio esperava o Enter: vão depois dele, para
     /// não entrar no meio da mensagem.
     held_keys: Vec<u8>,
-    pub(crate) seen_output: u64,
+    seen_output: u64,
     idle_deadline: Option<Instant>,
     /// Houve saída desde que a aba ficou ocupada (só então o fim do turno toca e marca "concluído").
     busy_output: bool,
@@ -927,7 +928,7 @@ impl Deck {
 
     /// Abre as abas salvas do projeto `id` (uma vez por sessão). Sendo o ativo, ele assume a ordem
     /// e as proporções das janelas salvas e ativa a aba salva; senão as abas rodam escondidas.
-    pub(crate) fn load_project(&mut self, id: &str) {
+    fn load_project(&mut self, id: &str) {
         if self.projects.get(id).is_some_and(|s| s.loaded) {
             return;
         }
@@ -1058,6 +1059,40 @@ impl Deck {
         self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, from: d.from, answer: false });
     }
 
+    /// Mensagem da própria interface (aba GitHub) para uma instância do projeto ativo: abre a aba
+    /// se ela não existir (ou, com `force_new`, abre outra do mesmo cargo) e enfileira o texto,
+    /// que é digitado quando a aba fica livre (mesma regra de `ask-agent`, em `delivery`).
+    /// Devolve o rótulo da aba de destino ou o motivo da recusa.
+    pub fn send_to_instance(&mut self, want: &Ident, force_new: bool, prompt: String) -> Result<String, String> {
+        let project = self.active_project.clone();
+        if project.is_empty() {
+            return Err("Abra uma pasta como projeto antes de enviar para um agente.".into());
+        }
+        if !self.agents.knows(&want.kind) || want.kind == "shell" {
+            return Err(format!("O agente \"{}\" não está disponível.", want.kind));
+        }
+        self.load_project(&project);
+        let ident = match self.core.resolve_instance(&project, want, force_new) {
+            Ok((ident, _)) => ident,
+            Err(options) => return Err(format!("\"{}\" é ambíguo: {}. Escolha uma delas.", want.id(), options.join(", "))),
+        };
+        let id = ident.id();
+        let idx = match self.tabs.iter().position(|t| t.project == project && t.ident.id() == id) {
+            Some(i) => i,
+            None => {
+                self.add_tab(project.clone(), ident, false, false);
+                self.tabs.len() - 1
+            }
+        };
+        if !self.tabs[idx].alive {
+            self.start(idx);
+        }
+        self.activate(idx);
+        self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), from: "você".into(), answer: false });
+        self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&id), prompt));
+        Ok(self.tabs[idx].label.clone())
+    }
+
     /// O que a regra de entrega precisa saber da aba.
     fn tab_state(&self, idx: usize) -> TabState {
         let tab = &self.tabs[idx];
@@ -1097,7 +1132,7 @@ impl Deck {
 
     /// Cria a aba da instância e inicia o processo. Uma aba `auto` fica em segundo plano (só ganha
     /// o foco se não houver nenhuma outra).
-    pub(crate) fn add_tab(&mut self, project: String, ident: Ident, restoring: bool, auto: bool) {
+    fn add_tab(&mut self, project: String, ident: Ident, restoring: bool, auto: bool) {
         let kind = ident.kind.clone();
         let label = ident.label(&self.agents.name(&kind));
         let tab = Tab {
@@ -2304,7 +2339,7 @@ impl Deck {
     ///
     /// Os Enters saem da thread da interface (em `tick`), na ordem certa em relação ao que o
     /// usuário digitar nesse meio-tempo; uma thread só acorda a interface na hora.
-    pub(crate) fn submit(&mut self, idx: usize, text: &str) {
+    fn submit(&mut self, idx: usize, text: &str) {
         let now = Instant::now();
         let tab = &mut self.tabs[idx];
         // Um envio anterior que ainda esperava o Enter é confirmado antes desta colagem.
