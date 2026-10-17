@@ -125,9 +125,13 @@ where
 
 fn credential_sources(home: &Path) -> Vec<String> {
     let mut out = Vec::new();
+    // O Credential Manager é do usuário do sistema: com uma home isolada (testes, `StartOptions`)
+    // ele não entra.
     #[cfg(windows)]
-    if let Some(json_str) = wincred::read_generic("gemini:antigravity") {
-        out.push(json_str);
+    if dirs::home_dir().is_some_and(|h| util::same_path(&h, home)) {
+        if let Some(json_str) = wincred::read_generic("gemini:antigravity") {
+            out.push(json_str);
+        }
     }
 
     // Fallback: ~/.gemini/oauth_creds.json na pasta home passada
@@ -138,7 +142,7 @@ fn credential_sources(home: &Path) -> Vec<String> {
 
     // Fallback adicional: home do sistema operacional (se diferente da home configurada)
     if let Some(sys_home) = dirs::home_dir() {
-        if sys_home != home {
+        if !util::same_path(&sys_home, home) {
             let path = sys_home.join(".gemini").join("oauth_creds.json");
             if let Ok(content) = std::fs::read_to_string(&path) {
                 out.push(content);

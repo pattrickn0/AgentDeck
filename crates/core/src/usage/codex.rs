@@ -202,10 +202,7 @@ mod tests {
     fn read_tail_does_not_empty_text_when_last_line_exceeds_tail_bytes() {
         let tmp = tempfile::tempdir().expect("tmp");
         let huge = "a".repeat((TAIL_BYTES as usize) + 1024);
-        let path = write(tmp.path(), "2025/09/18/rollout-huge.jsonl", &[
-            r#"{"type":"session_meta"}"#.to_owned(),
-            huge,
-        ]);
+        let path = write(tmp.path(), "2025/09/18/rollout-huge.jsonl", &[r#"{"type":"session_meta"}"#.to_owned(), huge]);
         let tail = read_tail(&path).expect("tail");
         assert!(!tail.is_empty(), "read_tail não pode esvaziar text quando a última linha excede 256 KB");
     }
