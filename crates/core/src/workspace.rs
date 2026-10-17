@@ -228,12 +228,7 @@ fn git_dirs_from_dotgit_file(workspace: &Path) -> Vec<PathBuf> {
 pub(crate) fn discover_git_dirs(core: &crate::Core, workspace: &Path) -> Vec<PathBuf> {
     let mut git = core.inner.agents.which(if cfg!(windows) { "git.exe" } else { "git" });
     if git.is_none() && cfg!(windows) {
-        git = core
-            .inner
-            .agents
-            .system_dir("ProgramFiles")
-            .map(|p| p.join("Git").join("cmd").join("git.exe"))
-            .filter(|p| p.is_file());
+        git = core.inner.agents.system_dir("ProgramFiles").map(|p| p.join("Git").join("cmd").join("git.exe")).filter(|p| p.is_file());
     }
     let mut out = Vec::new();
     if let Some(git) = git {
@@ -329,10 +324,8 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
             if let Some(inner) = core.upgrade() {
                 let c = crate::Core { inner: inner.clone() };
                 let default_git = ws_for_thread.join(".git");
-                let dirs: Vec<PathBuf> = discover_git_dirs(&c, &ws_for_thread)
-                    .into_iter()
-                    .filter(|gd| !crate::util::same_path(gd, &default_git))
-                    .collect();
+                let dirs: Vec<PathBuf> =
+                    discover_git_dirs(&c, &ws_for_thread).into_iter().filter(|gd| !crate::util::same_path(gd, &default_git)).collect();
                 if !dirs.is_empty() {
                     *extra_git.write() = dirs.clone();
                     let mut guard = inner.watcher.lock();
