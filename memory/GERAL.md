@@ -177,8 +177,8 @@ ela dura.
 - Mandar uma mensagem (com anexos ou áudio transcrito) para a aba ativa pelo compositor.
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
 - Ver no **Mapa** quem está conversando com quem neste momento.
-- Usar o **git** do projeto pela aba Git: ver alterações e diffs, preparar, fazer commit, trocar/criar branch,
-  buscar, puxar e enviar.
+- Usar o **git** do projeto pela aba Git: alterações e diffs (inclusive por trecho), commit, histórico, stash,
+  branches, merge/rebase com resolução de conflitos, buscar, puxar e enviar.
 - Citar arquivos do workspace (`@arquivo`), anexar arquivos e imagens, ditar por voz (whisper.cpp local).
 
 **Como agente, dentro de uma aba:**
