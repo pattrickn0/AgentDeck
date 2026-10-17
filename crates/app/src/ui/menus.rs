@@ -84,19 +84,21 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     if !deck.settings_open {
         return;
     }
-    let w = 220.0;
+    let w = 260.0;
     let title_h = 11.0 * theme::LINE_HEIGHT + 4.0;
     let item_h = 13.0 * theme::LINE_HEIGHT + 12.0;
     let btn_h = 12.0 * theme::LINE_HEIGHT + 12.0 + 2.0;
-    let h = 8.0 + title_h + 8.0 + item_h + 2.0 + item_h + 6.0 + btn_h + 8.0 + 2.0;
+    let h = 8.0 + title_h + 8.0 + (item_h + 2.0) * 3.0 - 2.0 + 6.0 + btn_h + 8.0 + 2.0;
     // O botão ☰ fica no canto esquerdo da barra de título: o menu abre alinhado a ele.
     let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x + 4.0, anchor.max.y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut toggle = false;
     let mut toggle_tabs = false;
+    let mut toggle_keys = false;
     let mut test = false;
     let sound = deck.sound_enabled;
     let auto_tabs = deck.auto_open_agent_tabs;
+    let app_keys = deck.app_shortcuts_first;
     Area::new(Id::new("settings-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         let p = ui.painter();
@@ -142,8 +144,25 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             toggle_tabs = true;
         }
 
+        // Item com checkbox: Ctrl+B / Ctrl+L do app mesmo com o terminal focado
+        let item3 = Rect::from_min_size(Pos2::new(inner.min.x, item2.max.y + 2.0), Vec2::new(inner.width(), item_h));
+        let r = super::clickable(ui, item3, Id::new("setting-app-keys"));
+        if r.hovered() {
+            p.rect_filled(item3, 6.0, theme::BORDER);
+        }
+        text_in(p, item3.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Atalhos do app acima do terminal", theme::ui(13.0), theme::TEXT);
+        let cb3 = Rect::from_center_size(Pos2::new(item3.max.x - 8.0 - 8.0, item3.center().y), Vec2::splat(16.0));
+        checkbox(p, cb3, app_keys);
+        if r.clicked() {
+            toggle_keys = true;
+        }
+        super::tip(
+            r,
+            "Ligado: Ctrl+B e Ctrl+L são do app mesmo com o terminal focado. Desligado: vão para o terminal (prefixo do tmux, limpar a tela).",
+        );
+
         // ▶ Testar som
-        let btn = Rect::from_min_size(Pos2::new(inner.min.x, item2.max.y + 6.0), Vec2::new(inner.width(), btn_h));
+        let btn = Rect::from_min_size(Pos2::new(inner.min.x, item3.max.y + 6.0), Vec2::new(inner.width(), btn_h));
         let r = super::clickable(ui, btn, Id::new("setting-test-sound"));
         let hot = r.hovered();
         frame(p, btn, 6.0, if hot { theme::BORDER } else { theme::PANEL }, theme::BORDER);
@@ -161,6 +180,11 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         deck.auto_open_agent_tabs = !deck.auto_open_agent_tabs;
         let v = deck.auto_open_agent_tabs;
         deck.core.update_config(|c| c.auto_open_agent_tabs = v);
+    }
+    if toggle_keys {
+        deck.app_shortcuts_first = !deck.app_shortcuts_first;
+        let v = deck.app_shortcuts_first;
+        deck.core.update_config(|c| c.app_shortcuts_first = v);
     }
     if test {
         deck.play_sound(true);
@@ -253,12 +277,7 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         return;
     }
     let screen = ctx.content_rect();
-    // Backdrop escuro
-    ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("rename-backdrop"))).rect_filled(
-        screen,
-        0.0,
-        theme::rgba(0, 0, 0, 0.5),
-    );
+    super::modal_backdrop(deck, ctx, "rename-backdrop");
 
     let w = 360.0;
     let h = if error.is_some() { 165.0 } else { 145.0 };

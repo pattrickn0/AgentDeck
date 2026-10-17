@@ -2,9 +2,12 @@
 //! sem deixar rastro. Aqui elas viram linhas em `<dados>/crash.log`.
 //!
 //! - Panics: mensagem + pilha de chamadas.
-//! - Windows: exceções fatais (corrupção de heap `0xC0000374`, estouro de buffer `0xC0000409`,
-//!   violação de acesso `0xC0000005`) gravam o código, o endereço e a pilha. A primeira camada
-//!   não aloca memória (o heap pode estar corrompido); a segunda tenta resolver os símbolos.
+//! - Windows: só o que derruba o app grava o código, o endereço e a pilha: corrupção de heap
+//!   (`0xC0000374`) e estouro de buffer (`0xC0000409`), que nunca são tratados, e qualquer exceção
+//!   que ninguém tratou (filtro de última chance). Violações de acesso de primeira chance que o
+//!   driver de vídeo trata sozinho não entram mais. A primeira camada não aloca memória (o heap
+//!   pode estar corrompido); a segunda tenta resolver os símbolos.
+//! - O arquivo passa para `crash.log.1` (substituindo o anterior) quando passa de `MAX_LOG`.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -14,9 +17,22 @@ use std::sync::{Mutex, OnceLock};
 /// Arquivo aberto na inicialização (não dá para abrir arquivos com o heap corrompido).
 static LOG: OnceLock<Mutex<File>> = OnceLock::new();
 
+/// Tamanho a partir do qual o log é girado ao abrir o app.
+const MAX_LOG: u64 = 256 * 1024;
+
+/// Gira o log grande: `crash.log` vira `crash.log.1` (o anterior sai) e o próximo começa vazio.
+fn rotate(path: &Path, max: u64) {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > max) {
+        let old = path.with_extension("log.1");
+        let _ = std::fs::remove_file(&old);
+        let _ = std::fs::rename(path, &old);
+    }
+}
+
 /// Instala os ganchos. `dir` é a pasta de dados do app.
 pub fn install(dir: &Path) {
     let _ = std::fs::create_dir_all(dir);
+    rotate(&dir.join("crash.log"), MAX_LOG);
     let Ok(file) = OpenOptions::new().create(true).append(true).open(dir.join("crash.log")) else { return };
     let _ = LOG.set(Mutex::new(file));
 
@@ -65,24 +81,53 @@ fn append(text: &str) {
 mod windows {
     use std::fmt::Write as _;
     use std::io::Write as _;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::OnceLock;
 
-    use windows_sys::Win32::System::Diagnostics::Debug::{AddVectoredExceptionHandler, RtlCaptureStackBackTrace, EXCEPTION_POINTERS};
+    use windows_sys::Win32::System::Diagnostics::Debug::{
+        AddVectoredExceptionHandler, RtlCaptureStackBackTrace, SetUnhandledExceptionFilter, EXCEPTION_POINTERS,
+        LPTOP_LEVEL_EXCEPTION_FILTER,
+    };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 
     const HEAP_CORRUPTION: u32 = 0xC000_0374;
     const FAST_FAIL: u32 = 0xC000_0409;
-    const ACCESS_VIOLATION: u32 = 0xC000_0005;
     const CONTINUE_SEARCH: i32 = 0;
 
     static LOGGED: AtomicBool = AtomicBool::new(false);
-    /// Violações de acesso tratadas por terceiros são raras, mas não devem lotar o log.
-    static ACCESS_VIOLATIONS: AtomicUsize = AtomicUsize::new(0);
+    /// Filtro de última chance que havia antes do nosso (chamado depois de registrar).
+    static PREVIOUS: OnceLock<LPTOP_LEVEL_EXCEPTION_FILTER> = OnceLock::new();
 
     pub fn install() {
-        // SAFETY: o gancho só lê o registro de exceção que o sistema passa e devolve CONTINUE_SEARCH.
+        // SAFETY: os ganchos só leem o registro de exceção que o sistema passa e devolvem
+        // CONTINUE_SEARCH (ou o que o filtro anterior decidir).
         unsafe {
             AddVectoredExceptionHandler(1, Some(handler));
+            let _ = PREVIOUS.set(SetUnhandledExceptionFilter(Some(unhandled)));
+        }
+    }
+
+    /// Primeira chance: só os códigos que nunca são tratados (o processo vai cair). Uma violação
+    /// de acesso aqui pode ser tratada por quem a causou (o driver de OpenGL faz isso), então ela
+    /// só é registrada se chegar sem tratamento ao filtro de última chance.
+    unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
+        // SAFETY: o sistema garante ponteiros válidos durante a chamada.
+        let code = unsafe { (*(*info).ExceptionRecord).ExceptionCode as u32 };
+        if matches!(code, HEAP_CORRUPTION | FAST_FAIL) {
+            // SAFETY: repassa o mesmo ponteiro, válido durante esta chamada.
+            unsafe { log_fatal(info) };
+        }
+        CONTINUE_SEARCH
+    }
+
+    /// Última chance: ninguém tratou a exceção e o processo vai cair.
+    unsafe extern "system" fn unhandled(info: *const EXCEPTION_POINTERS) -> i32 {
+        // SAFETY: o sistema garante ponteiros válidos durante a chamada.
+        unsafe { log_fatal(info) };
+        match PREVIOUS.get().copied().flatten() {
+            // SAFETY: filtro instalado antes do nosso, chamado com o mesmo argumento.
+            Some(prev) => unsafe { prev(info) },
+            None => CONTINUE_SEARCH,
         }
     }
 
@@ -101,23 +146,19 @@ mod windows {
         }
     }
 
-    unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
+    /// Grava a exceção que vai derrubar o app (uma vez só).
+    ///
+    /// # Safety
+    /// `info` precisa ser o ponteiro válido que o sistema passou ao gancho.
+    unsafe fn log_fatal(info: *const EXCEPTION_POINTERS) {
+        if LOGGED.swap(true, Ordering::SeqCst) {
+            return;
+        }
         // SAFETY: o sistema garante ponteiros válidos durante a chamada.
         let (code, address) = unsafe {
             let record = (*info).ExceptionRecord;
             ((*record).ExceptionCode as u32, (*record).ExceptionAddress as usize)
         };
-        let fatal = matches!(code, HEAP_CORRUPTION | FAST_FAIL);
-        // Violações de acesso podem ser tratadas por quem as causou: registra, mas sem travar o gancho.
-        if !fatal && code != ACCESS_VIOLATION {
-            return CONTINUE_SEARCH;
-        }
-        if fatal && LOGGED.swap(true, Ordering::SeqCst) {
-            return CONTINUE_SEARCH;
-        }
-        if !fatal && ACCESS_VIOLATIONS.fetch_add(1, Ordering::Relaxed) >= 3 {
-            return CONTINUE_SEARCH;
-        }
 
         // Camada 1: sem alocação. Endereços relativos ao módulo, resolvíveis com o .pdb do mesmo build.
         let mut frames = [std::ptr::null_mut::<std::ffi::c_void>(); 48];
@@ -145,10 +186,29 @@ mod windows {
         }
 
         // Camada 2: pilha resolvida (aloca; pode falhar se o heap estiver muito danificado).
-        if fatal {
-            let thread = std::thread::current();
-            super::append(&format!("thread {:?}\n{}", thread.name().unwrap_or("?"), std::backtrace::Backtrace::force_capture()));
-        }
-        CONTINUE_SEARCH
+        let thread = std::thread::current();
+        super::append(&format!("thread {:?}\n{}", thread.name().unwrap_or("?"), std::backtrace::Backtrace::force_capture()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_big_log_is_rotated_and_a_small_one_is_kept() {
+        let dir = std::env::temp_dir().join(format!("cd-crash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("crash.log");
+        std::fs::write(&log, "pequeno").unwrap();
+        rotate(&log, 100);
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "pequeno");
+        std::fs::write(&log, "x".repeat(101)).unwrap();
+        std::fs::write(dir.join("crash.log.1"), "antigo").unwrap();
+        rotate(&log, 100);
+        assert!(!log.exists());
+        assert_eq!(std::fs::read_to_string(dir.join("crash.log.1")).unwrap().len(), 101);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

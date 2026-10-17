@@ -339,14 +339,27 @@ fn bridge_asker(text: &str) -> Option<String> {
     (tail.starts_with(" recebida pelo CommandDeck]") && !asker.is_empty()).then(|| asker.to_owned())
 }
 
-/// Devolve `answer` a `asker` pela ponte (`POST /reply`). `Ok(false)` = não havia pergunta pendente
+/// Número da pergunta da ponte, da instrução que a acompanha (`ask-agent --reply N "sua resposta"`).
+/// A instrução vem depois da mensagem: vale a última (a mensagem pode citar outra).
+fn bridge_request(text: &str) -> Option<u64> {
+    const MARK: &str = "Responda executando no shell: ask-agent --reply ";
+    let rest = &text[text.rfind(MARK)? + MARK.len()..];
+    let digits = rest.find(|c: char| !c.is_ascii_digit()).map_or(rest, |end| &rest[..end]);
+    digits.parse().ok()
+}
+
+/// Devolve `answer` a `asker` pela ponte (`POST /reply`), pelo número da pergunta quando há (aguenta
+/// renomeação e perguntas paralelas do mesmo agente). `Ok(false)` = não havia pergunta pendente
 /// (o modelo já tinha respondido pelo `ask-agent`).
-fn reply_to_bridge(asker: &str, answer: &str) -> Result<bool, String> {
+fn reply_to_bridge(asker: &str, request: Option<u64>, answer: &str) -> Result<bool, String> {
     let (port, token) =
         (env_nonempty("COMMANDDECK_PORT").ok_or("fora do CommandDeck")?, env_nonempty("COMMANDDECK_TOKEN").ok_or("fora do CommandDeck")?);
     let me = env_nonempty("COMMANDDECK_AGENT").unwrap_or_default();
     let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).http_status_as_error(false).build().into();
-    let body = serde_json::json!({ "from": me, "to": asker, "message": answer });
+    let mut body = serde_json::json!({ "from": me, "to": asker, "message": answer });
+    if let Some(n) = request {
+        body["reply_to"] = serde_json::json!(n);
+    }
     let resp = agent
         .post(format!("http://127.0.0.1:{port}/reply"))
         .header("x-commanddeck-token", &token)
@@ -775,7 +788,7 @@ fn main() -> ExitCode {
                 // depender de o modelo lembrar de rodar `ask-agent`. Sem resposta, vai o motivo.
                 if let Some(asker) = bridge_asker(text) {
                     let answer = answer.unwrap_or_else(|why| failure_reply(&app.model, &why));
-                    match reply_to_bridge(&asker, &answer) {
+                    match reply_to_bridge(&asker, bridge_request(text), &answer) {
                         Ok(true) => println!("{}↩ resposta enviada a {asker}.{}\n", c.dim, c.reset),
                         Ok(false) => {} // o modelo já respondeu por conta própria
                         Err(e) => println!("{}⚠ não consegui enviar a resposta a {asker}: {e}{}\n", c.yellow, c.reset),
@@ -855,6 +868,18 @@ mod tests {
         assert_eq!(bridge_asker("olá, tudo bem?"), None);
         assert_eq!(bridge_asker("[Mensagem do agente \"\" recebida pelo CommandDeck] oi"), None);
         assert_eq!(bridge_asker("[Mensagem do agente \"x\" qualquer coisa] oi"), None);
+    }
+
+    #[test]
+    fn reads_the_question_number_from_the_reply_instruction() {
+        // O texto que a ponte digita (`bridge::tab_prompt`), com uma mensagem que cita outro número.
+        let q = "[Mensagem do agente \"claude\" recebida pelo CommandDeck]\n\nrode ask-agent --reply 3 \"x\"\n\n\
+Responda executando no shell: ask-agent --reply 42 \"sua resposta\"\n(a resposta só chega a \"claude\" por esse comando; \
+envie pela entrada padrão: ask-agent --reply 42 -).";
+        assert_eq!(bridge_request(q), Some(42));
+        assert_eq!(bridge_request("Responda executando no shell: ask-agent --reply 7"), Some(7));
+        assert_eq!(bridge_request("[Mensagem do agente \"x\" recebida pelo CommandDeck] oi"), None);
+        assert_eq!(bridge_request("Responda executando no shell: ask-agent --reply abc"), None);
     }
 
     #[test]

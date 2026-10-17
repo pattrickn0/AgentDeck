@@ -36,7 +36,7 @@ pub fn team_of(parents: &BTreeMap<String, String>, id: &str, open: &[String]) ->
 }
 
 /// A instância `closed` saiu: a equipe dela passa ao chefe dela (ou à raiz). Devolve quem mudou de
-/// chefe (para avisar), mais o chefe que herdou a equipe, se houver.
+/// chefe (para avisar), mais o chefe dela, se houver: ele perdeu um subordinado (e talvez herdou a equipe).
 pub fn remove(parents: &mut BTreeMap<String, String>, closed: &str) -> Vec<String> {
     let boss = parents.remove(closed);
     let crew: Vec<String> = parents.iter().filter(|(_, p)| *p == closed).map(|(c, _)| c.clone()).collect();
@@ -47,9 +47,7 @@ pub fn remove(parents: &mut BTreeMap<String, String>, closed: &str) -> Vec<Strin
         };
     }
     let mut touched = crew;
-    if let Some(b) = boss.filter(|_| !touched.is_empty()) {
-        touched.push(b);
-    }
+    touched.extend(boss);
     touched
 }
 
@@ -119,6 +117,15 @@ mod tests {
         // Sem chefe, a equipe vai para a raiz.
         assert_eq!(remove(&mut m, "claude"), ids(&["ollama", "qa"]));
         assert!(m.is_empty());
+    }
+
+    #[test]
+    fn o_chefe_que_perde_um_subordinado_sem_equipe_e_avisado() {
+        let mut m = map(&[("dev", "claude"), ("qa", "claude")]);
+        assert_eq!(remove(&mut m, "dev"), ids(&["claude"]));
+        assert_eq!(m, map(&[("qa", "claude")]));
+        // Sem chefe nem equipe, ninguém muda de posição.
+        assert!(remove(&mut m, "solto").is_empty());
     }
 
     #[test]

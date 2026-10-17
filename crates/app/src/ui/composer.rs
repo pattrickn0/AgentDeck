@@ -68,7 +68,7 @@ fn layout(deck: &Deck, painter: &egui::Painter, rect: Rect) -> Layout {
     let mut chips = Vec::new();
     let mut cx = x0;
     for (i, a) in deck.attachments.iter().enumerate() {
-        let w = chip_width(painter, a).min(x1 - x0);
+        let w = chip_width(painter, &a.to_string_lossy()).min(x1 - x0);
         let gap = if i == 0 { 0.0 } else { 6.0 };
         if cx + gap + w > x1 && cx > x0 {
             y += CHIP_H + 6.0;
@@ -124,10 +124,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         let xw = 8.0 + text_w(&painter, "×", theme::ui(13.0));
         let x_rect = Rect::from_min_size(Pos2::new(r.max.x - 1.0 - 4.0 - xw, r.min.y + 1.0), Vec2::new(xw, r.height() - 2.0));
         let tr = Rect::from_min_max(Pos2::new(r.min.x + 11.0, r.min.y), Pos2::new(x_rect.min.x - 4.0, r.max.y));
-        let g = galley_trunc(&painter, &util::chip_label(a), theme::ui(12.0), theme::CHIP_TEXT, tr.width());
+        let g = galley_trunc(&painter, &util::chip_label(&a.to_string_lossy()), theme::ui(12.0), theme::CHIP_TEXT, tr.width());
         place(&painter, tr, Align2::LEFT_CENTER, g, theme::CHIP_TEXT);
         let chip_resp = ui.interact(*r, Id::new(("chip", i)), Sense::hover());
-        tip(chip_resp, a.clone());
+        tip(chip_resp, a.display().to_string());
         let xr = clickable(ui, x_rect, Id::new(("chip-x", i)));
         text_in(&painter, x_rect, Align2::CENTER_CENTER, "×", theme::ui(13.0), if xr.hovered() { theme::TEXT } else { theme::MUTED });
         if tip(xr, "Remover").clicked() {
@@ -135,7 +135,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         }
     }
     if let Some(i) = remove {
-        deck.attachments.remove(i);
+        deck.remove_attachment(i);
     }
 
     // ---------- Linha do compositor ----------
@@ -171,13 +171,15 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         opacity = super::right_panel::blink_alpha(ctx.input(|i| i.time), 1.2);
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
-    if busy || !audio::AVAILABLE {
+    if busy || !audio::AVAILABLE || deck.mic_opening {
         opacity = 0.5;
     }
     painter.rect_filled(l.mic, 7.0, theme::with_opacity(bg, opacity));
     deck.icons.paint(&painter, Icon::Mic, l.mic.center(), 17.0, theme::with_opacity(fg, opacity), 0.0);
     let mic_title = if recording {
-        "Parar gravação".to_owned()
+        format!("Parar gravação (até {} min)", audio::MAX_RECORDING_SECS / 60)
+    } else if deck.mic_opening {
+        "Abrindo o microfone… (clique para desistir)".to_owned()
     } else if !audio::AVAILABLE {
         "Gravar áudio (indisponível: compilado sem o recurso de áudio)".to_owned()
     } else {

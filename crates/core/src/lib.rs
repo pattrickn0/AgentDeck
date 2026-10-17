@@ -449,9 +449,16 @@ impl Core {
         self.inner.tab_delivery.load(Ordering::SeqCst) && self.config().auto_open_agent_tabs
     }
 
-    /// Aplica `f` às instâncias do projeto `project` (criadas na primeira vez).
+    /// Aplica `f` às instâncias do projeto `project` (criadas na primeira vez). Um projeto que não
+    /// existe (removido no meio de uma pergunta) não ganha entrada: `f` recebe uma lista descartável.
     pub(crate) fn with_instances<R>(&self, project: &str, f: impl FnOnce(&mut instances::Instances) -> R) -> R {
-        f(self.inner.instances.lock().entry(project.to_owned()).or_default())
+        let exists = self.project_path(project).is_some();
+        let mut all = self.inner.instances.lock();
+        match all.get_mut(project) {
+            Some(list) => f(list),
+            None if exists => f(all.entry(project.to_owned()).or_default()),
+            None => f(&mut instances::Instances::default()),
+        }
     }
 
     /// Nova instância aberta pelo usuário no projeto (menu "+"): `claude`, e `claude@main@ana` se
@@ -485,6 +492,7 @@ impl Core {
         self.inner.exchange.fail_target(&key, &format!("a aba de \"{id}\" foi fechada antes de responder"));
         self.inner.exchange.fail_asker(&key, &format!("a aba de \"{id}\" foi fechada"));
         self.inner.activity.forget(&key);
+        self.inner.team_changed.lock().remove(&key);
         // A equipe de quem fechou passa ao chefe dele.
         let mut touched = Vec::new();
         self.update_project(project, |p| touched = team::remove(&mut p.tab_parents, id));
@@ -537,8 +545,9 @@ impl Core {
         changed.extend(ids.iter().map(|id| instances::scoped(project, id)));
     }
 
-    /// O aviso de equipe pendente da instância (uma vez: some ao ser lido).
-    pub(crate) fn take_team_notice(&self, project: &str, id: &str) -> Option<String> {
+    /// O aviso de equipe pendente da instância (uma vez: some ao ser lido). A interface anexa à
+    /// mensagem quando a digita: uma entrega descartada não gasta o aviso.
+    pub fn take_team_notice(&self, project: &str, id: &str) -> Option<String> {
         let had = self.inner.team_changed.lock().remove(&instances::scoped(project, id));
         had.then(|| team::notice(&self.team(project, id)))
     }
@@ -712,18 +721,9 @@ impl Core {
         if self.project_path(id).is_none() {
             return false;
         }
-        let ids = self.inner.instances.lock().remove(id).map(|list| list.ids()).unwrap_or_default();
-        for instance in &ids {
-            self.close_instance(id, instance);
-        }
-        // Perguntas que sobraram no projeto (ex.: feitas pelo token mestre).
-        for p in self.inner.exchange.snapshot().into_iter().filter(|p| p.project == id) {
-            self.inner.exchange.fail(p.id, "o projeto foi removido");
-        }
+        // Primeiro os tokens (nenhuma pergunta nova entra) e o projeto (uma pergunta que já passou
+        // da autenticação confere que ele existe depois de registrada; ver `bridge::ask_tab`).
         self.inner.callers.lock().retain(|_, c| c.project != id);
-        let prefix = instances::scoped(id, "");
-        self.inner.headless_sessions.lock().retain(|k, _| !k.starts_with(&prefix));
-        self.inner.context_written.lock().remove(id);
         let was_active = self.active_project_id() == id;
         self.update_config(|c| {
             c.project_list.retain(|p| p.id != id);
@@ -732,6 +732,19 @@ impl Core {
                 c.workspace = c.active().map(|p| p.path.clone()).unwrap_or_default();
             }
         });
+        let ids = self.inner.instances.lock().remove(id).map(|list| list.ids()).unwrap_or_default();
+        for instance in &ids {
+            self.close_instance(id, instance);
+        }
+        // Perguntas que sobraram no projeto (ex.: feitas pelo token mestre).
+        for p in self.inner.exchange.snapshot().into_iter().filter(|p| p.project == id) {
+            self.inner.exchange.fail(p.id, "o projeto foi removido");
+        }
+        let prefix = instances::scoped(id, "");
+        self.inner.headless_sessions.lock().retain(|k, _| !k.starts_with(&prefix));
+        self.inner.team_changed.lock().retain(|k| !k.starts_with(&prefix));
+        self.inner.activity.forget_prefix(&prefix);
+        self.inner.context_written.lock().remove(id);
         if was_active {
             self.prepare_workspace();
         }

@@ -480,6 +480,7 @@ fn apply_debug_ui(deck: &mut Deck) {
     for item in v.split(',').map(str::trim) {
         match item {
             "settings" => deck.settings_open = true,
+            "shortcuts" => deck.toggle_shortcuts = true,
             "newtab" => deck.new_tab_menu_open = true,
             "drop" => deck.drop_hover = true,
             "map" => deck.set_right_view(crate::deck::RightView::Mapa),

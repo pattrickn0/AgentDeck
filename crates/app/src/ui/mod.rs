@@ -42,6 +42,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let window = ui.max_rect();
     ui.painter().rect_filled(window, 0.0, theme::BG);
     let ctx = ui.ctx().clone();
+    // Cada modal desenhado neste quadro volta a marcar (ver `modal_backdrop`).
+    deck.modal_open = false;
 
     // ---------- Layout: barra de título em cima; embaixo, barra esquerda | terminal | barra direita ----------
     let titlebar = Rect::from_min_size(window.min, Vec2::new(window.width(), theme::TITLEBAR_H));
@@ -106,6 +108,18 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
 // ---------------------------------------------------------------------------
 // Utilitários de pintura
 // ---------------------------------------------------------------------------
+
+/// Fundo escurecido de um modal. Fica numa camada acima de tudo menos do próprio modal e segura o
+/// clique, o arrasto e o hover do que está atrás; marca `modal_open`, que tira o teclado do
+/// terminal e dos atalhos do app enquanto o modal está aberto.
+pub fn modal_backdrop(deck: &mut Deck, ctx: &egui::Context, id: &str) {
+    deck.modal_open = true;
+    let screen = ctx.content_rect();
+    egui::Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(screen.min).constrain(false).show(ctx, |ui| {
+        let (r, _) = ui.allocate_exact_size(screen.size(), Sense::click_and_drag());
+        ui.painter().rect_filled(r, 0.0, theme::rgba(0, 0, 0, 0.5));
+    });
+}
 
 /// Texto numa linha (sem quebra).
 pub fn galley(painter: &Painter, text: &str, font: FontId, color: Color32) -> Arc<Galley> {

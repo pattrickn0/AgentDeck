@@ -1,5 +1,6 @@
 //! Faixa de uso dos agentes na barra de título: logo + círculo (sessão) + anel (semana) + %.
 
+use commanddeck_core::usage::UsageWindow;
 use commanddeck_core::AgentUsage;
 use egui::{Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui};
 
@@ -166,6 +167,32 @@ pub fn format_updated(ms: u64) -> String {
     }
 }
 
+/// Janela que já renovou (`resets_at` no passado) sem leitura nova depois disso: a % lida é de
+/// antes da renovação e não vale mais.
+pub fn expired(w: &UsageWindow, updated_ms: u64, now_ms: u64) -> bool {
+    w.resets_at_ms.is_some_and(|r| r <= now_ms && updated_ms < r)
+}
+
+/// O uso como vale agora: janelas vencidas zeradas (e sem data de renovação, que já passou).
+/// Devolve também quais venceram (sessão, semana), para esmaecer e explicar na dica.
+pub fn current(usage: &AgentUsage, now_ms: u64) -> (AgentUsage, bool, bool) {
+    let mut u = usage.clone();
+    let zero = |w: &mut Option<UsageWindow>| match w {
+        Some(win) if expired(win, usage.updated_ms, now_ms) => {
+            *win = UsageWindow { used: 0.0, resets_at_ms: None };
+            true
+        }
+        _ => false,
+    };
+    let (s, wk) = (zero(&mut u.session), zero(&mut u.weekly));
+    (u, s, wk)
+}
+
+/// Próxima renovação ainda por vir (para redesenhar quando ela passar).
+fn next_reset(usage: &AgentUsage, now_ms: u64) -> Option<u64> {
+    [usage.session, usage.weekly].into_iter().flatten().filter_map(|w| w.resets_at_ms).filter(|&r| r > now_ms).min()
+}
+
 /// Monta o texto descritivo do tooltip para o item de uso.
 pub fn build_tooltip(name: &str, usage: Option<&AgentUsage>, now_ms: u64) -> String {
     let Some(usage) = usage else {
@@ -174,8 +201,11 @@ pub fn build_tooltip(name: &str, usage: Option<&AgentUsage>, now_ms: u64) -> Str
     if usage.local {
         return format!("{name} · local, sem limite");
     }
+    let (usage, session_gone, weekly_gone) = current(usage, now_ms);
     let mut parts = vec![name.to_owned()];
-    if let Some(s) = usage.session {
+    if session_gone {
+        parts.push("sessão renovada (sem dados novos)".to_owned());
+    } else if let Some(s) = usage.session {
         let pct = (s.used * 100.0).round() as i32;
         let mut s_str = format!("sessão {pct}%");
         if let Some(resets_ms) = s.resets_at_ms {
@@ -184,7 +214,9 @@ pub fn build_tooltip(name: &str, usage: Option<&AgentUsage>, now_ms: u64) -> Str
         }
         parts.push(s_str);
     }
-    if let Some(w) = usage.weekly {
+    if weekly_gone {
+        parts.push("semana renovada (sem dados novos)".to_owned());
+    } else if let Some(w) = usage.weekly {
         let pct = (w.used * 100.0).round() as i32;
         let mut w_str = format!("semana {pct}%");
         if let Some(resets_ms) = w.resets_at_ms {
@@ -233,8 +265,13 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
         let agent_color = deck.agents.tab_color(model);
         let name = deck.agents.name(model);
         let icon = agent_icon(model);
-        let usage = usage_map.get(model);
-        let tooltip = build_tooltip(&name, usage, now_ms);
+        let tooltip = build_tooltip(&name, usage_map.get(model), now_ms);
+        if let Some(at) = usage_map.get(model).and_then(|u| next_reset(u, now_ms)) {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(at - now_ms + 50));
+        }
+        let fresh = usage_map.get(model).map(|u| current(u, now_ms));
+        let session_gone = fresh.as_ref().is_some_and(|f| f.1);
+        let usage = fresh.as_ref().map(|f| &f.0);
 
         let is_local = usage.map(|u| u.local).unwrap_or(false);
         let has_data = usage.is_some_and(|u| u.local || u.session.is_some() || u.weekly.is_some());
@@ -244,7 +281,9 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
         let (text_galley, text_w) = if let Some(s_used) = session_used {
             if !is_local {
                 let pct_text = format!("{}%", (s_used * 100.0).round() as i32);
-                let g = painter.layout_no_wrap(pct_text, theme::ui(11.5), theme::MUTED);
+                // Sessão renovada sem leitura nova: 0% esmaecido até chegar dado novo.
+                let color = if session_gone { theme::with_opacity(theme::MUTED, 0.5) } else { theme::MUTED };
+                let g = painter.layout_no_wrap(pct_text, theme::ui(11.5), color);
                 let w = g.size().x;
                 (Some(g), w)
             } else {
@@ -351,7 +390,6 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commanddeck_core::usage::UsageWindow;
 
     #[test]
     fn liquid_polygon_geometry() {
@@ -456,5 +494,27 @@ mod tests {
         assert_eq!(build_tooltip("Ollama", Some(&ollama), 10_000_000), "Ollama · local, sem limite");
 
         assert_eq!(build_tooltip("Codex", None, 10_000_000), "Codex · sem dados de uso");
+    }
+
+    #[test]
+    fn a_window_past_its_reset_without_new_data_is_zeroed() {
+        let usage = AgentUsage {
+            session: Some(UsageWindow { used: 0.9, resets_at_ms: Some(1_000) }),
+            weekly: Some(UsageWindow { used: 0.4, resets_at_ms: Some(9_000) }),
+            updated_ms: 500,
+            local: false,
+        };
+        // Antes da renovação: nada muda.
+        assert_eq!(current(&usage, 900), (usage.clone(), false, false));
+        // Depois: a sessão zera e perde a data; a semana (que renova depois) fica.
+        let (now, s, w) = current(&usage, 2_000);
+        assert!(s && !w);
+        assert_eq!(now.session, Some(UsageWindow { used: 0.0, resets_at_ms: None }));
+        assert_eq!(now.weekly, usage.weekly);
+        assert!(build_tooltip("Claude", Some(&usage), 2_000).contains("sessão renovada (sem dados novos) · semana 40%"));
+        // Leitura feita depois da renovação: o dado é novo, vale como está.
+        let fresh = AgentUsage { updated_ms: 1_500, ..usage.clone() };
+        assert!(!current(&fresh, 2_000).1);
+        assert_eq!(next_reset(&usage, 2_000), Some(9_000));
     }
 }

@@ -217,6 +217,29 @@ Com a pasta de trabalho num repositório git:
 - [ ] Aba do Ollama: "quem é você?" responde com o nome da instância (`ollama:<modelo>`); com o Ollama parado, quem perguntou recebe "não consegui responder" em vez de esperar 10 min.
 - [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
 - [ ] Ditado: gravar, clicar Enviar e trocar de aba durante a transcrição: o texto fica na caixa com o aviso, não vai para a outra aba.
+- [ ] Tela dividida: arrastar um divisor, estreitar a janela até a grade mudar de formato e alargar de novo. As proporções arrastadas voltam, também depois de reabrir o app.
+- [ ] Renomear uma aba (claude → claude@dev) enquanto ela está "pensando" na Conversa: as mensagens antigas mostram o nome novo, e o "pensando" some com a próxima mensagem dela.
+- [ ] Com um modal aberto (renomear aba ou projeto, Ctrl+/), clicar nas abas, na barra lateral ou no terminal não faz nada, e o que se digita não vai ao terminal. Esc fecha e devolve o foco.
+- [ ] Ctrl+/ com o terminal focado abre e fecha a tela de atalhos.
+- [ ] Clique direito num projeto → Remover: a janela continua desenhando com a pergunta aberta. "Sim" remove, "Não" mantém.
+- [ ] Shell focado: Ctrl+L limpa a tela, Ctrl+B chega ao programa (tmux) e Ctrl+T abre aba. Com "Atalhos do app acima do terminal" ligado, Ctrl+L foca a mensagem e Ctrl+B recolhe a barra. A opção continua depois de reabrir.
+- [ ] Rascunho e anexo no projeto A, trocar para o B (compositor vazio) e voltar: rascunho e anexo estão lá, e o `@` enviado aponta para o arquivo certo. O "×" apaga a cópia em `dados/anexos`.
+- [ ] Microfone: a janela não congela enquanto ele abre, e um segundo clique desiste. Gravar mais de 5 min para sozinho com aviso e transcreve.
+- [ ] Uso: passado o horário de renovação da sessão sem o agente rodar, o círculo mostra 0% esmaecido e "sessão renovada (sem dados novos)".
+- [ ] crash.log: usar o app normalmente não acrescenta nada; `COMMANDDECK_DEBUG_CRASH=heap` ainda registra a queda; um crash.log acima de 256 KB vira crash.log.1 ao abrir.
+- [ ] Ponte: pergunta com resposta atrasada (202); renomear a aba de quem perguntou e a do destino antes da resposta. A resposta é digitada na aba renomeada de quem perguntou.
+- [ ] Ponte: depois de um 202, o destino roda `ask-agent <quem perguntou> "pergunta"`. Chega como pergunta nova, e a original continua esperando o `--reply N`.
+- [ ] Ponte: responder pela forma antiga com apelido (`ask-agent agy "..."` para uma pergunta do Antigravity) entrega a resposta, sem 409.
+- [ ] Projetos: remover um projeto com pergunta em andamento entre abas dele. Quem perguntou recebe erro, e nada reaparece no projeto removido nem no Mapa.
+- [ ] Equipe: mudar o chefe de um agente e fechar a aba dele antes da próxima mensagem não gasta o aviso. Fechar um subordinado sem equipe avisa o chefe na próxima mensagem.
+- [ ] Ollama: duas perguntas para a mesma aba do Ollama (de agentes diferentes, ou com renomeação no meio) voltam cada uma a quem perguntou.
+- [ ] Colagem grande (~5 MB) numa aba de shell rodando `timeout /t 30`, que não lê a entrada: a janela continua respondendo e as outras abas funcionam. Quando o comando termina, o texto chega inteiro.
+- [ ] Enviar pelo compositor para o Claude e digitar logo em seguida: a ordem é colagem → Enter → teclas.
+- [ ] Pasta de dados com `&` no caminho (`COMMANDDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.
+- [ ] Numa aba em segundo plano ou de outro projeto, `printf '\e]52;c;%s\a' $(printf teste|base64)` não muda a área de transferência; na aba ativa, muda.
+- [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o commanddeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
+- [ ] No vim/htop com mouse ligado, Ctrl+roda e Alt+roda chegam ao programa com o modificador. Shift+roda rola o histórico do terminal, com ou sem programa usando o mouse.
+- [ ] Arrastar devagar a borda da barra direita ou o divisor com o Claude aberto: durante o arrasto a aba não se redesenha; ao soltar, o Claude se redesenha uma vez na largura nova (no histórico fica no máximo uma cópia antiga por arrasto).
 - [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
 - [x] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.
   - Conferido no `commanddeck-dev`: o conteúdo tem o mesmo hash do HEAD. O `M` que ainda aparecia era o índice desatualizado; um `git add AGENTS.md`, sem mudar nada, limpou.
