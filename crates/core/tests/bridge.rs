@@ -1431,3 +1431,32 @@ fn headless_runs_get_the_requested_or_default_model() {
     assert_eq!((st, b), (400, json!({"error": "o agente aider não aceita escolher modelo"})));
     env.core.shutdown();
 }
+
+/// Com os CLIs reais instalados: `cargo test -p commanddeck-core --test bridge -- --ignored --nocapture`.
+#[test]
+#[ignore = "usa o agy e o opencode instalados na máquina"]
+fn the_known_models_come_from_the_installed_clis() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let root = tmp.path().to_path_buf();
+    let paths = paths_in(&root);
+    let opts = StartOptions {
+        search_path: None,
+        home_dir: None,
+        ollama_discovery: false,
+        watch_workspace: false,
+        config: Some(Config::with_project(paths.default_workspace.clone())),
+        system_dirs: true,
+    };
+    let (core, _rx) = Core::start_with(paths, opts).expect("start");
+    assert_eq!(core.known_models("claude"), ["opus", "sonnet", "haiku", "fable"]);
+    assert!(core.known_models("shell").is_empty());
+    for kind in ["antigravity", "opencode"] {
+        let started = std::time::Instant::now();
+        let list = core.known_models(kind);
+        println!("{kind}: {} modelos em {:?}; primeiros: {:?}", list.len(), started.elapsed(), &list[..list.len().min(4)]);
+        let again = std::time::Instant::now();
+        assert_eq!(core.known_models(kind), list);
+        assert!(again.elapsed() < Duration::from_millis(50), "a segunda consulta vem do cache");
+    }
+    core.shutdown();
+}

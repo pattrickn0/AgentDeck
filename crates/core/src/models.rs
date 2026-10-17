@@ -135,10 +135,13 @@ const LIST_RETRY: Duration = Duration::from_secs(60);
 /// Limite de tempo de `agy models` / `opencode models`.
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Uma consulta guardada: quando, se deu certo e a lista.
+type CachedList = (Instant, bool, Vec<String>);
+
 /// Cache das listas de modelos por agente.
 #[derive(Default)]
 pub(crate) struct ModelLists {
-    lists: parking_lot::Mutex<std::collections::HashMap<String, (Instant, bool, Vec<String>)>>,
+    lists: parking_lot::Mutex<std::collections::HashMap<String, CachedList>>,
 }
 
 impl ModelLists {
@@ -219,10 +222,10 @@ impl Core {
     /// OpenCode: o que o CLI lista (`agy models`, `opencode models`), em cache. BLOQUEANTE (até 15 s
     /// na primeira vez): chame fora da thread da interface. Vazio = só o padrão.
     pub fn known_models(&self, kind: &str) -> Vec<String> {
-        let (args, parse): (&[&str], fn(&str) -> Vec<String>) = match kind {
+        let parse: fn(&str) -> Vec<String> = match kind {
             "claude" => return CLAUDE_MODELS.map(String::from).to_vec(),
-            "antigravity" => (&["models"], parse_agy_models),
-            "opencode" => (&["models"], parse_opencode_models),
+            "antigravity" => parse_agy_models,
+            "opencode" => parse_opencode_models,
             _ => return Vec::new(),
         };
         if let Some(list) = self.inner.model_lists.fresh(kind) {
@@ -231,7 +234,7 @@ impl Core {
         let list = self.inner.agents.resolve(kind).and_then(|r| {
             let (program, pre) = r.command();
             let mut cmd = Command::new(program);
-            cmd.args(pre).args(args).current_dir(&self.inner.home);
+            cmd.args(pre).arg("models").current_dir(&self.inner.home);
             let out = crate::process::run_captured(cmd, None, LIST_TIMEOUT, None, None).ok()?;
             let list = parse(&out.stdout);
             (!list.is_empty()).then_some(list)
