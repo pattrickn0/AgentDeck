@@ -215,9 +215,12 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
 - **Erros** (`TaskError` → HTTP): `Invalid` 400, `NotFound` 404, `Conflict` 409, `Failed` 500.
 - **Para a interface** (`Core`, tudo bloqueante: chame numa thread): `tasks(projeto)`, `task(projeto, id)`,
   `task_of_instance(projeto, instância)`, `task_create(projeto, TaskSpec)`, `task_start`, `task_done`, `task_return`,
-  `task_merge`, `task_discard`. Eventos: `CoreEvent::TasksChanged { project }` a cada gravação (também as vindas da ponte) e
+  `task_merge`, `task_discard`, e `task_diff(projeto, id)` (só leitura: o `git diff base...branch` no mesmo `GitDiff` da aba Git).
+  Eventos: `CoreEvent::TasksChanged { project }` a cada gravação (também as vindas da ponte) e
   `CoreEvent::CloseInstance { project, id }` quando o core encerra a instância (a interface fecha a aba). Reabrir a aba de uma
   tarefa em andamento é abrir a instância dela (`restore_instance` + aba): o terminal já abre na worktree.
+- **Interface** (`crates/app/src/tasks_ui.rs`, `ui/tasks.rs`): a aba Tarefas da barra direita. Cada chamada acima roda numa thread
+  (`Deck::spawn_bg`) e volta como `UiMsg::Tasks`; a lista é relida a cada `TasksChanged` do projeto ativo.
 
 **Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
 bloqueantes; a UI chama numa thread):

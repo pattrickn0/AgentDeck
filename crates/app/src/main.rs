@@ -17,6 +17,9 @@ mod github_ui;
 mod icons;
 mod smoke;
 mod split;
+#[cfg(test)]
+mod tasks_flow_tests;
+mod tasks_ui;
 mod terminal;
 mod theme;
 mod ui;

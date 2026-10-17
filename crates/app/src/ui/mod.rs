@@ -15,6 +15,7 @@ mod right_panel;
 mod shortcuts;
 mod sidebar;
 mod tabs;
+mod tasks;
 mod titlebar;
 mod usage;
 
@@ -22,7 +23,7 @@ use std::sync::Arc;
 
 use egui::{Align2, Color32, CursorIcon, FontId, Galley, Id, Order, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 
-use crate::deck::{Deck, RightView};
+use crate::deck::Deck;
 use crate::theme;
 
 pub use composer::COMPOSER_INPUT_ID;
@@ -57,8 +58,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let term_rect = center;
     // A barra tem sempre a mesma largura: o Mapa e o diff do Git rolam dentro dela.
     let panel = Rect::from_min_max(Pos2::new(full.max.x - right_w, full.min.y), full.max);
-    // Nas abas Git e GitHub o compositor some para dar espaço às listas, diffs e logs.
-    let comp_h = if matches!(deck.right_view, RightView::Git | RightView::GitHub) { 0.0 } else { composer::measure(deck, ui, right_w) };
+    // Nas abas Tarefas, Git e GitHub o compositor some para dar espaço às listas, diffs e logs.
+    let comp_h = if deck.right_view.hides_composer() { 0.0 } else { composer::measure(deck, ui, right_w) };
 
     // ---------- Terminais (tela dividida por tipo de agente) ----------
     panes::draw(deck, ui, term_rect);

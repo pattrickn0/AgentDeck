@@ -480,7 +480,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,newtab-models:<agente>,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-agent,tasks-new-model,settings,newtab,newtab-models:<agente>,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -621,6 +621,10 @@ fn apply_debug_ui(deck: &mut Deck) {
                     authenticated: false,
                 });
             }
+            "tasks" | "tasks-demo" | "tasks-empty" | "tasks-detail" | "tasks-running" | "tasks-failed" | "tasks-diff" | "tasks-confirm"
+            | "tasks-discard" | "tasks-return" | "tasks-error" | "tasks-busy" | "tasks-new" | "tasks-new-agent" | "tasks-new-model" => {
+                debug_tasks(deck, item)
+            }
             "map-demo" => {
                 deck.set_right_view(crate::deck::RightView::Mapa);
                 deck.debug_map = Some(debug_map());
@@ -650,6 +654,62 @@ fn apply_debug_ui(deck: &mut Deck) {
                 }
             }
         }
+    }
+}
+
+/// SOMENTE DEPURAÇÃO: estados fictícios da aba Tarefas (`COMMANDDECK_DEBUG_UI=tasks-*`), sem git nem core.
+fn debug_tasks(deck: &mut Deck, item: &str) {
+    use crate::tasks_ui::{self as t, Confirm, FormMenu, OpenDiff, TasksView};
+    deck.set_right_view(crate::deck::RightView::Tarefas);
+    deck.tasks.debug_hold = true;
+    deck.tasks.loaded = true;
+    deck.tasks.tasks = if item == "tasks-empty" { Vec::new() } else { t::demo_tasks() };
+    // A lista de capturas mostra todas as tarefas: as concluídas ficam abertas.
+    deck.tasks.collapsed.clear();
+    let detail = |id: &str| TasksView::Detail(id.to_owned());
+    match item {
+        "tasks-detail" | "tasks-confirm" | "tasks-return" | "tasks-error" | "tasks-busy" | "tasks-diff" => {
+            deck.tasks.view = detail("t4");
+            match item {
+                "tasks-confirm" => deck.tasks.confirm = Some(Confirm::Merge("t4".into())),
+                "tasks-return" => {
+                    deck.tasks.return_open = true;
+                    deck.tasks.feedback = "Falta tratar o caso de nenhuma tarefa no projeto e um teste para o resumo do diff.".into();
+                }
+                "tasks-error" => {
+                    deck.tasks.notice = Some(
+                        "o repositório principal tem alterações sem commit (crates/app/src/deck.rs, crates/app/src/app.rs): faça o commit ou guarde-as e tente de novo"
+                            .into(),
+                    )
+                }
+                "tasks-busy" => deck.tasks.busy = Some(t::Busy { id: "t4".into(), label: "Mesclando…" }),
+                "tasks-diff" => {
+                    deck.tasks.diff = Some(OpenDiff { id: "t4".into(), diff: Some(Ok(crate::git_ui::demo_diff())) });
+                }
+                _ => {}
+            }
+        }
+        "tasks-discard" => {
+            deck.tasks.view = detail("t6");
+            deck.tasks.confirm = Some(Confirm::Discard("t6".into()));
+        }
+        "tasks-running" => deck.tasks.view = detail("t6"),
+        "tasks-failed" => deck.tasks.view = detail("t3"),
+        "tasks-new" | "tasks-new-agent" | "tasks-new-model" => {
+            deck.tasks_open_new();
+            let f = &mut deck.tasks.form;
+            f.kind = "claude".into();
+            f.base = "dev".into();
+            f.title = "Documentar as rotas /tasks da ponte".into();
+            f.brief = "Explicar no memory/ARCHITECTURE.md cada rota, com o corpo de exemplo e os códigos de erro.\n\nConferir também o texto do ask-agent --task.".into();
+            f.focus_title = false;
+            f.menu = match item {
+                "tasks-new-agent" => Some(FormMenu::Agent),
+                "tasks-new-model" => Some(FormMenu::Model),
+                _ => None,
+            };
+        }
+        _ => {}
     }
 }
 

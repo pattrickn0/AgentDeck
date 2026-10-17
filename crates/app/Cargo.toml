@@ -36,3 +36,6 @@ cpal = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader"] }
+
+[dev-dependencies]
+tempfile.workspace = true

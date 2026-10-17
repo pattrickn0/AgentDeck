@@ -43,6 +43,8 @@ pub enum UiMsg {
     Git(u64, crate::git_ui::GitReply),
     /// Modelos conhecidos de um agente (menu de novo agente); vazio = só o padrão.
     Models(String, Vec<String>),
+    /// Resposta da mesa de tarefas, com a geração do projeto em que foi pedida (ver `TasksUi::generation`).
+    Tasks(u64, crate::tasks_ui::TaskReply),
 }
 
 /// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
@@ -76,6 +78,8 @@ struct Queued {
 /// O que a barra lateral direita mostra.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightView {
+    /// Mesa de tarefas (ver `tasks_ui.rs`).
+    Tarefas,
     Conversa,
     Mapa,
     /// Repositório git do workspace (ver `git_ui.rs`).
@@ -285,6 +289,8 @@ pub struct Deck {
     pub git: crate::git_ui::GitUi,
     /// Aba GitHub (ver `github_ui.rs`).
     pub github: crate::github_ui::GithubUi,
+    /// Aba Tarefas (ver `tasks_ui.rs`).
+    pub tasks: crate::tasks_ui::TasksUi,
 
     // Árvore e Projetos
     /// Pasta do projeto ativo (vazia sem projeto).
@@ -479,7 +485,8 @@ impl Deck {
                 theme::RIGHT_DEFAULT_W
             },
             right_dragging: None,
-            right_view: RightView::Conversa,
+            // A mesa de tarefas é a primeira aba e a que abre: o app não grava a aba escolhida.
+            right_view: RightView::Tarefas,
             split_enabled: cfg.split_enabled,
             group_order: Vec::new(),
             split_ratios: cfg
@@ -498,6 +505,7 @@ impl Deck {
             quit_requested: false,
             git: crate::git_ui::GitUi::default(),
             github: crate::github_ui::GithubUi::default(),
+            tasks: crate::tasks_ui::TasksUi::default(),
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
             feed: Vec::new(),
             thinking: HashMap::new(),
@@ -550,8 +558,9 @@ impl Deck {
         if std::env::var("COMMANDDECK_DEBUG_FEED").is_ok_and(|v| v == "1") {
             deck.debug_feed();
         }
-        // O chip da branch na topbar aparece já ao abrir.
+        // O chip da branch na topbar aparece já ao abrir, e o número de tarefas em revisão no ícone da aba.
         deck.git_refresh();
+        deck.tasks_refresh();
         deck
     }
 
@@ -668,8 +677,7 @@ impl Deck {
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { project, id, busy } => self.on_agent_signal(&project, &id, busy),
             CoreEvent::UsageChanged => {}
-            // A mesa de tarefas (fase B) relê `Core::tasks` quando ganhar a tela; por ora só o repaint do waker.
-            CoreEvent::TasksChanged { .. } => {}
+            CoreEvent::TasksChanged { project } => self.tasks_changed(&project),
             CoreEvent::CloseInstance { project, id } => {
                 // Tarefa mesclada ou descartada: o core já esqueceu a instância; a aba (se aberta) fecha aqui.
                 if let Some(idx) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == id) {
@@ -751,6 +759,7 @@ impl Deck {
             UiMsg::RemoveProject(id) => self.remove_project_by_id(&id),
             UiMsg::MicOpened(res) => self.on_mic_opened(res),
             UiMsg::Git(generation, reply) => self.on_git(generation, reply),
+            UiMsg::Tasks(generation, reply) => self.on_tasks(generation, reply),
         }
     }
 
@@ -1151,6 +1160,28 @@ impl Deck {
         self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), from: "você".into(), answer: false });
         self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&id), prompt));
         Ok(self.tabs[idx].label.clone())
+    }
+
+    /// Mostra a aba do agente de uma tarefa. Se ela foi fechada e a tarefa ainda está em andamento ou
+    /// em revisão, registra a instância de novo e abre a aba: o terminal abre na worktree da tarefa
+    /// (`spawn_spec_for`) com o modelo da tarefa. Devolve o motivo da recusa.
+    pub fn open_task_tab(&mut self, task: &commanddeck_core::Task) -> Result<(), String> {
+        use commanddeck_core::TaskStatus;
+        let project = self.active_project.clone();
+        if let Some(i) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == task.instance) {
+            self.activate(i);
+            return Ok(());
+        }
+        if !matches!(task.status, TaskStatus::Running | TaskStatus::Review) {
+            return Err(format!("A tarefa {} está {}: não há agente rodando.", task.id, task.status.label()));
+        }
+        let Some(ident) = Ident::parse(&task.instance).filter(|i| self.agents.knows(&i.kind)) else {
+            return Err(format!("O agente \"{}\" desta tarefa não está disponível.", task.kind));
+        };
+        self.core.restore_instance(&project, &task.instance);
+        self.core.assign_model(&project, &ident, task.model.as_deref());
+        self.add_tab(project, ident, false, false);
+        Ok(())
     }
 
     /// O que a regra de entrega precisa saber da aba.
@@ -1947,6 +1978,8 @@ impl Deck {
         self.refresh_tree();
         self.git_reset_for_project();
         self.git_refresh();
+        self.tasks_reset_for_project();
+        self.tasks_refresh();
         self.github_reset_for_project();
         self.persist_tabs();
     }
@@ -2128,6 +2161,7 @@ impl Deck {
     pub fn set_right_view(&mut self, view: RightView) {
         let opening_git = view == RightView::Git && self.right_view != RightView::Git;
         let opening_github = view == RightView::GitHub && self.right_view != RightView::GitHub;
+        let opening_tasks = view == RightView::Tarefas && self.right_view != RightView::Tarefas;
         self.right_view = view;
         if view == RightView::Conversa {
             self.unseen = 0;
@@ -2137,6 +2171,9 @@ impl Deck {
         }
         if opening_github {
             self.github_refresh();
+        }
+        if opening_tasks {
+            self.tasks_on_open();
         }
     }
 
@@ -2236,8 +2273,8 @@ impl Deck {
     // ------------------------------------------------------------------
 
     pub fn request_composer_focus(&mut self) {
-        // Nas abas Git e GitHub o compositor fica escondido: volta para a Conversa.
-        if matches!(self.right_view, RightView::Git | RightView::GitHub) {
+        // Nas abas sem compositor (Tarefas, Git e GitHub) ele fica escondido: volta para a Conversa.
+        if self.right_view.hides_composer() {
             self.set_right_view(RightView::Conversa);
         }
         self.focus_composer = true;
@@ -2306,7 +2343,7 @@ impl Deck {
         if paths.is_empty() {
             return;
         }
-        if matches!(self.right_view, RightView::Git | RightView::GitHub) {
+        if self.right_view.hides_composer() {
             self.set_right_view(RightView::Conversa);
         }
         let project = self.active_project.clone();
