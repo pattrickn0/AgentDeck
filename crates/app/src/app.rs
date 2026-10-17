@@ -429,6 +429,12 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
         parent: parent.map(Into::into),
         kind: kind.into(),
         label: label.into(),
+        model: match id {
+            "claude@dev" => Some("sonnet".into()),
+            "claude@review" => Some("opus".into()),
+            "antigravity@sidebar" => Some("claude-sonnet-5-5-medium".into()),
+            _ => None,
+        },
         color,
         busy,
         done: false,
@@ -474,7 +480,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,newtab-models:<agente>,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -483,6 +489,11 @@ fn apply_debug_ui(deck: &mut Deck) {
             "settings" => deck.settings_open = true,
             "shortcuts" => deck.toggle_shortcuts = true,
             "newtab" => deck.new_tab_menu_open = true,
+            // Segundo passo do menu de novo agente (escolher o modelo): `newtab-models:claude`, `newtab-models:opencode`…
+            k if k.starts_with("newtab-models:") => {
+                deck.new_tab_menu_open = true;
+                deck.new_tab_models_for = Some(k["newtab-models:".len()..].to_owned());
+            }
             "drop" => deck.drop_hover = true,
             "map" => deck.set_right_view(crate::deck::RightView::Mapa),
             "git" => deck.set_right_view(crate::deck::RightView::Git),
