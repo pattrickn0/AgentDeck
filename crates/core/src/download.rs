@@ -173,22 +173,74 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn part_path(dest: &Path) -> PathBuf {
-    PathBuf::from(format!("{}.part", dest.display()))
+pub(crate) fn part_path(dest: &Path) -> PathBuf {
+    let mut s = dest.as_os_str().to_os_string();
+    s.push(".part");
+    PathBuf::from(s)
+}
+
+#[derive(Debug)]
+struct StallConnector(Duration);
+
+#[derive(Debug)]
+struct StallTransport {
+    inner: Box<dyn ureq::unversioned::transport::Transport>,
+    read_timeout: ureq::unversioned::transport::time::Duration,
+}
+
+impl ureq::unversioned::transport::Connector<Box<dyn ureq::unversioned::transport::Transport>> for StallConnector {
+    type Out = StallTransport;
+
+    fn connect(
+        &self,
+        _details: &ureq::unversioned::transport::ConnectionDetails,
+        chained: Option<Box<dyn ureq::unversioned::transport::Transport>>,
+    ) -> Result<Option<Self::Out>, ureq::Error> {
+        Ok(chained.map(|inner| StallTransport { inner, read_timeout: self.0.into() }))
+    }
+}
+
+impl ureq::unversioned::transport::Transport for StallTransport {
+    fn buffers(&mut self) -> &mut dyn ureq::unversioned::transport::Buffers {
+        self.inner.buffers()
+    }
+
+    fn transmit_output(&mut self, amount: usize, timeout: ureq::unversioned::transport::NextTimeout) -> Result<(), ureq::Error> {
+        self.inner.transmit_output(amount, timeout)
+    }
+
+    fn await_input(&mut self, mut timeout: ureq::unversioned::transport::NextTimeout) -> Result<bool, ureq::Error> {
+        timeout.after = timeout.after.min(self.read_timeout);
+        self.inner.await_input(timeout)
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn is_tls(&self) -> bool {
+        self.inner.is_tls()
+    }
 }
 
 fn agent(url: &str, stall: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
+    use ureq::unversioned::resolver::DefaultResolver;
+    use ureq::unversioned::transport::{Connector, DefaultConnector};
+
+    let read_timeout = stall.saturating_add(Duration::from_millis(250));
+    let config = ureq::config::Config::builder()
         .http_status_as_error(false)
         .user_agent("commanddeck")
         .timeout_connect(Some(Duration::from_secs(30)))
         .timeout_recv_response(Some(Duration::from_secs(30).max(stall)))
-        // Teto de segurança da leitura do corpo; a parada de verdade é detectada por `stall_timeout`.
+        // Teto global do corpo; cada leitura individual no socket tem timeout perto de `stall`
+        // (via `StallConnector`), evitando que a thread `cd-download` fique órfã por horas.
         .timeout_recv_body(Some(Duration::from_secs(4 * 3600)))
         // HTTPS nunca é rebaixado para HTTP num redirecionamento.
         .https_only(url.starts_with("https://"))
-        .build()
-        .into()
+        .build();
+    let connector = DefaultConnector::default().chain(StallConnector(read_timeout));
+    ureq::Agent::with_parts(config, connector, DefaultResolver::default())
 }
 
 fn classify(e: ureq::Error) -> DownloadError {
@@ -313,6 +365,27 @@ fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) ->
     Ok(())
 }
 
+fn retry_io<T>(delays_ms: &[u64], mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut last_err = match op() {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    for &ms in delays_ms {
+        std::thread::sleep(Duration::from_millis(ms));
+        match op() {
+            Ok(v) => return Ok(v),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
+/// Move `from` para `to`, insistindo algumas vezes (antivírus no Windows pode segurar o `.part`
+/// recém-fechado por alguns milissegundos).
+pub(crate) fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    retry_io(&[25, 50, 100, 200, 400], || std::fs::rename(from, to))
+}
+
 /// Uma tentativa completa: baixa o que falta, confere o hash e publica o arquivo.
 fn attempt(
     url: &str,
@@ -340,7 +413,7 @@ fn attempt(
             });
         }
     }
-    std::fs::rename(part, dest).map_err(|e| DownloadError::fatal(format!("não foi possível gravar {}: {e}", dest.display())))
+    rename_with_retry(part, dest).map_err(|e| DownloadError::fatal(format!("não foi possível gravar {}: {e}", dest.display())))
 }
 
 /// Baixa `url` para `dest`. Só entrega o arquivo depois de conferir o SHA-256 (quando informado).
@@ -738,5 +811,48 @@ mod tests {
         let f = dir.path().join("abc");
         std::fs::write(&f, b"abc").expect("write");
         assert_eq!(sha256_file(&f, &mut |_, _| {}).expect("sha"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    #[test]
+    fn leitura_do_socket_expira_perto_do_stall_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let srv = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut req = [0u8; 512];
+            let _ = stream.read(&mut req);
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n").expect("write");
+            // Segurar a conexão aberta sem mandar o corpo: o leitor deve desistir pelo timeout do socket.
+            std::thread::sleep(Duration::from_secs(3));
+        });
+        let started = Instant::now();
+        let resp = agent(&format!("http://{addr}/x"), Duration::from_millis(200)).get(&format!("http://{addr}/x")).call().expect("headers");
+        let mut buf = [0u8; 64];
+        let res = resp.into_body().into_reader().read(&mut buf);
+        assert!(res.is_err(), "leitura deveria falhar por timeout");
+        assert!(started.elapsed() < Duration::from_millis(2500), "demorou {:?}", started.elapsed());
+        let _ = srv.join();
+    }
+
+    #[test]
+    fn retry_io_supera_falhas_transitorias_no_rename() {
+        let mut tries = 0;
+        let r = retry_io(&[5, 5, 5], || {
+            tries += 1;
+            if tries < 3 {
+                Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "antivírus"))
+            } else {
+                Ok(42)
+            }
+        });
+        assert_eq!(r.expect("ok na 3ª tentativa"), 42);
+        assert_eq!(tries, 3);
+
+        let dir = tempfile::tempdir().expect("tmp");
+        let part = dir.path().join("a.bin.part");
+        let dest = dir.path().join("a.bin");
+        std::fs::write(&part, b"dados").expect("write");
+        rename_with_retry(&part, &dest).expect("rename");
+        assert_eq!(std::fs::read(&dest).expect("read"), b"dados");
     }
 }

@@ -25,6 +25,8 @@ use crate::{util, Core, CoreEvent};
 const CODEX_EVERY: Duration = Duration::from_secs(60);
 /// De quanto em quanto tempo a cota do Antigravity é consultada (rede).
 const ANTIGRAVITY_EVERY: Duration = Duration::from_secs(180);
+/// Intervalo curto de nova tentativa quando uma leitura/consulta de uso falha (`None`).
+const RETRY_EVERY: Duration = Duration::from_secs(20);
 
 /// Uma janela de limite (sessão de 5 h, semana…).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -136,8 +138,9 @@ pub(crate) fn epoch_ms(v: &Value) -> Option<u64> {
 /// `2025-09-18T12:34:56.789Z` (ou com `±hh:mm`) → ms Unix.
 pub(crate) fn rfc3339_ms(s: &str) -> Option<u64> {
     let s = s.trim();
-    let num = |a: usize, b: usize| s.get(a..b).and_then(|t| t.parse::<i64>().ok());
-    if s.len() < 19 || !matches!(s.as_bytes()[10], b'T' | b't' | b' ') {
+    // Só dígitos ASCII: `parse` aceitaria sinais (`+5`, `-5`) e produziria datas erradas.
+    let num = |a: usize, b: usize| s.get(a..b).filter(|t| t.bytes().all(|c| c.is_ascii_digit())).and_then(|t| t.parse::<i64>().ok());
+    if s.len() < 19 || !matches!(s.as_bytes()[10], b'T' | b't' | b' ') || !matches!((s.as_bytes()[4], s.as_bytes()[7]), (b'-', b'-')) {
         return None;
     }
     let (y, mo, d, h, mi, sec) = (num(0, 4)?, num(5, 7)?, num(8, 10)?, num(11, 13)?, num(14, 16)?, num(17, 19)?);
@@ -160,8 +163,16 @@ pub(crate) fn rfc3339_ms(s: &str) -> Option<u64> {
                 b'-' => -1,
                 _ => return None,
             };
-            let hh: i64 = rest.get(1..3)?.parse().ok()?;
-            let mm: i64 = rest.get(4..6)?.parse().ok()?;
+            // Exatamente `±hh:mm`.
+            let b = rest.as_bytes();
+            if b.len() != 6 || b[3] != b':' || ![1, 2, 4, 5].iter().all(|&i| b[i].is_ascii_digit()) {
+                return None;
+            }
+            let hh = i64::from(b[1] - b'0') * 10 + i64::from(b[2] - b'0');
+            let mm = i64::from(b[4] - b'0') * 10 + i64::from(b[5] - b'0');
+            if hh > 23 || mm > 59 {
+                return None;
+            }
             sign * (hh * 60 + mm)
         }
     };
@@ -194,18 +205,30 @@ pub(crate) fn start_poller(core: &Core) {
                 open.iter().any(|id| id == model || id.starts_with(&format!("{model}@")) || id.starts_with(&format!("{model}:")))
             };
             let due = |last: &HashMap<&str, Instant>, key: &str, every: Duration| last.get(key).is_none_or(|t| t.elapsed() >= every);
+            // Marca a leitura: depois de uma falha (sem login, rede fora, rollout sem dados) volta em
+            // `RETRY_EVERY`, não no intervalo normal.
+            let mark = |last: &mut HashMap<&'static str, Instant>, key: &'static str, every: Duration, ok: bool| {
+                let at = if ok {
+                    Instant::now()
+                } else {
+                    Instant::now().checked_sub(every.saturating_sub(RETRY_EVERY)).unwrap_or_else(Instant::now)
+                };
+                last.insert(key, at);
+            };
             if has("ollama") && !core.inner.usage.map.lock().contains_key("ollama") {
                 core.set_usage("ollama", AgentUsage { local: true, updated_ms: util::now_ms(), ..Default::default() });
             }
             if has("codex") && due(&last, "codex", CODEX_EVERY) {
-                last.insert("codex", Instant::now());
-                if let Some(u) = codex::read(&core.inner.home) {
+                let usage = codex::read(&core.inner.home);
+                mark(&mut last, "codex", CODEX_EVERY, usage.is_some());
+                if let Some(u) = usage {
                     core.set_usage("codex", u);
                 }
             }
             if has("antigravity") && due(&last, "antigravity", ANTIGRAVITY_EVERY) {
-                last.insert("antigravity", Instant::now());
-                if let Some(u) = antigravity::fetch(&core.inner.home) {
+                let usage = antigravity::fetch(&core.inner.home);
+                mark(&mut last, "antigravity", ANTIGRAVITY_EVERY, usage.is_some());
+                if let Some(u) = usage {
                     core.set_usage("antigravity", u);
                 }
             }
@@ -258,6 +281,22 @@ mod tests {
         assert_eq!(rfc3339_ms("2025-09-18T09:34:56.789-03:00"), Some(1_758_198_896_789));
         assert_eq!(rfc3339_ms("2024-02-29T00:00:00.5Z"), Some(1_709_164_800_500));
         assert_eq!(rfc3339_ms("ontem"), None);
+        // Sinais e lixo nos campos ou no fuso não passam por número.
+        for bad in [
+            "2025-09-18T-5:00:00Z",
+            "2025-09-18T+5:00:00Z",
+            "2025-09-18T12:+0:00Z",
+            "+025-09-18T12:00:00Z",
+            "2025-09-18T12:00:00+03x00lixo",
+            "2025-09-18T12:00:00+0300",
+            "2025-09-18T12:00:00+03:00:00",
+            "2025-09-18T12:00:00+3:00",
+            "2025-09-18T12:00:00+24:00",
+            "2025-09-18T12:00:00+03:60",
+            "2025/09/18T12:00:00Z",
+        ] {
+            assert_eq!(rfc3339_ms(bad), None, "{bad}");
+        }
         assert_eq!(epoch_ms(&json!(1_758_198_896)), Some(1_758_198_896_000));
         assert_eq!(epoch_ms(&json!(1_758_198_896_789u64)), Some(1_758_198_896_789));
         assert_eq!(epoch_ms(&json!("2025-09-18T12:34:56.789Z")), Some(1_758_198_896_789));
