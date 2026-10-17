@@ -94,6 +94,16 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - [ ] `--task discard` numa tarefa em andamento fecha a aba e apaga a worktree e a branch, também com a pasta já apagada à mão.
 - [ ] Reabrir o app com uma tarefa em andamento: a aba volta na worktree, e o número da próxima tarefa não se repete.
 - [ ] Com "Abrir abas dos agentes" desligado, `--task start` recusa com explicação.
+- [ ] **Aba Tarefas:** abrir o app mostra Tarefas como a primeira aba da barra direita. Num projeto git sem tarefas, aparece a explicação e "+ Nova tarefa".
+- [ ] "+ Nova": com o título vazio, o botão fica desligado; a base vem com a branch atual; base inexistente dá erro inline; Ctrl+Enter cria. Com "Iniciar agora", o detalhe abre em andamento e a aba do agente aparece na worktree com o pedido digitado. Sem ele, a tarefa fica em rascunho e "Iniciar" a começa.
+- [ ] Fechar a aba de uma tarefa em andamento: o detalhe mostra "Reabrir aba", que a abre de novo na worktree com o modelo da tarefa.
+- [ ] O agente roda `ask-agent --task done tN -`: o cartão vai sozinho para "Em revisão", o selo do ícone sobe e aparece "N arquivos +X −Y".
+- [ ] No detalhe em revisão: relatório, alterações por arquivo, e "Ver diff completo" abre o diff (cores, rolagem horizontal); "←" volta.
+- [ ] "Devolver" com Ctrl+Enter: a tarefa volta a andamento e o texto chega à aba do agente, reabrindo-a se estiver fechada.
+- [ ] "Mesclar em <base>" pede confirmação. Com o repositório principal sujo, mostra a recusa e a tarefa fica em revisão. Limpo, mescla, fecha a aba, move para Concluídas e apaga a worktree.
+- [ ] "Descartar" pede confirmação; depois a aba fecha e a worktree e a branch somem.
+- [ ] Na largura mínima (280 px), nada vaza na lista, no detalhe nem no formulário; trocar de projeto mostra as tarefas do outro.
+- [ ] Uma tarefa criada por outro agente (`ask-agent --task new --start`) aparece sem clicar em atualizar.
 
 ## 5. Quando a mensagem é digitada na aba ★
 

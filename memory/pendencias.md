@@ -108,6 +108,7 @@ Proposta:
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
 - [ ] No headless, aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] A ponte sem interface ainda usa o modo headless: não aparece nas abas.
+- [ ] **Mesa de tarefas, depois:** pedido e relatório aparecem como texto puro (o markdown não é desenhado); a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`) usam nomes de modelos antigos.
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
 
 ## 7. Git
@@ -122,13 +123,20 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
+- [x] **Mesa de tarefas, fase B: a interface** (branch `feat/mesa-ui`, dev Sonnet):
+  - A aba **Tarefas** é a primeira da barra direita, com selo = tarefas em revisão.
+  - Lista por estado: em revisão, em andamento, rascunho, falhou e concluídas (recolhida).
+  - Detalhe com pedido, relatório, alterações por arquivo, diff completo (o mesmo desenho da aba Git, só leitura) e histórico.
+  - Ações por estado: iniciar; mesclar e descartar, com confirmação; devolver, com retorno; tentar de novo; reabrir a aba na worktree.
+  - Formulário "Nova tarefa" com agente, modelo, base e "Iniciar agora". Tudo fora da thread da interface.
+  - `Core::task_diff`. Testes de ponta a ponta do Deck com git real.
 - [x] **Mesa de tarefas, fase A** (core, ponte e CLI; branch `feat/mesa-tarefas`, dev Sonnet; desenho em [AGENTDECK.md](AGENTDECK.md)):
   - Uma tarefa tem pedido, agente `<tipo>@tN` com modelo, worktree e branch próprias em `<repo>/.agentdeck/worktrees/tN` (excluída pelo `.git/info/exclude`), relatório, `diff --stat` e eventos.
   - Ciclo: criar → iniciar (abre a aba já na worktree e entrega o pedido) → `done` (só o próprio agente) → devolver, ou mesclar com `--no-ff` na base e limpar → ou descartar.
   - A mesclagem recusa a árvore principal suja ou em outra branch e desfaz conflito, deixando a tarefa em revisão.
   - Gravação em `dados/tarefas/<projeto>.json`.
   - Rotas `/tasks` e `ask-agent --task …`.
-  - Falta a fase B (a mesa na interface) e reabrir a aba de uma tarefa em andamento que o usuário fechou.
+  - A interface veio na fase B (acima).
 - [x] **Modelo de LLM por instância** (branch `feat/modelo-por-agente`, dev Sonnet; desenho do orquestrador):
   - O modelo fica ao lado do id (`ProjectCfg.tabModels`) e vale nesta ordem: o pedido (`ask-agent --model`, menu), o salvo, o `Config.roleModels` (`"claude@dev": "sonnet"`) e por fim o padrão do CLI.
   - Chega ao `--model` no claude, agy e codex. No OpenCode, a aba abre com `--standalone` e `OPENCODE_CONFIG_CONTENT`, e o headless usa `run -m`.
