@@ -28,6 +28,9 @@ pub struct ProjectCfg {
     /// Quem abriu cada aba (id da aba → id de quem a chamou pelo `ask-agent`): a hierarquia da
     /// lista de agentes na barra lateral. Abas abertas pelo usuário não entram.
     pub tab_parents: BTreeMap<String, String>,
+    /// Modelo de LLM de cada instância (id da aba → modelo, ex.: `claude@dev` → `sonnet`). O id não
+    /// muda com o modelo; só as instâncias que escolheram (ou herdaram) um modelo entram aqui.
+    pub tab_models: BTreeMap<String, String>,
     /// A lista de agentes do projeto está recolhida na barra lateral.
     pub collapsed: bool,
 }
@@ -44,6 +47,7 @@ impl Default for ProjectCfg {
             split_rows: Vec::new(),
             split_cols: Vec::new(),
             tab_parents: BTreeMap::new(),
+            tab_models: BTreeMap::new(),
             collapsed: false,
         }
     }
@@ -108,6 +112,9 @@ pub struct Config {
     /// Com o terminal focado, Ctrl+L e Ctrl+B são do app (focar a mensagem / barra lateral) em vez
     /// de irem ao terminal (limpar a tela / prefixo do tmux). Ctrl+T é sempre do app.
     pub app_shortcuts_first: bool,
+    /// Modelo padrão das instâncias novas, por `modelo@cargo` (`claude@dev`) ou só por `modelo`
+    /// (`opencode`); o `modelo@cargo` vale mais. Sem entrada, vale o padrão do próprio CLI.
+    pub role_models: BTreeMap<String, String>,
     // --- Formato antigo (antes dos projetos): lido só para a migração, nunca gravado. Agora
     // cada projeto guarda as próprias abas e o próprio layout (ver `ProjectCfg`). ---
     /// Pastas conhecidas (`projects`); os projetos agora ficam em `projectList`.
@@ -142,6 +149,7 @@ impl Default for Config {
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
             auto_open_agent_tabs: true,
             app_shortcuts_first: false,
+            role_models: BTreeMap::new(),
             projects: Vec::new(),
             open_tabs: Vec::new(),
             active_tab_index: -1,
@@ -384,6 +392,25 @@ mod tests {
             .filter(|n| n.contains("ilegivel"))
             .collect();
         assert_eq!(kept.len(), 1, "cópia do arquivo ilegível: {kept:?}");
+    }
+
+    #[test]
+    fn models_are_saved_per_instance_and_per_role() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let mut project = ProjectCfg::new(tmp.path().join("proj"), None, &[]);
+        project.tab_models.insert("claude@dev".into(), "sonnet".into());
+        let mut cfg = Config { active_project: project.id.clone(), project_list: vec![project.clone()], ..Config::default() };
+        cfg.role_models.insert("opencode".into(), "opencode/glm-5.3-flash-free".into());
+        cfg.save(&p.config_file).expect("save");
+        let text = std::fs::read_to_string(&p.config_file).expect("read");
+        assert!(text.contains("\"tabModels\"") && text.contains("\"roleModels\""), "{text}");
+        let back = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
+        assert_eq!(back.project_list, vec![project]);
+        assert_eq!(back.role_models, cfg.role_models);
+        // Uma config antiga, sem os campos, continua valendo.
+        let old = Config::from_json_over_defaults(r#"{"projectList":[{"id":"p1","name":"x","path":"/x"}]}"#, &p);
+        assert!(old.project_list[0].tab_models.is_empty() && old.role_models.is_empty());
     }
 
     #[test]

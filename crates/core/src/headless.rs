@@ -32,6 +32,8 @@ pub struct HeadlessOptions {
     /// Substitui as instruções da ponte no prompt de sistema (Claude/Ollama).
     pub extra_system: Option<String>,
     pub attachments: Vec<String>,
+    /// Modelo de LLM (`--model`; no OpenCode, `run -m`). Ignorado nos agentes que não escolhem modelo.
+    pub model: Option<String>,
 }
 
 /// Limpa formatação ANSI e tags residuais de raciocínio (`<think>…</think>`).
@@ -182,12 +184,15 @@ impl Core {
         let mut sid = opts.session_key.as_ref().and_then(|k| self.inner.headless_sessions.lock().get(k).cloned());
         let is_new = opts.session_key.is_some() && sid.is_none();
         let mut stdin = prompt.to_owned();
+        let model =
+            opts.model.as_deref().filter(|m| crate::models::valid_model(m) && crate::models::accepts_model(base)).map(str::to_owned);
         match base {
             "claude" => {
                 if is_new {
                     sid = Some(uuid::Uuid::new_v4().to_string());
                 }
                 args.extend(["-p", "--output-format", "text"].map(String::from));
+                args.extend(model.iter().flat_map(|m| crate::models::headless_args(base, m)));
                 if let Some(s) = &sid {
                     args.push(if is_new { "--session-id" } else { "--resume" }.into());
                     args.push(s.clone());
@@ -206,6 +211,7 @@ impl Core {
                     "--add-dir".into(),
                     data_dir.clone(),
                 ]);
+                args.extend(model.iter().flat_map(|m| crate::models::headless_args(base, m)));
                 if let Some(s) = &sid {
                     args.extend(["--conversation".into(), s.clone()]);
                 }
@@ -239,9 +245,15 @@ impl Core {
                 stdin.clear();
             }
             // `codex exec -`: o prompt vem pela entrada padrão; só a resposta final vai ao stdout.
-            "codex" => args.extend(["exec", "--skip-git-repo-check", "-"].map(String::from)),
+            "codex" => {
+                args.push("exec".into());
+                args.extend(model.iter().flat_map(|m| crate::models::headless_args(base, m)));
+                args.extend(["--skip-git-repo-check", "-"].map(String::from));
+            }
             "opencode" => {
-                args.extend(["run".into(), self.prompt_arg(&workspace, prompt, via_cmd)]);
+                args.push("run".into());
+                args.extend(model.iter().flat_map(|m| crate::models::headless_args(base, m)));
+                args.push(self.prompt_arg(&workspace, prompt, via_cmd));
                 stdin.clear();
             }
             _ => {}

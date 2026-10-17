@@ -2425,6 +2425,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         color: commanddeck_core::agents::COLOR_SHELL.into(),
         kind: kind.to_owned(),
         double_enter_on_mention: false,
+        model: None,
     }
 }
 

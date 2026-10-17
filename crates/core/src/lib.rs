@@ -22,6 +22,7 @@ pub mod git;
 pub mod github;
 pub mod headless;
 pub mod instances;
+pub mod models;
 pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
@@ -132,6 +133,8 @@ pub(crate) struct CoreInner {
     /// As alterações da configuração ficam só na memória (capturas de tela e estados de depuração).
     pub config_read_only: std::sync::atomic::AtomicBool,
     pub bridge_queues: bridge::PairQueues,
+    /// Modelos conhecidos de cada agente (menu de novo agente), em cache.
+    pub model_lists: models::ModelLists,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub whisper: whisper::WhisperState,
@@ -305,6 +308,7 @@ impl Core {
             config_save: Mutex::new(()),
             config_read_only: std::sync::atomic::AtomicBool::new(false),
             bridge_queues: bridge::PairQueues::default(),
+            model_lists: models::ModelLists::default(),
             bridge_server: Mutex::new(None),
             watcher: Mutex::new(None),
             whisper: whisper::WhisperState::default(),
@@ -495,7 +499,10 @@ impl Core {
         self.inner.team_changed.lock().remove(&key);
         // A equipe de quem fechou passa ao chefe dele.
         let mut touched = Vec::new();
-        self.update_project(project, |p| touched = team::remove(&mut p.tab_parents, id));
+        self.update_project(project, |p| {
+            touched = team::remove(&mut p.tab_parents, id);
+            p.tab_models.remove(id);
+        });
         self.mark_team_changed(project, &touched);
     }
 
@@ -563,7 +570,10 @@ impl Core {
         }
         self.inner.exchange.rename(&instances::scoped(project, old_id), &instances::scoped(project, &new_id));
         self.inner.activity.forget(&instances::scoped(project, old_id));
-        self.update_project(project, |p| team::rename(&mut p.tab_parents, old_id, &new_id));
+        self.update_project(project, |p| {
+            team::rename(&mut p.tab_parents, old_id, &new_id);
+            models::rename(&mut p.tab_models, old_id, &new_id);
+        });
         let mut changed = self.inner.team_changed.lock();
         if changed.remove(&instances::scoped(project, old_id)) {
             changed.insert(instances::scoped(project, &new_id));

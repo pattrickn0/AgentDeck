@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 
 use crate::instances::Ident;
+use crate::models;
 use crate::Core;
 
 /// Item de menu de agente (equivalente ao retorno de `agents:list`).
@@ -43,6 +44,8 @@ pub struct SpawnSpec {
     /// Se `true`, o envio via compositor deve mandar um `\r` extra após 600 ms quando o
     /// texto contém `@` (autocomplete de arquivo do Claude/Antigravity).
     pub double_enter_on_mention: bool,
+    /// Modelo de LLM da instância (já resolvido e gravado em `tab_models`); `None` = o padrão do CLI.
+    pub model: Option<String>,
 }
 
 /// Cores oficiais (usadas também pela UI como fallback).
@@ -557,7 +560,7 @@ impl Registry {
             ),
             "O histórico de cada par de agentes é mantido entre chamadas. O usuário tem acesso à \"Conversa integrada\" em tempo real no CommandDeck, portanto você NÃO precisa relatar nem resumir a conversa dos agentes para ele.".to_owned(),
             "Ao colaborar com outro agente (ex: Antigravity), mantenha o diálogo diretamente com ele (iterando, tirando dúvidas e alinhando) até concluir a tarefa, em vez de parar no meio para fazer perguntas ao usuário.".to_owned(),
-            "Cada aba é uma instância com nome <modelo>[@<cargo>[@<nome>]] (ex.: claude, claude@dev, claude@dev@ana). Para delegar a uma instância com cargo, chame-a pelo nome: ask-agent claude@dev \"tarefa\" (a aba é aberta se não existir); use --new para abrir outra instância do mesmo cargo.".to_owned(),
+            "Cada aba é uma instância com nome <modelo>[@<cargo>[@<nome>]] (ex.: claude, claude@dev, claude@dev@ana). Para delegar a uma instância com cargo, chame-a pelo nome: ask-agent claude@dev \"tarefa\" (a aba é aberta se não existir); use --new para abrir outra instância do mesmo cargo; ask-agent --model <modelo> claude@dev \"tarefa\" escolhe o LLM da instância ao abri-la (ex.: sonnet).".to_owned(),
             "Quando outro agente lhe mandar uma mensagem, responda executando o comando indicado nela (ask-agent --reply <número> \"sua resposta\"): é só assim que a resposta chega a ele.".to_owned(),
             "Os agentes formam uma equipe: cada um pode ter um chefe e subordinados, e o usuário pode reorganizá-la a qualquer momento. Antes de delegar ou de reportar, consulte a sua posição com ask-agent --team; delegue de preferência à sua equipe e, ao concluir algo que o seu chefe pediu, reporte a ele com ask-agent --boss \"mensagem\".".to_owned(),
         ]
@@ -787,6 +790,8 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         env.insert("COMMANDDECK_ROLE".into(), role.clone());
     }
 
+    // Pedido > gravado > padrão do cargo; fica gravado para a interface e para reabrir o app.
+    let model = core.assign_model(project, ident, None);
     let (program, args, label) = if base == "ollama" {
         let resolved = reg.resolve_ollama(sub_model).ok_or_else(|| def.missing.to_owned())?;
         let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
@@ -823,6 +828,16 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
             args.push("--add-dir".into());
             args.push(data_dir);
         }
+        if let Some(m) = &model {
+            if base == "opencode" {
+                // O TUI não tem --model: servidor próprio + modelo na configuração (ver `models::opencode_tui`).
+                let (extra, (key, value)) = models::opencode_tui(m);
+                args.extend(extra);
+                env.insert(key, value);
+            } else {
+                args.extend(models::cli_args(base, m));
+            }
+        }
         if resolved.shim.is_some() {
             args = args.iter().map(|a| cmd_safe_arg(a)).collect();
         }
@@ -841,6 +856,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         color: def.color.to_owned(),
         kind: kind.to_owned(),
         double_enter_on_mention: kind == "claude" || kind == "antigravity",
+        model,
     })
 }
 
