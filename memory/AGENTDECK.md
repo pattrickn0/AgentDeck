@@ -28,7 +28,7 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
 ## Rumo (ordem decidida pelo orquestrador)
 
 1. ~~Modelo de LLM por instância~~ (feito em 2026-10-17).
-2. **Mesa de tarefas** no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
+2. **Mesa de tarefas** (fase A — core, ponte e CLI — feita em 2026-10-17; falta a fase B, a interface) no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
    acompanhar, receber o relatório, revisar o diff e mesclar ou descartar com um botão. É o fluxo que hoje o
    orquestrador faz à mão.
 3. **Memória em duas camadas.** Longo prazo: avaliar o Trail-Code (MIT, arquivos, mapa do código + "aprendizados"

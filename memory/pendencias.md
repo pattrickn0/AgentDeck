@@ -122,6 +122,13 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
+- [x] **Mesa de tarefas, fase A** (core, ponte e CLI; branch `feat/mesa-tarefas`, dev Sonnet; desenho em [AGENTDECK.md](AGENTDECK.md)):
+  - Uma tarefa tem pedido, agente `<tipo>@tN` com modelo, worktree e branch próprias em `<repo>/.agentdeck/worktrees/tN` (excluída pelo `.git/info/exclude`), relatório, `diff --stat` e eventos.
+  - Ciclo: criar → iniciar (abre a aba já na worktree e entrega o pedido) → `done` (só o próprio agente) → devolver, ou mesclar com `--no-ff` na base e limpar → ou descartar.
+  - A mesclagem recusa a árvore principal suja ou em outra branch e desfaz conflito, deixando a tarefa em revisão.
+  - Gravação em `dados/tarefas/<projeto>.json`.
+  - Rotas `/tasks` e `ask-agent --task …`.
+  - Falta a fase B (a mesa na interface) e reabrir a aba de uma tarefa em andamento que o usuário fechou.
 - [x] **Modelo de LLM por instância** (branch `feat/modelo-por-agente`, dev Sonnet; desenho do orquestrador):
   - O modelo fica ao lado do id (`ProjectCfg.tabModels`) e vale nesta ordem: o pedido (`ask-agent --model`, menu), o salvo, o `Config.roleModels` (`"claude@dev": "sonnet"`) e por fim o padrão do CLI.
   - Chega ao `--model` no claude, agy e codex. No OpenCode, a aba abre com `--standalone` e `OPENCODE_CONFIG_CONTENT`, e o headless usa `run -m`.
