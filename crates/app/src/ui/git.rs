@@ -757,6 +757,12 @@ fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut
     if !h.staged {
         items.push(("Descartar", "Descarta só este trecho da cópia de trabalho", true));
     }
+    // Faixa opaca atrás dos botões (com a cor da linha do trecho): o texto do cabeçalho não aparece
+    // entre eles.
+    let total: f32 = items.iter().map(|(l, ..)| galley(ui.painter(), l, theme::ui(11.0), theme::TEXT).size().x + 16.0).sum();
+    let strip = Rect::from_min_max(Pos2::new(right - total - 6.0, row.min.y), Pos2::new(area.max.x, row.max.y));
+    ui.painter().rect_filled(strip, 0.0, theme::BG);
+    ui.painter().rect_filled(strip, 0.0, theme::rgba(79, 140, 247, 0.10));
     for (label, tooltip, danger) in items {
         let g = galley(ui.painter(), label, theme::ui(11.0), theme::TEXT);
         let w = g.size().x + 12.0;
