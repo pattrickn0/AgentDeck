@@ -58,7 +58,7 @@ Proposta:
 
 ## 3. Terminal
 
-Nada pendente.
+- [ ] **Claude Code duplica a conversa no histórico a cada mudança de largura** (Windows). Ao mudar de largura, ele limpa só a tela e reimprime a conversa, sem `ESC[3J` (que ele só manda fora do Windows). A cópia anterior fica no histórico, na largura antiga. Medido numa sonda (portable-pty + alacritty_terminal + o claude.exe real): uma cópia a mais por largura; o mesmo com o `OpenConsole.exe` do Windows Terminal. Limpar o nosso histórico antes não serve: ao alargar, ele redesenha só a tela e a conversa sumiria. Hoje o PTY só muda com o mouse solto e o tamanho parado por 150 ms (um arrasto = uma cópia). Ideia para depois: marcar onde começa a reimpressão e descartar o trecho antigo do histórico.
 
 ## 4. Interface
 
@@ -127,31 +127,6 @@ Revisão com quatro revisores Claude (core da ponte, Deck/interface, terminal/CL
 Antigravity (git, workspace, download, Whisper, uso; relatório em `dados/anexos/revisao-antigravity.md`). O que
 foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
-**Ponte e equipe**
-- [ ] Renomear uma aba no meio de uma pergunta: o prazo lê a atividade da chave velha, a resposta atrasada vai para o id antigo e é descartada. Ler quem perguntou/destino do `Exchange` pelo número na hora de usar (ou recusar renomear com pergunta pendente).
-- [ ] Depois de um 202 (pergunta destacada), uma pergunta nova do destino para quem perguntou é tomada como resposta pela forma antiga (`ask-agent <quem> "..."`). Mudar quebraria quem ainda responde assim; avaliar só aceitar `--reply N` para perguntas destacadas.
-- [ ] A forma antiga de resposta não resolve apelidos (`agy`, `qwen3.5`): dá 409 ou vira pergunta nova.
-- [ ] Remover projeto com pergunta em andamento: `with_instances` recria a entrada do projeto removido; revogar tokens antes e não criar entrada de projeto inexistente. `PairQueues`, `team_changed` e `activity` só crescem.
-- [ ] Aviso de equipe some se a UI descartar a entrega; o chefe que perde um subordinado sem equipe não é avisado.
-- [ ] Resposta que chega entre o fim da espera e o `exchange.remove` é descartada (quem respondeu recebeu "entregue").
-- [ ] Enquanto `bridge_port` é 0 (logo ao iniciar) o `Host` não é validado; 16 MB × 128 requisições = até 2 GB; threads `cd-bridge-late` fora do `MAX_ACTIVE`.
-- [ ] `ollama-agent` responde pelo nome de quem perguntou (`/reply` com `to`): responder pelo número (`--reply N`, que está no prompt) aguentaria renomeação e perguntas paralelas.
-
-**Terminal e processos**
-- [ ] Escrita no PTY bloqueante na thread da interface (com o lock `writer`); colagem grande + consulta DA/DSR pode travar. Uma thread de escrita por aba.
-- [ ] `cmd_safe_arg` apaga `& % ! ^` também dos caminhos que o app gera (`--add-dir`, `--settings`): perfil `C:\Users\Ana&Bia` quebra o Claude via shim. Escapar em vez de apagar.
-- [ ] OSC 52 de qualquer aba escreve na área de transferência (a colagem já não deixa escapar, mas avaliar restringir à aba focada). Job Object (KILL_ON_JOB_CLOSE) nos headless. Roda do mouse ignora Shift/modificadores.
-
-**Interface**
-- [ ] `plan_panes` chama `conform` a cada quadro: estreitar a janela por um instante zera as proporções salvas.
-- [ ] Ao renomear, a Conversa compara `who` (nome de exibição) com o id antigo: nunca bate; entradas "pensando" do id antigo ficam.
-- [ ] Modais (renomear aba/projeto, atalhos) não bloqueiam o clique de fora nem o teclado; "Remover projeto" usa `rfd` síncrono e congela o quadro; Ctrl+/ não abre com o terminal focado.
-- [ ] Rascunho do compositor e anexos passam de um projeto para o outro (o caminho do anexo pode ficar relativo ao projeto errado); o "×" do chip não apaga o anexo copiado.
-- [ ] Microfone: `Recorder::start` na thread da interface (até 5 s) e gravação sem limite de tamanho.
-- [ ] Círculo de uso continua com a % antiga depois que o `resets_at` passa sem dados novos.
-- [ ] Ctrl+L, Ctrl+B e Ctrl+T são capturados mesmo com o terminal focado (Ctrl+L limpa no shell, Ctrl+B é o prefixo do tmux): avaliar configurar.
-- [ ] `crash.log` só cresce e registra exceções de primeira chance tratadas pelo driver.
-
 **Git, workspace, download, Whisper e uso** (itens do relatório do Antigravity não corrigidos nesta rodada)
 - [ ] Descartar arquivo em conflito (`Unmerged`) falha; pasta não rastreada com `.git` dentro precisa de `-ffd`; `diff --cc` (conflito) mal interpretado.
 - [ ] Watcher: prefixo verbatim `\\?\` não tratado; `.git` fora de `workspace/.git` (worktree, submódulo, workspace numa subpasta do repositório) não dispara `GitChanged`.
@@ -162,6 +137,28 @@ foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
 
 ## Concluído
 
+- [x] **Auditoria, interface** (branch `fix/interface`, claude@interface):
+  - Estreitar a janela não apaga as proporções salvas da tela dividida (`Ratios::fitted` só ajusta para desenhar).
+  - Renomear uma aba atualiza a Conversa e o "pensando".
+  - Os modais seguram o clique e o teclado (`ui::modal_backdrop`). Ctrl+/ abre com o terminal focado. "Remover projeto" pergunta numa thread.
+  - Rascunho e anexos do compositor ficam por projeto, e o "×" apaga a cópia em `dados/anexos`.
+  - O microfone abre fora da thread da interface e grava no máximo 5 min.
+  - O círculo de uso zera a janela vencida sem dados novos.
+  - Com o terminal focado, Ctrl+L e Ctrl+B vão ao terminal. A opção "Atalhos do app acima do terminal" (☰) inverte isso.
+  - O `crash.log` só registra o que derruba o app e gira acima de 256 KB.
+- [x] **Auditoria, ponte e equipe** (branch `fix/ponte`, claude@ponte):
+  - Quem perguntou e o destino são lidos do `Exchange` pelo número na hora de usar, o que aguenta renomear no meio de uma pergunta. A resposta que chega no instante do prazo não se perde.
+  - Depois de um 202, a forma antiga (`ask-agent <quem> "..."`) vira pergunta nova, e a resposta vai por `--reply N` ou `/reply`. Antes do 202 a forma antiga resolve apelidos.
+  - Remover projeto revoga os tokens primeiro e não recria a entrada. `PairQueues`, `team_changed` e `activity` são limpos.
+  - O aviso de equipe é anexado pela interface na hora de digitar, e o chefe que perde um subordinado é avisado.
+  - `Host` validado desde a primeira requisição; orçamento de 64 MB de corpos em andamento (503 acima); a thread da resposta atrasada segura a vaga em `MAX_ACTIVE`.
+  - O `ollama-agent` responde pelo número da pergunta.
+- [x] **Auditoria, terminal e processos** (branch `fix/terminal`, claude@terminal):
+  - A escrita no PTY passa por uma fila com thread própria por aba (`pty-write`), e as respostas do emulador (DA/DSR/cores) vão pela mesma fila. Nem a interface nem a leitora bloqueiam numa colagem grande, e a ordem continua igual.
+  - `cmd_safe_arg` escapa para o cmd em vez de apagar `& % ! ^`. O shim roda com `cmd.exe /d /e:on /v:off /c`, testado com o cmd.exe real.
+  - OSC 52 só vale para a aba ativa do projeto ativo.
+  - No Windows, os headless (e o whisper-cli) entram num Job Object com KILL_ON_JOB_CLOSE e morrem junto com o app.
+  - A roda do mouse manda Ctrl/Alt ao programa, e Shift+roda rola o histórico local.
 - [x] **Terminal congelava ao redimensionar as janelas** (visto na aba do Claude, que ficou preta). O Claude Code usa a atualização sincronizada (`ESC[?2026h` … `ESC[?2026l`), e o parser (`vte`) retém a saída até o fim dela, mas o prazo de 150 ms fica a cargo de quem o usa: nada o cobrava, então um fim perdido no redesenho segurava a tela até chegarem 2 MB. `Emulator::expire_sync` solta o que estava retido quando o prazo vence, chamado pela leitora antes de cada bloco e pelo `tick` da interface (testes em `terminal/mod.rs`).
 - [x] **Conferido em uso (2026-10-15 e 16).** O que o usuário testou no app e o que o Claude verificou ao vivo pela ponte:
   - **Usuário:** projetos (cada um lista os seus agentes abertos, migração da config antiga com as abas), botão de recolher a barra lateral, chave da tela dividida na ORGANIZAÇÃO, barra de título própria, círculos de uso (Claude e Antigravity) e o "+ Novo agente" do projeto.

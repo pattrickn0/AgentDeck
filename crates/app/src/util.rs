@@ -24,7 +24,7 @@ pub fn insert_ref(value: &str, rel_path: &str) -> String {
 
 /// Rótulo do chip de anexo: último segmento sem o prefixo `hash-` (`/^[a-z0-9]+-/`).
 pub fn chip_label(reference: &str) -> String {
-    let last = reference.rsplit('/').next().unwrap_or(reference);
+    let last = reference.rsplit(['/', '\\']).next().unwrap_or(reference);
     let prefix_len = last.bytes().take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit()).count();
     if prefix_len > 0 && last.as_bytes().get(prefix_len) == Some(&b'-') {
         last[prefix_len + 1..].to_owned()
@@ -69,6 +69,7 @@ mod tests {
         assert_eq!(chip_label("x/abc-def-ghi.txt"), "def-ghi.txt");
         assert_eq!(chip_label("semhifen"), "semhifen");
         assert_eq!(chip_label("C:/Users/x/AB-1.png"), "AB-1.png");
+        assert_eq!(chip_label(r"C:\dados\anexos\1a2b-foto.png"), "foto.png");
     }
 
     #[test]

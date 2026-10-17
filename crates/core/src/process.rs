@@ -70,6 +70,69 @@ pub(crate) fn platform_flags(cmd: &mut Command) {
     }
 }
 
+/// Windows: Job Object com `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` para os processos headless. O
+/// handle só fecha quando o app termina (inclusive se cair), e aí o sistema mata o job inteiro
+/// (o agente e o que ele abriu): nada fica órfão rodando sem a interface.
+#[cfg(windows)]
+mod job {
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Child;
+    use std::sync::OnceLock;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    /// Handle de um job (só usado por chamadas do sistema, que aceitam qualquer thread).
+    pub(super) struct Job(pub(super) HANDLE);
+    // SAFETY: um handle de job é um valor opaco do kernel, válido em qualquer thread.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            // SAFETY: o handle é deste `Job` e fecha uma vez só (o do app é estático e nunca cai aqui).
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    /// Cria um job que mata os processos dele quando o último handle fecha.
+    pub(super) fn kill_on_close() -> Option<Job> {
+        // SAFETY: chamadas Win32 com ponteiros nulos (sem nome, segurança padrão) e uma estrutura
+        // zerada do tamanho informado; o handle é fechado se a configuração falhar.
+        unsafe {
+            let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if h.is_null() {
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+            let job = Job(h);
+            if SetInformationJobObject(job.0, JobObjectExtendedLimitInformation, (&raw const info).cast(), size) == 0 {
+                return None;
+            }
+            Some(job)
+        }
+    }
+
+    pub(super) fn assign(job: &Job, child: &Child) -> bool {
+        // SAFETY: o handle do processo vale enquanto `child` existe; o do job, enquanto `job` existe.
+        unsafe { AssignProcessToJobObject(job.0, child.as_raw_handle() as HANDLE) != 0 }
+    }
+
+    /// Põe o processo no job do app (criado na primeira vez e nunca fechado).
+    pub(super) fn adopt(child: &Child) {
+        static APP_JOB: OnceLock<Option<Job>> = OnceLock::new();
+        match APP_JOB.get_or_init(kill_on_close) {
+            Some(job) if assign(job, child) => {}
+            _ => log::warn!("não consegui pôr o processo {} no job do app", child.id()),
+        }
+    }
+}
+
 /// Mata o processo e seus descendentes (melhor esforço).
 pub(crate) fn kill_tree(child: &mut Child) {
     #[cfg(windows)]
@@ -146,6 +209,11 @@ pub(crate) fn run_captured_raw(
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     platform_flags(&mut cmd);
     let mut child = cmd.spawn()?;
+    // Processos registrados (headless) morrem com o app, mesmo se ele cair.
+    #[cfg(windows)]
+    if registry.is_some() {
+        job::adopt(&child);
+    }
 
     let out_buf = Arc::new(Mutex::new(Vec::new()));
     let err_buf = Arc::new(Mutex::new(Vec::new()));
@@ -201,6 +269,48 @@ pub(crate) fn run_captured_raw(
     let stdout = std::mem::take(&mut *out_buf.lock());
     let stderr = std::mem::take(&mut *err_buf.lock());
     Ok(CapturedRaw { stdout, stderr, exit })
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn closing_the_job_kills_its_processes() {
+        let job = job::kill_on_close().expect("job");
+        let mut cmd = Command::new("cmd");
+        // ~60 s de ping: terminar em menos de 10 s só acontece se o job o matou.
+        cmd.args(["/d", "/c", "ping -n 60 127.0.0.1 >nul"]).stdout(Stdio::null()).stderr(Stdio::null());
+        platform_flags(&mut cmd);
+        let mut child = cmd.spawn().expect("spawn");
+        assert!(job::assign(&job, &child));
+        assert!(child.try_wait().expect("try_wait").is_none(), "ainda rodando");
+
+        drop(job); // como o app caindo: o último handle do job fecha
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(s) = child.try_wait().expect("try_wait") {
+                break Some(s);
+            }
+            if Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let _ = child.kill();
+        // (o sistema encerra os processos de um job fechado com o código 0)
+        assert!(status.is_some(), "o processo deveria morrer com o job");
+    }
+
+    #[test]
+    fn headless_runs_go_into_the_app_job() {
+        let reg = ProcessRegistry::default();
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/d", "/c", "echo ok"]);
+        let c = run_captured(cmd, None, Duration::from_secs(10), None, Some(&reg)).expect("run");
+        assert_eq!(c.stdout.trim(), "ok");
+        assert_eq!(c.exit, Exit::Code(Some(0)));
+    }
 }
 
 #[cfg(all(test, unix))]

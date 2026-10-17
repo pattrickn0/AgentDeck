@@ -5,7 +5,7 @@
 
 use egui::{Align2, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
 
-use super::{clickable, frame, galley, place, shadow, text_in, text_w};
+use super::{clickable, frame, galley, galley_trunc, place, shadow, text_in, text_w};
 use crate::deck::Deck;
 use crate::theme;
 
@@ -19,14 +19,25 @@ pub struct ShortcutItem {
 
 /// Lista de atalhos do CommandDeck (conforme README).
 pub const SHORTCUTS: &[ShortcutItem] = &[
-    ShortcutItem { keys: &["Ctrl+T"], desc: "Nova aba do mesmo agente (barra lateral recolhida: escolher o agente)" },
+    ShortcutItem { keys: &["Ctrl+T"], desc: "Nova aba do mesmo agente (barra recolhida: escolher)" },
     ShortcutItem { keys: &["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: "Alternar abas (próxima / anterior)" },
-    ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral" },
-    ShortcutItem { keys: &["Ctrl+L"], desc: "Focar caixa de mensagem" },
+    ShortcutItem { keys: &["Ctrl+Alt+setas"], desc: "Ir para a janela vizinha (tela dividida)" },
+    ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral *" },
+    ShortcutItem { keys: &["Ctrl+L"], desc: "Focar caixa de mensagem *" },
     ShortcutItem { keys: &["Enter"], desc: "Enviar mensagem" },
     ShortcutItem { keys: &["Shift+Enter"], desc: "Quebrar linha na mensagem" },
     ShortcutItem { keys: &["Duplo clique"], desc: "Renomear aba (modelo@cargo@nome)" },
+    ShortcutItem { keys: &["Ctrl+/"], desc: "Mostrar ou fechar estes atalhos" },
 ];
+
+/// Nota dos atalhos marcados com `*`, conforme a opção "Atalhos do app acima do terminal".
+pub fn terminal_note(app_first: bool) -> &'static str {
+    if app_first {
+        "* Também com o terminal focado (opção em ☰ Configurações)."
+    } else {
+        "* Com o terminal focado, vão para o terminal (tmux, limpar a tela). Mude em ☰ Configurações."
+    }
+}
 
 /// Informa se o modal de atalhos está aberto.
 #[allow(dead_code)]
@@ -51,7 +62,7 @@ pub fn toggle(ctx: &egui::Context) -> bool {
 }
 
 /// Modal que lista os atalhos de teclado da aplicação.
-pub fn shortcuts_modal(_deck: &mut Deck, ctx: &egui::Context) {
+pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
     let id = Id::new(ID_SHORTCUTS_OPEN);
     let mut open = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
 
@@ -67,6 +78,8 @@ pub fn shortcuts_modal(_deck: &mut Deck, ctx: &egui::Context) {
             || i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::Questionmark)
     });
 
+    // Ctrl+/ com o terminal focado chega pelo teclado do app (`Deck::handle_key`), não pelo egui.
+    let triggered = triggered || std::mem::take(&mut deck.toggle_shortcuts);
     if triggered {
         open = !open;
         ctx.data_mut(|d| d.insert_temp(id, open));
@@ -77,15 +90,11 @@ pub fn shortcuts_modal(_deck: &mut Deck, ctx: &egui::Context) {
     }
 
     let screen = ctx.content_rect();
-    // Backdrop escuro
-    ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("shortcuts-backdrop"))).rect_filled(
-        screen,
-        0.0,
-        theme::rgba(0, 0, 0, 0.5),
-    );
+    super::modal_backdrop(deck, ctx, "shortcuts-backdrop");
 
-    let w = 480.0;
-    let h = 330.0;
+    let note = terminal_note(deck.app_shortcuts_first);
+    let w = 560.0;
+    let h = 150.0 + SHORTCUTS.len() as f32 * 26.0;
     let center = screen.center();
     let rect = Rect::from_center_size(center, Vec2::new(w, h));
     let mut close = false;
@@ -147,7 +156,7 @@ pub fn shortcuts_modal(_deck: &mut Deck, ctx: &egui::Context) {
                 kx += kw + 2.0;
             }
 
-            let desc_g = galley(&p, item.desc, theme::ui(12.5), theme::TEXT);
+            let desc_g = galley_trunc(&p, item.desc, theme::ui(12.5), theme::TEXT, w - 235.0);
             place(
                 &p,
                 Rect::from_min_size(Pos2::new(r.min.x + 215.0, y), Vec2::new(w - 235.0, 22.0)),
@@ -158,7 +167,9 @@ pub fn shortcuts_modal(_deck: &mut Deck, ctx: &egui::Context) {
             y += 26.0;
         }
 
-        y += 4.0;
+        let note_g = galley_trunc(&p, note, theme::ui(11.5), theme::MUTED, w - 40.0);
+        place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 18.0)), Align2::LEFT_CENTER, note_g, theme::MUTED);
+        y += 22.0;
         // Linha divisória antes do rodapé
         p.rect_filled(Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 1.0)), 0.0, theme::BORDER);
         y += 10.0;
@@ -210,6 +221,8 @@ mod tests {
         assert!(all_keys.contains("Enter"), "deve conter Enter");
         assert!(all_keys.contains("Shift+Enter"), "deve conter Shift+Enter");
         assert!(all_keys.contains("Duplo clique"), "deve conter Duplo clique");
+        assert!(all_keys.contains("Ctrl+/"), "deve conter Ctrl+/");
+        assert!(terminal_note(false).contains("terminal") && terminal_note(true).contains('*'));
     }
 
     #[test]

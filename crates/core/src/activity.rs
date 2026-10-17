@@ -35,6 +35,11 @@ impl Activity {
     pub fn forget(&self, id: &str) {
         self.last.lock().remove(id);
     }
+
+    /// Esquece as abas cujas chaves começam com `prefix` (as de um projeto removido).
+    pub fn forget_prefix(&self, prefix: &str) {
+        self.last.lock().retain(|k, _| !k.starts_with(prefix));
+    }
 }
 
 #[cfg(test)]
@@ -52,5 +57,16 @@ mod tests {
         assert_eq!(a.last("x"), Some(t0 + Duration::from_secs(5)));
         a.forget("x");
         assert_eq!(a.last("x"), None);
+    }
+
+    #[test]
+    fn esquece_um_projeto_inteiro() {
+        let a = Activity::default();
+        let t0 = Instant::now();
+        for k in ["p1#claude", "p1#claude@dev", "p2#claude"] {
+            a.touch(k, t0);
+        }
+        a.forget_prefix("p1#");
+        assert_eq!((a.last("p1#claude"), a.last("p1#claude@dev"), a.last("p2#claude")), (None, None, Some(t0)));
     }
 }

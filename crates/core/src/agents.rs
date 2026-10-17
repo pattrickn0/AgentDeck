@@ -173,9 +173,12 @@ impl Resolved {
         Self { program: p, pre: Vec::new(), shim: None }
     }
 
-    /// `cmd.exe /d /c <nome> [extra…]` para o shim em `path`.
+    /// `cmd.exe /d /e:on /v:off /c <nome> [extra…]` para o shim em `path`. Extensões ligadas e
+    /// expansão atrasada desligada mesmo que o registro diga o contrário: o escape de
+    /// [`cmd_safe_arg`] conta com isso (`%cd:~,%` e `!` literal).
     fn via_cmd(path: PathBuf, name: &str, extra: &[&str]) -> Self {
-        let mut pre: Vec<String> = ["/d", "/c", name].map(String::from).to_vec();
+        let mut pre: Vec<String> = CMD_FLAGS.map(String::from).to_vec();
+        pre.push(name.to_owned());
         pre.extend(extra.iter().map(|s| s.to_string()));
         Self { program: "cmd.exe".into(), pre, shim: Some(path) }
     }
@@ -185,17 +188,41 @@ impl Resolved {
     /// não dá para escapar), o que não acontece com um `cmd.exe /c` explícito.
     pub fn command(&self) -> (PathBuf, Vec<String>) {
         match &self.shim {
-            Some(path) => (path.clone(), self.pre.iter().skip(3).cloned().collect()),
+            Some(path) => (path.clone(), self.pre.iter().skip(CMD_FLAGS.len() + 1).cloned().collect()),
             None => (self.program.clone(), self.pre.clone()),
         }
     }
 }
 
-/// Deixa um argumento inofensivo para o `cmd.exe /c` (abas abertas por um shim `.cmd`, em que o
-/// argumento passa pelo interpretador do cmd): quebras de linha viram espaço e os caracteres
-/// especiais do cmd são removidos. Só para textos gerados pelo app (instruções, caminhos).
+/// Opções do `cmd.exe` que abre um shim `.cmd` numa aba (antes do nome do shim).
+const CMD_FLAGS: [&str; 4] = ["/d", "/e:on", "/v:off", "/c"];
+
+/// Escapa um argumento para o `cmd.exe /c <shim>` das abas no Windows. O texto passa por dois
+/// interpretadores do cmd: a linha do `cmd.exe /c` e a linha do shim que repassa `%*`.
+/// - o portable-pty põe entre aspas o argumento com espaço ou tabulação (e só ele): entre aspas,
+///   `& | < > ^ ( )` já são literais nas duas passagens;
+/// - sem aspas, cada um desses vira `^^^c` (a primeira passagem deixa `^c`, a segunda, `c`);
+/// - `%` vira `%%cd:~,%` (como na std do Rust), que a linha de comando expande para `%` e não é
+///   expandido de novo no `%*`; `!` fica literal com `/v:off`;
+/// - aspas são removidas (não aparecem em caminhos) e quebras de linha viram espaço.
+///
+/// Só para textos gerados pelo app (instruções, caminhos como `C:\Users\Ana&Bia`): texto livre
+/// de outros agentes nunca vai pela linha de comando de um shim.
 pub(crate) fn cmd_safe_arg(arg: &str) -> String {
-    arg.replace("\r\n", " ").replace(['\r', '\n'], " ").chars().filter(|c| !"\"^&|<>%!".contains(*c)).collect()
+    let arg: String = arg.replace("\r\n", " ").replace(['\r', '\n'], " ").chars().filter(|&c| c != '"').collect();
+    let quoted = arg.is_empty() || arg.contains([' ', '\t', '\x0b']);
+    let mut out = String::with_capacity(arg.len());
+    for c in arg.chars() {
+        match c {
+            '%' => out.push_str("%%cd:~,%"),
+            '&' | '|' | '<' | '>' | '^' | '(' | ')' if !quoted => {
+                out.push_str("^^^");
+                out.push(c);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Resultado de `resolveOllama`.
@@ -875,16 +902,64 @@ mod tests {
     }
 
     #[test]
-    fn cmd_args_lose_what_the_cmd_interprets() {
-        assert_eq!(cmd_safe_arg("a \"b\" & calc | x <y> ^z %PATH% !v!\r\nfim\n"), "a b  calc  x y z PATH v fim ");
+    fn cmd_args_are_escaped_not_mangled() {
+        // Com espaço o portable-pty põe aspas: só `%`, aspas e quebras de linha mudam.
+        assert_eq!(cmd_safe_arg("a \"b\" & calc | x <y> ^z %PATH% !v!\r\nfim\n"), "a b & calc | x <y> ^z %%cd:~,%PATH%%cd:~,% !v! fim ");
         assert_eq!(cmd_safe_arg(r"C:\Users\ana\dados"), r"C:\Users\ana\dados");
+        // Sem espaço, sem aspas: circunflexos para as duas passagens do cmd.
+        assert_eq!(cmd_safe_arg(r"C:\Users\Ana&Bia\dados"), r"C:\Users\Ana^^^&Bia\dados");
+        assert_eq!(cmd_safe_arg("Bash(ask-agent:*)"), "Bash^^^(ask-agent:*^^^)");
+        assert_eq!(cmd_safe_arg("50%!"), "50%%cd:~,%!");
+    }
+
+    /// Linha de comando como o portable-pty monta (`append_quoted`) para argumentos sem aspas.
+    #[cfg(windows)]
+    fn pty_quoted(arg: &str) -> String {
+        if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '\x0b', '"']) {
+            return arg.to_owned();
+        }
+        let trailing = arg.len() - arg.trim_end_matches('\\').len();
+        format!("\"{arg}{}\"", "\\".repeat(trailing))
+    }
+
+    /// Caminhos e textos do app atravessam o `cmd.exe /c` e o `%*` de um shim (os dois formatos do
+    /// npm: linha única e bloco `IF … ( … ) ELSE ( … )`) sem quebrar nem expandir nada.
+    #[cfg(windows)]
+    #[test]
+    fn escaped_args_reach_the_shim_intact() {
+        use std::os::windows::process::CommandExt;
+        let tmp = tempfile::tempdir().expect("tmp");
+        std::fs::write(tmp.path().join("linha.cmd"), "@ECHO off\r\nSETLOCAL\r\necho(%*\r\n").expect("shim");
+        std::fs::write(tmp.path().join("bloco.cmd"), "@IF EXIST \"%~dp0\\nada.exe\" (\r\n  echo(%*\r\n) ELSE (\r\n  echo(%*\r\n)\r\n")
+            .expect("shim");
+        let args = [
+            r"C:\Users\Ana&Bia\dados",
+            r"C:\Users\Ana Bia&X (1)\dados\",
+            "Bash(ask-agent:*)",
+            "50%PATH%!PATH!^x|y<z>w",
+            "texto com %PATH% & aspas \"x\" | fim",
+        ];
+        let expected: Vec<String> = args.iter().map(|a| pty_quoted(&a.replace('"', ""))).collect();
+        for shim in ["linha", "bloco"] {
+            let mut tail: Vec<String> = CMD_FLAGS.map(String::from).to_vec();
+            tail.push(format!(r".\{shim}")); // sem depender de NoDefaultCurrentDirectoryInExePath
+            tail.extend(args.iter().map(|a| pty_quoted(&cmd_safe_arg(a))));
+            let out = std::process::Command::new("cmd.exe")
+                .raw_arg(tail.join(" "))
+                .current_dir(tmp.path())
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .output()
+                .expect("cmd");
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert_eq!(stdout.trim_end_matches(['\r', '\n']), expected.join(" "), "{shim}: {}", String::from_utf8_lossy(&out.stderr));
+        }
     }
 
     #[test]
     fn a_cmd_shim_is_called_directly_by_std() {
         let r = Resolved::via_cmd(PathBuf::from(r"C:\npm\gh.cmd"), "gh", &["copilot"]);
         assert_eq!(r.program, PathBuf::from("cmd.exe"));
-        assert_eq!(r.pre, ["/d", "/c", "gh", "copilot"]);
+        assert_eq!(r.pre, ["/d", "/e:on", "/v:off", "/c", "gh", "copilot"]);
         assert_eq!(r.command(), (PathBuf::from(r"C:\npm\gh.cmd"), vec!["copilot".to_owned()]));
         let d = Resolved::direct(PathBuf::from("/bin/claude"));
         assert_eq!(d.command(), (PathBuf::from("/bin/claude"), Vec::new()));

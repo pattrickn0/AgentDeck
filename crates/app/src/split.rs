@@ -63,6 +63,16 @@ impl Ratios {
             *self = Self::equal(shape);
         }
     }
+
+    /// As proporções para desenhar o formato atual, sem gravar nada: as salvas se servem, senão
+    /// iguais. Um formato passageiro (janela estreitada por um instante) não apaga as do usuário.
+    pub fn fitted(&self, shape: &[usize]) -> Self {
+        if self.fits(shape) {
+            self.clone()
+        } else {
+            Self::equal(shape)
+        }
+    }
 }
 
 /// Tamanhos das partes de `total` (descontados os divisores) segundo `ratios`, sem deixar nenhuma
@@ -261,6 +271,16 @@ mod tests {
         r.conform(&[2, 1]);
         assert_eq!(r, Ratios::equal(&[2, 1]));
         assert!(!Ratios::default().fits(&[1]));
+    }
+
+    #[test]
+    fn a_passing_shape_does_not_erase_the_saved_ratios() {
+        let mut saved = Ratios::equal(&[2]);
+        saved.cols[0] = vec![0.7, 0.3];
+        // Janela estreitada: uma coluna só por um quadro; desenha com iguais e guarda as salvas.
+        assert_eq!(saved.fitted(&[1, 1]), Ratios::equal(&[1, 1]));
+        assert_eq!(saved.fitted(&[2]).cols[0], [0.7, 0.3]);
+        assert_eq!(saved.cols[0], [0.7, 0.3]);
     }
 
     #[test]

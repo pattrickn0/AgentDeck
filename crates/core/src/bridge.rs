@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -44,19 +44,30 @@ pub(crate) struct PairQueue {
     cv: Condvar,
 }
 
-/// Vez na fila; ao ser solta, chama o próximo.
-pub(crate) struct Turn {
+/// Vez na fila; ao ser solta, chama o próximo (e esquece a fila do par se ninguém mais espera).
+pub(crate) struct Turn<'a> {
+    owner: &'a PairQueues,
+    key: String,
     queue: Arc<PairQueue>,
 }
 
-impl Drop for Turn {
+impl Drop for Turn<'_> {
     fn drop(&mut self) {
-        self.queue.state.lock().serving += 1;
+        // Mesma ordem de travas de `enter` (mapa, depois a fila): ninguém pega senha no meio.
+        let mut queues = self.owner.queues.lock();
+        let mut st = self.queue.state.lock();
+        st.serving += 1;
+        if st.serving == st.next && queues.get(&self.key).is_some_and(|q| Arc::ptr_eq(q, &self.queue)) {
+            queues.remove(&self.key);
+        }
+        drop(st);
+        drop(queues);
         self.queue.cv.notify_all();
     }
 }
 
-/// Filas por chave de sessão (equivalente a `bridgeQueues`).
+/// Filas por chave de sessão (equivalente a `bridgeQueues`). Só guarda os pares com alguém na
+/// fila: o mapa não cresce com cada par que já conversou.
 #[derive(Default)]
 pub(crate) struct PairQueues {
     queues: Mutex<HashMap<String, Arc<PairQueue>>>,
@@ -64,16 +75,24 @@ pub(crate) struct PairQueues {
 
 impl PairQueues {
     /// Pega uma senha (na ordem de chamada) e bloqueia até ser a vez dela.
-    pub fn enter(&self, key: &str) -> Turn {
-        let queue = self.queues.lock().entry(key.to_owned()).or_default().clone();
+    pub fn enter(&self, key: &str) -> Turn<'_> {
+        let mut queues = self.queues.lock();
+        let queue = queues.entry(key.to_owned()).or_default().clone();
         let mut st = queue.state.lock();
+        drop(queues);
         let ticket = st.next;
         st.next += 1;
         while st.serving != ticket {
             queue.cv.wait(&mut st);
         }
         drop(st);
-        Turn { queue }
+        Turn { owner: self, key: key.to_owned(), queue }
+    }
+
+    /// Pares com alguém na fila agora.
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.queues.lock().len()
     }
 }
 
@@ -81,15 +100,41 @@ impl PairQueues {
 
 /// Tamanho máximo do corpo de uma requisição (mensagens longas vão pelo stdin do `ask-agent`).
 const MAX_BODY: u64 = 16 << 20;
-/// Requisições em atendimento ao mesmo tempo (cada pergunta esperando resposta ocupa uma).
+/// Requisições em atendimento ao mesmo tempo (cada pergunta esperando resposta ocupa uma, também
+/// depois do 202, enquanto a resposta atrasada não chega).
 const MAX_ACTIVE: usize = 128;
+/// Soma dos corpos sendo lidos ou atendidos ao mesmo tempo: sem ela, 128 corpos de 16 MB seriam 2 GB.
+const MAX_BODIES: u64 = 64 << 20;
 
 /// Conta uma requisição em atendimento enquanto existir.
-struct Active(Arc<AtomicUsize>);
+pub(crate) struct Active(Arc<AtomicUsize>);
 
 impl Drop for Active {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Bytes reservados do orçamento de corpos ([`MAX_BODIES`]) enquanto existir.
+struct BodyBudget {
+    used: Arc<AtomicU64>,
+    bytes: u64,
+}
+
+impl BodyBudget {
+    /// Reserva `bytes`, se couberem no orçamento.
+    fn reserve(used: &Arc<AtomicU64>, bytes: u64) -> Option<Self> {
+        if used.fetch_add(bytes, Ordering::SeqCst) + bytes > MAX_BODIES {
+            used.fetch_sub(bytes, Ordering::SeqCst);
+            return None;
+        }
+        Some(Self { used: used.clone(), bytes })
+    }
+}
+
+impl Drop for BodyBudget {
+    fn drop(&mut self) {
+        self.used.fetch_sub(self.bytes, Ordering::SeqCst);
     }
 }
 
@@ -102,6 +147,7 @@ pub(crate) fn start(core: &Core) -> anyhow::Result<(Arc<Server>, u16)> {
     let weak = Arc::downgrade(&core.inner);
     std::thread::Builder::new().name("cd-bridge".into()).spawn(move || {
         let active = Arc::new(AtomicUsize::new(0));
+        let bodies = Arc::new(AtomicU64::new(0));
         // Termina quando `Server::unblock` é chamado (shutdown).
         for req in srv.incoming_requests() {
             if active.fetch_add(1, Ordering::SeqCst) >= MAX_ACTIVE {
@@ -110,12 +156,9 @@ pub(crate) fn start(core: &Core) -> anyhow::Result<(Arc<Server>, u16)> {
                 continue;
             }
             let slot = Active(active.clone());
-            let weak = weak.clone();
+            let (weak, bodies) = (weak.clone(), bodies.clone());
             // Se a thread não subir, o fechamento é descartado e `slot` libera a vaga.
-            let _ = std::thread::Builder::new().name("cd-bridge-req".into()).spawn(move || {
-                let _slot = slot;
-                handle(weak, req)
-            });
+            let _ = std::thread::Builder::new().name("cd-bridge-req".into()).spawn(move || handle(weak, req, port, slot, &bodies));
         }
     })?;
     Ok((server, port))
@@ -134,7 +177,9 @@ fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
     req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
 }
 
-fn handle(weak: Weak<CoreInner>, mut req: Request) {
+/// Atende uma requisição. `port` é a porta da ponte (conhecida antes da primeira requisição: o
+/// `Host` é validado desde o início) e `slot` a vaga dela entre as [`MAX_ACTIVE`].
+fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodies: &Arc<AtomicU64>) {
     let Some(inner) = weak.upgrade() else {
         return reply(req, 503, json!({ "error": "CommandDeck encerrando" }));
     };
@@ -143,9 +188,8 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         return reply(req, 403, json!({ "error": "token inválido" }));
     };
     // Validação de Host contra DNS rebinding (sem Host também é recusado).
-    let port = core.bridge_port();
     let host = header(&req, "host").unwrap_or("");
-    if port != 0 && host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
         return reply(req, 403, json!({ "error": "host inválido" }));
     }
 
@@ -170,6 +214,11 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
     }
 
+    // Reserva o tamanho anunciado (sem `Content-Length`, o máximo) antes de ler.
+    let announced = req.body_length().map_or(MAX_BODY + 1, |n| (n as u64).min(MAX_BODY + 1));
+    let Some(_budget) = BodyBudget::reserve(bodies, announced) else {
+        return reply(req, 503, json!({ "error": "ponte ocupada: mensagens grandes demais em andamento" }));
+    };
     let mut body = Vec::new();
     if req.as_reader().take(MAX_BODY + 1).read_to_end(&mut body).is_err() {
         return reply(req, 400, json!({ "error": "JSON inválido" }));
@@ -180,6 +229,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
     let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
         return reply(req, 400, json!({ "error": "JSON inválido" }));
     };
+    drop(body);
     let default_from = if route == "/ask" { "usuário" } else { "" };
     let caller = match caller(&core, &auth, &msg, default_from) {
         Ok(c) => c,
@@ -189,7 +239,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request) {
         "/reply" => reply_pending(&core, &caller, &msg),
         "/signal" => signal(&core, &auth, &msg),
         "/usage" => usage(&core, &auth, &msg),
-        _ => ask(&core, &caller, &msg),
+        _ => ask(&core, &caller, &msg, slot),
     };
     reply(req, status, out);
 }
@@ -269,6 +319,31 @@ pub(crate) fn resolve_target(asked: &str, available: &[String], ollama_models: &
         }
     }
     to
+}
+
+/// O destino `asked` (`agy`, `qwen3.5`, `claude@dev`…) já resolvido num id de instância: o modelo
+/// pelo apelido e a instância (sem criar nenhuma) no projeto. `None` se não há uma só que sirva.
+fn existing_instance(core: &Core, project: &str, asked: &str) -> Option<String> {
+    let (base, suffix) = asked.split_at(asked.find('@').unwrap_or(asked.len()));
+    let models = core.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
+    let kind = resolve_target(base, &core.inner.agents.peers(), &models);
+    let want = Ident::parse(&format!("{kind}{suffix}"))?;
+    core.inner.instances.lock().get(project)?.find(&want).ok().flatten().map(|i| i.id())
+}
+
+/// Chave (com escopo) do destino da pergunta `request` agora: segue uma renomeação da aba.
+fn target_now(core: &Core, request: u64, fallback: &str) -> String {
+    core.inner.exchange.parties(request).map_or_else(|| fallback.to_owned(), |(_, target)| target)
+}
+
+/// O prazo da pergunta `request` acabou sem resposta: tira a pergunta da lista. Se a resposta chegou
+/// bem nessa hora (entre o fim da espera e aqui), ela vale: quem respondeu já ouviu "entregue".
+fn give_up(core: &Core, request: u64, rx: &crossbeam_channel::Receiver<Reply>, why: String) -> Reply {
+    if core.inner.exchange.remove(request) {
+        Reply::Failed(why)
+    } else {
+        rx.try_recv().unwrap_or(Reply::Failed(why))
+    }
 }
 
 /// Quanto tempo uma pergunta entregue numa aba espera pela resposta.
@@ -396,7 +471,7 @@ fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl 
 /// Resposta que chegou depois de o `ask-agent` de quem perguntou já ter terminado: é digitada
 /// no terminal de quem perguntou, como uma mensagem nova. `target` é o id sem o projeto.
 fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request: u64, outcome: Reply) {
-    let mut prompt = match outcome {
+    let prompt = match outcome {
         Reply::Answer(text) => format!(
             "[Resposta do agente \"{target}\" à sua pergunta #{request}, recebida pelo CommandDeck]\n\n{}\n\n\
 Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Conversa integrada.",
@@ -407,10 +482,6 @@ Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Co
             format!("[CommandDeck] A pergunta #{request} para \"{target}\" ficou sem resposta: {}", terminal_text(&text))
         }
     };
-    if let Some(notice) = core.take_team_notice(project, &asker.id()) {
-        prompt.push_str("\n\n");
-        prompt.push_str(&notice);
-    }
     core.emit(CoreEvent::Deliver(Delivery {
         request,
         project: project.to_owned(),
@@ -428,7 +499,7 @@ Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Co
 /// Se quem pergunta é uma aba e pediu `wait` segundos, o `ask-agent` dela volta depois desse
 /// tempo (antes de o Bash do agente estourar o próprio timeout) e a resposta, quando chegar, é
 /// digitada no terminal dela.
-fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAsk) -> (u16, Value) {
+fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAsk, slot: Active) -> (u16, Value) {
     let from = caller.id.as_str();
     let project = caller.project.as_str();
     let (base, suffix) = match asked.find('@') {
@@ -475,6 +546,12 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
             return forget(409, json!({ "error": format!("\"{id}\" já está esperando uma resposta de \"{from}\" (ciclo de espera)") }))
         }
     };
+    // O projeto foi removido no meio do caminho (a remoção falha as perguntas registradas antes
+    // dela; esta é conferida aqui, depois de registrada).
+    if core.project_path(project).is_none() {
+        core.inner.exchange.remove(request);
+        return forget(400, json!({ "error": "o projeto foi removido" }));
+    }
 
     caller.feed(core, FeedKind::Ask, from, &id, message.to_owned());
     // Quem abriu a instância passa a ser o chefe dela (o usuário, pelo token mestre, não conta).
@@ -483,11 +560,9 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
             log::warn!("chefe de \"{id}\": {e}");
         }
     }
-    let mut prompt = tab_prompt(from, request, message);
-    if let Some(notice) = core.take_team_notice(project, &id) {
-        prompt.push_str("\n\n");
-        prompt.push_str(&notice);
-    }
+    // O aviso de equipe pendente vai quando a interface digitar (`Core::take_team_notice`): se a
+    // entrega for descartada, ele não se perde.
+    let prompt = tab_prompt(from, request, message);
     core.emit(CoreEvent::Deliver(Delivery {
         request,
         project: project.to_owned(),
@@ -506,48 +581,81 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         (Some(w), Some(_)) if w > 0 => Some(Instant::now() + Duration::from_secs(w)),
         _ => None,
     };
-    let outcome = match wait_reply(core, &rx, || {
-        let deadline = reply_deadline(core, &target_key, sent);
-        detach_at.map_or(deadline, |d| d.min(deadline))
-    }) {
+    // O destino é lido pelo número a cada volta: renomear a aba no meio da pergunta não perde a
+    // atividade dela (o prazo conta a partir dela).
+    let deadline = || reply_deadline(core, &target_now(core, request, &target_key), sent);
+    let waited = wait_reply(core, &rx, || detach_at.map_or_else(deadline, |d| d.min(deadline())));
+    let (asker_key, target_key_now) = core.inner.exchange.parties(request).unwrap_or_else(|| (from_key, target_key.clone()));
+    let (asker_id, target_id) = (unscoped(&asker_key).1.to_owned(), unscoped(&target_key_now).1.to_owned());
+    let outcome = match waited {
         Some(reply) => reply,
         None => match (detach_at, asker) {
-            (Some(_), Some(asker)) if Instant::now() < reply_deadline(core, &target_key, sent) => {
+            (Some(_), Some(asker)) if Instant::now() < deadline() => {
                 core.inner.exchange.detach(request);
-                let core2 = core.clone();
-                let (target, key, project) = (id.clone(), target_key.clone(), project.to_owned());
-                let spawned = std::thread::Builder::new().name("cd-bridge-late".into()).spawn(move || {
-                    let outcome = wait_reply(&core2, &rx, || reply_deadline(&core2, &key, sent))
-                        .unwrap_or_else(|| Reply::Failed(format!("\"{target}\" não respondeu em 10 minutos")));
-                    core2.inner.exchange.remove(request);
-                    deliver_late(&core2, &project, asker, &target, request, outcome);
-                });
-                if spawned.is_err() {
-                    core.inner.exchange.fail(request, "falha interna da ponte");
-                    return (500, json!({ "error": "falha interna da ponte" }));
+                // A resposta chegou no instante do 202: vai agora mesmo.
+                match rx.try_recv() {
+                    Ok(reply) => reply,
+                    Err(_) => return detach(core, project, request, rx, sent, asker, target_key_now, slot),
                 }
-                return (
-                    202,
-                    json!({
-                        "pending": request,
-                        "answer": format!(
-                            "A pergunta #{request} foi entregue a \"{id}\", que ainda está trabalhando nela. A resposta será digitada \
-                    neste terminal quando chegar, como uma nova mensagem. Não repita a pergunta: siga com outra parte da tarefa ou encerre o turno e aguarde."
-                        ),
-                    }),
-                );
             }
-            _ => Reply::Failed(format!("\"{id}\" não respondeu em 10 minutos")),
+            _ => give_up(core, request, &rx, format!("\"{target_id}\" não respondeu em 10 minutos")),
         },
     };
     core.inner.exchange.remove(request);
     match outcome {
         Reply::Answer(answer) => (200, json!({ "answer": answer })),
         Reply::Failed(text) => {
-            caller.feed(core, FeedKind::Error, &id, from, text.clone());
+            caller.feed(core, FeedKind::Error, &target_id, &asker_id, text.clone());
             (500, json!({ "error": text }))
         }
     }
+}
+
+/// O `ask-agent` de quem perguntou volta agora (202) e a resposta, quando chegar, é digitada no
+/// terminal dele por uma thread que fica com a vaga (`slot`) da requisição. `target_key` é o
+/// destino com escopo; quem perguntou e o destino são relidos pelo número no fim (renomeações).
+#[allow(clippy::too_many_arguments)]
+fn detach(
+    core: &Core,
+    project: &str,
+    request: u64,
+    rx: crossbeam_channel::Receiver<Reply>,
+    sent: Instant,
+    asker: Ident,
+    target_key: String,
+    slot: Active,
+) -> (u16, Value) {
+    let core2 = core.clone();
+    let project = project.to_owned();
+    let target = unscoped(&target_key).1.to_owned();
+    let spawned = std::thread::Builder::new().name("cd-bridge-late".into()).spawn(move || {
+        let _slot = slot;
+        let core = core2;
+        let waited = wait_reply(&core, &rx, || reply_deadline(&core, &target_now(&core, request, &target_key), sent));
+        let parties = core.inner.exchange.parties(request);
+        let (asker, target) = match &parties {
+            Some((a, t)) => (Ident::parse(unscoped(a).1).unwrap_or(asker), unscoped(t).1.to_owned()),
+            None => (asker, unscoped(&target_key).1.to_owned()),
+        };
+        let outcome = waited.unwrap_or_else(|| give_up(&core, request, &rx, format!("\"{target}\" não respondeu em 10 minutos")));
+        core.inner.exchange.remove(request);
+        deliver_late(&core, &project, asker, &target, request, outcome);
+    });
+    if spawned.is_err() {
+        core.inner.exchange.fail(request, "falha interna da ponte");
+        core.inner.exchange.remove(request);
+        return (500, json!({ "error": "falha interna da ponte" }));
+    }
+    (
+        202,
+        json!({
+            "pending": request,
+            "answer": format!(
+                "A pergunta #{request} foi entregue a \"{target}\", que ainda está trabalhando nela. A resposta será digitada \
+        neste terminal quando chegar, como uma nova mensagem. Não repita a pergunta: siga com outra parte da tarefa ou encerre o turno e aguarde."
+            ),
+        }),
+    )
 }
 
 /// Opções de uma pergunta a uma aba.
@@ -560,7 +668,7 @@ struct TabAsk {
 
 /// Processa um `POST /ask` já decodificado. Retorna (status HTTP, corpo). Tudo acontece no
 /// projeto de quem chama: as instâncias, as perguntas pendentes e as sessões headless.
-fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
+fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) {
     let from = caller.id.as_str();
     let project = caller.project.as_str();
     let asked = js_string_or(msg.get("to"), "").to_lowercase();
@@ -585,11 +693,13 @@ fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
             ),
         };
     }
-    // `from` está respondendo a uma pergunta que `asked` fez: entrega a quem espera. (Uma pergunta
-    // nova de `from` para quem o espera fecharia um ciclo de espera; por isso é resposta.)
-    if core.inner.exchange.reply(&caller.key(from), &caller.key(&asked), &message) {
-        caller.feed(core, FeedKind::Answer, from, &asked, message);
-        return (200, delivered(&asked));
+    // `from` está respondendo a uma pergunta que `asked` fez e cujo `ask-agent` ainda espera:
+    // entrega a ele. (Uma pergunta nova de `from` para quem o espera fecharia um ciclo de espera;
+    // por isso é resposta.) O nome passa pelos apelidos (`agy`, `qwen3.5`) e pelas instâncias.
+    let asker = existing_instance(core, project, &asked).unwrap_or_else(|| asked.clone());
+    if core.inner.exchange.reply_waiting(&caller.key(from), &caller.key(&asker), &message) {
+        caller.feed(core, FeedKind::Answer, from, &asker, message);
+        return (200, delivered(&asker));
     }
     // Com a interface ligada, a pergunta vai para a aba (instância) do agente; sem ela, em headless.
     if core.tab_delivery() {
@@ -598,7 +708,7 @@ fn ask(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
             depth,
             wait: msg.get("wait").and_then(Value::as_u64),
         };
-        return ask_tab(core, caller, &asked, &message, opts);
+        return ask_tab(core, caller, &asked, &message, opts, slot);
     }
 
     let available = core.peers(project);
@@ -678,6 +788,8 @@ mod tests {
         let p = tab_prompt("claude@dev", 7, "faça\x1b[201~ x");
         assert!(p.starts_with("[Mensagem do agente \"claude@dev\" recebida pelo CommandDeck]\n\nfaça[201~ x\n\n"), "{p}");
         assert!(p.contains("ask-agent --reply 7 \"sua resposta\""), "{p}");
+        // O `ollama-agent` lê o número desta linha (`bridge_request`): mudou aqui, mude lá.
+        assert!(p.contains("Responda executando no shell: ask-agent --reply 7 "), "{p}");
         assert!(!p.contains('\x1b'));
     }
 
@@ -720,6 +832,38 @@ mod tests {
             h.join().expect("thread");
         }
         assert_eq!(*order.lock(), vec![0, 1, 2, 3, 4]);
+        assert_eq!(queues.len(), 0, "sem ninguém na fila, os pares são esquecidos");
+    }
+
+    #[test]
+    fn a_pair_queue_is_kept_while_someone_waits() {
+        let queues = Arc::new(PairQueues::default());
+        let first = queues.enter("a->b");
+        let waiting = std::thread::spawn({
+            let q = queues.clone();
+            move || drop(q.enter("a->b"))
+        });
+        while queues.queues.lock().get("a->b").is_none_or(|q| q.state.lock().next < 2) {
+            std::thread::yield_now();
+        }
+        drop(first);
+        assert!(queues.len() <= 1);
+        waiting.join().expect("thread");
+        assert_eq!(queues.len(), 0);
+        // E volta a funcionar depois de esquecido.
+        drop(queues.enter("a->b"));
+        assert_eq!(queues.len(), 0);
+    }
+
+    #[test]
+    fn the_body_budget_caps_the_bytes_in_flight() {
+        let used = Arc::new(AtomicU64::new(0));
+        let big: Vec<BodyBudget> = (0..4).map(|_| BodyBudget::reserve(&used, MAX_BODY).expect("cabe")).collect();
+        assert!(BodyBudget::reserve(&used, 1).is_none(), "orçamento cheio");
+        assert_eq!(used.load(Ordering::SeqCst), MAX_BODIES, "a tentativa recusada não fica reservada");
+        drop(big);
+        assert_eq!(used.load(Ordering::SeqCst), 0);
+        assert!(BodyBudget::reserve(&used, 1).is_some());
     }
 }
 
