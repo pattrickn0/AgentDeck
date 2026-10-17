@@ -430,3 +430,124 @@ fn gpgsign_without_agent_fails_fast_with_explanation() {
     assert_eq!(String::from_utf8_lossy(&cfg.stdout).trim(), "true");
     env.core.shutdown();
 }
+
+#[test]
+fn conflict_variants_diff_cc_stash_pop_and_rebase_continue() {
+    need_git!();
+    let env = start(true);
+    let (core, ws) = (&env.core, &env.ws);
+    let _ = std::fs::remove_file(ws.join("AGENTS.md"));
+    core.git_init().expect("init");
+    std::fs::write(ws.join("a.txt"), "l1\nl2\nl3\n").expect("w");
+    std::fs::write(ws.join("b.txt"), "b\n").expect("w");
+    std::fs::write(ws.join("c.txt"), "c\n").expect("w");
+    core.git_stage_all().expect("stage");
+    core.git_commit("base", false).expect("base");
+
+    // Sem alterações: guardar no stash é um erro claro; sem `-u`, o não rastreado fica.
+    assert!(core.git_stash_push("nada", false).is_err());
+    std::fs::write(ws.join("b.txt"), "b2\n").expect("w");
+    std::fs::write(ws.join("solto.txt"), "x\n").expect("w");
+    core.git_stash_push("", false).expect("stash sem mensagem");
+    assert!(ws.join("solto.txt").exists());
+    assert_eq!(std::fs::read_to_string(ws.join("b.txt")).expect("r"), "b\n");
+    let list = core.git_stash_list().expect("list");
+    assert_eq!(list.len(), 1);
+    core.git_stash_pop(0).expect("pop");
+    assert!(core.git_stash_list().expect("list").is_empty());
+    assert_eq!(std::fs::read_to_string(ws.join("b.txt")).expect("r"), "b2\n");
+    let _ = git(ws, &["reset", "-q", "--hard"]);
+    let _ = git(ws, &["clean", "-fdq"]);
+
+    // Branch `feat`: muda a.txt, apaga b.txt, muda c.txt.
+    core.git_create_branch("feat", true).expect("feat");
+    std::fs::write(ws.join("a.txt"), "l1\nFEAT\nl3\n").expect("w");
+    std::fs::remove_file(ws.join("b.txt")).expect("rm");
+    std::fs::write(ws.join("c.txt"), "c-feat\n").expect("w");
+    core.git_stage_all().expect("stage");
+    core.git_commit("feat", false).expect("feat commit");
+    let main = core.git_branches().expect("b").into_iter().find(|b| b.name == "main").expect("main");
+    core.git_checkout(&main).expect("main");
+    std::fs::write(ws.join("a.txt"), "l1\nMAIN\nl3\n").expect("w");
+    std::fs::write(ws.join("b.txt"), "b-main\n").expect("w");
+    std::fs::write(ws.join("c.txt"), "c-main\n").expect("w");
+    core.git_stage_all().expect("stage");
+    core.git_commit("main", false).expect("main commit");
+
+    core.git_merge("feat").expect("merge devolve Ok com conflitos");
+    let st = core.git_status().expect("st");
+    assert_eq!(st.state, RepoState::Merging);
+    let kinds: Vec<(String, char, char)> = st.entries.iter().map(|e| (e.path.clone(), e.index, e.worktree)).collect();
+    assert_eq!(kinds, [("a.txt".into(), 'U', 'U'), ("b.txt".into(), 'U', 'D'), ("c.txt".into(), 'U', 'U')]);
+
+    // O diff de um arquivo em conflito (`diff --cc`, `@@@`) tem números de linha e nada de crash.
+    let d = core.git_diff(&st.entries[0], false).expect("diff --cc");
+    assert!(d.lines.iter().any(|l| l.kind == commanddeck_core::git::DiffKind::Hunk && l.text.starts_with("@@@")));
+    assert!(d.lines.iter().any(|l| l.kind == commanddeck_core::git::DiffKind::Add && l.text.contains("FEAT")));
+    assert!(extract_hunk_patch(&d, 0).is_none(), "diff combinado não vira patch de trecho");
+
+    // a.txt: "ambos"; c.txt: "deles" (arquivo inteiro); b.txt (modify/delete): "deles" = apagar.
+    core.git_resolve_conflict_file("a.txt", ConflictChoice::Both).expect("both");
+    assert_eq!(std::fs::read_to_string(ws.join("a.txt")).expect("r"), "l1\nMAIN\nFEAT\nl3\n");
+    core.git_resolve_conflict_file("c.txt", ConflictChoice::Theirs).expect("theirs");
+    assert_eq!(std::fs::read_to_string(ws.join("c.txt")).expect("r"), "c-feat\n");
+    core.git_resolve_conflict_file("b.txt", ConflictChoice::Theirs).expect("theirs delete");
+    assert!(!ws.join("b.txt").exists());
+    let st = core.git_status().expect("st");
+    assert!(st.entries.iter().all(|e| e.kind != EntryKind::Unmerged), "{:?}", paths(&st));
+    core.git_continue_op().expect("merge continue");
+    assert_eq!(core.git_status().expect("st").state, RepoState::Normal);
+
+    // Descartar um conflito modify/delete (o outro lado apagou) também funciona.
+    let m2 = core.git_log(0, 1).expect("log").0[0].hash.clone();
+    assert!(git(ws, &["reset", "-q", "--hard", &format!("{m2}~1")]).status.success());
+    assert!(!git(ws, &["merge", "feat"]).status.success());
+    let st = core.git_status().expect("st");
+    let b = st.entries.iter().find(|e| e.path == "b.txt").expect("b.txt em conflito");
+    assert_eq!(b.kind, EntryKind::Unmerged);
+    core.git_discard(b).expect("discard modify/delete");
+    assert!(core.git_status().expect("st").entries.iter().all(|e| e.path != "b.txt"));
+    core.git_abort_op().expect("abort");
+    assert_eq!(core.git_status().expect("st").state, RepoState::Normal);
+
+    // Rebase com conflito: resolver e continuar.
+    core.git_create_branch("feat2", true).expect("feat2");
+    std::fs::write(
+        ws.join("a.txt"),
+        "l1
+FEAT2
+l3
+",
+    )
+    .expect("w");
+    core.git_stage_all().expect("stage");
+    core.git_commit("feat2", false).expect("feat2 commit");
+    core.git_checkout(&main).expect("main");
+    std::fs::write(
+        ws.join("a.txt"),
+        "l1
+MAIN2
+l3
+",
+    )
+    .expect("w");
+    core.git_stage_all().expect("stage");
+    core.git_commit("main2", false).expect("main2");
+    let feat2 = core.git_branches().expect("b").into_iter().find(|b| b.name == "feat2").expect("feat2");
+    core.git_checkout(&feat2).expect("feat2");
+    let msg = core.git_rebase("main").expect("rebase");
+    assert!(msg.to_lowercase().contains("conflito"), "{msg}");
+    assert_eq!(core.git_status().expect("st").state, RepoState::Rebasing);
+    core.git_resolve_conflict_file("a.txt", ConflictChoice::Theirs).expect("resolve");
+    core.git_continue_op().expect("rebase continue");
+    assert_eq!(core.git_status().expect("st").state, RepoState::Normal);
+    assert_eq!(
+        std::fs::read_to_string(ws.join("a.txt")).expect("r"),
+        "l1
+FEAT2
+l3
+"
+    );
+    assert!(core.git_continue_op().is_err(), "sem operação em andamento");
+    env.core.shutdown();
+}

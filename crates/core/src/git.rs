@@ -495,16 +495,6 @@ pub const LOG_FORMAT: &str = "%H%x00%h%x00%an%x00%cr%x00%s";
 /// Lê a saída de `git log -z --format=LOG_FORMAT`.
 pub fn parse_log(out: &[u8]) -> Vec<GitCommit> {
     let mut list = Vec::new();
-    for rec in out.split(|b| *b == 0).filter(|r| !r.is_empty()) {
-        // Ignora eventual `\n` entre registros.
-        let s = String::from_utf8_lossy(rec);
-        let s = s.trim_start_matches('\n');
-        if s.is_empty() {
-            continue;
-        }
-        // Quando `-z` separa cada registro por NUL e o próprio formato usa `%x00`, a saída tem 5 campos seguidos.
-        let _ = s;
-    }
     // Com `-z` e `%x00`, todos os campos ficam separados por NUL em sequência de 5 em 5.
     let fields: Vec<&[u8]> = out.split(|b| *b == 0).collect();
     for chunk in fields.chunks(5) {
@@ -668,12 +658,10 @@ pub fn classify_error(stderr: &str) -> GitError {
         return GitError::NoIdentity;
     }
     let short = crate::util::last_meaningful_lines(s, 4);
-    if low.contains("permission denied (publickey")
-        || low.contains("sign_and_send_pubkey")
-        || low.contains("no mutual signature algorithm")
+    if low.contains("permission denied (publickey") || low.contains("sign_and_send_pubkey") || low.contains("no mutual signature algorithm")
     {
         return GitError::Auth(format!(
-            "{short}\nSe a sua chave SSH tem senha, carregue-a no ssh-agent antes de sincronizar:\n• Windows (PowerShell): Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add"
+            "{short}\nSe a sua chave SSH tem senha, o CommandDeck não consegue perguntá-la: carregue a chave no ssh-agent e tente de novo.\n• Windows (PowerShell; na primeira vez como administrador): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add"
         ));
     }
     if low.contains("authentication failed")
@@ -685,10 +673,11 @@ pub fn classify_error(stderr: &str) -> GitError {
     {
         return GitError::Auth(short);
     }
-    // `commit.gpgsign` sem agente/pinentry que peça a senha: o gpg não consegue assinar.
+    // `commit.gpgsign` com a chave travada ou sem agente/pinentry que consiga perguntar a senha.
     if low.contains("gpg failed to sign") || low.contains("no pinentry") || low.contains("inappropriate ioctl for device") {
         return GitError::Failed(format!(
-            "o git não conseguiu assinar o commit (commit.gpgsign) sem um agente GPG gráfico ativo. Destrave a chave no seu agente GPG (ou configure pinentry gráfico) ou, se preferir não assinar neste repositório, rode: git config commit.gpgsign false\n{short}"
+            "O commit não foi feito: a assinatura GPG (commit.gpgsign) precisa da chave destravada, e o CommandDeck não consegue abrir o pedido de senha. Destrave a chave numa aba de terminal (echo teste | gpg --clearsign) e tente de novo em seguida; a senha fica no gpg-agent por alguns minutos. Se não quiser assinar neste repositório: git config commit.gpgsign false
+{short}"
         ));
     }
     if low.contains("[rejected]")
@@ -728,18 +717,6 @@ pub fn safe_rel(path: &str) -> bool {
         && !path.starts_with(['/', '\\'])
         && !path.split(['/', '\\']).any(|p| p == "..")
         && Path::new(path).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
-}
-
-/// Wrapper passado em `gpg.program` quando o usuário não tem agente gráfico: adiciona
-/// `--pinentry-mode loopback --batch` para que o GPG nunca bloqueie no terminal esperando senha
-/// por 120 s (se a chave estiver destravada no `gpg-agent`, assina normal; se precisar de senha,
-/// falha na hora e `classify_error` explica o motivo sem desligar `commit.gpgsign`).
-fn gpg_nonblocking_args(user_gpg: &str) -> String {
-    // Se for um caminho simples sem espaços nem aspas, podemos verificar; mas via `-c gpg.program=...`
-    // o git só aceita um caminho de executável (sem argumentos). Por isso usamos variáveis de ambiente
-    // e invocação controlada.
-    let _ = user_gpg;
-    String::new()
 }
 
 // ---------- Execução ----------
@@ -789,7 +766,6 @@ fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
     for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", "GIT_ASKPASS", "SSH_ASKPASS"] {
         c.env_remove(k);
     }
-    let _ = gpg_nonblocking_args;
     c
 }
 
@@ -804,7 +780,12 @@ fn run(cmd: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<Captur
     match out.exit {
         Exit::Code(Some(0)) => Ok(out),
         Exit::TimedOut => Err(GitError::Timeout),
-        _ => Err(classify_error(&String::from_utf8_lossy(&out.stderr))),
+        _ => {
+            // Alguns erros (ex.: "nothing to commit") saem pela saída padrão.
+            let err = String::from_utf8_lossy(&out.stderr);
+            let err = if err.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { err };
+            Err(classify_error(&err))
+        }
     }
 }
 
@@ -855,51 +836,44 @@ impl Repo {
 
     /// Verifica se o commit atual usaria assinatura GPG (`commit.gpgsign = true`).
     fn is_gpgsign_enabled(&self) -> bool {
-        self.read(&["config", "--bool", "--get", "commit.gpgsign"])
-            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
+        self.read(&["config", "--bool", "--get", "commit.gpgsign"]).is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
     }
 
-    /// Quando `commit.gpgsign` está ligado, testa rápido (3 s) se o GPG consegue assinar sem
-    /// bloquear esperando senha no terminal. Se travar ou falhar por falta de agente/pinentry,
-    /// devolve já a explicação sem fazer o usuário esperar 120 s (e sem desligar `commit.gpgsign`).
+    /// Quando `commit.gpgsign` está ligado, confere em instantes se o GPG consegue assinar SEM
+    /// perguntar nada (`--pinentry-mode error`): com a chave destravada no `gpg-agent` passa; com a
+    /// chave travada (ou sem agente/pinentry utilizável) o gpg falha na hora, em vez de deixar o
+    /// commit esperar o `COMMIT_TIMEOUT` por um pedido de senha que ninguém vê. Devolve a explicação
+    /// e NÃO mexe na configuração do usuário. Só vale para assinatura OpenPGP.
     fn check_gpg_ready(&self) -> Result<(), GitError> {
         if !self.is_gpgsign_enabled() {
             return Ok(());
         }
-        let format = self
-            .read(&["config", "--get", "gpg.format"])
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-            .unwrap_or_default();
-        if !format.is_empty() && format != "openpgp" {
+        let cfg = |key: &str| {
+            self.read(&["config", "--get", key])
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                .filter(|s| !s.is_empty())
+        };
+        if cfg("gpg.format").is_some_and(|f| f != "openpgp") {
             return Ok(());
         }
-        let key_flag = format!("gpg.{}.program", if format.is_empty() { "openpgp" } else { &format });
-        let prog = self
-            .read(&["config", "--get", &key_flag])
-            .ok()
-            .filter(|o| !o.stdout.is_empty())
-            .or_else(|| self.read(&["config", "--get", "gpg.program"]).ok().filter(|o| !o.stdout.is_empty()))
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-            .unwrap_or_else(|| "gpg".into());
-        let signing_key = self
-            .read(&["config", "--get", "user.signingkey"])
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-            .filter(|s| !s.is_empty());
+        let prog = cfg("gpg.openpgp.program").or_else(|| cfg("gpg.program")).unwrap_or_else(|| "gpg".into());
         let mut cmd = Command::new(&prog);
-        cmd.current_dir(&self.root).args(["--status-fd=2", "--bsign", "-o", "-"]);
-        if let Some(k) = &signing_key {
-            cmd.args(["-u", k]);
+        cmd.current_dir(&self.root).args(["--batch", "--pinentry-mode", "error", "--detach-sign", "-o", "-"]);
+        if let Some(k) = cfg("user.signingkey") {
+            cmd.args(["-u", &k]);
         }
         cmd.env("LC_ALL", "C").env("GPG_TTY", "not a tty").env("PINENTRY_USER_DATA", "USE_CURSES=0");
-        match run_captured_raw(cmd, Some(b"test".to_vec()), Duration::from_secs(3), None, None, 64 << 10) {
+        match run_captured_raw(cmd, Some(b"commanddeck".to_vec()), Duration::from_secs(5), None, None, 64 << 10) {
             Ok(out) if matches!(out.exit, Exit::Code(Some(0))) => Ok(()),
-            Ok(out) if matches!(out.exit, Exit::TimedOut) => Err(classify_error("error: gpg failed to sign the data (timed out waiting for agent/pinentry)")),
-            Ok(out) => {
-                let err = String::from_utf8_lossy(&out.stderr);
-                Err(classify_error(&format!("error: gpg failed to sign the data\n{err}")))
+            Ok(out) if matches!(out.exit, Exit::TimedOut) => {
+                Err(classify_error("error: gpg failed to sign the data (no response from gpg-agent)"))
             }
+            Ok(out) => Err(classify_error(&format!(
+                "error: gpg failed to sign the data
+{}",
+                String::from_utf8_lossy(&out.stderr)
+            ))),
             Err(_) => Err(classify_error("error: gpg failed to sign the data (gpg executable not found)")),
         }
     }
@@ -1104,11 +1078,11 @@ impl Core {
         let _op = self.inner.git.op.lock();
         let args: &[&str] = match (discard, staged) {
             // Descartar um trecho não preparado na cópia de trabalho.
-            (true, _) => &["apply", "--reverse", "--recount", "--unidiff-zero", "-"],
+            (true, _) => &["apply", "--reverse", "--recount", "-"],
             // Tirar do stage um trecho que estava preparado.
-            (false, true) => &["apply", "--cached", "--reverse", "--recount", "--unidiff-zero", "-"],
+            (false, true) => &["apply", "--cached", "--reverse", "--recount", "-"],
             // Preparar um trecho da cópia de trabalho.
-            (false, false) => &["apply", "--cached", "--recount", "--unidiff-zero", "-"],
+            (false, false) => &["apply", "--cached", "--recount", "-"],
         };
         repo.write(args, Some(patch.as_bytes().to_vec()))?;
         Ok(())
@@ -1253,16 +1227,14 @@ impl Core {
             args.push("-m");
             args.push(msg);
         }
-        let out = repo.write(&args, None)?;
+        // Sem caminhos nossos: o `stash -u` chama o `git clean` por dentro e, com pathspecs literais,
+        // ele deixaria os não rastreados no lugar depois de guardá-los.
+        let mut cmd = repo.cmd(&args);
+        cmd.env_remove("GIT_LITERAL_PATHSPECS");
+        let out = run(cmd, None, WRITE_TIMEOUT)?;
         let text = summary(&out);
         if text.to_lowercase().contains("no local changes to save") {
             return Err(GitError::Failed("nenhuma alteração local para guardar no stash".into()));
-        }
-        // Em algumas instalações do Git for Windows sem utilitários MSYS no PATH (ex.: `search_path`
-        // restrito apenas a `Git/cmd`), `git stash push -u` grava o commit no stash mas não conclui o
-        // `clean` final dos não rastreados; garantimos a limpeza se o stash já contém `^3`.
-        if include_untracked && repo.read(&["rev-parse", "--verify", "-q", "stash@{0}^3"]).is_ok() {
-            let _ = repo.write(&["clean", "-fdq"], None);
         }
         Ok(text)
     }
@@ -1739,10 +1711,7 @@ mod tests {
         assert_eq!(blocks[1].theirs, ["B"]);
 
         let after0 = resolve_conflict_block_in_text(content, 0, ConflictChoice::Ours).expect("resolve 0");
-        assert_eq!(
-            after0,
-            "inicio\nnosso 1\nnosso 2\nmeio\n<<<<<<< HEAD\nA\n||||||| base\nO\n=======\nB\n>>>>>>> feat/x\nfim\n"
-        );
+        assert_eq!(after0, "inicio\nnosso 1\nnosso 2\nmeio\n<<<<<<< HEAD\nA\n||||||| base\nO\n=======\nB\n>>>>>>> feat/x\nfim\n");
         let after1 = resolve_conflict_block_in_text(&after0, 0, ConflictChoice::Both).expect("resolve 1");
         assert_eq!(after1, "inicio\nnosso 1\nnosso 2\nmeio\nA\nB\nfim\n");
     }
@@ -1762,8 +1731,20 @@ mod tests {
         assert_eq!(
             commits,
             [
-                GitCommit { hash: "aaaa1111".into(), short_hash: "aaaa".into(), author: "Ana".into(), date: "2 hours ago".into(), subject: "feat: x".into() },
-                GitCommit { hash: "bbbb2222".into(), short_hash: "bbbb".into(), author: "Bia".into(), date: "yesterday".into(), subject: "fix: y".into() },
+                GitCommit {
+                    hash: "aaaa1111".into(),
+                    short_hash: "aaaa".into(),
+                    author: "Ana".into(),
+                    date: "2 hours ago".into(),
+                    subject: "feat: x".into()
+                },
+                GitCommit {
+                    hash: "bbbb2222".into(),
+                    short_hash: "bbbb".into(),
+                    author: "Bia".into(),
+                    date: "yesterday".into(),
+                    subject: "fix: y".into()
+                },
             ]
         );
     }
@@ -1790,7 +1771,9 @@ mod tests {
             classify_error("fatal: could not read Username for 'https://github.com': terminal prompts disabled"),
             GitError::Auth(_)
         ));
-        let GitError::Auth(ssh_msg) = classify_error("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.") else {
+        let GitError::Auth(ssh_msg) =
+            classify_error("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.")
+        else {
             panic!("ssh auth")
         };
         assert!(ssh_msg.contains("ssh-agent") && ssh_msg.contains("ssh-add") && ssh_msg.contains("Start-Service ssh-agent"), "{ssh_msg}");
