@@ -6,26 +6,30 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use commanddeck_core::git::{valid_branch_name, DiffKind, EntryKind, GitBranch, GitDiff, GitEntry, GitStatus, RepoState};
+use commanddeck_core::git::{
+    valid_branch_name, ConflictChoice, DiffKind, EntryKind, GitBranch, GitCommit, GitDiff, GitEntry, GitStash, GitStatus, RepoState,
+};
 
+use super::git_views;
 use super::{clickable, frame, galley, galley_trunc, place, shadow, text_in, tip};
 use crate::deck::Deck;
-use crate::git_ui::{sections, GitView, OpenDiff, Row, Section};
+use crate::git_ui::{sections, BranchMenuMode, ConfirmAction, GitSubView, GitView, OpenDiff, Row, Section};
 use crate::icons::Icon;
 use crate::theme;
 
 const HEAD_H: f32 = 34.0;
 const BANNER_H: f32 = 24.0;
+const MODE_H: f32 = 24.0;
 const ROW_H: f32 = 22.0;
 const DIFF_ROW_H: f32 = 17.0;
 const DIFF_FONT: f32 = 12.0;
 const MSG_FONT: f32 = 13.0;
 const MSG_ROWS: f32 = 3.0;
-const BTN_H: f32 = 28.0;
+pub(super) const BTN_H: f32 = 28.0;
 pub const COMMIT_ID: &str = "git-commit-msg";
 
 /// O que foi clicado neste quadro.
-enum Act {
+pub(super) enum Act {
     Refresh,
     Init,
     Copy(String),
@@ -44,6 +48,26 @@ enum Act {
     ToggleAmend,
     Toggle(Section),
     DismissNotice,
+    SetSub(GitSubView),
+    /// Prepara/tira da preparação o trecho (hunk) `n` do diff aberto.
+    HunkStage(usize),
+    HunkDiscard(usize),
+    Continue,
+    AskAbort(RepoState),
+    MoreLog,
+    OpenCommit(GitCommit),
+    CloseCommit,
+    StashPush,
+    StashToggleUntracked,
+    OpenStash(GitStash),
+    CloseStash,
+    StashApply(usize),
+    StashPop(usize),
+    AskDropStash(GitStash),
+    OpenConflict(String),
+    CloseConflict,
+    ResolveFile(String, ConflictChoice),
+    ResolveBlock(String, usize, ConflictChoice),
 }
 
 fn letter_color(letter: char, section: Section) -> Color32 {
@@ -122,11 +146,11 @@ fn apply(deck: &mut Deck, ctx: &egui::Context, act: Act) {
         Act::Fetch => deck.git_fetch(),
         Act::Pull => deck.git_pull(),
         Act::Push => deck.git_push(),
-        Act::BranchMenu => deck.git_open_branch_menu(),
+        Act::BranchMenu => deck.git_open_branch_menu(BranchMenuMode::Switch),
         Act::Stage(p) => deck.git_stage(p),
         Act::Unstage(p) => deck.git_unstage(p),
         Act::UnstageAll => deck.git_unstage_all(),
-        Act::AskDiscard(e) => deck.git.confirm = Some(e),
+        Act::AskDiscard(e) => deck.git.confirm = Some(ConfirmAction::DiscardFile(e)),
         Act::OpenDiff(e, staged) => deck.git_open_diff(e, staged),
         Act::CloseDiff => deck.git.diff = None,
         Act::OpenFile(p) => deck.git_open_file(&p),
@@ -138,6 +162,25 @@ fn apply(deck: &mut Deck, ctx: &egui::Context, act: Act) {
             }
         }
         Act::DismissNotice => deck.git.notice = None,
+        Act::SetSub(v) => deck.git_set_subview(v),
+        Act::HunkStage(n) => deck.git_stage_or_unstage_hunk(n),
+        Act::HunkDiscard(n) => deck.git_ask_discard_hunk(n),
+        Act::Continue => deck.git_continue_op(),
+        Act::AskAbort(state) => deck.git.confirm = Some(ConfirmAction::AbortOp(state)),
+        Act::MoreLog => deck.git_load_log(true),
+        Act::OpenCommit(c) => deck.git_open_commit(c),
+        Act::CloseCommit => deck.git.commit_detail = None,
+        Act::StashPush => deck.git_stash_push(),
+        Act::StashToggleUntracked => deck.git.stash_include_untracked = !deck.git.stash_include_untracked,
+        Act::OpenStash(s) => deck.git_open_stash_diff(s),
+        Act::CloseStash => deck.git.stash_diff = None,
+        Act::StashApply(i) => deck.git_stash_apply(i),
+        Act::StashPop(i) => deck.git_stash_pop(i),
+        Act::AskDropStash(s) => deck.git.confirm = Some(ConfirmAction::DropStash(s)),
+        Act::OpenConflict(p) => deck.git_open_conflict(p),
+        Act::CloseConflict => deck.git.conflict_open = None,
+        Act::ResolveFile(p, c) => deck.git_resolve_conflict_file(p, c),
+        Act::ResolveBlock(p, i, c) => deck.git_resolve_conflict_block(p, i, c),
     }
 }
 
@@ -291,25 +334,7 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         banner(ui, rect, &mut y, label, theme::TEXT, false, acts);
         busy_bar(ui, Rect::from_min_max(Pos2::new(rect.min.x, y - 2.0), Pos2::new(rect.max.x, y)));
     }
-    match st.state {
-        RepoState::Normal => {}
-        RepoState::Merging => {
-            banner(ui, rect, &mut y, "Mesclagem em andamento: resolva os conflitos, prepare e faça o commit.", theme::OLLAMA, false, acts)
-        }
-        RepoState::Rebasing => banner(
-            ui,
-            rect,
-            &mut y,
-            "Rebase em andamento: continue ou aborte pelo terminal (git rebase --continue / --abort).",
-            theme::OLLAMA,
-            false,
-            acts,
-        ),
-        RepoState::CherryPicking => {
-            banner(ui, rect, &mut y, "Cherry-pick em andamento: resolva e faça o commit.", theme::OLLAMA, false, acts)
-        }
-        RepoState::Reverting => banner(ui, rect, &mut y, "Revert em andamento: resolva e faça o commit.", theme::OLLAMA, false, acts),
-    }
+    y += git_views::op_banner(ui, rect, y, st, busy, acts);
     if !st.prefix.is_empty() {
         let text = format!("Repositório em {} (a pasta de trabalho é a subpasta {})", st.root.display(), st.prefix.trim_end_matches('/'));
         banner(ui, rect, &mut y, &text, theme::MUTED, false, acts);
@@ -321,22 +346,34 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         banner(ui, rect, &mut y, &text, if error { theme::RED_TEXT } else { theme::MUTED }, true, acts);
     }
 
-    // ---------- Rodapé: commit ----------
-    let msg_h = MSG_ROWS * MSG_FONT * theme::LINE_HEIGHT + 14.0;
-    let footer_h = 8.0 + msg_h + 6.0 + BTN_H + 10.0;
-    let footer = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - footer_h), rect.max);
-    let staged = st.entries.iter().filter(|e| e.staged()).count();
-    commit_box(deck, ui, footer, msg_h, staged, busy, acts);
+    y += git_views::tab_strip(deck, ui, rect, y, st, acts);
 
-    // ---------- Meio: diff ou lista ----------
-    let body = Rect::from_min_max(Pos2::new(rect.min.x, y), Pos2::new(rect.max.x, footer.min.y));
-    if body.height() < 20.0 {
-        return;
+    // ---------- Rodapé: commit (só em Alterações) ----------
+    let changes_view = deck.git.subview == GitSubView::Changes;
+    let msg_h = MSG_ROWS * MSG_FONT * theme::LINE_HEIGHT + 14.0;
+    let footer_h = if changes_view { 8.0 + msg_h + 6.0 + BTN_H + 10.0 } else { 0.0 };
+    let footer = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - footer_h), rect.max);
+    if changes_view {
+        let staged = st.entries.iter().filter(|e| e.staged()).count();
+        commit_box(deck, ui, footer, msg_h, staged, busy, acts);
     }
-    if let Some(open) = deck.git.diff.clone() {
-        diff_view(deck, ui, body, &open, busy, acts);
-    } else {
-        lists(deck, ui, body, st, busy, acts);
+
+    // ---------- Meio: a visão escolhida ----------
+    let body = Rect::from_min_max(Pos2::new(rect.min.x, y), Pos2::new(rect.max.x, footer.min.y));
+    if body.height() >= 20.0 {
+        match deck.git.subview {
+            GitSubView::Changes => {
+                if let Some(open) = deck.git.diff.take() {
+                    diff_view(deck, ui, body, &open, busy, acts);
+                    deck.git.diff = Some(open);
+                } else {
+                    lists(deck, ui, body, st, busy, acts);
+                }
+            }
+            GitSubView::History => git_views::history(deck, ui, body, acts),
+            GitSubView::Stash => git_views::stash(deck, ui, body, st, busy, acts),
+            GitSubView::Conflicts => git_views::conflicts(deck, ui, body, st, busy, acts),
+        }
     }
 
     branch_menu(deck, ui.ctx(), branch_r, busy);
@@ -472,7 +509,7 @@ fn file_row(deck: &mut Deck, ui: &mut Ui, section: Section, i: usize, row: &crat
     let mut buttons: Vec<(&str, &str, Act)> = Vec::new();
     let path = row.entry.path.clone();
     match section {
-        Section::Conflicts => buttons.push(("+", "Marcar como resolvido (preparar)", Act::Stage(vec![path.clone()]))),
+        Section::Conflicts => buttons.push(("+", "Marcar como resolvido (prepara o arquivo como está)", Act::Stage(vec![path.clone()]))),
         Section::Staged => buttons.push(("−", "Tirar da preparação", Act::Unstage(vec![path.clone()]))),
         Section::Changes => {
             buttons.push(("+", "Preparar", Act::Stage(vec![path.clone()])));
@@ -539,7 +576,11 @@ fn file_row(deck: &mut Deck, ui: &mut Ui, section: Section, i: usize, row: &crat
         if resp.double_clicked() {
             acts.push(Act::OpenFile(row.entry.path.clone()));
         } else if resp.clicked() {
-            acts.push(Act::OpenDiff(row.entry.clone(), row.staged));
+            if section == Section::Conflicts {
+                acts.push(Act::OpenConflict(row.entry.path.clone()));
+            } else {
+                acts.push(Act::OpenDiff(row.entry.clone(), row.staged));
+            }
         }
     }
 }
@@ -618,11 +659,23 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
             let g = ui.painter().layout(e.clone(), theme::ui(12.5), theme::RED_TEXT, area.width() - 28.0);
             ui.painter_at(area).galley(area.min + Vec2::splat(14.0), g, theme::RED_TEXT);
         }
-        Some(Ok(diff)) => diff_lines(ui, area, diff),
+        Some(Ok(diff)) => {
+            // Trechos só valem para um arquivo rastreado e sem conflito.
+            let hunks =
+                (!matches!(entry.kind, EntryKind::Untracked | EntryKind::Unmerged)).then_some(HunkCtx { staged: open.staged, busy });
+            diff_lines(ui, area, diff, hunks, acts)
+        }
     }
 }
 
-fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff) {
+/// Botões por trecho (hunk) do diff: preparar/tirar e descartar.
+#[derive(Clone, Copy)]
+pub(super) struct HunkCtx {
+    staged: bool,
+    busy: bool,
+}
+
+pub(super) fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<HunkCtx>, acts: &mut Vec<Act>) {
     let mut notes: Vec<&str> = Vec::new();
     if diff.binary {
         notes.push("Arquivo binário: o conteúdo não é mostrado.");
@@ -644,7 +697,12 @@ fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff) {
         text_in(child.painter(), r.shrink2(Vec2::new(12.0, 0.0)), Align2::LEFT_CENTER, note, theme::ui(12.0), theme::OLLAMA);
     }
     let n = diff.lines.len();
-    egui::ScrollArea::both().id_salt("git-diff").auto_shrink([false, false]).show_rows(&mut child, DIFF_ROW_H, n, |ui, range| {
+    // Diff combinado (`@@@`, de um conflito) não vira patch de trecho.
+    let hunks = hunks
+        .filter(|_| !diff.binary && !diff.truncated && !diff.lines.iter().any(|l| l.kind == DiffKind::Hunk && l.text.starts_with("@@@")));
+    let id = ui.id().with(("git-diff", area.min.x as i32, area.min.y as i32));
+    egui::ScrollArea::both().id_salt(id).auto_shrink([false, false]).show_rows(&mut child, DIFF_ROW_H, n, |ui, range| {
+        let mut hunk_no = diff.lines[..range.start].iter().filter(|l| l.kind == DiffKind::Hunk).count();
         for line in &diff.lines[range] {
             let (r, _) = ui.allocate_exact_size(Vec2::new(content_w, DIFF_ROW_H), Sense::hover());
             let p = ui.painter();
@@ -674,9 +732,45 @@ fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff) {
                 font.clone(),
                 theme::with_opacity(theme::MUTED, 0.7),
             );
-            p.text(Pos2::new(r.min.x + gutter, r.center().y), Align2::LEFT_CENTER, &line.text, font.clone(), fg);
+            p.text(Pos2::new(r.min.x + gutter, r.center().y), Align2::LEFT_CENTER, line.text.trim_end_matches('\r'), font.clone(), fg);
+            if line.kind == DiffKind::Hunk {
+                if let Some(h) = hunks {
+                    hunk_buttons(ui, area, r, hunk_no, h, acts);
+                }
+                hunk_no += 1;
+            }
         }
     });
+}
+
+/// Botões do cabeçalho de um trecho, fixos na borda direita da área visível.
+fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut Vec<Act>) {
+    let (stage_label, stage_tip) = if h.staged {
+        ("Tirar", "Tira só este trecho da preparação")
+    } else {
+        ("Preparar", "Prepara só este trecho (git apply --cached)")
+    };
+    let mut right = area.max.x - 6.0;
+    let y = row.min.y + 1.0;
+    let ht = row.height() - 2.0;
+    let mut items: Vec<(&str, &str, bool)> = vec![(stage_label, stage_tip, false)];
+    if !h.staged {
+        items.push(("Descartar", "Descarta só este trecho da cópia de trabalho", true));
+    }
+    for (label, tooltip, danger) in items {
+        let g = galley(ui.painter(), label, theme::ui(11.0), theme::TEXT);
+        let w = g.size().x + 12.0;
+        let r = Rect::from_min_size(Pos2::new(right - w, y), Vec2::new(w, ht));
+        right = r.min.x - 4.0;
+        let id = Id::new(("git-hunk-btn", n, label));
+        let resp = if h.busy { ui.interact(r, id, Sense::hover()) } else { clickable(ui, r, id) };
+        let fg = if danger { theme::RED_TEXT } else { theme::TEXT };
+        ui.painter().rect_filled(r, 4.0, if resp.hovered() && !h.busy { theme::BORDER } else { theme::PANEL_2 });
+        text_in(ui.painter(), r, Align2::CENTER_CENTER, label, theme::ui(11.0), if h.busy { theme::with_opacity(fg, 0.4) } else { fg });
+        if tip(resp, tooltip).clicked() && !h.busy {
+            acts.push(if danger { Act::HunkDiscard(n) } else { Act::HunkStage(n) });
+        }
+    }
 }
 
 fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: usize, busy: bool, acts: &mut Vec<Act>) {
@@ -768,15 +862,26 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
     let matches = |b: &&GitBranch| low.is_empty() || b.name.to_lowercase().contains(&low);
     let locals: Vec<GitBranch> = deck.git.branches.iter().filter(|b| !b.remote).filter(matches).cloned().collect();
     let remotes: Vec<GitBranch> = deck.git.branches.iter().filter(|b| b.remote).filter(matches).cloned().collect();
-    let can_create = !filter.is_empty() && valid_branch_name(&filter) && !deck.git.branches.iter().any(|b| b.name == filter);
+    let mode = deck.git.branch_menu_mode;
+    let current = deck.git.status().and_then(|st| st.branch.clone());
+    let can_create = mode == BranchMenuMode::Switch
+        && !filter.is_empty()
+        && valid_branch_name(&filter)
+        && !deck.git.branches.iter().any(|b| b.name == filter);
     let row = 24.0;
     let rows = locals.len() + remotes.len() + usize::from(!locals.is_empty()) + usize::from(!remotes.is_empty()) + usize::from(can_create);
     let list_h = (rows.max(1) as f32 * row).min(300.0);
-    let h = 8.0 + 26.0 + 6.0 + list_h + 6.0;
+    let h = 8.0 + 26.0 + 6.0 + MODE_H + 6.0 + list_h + 6.0;
     let pos = super::menus::keep_on_screen(ctx, Pos2::new(anchor.min.x, anchor.max.y + 2.0), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut chosen: Option<GitBranch> = None;
     let mut create = false;
+    let mut new_mode: Option<BranchMenuMode> = None;
+    let hint = match mode {
+        BranchMenuMode::Switch => "Buscar ou criar branch…",
+        BranchMenuMode::Merge => "Buscar a branch a mesclar aqui…",
+        BranchMenuMode::Rebase => "Buscar a branch-base do rebase…",
+    };
     Area::new(Id::new("git-branch-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.5));
@@ -790,14 +895,42 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
             .frame(egui::Frame::NONE)
             .margin(egui::Margin { left: 8, right: 8, top: 4, bottom: 4 })
             .font(theme::ui(12.5))
-            .hint_text(egui::RichText::new("Buscar ou criar branch…").font(theme::ui(12.5)).color(theme::PLACEHOLDER))
+            .hint_text(egui::RichText::new(hint).font(theme::ui(12.5)).color(theme::PLACEHOLDER))
             .desired_width(fr.width() - 2.0)
             .show(&mut child);
         if !out.response.has_focus() && deck.git.branch_filter.is_empty() {
             out.response.request_focus();
         }
         let enter = out.response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-        let list = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, fr.max.y + 6.0), Vec2::new(w - 8.0, list_h));
+        // Trocar / Mesclar / Rebase.
+        let mut mx = rect.min.x + 8.0;
+        for (m, label, tooltip) in [
+            (BranchMenuMode::Switch, "Trocar", "Troca para a branch escolhida"),
+            (BranchMenuMode::Merge, "Mesclar", "Mescla a branch escolhida na branch atual (git merge)"),
+            (BranchMenuMode::Rebase, "Rebase", "Refaz a branch atual por cima da escolhida (git rebase)"),
+        ] {
+            let tw = galley(ui.painter(), label, theme::ui_semibold(11.5), theme::TEXT).size().x + 18.0;
+            let mr = Rect::from_min_size(Pos2::new(mx, fr.max.y + 6.0), Vec2::new(tw, MODE_H));
+            mx = mr.max.x + 4.0;
+            let resp = clickable(ui, mr, Id::new(("git-menu-mode", label)));
+            let on = m == mode;
+            ui.painter().rect_filled(
+                mr,
+                6.0,
+                if on {
+                    theme::BORDER
+                } else if resp.hovered() {
+                    theme::PANEL
+                } else {
+                    theme::PANEL_2
+                },
+            );
+            text_in(ui.painter(), mr, Align2::CENTER_CENTER, label, theme::ui_semibold(11.5), if on { theme::TEXT } else { theme::MUTED });
+            if tip(resp, tooltip).clicked() && !on {
+                new_mode = Some(m);
+            }
+        }
+        let list = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, fr.max.y + 6.0 + MODE_H + 6.0), Vec2::new(w - 8.0, list_h));
         let mut lc = ui.new_child(egui::UiBuilder::new().max_rect(list));
         lc.set_clip_rect(list);
         egui::ScrollArea::vertical().id_salt("git-branch-list").auto_shrink([false, false]).show(&mut lc, |ui| {
@@ -824,7 +957,9 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
                 for b in list {
                     let text = if b.current { format!("✓ {}", b.name) } else { format!("   {}", b.name) };
                     let color = if b.current { theme::TEXT } else { theme::SELECT_TEXT };
-                    if item(ui, &text, color, !b.current && !busy, ("b", &b.name)) {
+                    // Mesclar/rebase da branch atual nela mesma não faz sentido.
+                    let same = current.as_deref() == Some(b.name.as_str());
+                    if item(ui, &text, color, !b.current && !same && !busy, ("b", &b.name)) {
                         chosen = Some(b.clone());
                     }
                 }
@@ -839,8 +974,14 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
             create = true;
         }
     });
-    if let Some(b) = chosen {
-        deck.git_checkout(b);
+    if let Some(m) = new_mode {
+        deck.git_open_branch_menu_mode(m);
+    } else if let Some(b) = chosen {
+        match mode {
+            BranchMenuMode::Switch => deck.git_checkout(b),
+            BranchMenuMode::Merge => deck.git_merge_branch(b.name),
+            BranchMenuMode::Rebase => deck.git_rebase_onto(b.name),
+        }
     } else if create {
         deck.git_create_branch(filter);
     } else if ctx.input(|i| i.key_pressed(Key::Escape)) || super::menus::closes_on_outside(ctx, menu_rect, anchor) {
@@ -848,19 +989,64 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
     }
 }
 
-/// Confirmação antes de descartar (não dá para desfazer).
+/// Texto da confirmação: (título, detalhe, rótulo do botão perigoso).
+fn confirm_texts(action: &ConfirmAction) -> (String, String, &'static str) {
+    match action {
+        ConfirmAction::DiscardFile(entry) => {
+            if entry.kind == EntryKind::Untracked {
+                (
+                    format!("Apagar {}?", entry.path),
+                    "O arquivo não rastreado será removido do disco. Não dá para desfazer.".into(),
+                    "Apagar",
+                )
+            } else if entry.kind == EntryKind::Unmerged {
+                (
+                    format!("Descartar o conflito em {}?", entry.path),
+                    "O arquivo volta ao que está no commit atual (as alterações dos dois lados nele se perdem). Não dá para desfazer."
+                        .into(),
+                    "Descartar",
+                )
+            } else {
+                (
+                    format!("Descartar as alterações em {}?", entry.path),
+                    "O arquivo volta ao que está preparado/commitado. Não dá para desfazer.".into(),
+                    "Descartar",
+                )
+            }
+        }
+        ConfirmAction::DiscardHunk { path, .. } => (
+            format!("Descartar este trecho de {path}?"),
+            "O trecho volta ao que está preparado/commitado. Não dá para desfazer.".into(),
+            "Descartar",
+        ),
+        ConfirmAction::DropStash(s) => (
+            format!("Apagar o stash@{{{}}}?", s.index),
+            format!("\"{}\" será removido da lista. Não dá para desfazer.", s.message),
+            "Apagar",
+        ),
+        ConfirmAction::AbortOp(state) => {
+            let what = match state {
+                RepoState::Merging => "a mesclagem",
+                RepoState::Rebasing => "o rebase",
+                RepoState::CherryPicking => "o cherry-pick",
+                RepoState::Reverting => "o revert",
+                RepoState::Normal => "a operação",
+            };
+            (format!("Abortar {what}?"), "A branch volta ao estado de antes e o que foi resolvido até aqui se perde.".into(), "Abortar")
+        }
+    }
+}
+
+/// Confirmação antes de uma ação que não dá para desfazer.
 fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect) {
-    let Some(entry) = deck.git.confirm.clone() else { return };
-    let untracked = entry.kind == EntryKind::Untracked;
-    let title = if untracked { format!("Apagar {}?", entry.path) } else { format!("Descartar as alterações em {}?", entry.path) };
-    let detail =
-        if untracked { "O arquivo não rastreado será removido do disco." } else { "O arquivo volta ao que está preparado/commitado." };
+    let Some(action) = deck.git.confirm.clone() else { return };
+    let (title, detail, danger) = confirm_texts(&action);
     let w = (panel.width() - 40.0).clamp(220.0, 360.0);
     let pos = Pos2::new(panel.center().x - w / 2.0, panel.min.y + 60.0);
     let mut decided: Option<bool> = None;
     Area::new(Id::new("git-confirm")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let g1 = ui.painter().layout(title.clone(), theme::ui_semibold(13.0), theme::TEXT, w - 28.0);
-        let g2 = ui.painter().layout(format!("{detail} Não dá para desfazer."), theme::ui(12.0), theme::MUTED, w - 28.0);
+        let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), theme::MUTED, w - 28.0);
         let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + BTN_H + 14.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         shadow(ui.painter(), rect, 10, 10, 30, theme::rgba(0, 0, 0, 0.6));
@@ -870,7 +1056,6 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect) {
         y += g1.size().y + 6.0;
         ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g2.clone(), theme::MUTED);
         let by = rect.max.y - 14.0 - BTN_H;
-        let danger = if untracked { "Apagar" } else { "Descartar" };
         let dw = galley(ui.painter(), danger, theme::ui_semibold(12.0), theme::WHITE).size().x + 26.0;
         let d = Rect::from_min_size(Pos2::new(rect.max.x - 14.0 - dw, by), Vec2::new(dw, BTN_H));
         let cw = galley(ui.painter(), "Cancelar", theme::ui_semibold(12.0), theme::TEXT).size().x + 26.0;
@@ -888,7 +1073,7 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect) {
         }
     });
     match decided {
-        Some(true) => deck.git_discard_confirmed(),
+        Some(true) => deck.git_confirm_accepted(),
         Some(false) => deck.git.confirm = None,
         None => {}
     }

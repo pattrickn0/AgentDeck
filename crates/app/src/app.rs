@@ -473,7 +473,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-branches,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=settings,newtab,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -497,6 +497,65 @@ fn apply_debug_ui(deck: &mut Deck) {
                 if item == "git-branches" {
                     deck.git.branch_menu = true;
                     deck.git.branches = crate::git_ui::demo_branches();
+                }
+            }
+            "git-merging" | "git-rebase" | "git-conflicts" | "git-conflict-file" | "git-history" | "git-commit" | "git-stash"
+            | "git-stash-diff" | "git-branches-merge" | "git-hunks" => {
+                use crate::git_ui::{self as g, GitSubView};
+                deck.set_right_view(crate::deck::RightView::Git);
+                deck.git.debug_hold = true;
+                let mut st = g::demo_conflicts_status();
+                if item == "git-rebase" {
+                    st.state = commanddeck_core::git::RepoState::Rebasing;
+                    st.entries.retain(|e| e.kind != commanddeck_core::git::EntryKind::Unmerged);
+                }
+                if matches!(item, "git-history" | "git-commit" | "git-stash" | "git-stash-diff" | "git-hunks" | "git-branches-merge") {
+                    st = g::demo_status();
+                }
+                deck.git.view = g::GitView::Ready(st);
+                deck.git.message.clear();
+                match item {
+                    "git-merging" => deck.git.subview = GitSubView::Changes,
+                    "git-rebase" => deck.git.subview = GitSubView::Changes,
+                    "git-conflicts" | "git-conflict-file" => {
+                        deck.git.subview = GitSubView::Conflicts;
+                        if item == "git-conflict-file" {
+                            deck.git.conflict_open =
+                                Some(g::OpenConflict { path: "crates/core/src/git.rs".into(), file: Some(Ok(g::demo_conflict_file())) });
+                        }
+                    }
+                    "git-history" | "git-commit" => {
+                        deck.git.subview = GitSubView::History;
+                        deck.git.log = g::demo_log();
+                        deck.git.log_has_more = true;
+                        if item == "git-commit" {
+                            let c = g::demo_log().remove(0);
+                            deck.git.commit_detail = Some(g::OpenCommit {
+                                hash: c.hash,
+                                short_hash: c.short_hash,
+                                subject: c.subject,
+                                detail: Some(Ok(g::demo_commit_detail())),
+                            });
+                        }
+                    }
+                    "git-stash" | "git-stash-diff" => {
+                        deck.git.subview = GitSubView::Stash;
+                        deck.git.stashes = g::demo_stashes();
+                        if item == "git-stash-diff" {
+                            let stash = g::demo_stashes().remove(0);
+                            deck.git.stash_diff = Some(g::OpenStashDiff { stash, diff: Some(Ok(g::demo_diff())) });
+                        }
+                    }
+                    "git-hunks" => {
+                        let entry = g::demo_status().entries[2].clone();
+                        deck.git.diff = Some(g::OpenDiff { entry, staged: false, diff: Some(Ok(g::demo_hunks_diff())) });
+                    }
+                    "git-branches-merge" => {
+                        deck.git.branch_menu = true;
+                        deck.git.branch_menu_mode = g::BranchMenuMode::Merge;
+                        deck.git.branches = g::demo_branches();
+                    }
+                    _ => {}
                 }
             }
             "git-norepo" | "git-nogit" => {

@@ -92,10 +92,7 @@ pub enum ConfirmAction {
     /// Descartar arquivo inteiro.
     DiscardFile(GitEntry),
     /// Descartar um único trecho (hunk) da cópia de trabalho.
-    DiscardHunk {
-        path: String,
-        patch: String,
-    },
+    DiscardHunk { path: String, patch: String },
     /// Apagar um stash (`stash@{index}`).
     DropStash(GitStash),
     /// Abortar merge/rebase/cherry-pick/revert em andamento.
@@ -245,6 +242,8 @@ pub struct GitUi {
     pub log: Vec<GitCommit>,
     pub log_has_more: bool,
     pub log_loading: bool,
+    /// HEAD em que `log` foi lido: se o HEAD mudar, a lista é relida.
+    pub log_head: Option<String>,
     pub commit_detail: Option<OpenCommit>,
     /// Estado da visão Conflitos.
     pub conflict_open: Option<OpenConflict>,
@@ -283,6 +282,7 @@ impl Default for GitUi {
             log: Vec::new(),
             log_has_more: false,
             log_loading: false,
+            log_head: None,
             commit_detail: None,
             conflict_open: None,
             generation: 0,
@@ -402,11 +402,23 @@ impl Deck {
                         self.git.conflict_open = None;
                     }
                 }
-                // Atualiza a subvisão ativa quando o status muda.
-                match self.git.subview {
-                    GitSubView::History => self.git_load_log(false),
-                    GitSubView::Stash => self.git_load_stashes(),
-                    _ => {}
+                // Histórico e stash só são relidos quando mudaram (HEAD novo; outra quantidade de stashes).
+                if let Some(st) = self.git.status() {
+                    let (head, stashes) = (st.head.clone(), st.stash_count as usize);
+                    if !self.git.log.is_empty() && self.git.log_head != head {
+                        self.git.log.clear();
+                        self.git.log_has_more = false;
+                        self.git.commit_detail = None;
+                    }
+                    match self.git.subview {
+                        GitSubView::History if self.git.log.is_empty() => self.git_load_log(false),
+                        GitSubView::Stash if stashes != self.git.stashes.len() => self.git_load_stashes(),
+                        _ => {}
+                    }
+                    if stashes == 0 {
+                        self.git.stashes.clear();
+                        self.git.stash_diff = None;
+                    }
                 }
                 if std::mem::take(&mut self.git.status_dirty) {
                     self.git_refresh();
@@ -447,6 +459,9 @@ impl Deck {
                 self.git.log_loading = false;
                 match result {
                     Ok((commits, has_more)) => {
+                        if !append {
+                            self.git.log_head = self.git.status().and_then(|st| st.head.clone());
+                        }
                         if append {
                             self.git.log.extend(commits);
                         } else {
@@ -558,11 +573,8 @@ impl Deck {
         let Some(Ok(diff)) = &open.diff else { return };
         let Some(patch) = extract_hunk_patch(diff, hunk_index) else { return };
         let staged = open.staged;
-        let (label, busy) = if staged {
-            ("Trecho removido da preparação", "Removendo trecho…")
-        } else {
-            ("Trecho preparado", "Preparando trecho…")
-        };
+        let (label, busy) =
+            if staged { ("Trecho removido da preparação", "Removendo trecho…") } else { ("Trecho preparado", "Preparando trecho…") };
         self.git_run(label, busy, move |core| core.git_apply_hunk(&patch, staged, false).map(|_| String::new()));
     }
 
@@ -650,6 +662,11 @@ impl Deck {
         }
     }
 
+    /// Troca o que o menu de branches faz (trocar, mesclar ou rebase) sem fechá-lo.
+    pub fn git_open_branch_menu_mode(&mut self, mode: BranchMenuMode) {
+        self.git.branch_menu_mode = mode;
+    }
+
     pub fn git_checkout(&mut self, branch: GitBranch) {
         self.git.branch_menu = false;
         self.git.diff = None;
@@ -731,7 +748,8 @@ impl Deck {
 
     pub fn git_open_commit(&mut self, commit: GitCommit) {
         let hash = commit.hash.clone();
-        self.git.commit_detail = Some(OpenCommit { hash: hash.clone(), short_hash: commit.short_hash, subject: commit.subject, detail: None });
+        self.git.commit_detail =
+            Some(OpenCommit { hash: hash.clone(), short_hash: commit.short_hash, subject: commit.subject, detail: None });
         if self.git.debug_hold {
             return;
         }
@@ -745,6 +763,7 @@ impl Deck {
     // ---------- Conflitos ----------
 
     pub fn git_open_conflict(&mut self, path: String) {
+        self.git.subview = GitSubView::Conflicts;
         self.git.conflict_open = Some(OpenConflict { path: path.clone(), file: None });
         if !self.git.debug_hold {
             self.git_load_conflict_file(path);
@@ -765,9 +784,7 @@ impl Deck {
             ConflictChoice::Theirs => "Conflito resolvido (deles)",
             ConflictChoice::Both => "Conflito resolvido (ambos)",
         };
-        self.git_run(label, "Resolvendo conflito…", move |core| {
-            core.git_resolve_conflict_file(&path, choice).map(|_| String::new())
-        });
+        self.git_run(label, "Resolvendo conflito…", move |core| core.git_resolve_conflict_file(&path, choice).map(|_| String::new()));
     }
 
     pub fn git_resolve_conflict_block(&mut self, path: String, block_index: usize, choice: ConflictChoice) {
@@ -837,6 +854,19 @@ pub fn demo_diff() -> GitDiff {
     }
 }
 
+/// SOMENTE DEPURAÇÃO: diff com dois trechos (`COMMANDDECK_DEBUG_UI=git-hunks`).
+pub fn demo_hunks_diff() -> GitDiff {
+    let mut d = demo_diff();
+    let l = |kind, old, new, text: &str| DiffLine { kind, old, new, text: text.into() };
+    d.lines.extend([
+        l(DiffKind::Hunk, None, None, "@@ -80,3 +82,3 @@ ### Limites"),
+        l(DiffKind::Context, Some(80), Some(82), " | Regra | Valor |"),
+        l(DiffKind::Del, Some(81), None, "-| Profundidade máxima | 2 |"),
+        l(DiffKind::Add, None, Some(83), "+| Profundidade máxima de delegação | 2 |"),
+    ]);
+    d
+}
+
 /// SOMENTE DEPURAÇÃO: branches fictícias.
 pub fn demo_branches() -> Vec<GitBranch> {
     let b = |name: &str, remote: bool, current: bool| GitBranch { name: name.into(), remote, upstream: None, current };
@@ -876,7 +906,8 @@ pub fn demo_commit_detail() -> GitCommitDetail {
         author: "Ana".into(),
         email: "ana@commanddeck.dev".into(),
         date: "há 12 min".into(),
-        message: "fix(terminal): prazo da atualização sincronizada\n\nSolta a saída retida após 150 ms quando o fim do bloco se perde.".into(),
+        message: "fix(terminal): prazo da atualização sincronizada\n\nSolta a saída retida após 150 ms quando o fim do bloco se perde."
+            .into(),
         files: vec![('M', "crates/app/src/terminal/mod.rs".into()), ('M', "memory/GERAL.md".into())],
         diff: demo_diff(),
     }
@@ -898,10 +929,8 @@ pub fn demo_conflicts_status() -> GitStatus {
         0,
         GitEntry { path: "crates/core/src/git.rs".into(), orig_path: None, index: 'U', worktree: 'U', kind: EntryKind::Unmerged },
     );
-    st.entries.insert(
-        1,
-        GitEntry { path: "memory/GERAL.md".into(), orig_path: None, index: 'U', worktree: 'U', kind: EntryKind::Unmerged },
-    );
+    st.entries
+        .insert(1, GitEntry { path: "memory/GERAL.md".into(), orig_path: None, index: 'U', worktree: 'U', kind: EntryKind::Unmerged });
     st
 }
 

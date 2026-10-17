@@ -123,11 +123,19 @@ caminho, as conversas concluídas no último minuto (esmaecidas) e os agentes se
 O Mapa rola dentro da barra, que mantém a largura. Clicar num agente abre a aba dele.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
-- branch atual e menu de branches (buscar, trocar, criar); buscar, puxar (só avanço direto) e enviar
-  ("Publicar" quando a branch ainda não existe no remoto);
-- alterações em seções (conflitos, preparadas, alterações, não rastreados) com preparar (+), tirar (−) e
-  descartar (↶, com confirmação); clique abre o diff (rola dentro da barra, que mantém a largura), duplo clique abre o arquivo;
-- caixa de commit (Ctrl+Enter), com a opção de corrigir o último commit;
+- topo: branch atual e menu de branches (trocar, criar, **mesclar** ou fazer **rebase** da branch escolhida); buscar, puxar
+  (só avanço direto) e enviar ("Publicar" quando a branch ainda não existe no remoto);
+- merge, rebase, cherry-pick ou revert em andamento aparecem numa faixa no topo com **Continuar** (só sem conflitos) e **Abortar**;
+- quatro visões: **Alterações**, **Histórico**, **Stash** e, só quando há conflito, **Conflitos**;
+- Alterações: seções (conflitos, preparadas, alterações, não rastreados) com preparar (+), tirar (−) e descartar (↶, com
+  confirmação); clique abre o diff (rola dentro da barra), que tem **Preparar / Tirar / Descartar por trecho** (hunk);
+  duplo clique abre o arquivo; caixa de commit (Ctrl+Enter) com a opção de corrigir o último commit;
+- Histórico: commits da branch (hash, autor, data, assunto; "Carregar mais") e, ao clicar, o detalhe do commit (mensagem,
+  arquivos e diff);
+- Stash: guardar (com mensagem; opção de incluir não rastreados), ver o diff, aplicar, aplicar e apagar e apagar;
+- Conflitos: cada arquivo mostra os blocos com "o nosso", "o deles" ou "ambos" por bloco ou no arquivo inteiro, e "Marcar como resolvido";
+- commit com `commit.gpgsign` e chave travada falha na hora, explicando como destravar (o app não desliga a assinatura);
+  push/pull por ssh com chave com senha explicam o ssh-agent;
 - sem repositório: botão "Inicializar repositório"; sem git: o link para instalar.
 
 Atualiza sozinha quando o `.git/` muda (commit ou checkout feitos pelo terminal ou por um agente), quando a
