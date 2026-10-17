@@ -99,7 +99,7 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
-| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some nas abas Git e GitHub |
+| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, cinco abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão), **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some nas abas Tarefas, Git e GitHub |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
 que foi aberta (o terminal roda na pasta dele) e só aparece com ele na tela; trocar de projeto esconde as abas do
@@ -147,6 +147,22 @@ A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado
 Atualiza sozinha quando o `.git/` muda (commit ou checkout feitos pelo terminal ou por um agente), quando a
 pasta muda e quando a janela volta a ter foco. Nada de agentes por enquanto: tudo é manual.
 
+A aba **Tarefas** é a mesa de tarefas do projeto ativo (o projeto precisa ser um repositório git com ao menos um
+commit, e "Abrir abas dos agentes" ligado). Uma tarefa é um pedido que um agente executa numa branch e numa pasta
+(worktree) só dela; quando ele entrega o relatório, a tarefa espera a sua revisão:
+- **Lista** agrupada por estado: *Em revisão*, *Em andamento*, *Rascunho*, *Falhou* e *Concluídas* (mescladas e
+  descartadas, recolhidas até você abrir). Cada cartão mostra o estado (o ponto), `tN`, o título, o agente com o
+  modelo e o tempo ("pronta há 3 min"); na revisão, também o resumo do diff ("3 arquivos, +120 −8");
+- **+ Nova** abre o formulário: título, pedido, agente (os instalados), modelo ("Padrão" ou os conhecidos do
+  agente), base (a branch atual) e "Iniciar agora". Ctrl+Enter cria; sem "Iniciar agora" a tarefa fica em rascunho;
+- **Detalhe** (clicar no cartão; "←" volta): estado, `branch → base`, agente, o pedido, o relatório, as alterações
+  (resumo por arquivo e **Ver diff completo**, no mesmo desenho do diff da aba Git, só leitura) e o histórico. Os
+  botões dependem do estado: rascunho **Iniciar** e **Descartar**; em andamento **Ir para a aba** (ou **Reabrir
+  aba**, se você a fechou) e **Descartar**; em revisão **Mesclar em \<base>**, **Devolver** (escreve o que mudar e
+  envia ao agente), a aba e **Descartar**; com erro **Tentar de novo** e **Descartar**. Mesclar e descartar pedem
+  confirmação no painel; enquanto a operação roda os botões ficam desligados, e uma recusa (repositório com
+  alterações sem commit, conflito…) aparece numa faixa vermelha com a explicação do core.
+
 A aba **GitHub** mostra o repositório do remoto `origin` do projeto ativo (sem remoto do GitHub, ela só explica):
 - **PRs** abertos (número, título, autor, branch, rascunho e o estado dos checks), **Issues** abertas (sem os PRs) e
   as últimas execuções do **Actions**; clicar abre o detalhe embaixo, com os checks/jobs e, para o job vermelho, o
@@ -193,6 +209,8 @@ ela dura.
 - Mandar uma mensagem (com anexos ou áudio transcrito) para a aba ativa pelo compositor.
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
 - Ver no **Mapa** quem está conversando com quem neste momento.
+- Dar **tarefas** a agentes pela aba Tarefas (cada uma numa branch e pasta próprias), revisar o relatório e o diff e
+  **mesclar**, **devolver** com ajustes ou **descartar**.
 - Usar o **git** do projeto pela aba Git: alterações e diffs (inclusive por trecho), commit, histórico, stash,
   branches, merge/rebase com resolução de conflitos, buscar, puxar e enviar.
 - Ver **PRs, issues e execuções do Actions** do GitHub pela aba GitHub e mandar um PR, uma issue ou um job que

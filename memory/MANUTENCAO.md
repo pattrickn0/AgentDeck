@@ -60,9 +60,11 @@ crates/
 │   ├── agent_map.rs  mapa de conversas entre agentes em texto (render_map: função pura, com testes)
 │   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
 │   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
+│   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
+│   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, descartar, reabrir a aba)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
 │   ├── ui/           titlebar (barra de título + uso dos agentes em usage.rs), panes (janelas da tela dividida) + tabs (abas de cada janela), sidebar
-│   │                 (árvore), right_panel (barra direita: Conversa/Mapa/Git/GitHub), map, git, github, compositor, menus
+│   │                 (árvore), right_panel (barra direita: Tarefas/Conversa/Mapa/Git/GitHub), map, git, github, tasks, compositor, menus
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas)
 │   └── audio.rs      som de notificação e microfone (cpal)
 └── cli/    (commanddeck-cli)    ask-agent e ollama-agent
@@ -135,6 +137,19 @@ puros (slug, branch, mensagens ao agente, `exclude`) têm testes no próprio `ta
 `tests/tasks.rs` e `tests/tasks_bridge.rs` (cenário em `tests/support/tasks_env.rs`; a identidade do git vem de um
 `GIT_CONFIG_GLOBAL` do teste). Mudou o que o agente recebe ao iniciar? É `tasks::start_message`.
 
+**Mexer na aba Tarefas (interface).** O estado e as ações ficam em `crates/app/src/tasks_ui.rs`; a pintura, em
+`crates/app/src/ui/tasks.rs` (a pintura só *coleta* o que foi clicado em `Act`; `apply` aplica no fim do quadro).
+Toda chamada de tarefa do core roda git, então vai para `Deck::spawn_bg` e volta como `UiMsg::Tasks(geração, TaskReply)`
+(a geração muda a cada troca de projeto e descarta respostas do anterior); a lista é relida ao abrir a aba, a cada
+`CoreEvent::TasksChanged` e depois de cada ação. O número do ícone da aba é `TasksUi::review_count`. Quais botões cada
+estado tem é `actions_for` (função pura, com testes); o agrupamento da lista, o resumo do diff (`parse_diff_stat`) e os
+textos de tempo também. O diff completo vem de `Core::task_diff` e é desenhado por `ui::git::diff_lines`, o mesmo
+desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
+de novo; o terminal abre na worktree sozinho). Para ver sem git nem agentes: `COMMANDDECK_DEBUG_UI=tasks-demo` (ou
+`tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-diff`, `tasks-confirm`, `tasks-discard`,
+`tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` em `app.rs`).
+Para a largura mínima da barra, ponha `{"rightPanelWidth": 280}` em `cfg/config.json` da pasta de `COMMANDDECK_HOME`.
+
 **Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
 
 **Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O agente Ollama já consulta os provedores registrados.
@@ -149,7 +164,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`newtab`, `newtab-models:<agente>`, `map`, `map-demo`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `map`, `map-demo`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas
