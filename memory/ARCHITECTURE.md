@@ -11,7 +11,7 @@ Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com a
 | Janela/eventos | **winit 0.30** (loop próprio, `ApplicationHandler`) | pedido do projeto; controle total do loop e de DnD |
 | Render | **glutin + glow** com **egui** (`egui-winit` + `egui_glow`) | widgets prontos e estilização fina para reproduzir o CSS; OpenGL leve (roda até em Xvfb/llvmpipe para testes) |
 | Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação madura; o render da grade é nosso (pintado no egui) |
-| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/ask`, `/reply`, `/signal`; token por processo de agente + validação de Host |
+| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/ask`, `/reply`, `/signal`, `/tasks`; token por processo de agente + validação de Host |
 | Cliente HTTP | **ureq** (Ollama `/api/chat`, `/api/tags`, downloads) | bloqueante e simples, roda em threads |
 | Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
 | Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
@@ -72,6 +72,11 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
 | `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
+| `GET /tasks`, `GET /tasks/<id>` | as tarefas do projeto de quem chama (`{"tasks": […]}`, sem brief, relatório nem histórico) ou uma tarefa completa (`{"task": {…}}`); com o token mestre, `?project=<id>` escolhe o projeto. Qualquer token pode ler |
+| `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"base"][,"start"]}` → `{"task"}`: cria a tarefa (`kind` padrão `claude`; `start: true` já a inicia) e grava quem pediu como criador; 400 para título vazio, agente ou modelo inválidos, base que não é branch local ou projeto sem git/commit; se `start` falha, devolve o erro com a tarefa criada |
+| `POST /tasks/<id>/start`, `/merge`, `/discard` | `{}` → `{"task"}`: inicia, mescla ou descarta (409 se o estado não permite, se o repositório principal não está pronto ou se há conflito; 500 em erro do git) |
+| `POST /tasks/<id>/done` | `{"report"}` → `{"task"}`: o agente da tarefa entrega o relatório (só o dono da tarefa, ou o token mestre) |
+| `POST /tasks/<id>/return` | `{"feedback"}` → `{"task"}`: devolve a tarefa em revisão ao agente, com o feedback |
 
 Toda requisição exige o cabeçalho `x-commanddeck-token` (comparado em tempo constante) e um `Host`
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
@@ -164,6 +169,55 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
    descarta as perguntas dela. Ciclos de espera (A espera B, B espera C, C espera A) são recusados na hora
    (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
    digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
+
+**Tarefas** (`crates/core/src/tasks.rs`; ponte em `bridge.rs`, `ask-agent --task`). A unidade de trabalho do AgentDeck: um
+pedido (brief), um agente com modelo, uma worktree + branch próprias, um relatório, um diff e um ciclo de vida.
+
+```
+Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Merged
+  │                 ▲  ▲              │ └─discard──▶ Discarded (de qualquer estado não final)
+  │                 │  └───return─────┘
+  └─ erro ao iniciar ▶ Failed ──start de novo──▶ Running
+```
+
+- **Dados.** `Task { id (t1, t2…: contador por projeto, nunca reaproveitado), title, brief, status, base, branch
+  (tarefa/<id>-<slug>), worktree, kind, model, instance (<modelo>@<id>, ex.: claude@t3), creator, created_ms, started_ms,
+  finished_ms, report, diff_stat, error, events (últimos 200) }`. Ficam em `dados/tarefas/<projeto>.json`
+  (`{"version","next","tasks"}`), gravados por arquivo temporário + `rename`, uma gravação por vez, **fora do repositório do
+  usuário**; um arquivo ilegível é copiado para `….json.ilegivel-<ms>` antes de recomeçar. Remover o projeto não apaga o arquivo.
+- **Worktrees.** Em `<raiz do repositório>/.agentdeck/worktrees/<id>` (dentro do repositório de propósito: agentes confinados
+  ao workspace, como o Antigravity, conseguem chegar lá). Na primeira tarefa iniciada, `/.agentdeck/` entra uma vez em
+  `<git comum>/info/exclude` (nunca no `.gitignore`); o explorador e o watcher ignoram a pasta. O core só apaga pastas que
+  estejam mesmo dentro de `.agentdeck/worktrees`.
+- **Iniciar** (`Core::task_start`, só com as abas dos agentes ligadas: tarefas não rodam em headless). `git worktree add -b
+  <branch> <pasta> <base>`; registra a instância `<modelo>@<id>` com o modelo da tarefa (`models.rs`); quem criou a tarefa,
+  se for um agente aberto, vira o chefe da instância (`ask-agent --boss` chega nele); `agents::spawn_spec_for` abre o terminal
+  **na worktree** (`Core::task_cwd`: tarefa em andamento ou em revisão); o brief mais as regras da tarefa (trabalhar só na
+  worktree, commits pequenos, nada de merge nem push, `ask-agent --task done <id> -` ao terminar, dúvidas ao chefe) vão
+  para a aba por `CoreEvent::Deliver { request: 0 }`, o mesmo caminho das mensagens entre agentes (fila e regras de `delivery.rs`,
+  sem esperar resposta). Erro ao iniciar = `Failed` com a mensagem; `start` de novo tenta outra vez.
+- **Relatório** (`task_done`): só `Running`; guarda o relatório e `git diff --stat base...branch`, vai a `Review` e avisa se
+  a worktree tem trabalho sem commit. **Devolver** (`task_return`): `Review → Running`, entrega o feedback (a aba é reaberta
+  se foi fechada).
+- **Mesclar** (`task_merge`): só `Review` (ou `Failed` com relatório, para repetir). No repositório principal recusa, sem mudar
+  nada e com a explicação, se ele não está na base, está no meio de outra operação, tem alterações sem commit em arquivos
+  rastreados (o `AGENTS.md`, que o app reescreve, não conta; o git ainda protege o arquivo se a mesclagem o tocar), se a worktree da
+  tarefa tem trabalho sem commit ou se a branch não tem commits novos. Depois `git merge --no-ff -m "Merge tarefa <id>: <título>"`.
+  Conflito: `git merge --abort`, a tarefa continua em `Review` e a mensagem lista os arquivos. Sucesso: fecha a aba
+  (`CoreEvent::CloseInstance`), `git worktree remove --force` (com tentativas, porque no Windows o terminal ainda segura a
+  pasta logo depois de a aba fechar), `git branch -d`, `Merged`. Erro inesperado do git = `Failed`.
+- **Descartar** (`task_discard`): qualquer estado não final; fecha a aba, remove a worktree à força (mesmo que a pasta já tenha
+  sumido) e a branch (`-D`), `git worktree prune`, `Discarded`. Sem repositório disponível, só o registro muda.
+- **Permissões na ponte** (`bridge::task_permission`). O **agente de uma tarefa** (a instância `<modelo>@<id>` de uma tarefa
+  em andamento ou em revisão) só consulta (`GET`) e entrega o relatório da **própria** tarefa; criar, iniciar, devolver, mesclar e
+  descartar dão 403, e entregar o relatório de outra tarefa também. Qualquer outro agente faz o resto, menos entregar relatório
+  por outro. O token mestre (nenhum agente o recebe) pode tudo. O projeto vem do token.
+- **Erros** (`TaskError` → HTTP): `Invalid` 400, `NotFound` 404, `Conflict` 409, `Failed` 500.
+- **Para a interface** (`Core`, tudo bloqueante: chame numa thread): `tasks(projeto)`, `task(projeto, id)`,
+  `task_of_instance(projeto, instância)`, `task_create(projeto, TaskSpec)`, `task_start`, `task_done`, `task_return`,
+  `task_merge`, `task_discard`. Eventos: `CoreEvent::TasksChanged { project }` a cada gravação (também as vindas da ponte) e
+  `CoreEvent::CloseInstance { project, id }` quando o core encerra a instância (a interface fecha a aba). Reabrir a aba de uma
+  tarefa em andamento é abrir a instância dela (`restore_instance` + aba): o terminal já abre na worktree.
 
 **Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
 bloqueantes; a UI chama numa thread):
