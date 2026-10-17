@@ -31,9 +31,15 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
 2. **Mesa de tarefas** (fase A — core, ponte e CLI — feita em 2026-10-17; falta a fase B, a interface) no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
    acompanhar, receber o relatório, revisar o diff e mesclar ou descartar com um botão. É o fluxo que hoje o
    orquestrador faz à mão.
-3. **Memória em duas camadas.** Longo prazo: avaliar o Trail-Code (MIT, arquivos, mapa do código + "aprendizados"
-   versionados; hooks no Claude Code e MCP para os outros). Curto prazo: o pedido da tarefa, as decisões e a
-   atividade recente entregues ao agente pelo app (o "ponto único de injeção de contexto" da seção 2 de
+3. **Memória em duas camadas, nossa.** Longo prazo: "aprendizados" em markdown versionado no repositório, com
+   frontmatter que diz que arquivos tocam (`touches`), entregues ao agente quando a tarefa dele mexe nesses arquivos;
+   e um resumo da API de um arquivo (estilo `skeleton`) para o agente ler menos. Curto prazo: o pedido da tarefa, as
+   decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto" da seção 2 de
    [pendencias.md](pendencias.md)).
+   - **Trail-Code avaliado em 2026-10-17 e não adotado como dependência.** O `skeleton` é bom (−87% de tokens), mas
+     o `ask` é léxico e não ganhou do `grep`, o `callers` não resolve chamadas de método entre crates em Rust, o `init`
+     escreve hooks no `~/.claude` global (afeta todos os repositórios) mesmo com `--no-global`, e toda saída dele
+     manda o agente anunciar ao usuário os tokens economizados (texto de terceiro dirigindo o agente). Ficamos com as
+     ideias: aprendizados versionados com `touches` e o resumo de API.
 4. **Renomear para AgentDeck** (executáveis, variáveis `COMMANDDECK_*`, pasta de dados, marcadores do `AGENTS.md`),
    com migração, depois da mesa de tarefas.
