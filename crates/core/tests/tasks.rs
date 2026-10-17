@@ -224,6 +224,32 @@ fn done_stores_the_report_and_the_diff_stat() {
 }
 
 #[test]
+fn task_diff_shows_only_what_the_branch_brought() {
+    use commanddeck_core::git::DiffKind;
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = core.task_create(&env.project, spec("Diff")).expect("create");
+    // Rascunho: a branch ainda não existe.
+    assert!(matches!(core.task_diff(&env.project, &t.id), Err(TaskError::Conflict(_))));
+    assert!(matches!(core.task_diff(&env.project, "t9"), Err(TaskError::NotFound(_))));
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    commit_file(&t.worktree, "novo.rs", "fn main() {}\n", "feat: novo");
+    // A base anda depois que a tarefa saiu: o diff `base...branch` não mostra o que a base ganhou.
+    commit_file(&env.ws, "da_base.txt", "só na base\n", "chore: base");
+    let diff = core.task_diff(&env.project, &t.id).expect("diff");
+    assert!(!diff.truncated && !diff.binary);
+    let added: Vec<&str> = diff.lines.iter().filter(|l| l.kind == DiffKind::Add).map(|l| l.text.as_str()).collect();
+    assert_eq!(added, ["+fn main() {}"], "{:?}", diff.lines);
+    let meta = diff.lines.iter().filter(|l| l.kind == DiffKind::Meta).map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+    assert!(meta.contains("novo.rs") && !meta.contains("da_base.txt"), "{meta}");
+    // Descartada: a branch some, o diff também.
+    core.task_discard(&env.project, &t.id).expect("discard");
+    assert!(matches!(core.task_diff(&env.project, &t.id), Err(TaskError::Conflict(_))));
+    core.shutdown();
+}
+
+#[test]
 fn return_sends_the_feedback_and_goes_back_to_running() {
     need_git!();
     let env = start();

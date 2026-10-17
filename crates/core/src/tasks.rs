@@ -798,6 +798,29 @@ impl Core {
         Ok(task)
     }
 
+    // ---------- Diff ----------
+
+    /// O diff completo da tarefa (`git diff base...branch`, só o que a branch trouxe), no mesmo formato
+    /// do diff da aba Git, para a interface mostrar. Só leitura: não toma a trava das operações. Falha
+    /// com `Conflict` se a branch já não existe (tarefa mesclada ou descartada).
+    pub fn task_diff(&self, project: &str, id: &str) -> Result<crate::git::GitDiff, TaskError> {
+        let task = self.task_or_404(project, id)?;
+        let repo = self.task_repo(project)?;
+        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) {
+            return Err(TaskError::Failed(format!("dados da tarefa {} fora do esperado; não li o diff", task.id)));
+        }
+        if repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{}", task.branch)]).is_err() {
+            return Err(TaskError::Conflict(format!("a branch {} não existe mais: não há diff para mostrar", task.branch)));
+        }
+        let range = format!("{}...{}", task.base, task.branch);
+        let out = run(repo.cmd(&["diff", "--no-color", "--no-ext-diff", "-M", &range, "--"]), None, WRITE_TIMEOUT).map_err(git_error)?;
+        let cut = out.stdout.len() > crate::git::DIFF_MAX_BYTES;
+        let bytes = &out.stdout[..out.stdout.len().min(crate::git::DIFF_MAX_BYTES)];
+        let mut diff = crate::git::parse_diff(&String::from_utf8_lossy(bytes), crate::git::DIFF_MAX_LINES);
+        diff.truncated |= cut;
+        Ok(diff)
+    }
+
     // ---------- Devolver ----------
 
     /// Revisão pediu ajustes: `Review` volta a `Running` e o feedback é entregue ao agente (a aba é
