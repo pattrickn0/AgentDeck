@@ -70,6 +70,20 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - [ ] Fechar a aba de quem perguntou no meio da espera: nada trava; a outra aba segue normal.
 - [ ] Cadeia longa: A pergunta a B, B a C, e C tenta perguntar a um quarto agente → recusado com "profundidade máxima" (o limite é 2 saltos).
 
+**Novidade: modelo por instância ★**
+
+- [ ] `ask-agent --model sonnet claude@dev "diga oi"` de dentro de uma aba: abre "Claude · Dev" com o sufixo `sonnet` no cabeçalho e na barra lateral; o Claude mostra Sonnet (`/status`).
+- [ ] Repetir com `--model opus` e a aba aberta: 409 `claude@dev já está aberta com sonnet; use --new para abrir outra com opus`. Com o mesmo modelo, ou sem `--model`, a entrega é normal. Com `--new --model opus`, abre `claude@dev@ana` com opus.
+- [ ] `ask-agent --model opencode/big-pickle opencode "oi"`: a aba do OpenCode abre com "Big Pickle" na linha de status. Sem `--model`, abre com o padrão de sempre.
+- [ ] `ask-agent --model x aider "oi"`: 400 "o agente aider não aceita escolher modelo". `--model "a b"`: "modelo inválido".
+- [ ] `ask-agent --list` e `--team` mostram `claude@dev (sonnet)`.
+- [ ] `"roleModels": {"claude@dev": "sonnet"}` no config.json: abrir `claude@dev` já usa sonnet, `claude@qa` cai no padrão e um `--model` explícito vence.
+- [ ] Reabrir o app: as abas voltam com o mesmo modelo. Renomear mantém o modelo, e fechar a aba apaga a entrada de `tabModels`.
+- [ ] "+ Novo agente" › do Claude lista Padrão, opus, sonnet, haiku, fable. O › do OpenCode e do Antigravity mostra "Carregando modelos…" e depois a lista (sem CLI ou rede, só "Padrão"). Clicar no nome abre com o padrão.
+- [ ] Clique direito numa aba com modelo mostra "Modelo: <m>" no alto do menu.
+- [ ] Antigravity com `--model claude-sonnet-5-5-medium`: o rodapé do agy mostra "Claude Sonnet 5.5 · medium".
+- [ ] Codex com `--model <m>` (se instalado): abre com o modelo e o aviso de fim de turno continua funcionando.
+
 ## 5. Quando a mensagem é digitada na aba ★
 
 - [ ] Enquanto **você digita** algo (sem Enter) na aba de um agente, uma pergunta de outro agente **não é digitada no meio** (espera ~20 s sem teclas).

@@ -108,6 +108,7 @@ Proposta:
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
 - [ ] No headless, aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] A ponte sem interface ainda usa o modo headless: não aparece nas abas.
+- [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
 
 ## 7. Git
 
@@ -121,6 +122,13 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
+- [x] **Modelo de LLM por instância** (branch `feat/modelo-por-agente`, dev Sonnet; desenho do orquestrador):
+  - O modelo fica ao lado do id (`ProjectCfg.tabModels`) e vale nesta ordem: o pedido (`ask-agent --model`, menu), o salvo, o `Config.roleModels` (`"claude@dev": "sonnet"`) e por fim o padrão do CLI.
+  - Chega ao `--model` no claude, agy e codex. No OpenCode, a aba abre com `--standalone` e `OPENCODE_CONFIG_CONTENT`, e o headless usa `run -m`.
+  - Modelo diferente numa instância aberta dá 409 explícito, sugerindo `--new`.
+  - Aparece na aba, na barra lateral, em `--list` e em `--team`, e o "+ Novo agente" tem um segundo passo com os modelos conhecidos (`agy models`, `opencode models`, numa thread com cache).
+  - Módulo `core/models.rs`.
+- [x] **Revisão do `core/github.rs` por modelos gratuitos do OpenCode**, com achados conferidos: a credencial do remoto não vaza mais na mensagem, os logs do ureq ficam no máximo em DEBUG, as cotas da API estão separadas por login e só o 410 vira lista vazia de issues. Também foi corrigido o teste instável do 401 (RST do Windows).
 - [x] **Integração com o GitHub** (branch `claude/github`, dev Sonnet a partir do wip do antigravity@github): aba GitHub na barra direita com PRs (e os checks), issues e execuções do Actions, jobs e o fim do log do job vermelho. "Abrir no navegador" e "Enviar para agente…", que entrega uma mensagem pronta pela fila de entrega (`Deck::send_to_instance`, abrindo `modelo@cargo` se preciso). API REST com o token do Git Credential Manager (`git credential fill`) ou do `gh`, só em memória; sem login, repositório público com 60/h. Conferido ao vivo com o repositório do projeto. Módulo `core/github.rs` com testes sem rede.
 - [x] **Git completo e bugs de git da auditoria** (branch `claude/git`, dev Sonnet a partir do wip do antigravity@git):
   - Stash: guardar, com ou sem os não rastreados, listar, ver o diff, aplicar, pop e apagar.
