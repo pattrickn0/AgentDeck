@@ -12,8 +12,8 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - Os números entre parênteses (ex.: 202, 409) são só referência para quem for corrigir.
 - Itens com ★ são os mais importantes (mudanças grandes que ainda não rodaram no Windows).
 
-**Novidades desta rodada** (comece por elas): **15. Agentes em árvore e equipe** e **16. Auditoria de 2026-10-15**.
-Depois, o que falta em **13. Barra de título** e **14. Projetos**.
+**Novidades desta rodada** (comece por elas): as novidades do **7. Git**, o **7b. GitHub** e a **16. Auditoria de
+2026-10-15**. Depois, **15. Agentes em árvore e equipe** e o que falta em **13. Barra de título** e **14. Projetos**.
 
 ---
 
@@ -109,6 +109,32 @@ Com a pasta de trabalho num repositório git:
 - [ ] Pasta que não é repositório: aparece "Inicializar repositório" e funciona.
 - [ ] (Se possível) sem git instalado / fora do PATH: aparece a mensagem com o link de instalação.
 - [ ] Observar: o `AGENTS.md` da pasta aparece como alterado (já conhecido, está em pendências).
+
+**Novidades: trechos, histórico, stash, merge/rebase e conflitos ★**
+
+- [ ] Diff de um arquivo com duas regiões alteradas: "Preparar" num trecho deixa o arquivo nas duas seções (preparado e alterações); "Tirar" o devolve; "Descartar" no outro trecho pede confirmação e mantém o primeiro. Os botões não cobrem o texto do cabeçalho `@@`.
+- [ ] O mesmo teste de trecho num arquivo com fim de linha CRLF (`autocrlf=false`).
+- [ ] Menu da branch, "Mesclar" uma branch com conflito: aparecem a faixa "Mesclagem · N conflito(s)" e a aba "Conflitos". "Continuar" fica desativado até resolver tudo; "Abortar" pede confirmação e restaura o estado.
+- [ ] Conflitos: "O nosso" num bloco e "O deles" noutro; "Marcar como resolvido" só fica ativo depois; "Continuar" conclui o merge; "Abrir" abre o arquivo no programa padrão.
+- [ ] O mesmo fluxo com "Rebase" (Continuar e Abortar).
+- [ ] Conflito "nós apagamos / eles alteraram": "Nosso" ou "Deles" no arquivo inteiro resolve; ↶ na seção Conflitos descarta com confirmação.
+- [ ] Histórico: lista com autor e data; "Carregar mais" traz mais 50; clicar abre o detalhe (mensagem, arquivos, diff); depois de um commit novo a lista é relida.
+- [ ] Stash: "Guardar" com mensagem e "Incluir não rastreados" tira os arquivos da pasta (o arquivo novo some e volta ao Aplicar). "Aplicar e apagar" remove da lista; "Apagar" pede confirmação.
+- [ ] gpgsign: com `commit.gpgsign=true` e a chave travada, o commit falha em menos de ~5 s com a explicação, sem diálogo de senha. Depois de `echo teste | gpg --clearsign` numa aba, o commit passa.
+- [ ] Push/pull por ssh com chave com senha fora do ssh-agent: "falha de autenticação" com o passo a passo do ssh-agent.
+- [ ] Descartar (↶) uma pasta não rastreada com `.git` dentro: apaga a pasta.
+
+## 7b. GitHub ★
+
+- [ ] Aba GitHub (4º ícone da barra direita) num projeto com `origin` do GitHub: mostra `dono/repo`, a bolinha verde (login do GCM) e as listas PRs / Issues / Actions com contagens; o selo do ícone mostra o nº de PRs abertos; o compositor some na aba.
+- [ ] Projeto sem `origin` ou com remoto fora do GitHub: a aba diz "Sem repositório no GitHub" e explica; "Tentar de novo" funciona depois de adicionar o remoto.
+- [ ] Clicar num PR abre o detalhe embaixo (checks/jobs). Com job vermelho, o fim do log abre sozinho, rola nos dois sentidos sem alargar a barra e destaca as linhas de erro. "Log", "Corrigir ▾" e ↗ do job funcionam; o X volta à lista.
+- [ ] "Atualizar" (ou abrir a aba depois de 60 s) relê os dados. Sem rede, a lista anterior continua e aparece a faixa de erro vermelha (fechável).
+- [ ] Sem login: faixa "Sem login (60 por hora)". Num repositório privado, mensagem 404 explicando como entrar. O log de job pede login.
+- [ ] "Abrir no navegador" (PR, issue, execução, job, repositório) abre a página certa.
+- [ ] "Enviar para agente ▾" num PR, issue ou job vermelho: escolher uma aba aberta digita a mensagem pronta quando ela fica livre (não no meio da sua digitação); escolher modelo + cargo (ex.: claude@review) abre a aba se não existir e entrega; a mensagem aparece na Conversa integrada.
+- [ ] Trocar de projeto com a aba aberta limpa a lista e lê o repositório do novo projeto.
+- [ ] Barra direita no mínimo (280 px): nada corta além das reticências; janela baixa não derruba o app.
 
 ## 8. Segurança e ambiente
 

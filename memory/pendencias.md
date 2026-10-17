@@ -93,12 +93,7 @@ Proposta:
 
 ## 6. Novas funcionalidades (comparação com o Orca)
 
-- [ ] **Integração com o GitHub (PRs, issues e Actions).**
-  - Listar e abrir PRs e issues do repositório do workspace, ver o estado das Actions (checks) de cada PR e o log de um job que falhou.
-  - Ações diretas: mandar um PR, uma issue ou um job vermelho para um agente (ex.: "claude@review, revise o PR #12"; "claude@dev, corrija este job").
-  - Caminho mais simples: usar o `gh` já autenticado na máquina (`gh pr list --json`, `gh run view --log-failed`), sem guardar token no app; alternativa: API REST com token no cofre do sistema.
-  - Novo módulo no core (ex.: `github.rs`) chamado fora da thread da interface; painel próprio na barra lateral.
-  - Depende de o workspace ser um repositório git (hoje não há nada de git no código).
+- [ ] **GitHub, depois:** comentar e aprovar PRs, criar issue e reexecutar um job pelo app (hoje é só leitura + "Enviar para agente"); o caminho `gh auth token` não foi exercitado (o `gh` não está instalado aqui).
 - [ ] **Editor de arquivos.** Abrir e editar arquivos do workspace dentro do app, em vez de mandar para o programa padrão do sistema (`Core::open_path`).
   - egui não tem editor de código pronto: avaliar `egui_extras::syntax_highlighting`/`syntect` para realce, ou um componente de editor de terceiros.
   - Mínimo útil: abas de arquivo ao lado das abas de terminal, realce de sintaxe, salvar (Ctrl+S), aviso quando um agente alterar o arquivo aberto (o watcher de `workspace.rs` já avisa) e pré-visualização de Markdown.
@@ -117,21 +112,26 @@ Proposta:
 ## 7. Git
 
 - [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). Continua aparecendo quando a lista de agentes muda (outra máquina, outros modelos do Ollama) e, em repositório sem `AGENTS.md`, como não rastreado. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
-- [ ] Ssh com senha na chave: hoje o push/pull falha com "falha de autenticação" (o `BatchMode` evita travar); orientar a usar o ssh-agent.
-- [ ] Stash, preparar por trecho (hunk), editor de conflitos, histórico (log), merge/rebase pela interface.
-- [ ] Integração com o GitHub (PRs, issues, Actions) — ver a seção 6.
+- [ ] Com `commit.gpgsign` e pinentry gráfico, a chave travada é recusada na hora (com a explicação de como destravar numa aba) em vez de abrir o diálogo de senha. Avaliar deixar o diálogo abrir quando houver pinentry gráfico.
 
-## 8. Auditoria de 2026-10-15 — achados confirmados ainda abertos
+## 8. Auditoria de 2026-10-15
 
-Revisão com quatro revisores Claude (core da ponte, Deck/interface, terminal/CLIs, barra direita/Ollama) e o
-Antigravity (git, workspace, download, Whisper, uso; relatório em `dados/anexos/revisao-antigravity.md`). O que
-foi corrigido está em "Concluído"; abaixo, o que ficou, por área.
-
-**Git** (em andamento na branch `claude/git`)
-- [ ] Descartar arquivo em conflito (`Unmerged`) falha; pasta não rastreada com `.git` dentro precisa de `-ffd`; `diff --cc` (conflito) mal interpretado.
-- [ ] `commit.gpgsign` sem agente gráfico: o commit espera o timeout de 120 s (o erro já é explicado depois).
+Todos os achados foram corrigidos (ver "Concluído"). Relatório do Antigravity em `dados/anexos/revisao-antigravity.md`;
+a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem saída) ficou de fora.
 
 ## Concluído
+
+- [x] **Integração com o GitHub** (branch `claude/github`, dev Sonnet a partir do wip do antigravity@github): aba GitHub na barra direita com PRs (e os checks), issues e execuções do Actions, jobs e o fim do log do job vermelho. "Abrir no navegador" e "Enviar para agente…", que entrega uma mensagem pronta pela fila de entrega (`Deck::send_to_instance`, abrindo `modelo@cargo` se preciso). API REST com o token do Git Credential Manager (`git credential fill`) ou do `gh`, só em memória; sem login, repositório público com 60/h. Conferido ao vivo com o repositório do projeto. Módulo `core/github.rs` com testes sem rede.
+- [x] **Git completo e bugs de git da auditoria** (branch `claude/git`, dev Sonnet a partir do wip do antigravity@git):
+  - Stash: guardar, com ou sem os não rastreados, listar, ver o diff, aplicar, pop e apagar.
+  - Preparar, tirar e descartar por trecho, inclusive em arquivo CRLF.
+  - Histórico paginado, com o detalhe do commit.
+  - Merge e rebase pelo menu de branches, com a faixa "em andamento" e continuar/abortar (também para cherry-pick e revert).
+  - Aba de conflitos: o nosso, o deles ou ambos, por bloco ou no arquivo inteiro; marcar como resolvido; abrir no programa do sistema.
+  - Bugs: descartar arquivo em conflito restaura do HEAD; pasta com `.git` usa `clean -ffd`; o `diff --cc` é lido certo.
+  - O gpgsign falha na hora, com a explicação, quando a chave está travada.
+  - A falha de ssh explica o ssh-agent, com os comandos para Windows e Linux.
+- [x] Captura de tela (`COMMANDDECK_SMOKE`) não começa mais o download do Whisper; cada pasta temporária baixava até 1,6 GB.
 
 - [x] **Auditoria: workspace, download, Whisper e uso** (branch `claude/infra`, dev Sonnet a partir do wip do antigravity@infra):
   - O watcher acompanha o git dir real (worktree, submódulo, subpasta) e trata `\\?\` e a caixa da unidade.

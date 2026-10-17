@@ -182,7 +182,8 @@ impl App {
         if self.frames == 1 {
             glw.window.set_visible(true);
         }
-        if self.frames == self.core_frame {
+        // Captura (COMMANDDECK_SMOKE) não baixa o whisper: cada pasta temporária começaria 1,6 GB.
+        if self.frames == self.core_frame && std::env::var_os("COMMANDDECK_SMOKE").is_none() {
             // Modelos/binários do whisper em segundo plano, depois do primeiro quadro.
             if let Some(core) = &self.core {
                 core.ensure_whisper_async();
