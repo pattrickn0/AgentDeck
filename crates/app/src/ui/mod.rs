@@ -4,6 +4,7 @@
 mod composer;
 mod empty_state;
 mod git;
+mod git_views;
 mod map;
 mod menus;
 mod overlay;
