@@ -35,7 +35,7 @@ pub fn new_agent_anchor(ctx: &egui::Context, fallback: Rect) -> Rect {
 }
 
 /// Mapeia o identificador do modelo para o ícone correspondente.
-fn agent_icon(kind: &str) -> Option<Icon> {
+pub(super) fn agent_icon(kind: &str) -> Option<Icon> {
     let model = kind.split(':').next().unwrap_or(kind);
     match model {
         "claude" => Some(Icon::ClaudeLogo),

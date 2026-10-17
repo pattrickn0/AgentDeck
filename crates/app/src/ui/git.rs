@@ -401,7 +401,7 @@ fn banner(ui: &mut Ui, rect: Rect, y: &mut f32, text: &str, color: Color32, dism
 }
 
 /// Faixa indeterminada (vai e volta) de operação em andamento.
-fn busy_bar(ui: &Ui, r: Rect) {
+pub(super) fn busy_bar(ui: &Ui, r: Rect) {
     let t = ui.ctx().input(|i| i.time);
     let phase = ((t * 0.9) % 2.0) as f32;
     let pos = if phase < 1.0 { phase } else { 2.0 - phase };

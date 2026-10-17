@@ -1,4 +1,4 @@
-//! Barra lateral direita (fixa, não recolhe): abas "Conversa | Mapa", faixa de download,
+//! Barra lateral direita (fixa, não recolhe): abas "Tarefas | Conversa | Mapa | Git | GitHub", faixa de download,
 //! mensagens da Conversa integrada (ou o mapa de agentes) e o compositor colado embaixo.
 
 use std::time::Duration;
@@ -31,6 +31,7 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) {
     let body = Rect::from_min_max(Pos2::new(rect.min.x, body_top), Pos2::new(rect.max.x, comp.min.y));
     if body.height() > 1.0 {
         match deck.right_view {
+            RightView::Tarefas => super::tasks::draw(deck, ui, body),
             RightView::Conversa => draw_feed(deck, ui, body),
             RightView::Mapa => map::draw(deck, ui, body),
             RightView::Git => super::git::draw(deck, ui, body),
@@ -95,7 +96,10 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     };
     let gh_badge = deck.github.open_prs_count();
     let gh_tip = deck.github.tab_tooltip();
+    let review = deck.tasks.review_count() as u32;
+    let tasks_tip = if review > 0 { format!("Tarefas · {review} em revisão") } else { "Tarefas".to_string() };
     let tabs = [
+        (RightView::Tarefas, HeadTab { id: "tarefas", icon: Icon::Tasks, tip: &tasks_tip, badge: review }),
         (RightView::Conversa, HeadTab { id: "conversa", icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
         (RightView::Mapa, HeadTab { id: "mapa", icon: Icon::Diagram, tip: "Mapa de agentes", badge: 0 }),
         (RightView::Git, HeadTab { id: "git", icon: Icon::GitBranch, tip: &git_tip, badge: git_badge }),
