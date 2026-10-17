@@ -551,3 +551,30 @@ l3
     assert!(core.git_continue_op().is_err(), "sem operação em andamento");
     env.core.shutdown();
 }
+
+#[test]
+fn hunks_work_in_crlf_files() {
+    need_git!();
+    let env = start(true);
+    let (core, ws) = (&env.core, &env.ws);
+    let _ = std::fs::remove_file(ws.join("AGENTS.md"));
+    core.git_init().expect("init");
+    // Sem conversão de fim de linha: o CRLF vai como está para o repositório.
+    assert!(git(ws, &["config", "core.autocrlf", "false"]).status.success());
+    let initial = (1..=12).map(|i| format!("linha {i}\r\n")).collect::<String>();
+    std::fs::write(ws.join("w.txt"), &initial).expect("w");
+    core.git_stage_all().expect("stage");
+    core.git_commit("crlf", false).expect("commit");
+    let modified = initial.replace("linha 1\r\n", "LINHA 1\r\n").replace("linha 12\r\n", "LINHA 12\r\n");
+    std::fs::write(ws.join("w.txt"), &modified).expect("w");
+    let st = core.git_status().expect("st");
+    let diff = core.git_diff(&st.entries[0], false).expect("diff");
+    let p0 = extract_hunk_patch(&diff, 0).expect("hunk 0");
+    let p1 = extract_hunk_patch(&diff, 1).expect("hunk 1");
+    core.git_apply_hunk(&p0, false, false).expect("stage hunk 0 (CRLF)");
+    assert_eq!(paths(&core.git_status().expect("st")), [("w.txt".into(), 'M', 'M', EntryKind::Ordinary)]);
+    core.git_apply_hunk(&p1, false, true).expect("discard hunk 1 (CRLF)");
+    let content = std::fs::read_to_string(ws.join("w.txt")).expect("r");
+    assert!(content.starts_with("LINHA 1\r\n") && content.ends_with("linha 12\r\n"), "{content:?}");
+    env.core.shutdown();
+}

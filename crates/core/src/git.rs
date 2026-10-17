@@ -342,14 +342,20 @@ pub fn parse_branches(out: &[u8]) -> Vec<GitBranch> {
 }
 
 /// Lê um diff unificado (ou combinado, `diff --cc` / `@@@`). Corta em `max_lines` linhas (e cada
-/// linha em 1000 caracteres).
+/// linha em 1000 caracteres). O `\r` final de uma linha CRLF é mantido em `text`.
 pub fn parse_diff(text: &str, max_lines: usize) -> GitDiff {
     let mut diff = GitDiff::default();
     let (mut old, mut new) = (0u32, 0u32);
     let mut in_hunk = false;
     // Número de prefixos de coluna (1 para diff normal `@@`, >= 2 para diff combinado `@@@`).
     let mut cols = 1usize;
-    for raw in text.lines() {
+    // Divide só em `\n`: o `\r` de arquivos CRLF fica no texto (o patch de um trecho precisa dele para
+    // aplicar; quem desenha tira o `\r`).
+    let mut raws: Vec<&str> = text.split('\n').collect();
+    if raws.last() == Some(&"") {
+        raws.pop();
+    }
+    for raw in raws {
         if diff.lines.len() >= max_lines {
             diff.truncated = true;
             break;
@@ -1718,7 +1724,7 @@ mod tests {
 
     #[test]
     fn stashes_and_log_are_parsed() {
-        let st = parse_stashes(b"stash@{0}\02 hours ago\0On main: rascunho\nstash@{1}\03 days ago\0WIP on feat: x\n");
+        let st = parse_stashes(b"stash@{0}\x002 hours ago\0On main: rascunho\nstash@{1}\x003 days ago\0WIP on feat: x\n");
         assert_eq!(
             st,
             [
@@ -1726,7 +1732,7 @@ mod tests {
                 GitStash { index: 1, date: "3 days ago".into(), message: "WIP on feat: x".into() },
             ]
         );
-        let log_bytes = b"aaaa1111\0aaaa\0Ana\02 hours ago\0feat: x\0\nbbbb2222\0bbbb\0Bia\0yesterday\0fix: y\0";
+        let log_bytes = b"aaaa1111\0aaaa\0Ana\x002 hours ago\0feat: x\0\nbbbb2222\0bbbb\0Bia\0yesterday\0fix: y\0";
         let commits = parse_log(log_bytes);
         assert_eq!(
             commits,
