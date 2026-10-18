@@ -11,8 +11,7 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
 - Abas de terminal reais (ConPTY no Windows) para cada agente, com cores próprias, restauradas ao reabrir.
 - **Tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama…) ganha uma janela com as próprias
   abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar ou desligar a divisão.
-- **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real, e o
-  **Mapa** (em texto de terminal) de quem está conversando com quem agora.
+- **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real.
 - **Compositor** na barra direita: a mensagem (com anexos e áudio transcrito) vai para a **aba ativa**.
 - **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
 - **GitHub** do projeto noutra aba: PRs abertos com os checks, issues, execuções do Actions e o fim do log do job que

@@ -30,7 +30,6 @@ Decisões já tomadas pelo usuário (não reabrir sem ele pedir):
   cria projeto. Nada de "+" solto na barra de título.
 - A seção ORGANIZAÇÃO continua sendo **seção** (vai ganhar outros modos, como a tela dividida com destaque),
   não um ícone no rodapé. Rodapé com atalhos: por enquanto não.
-- O Mapa de agentes tende a sair (a árvore da barra lateral cobre o "quem é de quem").
 
 ## Tokens (`crates/app/src/theme.rs`)
 
@@ -92,6 +91,6 @@ COMMANDDECK_HOME=<scratch>/home COMMANDDECK_SMOKE=<scratch>/shot COMMANDDECK_DEB
   ./target/debug/commanddeck.exe        # salva <scratch>/shot/screen.png e sai
 ```
 
-Outros estados em `COMMANDDECK_DEBUG_UI` (lista em `apply_debug_ui`, `app.rs`): `settings`, `newtab`, `map-demo`,
+Outros estados em `COMMANDDECK_DEBUG_UI` (lista em `apply_debug_ui`, `app.rs`): `settings`, `newtab`,
 `usage-demo`, `git-demo`, `split-drag`... Abra a imagem e confira alinhamento, truncamento e contraste antes de
 dizer que terminou; interação (clique, arrasto) não aparece na captura — diga ao usuário o que falta testar à mão.

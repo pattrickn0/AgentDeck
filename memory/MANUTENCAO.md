@@ -57,14 +57,13 @@ crates/
 │   ├── main.rs / app.rs / window.rs   janela winit, OpenGL, loop de eventos
 │   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
 │   ├── terminal/     emulador de terminal (pty + alacritty_terminal + desenho + teclado)
-│   ├── agent_map.rs  mapa de conversas entre agentes em texto (render_map: função pura, com testes)
 │   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
 │   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
 │   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
 │   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, descartar, reabrir a aba)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
 │   ├── ui/           titlebar (barra de título + uso dos agentes em usage.rs), panes (janelas da tela dividida) + tabs (abas de cada janela), sidebar
-│   │                 (árvore), right_panel (barra direita: Tarefas/Conversa/Mapa/Git/GitHub), map, git, github, tasks, compositor, menus
+│   │                 (árvore), right_panel (barra direita: Tarefas/Conversa/Git/GitHub), git, github, tasks, compositor, menus
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas)
 │   └── audio.rs      som de notificação e microfone (cpal)
 └── cli/    (commanddeck-cli)    ask-agent e ollama-agent
@@ -99,12 +98,6 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
 5. Opcionalmente, crie um alias em `ALIASES`, e atualize a lista de ids no teste `workspace_agents_md_and_spawn_specs`.
 
 **Mudar uma cor ou tamanho.** Edite `crates/app/src/theme.rs` (larguras da barra direita: `RIGHT_*_W`).
-
-**Mudar o Mapa de agentes.** O conteúdo é a função pura `agent_map::render_map` (com testes de largura e de
-caracteres); os dados vêm de `Deck::map_snapshot`, que junta `Core::conversation_map` (perguntas pendentes no
-core) com o que só a interface sabe (filas das abas, quem está ocupado, recentes). Use só caracteres que
-existem nas fontes monoespaçadas do Windows (o teste confere). Para ver sem agentes reais:
-`COMMANDDECK_DEBUG_UI=map-demo`.
 
 **Mexer na tela dividida.** O cálculo é puro e testado em `crates/app/src/split.rs` (grupo de cada aba,
 formato da grade, retângulos, divisores, vizinho para os atalhos, ordem das janelas, foco ao fechar); o
@@ -164,7 +157,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `map`, `map-demo`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas

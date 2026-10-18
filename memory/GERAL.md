@@ -21,8 +21,8 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 
 Terminal desktop nativo em Rust (winit + egui). São três executáveis, que precisam ficar **na mesma pasta**:
 
-- `commanddeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (Conversa integrada,
-  Mapa de agentes e compositor);
+- `commanddeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (Conversa integrada
+  e compositor);
 - `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si;
 - `ollama-agent` (crate `cli`): o agente local com ferramentas, que roda numa aba.
 
@@ -99,11 +99,11 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
-| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, cinco abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão), **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Mapa** (diagrama), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some nas abas Tarefas, Git e GitHub |
+| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão), **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some nas abas Tarefas, Git e GitHub |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
 que foi aberta (o terminal roda na pasta dele) e só aparece com ele na tela; trocar de projeto esconde as abas do
-anterior, que **continuam rodando**. A árvore, a aba Git, a Conversa e o Mapa são do projeto ativo; o uso na barra
+anterior, que **continuam rodando**. A árvore, a aba Git e a Conversa são do projeto ativo; o uso na barra
 de título é global (o limite é da conta). Ao abrir o app, voltam só as abas do projeto ativo; as dos outros abrem
 na primeira vez que o projeto é selecionado (ou quando um agente chama alguém de lá). Não existe mais workspace
 padrão: sem projeto, o centro pede uma pasta.
@@ -122,11 +122,6 @@ A **tela dividida** organiza as abas por tipo de agente:
   o foco de onde você está digitando;
 - atalhos: Ctrl+Tab / Ctrl+Shift+Tab trocam de aba dentro da janela focada; Ctrl+Alt+setas mudam o foco para a
   janela vizinha; Ctrl+T abre outra aba do tipo focado.
-
-O **Mapa** mostra, em texto de terminal, quem está conversando com quem agora: a árvore de quem pergunta a quem
-(pergunta na fila, digitada, com resposta atrasada ou em modo headless, com o tempo de espera), as respostas a
-caminho, as conversas concluídas no último minuto (esmaecidas) e os agentes sem conversa.
-O Mapa rola dentro da barra, que mantém a largura. Clicar num agente abre a aba dele.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
 - topo: branch atual e menu de branches (trocar, criar, **mesclar** ou fazer **rebase** da branch escolhida); buscar, puxar
@@ -208,7 +203,6 @@ ela dura.
 - Acompanhar o **uso** de cada agente aberto (sessão e semana) na barra de título.
 - Mandar uma mensagem (com anexos ou áudio transcrito) para a aba ativa pelo compositor.
 - Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
-- Ver no **Mapa** quem está conversando com quem neste momento.
 - Dar **tarefas** a agentes pela aba Tarefas (cada uma numa branch e pasta próprias), revisar o relatório e o diff e
   **mesclar**, **devolver** com ajustes ou **descartar**.
 - Usar o **git** do projeto pela aba Git: alterações e diffs (inclusive por trecho), commit, histórico, stash,

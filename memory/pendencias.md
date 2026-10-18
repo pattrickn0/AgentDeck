@@ -62,7 +62,6 @@ Proposta:
 
 ## 4. Interface
 
-- [ ] **Botão "quem conversa com quem"** (próximo passo do Mapa): contagem de mensagens por par de agentes na sessão, a partir do anel de recentes do `Deck` ampliado (hoje só guarda 60 s).
 - [ ] Janela estreita (perto do mínimo de 820 px): com muitas abas, as de trás encolhem até virar só o ponto colorido.
 
 - [ ] Emojis monocromáticos (limitação do egui). Avaliar fonte de emoji colorida ou renderização própria.
@@ -70,7 +69,6 @@ Proposta:
 - [ ] Animação suave (hover) nos botões do estado vazio.
 - [ ] **Destacar o agente selecionado** (seção ORGANIZAÇÃO da barra lateral): realçar a janela/aba do agente escolhido e o que é dele (pedido do usuário; a seção já existe com a chave da tela dividida).
 - [ ] **Tela dividida com destaque**: terceiro modo de organização (além de aba única e tela dividida), em que a janela do agente/projeto selecionado fica grande e as outras menores ao lado. Entra na seção ORGANIZAÇÃO (que continua seção, não vira ícone).
-- [ ] **Mapa de agentes: avaliar remoção.** A árvore de agentes na barra lateral já mostra quem abriu quem; o que sobra do Mapa (quem conversa com quem agora, contagem por par) pode virar detalhe ao passar o mouse no agente.
 - [ ] **Equipe: as instruções da ponte são fixadas na partida.** Um agente aberto antes desta versão não sabe do `--team`/`--boss` até reabrir a aba. O aviso de equipe só chega com a próxima mensagem (de propósito, para não gastar turno).
 - [ ] **Equipe: teste de integração do "chefe na criação" só roda em Unix** (`an_agent_becomes_the_boss_of_the_role_it_opens_and_the_new_one_is_told`, usa agente falso em shell); ver a seção 5.
 - [ ] **Contexto de curto/longo prazo** (injeção de contexto + memória): só discutir por enquanto (ver seção 2).
@@ -82,12 +80,12 @@ Proposta:
 - [ ] **Uso do Antigravity depende de API interna** (`v1internal:retrieveUserQuotaSummary`): pode mudar sem aviso; hoje qualquer falha vira "sem dados". Avaliar um aviso discreto quando falhar por muito tempo.
 - [ ] **Uso do Codex só testado com arquivos de exemplo** (o Codex não estava instalado): conferir o formato real de `rate_limits` nos `rollout-*.jsonl`.
 - [ ] **Statusline do usuário perde o `padding`**: a nossa (`ask-agent --usage`) fixa 0 e repassa a dele.
-- [ ] **Janela sem decoração:** validar no Windows real (arrastar, snap, Win+setas, redimensionar pelas bordas, maximizada sem cobrir a barra de tarefas); no Linux, conferir X11/Wayland ([testes.md](testes.md), seção 13).
+- [ ] **Janela sem decoração:** validar no Windows real (arrastar, snap, Win+setas, redimensionar pelas bordas, maximizada sem cobrir a barra de tarefas); no Linux, conferir X11/Wayland ([testes.md](testes.md), seção 12).
 
 ## 5. Testes automáticos
 
 - [ ] Os testes de integração do fluxo entre abas (`a_question_is_typed_into_the_tab_and_answered_by_callback` e vizinhos) só rodam em Unix (agentes falsos em shell): criar agentes falsos para Windows (`.cmd`/`.exe` de teste) para a CI do Windows cobrir a ponte.
-- [ ] Testes de interface (egui) para a barra direita, o Mapa, a aba Git e a tela dividida (hoje só capturas de tela no Linux).
+- [ ] Testes de interface (egui) para a barra direita, a aba Git e a tela dividida (hoje só capturas de tela no Linux).
 - [ ] Tela dividida: com várias janelas, cada uma redesenha a grade inteira a cada quadro (e qualquer saída de qualquer aba pede um quadro). Se pesar com 5–6 janelas, guardar as linhas que não mudaram (cache por aba).
 - [ ] Tela dividida, depois: arrastar uma **aba** para outra janela (hoje o agrupamento é sempre pelo tipo) e maximizar uma janela temporariamente.
 
@@ -101,7 +99,7 @@ Proposta:
 
 ## Instâncias (abas) — pontos em aberto
 
-- [ ] Pré-autorizar o `ask-agent` nos CLIs que pedirem aprovação na aba (hoje só o Claude abre com `--allowedTools`; quais pedem é verificado em [testes.md](testes.md), seção 8).
+- [ ] Pré-autorizar o `ask-agent` nos CLIs que pedirem aprovação na aba (hoje só o Claude abre com `--allowedTools`; quais pedem é verificado em [testes.md](testes.md), seção 7).
 - [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
 - [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
 - [ ] Falta `ask-agent --cancel <n>` para desistir de uma pergunta (hoje ela expira em 10 min).
@@ -123,6 +121,9 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
+- [x] **Mapa de agentes removido** (tarefa `t1`): saíram a aba Mapa da barra direita, o módulo `agent_map` (e
+  `ui/map.rs`), o ícone de diagrama, o `Core::conversation_map` com o rastreio de perguntas headless e os estados
+  de depuração `map`/`map-demo`. A árvore de agentes da barra lateral já cobre o "quem é de quem".
 - [x] **Mesa de tarefas, fase B: a interface** (branch `feat/mesa-ui`, dev Sonnet):
   - A aba **Tarefas** é a primeira da barra direita, com selo = tarefas em revisão.
   - Lista por estado: em revisão, em andamento, rascunho, falhou e concluídas (recolhida).
@@ -194,7 +195,7 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 - [x] **Auditoria de 2026-10-15 (regressão + correções).** Quatro revisores Claude, o Antigravity e capturas de todos os estados de depuração; 235 testes, clippy e fmt limpos. Corrigido:
   - **Dados:** config gravada por arquivo temporário + `rename`, uma gravação por vez e na ordem (a ponte e a interface gravavam juntas); config ilegível guarda uma cópia `.json.ilegivel-*` antes de voltar aos padrões. Capturas e `COMMANDDECK_DEBUG_UI` não gravam mais a config (o estado `empty` apagava as abas salvas).
   - **Git:** trocar de projeto zera o estado do Git e descarta respostas do projeto anterior (geração): uma confirmação de "Descartar" aberta rodava `git restore/clean` no outro repositório. Checkout de branch remota com a local existente; `unstage` de renomeado; `unstage_all` sem HEAD; `git init` comparando com a home sem diferença de caixa; `GCM_INTERACTIVE=never`; a mensagem do commit só sai da caixa se ele der certo; o "+" de cada seção prepara só aquela seção.
-  - **Abas e ponte:** Enter sem saída não deixa a aba "trabalhando" para sempre (prendia a fila e o prazo das perguntas); pergunta cancelada na fila não é mais digitada; renomear/menu de contexto seguem a aba certa depois de fechar outra; Mapa só ativa abas do projeto ativo; `set_boss` confere ciclo e grava sob a mesma trava; profundidade negativa recusada; instância órfã na "pergunta a si mesmo".
+  - **Abas e ponte:** Enter sem saída não deixa a aba "trabalhando" para sempre (prendia a fila e o prazo das perguntas); pergunta cancelada na fila não é mais digitada; renomear/menu de contexto seguem a aba certa depois de fechar outra; `set_boss` confere ciclo e grava sob a mesma trava; profundidade negativa recusada; instância órfã na "pergunta a si mesmo".
   - **Terminal e CLIs:** colagem filtra ESC/C1 (marcador aninhado escapava do *bracketed paste*); Ctrl+letra pela tecla física (layouts não latinos); `ask-agent` não trava lendo o stdin de um terminal, aceita cp1252 e recusa `--new --boss`; `ollama-agent` sabe o próprio nome/cargo, responde à ponte mesmo quando falha e não imprime controles vindos do modelo; headless não reabre processo ao encerrar o app; `MSYS_NO_PATHCONV` para o Git Bash não reescrever `/comando`.
   - **Outros:** `read_file` do Ollama lê no máximo 1 MB; aviso honesto ao parar no limite de passos; anexos com o mesmo nome não se sobrescrevem; Conversa limitada a 1000 mensagens; ditado só envia sozinho se a aba de destino ainda for a ativa; watcher com teto de 1 s sob eventos contínuos e comparação de caminho sem caixa; `AGENTS.md` mantém CRLF e é gravado atomicamente; caminhos relativos endurecidos (`safe_rel`, árvore); Whisper encerra com o app; Ctrl+T com a barra recolhida abre o menu de agentes; menus não saem da tela por baixo; o chip `ask-agent` da Conversa não quebra de linha.
 
@@ -202,13 +203,13 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 - [x] **Agentes de todos os projetos, em árvore, com logo.** Seta ▸/▾ em cada projeto e "expandir/recolher todos" no cabeçalho PROJETOS (estado em `ProjectCfg.collapsed`); clicar num agente de outro projeto troca de projeto e ativa a aba. A aba aberta por `ask-agent` fica sob quem a chamou (`ProjectCfg.tab_parents`), com linhas-guia; o ponto virou o logo do modelo (halo trabalhando, anel ao concluir). Ordem da árvore testada em `ui/projects.rs`.
 - [x] **Novo agente dentro do projeto.** O "+" solto da barra de título saiu; o projeto ativo ganhou a linha "+ Novo agente" no fim da lista de agentes (abre o menu de agentes; Ctrl+T continua e, com a barra recolhida, abre sob a barra de título). O "+" do cabeçalho PROJETOS segue criando projeto.
 
-- [x] **Projetos como unidade principal.** Cada aba pertence a um projeto (pasta) e só aparece com ele; as de outros projetos continuam rodando escondidas. Instâncias, tokens e `ask-agent` por projeto (`instances::scoped`), config por projeto (`projectList`, com migração), Conversa e Mapa do projeto ativo, abas dos outros projetos abertas sob demanda. Sem workspace padrão. Seção PROJETOS na barra lateral.
+- [x] **Projetos como unidade principal.** Cada aba pertence a um projeto (pasta) e só aparece com ele; as de outros projetos continuam rodando escondidas. Instâncias, tokens e `ask-agent` por projeto (`instances::scoped`), config por projeto (`projectList`, com migração), Conversa do projeto ativo, abas dos outros projetos abertas sob demanda. Sem workspace padrão. Seção PROJETOS na barra lateral.
 
 - [x] **Barra de título própria, uso dos agentes e barra lateral nova.**
   - Janela sem a barra do sistema: ☰ (configurações), "CommandDeck", recolher barra, "+", tela dividida e botões de janela menores; arrastar, duplo clique e bordas pelo egui (`ui/titlebar.rs`).
   - Uso por agente aberto: logo + círculo que enche com a sessão + anel semanal (âmbar a 80 %, vermelho fechado a 100 %). Claude pela statusline (`ask-agent --usage` → `POST /usage`), Codex pelos `rollout-*.jsonl`, Antigravity pela API de cota, Ollama local (`core/src/usage.rs`).
   - Seletor de workspace no topo da barra lateral (lista de projetos, "Abrir pasta…"); explorador sem a linha raiz, com atualizar e recolher tudo.
-  - O diff do Git deixou de alargar a barra direita: rola dentro dela, como o Mapa.
+  - O diff do Git deixou de alargar a barra direita: rola dentro dela.
 
 - [x] **Tela dividida por tipo de agente.**
   - Uma janela por tipo (todos os Ollama juntos), numa grade automática (2 lado a lado, 2+1, 2×2, 3+2, 3×2); os tipos que não cabem viram abas da última janela.
@@ -219,14 +220,13 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 - [x] **Gemini removido.** Substituído pelo Antigravity em todo o projeto (catálogo de agentes, headless, prompts, ditado, testes e documentos). Só os filtros da pasta `.gemini` ficaram: é a configuração do próprio Antigravity.
 
 - [x] **Aba Git e ícones no cabeçalho da barra direita.**
-  - Conversa, Mapa e Git viraram ícones (balões, diagrama, branch) com dica ao passar o mouse; o número de mensagens novas fica sobre o ícone da Conversa.
+  - Conversa e Git viraram ícones (balões, branch) com dica ao passar o mouse; o número de mensagens novas fica sobre o ícone da Conversa.
   - Git local do workspace (`core/src/git.rs`): status, diff, preparar/tirar/descartar, commit (e corrigir o último), branches, buscar/puxar/enviar e `git init`, sempre sem shell e sem prompts que travam. Testado com o git real em `tests/git.rs` (inclusive conflito e push/pull num remoto local).
   - Chip da branch na topbar; releitura automática por `CoreEvent::GitChanged` (watcher do `.git/`).
 
-- [x] **Barra lateral direita fixa com Conversa e Mapa.**
+- [x] **Barra lateral direita fixa com a Conversa.**
   - A Conversa integrada, o compositor e o menu "Enviar para" saíram de baixo dos terminais para uma barra à direita que não recolhe e tem largura ajustável (salva em `Config.right_panel_width`; `bottomHeight`/`feedCollapsed` antigos são ignorados).
   - Compositor redesenhado para a barra estreita; menus ficam dentro da tela e rolam quando não cabem (corrigido também o `constrain` do menu "+", que fechava o menu no clique).
-  - **Mapa** em texto de terminal com quem conversa com quem agora (`Core::conversation_map` + `agent_map::render_map`), alargando a barra sobre o terminal sem redimensioná-lo.
   - Uma pergunta com resposta atrasada (202) deixou de causar falsos "ciclo de espera".
 
 - [x] **Segurança da ponte e das abas.**
