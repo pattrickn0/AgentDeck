@@ -1306,7 +1306,7 @@ impl Deck {
         if idx >= self.tabs.len() {
             return;
         }
-        // Aba de outro projeto (ex.: clique no mapa): o projeto dela vem para a tela.
+        // Aba de outro projeto (ex.: clique na árvore da barra lateral): o projeto dela vem para a tela.
         if self.tabs[idx].project != self.active_project {
             let (project, uid) = (self.tabs[idx].project.clone(), self.tabs[idx].uid);
             self.switch_project(&project);
