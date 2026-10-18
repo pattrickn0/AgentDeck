@@ -6,7 +6,6 @@ mod empty_state;
 mod git;
 mod git_views;
 mod github;
-mod map;
 mod menus;
 mod overlay;
 mod panes;
@@ -56,7 +55,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let (right_w, right_max) = right_width(deck.right_w, full.width(), left);
     let center = Rect::from_min_max(Pos2::new(full.min.x + left, full.min.y), Pos2::new(full.max.x - right_w - 1.0, full.max.y));
     let term_rect = center;
-    // A barra tem sempre a mesma largura: o Mapa e o diff do Git rolam dentro dela.
+    // A barra tem sempre a mesma largura: as listas e o diff do Git rolam dentro dela.
     let panel = Rect::from_min_max(Pos2::new(full.max.x - right_w, full.min.y), full.max);
     // Nas abas Tarefas, Git e GitHub o compositor some para dar espaço às listas, diffs e logs.
     let comp_h = if deck.right_view.hides_composer() { 0.0 } else { composer::measure(deck, ui, right_w) };

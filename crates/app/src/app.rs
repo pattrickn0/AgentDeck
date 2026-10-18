@@ -395,31 +395,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: mapa de conversas fictício (`COMMANDDECK_DEBUG_UI=map-demo`).
-fn debug_map() -> crate::agent_map::Snapshot {
-    use crate::agent_map::{AnswerInFlight, Link, LinkState, NodeState, Recent, Snapshot};
-    let now = commanddeck_core::util::now_ms();
-    let link =
-        |id, from: &str, to: &str, ago: u64, state| Link { id: Some(id), from: from.into(), to: to.into(), since_ms: now - ago, state };
-    Snapshot {
-        nodes: vec![
-            ("claude".into(), NodeState::Busy),
-            ("claude@dev".into(), NodeState::Busy),
-            ("antigravity".into(), NodeState::Idle),
-            ("codex".into(), NodeState::Idle),
-            ("ollama:qwen3.5:9b".into(), NodeState::Idle),
-            ("shell".into(), NodeState::Ended),
-        ],
-        links: vec![
-            link(12, "claude", "claude@dev", 42_000, LinkState::Typed),
-            link(13, "claude@dev", "antigravity", 5_000, LinkState::Queued(1)),
-            link(14, "claude", "codex", 70_000, LinkState::Detached),
-        ],
-        answers: vec![AnswerInFlight { request: 9, from: "ollama:qwen3.5:9b".into(), to: "claude".into() }],
-        recent: vec![Recent { from: "antigravity".into(), to: "claude@dev".into(), ok: true, at_ms: now - 20_000 }],
-    }
-}
-
 /// SOMENTE DEPURAÇÃO: projetos fictícios na barra lateral (`COMMANDDECK_DEBUG_UI=projects-demo`): um ativo com
 /// três agentes (um ocupado), outro com um, outro vazio.
 fn debug_projects() -> Vec<crate::deck::ProjectView> {
@@ -480,7 +455,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-agent,tasks-new-model,settings,newtab,newtab-models:<agente>,drop,map,map-demo,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-agent,tasks-new-model,settings,newtab,newtab-models:<agente>,drop,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -495,7 +470,6 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.new_tab_models_for = Some(k["newtab-models:".len()..].to_owned());
             }
             "drop" => deck.drop_hover = true,
-            "map" => deck.set_right_view(crate::deck::RightView::Mapa),
             "git" => deck.set_right_view(crate::deck::RightView::Git),
             "git-demo" | "git-diff" | "git-branches" => {
                 deck.set_right_view(crate::deck::RightView::Git);
@@ -624,10 +598,6 @@ fn apply_debug_ui(deck: &mut Deck) {
             "tasks" | "tasks-demo" | "tasks-empty" | "tasks-detail" | "tasks-running" | "tasks-failed" | "tasks-diff" | "tasks-confirm"
             | "tasks-discard" | "tasks-return" | "tasks-error" | "tasks-busy" | "tasks-new" | "tasks-new-agent" | "tasks-new-model" => {
                 debug_tasks(deck, item)
-            }
-            "map-demo" => {
-                deck.set_right_view(crate::deck::RightView::Mapa);
-                deck.debug_map = Some(debug_map());
             }
             "usage-demo" => deck.debug_usage = Some(debug_usage()),
             "projects-demo" => deck.debug_projects = Some(debug_projects()),

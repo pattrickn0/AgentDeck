@@ -348,7 +348,6 @@ fn instances_are_registered_named_and_forgotten() {
     assert_eq!(env.core.restore_instance(&p, "claude@dev").map(|i| i.id()).as_deref(), Some("claude@dev"));
     assert!(env.core.restore_instance(&p, "claude@Dev!").is_none());
     assert_eq!(env.core.project_instance_ids(&p), vec!["claude", "claude@main@ana", "claude@dev"]);
-    assert_eq!(env.core.conversation_map(&p).instances, vec!["claude", "claude@main@ana", "claude@dev"]);
     env.core.close_instance(&p, "claude@main@ana");
     assert_eq!(env.core.register_instance(&p, "claude").id(), "claude@main@ana", "o nome é reaproveitado");
     env.core.shutdown();
@@ -418,12 +417,6 @@ fn a_role_asked_in_one_project_opens_there_and_cycles_do_not_cross_projects() {
     assert!(env.core.project_instance_ids(&a).contains(&"claude@dev".to_owned()));
     assert!(!env.core.project_instance_ids(&b).contains(&"claude@dev".to_owned()), "B não vê o claude@dev de A");
     assert!(!env.core.peers(&b).contains(&"claude@dev".to_owned()));
-    let map_a = env.core.conversation_map(&a);
-    assert_eq!(
-        map_a.pending.iter().map(|p| (p.project.as_str(), p.asker.as_str(), p.target.as_str())).collect::<Vec<_>>(),
-        [(a.as_str(), "claude", "claude@dev")]
-    );
-    assert!(env.core.conversation_map(&b).pending.is_empty(), "o mapa de B não mostra as perguntas de A");
     let second = ask_as(tab_token_in(&env, &a, "claude@dev"), "claude@qa");
     assert_eq!(next_delivery(&env).ident.id(), "claude@qa");
 
@@ -958,64 +951,6 @@ fn a_plain_terminal_waits_until_the_end_instead_of_getting_typed_answers() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
-#[test]
-fn the_conversation_map_follows_questions_live() {
-    let env = start(&[("claude", "echo x")]);
-    let p = env.core.active_project_id();
-    env.core.enable_tab_delivery();
-    let port = env.core.bridge_port();
-    let host = format!("127.0.0.1:{port}");
-    assert_eq!(env.core.conversation_map(&p).pending, []);
-    let claude = tab_token(&env, "claude");
-    let asking = std::thread::spawn({
-        let host = host.clone();
-        move || http(port, "POST", "/ask", &host, &claude, &json!({"to": "claude@dev", "message": "x", "wait": 1}).to_string())
-    });
-    let d = next_delivery(&env);
-    let map = env.core.conversation_map(&p);
-    assert_eq!(map.pending.len(), 1);
-    let q = &map.pending[0];
-    assert_eq!(
-        (q.id, q.project.as_str(), q.asker.as_str(), q.target.as_str(), q.detached),
-        (d.request, p.as_str(), "claude", "claude@dev", false)
-    );
-    assert!(map.instances.contains(&"claude@dev".to_owned()));
-    // Depois do 202, a pergunta continua no mapa, marcada como resposta atrasada.
-    assert_eq!(asking.join().expect("thread").0, 202);
-    assert!(env.core.conversation_map(&p).pending[0].detached);
-    let dev = tab_token(&env, "claude@dev");
-    let reply = json!({"to": "", "message": "ok", "reply_to": d.request}).to_string();
-    assert_eq!(http(port, "POST", "/ask", &host, &dev, &reply).0, 200);
-    assert_eq!(env.core.conversation_map(&p).pending, []);
-    env.core.shutdown();
-}
-
-#[cfg(unix)]
-#[test]
-fn a_headless_question_shows_in_the_map_while_it_runs() {
-    let env = std::sync::Arc::new(start(&[("claude", "cat >/dev/null; sleep 1; echo pronto")]));
-    let p = env.core.active_project_id();
-    let e2 = env.clone();
-    let asking = std::thread::spawn(move || ask(&e2, json!({"from": "shell", "to": "claude", "message": "oi"})));
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    let seen = loop {
-        let h = env.core.conversation_map(&p).headless;
-        if !h.is_empty() || std::time::Instant::now() > deadline {
-            break h;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    assert_eq!(
-        seen.iter().map(|a| (a.project.as_str(), a.asker.as_str(), a.target.as_str())).collect::<Vec<_>>(),
-        [(p.as_str(), "shell", "claude")]
-    );
-    assert!(env.core.conversation_map("pdeadbeef").headless.is_empty(), "só no projeto de quem perguntou");
-    assert_eq!(asking.join().expect("thread").0, 200);
-    assert!(env.core.conversation_map(&p).headless.is_empty(), "some quando a resposta chega");
-    env.core.shutdown();
-}
-
 #[test]
 fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
     let env = start(&[]);
@@ -1098,8 +1033,6 @@ fn renaming_both_tabs_mid_question_still_delivers_the_late_answer() {
     let ident = |s: &str| commanddeck_core::Ident::parse(s).expect("id");
     env.core.rename_instance(&p, "claude", &ident("claude@lead")).expect("renomeia");
     env.core.rename_instance(&p, "claude@dev", &ident("claude@dev@ana")).expect("renomeia");
-    let pending = env.core.conversation_map(&p).pending;
-    assert_eq!((pending[0].asker.as_str(), pending[0].target.as_str()), ("claude@lead", "claude@dev@ana"));
     // O token da aba segue a instância; a resposta vai pelo número e chega ao nome novo.
     let reply = json!({"to": "", "message": "pronto", "reply_to": q.request});
     assert_eq!(ask_raw(env.core.bridge_port(), &tab_token(&env, "claude@dev@ana"), reply).0, 200);
@@ -1111,7 +1044,7 @@ fn renaming_both_tabs_mid_question_still_delivers_the_late_answer() {
 
 #[test]
 fn after_a_202_asking_the_asker_back_is_a_new_question() {
-    let (env, p) = start_with_claude_tab();
+    let (env, _p) = start_with_claude_tab();
     let asking = ask_in_thread(&env, tab_token(&env, "claude"), json!({"to": "claude@dev", "message": "tarefa", "wait": 1}));
     let q = next_delivery(&env);
     assert_eq!(asking.join().expect("thread").0, 202);
@@ -1123,7 +1056,7 @@ fn after_a_202_asking_the_asker_back_is_a_new_question() {
     assert!(env.core.question_pending(q.request), "a pergunta original segue esperando o --reply");
     env.core.fail_delivery(d.request, "teste");
     assert_eq!(back.join().expect("thread").0, 500);
-    assert_eq!(env.core.conversation_map(&p).pending.len(), 1);
+    assert!(env.core.question_pending(q.request), "liberar a pergunta nova não cancela a original");
     env.core.shutdown();
 }
 
@@ -1149,12 +1082,13 @@ fn removing_a_project_mid_question_leaves_nothing_behind() {
     env.core.restore_instance(&b, "claude");
     let tb = tab_token_in(&env, &b, "claude");
     let asking = ask_in_thread(&env, tb.clone(), json!({"to": "claude@dev", "message": "tarefa"}));
-    assert_eq!(next_delivery(&env).project, b);
+    let q = next_delivery(&env);
+    assert_eq!(q.project, b);
     assert!(env.core.remove_project(&b));
     let (st, body) = asking.join().expect("thread");
     assert_eq!(st, 500, "{body}");
     assert_eq!(ask_raw(env.core.bridge_port(), &tb, json!({"to": "claude@qa", "message": "oi"})).0, 403);
-    assert!(env.core.conversation_map(&b).pending.is_empty());
+    assert!(!env.core.question_pending(q.request), "a pergunta some com o projeto");
     // Nada recria a entrada do projeto removido.
     env.core.restore_instance(&b, "claude@qa");
     assert!(env.core.project_instance_ids(&b).is_empty());

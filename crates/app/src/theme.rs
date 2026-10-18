@@ -65,7 +65,7 @@ pub const UI_FONT_SIZE: f32 = 13.0;
 pub const LINE_HEIGHT: f32 = 1.45;
 /// Barra de título própria (a janela não tem decoração do sistema).
 pub const TITLEBAR_H: f32 = 36.0;
-/// Cabeçalho da barra direita (abas Conversa/Mapa/Git).
+/// Cabeçalho da barra direita (abas Tarefas/Conversa/Git/GitHub).
 pub const TOPBAR_H: f32 = 38.0;
 pub const SIDEBAR_DEFAULT_W: f32 = 220.0;
 pub const SIDEBAR_MIN_W: f32 = 150.0;

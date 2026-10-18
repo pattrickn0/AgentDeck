@@ -59,7 +59,7 @@ projeto ativo (400 se não há nenhum). Por dentro, as chaves das perguntas pend
 filas por par e das sessões headless têm escopo: `instances::scoped(projeto, id)` = `"<projeto>#<id>"`
 (`#` nunca aparece num id), então ciclos e profundidade nunca misturam projetos. O que agentes e pessoas
 veem é sempre o id **sem** o projeto: o texto digitado, as mensagens de erro (lista de "Disponíveis"), os
-`FeedEntry.from/to` e o mapa (`PendingInfo { project, asker, target }`, `HeadlessAsk { project, … }`).
+`FeedEntry.from/to` e `PendingInfo { project, asker, target }` (pergunta pendente entre abas).
 Os eventos levam o projeto: `Delivery.project`, `AgentSignal { project, id, busy }` e `FeedEntry.project`
 (`None` = global, como os avisos do Whisper). As abas de agentes rodam na pasta do projeto, e o AGENTS.md
 de um projeto que não é o ativo é escrito na primeira aba aberta nele.
@@ -281,12 +281,10 @@ até aparecerem. O retrato das janelas do último quadro (`Deck::panes`) serve a
 janela, Ctrl+Alt+setas) e ao tamanho inicial das abas novas. Ordem, proporções e liga/desliga ficam em
 `Config` (`paneOrder`, `splitRows`, `splitCols`, `splitEnabled`).
 
-**Mapa de conversas.** `Core::conversation_map()` devolve um retrato barato (pode ser chamado a cada quadro):
-instâncias abertas, perguntas pendentes entre abas (`PendingInfo`: id, quem perguntou, a quem, profundidade,
-desde quando e se o `ask-agent` já voltou com 202) e perguntas sendo respondidas em headless. Uma pergunta
-com resposta atrasada (`detached`) não entra na detecção de ciclos (quem perguntou não está bloqueado), mas
-continua contando na profundidade. A interface completa o retrato com o que só ela sabe (filas das abas,
-respostas a caminho, recentes) em `Deck::map_snapshot` e desenha com `agent_map::render_map`.
+**Perguntas com resposta atrasada.** Uma pergunta com resposta atrasada (`detached`: o `ask-agent` já voltou
+com 202) não entra na detecção de ciclos (quem perguntou não está bloqueado), mas continua contando na
+profundidade. As perguntas pendentes entre abas viram `PendingInfo` (id, quem perguntou, a quem, profundidade,
+desde quando e se está `detached`; ver `exchange::snapshot`, usado por `remove_project`).
 
 **Quando digitar** (`crates/core/src/delivery.rs`, regra pura com testes; a interface só consulta):
 

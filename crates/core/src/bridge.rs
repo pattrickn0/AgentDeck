@@ -806,7 +806,6 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
     );
     let session_key = format!("{}->{}", caller.key(from), caller.key(&to));
-    let _live = core.headless_ask_started(project, from, &to);
     let result = {
         let _turn = core.inner.bridge_queues.enter(&session_key);
         core.run_headless(
