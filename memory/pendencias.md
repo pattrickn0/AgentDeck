@@ -108,6 +108,8 @@ Proposta:
 - [ ] A ponte sem interface ainda usa o modo headless: não aparece nas abas.
 - [ ] **Mesa de tarefas, depois:** pedido e relatório aparecem como texto puro (o markdown não é desenhado); a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`) usam nomes de modelos antigos.
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
+- [ ] **OpenCode: escolher o provedor antes do modelo** (pedido do usuário, 2026-10-18). Hoje o `opencode models` mistura todos os provedores conectados (`/connect`), e o formulário de nova tarefa oferece modelos sem acesso: a `t1` foi registrada com `opencode-go/deepseek-v4.1-flash` (plano Go, que o usuário não tem; 0 tokens no `opencode stats`). Fazer em dois passos: provedor (`opencode`, `opencode-go`, `ollama`…, o prefixo antes da `/`) e depois os modelos daquele provedor. Avaliar destacar os `-free`.
+- [ ] **Regras da tarefa: o agente não pede merge.** No primeiro uso real, o `opencode@t2` pediu ao Claude, por `ask-agent`, que rodasse `--task merge t2` no trabalho dele. As regras devem dizer que o merge é de quem revisa.
 
 ## 7. Git
 
