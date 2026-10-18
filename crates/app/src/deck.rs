@@ -16,7 +16,6 @@ use egui::Color32;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
-use crate::agent_map::{self, AnswerInFlight, Link, LinkState, NodeState, Recent, Snapshot};
 use crate::agents::Agents;
 use crate::audio;
 use crate::icons::IconCache;
@@ -69,8 +68,6 @@ struct Queued {
     /// Número da pergunta no core; 0 = mensagem da própria interface (ex.: aba GitHub), sem resposta a devolver.
     request: u64,
     prompt: String,
-    /// Quem mandou (quem perguntou; ou quem respondeu, se `answer`).
-    from: String,
     /// É uma resposta atrasada a uma pergunta desta aba, não uma pergunta nova.
     answer: bool,
 }
@@ -81,7 +78,6 @@ pub enum RightView {
     /// Mesa de tarefas (ver `tasks_ui.rs`).
     Tarefas,
     Conversa,
-    Mapa,
     /// Repositório git do workspace (ver `git_ui.rs`).
     Git,
     /// PRs, issues e Actions do GitHub (ver `github_ui.rs`).
@@ -189,9 +185,8 @@ struct ProjectState {
     active_uid: Option<u64>,
     group_order: Vec<String>,
     split_ratios: split::Ratios,
-    /// Conversa integrada e conversas recentes do mapa (as do projeto ativo ficam em `Deck`).
+    /// Conversa integrada (a do projeto ativo fica em `Deck`).
     feed: Vec<FeedItem>,
-    recent: VecDeque<Recent>,
     /// Rascunho do compositor e anexos (os do projeto ativo ficam em `Deck`).
     input: String,
     attachments: Vec<PathBuf>,
@@ -271,11 +266,6 @@ pub struct Deck {
     pub debug_pane_drop: Option<usize>,
     show_seq: u64,
 
-    // Mapa de conversas
-    /// Conversas concluídas há pouco (o "Limpar" da conversa não apaga).
-    recent: VecDeque<Recent>,
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=map-demo`): mapa fictício para capturas de tela.
-    pub debug_map: Option<Snapshot>,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
     pub debug_usage: Option<HashMap<String, commanddeck_core::AgentUsage>>,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
@@ -497,8 +487,6 @@ impl Deck {
             pane_drag: None,
             debug_pane_drop: None,
             show_seq: 0,
-            recent: VecDeque::new(),
-            debug_map: None,
             debug_usage: None,
             debug_projects: None,
             debug_switch_project: None,
@@ -1090,7 +1078,7 @@ impl Deck {
             match found {
                 // Num terminal comum o texto seria executado como comando (a ponte já evita isso).
                 Some(i) if self.tabs[i].alive && self.tabs[i].kind != "shell" => {
-                    self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, from: d.from, answer: true })
+                    self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: true })
                 }
                 _ => log::info!("resposta atrasada para \"{id}\" descartada: a aba não está aberta"),
             }
@@ -1125,7 +1113,7 @@ impl Deck {
         if !self.tabs[idx].alive {
             self.start(idx); // o processo tinha encerrado: sobe de novo para receber a pergunta
         }
-        self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, from: d.from, answer: false });
+        self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: false });
     }
 
     /// Mensagem da própria interface (aba GitHub) para uma instância do projeto ativo: abre a aba
@@ -1157,7 +1145,7 @@ impl Deck {
             self.start(idx);
         }
         self.activate(idx);
-        self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), from: "você".into(), answer: false });
+        self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), answer: false });
         self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&id), prompt));
         Ok(self.tabs[idx].label.clone())
     }
@@ -1516,15 +1504,6 @@ impl Deck {
                 if project == self.active_project { &mut self.feed } else { &mut self.projects.entry(project.clone()).or_default().feed };
             rename_in_feed(feed, &old_who, &new_who);
             rename_thinking(&mut self.thinking, &project, &old_id, &new_id);
-            // Atualiza histórico recente do mapa
-            for r in &mut self.recent {
-                if r.from == old_id {
-                    r.from = new_id.clone();
-                }
-                if r.to == old_id {
-                    r.to = new_id.clone();
-                }
-            }
             self.persist_tabs();
         }
         self.rename_tab = None;
@@ -1936,7 +1915,6 @@ impl Deck {
             state.group_order = std::mem::take(&mut self.group_order);
             state.split_ratios = std::mem::take(&mut self.split_ratios);
             state.feed = std::mem::take(&mut self.feed);
-            state.recent = std::mem::take(&mut self.recent);
             state.input = std::mem::take(&mut self.input);
             state.attachments = std::mem::take(&mut self.attachments);
         } else {
@@ -1956,14 +1934,12 @@ impl Deck {
                 self.group_order = std::mem::take(&mut state.group_order);
                 self.split_ratios = std::mem::take(&mut state.split_ratios);
                 self.feed = std::mem::take(&mut state.feed);
-                self.recent = std::mem::take(&mut state.recent);
                 let uid = state.active_uid;
                 self.sync_groups();
                 self.show_project_tab(uid);
             }
             Some(state) => {
                 self.feed = std::mem::take(&mut state.feed);
-                self.recent = std::mem::take(&mut state.recent);
                 self.load_project(id);
             }
             None => self.load_project(id),
@@ -2098,7 +2074,6 @@ impl Deck {
             self.group_order.clear();
             self.split_ratios = split::Ratios::default();
             self.feed.clear();
-            self.recent.clear();
             let next = self.core.active_project_id();
             if next.is_empty() {
                 self.after_project_change();
@@ -2135,7 +2110,6 @@ impl Deck {
         }
         if let Some(project) = elsewhere {
             let state = self.projects.entry(project).or_default();
-            track_recent(&mut state.recent, &e);
             if let Some(id) = thinking_prev {
                 state.feed.retain(|f| f.id != id);
             }
@@ -2143,7 +2117,6 @@ impl Deck {
             cap_feed(&mut state.feed);
             return;
         }
-        track_recent(&mut self.recent, &e);
         if let Some(id) = thinking_prev {
             self.feed.retain(|f| f.id != id);
         }
@@ -2175,61 +2148,6 @@ impl Deck {
         if opening_tasks {
             self.tasks_on_open();
         }
-    }
-
-    /// Quem está conversando com quem agora, para o mapa: o core sabe as perguntas pendentes; a
-    /// interface sabe as filas das abas, quem está ocupado, e as conversas recentes.
-    pub fn map_snapshot(&self) -> Snapshot {
-        if let Some(demo) = &self.debug_map {
-            return demo.clone();
-        }
-        let cm = self.core.conversation_map(&self.active_project);
-        let visible: Vec<&Tab> = self.visible().into_iter().map(|i| &self.tabs[i]).collect();
-        let nodes = visible
-            .iter()
-            .map(|t| {
-                let state = if !t.alive {
-                    NodeState::Ended
-                } else if t.busy || !t.pending_enter.is_empty() {
-                    NodeState::Busy
-                } else {
-                    NodeState::Idle
-                };
-                (t.ident.id(), state)
-            })
-            .collect();
-        let queued = |target: &str, request: u64| -> Option<usize> {
-            let tab = visible.iter().find(|t| t.ident.id() == target)?;
-            tab.queue.iter().filter(|q| !q.answer && q.request != 0).position(|q| q.request == request).map(|i| i + 1)
-        };
-        let mut links: Vec<Link> = cm
-            .pending
-            .iter()
-            .map(|p| {
-                let state =
-                    if p.detached { LinkState::Detached } else { queued(&p.target, p.id).map_or(LinkState::Typed, LinkState::Queued) };
-                Link { id: Some(p.id), from: p.asker.clone(), to: p.target.clone(), since_ms: p.since_ms, state }
-            })
-            .collect();
-        links.extend(cm.headless.iter().map(|h| Link {
-            id: None,
-            from: h.asker.clone(),
-            to: h.target.clone(),
-            since_ms: h.since_ms,
-            state: LinkState::Headless,
-        }));
-        let answers = visible
-            .iter()
-            .flat_map(|t| {
-                let to = t.ident.id();
-                t.queue
-                    .iter()
-                    .filter(|q| q.answer && q.request != 0)
-                    .map(move |q| AnswerInFlight { request: q.request, from: q.from.clone(), to: to.clone() })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        Snapshot { nodes, links, answers, recent: self.recent.iter().cloned().collect() }
     }
 
     pub fn system(&mut self, text: impl Into<String>) {
@@ -2490,22 +2408,6 @@ impl Deck {
 /// Lê texto da área de transferência do sistema. Só da thread da UI (ver `check_clipboard_image`).
 fn clipboard_text() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
-}
-
-/// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_FAKE_SHELL=1`): abre o shell do sistema quando o
-/// backend ainda não sabe montar o comando do agente, para exercitar o renderizador do terminal.
-/// Alimenta as conversas recentes do mapa com a resposta (ou falha) de uma pergunta entre dois agentes.
-fn track_recent(recent: &mut VecDeque<Recent>, e: &FeedEntry) {
-    if !matches!(e.kind, FeedKind::Answer | FeedKind::Error) {
-        return;
-    }
-    if let (Some(from), Some(to)) = (&e.from, &e.to) {
-        let at_ms = commanddeck_core::util::now_ms();
-        recent.push_back(Recent { from: from.clone(), to: to.clone(), ok: e.kind == FeedKind::Answer, at_ms });
-        while recent.len() > 50 || recent.front().is_some_and(|r| at_ms.saturating_sub(r.at_ms) > agent_map::RECENT_MS) {
-            recent.pop_front();
-        }
-    }
 }
 
 /// Pasta pessoal (início do seletor de pasta quando não há projeto).

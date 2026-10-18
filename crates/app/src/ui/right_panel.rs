@@ -1,12 +1,12 @@
-//! Barra lateral direita (fixa, não recolhe): abas "Tarefas | Conversa | Mapa | Git | GitHub", faixa de download,
-//! mensagens da Conversa integrada (ou o mapa de agentes) e o compositor colado embaixo.
+//! Barra lateral direita (fixa, não recolhe): abas "Tarefas | Conversa | Git | GitHub", faixa de download,
+//! mensagens da Conversa integrada e o compositor colado embaixo.
 
 use std::time::Duration;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use super::{composer, galley, map, paint_splitter, place, text_in, tip};
+use super::{composer, galley, paint_splitter, place, text_in, tip};
 use crate::deck::{Deck, FeedItem, RightView};
 use crate::icons::Icon;
 use crate::theme;
@@ -33,7 +33,6 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) {
         match deck.right_view {
             RightView::Tarefas => super::tasks::draw(deck, ui, body),
             RightView::Conversa => draw_feed(deck, ui, body),
-            RightView::Mapa => map::draw(deck, ui, body),
             RightView::Git => super::git::draw(deck, ui, body),
             RightView::GitHub => super::github::draw(deck, ui, body),
         }
@@ -101,7 +100,6 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let tabs = [
         (RightView::Tarefas, HeadTab { id: "tarefas", icon: Icon::Tasks, tip: &tasks_tip, badge: review }),
         (RightView::Conversa, HeadTab { id: "conversa", icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
-        (RightView::Mapa, HeadTab { id: "mapa", icon: Icon::Diagram, tip: "Mapa de agentes", badge: 0 }),
         (RightView::Git, HeadTab { id: "git", icon: Icon::GitBranch, tip: &git_tip, badge: git_badge }),
         (RightView::GitHub, HeadTab { id: "github", icon: Icon::GitHub, tip: &gh_tip, badge: gh_badge }),
     ];
