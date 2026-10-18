@@ -88,6 +88,7 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 
 - [ ] Num projeto git, de uma aba orquestradora: `ask-agent --task new "teste" --start -` com o pedido na entrada. A aba da tarefa abre em segundo plano, o terminal dela está em `<repo>\.agentdeck\worktrees\t1`, o pedido e as regras chegam digitados, e o `git status` do repositório principal continua limpo.
 - [ ] Na aba da tarefa, fazer um commit e rodar `ask-agent --task done t1 -`. O `--task show t1` mostra o relatório e o diff, e o `--boss` da tarefa chega a quem a criou.
+- [ ] Na aba da tarefa, escrever o relatório num arquivo com acentos (ex.: `C:\Temp\relatorio.md`) e rodar `ask-agent --task done t1 --file C:\Temp\relatorio.md`: o `--task show t1` mostra os acentos inteiros (sem `?`).
 - [ ] `--task return t1 "ajuste"` digita o retorno na aba. Depois, `--task merge t1` cria o commit de merge, fecha a aba e apaga a pasta e a branch, mesmo com o processo do agente vivo.
 - [ ] Com o repositório principal em outra branch, ou com um arquivo rastreado alterado, o merge recusa com explicação e a tarefa fica em revisão.
 - [ ] Conflito (mesma linha alterada na base e na tarefa): o merge é desfeito, a tarefa fica em revisão e o repositório principal fica limpo.

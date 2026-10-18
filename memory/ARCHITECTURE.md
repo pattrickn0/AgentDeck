@@ -193,7 +193,7 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
   <branch> <pasta> <base>`; registra a instância `<modelo>@<id>` com o modelo da tarefa (`models.rs`); quem criou a tarefa,
   se for um agente aberto, vira o chefe da instância (`ask-agent --boss` chega nele); `agents::spawn_spec_for` abre o terminal
   **na worktree** (`Core::task_cwd`: tarefa em andamento ou em revisão); o brief mais as regras da tarefa (trabalhar só na
-  worktree, commits pequenos, nada de merge nem push, `ask-agent --task done <id> -` ao terminar, dúvidas ao chefe) vão
+  worktree, commits pequenos, nada de merge nem push, o relatório em um arquivo com `ask-agent --task done <id> --file <arq>`, dúvidas ao chefe) vão
   para a aba por `CoreEvent::Deliver { request: 0 }`, o mesmo caminho das mensagens entre agentes (fila e regras de `delivery.rs`,
   sem esperar resposta). Erro ao iniciar = `Failed` com a mensagem; `start` de novo tenta outra vez.
 - **Relatório** (`task_done`): só `Running`; guarda o relatório e `git diff --stat base...branch`, vai a `Review` e avisa se

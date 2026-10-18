@@ -219,15 +219,15 @@ ela dura.
 | `ask-agent --new <agente> "mensagem"` | abre outra instância do mesmo cargo |
 | `ask-agent --model <modelo> <agente> "mensagem"` | escolhe o LLM da instância ao abri-la (`sonnet`, `opencode/glm-5.3-flash-free`…); combina com `--new`; erro 409 se a aba já está aberta com outro modelo |
 | `ask-agent --reply <n> "resposta"` | responde à pergunta número `n` |
-| `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão |
+| `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão (`--file <arquivo>` lê de um arquivo; preserva acentos, que o PowerShell troca por `?` no stdin) |
 | `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
 | `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
-| `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -` | cria uma tarefa (o pedido vem pela entrada padrão, ou como último argumento): uma worktree + branch + agente próprios; `--start` já a inicia |
+| `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
 | `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
 | `ask-agent --task start <id>` / `merge <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e limpa / descarta e limpa |
-| `ask-agent --task done <id> -` | o agente da tarefa entrega o relatório (pela entrada padrão) e a põe em revisão |
-| `ask-agent --task return <id> "feedback"` | devolve a tarefa em revisão ao agente com ajustes a fazer |
+| `ask-agent --task done <id> -\|"relatório"\|--file <arq>` | o agente da tarefa entrega o relatório (pela entrada padrão, como argumento ou de um arquivo) e a põe em revisão |
+| `ask-agent --task return <id> "feedback"` | devolve a tarefa em revisão ao agente com ajustes a fazer (o feedback também vem de um arquivo: `--file <arq>`) |
 | `ask-agent --signal busy\|idle` | uso interno dos hooks (sai sempre com 0) |
 
 ---

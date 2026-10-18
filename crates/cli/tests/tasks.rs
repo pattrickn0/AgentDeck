@@ -124,10 +124,13 @@ fn the_task_commands_drive_the_whole_lifecycle() {
     assert_eq!((t1.brief.as_str(), t1.model.as_deref()), ("Conserte o login.\nCom testes.", Some("sonnet")));
     assert!(t1.worktree.is_dir());
 
-    // Só criar (pedido na linha de comando), listar, mostrar.
-    let out = run(&core, None, &["--task", "new", "Segunda tarefa", "Faça", "outra", "coisa"], "");
+    // Só criar (pedido num arquivo com acentos, via `--file`), listar, mostrar.
+    let brief = tmp.path().join("pedido.md");
+    std::fs::write(&brief, "Faça outra coisa: ação e revisão.\n").expect("w");
+    let out = run(&core, None, &["--task", "new", "Segunda tarefa", "--file", brief.to_str().expect("utf8")], "");
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert!(text(&out.stdout).contains("inicie com: ask-agent --task start t2"), "{}", text(&out.stdout));
+    assert_eq!(core.task(&project, "t2").expect("t2").brief, "Faça outra coisa: ação e revisão.");
     let out = run(&core, None, &["--task", "list"], "");
     let list = text(&out.stdout);
     let lines: Vec<&str> = list.lines().collect();
@@ -168,7 +171,14 @@ fn the_task_commands_drive_the_whole_lifecycle() {
     let out = run(&core, None, &["--task", "return", "t1", "Falta", "o", "teste"], "");
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert!(text(&out.stdout).contains("devolvida a claude@t1"), "{}", text(&out.stdout));
-    assert_eq!(run(&core, agent, &["--task", "done", "t1", "Agora com teste."], "").status.code(), Some(0));
+    // O relatório também vem de um arquivo (`--file`): é o caminho que preserva os acentos, que o
+    // shell do agente (PowerShell 5.1, `$OutputEncoding` em US-ASCII) trocaria por "?" no stdin.
+    let report = tmp.path().join("relatorio.md");
+    std::fs::write(&report, "Agora com teste: ação e coração ✓.\n").expect("w");
+    let out = run(&core, agent, &["--task", "done", "t1", "--file", report.to_str().expect("utf8")], "");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let t1 = core.task(&project, "t1").expect("t1");
+    assert_eq!(t1.report.as_deref(), Some("Agora com teste: ação e coração ✓."), "acentos preservados pelo --file");
     let out = run(&core, None, &["--task", "merge", "t1"], "");
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert!(text(&out.stdout).contains("Tarefa t1 mesclada em main"), "{}", text(&out.stdout));
