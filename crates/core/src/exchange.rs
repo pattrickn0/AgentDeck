@@ -33,7 +33,7 @@ struct Pending {
     tx: Sender<Reply>,
 }
 
-/// Retrato de uma pergunta pendente (para o mapa de conversas da interface).
+/// Retrato de uma pergunta pendente entre instâncias (projeto, quem perguntou, para quem).
 ///
 /// As chaves internas têm o escopo do projeto (`<projeto>#<id>`, ver [`crate::instances::scoped`]);
 /// aqui vêm separadas: `project` e os ids sem o projeto. Uma chave sem escopo dá `project` vazio.
