@@ -145,6 +145,33 @@ pub fn terminal_text(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n").chars().filter(|&c| c == '\n' || c == '\t' || !c.is_control()).collect()
 }
 
+/// Texto de bytes que vieram de um arquivo ou da entrada padrão: UTF-8 (com ou sem BOM), UTF-16
+/// com BOM (o PowerShell 5.1 grava assim com `>` e `Out-File`) ou, na falta de outra pista, UTF-8
+/// com substituições (nunca falha, como o `from_utf8_lossy`).
+///
+/// É o que mantém acentos e travessões inteiros quando um agente escreve o relatório de uma tarefa
+/// num arquivo: pelo shell (PowerShell, `$OutputEncoding` em US-ASCII) todo caractere fora do ASCII
+/// viraria `?` antes mesmo de chegar aqui.
+pub fn decode_text(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8_lossy(&bytes[3..]).into_owned();
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return utf16_to_string(&bytes[2..], true);
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return utf16_to_string(&bytes[2..], false);
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// Junta pares de bytes UTF-16 num texto (bytes ímpares no fim são ignorados).
+fn utf16_to_string(bytes: &[u8], little_endian: bool) -> String {
+    let (chunks, _) = bytes.as_chunks::<2>();
+    let units: Vec<u16> = chunks.iter().map(|c| if little_endian { u16::from_le_bytes(*c) } else { u16::from_be_bytes(*c) }).collect();
+    String::from_utf16_lossy(&units)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,6 +181,20 @@ mod tests {
         let evil = "oi\x1b[201~!rm -rf ~\r\x1b[200~\u{9b}2J\x07\x00fim\r\nlinha\ttab";
         assert_eq!(terminal_text(evil), "oi[201~!rm -rf ~\n[200~2Jfim\nlinha\ttab");
         assert_eq!(terminal_text("ação ✓ 🎉"), "ação ✓ 🎉");
+    }
+
+    #[test]
+    fn decode_text_reads_utf8_and_utf16_with_acents() {
+        assert_eq!(decode_text("ação — ícone".as_bytes()), "ação — ícone");
+        // BOM UTF-8 e BOM UTF-16 (LE, o do PowerShell 5.1 com `>`/`Out-File`, e BE).
+        assert_eq!(decode_text(&[0xEF, 0xBB, 0xBF, b'a', b'\xC3', b'\xA7']), "aç");
+        let utf16le: Vec<u8> = [0xFF, 0xFE].into_iter().chain("ação".encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        assert_eq!(decode_text(&utf16le), "ação");
+        let utf16be: Vec<u8> = [0xFE, 0xFF].into_iter().chain("ação".encode_utf16().flat_map(u16::to_be_bytes)).collect();
+        assert_eq!(decode_text(&utf16be), "ação");
+        // Lixo que não é UTF-8 nem UTF-16: substituições, sem panic.
+        assert_eq!(decode_text(b"a\xE7\xE3o"), "a\u{FFFD}\u{FFFD}o");
+        assert_eq!(decode_text(&[]), "");
     }
 
     #[test]

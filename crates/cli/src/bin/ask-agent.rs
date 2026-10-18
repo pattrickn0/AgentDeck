@@ -1,6 +1,6 @@
 //! `ask-agent` — pergunta algo a outro agente pela ponte do CommandDeck (porta de bin/ask-agent.js).
 //!
-//! Uso: ask-agent <agente> "mensagem"     (ou "-" para ler a mensagem do stdin)
+//! Uso: ask-agent <agente> "mensagem"     (ou "-" para ler a mensagem do stdin; "--file <arq>" de um arquivo)
 //!      ask-agent --new <agente> "mensagem"   (abre outra instância, mesmo se já houver uma)
 //!      ask-agent --model <modelo> <agente> "mensagem"   (escolhe o LLM da instância ao abri-la; combina com --new)
 //!      ask-agent --reply <n> "resposta"       (responde à pergunta número n)
@@ -9,12 +9,16 @@
 //!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
-//!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|"pedido"
+//!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|"pedido"|--file <arq>
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | discard <id>
-//!      ask-agent --task done <id> -|"relatório"   (só o agente da própria tarefa)
-//!      ask-agent --task return <id> "feedback"
+//!      ask-agent --task done <id> -|"relatório"|--file <arq>   (só o agente da própria tarefa)
+//!      ask-agent --task return <id> "feedback"|--file <arq>
 //!
 //! `<agente>` é `modelo[@cargo[@nome]]`: `claude`, `claude@dev`, `claude@dev@ana`.
+//!
+//! `--file` lê o texto de um arquivo (UTF-8, ou UTF-16 com BOM, como o PowerShell 5.1 grava). É o
+//! caminho recomendado para textos longos ou com acentos: no Windows PowerShell, canalizar pelo shell
+//! troca acentos e travessões por `?` (o `$OutputEncoding` é US-ASCII).
 //!
 //! Numa aba, o `ask-agent` espera a resposta por até `COMMANDDECK_ASK_WAIT` segundos (padrão 90,
 //! abaixo do timeout padrão do Bash do Claude Code; `0` = até o fim). Se o outro agente demorar
@@ -30,6 +34,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
 use commanddeck_core::usage::{from_claude_statusline, usage_to_json};
+use commanddeck_core::util::decode_text;
 use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
@@ -108,6 +113,10 @@ fn main() -> ExitCode {
         Ok(v) => v,
         Err(e) => return fail(format!("{e}\n{USAGE}"), 2),
     };
+    let file_body = match take_body_file(&mut args) {
+        Ok(p) => p,
+        Err(e) => return fail(format!("{e}\n{USAGE}"), 2),
+    };
     let mut reply_to: Option<u64> = None;
     if args.first().is_some_and(|a| a == "--reply") {
         match args.get(1).and_then(|n| n.trim_start_matches('#').parse().ok()) {
@@ -174,15 +183,22 @@ fn main() -> ExitCode {
         };
     }
 
-    let mut message = args.get(1..).map(|a| a.join(" ")).unwrap_or_default();
+    let mut message = match &file_body {
+        Some(path) => match read_text_file(path) {
+            Ok(text) => text,
+            Err(e) => return fail(e, 2),
+        },
+        None => args.get(1..).map(|a| a.join(" ")).unwrap_or_default(),
+    };
     // O stdin só é lido com "-" ou quando vem de um pipe/arquivo: num terminal, sem mensagem,
-    // a leitura travaria sem aviso. Bytes + `from_utf8_lossy`: arquivos em cp1252 não dão erro.
-    if message == "-" || (message.is_empty() && !std::io::stdin().is_terminal()) {
+    // a leitura travaria sem aviso. `decode_text`: UTF-8 (ou UTF-16 com BOM) sem erro, e arquivos
+    // em cp1252 viram substituições em vez de falhar.
+    if file_body.is_none() && (message == "-" || (message.is_empty() && !std::io::stdin().is_terminal())) {
         let mut raw = Vec::new();
         if let Err(e) = std::io::stdin().read_to_end(&mut raw) {
             return fail(format!("falha ao ler o stdin: {e}"), 1);
         }
-        message = String::from_utf8_lossy(&raw).into_owned();
+        message = decode_text(&raw);
     }
     if message.trim().is_empty() {
         return fail("mensagem vazia.", 2);
@@ -277,7 +293,7 @@ fn team(bridge: &Bridge) -> Result<Team, String> {
 
 // ---------- Tarefas (`--task`) ----------
 
-const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|\"pedido\"   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|discard <id>   |   ask-agent --task done <id> -|\"relatório\"   |   ask-agent --task return <id> \"feedback\"";
+const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|\"pedido\"|--file <arq>   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|discard <id>   |   ask-agent --task done <id> -|\"relatório\"|--file <arq>   |   ask-agent --task return <id> \"feedback\"|--file <arq>";
 
 /// De onde vem um texto longo (pedido, relatório, feedback).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -286,6 +302,8 @@ enum Body {
     Inline(String),
     /// `-`: entrada padrão.
     Stdin,
+    /// `--file <caminho>`: lido do arquivo (UTF-8, ou UTF-16 com BOM).
+    File(String),
     /// Não foi dado: vale a entrada padrão se ela for um pipe/arquivo.
     Missing,
 }
@@ -303,13 +321,36 @@ enum TaskCmd {
     Return { id: String, feedback: Body },
 }
 
-/// `-` sozinho = entrada padrão; texto = linha de comando; nada = `Missing`.
-fn body_of(words: &[String]) -> Body {
+/// `-` sozinho = entrada padrão; `--file <caminho>` = arquivo; texto = linha de comando; nada = `Missing`.
+fn body_of(words: &[String]) -> Result<Body, String> {
     match words {
-        [] => Body::Missing,
-        [dash] if dash == "-" => Body::Stdin,
-        words => Body::Inline(words.join(" ")),
+        [] => Ok(Body::Missing),
+        [dash] if dash == "-" => Ok(Body::Stdin),
+        [flag, path] if flag == "--file" => Ok(Body::File(path.clone())),
+        [one] if one.starts_with("--file=") => Ok(Body::File(one["--file=".len()..].to_owned())),
+        [flag, ..] if flag == "--file" => Err("--file precisa do caminho do arquivo.".into()),
+        words => Ok(Body::Inline(words.join(" "))),
     }
+}
+
+/// Tira um `--file <caminho>` (ou `--file=<caminho>`) da linha de comando e devolve o caminho.
+/// Vale para a mensagem genérica (`ask-agent <agente> --file <arq>`, `--reply ... --file <arq>`).
+fn take_body_file(args: &mut Vec<String>) -> Result<Option<String>, String> {
+    let mut path = None;
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--file" {
+            let value = args.get(i + 1).cloned().filter(|v| !v.is_empty() && !v.starts_with("--"));
+            path = Some(value.ok_or("--file precisa do caminho do arquivo.")?);
+            args.drain(i..=i + 1);
+        } else if let Some(p) = args[i].strip_prefix("--file=") {
+            path = Some(p.to_owned());
+            args.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    Ok(path)
 }
 
 /// O id de tarefa (`t3`, `3`) como a ponte o espera.
@@ -339,10 +380,11 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                 _ => TaskCmd::Discard(id),
             })
         }
-        "done" => Ok(TaskCmd::Done { id: task_id(rest.first())?, report: body_of(&rest[1..]) }),
-        "return" => Ok(TaskCmd::Return { id: task_id(rest.first())?, feedback: body_of(&rest[1..]) }),
+        "done" => Ok(TaskCmd::Done { id: task_id(rest.first())?, report: body_of(&rest[1..])? }),
+        "return" => Ok(TaskCmd::Return { id: task_id(rest.first())?, feedback: body_of(&rest[1..])? }),
         "new" => {
             let (mut agent, mut model, mut base, mut start) = (None, None, None, false);
+            let mut brief_file: Option<String> = None;
             let mut words: Vec<String> = Vec::new();
             let mut it = rest.iter();
             while let Some(a) = it.next() {
@@ -358,9 +400,11 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                     "--agent" => agent = Some(value("--agent", None)?),
                     "--model" => model = Some(value("--model", None)?),
                     "--base" => base = Some(value("--base", None)?),
+                    "--file" => brief_file = Some(value("--file", None)?),
                     s if s.starts_with("--agent=") => agent = Some(value("--agent", Some(&s["--agent=".len()..]))?),
                     s if s.starts_with("--model=") => model = Some(value("--model", Some(&s["--model=".len()..]))?),
                     s if s.starts_with("--base=") => base = Some(value("--base", Some(&s["--base=".len()..]))?),
+                    s if s.starts_with("--file=") => brief_file = Some(value("--file", Some(&s["--file=".len()..]))?),
                     s if s.starts_with("--") && s.len() > 2 => return Err(format!("opção desconhecida de --task new: {s}")),
                     _ => words.push(a.clone()),
                 }
@@ -369,20 +413,27 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                 return Err("falta o título da tarefa: ask-agent --task new \"título\" ... -".into());
             }
             let title = words.remove(0);
-            Ok(TaskCmd::New { title, brief: body_of(&words), agent, model, base, start })
+            let brief = match brief_file {
+                Some(path) => Body::File(path),
+                None => body_of(&words)?,
+            };
+            Ok(TaskCmd::New { title, brief, agent, model, base, start })
         }
         other => Err(format!("subcomando desconhecido de --task: {other}")),
     }
 }
 
-/// Texto de um `Body`: a linha de comando ou a entrada padrão. Sem nada e num terminal, erro (ler
-/// travaria sem aviso).
+/// Texto de um `Body`: a linha de comando, a entrada padrão ou um arquivo. Sem nada e num terminal,
+/// erro (ler travaria sem aviso).
 fn read_body(body: Body, what: &str) -> Result<String, String> {
     let text = match body {
         Body::Inline(text) => text,
         Body::Stdin => read_stdin()?,
+        Body::File(path) => read_text_file(&path)?,
         Body::Missing if !std::io::stdin().is_terminal() => read_stdin()?,
-        Body::Missing => return Err(format!("falta {what}: passe o texto como argumento ou pela entrada padrão (-).")),
+        Body::Missing => {
+            return Err(format!("falta {what}: passe o texto como argumento, pela entrada padrão (-) ou em --file <arquivo>."))
+        }
     };
     Ok(text)
 }
@@ -390,7 +441,14 @@ fn read_body(body: Body, what: &str) -> Result<String, String> {
 fn read_stdin() -> Result<String, String> {
     let mut raw = Vec::new();
     std::io::stdin().read_to_end(&mut raw).map_err(|e| format!("falha ao ler o stdin: {e}"))?;
-    Ok(String::from_utf8_lossy(&raw).into_owned())
+    Ok(decode_text(&raw))
+}
+
+/// Lê um arquivo como texto (UTF-8 ou UTF-16 com BOM; ver `decode_text`). É o caminho que mantém os
+/// acentos: o shell do agente (PowerShell) os trocaria por `?` ao canalizar pelo `stdin`.
+fn read_text_file(path: &str) -> Result<String, String> {
+    let raw = std::fs::read(path).map_err(|e| format!("falha ao ler o arquivo {path}: {e}"))?;
+    Ok(decode_text(&raw))
 }
 
 /// Texto de um campo da tarefa na resposta da ponte.
@@ -518,7 +576,9 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
             println!("  agente: {} · base: {} · branch: {}", who(&task), field(&task, "base"), field(&task, "branch"));
             if field(&task, "status") == "running" {
                 println!("  iniciada na worktree {}", field(&task, "worktree"));
-                println!("  o agente avisa com: ask-agent --task done {id} -  (o relatório fica em: ask-agent --task show {id})");
+                println!(
+                    "  o agente avisa com: ask-agent --task done {id} --file <arquivo>  (o relatório fica em: ask-agent --task show {id})"
+                );
             } else {
                 println!("  inicie com: ask-agent --task start {id}");
             }
@@ -720,6 +780,12 @@ mod tests {
             task(&["new", "--start", "--agent=claude", "T", "--model=sonnet", "--base=main", "pedido"]),
             Ok(new("T", Body::Inline("pedido".into()), Some("claude"), Some("sonnet"), Some("main"), true))
         );
+        // O pedido vem de um arquivo (mantém os acentos): `--file <arq>` ou `--file=<arq>`.
+        assert_eq!(task(&["new", "T", "--file", "pedido.md"]), Ok(new("T", Body::File("pedido.md".into()), None, None, None, false)));
+        assert_eq!(
+            task(&["new", "T", "--start", "--file=pedido.md"]),
+            Ok(new("T", Body::File("pedido.md".into()), None, None, None, true))
+        );
         for bad in [
             &["new"][..],
             &["new", "-"],
@@ -728,6 +794,8 @@ mod tests {
             &["new", "T", "--model", "--start"],
             &["new", "T", "--base="],
             &["new", "T", "--agente", "x"],
+            &["new", "T", "--file"],
+            &["new", "T", "--file="],
         ] {
             assert!(task(bad).is_err(), "{bad:?}");
         }
@@ -753,6 +821,10 @@ mod tests {
             Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Inline("Faltou o teste.".into()) })
         );
         assert_eq!(task(&["return", "t3", "-"]), Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Stdin }));
+        // Relatório/feedback de um arquivo (mantém os acentos).
+        assert_eq!(task(&["done", "t3", "--file", "r.md"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::File("r.md".into()) }));
+        assert_eq!(task(&["done", "t3", "--file=r.md"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::File("r.md".into()) }));
+        assert_eq!(task(&["return", "t3", "--file", "f.md"]), Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::File("f.md".into()) }));
         for bad in [
             &[][..],
             &["explodir"],
@@ -761,6 +833,7 @@ mod tests {
             &["show", "claude@t3"],
             &["start", "t1", "t2"],
             &["done"],
+            &["done", "t3", "--file"],
             &["done", "xyz", "-"],
             &["return"],
         ] {
@@ -809,6 +882,23 @@ mod tests {
     fn model_flag_needs_a_name() {
         for bad in [&["--model"][..], &["--model", "--new", "claude"], &["--model", "", "claude"], &["--model="]] {
             assert!(flags(bad).0.is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_message_body_can_come_from_a_file() {
+        for (args, path, left) in [
+            (&["claude", "oi"][..], None, &["claude", "oi"][..]),
+            (&["claude", "--file", "m.md"], Some("m.md"), &["claude"]),
+            (&["--reply", "3", "--file=m.md"], Some("m.md"), &["--reply", "3"]),
+        ] {
+            let mut v = words(args);
+            assert_eq!(take_body_file(&mut v), Ok(path.map(String::from)), "{args:?}");
+            assert_eq!(v, words(left));
+        }
+        for bad in [&["claude", "--file"][..], &["claude", "--file", "--new"]] {
+            let mut v = words(bad);
+            assert!(take_body_file(&mut v).is_err(), "{bad:?}");
         }
     }
 

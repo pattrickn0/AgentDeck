@@ -149,7 +149,7 @@ fn start_makes_the_worktree_the_instance_and_delivers_the_brief() {
     assert_eq!(to, "claude@t1");
     assert!(prompt.contains("Faça: Corrigir o login\n\nCom cuidado."), "{prompt}");
     assert!(prompt.contains(&t.worktree.display().to_string()) && prompt.contains(&t.branch), "{prompt}");
-    assert!(prompt.contains("ask-agent --task done t1 -") && prompt.contains("ask-agent --boss"), "{prompt}");
+    assert!(prompt.contains("ask-agent --task done t1 --file") && prompt.contains("ask-agent --boss"), "{prompt}");
     assert!(!prompt.contains('\x1b'));
     assert!(evs.iter().any(|e| matches!(e, CoreEvent::Deliver(d) if d.create && d.from == "claude" && d.project == env.project)));
 
@@ -269,7 +269,7 @@ fn return_sends_the_feedback_and_goes_back_to_running() {
     let sent = deliveries(&events(&env));
     assert_eq!(sent.len(), 1, "{sent:?}");
     assert_eq!(sent[0].0, "claude@t1");
-    assert!(sent[0].1.contains("Faltou o teste do caso vazio.") && sent[0].1.contains("ask-agent --task done t1 -"), "{}", sent[0].1);
+    assert!(sent[0].1.contains("Faltou o teste do caso vazio.") && sent[0].1.contains("ask-agent --task done t1 --file"), "{}", sent[0].1);
     // O ciclo continua: novo commit, novo relatório, e a aba (fechada à mão no meio) é registrada de novo.
     core.close_instance(&env.project, "claude@t1");
     commit_file(&t.worktree, "b.rs", "2\n", "fix: b");

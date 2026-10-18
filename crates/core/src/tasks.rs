@@ -311,7 +311,8 @@ pub fn start_message(task: &Task, boss: Option<&str>) -> String {
 Regras da tarefa {id}:\n\
 - Trabalhe SOMENTE na pasta {wt}, na branch {branch} (criada a partir de {base}). Não mexa no repositório principal nem em outras pastas.\n\
 - Faça commits pequenos nessa branch. Não faça merge nem push: quem mescla é o CommandDeck, depois da revisão.\n\
-- Ao terminar, rode ask-agent --task done {id} - com o relatório na entrada padrão (o que foi feito, arquivos alterados, testes rodados e o que falta).\n\
+- Ao terminar, escreva o relatório (o que foi feito, arquivos alterados, testes rodados e o que falta) em um arquivo e rode: ask-agent --task done {id} --file <arquivo>.\n\
+  (Entregar por arquivo preserva os acentos; canalizar pela entrada padrão (-) faz o shell do Windows trocá-los por \"?\".)\n\
 - {doubts}",
         id = task.id,
         title = task.title,
@@ -325,8 +326,8 @@ Regras da tarefa {id}:\n\
 pub fn return_message(task: &Task, feedback: &str) -> String {
     terminal_text(&format!(
         "[CommandDeck · Tarefa {id}: {title} — ajustes pedidos na revisão]\n\n{feedback}\n\n---\n\
-Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao terminar, rode de novo ask-agent --task done {id} - \
-com o relatório na entrada padrão.",
+Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
+(entregar por arquivo preserva os acentos).",
         id = task.id,
         title = task.title,
         wt = task.worktree.display(),
@@ -1217,7 +1218,7 @@ mod tests {
         let m = start_message(&sample(), Some("claude"));
         assert!(m.starts_with("[CommandDeck · Tarefa t3: Corrigir o login]\n\nFaça X.\n\nDepois Y."), "{m}");
         assert!(m.contains("SOMENTE na pasta") && m.contains("tarefa/t3-corrigir-o-login") && m.contains("criada a partir de main"), "{m}");
-        assert!(m.contains("ask-agent --task done t3 -"), "{m}");
+        assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(m.contains("Não faça merge nem push"), "{m}");
         assert!(m.contains("ask-agent --boss") && m.contains("\"claude\""), "{m}");
         // Sem chefe agente, as dúvidas ficam no terminal; sem brief, vale o título; sem ESC.
@@ -1233,7 +1234,7 @@ mod tests {
     fn the_return_message_has_the_feedback() {
         let m = return_message(&sample(), "  Faltou o teste.  ");
         assert!(m.contains("ajustes pedidos") && m.contains("\n\nFaltou o teste.\n\n"), "{m}");
-        assert!(m.contains("ask-agent --task done t3 -"), "{m}");
+        assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
     }
 
     #[test]

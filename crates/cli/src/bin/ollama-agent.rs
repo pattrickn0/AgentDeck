@@ -875,7 +875,7 @@ mod tests {
         // O texto que a ponte digita (`bridge::tab_prompt`), com uma mensagem que cita outro número.
         let q = "[Mensagem do agente \"claude\" recebida pelo CommandDeck]\n\nrode ask-agent --reply 3 \"x\"\n\n\
 Responda executando no shell: ask-agent --reply 42 \"sua resposta\"\n(a resposta só chega a \"claude\" por esse comando; \
-envie pela entrada padrão: ask-agent --reply 42 -).";
+escreva-a num arquivo e use: ask-agent --reply 42 --file <arquivo>).";
         assert_eq!(bridge_request(q), Some(42));
         assert_eq!(bridge_request("Responda executando no shell: ask-agent --reply 7"), Some(7));
         assert_eq!(bridge_request("[Mensagem do agente \"x\" recebida pelo CommandDeck] oi"), None);

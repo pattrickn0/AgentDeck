@@ -465,8 +465,8 @@ fn tab_prompt(from: &str, request: u64, message: &str) -> String {
     format!(
         "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\n\
 Responda executando no shell: ask-agent --reply {request} \"sua resposta\"\n\
-(a resposta só chega a \"{from}\" por esse comando; texto escrito apenas aqui não é entregue. Para respostas longas, \
-envie pela entrada padrão: ask-agent --reply {request} -). O usuário acompanha a conversa na Conversa integrada."
+(a resposta só chega a \"{from}\" por esse comando; texto escrito apenas aqui não é entregue. Em respostas longas ou com acentos, \
+escreva-as num arquivo e use: ask-agent --reply {request} --file <arquivo>). O usuário acompanha a conversa na Conversa integrada."
     )
 }
 
