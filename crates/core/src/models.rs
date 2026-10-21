@@ -112,7 +112,16 @@ pub fn provider(model: &str) -> Option<&str> {
     model.split_once('/').map(|(p, _)| p).filter(|p| !p.is_empty())
 }
 
-/// A lista de modelos agrupada por provedor, na ordem em que os provedores aparecem.
+/// A lista com os gratuitos (`-free`) primeiro, mantendo a ordem original dentro de cada grupo
+/// (ordenação estável). É o que as listas de modelo mostram.
+pub fn free_first(models: &[String]) -> Vec<String> {
+    let mut out = models.to_vec();
+    out.sort_by_key(|m| !is_free(m));
+    out
+}
+
+/// A lista de modelos agrupada por provedor, na ordem em que os provedores aparecem, com os
+/// gratuitos (`-free`) primeiro em cada grupo.
 ///
 /// Só o `opencode models` devolve `provedor/modelo`; os demais agentes listam nomes simples, então
 /// a lista deles volta vazia e a interface mostra a lista de sempre. Modelos sem provedor no nome
@@ -126,7 +135,20 @@ pub fn by_provider(models: &[String]) -> Vec<(String, Vec<String>)> {
             None => out.push((provider.to_owned(), vec![model.clone()])),
         }
     }
+    for (_, list) in &mut out {
+        *list = free_first(list);
+    }
     out
+}
+
+/// O passo inicial do menu de modelo: com **um provedor só** não há o que escolher, então os modelos
+/// dele aparecem direto, sem o passo dos provedores. `None` = a lista de provedores vem primeiro (ou
+/// não há grupos, caso de Claude e Antigravity).
+pub fn sole_provider(groups: &[(String, Vec<String>)]) -> Option<&str> {
+    match groups {
+        [(provider, _)] => Some(provider),
+        _ => None,
+    }
 }
 
 /// Modelo gratuito (`…-free`, o `#variante` não conta): sem custo por token, para destacar nas
@@ -394,20 +416,41 @@ mod tests {
     fn models_are_grouped_by_provider() {
         let list = [
             "ollama/qwen3.5:4b",
+            "opencode/pago-antes",
             "opencode/glm-5.3-flash-free",
             "opencode-go/deepseek-v4.1-flash",
             "opencode/big-pickle",
             "opencode-go/glm-5.3",
+            "opencode/beam-free",
         ]
         .map(str::to_owned)
         .to_vec();
         let groups = by_provider(&list);
         assert_eq!(groups.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["ollama", "opencode", "opencode-go"]);
-        assert_eq!(groups[1].1, ["opencode/glm-5.3-flash-free", "opencode/big-pickle"]);
-        assert_eq!(groups[2].1.len(), 2);
+        // Gratuitos primeiro, e a ordem original dentro de cada grupo (ordenação estável).
+        assert_eq!(groups[1].1, ["opencode/glm-5.3-flash-free", "opencode/beam-free", "opencode/pago-antes", "opencode/big-pickle"]);
+        assert_eq!(groups[2].1, ["opencode-go/deepseek-v4.1-flash", "opencode-go/glm-5.3"]);
         // Sem provedor no nome (Claude, Antigravity): nada a agrupar.
         assert!(by_provider(&["sonnet".to_owned(), "gemini-4-argon".to_owned()]).is_empty());
         assert!(by_provider(&[]).is_empty());
+    }
+
+    #[test]
+    fn free_models_come_first_and_keep_the_order() {
+        let list = ["pago-a", "gratis-b-free", "pago-c", "gratis-d-free"].map(str::to_owned).to_vec();
+        assert_eq!(free_first(&list), ["gratis-b-free", "gratis-d-free", "pago-a", "pago-c"]);
+        // A lista original não muda.
+        assert_eq!(list[0], "pago-a");
+        assert!(free_first(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_single_provider_skips_the_provider_step() {
+        let one = by_provider(&["opencode/pago".to_owned(), "opencode/gratis-free".to_owned()]);
+        assert_eq!(sole_provider(&one), Some("opencode"));
+        let two = by_provider(&["opencode/a".to_owned(), "ollama/b".to_owned()]);
+        assert_eq!(sole_provider(&two), None);
+        assert_eq!(sole_provider(&[]), None);
     }
 
     #[test]
