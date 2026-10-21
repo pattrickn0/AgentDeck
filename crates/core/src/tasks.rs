@@ -1428,6 +1428,41 @@ mod tests {
     }
 
     #[test]
+    fn the_reject_message_says_what_was_merged_and_why_it_failed() {
+        let m = reject_message(&sample(), "  Fecha ao salvar.  ", true);
+        assert!(m.contains("reprovada na validação") && m.contains("já foi mesclado em main"), "{m}");
+        assert!(m.contains("pelo seguinte motivo:
+
+Fecha ao salvar.
+
+"), "{m}");
+        assert!(m.contains("mesma branch tarefa/t3-corrigir-o-login") && m.contains("ask-agent --task done t3 --file"), "{m}");
+        assert!(!m.contains("alinhar") && !m.contains(''), "{m:?}");
+        // Branch que não pôde ser alinhada: o agente recebe o comando para fazê-lo.
+        assert!(reject_message(&sample(), "x", false).contains("rode na sua pasta: git merge main"));
+    }
+
+    #[test]
+    fn only_a_completed_or_discarded_task_is_final() {
+        for (s, terminal) in [
+            (TaskStatus::Draft, false),
+            (TaskStatus::Running, false),
+            (TaskStatus::Review, false),
+            (TaskStatus::Validating, false),
+            (TaskStatus::Failed, false),
+            (TaskStatus::Merged, true),
+            (TaskStatus::Discarded, true),
+        ] {
+            assert_eq!(s.is_terminal(), terminal, "{s:?}");
+        }
+        // Estável: o JSON antigo (`merged`) segue valendo e o novo estado tem nome e rótulo próprios.
+        assert_eq!(serde_json::from_str::<TaskStatus>("\"merged\"").ok(), Some(TaskStatus::Merged));
+        assert_eq!(serde_json::to_string(&TaskStatus::Validating).ok().as_deref(), Some("\"validating\""));
+        assert_eq!((TaskStatus::Validating.as_str(), TaskStatus::Validating.label()), ("validating", "aguardando validação"));
+        assert_eq!(TaskStatus::Merged.label(), "concluída");
+    }
+
+    #[test]
     fn the_counter_never_goes_back() {
         let mut p = ProjectTasks { next: 2, tasks: vec![Task { id: "t7".into(), ..Task::default() }], ..ProjectTasks::default() };
         p.fix_counter();

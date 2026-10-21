@@ -181,13 +181,35 @@ fn the_task_commands_drive_the_whole_lifecycle() {
     assert_eq!(t1.report.as_deref(), Some("Agora com teste: ação e coração ✓."), "acentos preservados pelo --file");
     let out = run(&core, None, &["--task", "merge", "t1"], "");
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    assert!(text(&out.stdout).contains("Tarefa t1 mesclada em main"), "{}", text(&out.stdout));
-    assert!(ws.join("login.txt").is_file() && !t1.worktree.exists());
+    assert!(text(&out.stdout).contains("Tarefa t1 mesclada em main; aguardando validação"), "{}", text(&out.stdout));
+    assert!(ws.join("login.txt").is_file() && t1.worktree.is_dir(), "mesclar mantém a worktree até validar");
+    let out = run(&core, None, &["--task", "show", "t1"], "");
+    assert!(text(&out.stdout).contains("Estado: validação"), "{}", text(&out.stdout));
+
+    // Reprovar (o motivo vem de um arquivo) e entregar de novo; depois validar.
+    let out = run(&core, None, &["--task", "reject", "t1"], "");
+    assert_eq!(out.status.code(), Some(2), "reprovar sem motivo é erro de uso");
+    let why = tmp.path().join("motivo.md");
+    std::fs::write(&why, "Não salva a sessão: ação ✗.\n").expect("w");
+    let out = run(&core, None, &["--task", "reject", "t1", "--file", why.to_str().expect("utf8")], "");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("Tarefa t1 reprovada; claude@t1 recebeu o motivo"), "{}", text(&out.stdout));
+    let out = run(&core, None, &["--task", "validate", "t1"], "");
+    assert_eq!(out.status.code(), Some(1), "em andamento não se valida");
+    std::fs::write(t1.worktree.join("login2.txt"), "ok\n").expect("w");
+    git(&t1.worktree, &["add", "-A"]);
+    git(&t1.worktree, &["commit", "-q", "-m", "fix: sessão"]);
+    assert_eq!(run(&core, agent, &["--task", "done", "t1", "-"], "Sessão corrigida.").status.code(), Some(0));
+    assert_eq!(run(&core, None, &["--task", "merge", "t1"], "").status.code(), Some(0));
+    let out = run(&core, None, &["--task", "validate", "t1"], "");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("Tarefa t1 validada e concluída"), "{}", text(&out.stdout));
+    assert!(ws.join("login2.txt").is_file() && !t1.worktree.exists());
 
     // Erros: estado errado (1), uso incorreto (2), agente inválido (1), descartar.
     let out = run(&core, None, &["--task", "merge", "t1"], "");
     assert_eq!(out.status.code(), Some(1));
-    assert!(text(&out.stderr).contains("mesclada"), "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("concluída"), "{}", text(&out.stderr));
     assert_eq!(run(&core, None, &["--task", "bogus"], "").status.code(), Some(2));
     assert_eq!(run(&core, None, &["--task"], "").status.code(), Some(2));
     assert_eq!(run(&core, None, &["--task", "show", "xyz"], "").status.code(), Some(2));
@@ -199,7 +221,7 @@ fn the_task_commands_drive_the_whole_lifecycle() {
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert!(text(&out.stdout).contains("Tarefa t2 descartada"), "{}", text(&out.stdout));
     let out = run(&core, None, &["--task", "list"], "");
-    assert!(text(&out.stdout).contains("mesclada") && text(&out.stdout).contains("descartada"), "{}", text(&out.stdout));
+    assert!(text(&out.stdout).contains("concluída") && text(&out.stdout).contains("descartada"), "{}", text(&out.stdout));
     // A ajuda cita as tarefas.
     assert!(text(&run(&core, None, &["--help"], "").stdout).contains("--task"));
     core.shutdown();
