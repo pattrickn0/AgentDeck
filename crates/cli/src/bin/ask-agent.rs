@@ -9,6 +9,7 @@
 //!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
+//!      ask-agent --learn <arquivo> [<arquivo>...]   (o que o projeto já aprendeu sobre esses arquivos)
 //!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|"pedido"|--file <arq>
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
 //!      ask-agent --task done <id> -|"relatório"|--file <arq>   (só o agente da própria tarefa)
@@ -40,7 +41,7 @@ use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn <arquivo>...   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -109,6 +110,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "--task") {
         return task_command(&bridge, &args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "--learn") {
+        return learn_command(&bridge, &args[1..]);
     }
     let (force_new, model) = match take_flags(&mut args) {
         Ok(v) => v,
@@ -290,6 +294,26 @@ fn team(bridge: &Bridge) -> Result<Team, String> {
     let boss = json.get("boss").and_then(Value::as_str).map(str::to_owned);
     let crew = json.get("crew").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect());
     Ok(Team { id, boss, crew: crew.unwrap_or_default(), models: models_of(&json) })
+}
+
+// ---------- Aprendizados (`--learn`) ----------
+
+const LEARN_USAGE: &str = "Uso: ask-agent --learn <arquivo> [<arquivo>...]   (o que o projeto já aprendeu sobre esses arquivos)";
+
+/// `ask-agent --learn <caminho>...`: imprime os aprendizados (`memory/aprendizados/`) que valem para os arquivos.
+fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
+    if paths.is_empty() || paths.iter().any(|p| p == "-h" || p == "--help") {
+        println!("{LEARN_USAGE}");
+        return ExitCode::from(if paths.is_empty() { 2 } else { 0 });
+    }
+    match bridge.request("POST", "/learn", Some(&json!({ "paths": paths })), Some(Duration::from_secs(15))) {
+        Ok((200, json)) => {
+            println!("{}", json.get("text").and_then(Value::as_str).unwrap_or(""));
+            ExitCode::SUCCESS
+        }
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Err(e) => fail(e, 1),
+    }
 }
 
 // ---------- Tarefas (`--task`) ----------
