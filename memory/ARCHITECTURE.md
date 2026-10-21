@@ -145,6 +145,14 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
   prefixo antes da `/`); os modelos `-free` levam a marca "grátis" (`models::is_free`) e vêm primeiro em
   cada lista. Com um provedor só, `models::sole_provider` pula o passo do provedor e mostra os modelos
   dele direto.
+- **Inventário para os agentes** (`ask-agent --models [agente]`, `GET /models[?agent=<id>]`, `Core::models_inventory`):
+  imprime, por agente instalado, o nome como vale no `--agent` e os modelos como o `--model` aceita, com os `-free`
+  primeiro e marcados "(grátis)"; o OpenCode sai agrupado por provedor, uma linha cada (`models::by_provider`); os
+  modelos do Ollama saem juntos como `ollama:<modelo>`; o Codex não tem lista e os CLIs sem escolha de modelo
+  (aider…) saem como tal. Agente não instalado não aparece (e `--models <agente>` dele dá 404); uma listagem que
+  falha vira uma linha ("não consegui listar") sem derrubar o resto. Usa o cache de `known_models` e consulta os
+  CLIs em paralelo, então demora no máximo o `LIST_TIMEOUT`. A formatação é a função pura `models::format_inventory`.
+  As instruções da ponte e as regras da tarefa (`start_message`) só apontam o comando, sem colar a lista no prompt.
 - **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet)`, pelos campos `models` de `/agents` e `/team`), o
   cabeçalho da aba, a barra lateral e o menu de contexto da aba (só leitura: trocar o modelo de uma aba aberta exige
   reiniciar o agente e não existe ainda).
