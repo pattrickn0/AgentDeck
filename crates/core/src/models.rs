@@ -191,6 +191,90 @@ pub fn parse_opencode_models(out: &str) -> Vec<String> {
     seen
 }
 
+/// O que se sabe dos modelos de um agente instalado (`ask-agent --models`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelList {
+    /// Os modelos que o `--model` aceita.
+    Models(Vec<String>),
+    /// Aceita `--model <nome>`, mas este computador não lista os nomes (Codex).
+    Unlisted,
+    /// Não escolhe modelo: usa o padrão do CLI.
+    Fixed,
+    /// O modelo vai no nome do agente (`ollama:<modelo>`).
+    InName,
+    /// A listagem falhou: o CLI não respondeu a tempo ou a lista veio vazia.
+    Failed,
+}
+
+/// Um agente instalado e os seus modelos, como o `--agent` e o `--model` os aceitam.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentModels {
+    pub agent: String,
+    pub list: ModelList,
+}
+
+/// Os agentes cujos modelos o CLI ou a lista fixa informam (os demais não têm lista).
+pub fn has_model_list(kind: &str) -> bool {
+    matches!(kind, "claude" | "antigravity" | "opencode")
+}
+
+/// A entrada do inventário de `kind`, dada a lista que [`Core::known_models`] devolveu (vazia = falhou).
+pub fn classify(kind: &str, models: Vec<String>) -> AgentModels {
+    let list = if kind.starts_with("ollama:") {
+        ModelList::InName
+    } else if has_model_list(kind) {
+        if models.is_empty() { ModelList::Failed } else { ModelList::Models(models) }
+    } else if accepts_model(kind) {
+        ModelList::Unlisted
+    } else {
+        ModelList::Fixed
+    };
+    AgentModels { agent: kind.to_owned(), list }
+}
+
+/// `a, b (grátis), c`: os gratuitos primeiro e marcados.
+fn join_marked(models: &[String], strip: impl Fn(&str) -> &str) -> String {
+    free_first(models)
+        .iter()
+        .map(|m| if is_free(m) { format!("{} (grátis)", strip(m)) } else { strip(m).to_owned() })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// O texto de `ask-agent --models`: uma linha por agente (o OpenCode, uma por provedor), curto o
+/// bastante para um agente ler. Função pura (testada); quem busca os dados é [`Core::models_inventory`].
+pub fn format_inventory(items: &[AgentModels]) -> String {
+    if items.is_empty() {
+        return "Nenhum agente instalado neste computador.".to_owned();
+    }
+    let mut lines = Vec::new();
+    let local: Vec<&str> = items.iter().filter(|i| i.list == ModelList::InName).map(|i| i.agent.as_str()).collect();
+    for item in items {
+        let agent = &item.agent;
+        match &item.list {
+            ModelList::Models(models) => {
+                let groups = by_provider(models);
+                if groups.is_empty() {
+                    lines.push(format!("{agent} --model: {}", join_marked(models, |m| m)));
+                } else {
+                    lines.push(format!("{agent} --model <provedor>/<modelo>:"));
+                    lines.extend(groups.iter().map(|(p, list)| format!("  {p}/: {}", join_marked(list, |m| m.strip_prefix(&format!("{p}/")).unwrap_or(m)))));
+                }
+            }
+            ModelList::Unlisted => lines.push(format!("{agent} --model <nome> (este computador não lista os modelos)")),
+            ModelList::Fixed => lines.push(format!("{agent}: sem escolha de modelo (usa o padrão do CLI)")),
+            ModelList::Failed => lines.push(format!("{agent}: não consegui listar os modelos (o CLI não respondeu); sem --model ele usa o padrão")),
+            ModelList::InName => {
+                // Todos os modelos do Ollama saem juntos, na posição do primeiro.
+                if local.first() == Some(&agent.as_str()) {
+                    lines.push(format!("{} (locais; o modelo vai no nome do agente, sem --model)", local.join(", ")));
+                }
+            }
+        }
+    }
+    lines.join("\n")
+}
+
 /// Quanto tempo a lista de modelos de um agente fica em cache.
 const LIST_TTL: Duration = Duration::from_secs(600);
 /// Uma consulta que falhou só é repetida depois disto.
@@ -306,6 +390,41 @@ impl Core {
         let list = list.unwrap_or_default();
         self.inner.model_lists.lists.lock().insert(kind.to_owned(), (Instant::now(), ok, list.clone()));
         list
+    }
+
+    /// Os agentes instalados e os seus modelos (`ask-agent --models`), com o cache de [`Core::known_models`].
+    /// `only` limita a um agente (aceita apelidos como `agy` e `ollama:<modelo>`). As consultas aos CLIs
+    /// correm juntas, então demora o mesmo que a mais lenta (até `LIST_TIMEOUT`). BLOQUEANTE.
+    /// Erro = o agente pedido não está instalado.
+    pub fn models_inventory(&self, only: Option<&str>) -> Result<Vec<AgentModels>, String> {
+        let agents = &self.inner.agents;
+        let mut kinds: Vec<String> = crate::agents::AGENTS
+            .iter()
+            .filter(|a| a.peer && a.id != "ollama" && agents.resolve(a.id).is_some())
+            .map(|a| a.id.to_owned())
+            .collect();
+        let local: Vec<String> = agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
+        if let Some(only) = only {
+            let name = crate::agents::resolve_alias(only);
+            let wanted = if name.starts_with("ollama") { "ollama" } else { name };
+            let installed = kinds.iter().any(|k| k == wanted) || (wanted == "ollama" && agents.resolve_ollama(None).is_some());
+            if !installed {
+                let mut have: Vec<&str> = kinds.iter().map(String::as_str).collect();
+                if agents.resolve_ollama(None).is_some() {
+                    have.push("ollama");
+                }
+                return Err(format!("o agente \"{only}\" não está instalado neste computador (instalados: {})", have.join(", ")));
+            }
+            kinds.retain(|k| k == wanted);
+        }
+        let mut out: Vec<AgentModels> = std::thread::scope(|s| {
+            let jobs: Vec<_> = kinds.iter().map(|k| s.spawn(move || classify(k, self.known_models(k)))).collect();
+            jobs.into_iter().zip(&kinds).map(|(j, k)| j.join().unwrap_or_else(|_| classify(k, Vec::new()))).collect()
+        });
+        if only.is_none_or(|o| crate::agents::resolve_alias(o).starts_with("ollama")) {
+            out.extend(local.iter().map(|m| classify(&format!("ollama:{m}"), Vec::new())));
+        }
+        Ok(out)
     }
 }
 
@@ -475,6 +594,50 @@ mod tests {
         assert!(is_free("opencode/beam-free#alta"));
         assert!(!is_free("opencode/deepseek-v4.1-flash"));
         assert!(!is_free("sonnet"));
+    }
+
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_inventory_is_formatted_one_line_per_agent_and_one_per_provider() {
+        let items = vec![
+            classify("claude", strs(&["opus", "sonnet"])),
+            classify("antigravity", strs(&["gemini-4-argon-low", "gemini-4-argon-free"])),
+            classify("codex", Vec::new()),
+            classify(
+                "opencode",
+                strs(&["opencode/pago", "opencode/glm-5.3-flash-free", "opencode-go/deepseek-v4.1-flash", "opencode/beam-free#alta"]),
+            ),
+            classify("ollama:qwen3.5:4b", Vec::new()),
+            classify("ollama:qwen3.5:9b", Vec::new()),
+            classify("aider", Vec::new()),
+        ];
+        let expected = [
+            "claude --model: opus, sonnet",
+            "antigravity --model: gemini-4-argon-free (grátis), gemini-4-argon-low",
+            "codex --model <nome> (este computador não lista os modelos)",
+            "opencode --model <provedor>/<modelo>:",
+            "  opencode/: glm-5.3-flash-free (grátis), beam-free#alta (grátis), pago",
+            "  opencode-go/: deepseek-v4.1-flash",
+            "ollama:qwen3.5:4b, ollama:qwen3.5:9b (locais; o modelo vai no nome do agente, sem --model)",
+            "aider: sem escolha de modelo (usa o padrão do CLI)",
+        ];
+        assert_eq!(format_inventory(&items), expected.join("\n"));
+    }
+
+    #[test]
+    fn a_failed_listing_is_one_line_and_the_rest_stays() {
+        // O CLI instalado que não listou nada (tempo esgotado, erro): uma linha, sem derrubar as outras.
+        let items = vec![classify("opencode", Vec::new()), classify("claude", strs(&["opus"]))];
+        assert_eq!(items[0].list, ModelList::Failed);
+        let text = format_inventory(&items);
+        assert_eq!(text.lines().count(), 2, "{text}");
+        assert!(text.starts_with("opencode: não consegui listar os modelos"), "{text}");
+        assert!(text.ends_with("claude --model: opus"), "{text}");
+        // Nenhum agente instalado.
+        assert_eq!(format_inventory(&[]), "Nenhum agente instalado neste computador.");
     }
 
     #[test]

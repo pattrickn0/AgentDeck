@@ -324,6 +324,7 @@ Regras da tarefa {id}:\n\
 - Não peça a ninguém (outro agente ou o usuário) que mescle ou rode ask-agent --task merge: a decisão é de quem revisa. O seu trabalho termina no --task done.\n\
 - Ao terminar, escreva o relatório (o que foi feito, arquivos alterados, testes rodados e o que falta) em um arquivo e rode: ask-agent --task done {id} --file <arquivo>.\n\
   (Entregar por arquivo preserva os acentos; canalizar pela entrada padrão (-) faz o shell do Windows trocá-los por \"?\".)\n\
+- Para saber que agentes e modelos este computador tem, rode `ask-agent --models` antes de escolher `--agent`/`--model`.\n\
 - {doubts}
 
 Comece agora, por conta própria: este brief é a sua ordem de trabalho. Não espere confirmação nem pergunte se pode começar.",

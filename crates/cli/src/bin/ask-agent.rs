@@ -6,6 +6,7 @@
 //!      ask-agent --reply <n> "resposta"       (responde à pergunta número n)
 //!      ask-agent --list
 //!      ask-agent --team                       (seu chefe e sua equipe)
+//!      ask-agent --models [agente]            (agentes instalados e modelos que o --model aceita)
 //!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
@@ -40,7 +41,7 @@ use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -109,6 +110,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "--task") {
         return task_command(&bridge, &args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "--models") {
+        return models_command(&bridge, args.get(1).map(String::as_str));
     }
     let (force_new, model) = match take_flags(&mut args) {
         Ok(v) => v,
@@ -252,6 +256,23 @@ fn take_flags(args: &mut Vec<String>) -> Result<(bool, Option<String>), String> 
             _ => return Ok((force_new, model)),
         }
         args.remove(0);
+    }
+}
+
+/// `--models [agente]`: os agentes instalados neste computador e os modelos que o `--model` aceita.
+fn models_command(bridge: &Bridge, only: Option<&str>) -> ExitCode {
+    let route = match only {
+        Some(a) => format!("/models?agent={a}"),
+        None => "/models".to_owned(),
+    };
+    // Os CLIs podem levar até 15 s na primeira consulta (depois vem do cache da ponte).
+    match bridge.request("GET", &route, None, Some(Duration::from_secs(40))) {
+        Ok((200, json)) => {
+            println!("{}", json.get("text").and_then(Value::as_str).unwrap_or_default());
+            ExitCode::SUCCESS
+        }
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Err(e) => fail(e, 1),
     }
 }
 
