@@ -89,7 +89,8 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         let is_shown = i == shown;
         let resp = ui.interact(vis, Id::new(("tab", tab.uid)), Sense::click());
         let close_rect = Rect::from_min_size(Pos2::new(r.max.x - 6.0 - close_w, r.center().y - 10.5), Vec2::new(close_w, 21.0));
-        let mic_rect = Rect::from_min_size(Pos2::new(close_rect.min.x - 2.0 - MIC_BTN, r.center().y - 10.5), Vec2::splat(MIC_BTN));
+        // Centrado no espaço abaixo da linha de 2 px do topo da aba, não na aba inteira.
+        let mic_rect = Rect::from_min_size(Pos2::new(close_rect.min.x - 2.0 - MIC_BTN, r.center().y + 1.0 - MIC_BTN / 2.0), Vec2::splat(MIC_BTN));
         let visual = dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid));
         let mic_busy = visual.is_busy() || !tab.alive;
         let mic_resp =
@@ -184,6 +185,9 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             painter.rect_filled(mic_rect, 4.0, theme::with_opacity(theme::RED, mic_opacity));
         } else if mic_hot {
             painter.rect_filled(mic_rect, 4.0, theme::BORDER);
+        } else {
+            // Parado: contorno leve para o botão ser visto sem passar o mouse.
+            painter.rect_stroke(mic_rect, 4.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
         }
         if mic_busy || !audio::AVAILABLE || visual == ButtonVisual::Opening {
             mic_opacity = 0.5;
@@ -193,7 +197,7 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         } else if mic_hot {
             theme::TEXT
         } else {
-            theme::MUTED
+            theme::brighten(theme::MUTED, 1.2)
         };
         deck.icons.paint(&painter, Icon::Mic, mic_rect.center(), 13.5, theme::with_opacity(mic_fg, mic_opacity), 0.0);
 
