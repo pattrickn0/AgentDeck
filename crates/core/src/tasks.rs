@@ -1466,7 +1466,6 @@ fn git_out(repo: &Repo, args: &[&str]) -> Result<String, GitError> {
     run(repo.cmd(args), None, WRITE_TIMEOUT).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
-/// `git diff --stat base...branch`, cortado; "sem alterações" quando vazio.
 /// Arquivos que a branch trouxe em relação à base (`git diff --name-only base...branch`); vazio se a branch
 /// não existe mais ou o git falha.
 fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
@@ -1479,6 +1478,7 @@ fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// `git diff --stat base...branch`, cortado; "sem alterações" quando vazio.
 fn diff_stat(repo: &Repo, base: &str, branch: &str) -> Result<String, String> {
     let out = git_out(repo, &["diff", "--stat", &format!("{base}...{branch}"), "--"]).map_err(|e| e.to_string())?;
     let out = out.trim();
