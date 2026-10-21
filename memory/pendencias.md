@@ -114,7 +114,6 @@ Proposta:
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
 - [ ] **OpenCode: escolher o provedor antes do modelo** (pedido do usuário, 2026-10-18). Hoje o `opencode models` mistura todos os provedores conectados (`/connect`), e o formulário de nova tarefa oferece modelos sem acesso: a `t1` foi registrada com `opencode-go/deepseek-v4.1-flash` (plano Go, que o usuário não tem; 0 tokens no `opencode stats`). Fazer em dois passos: provedor (`opencode`, `opencode-go`, `ollama`…, o prefixo antes da `/`) e depois os modelos daquele provedor. Avaliar destacar os `-free`.
 - [ ] **Mesa de tarefas: áudio e anexos no pedido** (pedido do usuário, 2026-10-18). O formulário "Nova tarefa" só aceita texto. Reaproveitar o microfone (Whisper local) e os anexos do compositor (`ui/composer.rs`, cópia em `dados/anexos`), com os anexos citados no arquivo do pedido.
-- [ ] **Ditado em qualquer aba de CLI** (pedido do usuário, 2026-10-18). Hoje o áudio só sai pelo compositor, que envia para a aba ativa: dá para mandar para o modelo errado. O usuário só não aposenta a Conversa integrada por causa do ditado. Proposta: microfone (e atalho) presos à aba do terminal, que grava, transcreve e digita o texto no PTY daquela aba **sem Enter**, para conferir antes de enviar. Funciona em qualquer CLI, porque é só entrada de teclado; o destino fica fixo na aba onde a gravação começou.
 
 ## 7. Git
 
@@ -128,6 +127,7 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
+- [x] **Ditado preso a cada aba de CLI** (tarefa `t5`): botão de microfone no cabeçalho de cada aba de terminal (e atalho `Ctrl+Shift+M`) que grava, transcreve com o Whisper local e digita o texto no PTY daquela aba (como colagem segura, sem Enter). O destino fica fixo no `uid` da aba onde a gravação começou (`crates/app/src/dictation.rs`), descartando com aviso se a aba fechar antes do fim da transcrição.
 - [x] **Regras da tarefa: o agente não pede merge.** O `start_message` (`tasks.rs`) agora diz que o agente não
   pede a ninguém que mescle nem rode `--task merge`: o trabalho dele termina no `--task done`. Veio do primeiro
   uso real (o `opencode@t2` pediu ao Claude que mesclasse a própria tarefa).

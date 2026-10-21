@@ -18,6 +18,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::agents::Agents;
 use crate::audio;
+use crate::dictation::{self, MicPhase, MicTarget, TabDelivery, ToggleOutcome};
 use crate::icons::IconCache;
 use crate::split;
 use crate::terminal::input::{self, Mods};
@@ -60,6 +61,8 @@ pub enum Action {
         dy: i32,
     },
     FocusComposer,
+    /// Ctrl+Shift+M: inicia/para o ditado na aba de CLI focada (ou na que já está gravando).
+    ToggleTabMic,
     CopyText(String),
 }
 
@@ -302,7 +305,7 @@ pub struct Deck {
     pub feed_scroll_to_bottom: bool,
     pub feed_near_bottom: bool,
 
-    // Compositor
+    // Compositor e ditado
     pub input: String,
     /// Anexos do rascunho, em caminho absoluto: a referência `@...` é feita no envio, relativa ao
     /// projeto em que a mensagem sai.
@@ -310,10 +313,8 @@ pub struct Deck {
     pub needs_text: bool,
     recorder: Option<audio::Recorder>,
     pub recording_since: Option<Instant>,
-    /// O microfone está sendo aberto numa thread (pode levar segundos); `false` no meio do caminho
-    /// = o usuário desistiu, e o gravador que chegar é descartado.
-    pub mic_opening: bool,
-    pub transcribing: bool,
+    /// Estado global do microfone e seu destino (compositor ou `Tab(uid)`).
+    pub mic_phase: MicPhase,
     pub send_after_transcribe: bool,
     /// Aba ativa quando o Enviar foi clicado durante a gravação: a transcrição só sai sozinha se
     /// ela ainda for a ativa (senão a mensagem iria para outro agente ou projeto).
@@ -508,8 +509,7 @@ impl Deck {
             needs_text: false,
             recorder: None,
             recording_since: None,
-            mic_opening: false,
-            transcribing: false,
+            mic_phase: MicPhase::Idle,
             send_after_transcribe: false,
             send_target: None,
             engine_label: String::new(),
@@ -642,6 +642,7 @@ impl Deck {
             }
             Action::FocusPane { dx, dy } => self.focus_pane(dx, dy),
             Action::FocusComposer => self.request_composer_focus(),
+            Action::ToggleTabMic => self.toggle_active_tab_mic(),
             Action::CopyText(t) => ctx.copy_text(t),
         }
     }
@@ -718,26 +719,60 @@ impl Deck {
                 }
             }
             UiMsg::Transcribed(res) => {
-                self.transcribing = false;
-                let mut ok = false;
-                match res {
-                    Ok(text) => {
-                        let text = text.trim();
-                        self.input = if self.input.is_empty() { text.to_owned() } else { format!("{} {text}", self.input) };
-                        self.composer_cursor_end = true;
-                        ok = true;
-                    }
-                    Err(e) => self.system(format!("Não foi possível transcrever: {e}.")),
-                }
-                self.request_composer_focus();
+                let target = dictation::finish_transcribe(&mut self.mic_phase).unwrap_or(MicTarget::Composer);
                 self.refresh_engine();
-                let send = self.send_after_transcribe && ok;
-                self.send_after_transcribe = false;
-                let target = self.send_target.take();
-                if send && target == self.active_tab().map(|t| t.uid) {
-                    self.send_message();
-                } else if send {
-                    self.system("A aba mudou durante a transcrição: o texto ficou na caixa de mensagem para você conferir e enviar.");
+                match target {
+                    MicTarget::Composer => {
+                        let mut ok = false;
+                        match res {
+                            Ok(text) => {
+                                let text = text.trim();
+                                self.input = if self.input.is_empty() { text.to_owned() } else { format!("{} {text}", self.input) };
+                                self.composer_cursor_end = true;
+                                ok = true;
+                            }
+                            Err(e) => self.system(format!("Não foi possível transcrever: {e}.")),
+                        }
+                        self.request_composer_focus();
+                        let send = self.send_after_transcribe && ok;
+                        self.send_after_transcribe = false;
+                        let send_target = self.send_target.take();
+                        if send && send_target == self.active_tab().map(|t| t.uid) {
+                            self.send_message();
+                        } else if send {
+                            self.system(
+                                "A aba mudou durante a transcrição: o texto ficou na caixa de mensagem para você conferir e enviar.",
+                            );
+                        }
+                    }
+                    MicTarget::Tab(uid) => {
+                        self.send_after_transcribe = false;
+                        self.send_target = None;
+                        let text = match res {
+                            Ok(t) => t.trim().to_owned(),
+                            Err(e) => {
+                                self.system(format!("Não foi possível transcrever: {e}."));
+                                return;
+                            }
+                        };
+                        if text.is_empty() {
+                            return;
+                        }
+                        let pairs: Vec<(u64, bool)> = self.tabs.iter().map(|t| (t.uid, t.alive)).collect();
+                        match dictation::resolve_tab_delivery(&pairs, uid) {
+                            TabDelivery::TypeInTab(idx) => {
+                                let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
+                                let safe = commanddeck_core::util::terminal_text(&text);
+                                self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
+                            }
+                            TabDelivery::TabDead => {
+                                self.system("O processo da aba encerrou durante a transcrição: o texto foi descartado.");
+                            }
+                            TabDelivery::TabClosed => {
+                                self.system("A aba do ditado foi fechada antes do fim da transcrição: o texto foi descartado.");
+                            }
+                        }
+                    }
                 }
             }
             UiMsg::Engine(label) => self.engine_label = label,
@@ -1679,6 +1714,10 @@ impl Deck {
             }
         }
         if ctrl && !mods.alt_key() {
+            if mods.shift_key() && lower == "m" && !ev.repeat {
+                self.push_action(Action::ToggleTabMic);
+                return true;
+            }
             let app_key = app_claims_ctrl(&lower, term_keys, self.app_shortcuts_first);
             match lower.as_str() {
                 "t" if !ev.repeat => {
@@ -2199,16 +2238,22 @@ impl Deck {
         self.term_focus = false;
     }
 
-    pub fn is_recording(&self) -> bool {
-        self.recorder.is_some()
+    /// O compositor está gravando agora.
+    pub fn is_composer_recording(&self) -> bool {
+        self.mic_phase == MicPhase::Recording(MicTarget::Composer)
+    }
+
+    /// O compositor está transcrevendo agora.
+    pub fn is_composer_transcribing(&self) -> bool {
+        self.mic_phase == MicPhase::Transcribing(MicTarget::Composer)
     }
 
     /// `ready` do botão Enviar.
     pub fn send_ready(&self) -> bool {
         !self.input.trim().is_empty()
             || !self.attachments.is_empty()
-            || self.is_recording()
-            || self.transcribing
+            || self.is_composer_recording()
+            || self.is_composer_transcribing()
             || self.send_after_transcribe
     }
 
@@ -2225,7 +2270,7 @@ impl Deck {
     }
 
     pub fn send_label(&self) -> &'static str {
-        if self.send_after_transcribe && (self.is_recording() || self.transcribing) {
+        if self.send_after_transcribe && (self.is_composer_recording() || self.is_composer_transcribing()) {
             "Enviando…"
         } else {
             "Enviar"
@@ -2268,29 +2313,67 @@ impl Deck {
         self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&paths)))));
     }
 
-    /// Clique no microfone. Abrir o dispositivo pode levar até 5 s: vai para uma thread, e um
-    /// segundo clique enquanto isso desiste.
+    /// Clique no microfone do compositor.
     pub fn toggle_mic(&mut self) {
-        if self.recorder.is_some() {
-            self.stop_recording();
-        } else if self.mic_opening {
-            self.mic_opening = false;
-        } else {
-            self.mic_opening = true;
-            self.spawn_bg("mic-open", |_| Some(UiMsg::MicOpened(audio::Recorder::start())));
+        self.toggle_mic_for(MicTarget::Composer);
+    }
+
+    /// Clique no microfone de uma aba de terminal (pelo `uid` da aba).
+    pub fn toggle_tab_mic(&mut self, uid: u64) {
+        self.toggle_mic_for(MicTarget::Tab(uid));
+    }
+
+    /// Atalho `Ctrl+Shift+M`: se já há uma aba abrindo/gravando, para/cancela nela (mesmo que o
+    /// usuário tenha trocado de aba); se está livre, inicia na aba ativa.
+    pub fn toggle_active_tab_mic(&mut self) {
+        match self.mic_phase {
+            MicPhase::Opening(MicTarget::Tab(uid)) | MicPhase::Recording(MicTarget::Tab(uid)) => {
+                self.toggle_mic_for(MicTarget::Tab(uid));
+            }
+            MicPhase::Idle => {
+                if let Some(tab) = self.active_tab() {
+                    if !tab.alive {
+                        self.system("A aba ativa não tem um processo rodando.");
+                        return;
+                    }
+                    let uid = tab.uid;
+                    self.toggle_mic_for(MicTarget::Tab(uid));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Aciona o microfone para `target` (compositor ou `Tab(uid)`). Abrir o dispositivo pode levar
+    /// até 5 s: vai para uma thread, e um segundo clique enquanto isso desiste.
+    fn toggle_mic_for(&mut self, target: MicTarget) {
+        match dictation::toggle(&mut self.mic_phase, target) {
+            ToggleOutcome::StartOpening(_) => {
+                self.spawn_bg("mic-open", |_| Some(UiMsg::MicOpened(audio::Recorder::start())));
+            }
+            ToggleOutcome::CancelOpening => {}
+            ToggleOutcome::StopAndTranscribe => self.stop_recording(),
+            ToggleOutcome::Busy => {}
         }
     }
 
     fn on_mic_opened(&mut self, res: Result<audio::Recorder, String>) {
-        let wanted = std::mem::take(&mut self.mic_opening);
+        let was_opening = self.mic_phase.is_opening();
         match res {
-            Ok(r) if wanted && self.recorder.is_none() => {
+            Ok(r) if self.recorder.is_none() && dictation::on_opened(&mut self.mic_phase, true) => {
                 self.recorder = Some(r);
                 self.recording_since = Some(Instant::now());
             }
-            Ok(r) => discard_recorder(r),
-            Err(e) if wanted => self.system(format!("Microfone indisponível: {e}")),
-            Err(_) => {}
+            Ok(r) => {
+                dictation::on_opened(&mut self.mic_phase, false);
+                discard_recorder(r);
+            }
+            Err(e) => {
+                dictation::on_opened(&mut self.mic_phase, false);
+                if was_opening {
+                    self.system(format!("Microfone indisponível: {e}"));
+                }
+            }
         }
     }
 
@@ -2298,7 +2381,7 @@ impl Deck {
     fn stop_recording(&mut self) {
         let Some(rec) = self.recorder.take() else { return };
         self.recording_since = None;
-        self.transcribing = true;
+        dictation::begin_transcribe(&mut self.mic_phase);
         self.spawn_bg("transcribe", move |core| {
             let pcm = rec.stop();
             let res = if pcm.is_empty() {
@@ -2314,18 +2397,20 @@ impl Deck {
         if let Some(rec) = self.recorder.take() {
             discard_recorder(rec);
         }
-        self.mic_opening = false;
+        let target = dictation::cancel(&mut self.mic_phase);
         self.recording_since = None;
         self.send_after_transcribe = false;
-        self.request_composer_focus();
+        if target == Some(MicTarget::Composer) {
+            self.request_composer_focus();
+        }
     }
 
     /// Porta de `sendMessage()`: o compositor envia sempre para a aba ativa.
     pub fn send_message(&mut self) {
-        if self.recorder.is_some() || self.transcribing {
+        if self.is_composer_recording() || self.is_composer_transcribing() {
             self.send_after_transcribe = true;
             self.send_target = self.active_tab().map(|t| t.uid);
-            if self.recorder.is_some() {
+            if self.is_composer_recording() {
                 self.stop_recording();
             }
             return;
