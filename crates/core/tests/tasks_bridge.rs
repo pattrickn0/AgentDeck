@@ -203,9 +203,12 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
             .is_some_and(|t| t.contains("Nenhum aprendizado específico") && t.contains("memory/aprendizados/src.md — Regra de src.")),
         "{none}"
     );
-    // Sem caminhos: erro claro. O orquestrador (sem tarefa) lê do repositório do projeto.
+    // Sem caminhos: os globais e o índice dos específicos. O orquestrador (sem tarefa) lê do repositório do projeto.
     let (st, b) = ask(&agent, json!([]));
-    assert!(st == 400 && b["error"].as_str().is_some_and(|e| e.contains("ao menos um arquivo")), "{st} {b}");
+    assert!(
+        st == 200 && b["text"].as_str().is_some_and(|t| t.starts_with("Aprendizados do projeto:") && t.contains("memory/aprendizados/src.md — Regra de src.")),
+        "{st} {b}"
+    );
     let (st, b) = ask(&boss, json!(["src/lib.rs"]));
     assert!(st == 200 && b["text"].as_str().is_some_and(|t| t.contains("Não mexa em src")), "{st} {b}");
     // Só POST.

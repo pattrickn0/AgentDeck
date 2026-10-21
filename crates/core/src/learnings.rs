@@ -341,10 +341,16 @@ pub fn render(all: &[Learning], paths: &[String], budget: usize) -> String {
     out
 }
 
-/// Resposta de `ask-agent --learn <caminho>…`: o que o projeto aprendeu sobre esses arquivos.
+/// Resposta de `ask-agent --learn [<caminho>…]`: o que o projeto aprendeu sobre esses arquivos; sem caminhos, os
+/// globais por inteiro e o índice dos específicos.
 pub fn learn_report(all: &[Learning], paths: &[String]) -> String {
     if all.is_empty() {
         return format!("O projeto ainda não tem aprendizados ({DIR}/ está vazia ou não existe).");
+    }
+    if paths.is_empty() {
+        return format!("Aprendizados do projeto:
+
+{}", render(all, &[], LEARN_BUDGET));
     }
     let specific = all.iter().filter(|l| !l.is_global() && l.touches_any(paths)).count();
     let body = render(all, paths, LEARN_BUDGET);
@@ -383,9 +389,6 @@ impl crate::Core {
         };
         let roots: Vec<std::path::PathBuf> = [Some(work_root.clone()), project_root].into_iter().flatten().collect();
         let paths: Vec<String> = paths.iter().map(|p| relativize(p, &roots)).filter(|p| !p.is_empty()).collect();
-        if paths.is_empty() {
-            return Err("informe ao menos um arquivo: ask-agent --learn <arquivo> [<arquivo>...]".into());
-        }
         Ok(learn_report(&load(&work_root), &paths))
     }
 }
@@ -534,6 +537,16 @@ mod tests {
         let miss = learn_report(&all, &strings(&["docs/x.md"]));
         assert!(miss.contains("Nenhum aprendizado específico") && !miss.contains("### T a") && miss.contains("### T g"), "{miss}");
         assert!(learn_report(&[], &strings(&["a.rs"])).contains("ainda não tem aprendizados"));
+    }
+
+    #[test]
+    fn the_learn_report_without_paths_gives_the_globals_and_the_index() {
+        let all = vec![learning("a", &["crates/cli/**"], "c"), learning("g", &[], "global")];
+        let out = learn_report(&all, &[]);
+        assert!(out.starts_with("Aprendizados do projeto:") && !out.contains("Nenhum aprendizado específico"), "{out}");
+        assert!(out.contains("### T g") && out.contains("global"), "{out}");
+        assert!(!out.contains("### T a") && out.contains(&format!("- {DIR}/a.md — R a")), "{out}");
+        assert!(learn_report(&[], &[]).contains("ainda não tem aprendizados"));
     }
 
     #[test]
