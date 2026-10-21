@@ -314,7 +314,9 @@ Regras da tarefa {id}:\n\
 - Não peça a ninguém (outro agente ou o usuário) que mescle ou rode ask-agent --task merge: a decisão é de quem revisa. O seu trabalho termina no --task done.\n\
 - Ao terminar, escreva o relatório (o que foi feito, arquivos alterados, testes rodados e o que falta) em um arquivo e rode: ask-agent --task done {id} --file <arquivo>.\n\
   (Entregar por arquivo preserva os acentos; canalizar pela entrada padrão (-) faz o shell do Windows trocá-los por \"?\".)\n\
-- {doubts}",
+- {doubts}
+
+Comece agora, por conta própria: este brief é a sua ordem de trabalho. Não espere confirmação nem pergunte se pode começar.",
         id = task.id,
         title = task.title,
         wt = task.worktree.display(),
@@ -1223,6 +1225,8 @@ mod tests {
         assert!(m.contains("Não faça merge nem push"), "{m}");
         assert!(m.contains("Não peça a ninguém") && m.contains("termina no --task done"), "{m}");
         assert!(m.contains("ask-agent --boss") && m.contains("\"claude\""), "{m}");
+        // O brief termina com uma ordem: o agente não fica esperando um "pode começar".
+        assert!(m.ends_with("Não espere confirmação nem pergunte se pode começar."), "{m}");
         // Sem chefe agente, as dúvidas ficam no terminal; sem brief, vale o título; sem ESC.
         let mut t = sample();
         t.brief = "  ".into();
