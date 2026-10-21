@@ -390,6 +390,7 @@ Regras da tarefa {id}:\n\
 - Se descobrir algo não óbvio que o próximo agente precisaria saber (armadilha, decisão, convenção), crie um arquivo em memory/aprendizados/ nesta branch (formato em memory/aprendizados/README.md) e cite-o no relatório: ele passa pela mesma revisão e mescla que o código.\n\
 - Ao terminar, escreva o relatório (o que foi feito, arquivos alterados, testes rodados e o que falta) em um arquivo e rode: ask-agent --task done {id} --file <arquivo>.\n\
   (Entregar por arquivo preserva os acentos; canalizar pela entrada padrão (-) faz o shell do Windows trocá-los por \"?\".)\n\
+- Para saber que agentes e modelos este computador tem, rode `ask-agent --models` antes de escolher `--agent`/`--model`.\n\
 - {doubts}
 
 Comece agora, por conta própria: este brief é a sua ordem de trabalho. Não espere confirmação nem pergunte se pode começar.",

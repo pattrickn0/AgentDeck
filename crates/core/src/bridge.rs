@@ -202,6 +202,17 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         };
         return reply(req, 200, json!({ "agents": core.peers(&project), "models": core.instance_models(&project) }));
     }
+    if *req.method() == Method::Get && (req.url() == "/models" || req.url().starts_with("/models?")) {
+        let url = req.url().to_owned();
+        let only = url.split_once('?').and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("agent="))).filter(|a| !a.is_empty());
+        if only.is_some_and(|a| !crate::models::valid_model(a)) {
+            return reply(req, 400, json!({ "error": "agente inválido" }));
+        }
+        return match core.models_inventory(only) {
+            Ok(items) => reply(req, 200, json!({ "text": crate::models::format_inventory(&items) })),
+            Err(e) => reply(req, 404, json!({ "error": e })),
+        };
+    }
     if *req.method() == Method::Get && req.url() == "/team" {
         let Auth::Agent(c) = &auth else {
             return reply(req, 400, json!({ "error": "só um agente tem chefe e equipe" }));

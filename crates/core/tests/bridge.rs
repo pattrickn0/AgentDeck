@@ -1243,6 +1243,33 @@ fn the_roster_and_the_team_show_the_models() {
 }
 
 #[test]
+fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listing() {
+    let env = start(&[]);
+    // O `opencode` instalado não lista nada (o falso sai sem saída): uma linha de falha, o resto segue.
+    fake_cli(&env, "claude");
+    fake_cli(&env, "opencode");
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let get = |path: &str| http(port, "GET", path, &host, env.core.bridge_token(), "");
+
+    let (st, body) = get("/models");
+    assert_eq!(st, 200, "{body}");
+    let text = body["text"].as_str().expect("text");
+    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n"), "{text}");
+    assert!(text.contains("opencode: não consegui listar os modelos"), "{text}");
+    assert!(!text.contains("antigravity"), "o que não está instalado não aparece: {text}");
+
+    // Um agente só (com apelido); o não instalado e o inválido são recusados.
+    let (st, body) = get("/models?agent=claudecode");
+    assert_eq!((st, body["text"].as_str()), (200, Some("claude --model: opus, sonnet, haiku, fable")));
+    let (st, body) = get("/models?agent=agy");
+    assert_eq!(st, 404);
+    assert!(body["error"].as_str().expect("error").contains("não está instalado"), "{body}");
+    assert_eq!(get("/models?agent=a%20b").0, 400);
+    env.core.shutdown();
+}
+
+#[test]
 fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_cli() {
     let env = start_cfg(&[], |c| {
         c.role_models.insert("claude@dev".into(), "sonnet".into());
@@ -1364,6 +1391,27 @@ fn headless_runs_get_the_requested_or_default_model() {
     let (st, b) = ask(&env, json!({"from": "shell", "to": "aider", "message": "oi", "model": "gpt"}));
     assert_eq!((st, b), (400, json!({"error": "o agente aider não aceita escolher modelo"})));
     env.core.shutdown();
+}
+
+/// Com os CLIs reais instalados: `cargo test -p commanddeck-core --test bridge -- --ignored --nocapture`.
+#[test]
+#[ignore = "usa o agy e o opencode instalados na máquina"]
+fn the_models_inventory_of_this_machine() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let paths = paths_in(tmp.path());
+    let opts = StartOptions {
+        search_path: None,
+        home_dir: None,
+        ollama_discovery: true,
+        watch_workspace: false,
+        config: Some(Config::with_project(paths.default_workspace.clone())),
+        system_dirs: true,
+    };
+    let (core, _rx) = Core::start_with(paths, opts).expect("start");
+    let started = std::time::Instant::now();
+    let items = core.models_inventory(None).expect("inventário");
+    println!("{}\n({:?})", commanddeck_core::models::format_inventory(&items), started.elapsed());
+    core.shutdown();
 }
 
 /// Com os CLIs reais instalados: `cargo test -p commanddeck-core --test bridge -- --ignored --nocapture`.
