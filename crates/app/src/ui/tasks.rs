@@ -433,7 +433,7 @@ fn empty_state(ui: &mut Ui, body: Rect, loaded: bool, acts: &mut Vec<Act>) {
     painter.galley(Pos2::new(x, y), title.clone(), theme::TEXT);
     y += title.size().y + 8.0;
     let text = "Uma tarefa é um pedido que um agente faz numa cópia isolada do projeto (uma branch com a própria pasta). \
-Quando ele termina, você revisa o relatório e o diff e então mescla, devolve com ajustes ou descarta.";
+Quando ele termina, você revisa o relatório e o diff, mescla, testa e valida. Se algo falhar, devolve ou reprova com o motivo.
     let g = painter.layout(text.to_owned(), theme::ui(12.5), theme::MUTED, w);
     painter.galley(Pos2::new(x, y), g.clone(), theme::MUTED);
     y += g.size().y + 14.0;
