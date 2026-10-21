@@ -1,6 +1,8 @@
 //! Menus suspensos: nova aba (+) e configurações (☰).
 
-use egui::{Align2, Area, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
+
+use commanddeck_core::models;
 
 use super::{dot, frame, place, shadow, text_in, text_w};
 use crate::deck::Deck;
@@ -47,6 +49,7 @@ const CHEVRON_W: f32 = 28.0;
 pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     if !deck.new_tab_menu_open {
         deck.new_tab_models_for = None;
+        deck.new_tab_provider = None;
         return;
     }
     if let Some(kind) = deck.new_tab_models_for.clone() {
@@ -118,43 +121,82 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     if let Some(kind) = pick_model_of {
         deck.request_models(&kind);
         deck.new_tab_models_for = Some(kind);
+        deck.new_tab_provider = None;
     } else if let Some(kind) = chosen {
         deck.new_tab_menu_open = false;
+        deck.new_tab_provider = None;
         deck.open_tab(&kind, false);
     } else if closes_on_outside(ctx, menu_rect, anchor) {
         deck.new_tab_menu_open = false;
+        deck.new_tab_provider = None;
     }
 }
 
-/// Segundo passo do menu de novo agente: "Padrão" e os modelos conhecidos de `kind`.
-fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
-    // A lista chega de uma thread: pede de novo se ainda não veio (ou venceu).
-    deck.request_models(kind);
-    let (models, loading) = deck.models_of(kind);
-    let models: Vec<String> = models.to_vec();
-    let status = models_status(loading, models.is_empty());
-    let name = deck.agents.name(kind);
-    let color = deck.agents.tab_color(kind);
+/// Uma linha de um passo do menu de modelo.
+struct StepRow {
+    label: String,
+    /// Modelo sem custo por token ("grátis", em verde).
+    free: bool,
+    /// Quantos modelos o provedor tem ("N modelos", em cinza); 0 = nada.
+    count: usize,
+    /// Abre o passo seguinte ("›").
+    submenu: bool,
+    enabled: bool,
+}
+
+impl StepRow {
+    fn new(label: impl Into<String>) -> Self {
+        Self { label: label.into(), free: false, count: 0, submenu: false, enabled: true }
+    }
+
+    /// O texto discreto à direita e a cor.
+    fn detail(&self) -> Option<(String, Color32)> {
+        if self.count > 0 {
+            Some((format!("{} modelo{}", self.count, if self.count == 1 { "" } else { "s" }), theme::MUTED))
+        } else if self.free {
+            Some(("grátis".to_owned(), theme::BADGE_JSON))
+        } else {
+            None
+        }
+    }
+}
+
+/// O que aconteceu num passo do menu: escolheu uma linha, voltou ao passo anterior, fechou tudo ou
+/// nada (o menu continua aberto).
+enum StepOutcome {
+    Chosen(usize),
+    Back,
+    Closed,
+    Pending,
+}
+
+/// Um passo do menu: o cabeçalho "‹ título" volta ao passo anterior e as linhas são as escolhas.
+fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title: &str, rows: &[StepRow]) -> StepOutcome {
     let font = theme::ui(13.0);
     let painter = ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("measure")));
+    let widest = rows
+        .iter()
+        .map(|row| {
+            let detail = row.detail().map_or(0.0, |(text, _)| 8.0 + text_w(&painter, &text, theme::ui(11.0)));
+            text_w(&painter, &row.label, font.clone()) + detail + if row.submenu { 16.0 } else { 0.0 }
+        })
+        .fold(text_w(&painter, title, font.clone()) + 54.0, f32::max);
+    let w = (widest + 8.0 + 2.0 + 10.0 * 2.0).clamp(200.0, 380.0);
     let row_h = 26.0;
     let head_h = 30.0;
-    let widest = models.iter().map(|m| text_w(&painter, m, font.clone())).fold(text_w(&painter, "Padrão", font.clone()), f32::max);
-    let w = (widest + 8.0 + 2.0 + 10.0 * 2.0 + 14.0).clamp(200.0, 380.0);
-    let rows = 1 + models.len() + usize::from(status.is_some());
-    let list_h = (rows as f32 * row_h).min(MODELS_MAX_H);
+    let list_h = (rows.len() as f32 * row_h).min(MODELS_MAX_H);
     let h = 5.0 + head_h + 1.0 + list_h + 5.0 + 2.0;
     let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x, anchor.max.y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut back = false;
-    let mut chosen: Option<Option<String>> = None;
-    Area::new(Id::new("new-tab-models-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
+    let mut chosen = None;
+    Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
         frame(ui.painter(), rect, 8.0, theme::PANEL_2, theme::BORDER);
-        // Cabeçalho: "‹ Claude" volta à lista de agentes.
+        // Cabeçalho: "‹ título" volta um passo.
         let head = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, rect.min.y + 5.0), Vec2::new(w - 10.0, head_h));
-        let resp = super::clickable(ui, head, Id::new("new-tab-models-back"));
+        let resp = super::clickable(ui, head, Id::new((id, "back")));
         if resp.hovered() {
             ui.painter().rect_filled(head, 6.0, theme::BORDER);
         }
@@ -171,11 +213,11 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
             ui.painter(),
             Rect::from_min_max(Pos2::new(head.min.x + 40.0, head.min.y), head.max),
             Align2::LEFT_CENTER,
-            &format!("{name} · modelo"),
+            title,
             theme::ui_semibold(12.5),
             theme::TEXT,
         );
-        if super::tip(resp, "Voltar à lista de agentes").clicked() {
+        if super::tip(resp, "Voltar").clicked() {
             back = true;
         }
         ui.painter().rect_filled(
@@ -186,40 +228,123 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
         let list = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, head.max.y + 1.0), Vec2::new(w - 10.0, list_h));
         let mut lc = ui.new_child(egui::UiBuilder::new().max_rect(list));
         lc.set_clip_rect(list);
-        egui::ScrollArea::vertical().id_salt("new-tab-models-list").auto_shrink([false, false]).show(&mut lc, |ui| {
-            let row = |ui: &mut egui::Ui, text: &str, text_color, id: Id| -> bool {
+        egui::ScrollArea::vertical().id_salt((id, "list")).auto_shrink([false, false]).show(&mut lc, |ui| {
+            for (i, row) in rows.iter().enumerate() {
                 let (r, _) = ui.allocate_exact_size(Vec2::new(list.width(), row_h), Sense::hover());
-                let resp = super::clickable(ui, r, id);
-                if resp.hovered() {
+                let resp =
+                    if row.enabled { super::clickable(ui, r, Id::new((id, i))) } else { ui.interact(r, Id::new((id, i)), Sense::hover()) };
+                if row.enabled && resp.hovered() {
                     ui.painter().rect_filled(r, 6.0, theme::BORDER);
                 }
-                let g = super::galley_trunc(ui.painter(), text, font.clone(), text_color, r.width() - 20.0);
-                super::place(ui.painter(), r.shrink2(Vec2::new(10.0, 0.0)), Align2::LEFT_CENTER, g, text_color);
-                resp.clicked()
-            };
-            if row(ui, "Padrão", theme::TEXT, Id::new(("new-tab-model", kind, ""))) {
-                chosen = Some(None);
-            }
-            for m in &models {
-                if row(ui, m, theme::TEXT, Id::new(("new-tab-model", kind, m))) {
-                    chosen = Some(Some(m.clone()));
+                let text_color = if row.enabled { theme::TEXT } else { theme::MUTED };
+                let mut right = r.max.x - 10.0;
+                if row.submenu {
+                    text_in(
+                        ui.painter(),
+                        Rect::from_min_max(Pos2::new(right - 12.0, r.min.y), Pos2::new(right, r.max.y)),
+                        Align2::CENTER_CENTER,
+                        "›",
+                        theme::ui(14.0),
+                        theme::MUTED,
+                    );
+                    right -= 16.0;
                 }
-            }
-            if let Some(text) = status {
-                let (r, _) = ui.allocate_exact_size(Vec2::new(list.width(), row_h), Sense::hover());
-                text_in(ui.painter(), r.shrink2(Vec2::new(10.0, 0.0)), Align2::LEFT_CENTER, text, theme::ui(12.0), theme::MUTED);
+                if let Some((text, dcolor)) = row.detail() {
+                    let dw = text_w(ui.painter(), &text, theme::ui(11.0));
+                    let dr = Rect::from_min_max(Pos2::new(right - dw, r.min.y), Pos2::new(right, r.max.y));
+                    text_in(ui.painter(), dr, Align2::RIGHT_CENTER, &text, theme::ui(11.0), dcolor);
+                    right -= dw + 8.0;
+                }
+                let g = super::galley_trunc(ui.painter(), &row.label, font.clone(), text_color, (right - r.min.x - 10.0).max(10.0));
+                super::place(
+                    ui.painter(),
+                    Rect::from_min_max(Pos2::new(r.min.x + 10.0, r.min.y), Pos2::new(right, r.max.y)),
+                    Align2::LEFT_CENTER,
+                    g,
+                    text_color,
+                );
+                if row.enabled && resp.clicked() {
+                    chosen = Some(i);
+                }
             }
         });
     });
-    if let Some(model) = chosen {
+    if let Some(i) = chosen {
+        return StepOutcome::Chosen(i);
+    }
+    if back {
+        return StepOutcome::Back;
+    }
+    if closes_on_outside(ctx, menu_rect, anchor) || ctx.input(|i| i.key_pressed(Key::Escape)) {
+        return StepOutcome::Closed;
+    }
+    StepOutcome::Pending
+}
+
+/// Segundo passo do menu de novo agente: "Padrão" e os modelos conhecidos de `kind`. Quando o CLI
+/// mistura provedores (`opencode models`), o primeiro passo é o provedor e o segundo, os modelos dele.
+fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
+    // A lista chega de uma thread: pede de novo se ainda não veio (ou venceu).
+    deck.request_models(kind);
+    let (models, loading) = deck.models_of(kind);
+    let models: Vec<String> = models.to_vec();
+    let groups = models::by_provider(&models);
+    let name = deck.agents.name(kind);
+    let color = deck.agents.tab_color(kind);
+    let close_all = |deck: &mut Deck| {
         deck.new_tab_menu_open = false;
         deck.new_tab_models_for = None;
-        deck.open_tab_with_model(kind, model.as_deref(), false);
-    } else if back {
-        deck.new_tab_models_for = None;
-    } else if closes_on_outside(ctx, menu_rect, anchor) || ctx.input(|i| i.key_pressed(Key::Escape)) {
-        deck.new_tab_menu_open = false;
-        deck.new_tab_models_for = None;
+        deck.new_tab_provider = None;
+    };
+
+    // Claude e Antigravity: a lista de sempre ("Padrão" + modelos).
+    if groups.is_empty() {
+        let mut rows = vec![StepRow::new("Padrão")];
+        rows.extend(models.iter().map(|m| StepRow { free: models::is_free(m), ..StepRow::new(m.as_str()) }));
+        if let Some(text) = models_status(loading, models.is_empty()) {
+            rows.push(StepRow { enabled: false, ..StepRow::new(text) });
+        }
+        match step_menu(ctx, anchor, "new-tab-models", color, &format!("{name} · modelo"), &rows) {
+            StepOutcome::Chosen(0) => {
+                close_all(deck);
+                deck.open_tab_with_model(kind, None, false);
+            }
+            StepOutcome::Chosen(i) => {
+                let model = models[i - 1].clone();
+                close_all(deck);
+                deck.open_tab_with_model(kind, Some(&model), false);
+            }
+            StepOutcome::Back => deck.new_tab_models_for = None,
+            StepOutcome::Closed => close_all(deck),
+            StepOutcome::Pending => {}
+        }
+        return;
+    }
+
+    // OpenCode: o provedor escolhido fica no estado do menu; sem ele, o passo é a lista de provedores.
+    if let Some(provider) = deck.new_tab_provider.clone().filter(|p| groups.iter().any(|(g, _)| g == p)) {
+        let list = groups.iter().find(|(g, _)| *g == provider).map(|(_, l)| l.as_slice()).unwrap_or_default();
+        let rows: Vec<StepRow> =
+            list.iter().map(|m| StepRow { free: models::is_free(m), ..StepRow::new(models::short_model(m)) }).collect();
+        match step_menu(ctx, anchor, "new-tab-provider-models", color, &provider, &rows) {
+            StepOutcome::Chosen(i) => {
+                let model = list[i].clone();
+                close_all(deck);
+                deck.open_tab_with_model(kind, Some(&model), false);
+            }
+            StepOutcome::Back => deck.new_tab_provider = None,
+            StepOutcome::Closed => close_all(deck),
+            StepOutcome::Pending => {}
+        }
+        return;
+    }
+    let rows: Vec<StepRow> =
+        groups.iter().map(|(provider, list)| StepRow { count: list.len(), submenu: true, ..StepRow::new(provider.as_str()) }).collect();
+    match step_menu(ctx, anchor, "new-tab-providers", color, &format!("{name} · provedor"), &rows) {
+        StepOutcome::Chosen(i) => deck.new_tab_provider = Some(groups[i].0.clone()),
+        StepOutcome::Back => deck.new_tab_models_for = None,
+        StepOutcome::Closed => close_all(deck),
+        StepOutcome::Pending => {}
     }
 }
 

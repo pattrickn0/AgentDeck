@@ -112,7 +112,6 @@ Proposta:
 - [ ] A ponte sem interface ainda usa o modo headless: não aparece nas abas.
 - [ ] **Mesa de tarefas, depois:** pedido e relatório aparecem como texto puro (o markdown não é desenhado); a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`) usam nomes de modelos antigos.
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
-- [ ] **OpenCode: escolher o provedor antes do modelo** (pedido do usuário, 2026-10-18). Hoje o `opencode models` mistura todos os provedores conectados (`/connect`), e o formulário de nova tarefa oferece modelos sem acesso: a `t1` foi registrada com `opencode-go/deepseek-v4.1-flash` (plano Go, que o usuário não tem; 0 tokens no `opencode stats`). Fazer em dois passos: provedor (`opencode`, `opencode-go`, `ollama`…, o prefixo antes da `/`) e depois os modelos daquele provedor. Avaliar destacar os `-free`.
 - [ ] **Mesa de tarefas: áudio e anexos no pedido** (pedido do usuário, 2026-10-18). O formulário "Nova tarefa" só aceita texto. Reaproveitar o microfone (Whisper local) e os anexos do compositor (`ui/composer.rs`, cópia em `dados/anexos`), com os anexos citados no arquivo do pedido.
 - [ ] **Ditado em qualquer aba de CLI** (pedido do usuário, 2026-10-18). Hoje o áudio só sai pelo compositor, que envia para a aba ativa: dá para mandar para o modelo errado. O usuário só não aposenta a Conversa integrada por causa do ditado. Proposta: microfone (e atalho) presos à aba do terminal, que grava, transcreve e digita o texto no PTY daquela aba **sem Enter**, para conferir antes de enviar. Funciona em qualquer CLI, porque é só entrada de teclado; o destino fica fixo na aba onde a gravação começou.
 
@@ -127,6 +126,12 @@ Todos os achados foram corrigidos (ver "Concluído"). Relatório do Antigravity 
 a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem saída) ficou de fora.
 
 ## Concluído
+
+- [x] **OpenCode: escolher o provedor antes do modelo** (tarefa `t3`). O `opencode models` mistura os
+  provedores conectados (`opencode`, `opencode-go`, `ollama`…), e a lista única oferecia modelos de um plano
+  que o usuário não tem. Agora o menu de modelo (no formulário "Nova tarefa" e no "+ Novo agente") pede o
+  provedor primeiro — `models::by_provider`, com a contagem de modelos por provedor — e mostra só os modelos
+  dele; `‹ Provedores` volta um passo. Os modelos `-free` levam a marca "grátis" (`models::is_free`).
 
 - [x] **Regras da tarefa: o agente não pede merge.** O `start_message` (`tasks.rs`) agora diz que o agente não
   pede a ninguém que mescle nem rode `--task merge`: o trabalho dele termina no `--task done`. Veio do primeiro
@@ -152,7 +157,7 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
   - O modelo fica ao lado do id (`ProjectCfg.tabModels`) e vale nesta ordem: o pedido (`ask-agent --model`, menu), o salvo, o `Config.roleModels` (`"claude@dev": "sonnet"`) e por fim o padrão do CLI.
   - Chega ao `--model` no claude, agy e codex. No OpenCode, a aba abre com `--standalone` e `OPENCODE_CONFIG_CONTENT`, e o headless usa `run -m`.
   - Modelo diferente numa instância aberta dá 409 explícito, sugerindo `--new`.
-  - Aparece na aba, na barra lateral, em `--list` e em `--team`, e o "+ Novo agente" tem um segundo passo com os modelos conhecidos (`agy models`, `opencode models`, numa thread com cache).
+  - Aparece na aba, na barra lateral, em `--list` e em `--team`, e o "+ Novo agente" tem um segundo passo com os modelos conhecidos (`agy models`, `opencode models`, numa thread com cache), com o provedor antes do modelo desde a tarefa `t3`.
   - Módulo `core/models.rs`.
 - [x] **Revisão do `core/github.rs` por modelos gratuitos do OpenCode**, com achados conferidos: a credencial do remoto não vaza mais na mensagem, os logs do ureq ficam no máximo em DEBUG, as cotas da API estão separadas por login e só o 410 vira lista vazia de issues. Também foi corrigido o teste instável do 401 (RST do Windows).
 - [x] **Integração com o GitHub** (branch `claude/github`, dev Sonnet a partir do wip do antigravity@github): aba GitHub na barra direita com PRs (e os checks), issues e execuções do Actions, jobs e o fim do log do job vermelho. "Abrir no navegador" e "Enviar para agente…", que entrega uma mensagem pronta pela fila de entrega (`Deck::send_to_instance`, abrindo `modelo@cargo` se preciso). API REST com o token do Git Credential Manager (`git credential fill`) ou do `gh`, só em memória; sem login, repositório público com 60/h. Conferido ao vivo com o repositório do projeto. Módulo `core/github.rs` com testes sem rede.

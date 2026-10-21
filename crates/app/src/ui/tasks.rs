@@ -48,6 +48,8 @@ enum Act {
     CloseMenu,
     SetKind(String),
     SetModel(Option<String>),
+    /// Passo do menu de modelo: o provedor cujos modelos estão à mostra (`None` = lista de provedores).
+    SetProvider(Option<String>),
     ToggleStartNow,
     Submit,
 }
@@ -100,10 +102,22 @@ fn apply(deck: &mut Deck, act: Act) {
             deck.tasks.return_open = false;
             deck.tasks.feedback.clear();
         }
-        Act::ToggleMenu(m) => deck.tasks.form.menu = if deck.tasks.form.menu == Some(m) { None } else { Some(m) },
-        Act::CloseMenu => deck.tasks.form.menu = None,
+        Act::ToggleMenu(m) => {
+            let open = deck.tasks.form.menu != Some(m);
+            deck.tasks.form.menu = open.then_some(m);
+            if open && m == FormMenu::Model {
+                // O menu abre no provedor do modelo escolhido; sem modelo, na lista de provedores.
+                deck.tasks.form.provider = deck.tasks.form.model.as_deref().and_then(models::provider).map(str::to_owned);
+            }
+        }
+        Act::CloseMenu => {
+            deck.tasks.form.menu = None;
+            deck.tasks.form.provider = None;
+        }
         Act::SetKind(k) => deck.tasks_form_set_kind(k),
+        Act::SetProvider(p) => deck.tasks.form.provider = p,
         Act::SetModel(m) => {
+            deck.tasks.form.provider = None;
             deck.tasks.form.model = m;
             deck.tasks.form.menu = None;
         }
@@ -949,12 +963,26 @@ fn dropdown_button(ui: &mut Ui, id: Id, label: &str, dot: Option<Color32>, enabl
     (r, clicked)
 }
 
+/// Marca discreta à direita da linha de um menu do formulário.
+#[derive(Clone, Copy)]
+enum Detail {
+    /// "grátis": modelo sem custo por token.
+    Free,
+    /// "N modelos": quantos o provedor tem.
+    Count(usize),
+}
+
 /// Itens de um menu do formulário.
+#[derive(Clone)]
 struct MenuItem {
     label: String,
     dot: Option<Color32>,
     selected: bool,
     enabled: bool,
+    /// Texto discreto à direita: "12 modelos" no passo do provedor, "grátis" nos modelos sem custo.
+    detail: Option<Detail>,
+    /// Abre outro passo: desenha a seta "›" à direita.
+    submenu: bool,
 }
 
 /// Menu sob `anchor`. Devolve o índice escolhido; fecha com clique fora ou Esc.
@@ -992,9 +1020,31 @@ fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem]
                 } else {
                     theme::SELECT_TEXT
                 };
+                let mut right = r.max.x - 10.0;
+                if item.submenu {
+                    let ar = Rect::from_min_max(Pos2::new(right - 12.0, r.min.y), Pos2::new(right, r.max.y));
+                    text_in(ui.painter(), ar, Align2::CENTER_CENTER, "›", theme::ui(14.0), theme::MUTED);
+                    right -= 16.0;
+                }
+                if let Some(detail) = &item.detail {
+                    let (text, dcolor) = match detail {
+                        Detail::Free => ("grátis".to_owned(), theme::BADGE_JSON),
+                        Detail::Count(n) => (format!("{n} modelo{}", if *n == 1 { "" } else { "s" }), theme::MUTED),
+                    };
+                    let g = galley(ui.painter(), &text, theme::ui(11.0), dcolor);
+                    let w = g.size().x;
+                    place(
+                        ui.painter(),
+                        Rect::from_min_max(Pos2::new(right - w, r.min.y), Pos2::new(right, r.max.y)),
+                        Align2::RIGHT_CENTER,
+                        g,
+                        dcolor,
+                    );
+                    right -= w + 8.0;
+                }
                 let label = if item.selected { format!("✓ {}", item.label) } else { item.label.clone() };
-                let g = galley_trunc(ui.painter(), &label, theme::ui(12.5), color, (r.max.x - 10.0 - x).max(10.0));
-                place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), r.max), Align2::LEFT_CENTER, g, color);
+                let g = galley_trunc(ui.painter(), &label, theme::ui(12.5), color, (right - x).max(10.0));
+                place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), Pos2::new(right, r.max.y)), Align2::LEFT_CENTER, g, color);
                 if item.enabled && resp.clicked() {
                     chosen = Some(i);
                 }
@@ -1024,20 +1074,107 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     };
     let agent_items: Vec<MenuItem> = choices
         .iter()
-        .map(|k| MenuItem { label: deck.agents.name(k), dot: Some(deck.agents.tab_color(k)), selected: *k == kind, enabled: true })
+        .map(|k| MenuItem {
+            label: deck.agents.name(k),
+            dot: Some(deck.agents.tab_color(k)),
+            selected: *k == kind,
+            enabled: true,
+            detail: None,
+            submenu: false,
+        })
         .collect();
-    let model_label = deck.tasks.form.model.as_deref().map_or("Padrão".to_owned(), |m| models::short_model(m).to_owned());
-    let mut model_items = vec![MenuItem { label: "Padrão".into(), dot: None, selected: deck.tasks.form.model.is_none(), enabled: true }];
-    model_items.extend(known.iter().map(|m| MenuItem {
-        label: m.clone(),
-        dot: None,
-        selected: deck.tasks.form.model.as_deref() == Some(m.as_str()),
-        enabled: true,
-    }));
-    if known.is_empty() {
-        let text = if loading { "Carregando modelos…" } else { "Sem lista de modelos: só o padrão" };
-        model_items.push(MenuItem { label: text.into(), dot: None, selected: false, enabled: false });
-    }
+    // O OpenCode lista todos os provedores conectados (`opencode`, `opencode-go`, `ollama`…): o menu
+    // pede o provedor antes e mostra só os modelos dele. Os outros agentes têm uma lista só.
+    let groups = models::by_provider(&known);
+    let step = deck.tasks.form.provider.clone().filter(|p| groups.iter().any(|(name, _)| name == p));
+    let model_label = deck.tasks.form.model.clone().unwrap_or_else(|| "Padrão".to_owned());
+    let rows: Vec<(MenuItem, Act)> = if let Some(provider) = &step {
+        let mut rows = vec![(
+            MenuItem { label: "‹ Provedores".into(), dot: None, selected: false, enabled: true, detail: None, submenu: false },
+            Act::SetProvider(None),
+        )];
+        rows.push((
+            MenuItem {
+                label: "Padrão".into(),
+                dot: None,
+                selected: deck.tasks.form.model.is_none(),
+                enabled: true,
+                detail: None,
+                submenu: false,
+            },
+            Act::SetModel(None),
+        ));
+        if let Some((_, list)) = groups.iter().find(|(name, _)| name == provider) {
+            rows.extend(list.iter().map(|m| {
+                let item = MenuItem {
+                    label: models::short_model(m).to_owned(),
+                    dot: None,
+                    selected: deck.tasks.form.model.as_deref() == Some(m.as_str()),
+                    enabled: true,
+                    detail: models::is_free(m).then_some(Detail::Free),
+                    submenu: false,
+                };
+                (item, Act::SetModel(Some(m.clone())))
+            }));
+        }
+        rows
+    } else if groups.is_empty() {
+        let mut rows = vec![(
+            MenuItem {
+                label: "Padrão".into(),
+                dot: None,
+                selected: deck.tasks.form.model.is_none(),
+                enabled: true,
+                detail: None,
+                submenu: false,
+            },
+            Act::SetModel(None),
+        )];
+        rows.extend(known.iter().map(|m| {
+            let item = MenuItem {
+                label: m.clone(),
+                dot: None,
+                selected: deck.tasks.form.model.as_deref() == Some(m.as_str()),
+                enabled: true,
+                detail: models::is_free(m).then_some(Detail::Free),
+                submenu: false,
+            };
+            (item, Act::SetModel(Some(m.clone())))
+        }));
+        if known.is_empty() {
+            let text = if loading { "Carregando modelos…" } else { "Sem lista de modelos: só o padrão" };
+            rows.push((
+                MenuItem { label: text.into(), dot: None, selected: false, enabled: false, detail: None, submenu: false },
+                Act::CloseMenu,
+            ));
+        }
+        rows
+    } else {
+        let mut rows = vec![(
+            MenuItem {
+                label: "Padrão".into(),
+                dot: None,
+                selected: deck.tasks.form.model.is_none(),
+                enabled: true,
+                detail: None,
+                submenu: false,
+            },
+            Act::SetModel(None),
+        )];
+        rows.extend(groups.iter().map(|(provider, list)| {
+            let item = MenuItem {
+                label: provider.clone(),
+                dot: None,
+                selected: false,
+                enabled: true,
+                detail: Some(Detail::Count(list.len())),
+                submenu: true,
+            };
+            (item, Act::SetProvider(Some(provider.clone())))
+        }));
+        rows
+    };
+    let model_items: Vec<MenuItem> = rows.iter().map(|(item, _)| item.clone()).collect();
     let open_menu = deck.tasks.form.menu;
     let (title_id, brief_id, base_id) = (Id::new("tasks-new-title"), Id::new("tasks-new-brief"), Id::new("tasks-new-base"));
     let any_focus = [title_id, brief_id, base_id].iter().any(|id| ctx.memory(|m| m.has_focus(*id)));
@@ -1087,7 +1224,13 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 None,
                 picks_model,
                 open_menu == Some(FormMenu::Model),
-                if picks_model { "Modelo de LLM do agente" } else { "Este agente não permite escolher o modelo" },
+                if !picks_model {
+                    "Este agente não permite escolher o modelo"
+                } else if groups.is_empty() {
+                    "Modelo de LLM do agente"
+                } else {
+                    "Escolha o provedor e depois o modelo"
+                },
             );
             anchors[1] = Some(r);
             if click {
@@ -1156,7 +1299,9 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
         }
         (Some(FormMenu::Model), [_, Some(a)]) => {
             if let Some(i) = dropdown_menu(&ctx, "tasks-menu-model", a, &model_items, acts) {
-                acts.push(Act::SetModel(if i == 0 { None } else { known.get(i - 1).cloned() }));
+                if let Some((_, act)) = rows.into_iter().nth(i) {
+                    acts.push(act);
+                }
             }
         }
         _ => {}

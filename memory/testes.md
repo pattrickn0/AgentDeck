@@ -79,7 +79,8 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - [ ] `ask-agent --list` e `--team` mostram `claude@dev (sonnet)`.
 - [ ] `"roleModels": {"claude@dev": "sonnet"}` no config.json: abrir `claude@dev` já usa sonnet, `claude@qa` cai no padrão e um `--model` explícito vence.
 - [ ] Reabrir o app: as abas voltam com o mesmo modelo. Renomear mantém o modelo, e fechar a aba apaga a entrada de `tabModels`.
-- [ ] "+ Novo agente" › do Claude lista Padrão, opus, sonnet, haiku, fable. O › do OpenCode e do Antigravity mostra "Carregando modelos…" e depois a lista (sem CLI ou rede, só "Padrão"). Clicar no nome abre com o padrão.
+- [ ] "+ Novo agente" › do Claude lista Padrão, opus, sonnet, haiku, fable. O › do OpenCode mostra primeiro os provedores (`ollama`, `opencode`, `opencode-go`) com a contagem de modelos; escolher um lista só os modelos dele, com "grátis" nos `-free`, e o "‹" do cabeçalho volta aos provedores. O do Antigravity mostra "Carregando modelos…" e depois a lista (sem CLI ou rede, só "Padrão"). Clicar no nome abre com o padrão.
+- [ ] "Nova tarefa" › Modelo com o OpenCode: o menu começa nos provedores (Padrão + a lista), depois mostra os modelos do provedor; "‹ Provedores" volta e "Padrão" limpa o modelo. O modelo gravado na tarefa mantém o prefixo do provedor (`opencode/…`).
 - [ ] Clique direito numa aba com modelo mostra "Modelo: <m>" no alto do menu.
 - [ ] Antigravity com `--model claude-sonnet-5-5-medium`: o rodapé do agy mostra "Claude Sonnet 5.5 · medium".
 - [ ] Codex com `--model <m>` (se instalado): abre com o modelo e o aviso de fim de turno continua funcionando.

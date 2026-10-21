@@ -136,10 +136,13 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
 - **Conflito explícito:** `/ask` com `model` para uma instância já aberta com **outro** modelo (ou com o padrão do CLI)
   devolve 409 com a saída pelo `--new`; o mesmo modelo, ou nenhum pedido, entrega normalmente; `--new` + `--model` abre
   outra instância com aquele modelo.
-- **Lista de modelos** (`Core::known_models`, para o menu "+ Novo agente"): `claude` = os apelidos
-  `opus, sonnet, haiku, fable`; `antigravity` = `agy models` (primeira coluna); `opencode` = `opencode models`. As duas
-  últimas rodam numa thread (a interface chama por `Deck::request_models`), com limite de 15 s e cache de 10 min (60 s
-  se falhou); sem lista o menu mostra só "Padrão".
+- **Lista de modelos** (`Core::known_models`, para o menu "+ Novo agente" e o formulário de nova tarefa):
+  `claude` = os apelidos `opus, sonnet, haiku, fable`; `antigravity` = `agy models` (primeira coluna);
+  `opencode` = `opencode models`. As duas últimas rodam numa thread (a interface chama por
+  `Deck::request_models`), com limite de 15 s e cache de 10 min (60 s se falhou); sem lista o menu mostra
+  só "Padrão". Como o `opencode models` mistura todos os provedores conectados, os dois menus usam
+  `models::by_provider` e pedem o **provedor antes do modelo** (`opencode`, `opencode-go`, `ollama`…, o
+  prefixo antes da `/`); os modelos `-free` levam a marca "grátis" (`models::is_free`).
 - **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet)`, pelos campos `models` de `/agents` e `/team`), o
   cabeçalho da aba, a barra lateral e o menu de contexto da aba (só leitura: trocar o modelo de uma aba aberta exige
   reiniciar o agente e não existe ainda).
