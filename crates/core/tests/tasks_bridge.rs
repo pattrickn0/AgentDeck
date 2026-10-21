@@ -168,3 +168,46 @@ fn a_task_agent_cannot_merge_discard_or_create() {
     assert_eq!(t2["id"], "t2");
     core.shutdown();
 }
+
+#[test]
+fn learn_answers_from_the_worktree_of_the_asking_agent() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    // Um aprendizado versionado na base, antes de a tarefa existir (a worktree parte dela).
+    let text = "---\ntitulo: Cuidado com src\nresumo: Regra de src.\ntouches: [src/**]\n---\nNão mexa em src sem ler isto.\n";
+    std::fs::create_dir_all(env.ws.join("memory").join("aprendizados")).expect("pasta");
+    commit_file(&env.ws, "memory/aprendizados/src.md", text, "docs: aprendizado");
+    core.register_instance(&env.project, "claude");
+    let boss = tab_token(&env, "claude");
+    let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": "Com memória", "brief": "Faça.", "start": true }).to_string());
+    assert_eq!(st, 200, "{b}");
+    let worktree = b["task"]["worktree"].as_str().expect("worktree").to_owned();
+    let agent = tab_token(&env, "claude@t1");
+    let ask = |token: &str, paths: Value| http(core, "POST", "/learn", token, &json!({ "paths": paths }).to_string());
+
+    // Caminho relativo e caminho absoluto dentro da worktree dão a mesma resposta.
+    let (st, rel) = ask(&agent, json!(["src/lib.rs"]));
+    assert_eq!(st, 200, "{rel}");
+    let rel = rel["text"].as_str().expect("texto").to_owned();
+    assert!(rel.contains("Não mexa em src sem ler isto.") && rel.contains("### Cuidado com src"), "{rel}");
+    let absolute = Path::new(&worktree).join("src").join("lib.rs").to_string_lossy().into_owned();
+    let (st, abs) = ask(&agent, json!([absolute]));
+    assert_eq!((st, abs["text"].as_str()), (200, Some(rel.as_str())));
+    // Arquivo sem aprendizado: diz que nada casa, e mostra o índice.
+    let (st, none) = ask(&agent, json!(["docs/x.md"]));
+    assert_eq!(st, 200);
+    assert!(
+        none["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("Nenhum aprendizado específico") && t.contains("memory/aprendizados/src.md — Regra de src.")),
+        "{none}"
+    );
+    // Sem caminhos: erro claro. O orquestrador (sem tarefa) lê do repositório do projeto.
+    let (st, b) = ask(&agent, json!([]));
+    assert!(st == 400 && b["error"].as_str().is_some_and(|e| e.contains("ao menos um arquivo")), "{st} {b}");
+    let (st, b) = ask(&boss, json!(["src/lib.rs"]));
+    assert!(st == 200 && b["text"].as_str().is_some_and(|t| t.contains("Não mexa em src")), "{st} {b}");
+    // Só POST.
+    assert_eq!(http(core, "GET", "/learn", &boss, "").0, 404);
+}

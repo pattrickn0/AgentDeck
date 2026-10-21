@@ -103,6 +103,8 @@ const MAX_BODY: u64 = 16 << 20;
 /// Requisições em atendimento ao mesmo tempo (cada pergunta esperando resposta ocupa uma, também
 /// depois do 202, enquanto a resposta atrasada não chega).
 const MAX_ACTIVE: usize = 128;
+/// Arquivos aceitos por chamada de `POST /learn` (`ask-agent --learn`).
+const MAX_LEARN_PATHS: usize = 50;
 /// Soma dos corpos sendo lidos ou atendidos ao mesmo tempo: sem ela, 128 corpos de 16 MB seriam 2 GB.
 const MAX_BODIES: u64 = 64 << 20;
 
@@ -229,6 +231,25 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
     let route = req.url().to_owned();
     if route == "/tasks" || route.starts_with("/tasks/") || route.starts_with("/tasks?") {
         return tasks_route(&core, req, &auth, bodies);
+    }
+    if route == "/learn" && *req.method() == Method::Post {
+        let (msg, _budget) = match read_json(&mut req, bodies, false) {
+            Ok(v) => v,
+            Err((status, body)) => return reply(req, status, body),
+        };
+        let caller = match caller(&core, &auth, &msg, "usuário") {
+            Ok(c) => c,
+            Err(e) => return reply(req, 400, json!({ "error": e })),
+        };
+        let paths: Vec<String> = msg
+            .get("paths")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).take(MAX_LEARN_PATHS).map(str::to_owned).collect())
+            .unwrap_or_default();
+        return match core.learn(&caller.project, &caller.id, &paths) {
+            Ok(text) => reply(req, 200, json!({ "text": text })),
+            Err(e) => reply(req, 400, json!({ "error": e })),
+        };
     }
     if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));

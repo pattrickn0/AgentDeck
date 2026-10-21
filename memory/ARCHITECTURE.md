@@ -254,6 +254,33 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
   (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base.
 
+**Memória em duas camadas** (fase 1 do passo 3 do roadmap; `learnings.rs`, `situation.rs` e `tasks.rs`). O app entrega ao
+agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agora, no `start_message`:
+- **Longo prazo: aprendizados.** Um `.md` por aprendizado em `memory/aprendizados/` (versionado no git; formato no `README.md` da
+  pasta): frontmatter `titulo`, `resumo` e `touches` (globs relativos à raiz do repositório; `*` não cruza pasta, `**` cruza, padrão sem
+  `/` vale para o nome do arquivo em qualquer pasta; vazio = projeto todo). `learnings::load` lê a pasta (arquivo inválido, grande demais
+  ou ilegível é ignorado com `log::warn!`; nunca derruba a tarefa), `glob_match`/`matching` casam os `touches` com um conjunto de
+  caminhos (os específicos antes dos globais), `paths_in_text` extrai do brief só os arquivos que existem no repositório (sem `..` nem
+  caminho absoluto) e `render` monta o texto: os que valem por inteiro até `START_BUDGET` (6 000 caracteres); o que passar do orçamento
+  e os demais viram uma linha de índice (`arquivo — resumo`), com teto de 2 500 caracteres e "e mais N". Os arquivos são lidos da
+  **worktree da tarefa** (já tem a base), então um aprendizado que o agente cria na branch dele é visível a ele mesmo.
+- **Sob demanda: `ask-agent --learn <arquivo>…`** (`POST /learn` na ponte → `Core::learn`): imprime os que valem para esses
+  arquivos (até `LEARN_BUDGET`, 12 000 caracteres). Caminhos absolutos dentro da worktree ou do repositório viram caminhos do
+  repositório (`learnings::relativize`). Lê a pasta da worktree da tarefa de quem pergunta ou, sem tarefa, do repositório do projeto.
+- **Escrita.** A regra da tarefa manda criar um arquivo em `memory/aprendizados/` na própria branch para algo não óbvio e citá-lo no
+  relatório: o aprendizado passa pela mesma revisão e mescla que o código.
+- **Curto prazo: "Situação atual"** (`situation::render`, orçamento de 1 500 caracteres): as **outras tarefas em andamento** do projeto
+  (em andamento, em revisão e aguardando validação; id, título, instância, estado e os arquivos da branch dela via
+  `git diff --name-only base...branch`, com um aviso quando algum deles é citado no pedido desta tarefa) e os **últimos 8 commits da
+  base** (`git log --oneline -8`). O que não couber é cortado do fim (primeiro os commits). `Core::task_memory` junta as duas
+  camadas (`tasks::memory_block`) e entra entre o pedido e as regras; qualquer falha deixa só aquela parte de fora.
+- **Histórico de feedbacks.** `Task::feedbacks` (`Vec<Feedback { at_ms, origin, text }>`, `serde(default)`: tarefas gravadas antes
+  continuam abrindo; no máximo 20) guarda cada devolução da revisão e cada reprovação da validação. `return_message` e
+  `reject_message` repetem os anteriores (os últimos 5, cada um cortado em 700 caracteres) antes das regras, para o agente não
+  repetir o que já lhe foi pedido; o feedback que está sendo entregue não entra na lista.
+- **Fora desta fase** (ver `pendencias.md`, seção 2): resumo de API por arquivo (estilo skeleton), RAG/embeddings, injeção nas abas que
+  não são de tarefa e o `ContextProvider` geral.
+
 **Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
 bloqueantes; a UI chama numa thread):
 - sempre `Command::new(git).args([...])`, nunca um shell; caminhos e a mensagem de commit vão pela entrada padrão

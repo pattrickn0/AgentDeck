@@ -223,6 +223,7 @@ ela dura.
 | `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
 | `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
+| `ask-agent --learn <arquivo> [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; o agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
 | `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
 | `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
 | `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e a deixa **aguardando validação** (o agente e a worktree continuam) / conclui a tarefa aguardando validação e limpa / descarta e limpa |

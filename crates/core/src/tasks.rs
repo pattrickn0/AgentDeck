@@ -46,6 +46,11 @@ use crate::{models, Core};
 
 /// Eventos guardados por tarefa (os mais antigos saem).
 pub const MAX_EVENTS: usize = 200;
+/// Feedbacks guardados por tarefa (os mais antigos saem), e o tamanho de cada um ao reaparecer numa mensagem.
+pub const MAX_FEEDBACKS: usize = 20;
+const HISTORY_ITEM_CHARS: usize = 700;
+/// Mensagens ao agente mostram só os últimos feedbacks anteriores.
+const HISTORY_SHOWN: usize = 5;
 /// Tamanho máximo do título (em caracteres).
 pub const MAX_TITLE: usize = 120;
 /// Tamanho máximo do slug do título na branch.
@@ -125,6 +130,15 @@ pub struct TaskEvent {
     pub text: String,
 }
 
+/// Um feedback dado ao agente: o pedido de ajustes da revisão ou o motivo da reprovação na validação.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Feedback {
+    pub at_ms: u64,
+    /// `revisão` ou `validação`.
+    pub origin: String,
+    pub text: String,
+}
+
 /// Uma tarefa. Os campos são os do JSON em disco e os da ponte (`GET /tasks/<id>`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -161,9 +175,21 @@ pub struct Task {
     pub error: Option<String>,
     /// Histórico curto (no máximo [`MAX_EVENTS`]).
     pub events: Vec<TaskEvent>,
+    /// Os feedbacks já dados ao agente, do mais antigo ao mais novo (no máximo [`MAX_FEEDBACKS`]); voltam
+    /// nas mensagens de devolução e de reprovação para o agente não repetir o que já lhe foi dito.
+    pub feedbacks: Vec<Feedback>,
 }
 
 impl Task {
+    /// Guarda um feedback entregue ao agente (os mais antigos saem além de [`MAX_FEEDBACKS`]).
+    pub fn add_feedback(&mut self, origin: &str, text: &str) {
+        self.feedbacks.push(Feedback { at_ms: now_ms(), origin: origin.to_owned(), text: text.to_owned() });
+        if self.feedbacks.len() > MAX_FEEDBACKS {
+            let extra = self.feedbacks.len() - MAX_FEEDBACKS;
+            self.feedbacks.drain(..extra);
+        }
+    }
+
     /// Acrescenta uma linha ao histórico.
     pub fn log(&mut self, text: impl Into<String>) {
         self.events.push(TaskEvent { at_ms: now_ms(), text: text.into() });
@@ -308,20 +334,60 @@ fn cap_text(text: &str, max: usize) -> String {
     }
 }
 
-/// A mensagem que entrega o brief ao agente: o pedido e as regras da tarefa. `boss` é quem criou a
-/// tarefa quando é um agente (as dúvidas vão a ele por `ask-agent --boss`).
-pub fn start_message(task: &Task, boss: Option<&str>) -> String {
+/// O bloco de memória do início da tarefa: o que o projeto já aprendeu (longo prazo) e a situação atual
+/// (curto prazo). Cada parte some quando está vazia; vazio quando as duas estão.
+pub fn memory_block(learnings: &str, situation: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !learnings.trim().is_empty() {
+        parts.push(format!("O que o projeto já aprendeu:\n{}", learnings.trim()));
+    }
+    if !situation.trim().is_empty() {
+        parts.push(format!("Situação atual:\n{}", situation.trim()));
+    }
+    parts.join("\n\n")
+}
+
+/// Os feedbacks que a tarefa já recebeu, para repetir ao agente numa devolução ou reprovação (os últimos
+/// [`HISTORY_SHOWN`], cada um cortado) e seguidos de uma linha em branco. Vazio quando não há nenhum.
+/// `task.feedbacks` não pode já conter o feedback que está sendo entregue agora.
+fn history_section(task: &Task) -> String {
+    if task.feedbacks.is_empty() {
+        return String::new();
+    }
+    let skipped = task.feedbacks.len().saturating_sub(HISTORY_SHOWN);
+    let mut out = String::from("Feedbacks anteriores desta tarefa (do mais antigo ao mais novo; não repita o que já foi pedido):");
+    if skipped > 0 {
+        out.push_str(&format!("\n(mais {skipped} anterior(es) omitido(s))"));
+    }
+    for (n, f) in task.feedbacks.iter().enumerate().skip(skipped) {
+        let (head, cut) = util::truncate_chars(f.text.trim(), HISTORY_ITEM_CHARS);
+        out.push_str(&format!("\n{}. [{}] {}{}", n + 1, f.origin, head, if cut { "…" } else { "" }));
+    }
+    out.push_str("\n\n");
+    out
+}
+
+/// A mensagem que entrega o brief ao agente: o pedido, a memória do projeto (`memory`, de [`memory_block`]) e
+/// as regras da tarefa. `boss` é quem criou a tarefa quando é um agente (as dúvidas vão a ele por
+/// `ask-agent --boss`).
+pub fn start_message(task: &Task, boss: Option<&str>, memory: &str) -> String {
     let brief = if task.brief.trim().is_empty() { task.title.as_str() } else { task.brief.trim() };
     let doubts = match boss {
         Some(b) => format!("Dúvidas: pergunte a quem criou a tarefa (\"{b}\") com ask-agent --boss \"sua pergunta\"."),
         None => "Dúvidas: escreva aqui no terminal; o usuário acompanha esta aba.".to_owned(),
     };
+    let memory = match memory.trim() {
+        "" => String::new(),
+        m => format!("{m}\n\n---\n"),
+    };
     terminal_text(&format!(
-        "[CommandDeck · Tarefa {id}: {title}]\n\n{brief}\n\n---\n\
+        "[CommandDeck · Tarefa {id}: {title}]\n\n{brief}\n\n---\n{memory}\
 Regras da tarefa {id}:\n\
 - Trabalhe SOMENTE na pasta {wt}, na branch {branch} (criada a partir de {base}). Não mexa no repositório principal nem em outras pastas.\n\
 - Faça commits pequenos nessa branch. Não faça merge nem push: quem mescla é o CommandDeck, depois da revisão.\n\
 - Não peça a ninguém (outro agente ou o usuário) que mescle ou rode ask-agent --task merge: a decisão é de quem revisa. O seu trabalho termina no --task done.\n\
+- Antes de mexer num arquivo pela primeira vez, rode ask-agent --learn <arquivo> (mostra o que o projeto já aprendeu sobre ele).\n\
+- Se descobrir algo não óbvio que o próximo agente precisaria saber (armadilha, decisão, convenção), crie um arquivo em memory/aprendizados/ nesta branch (formato em memory/aprendizados/README.md) e cite-o no relatório: ele passa pela mesma revisão e mescla que o código.\n\
 - Ao terminar, escreva o relatório (o que foi feito, arquivos alterados, testes rodados e o que falta) em um arquivo e rode: ask-agent --task done {id} --file <arquivo>.\n\
   (Entregar por arquivo preserva os acentos; canalizar pela entrada padrão (-) faz o shell do Windows trocá-los por \"?\".)\n\
 - Para saber que agentes e modelos este computador tem, rode `ask-agent --models` antes de escolher `--agent`/`--model`.\n\
@@ -339,7 +405,7 @@ Comece agora, por conta própria: este brief é a sua ordem de trabalho. Não es
 /// A mensagem que devolve a tarefa ao agente com o feedback da revisão.
 pub fn return_message(task: &Task, feedback: &str) -> String {
     terminal_text(&format!(
-        "[CommandDeck · Tarefa {id}: {title} — ajustes pedidos na revisão]\n\n{feedback}\n\n---\n\
+        "[CommandDeck · Tarefa {id}: {title} — ajustes pedidos na revisão]\n\n{feedback}\n\n{history}---\n\
 Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
 (entregar por arquivo preserva os acentos).",
         id = task.id,
@@ -347,6 +413,7 @@ Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao te
         wt = task.worktree.display(),
         branch = task.branch,
         feedback = feedback.trim(),
+        history = history_section(task),
     ))
 }
 
@@ -363,7 +430,7 @@ pub fn reject_message(task: &Task, feedback: &str, aligned: bool) -> String {
     };
     terminal_text(&format!(
         "[CommandDeck · Tarefa {id}: {title} — reprovada na validação]\n\n\
-O seu trabalho anterior já foi mesclado em {base}, mas o usuário testou e reprovou pelo seguinte motivo:\n\n{feedback}\n\n---\n\
+O seu trabalho anterior já foi mesclado em {base}, mas o usuário testou e reprovou pelo seguinte motivo:\n\n{feedback}\n\n{history}---\n\
 Corrija na mesma pasta ({wt}) e na mesma branch {branch}, com commits pequenos.{align} Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
 (entregar por arquivo preserva os acentos).",
         id = task.id,
@@ -372,6 +439,7 @@ Corrija na mesma pasta ({wt}) e na mesma branch {branch}, com commits pequenos.{
         wt = task.worktree.display(),
         branch = task.branch,
         feedback = feedback.trim(),
+        history = history_section(task),
     ))
 }
 
@@ -722,11 +790,45 @@ impl Core {
         let Some(task) = started else { return Err(TaskError::NotFound(format!("tarefa {id} sumiu"))) };
         let ident = self.open_task_instance(project, &task);
         let boss = self.task_boss(project, &task);
-        let prompt = start_message(&task, boss.as_deref());
+        let prompt = start_message(&task, boss.as_deref(), &self.task_memory(project, &task));
         let boot = self.task_boot_prompt(project, &task, "brief", "o pedido completo esta no arquivo", &prompt);
         self.deliver_to_task(project, &task, ident, prompt, boot, "brief entregue ao agente");
         self.feed(FeedEntry::system(format!("Tarefa {} iniciada: {} ({})", task.id, task.title, task.instance)).in_project(project));
         Ok(task)
+    }
+
+    /// O bloco de memória do início da tarefa ([`memory_block`]): os aprendizados que valem para o pedido (lidos
+    /// da worktree, que já tem a base) e a situação atual. Qualquer falha só deixa a parte de fora: a tarefa
+    /// nunca deixa de começar por causa da memória.
+    fn task_memory(&self, project: &str, task: &Task) -> String {
+        let brief = if task.brief.trim().is_empty() { task.title.as_str() } else { task.brief.as_str() };
+        let cited = crate::learnings::paths_in_text(brief, &task.worktree);
+        let learnings = crate::learnings::render(&crate::learnings::load(&task.worktree), &cited, crate::learnings::START_BUDGET);
+        memory_block(&learnings, &self.task_situation(project, task, &cited))
+    }
+
+    /// A "situação atual" ([`crate::situation::render`]): as outras tarefas em andamento do projeto, com os
+    /// arquivos que a branch delas já mexeu, e os últimos commits da base. Vazia se não há repositório.
+    fn task_situation(&self, project: &str, task: &Task, cited: &[String]) -> String {
+        let Ok(repo) = self.task_repo(project) else { return String::new() };
+        let others: Vec<crate::situation::OtherTask> = self
+            .tasks(project)
+            .into_iter()
+            .filter(|t| t.id != task.id && matches!(t.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Validating))
+            .map(|t| {
+                // `Validating` já está na base (a branch foi alinhada): não há diff a mostrar.
+                let files = match t.status {
+                    TaskStatus::Validating => Vec::new(),
+                    _ => changed_files(&repo, &t.base, &t.branch),
+                };
+                crate::situation::OtherTask { id: t.id, title: t.title, instance: t.instance, status: t.status.label().to_owned(), files }
+            })
+            .collect();
+        let commits: Vec<String> = repo
+            .read(&["log", "--oneline", "-8", &task.base, "--"])
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::to_owned).collect())
+            .unwrap_or_default();
+        crate::situation::render(&others, &commits, &task.base, cited, crate::situation::BUDGET)
     }
 
     /// Worktree + branch da tarefa: exclui `/.agentdeck/` do git, limpa o que sobrou de uma tentativa
@@ -946,11 +1048,14 @@ impl Core {
             t.status = TaskStatus::Running;
             t.finished_ms = None;
             t.log("devolvida ao agente com feedback");
-            t.clone()
+            // `before` não tem o feedback novo: a mensagem mostra só os anteriores.
+            let before = t.clone();
+            t.add_feedback("revisão", &feedback);
+            (before, t.clone())
         });
-        let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+        let (before, task) = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         let ident = self.open_task_instance(project, &task);
-        let prompt = return_message(&task, &feedback);
+        let prompt = return_message(&before, &feedback);
         let boot = self.task_boot_prompt(project, &task, "feedback", "foi devolvida na revisao com ajustes, descritos no arquivo", &prompt);
         self.deliver_to_task(project, &task, ident, prompt, boot, "feedback entregue ao agente");
         Ok(task)
@@ -1211,11 +1316,14 @@ impl Core {
             if let Err(e) = &aligned {
                 t.log(format!("aviso: não consegui alinhar a branch {} com {}: {e}", t.branch, t.base));
             }
-            t.clone()
+            // `before` não tem o feedback novo: a mensagem mostra só os anteriores.
+            let before = t.clone();
+            t.add_feedback("validação", &feedback);
+            (before, t.clone())
         });
-        let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+        let (before, task) = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         let ident = self.open_task_instance(project, &task);
-        let prompt = reject_message(&task, &feedback, aligned.is_ok());
+        let prompt = reject_message(&before, &feedback, aligned.is_ok());
         let boot = self.task_boot_prompt(project, &task, "feedback", "foi reprovada na validacao, com o motivo no arquivo", &prompt);
         self.deliver_to_task(project, &task, ident, prompt, boot, "motivo da reprovação entregue ao agente");
         Ok(task)
@@ -1359,6 +1467,18 @@ fn git_out(repo: &Repo, args: &[&str]) -> Result<String, GitError> {
 }
 
 /// `git diff --stat base...branch`, cortado; "sem alterações" quando vazio.
+/// Arquivos que a branch trouxe em relação à base (`git diff --name-only base...branch`); vazio se a branch
+/// não existe mais ou o git falha.
+fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
+    if !valid_task_branch(branch) || !crate::git::valid_branch_name(base) {
+        return Vec::new();
+    }
+    let range = format!("{base}...{branch}");
+    repo.read(&["diff", "--name-only", "--no-ext-diff", &range, "--"])
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
 fn diff_stat(repo: &Repo, base: &str, branch: &str) -> Result<String, String> {
     let out = git_out(repo, &["diff", "--stat", &format!("{base}...{branch}"), "--"]).map_err(|e| e.to_string())?;
     let out = out.trim();
@@ -1477,7 +1597,7 @@ mod tests {
 
     #[test]
     fn the_start_message_carries_the_brief_and_the_rules() {
-        let m = start_message(&sample(), Some("claude"));
+        let m = start_message(&sample(), Some("claude"), "");
         assert!(m.starts_with("[CommandDeck · Tarefa t3: Corrigir o login]\n\nFaça X.\n\nDepois Y."), "{m}");
         assert!(m.contains("SOMENTE na pasta") && m.contains("tarefa/t3-corrigir-o-login") && m.contains("criada a partir de main"), "{m}");
         assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
@@ -1490,9 +1610,63 @@ mod tests {
         let mut t = sample();
         t.brief = "  ".into();
         t.title = "T\x1b[201~ítulo".into();
-        let m = start_message(&t, None);
+        let m = start_message(&t, None, "");
         assert!(m.contains("escreva aqui no terminal") && !m.contains("--boss"), "{m}");
         assert!(!m.contains('\x1b'), "{m:?}");
+    }
+
+    #[test]
+    fn the_start_message_carries_the_memory_and_the_memory_rules() {
+        // Sem memória, nada de seção vazia.
+        let plain = start_message(&sample(), None, &memory_block("", " "));
+        assert!(!plain.contains("O que o projeto já aprendeu") && !plain.contains("Situação atual"), "{plain}");
+        // Com memória: entre o pedido e as regras, cada parte com o seu título.
+        let memory = memory_block("### T (memory/aprendizados/a.md)\ncorpo", "Outras tarefas em andamento: nenhuma.");
+        let m = start_message(&sample(), None, &memory);
+        let (brief, learned, situation, rules) = (
+            m.find("Depois Y."),
+            m.find("O que o projeto já aprendeu:\n### T"),
+            m.find("Situação atual:\nOutras tarefas"),
+            m.find("Regras da tarefa t3"),
+        );
+        assert!(brief < learned && learned < situation && situation < rules && rules.is_some(), "{m}");
+        // As regras mandam consultar e registrar aprendizados.
+        assert!(m.contains("ask-agent --learn <arquivo>") && m.contains("memory/aprendizados/"), "{m}");
+        assert_eq!(memory_block("só longo prazo", ""), "O que o projeto já aprendeu:\nsó longo prazo");
+    }
+
+    #[test]
+    fn feedbacks_come_back_in_the_return_and_reject_messages() {
+        let mut t = sample();
+        // Primeira devolução: nada anterior.
+        assert!(!return_message(&t, "Faltou o teste.").contains("Feedbacks anteriores"));
+        t.add_feedback("revisão", "Faltou o teste.");
+        t.add_feedback("validação", "Fecha ao salvar.");
+        let m = return_message(&t, "Agora o log.");
+        assert!(m.contains("\n\nAgora o log.\n\nFeedbacks anteriores desta tarefa"), "{m}");
+        assert!(m.contains("1. [revisão] Faltou o teste.\n2. [validação] Fecha ao salvar.\n\n---"), "{m}");
+        let m = reject_message(&t, "Ainda fecha.", true);
+        assert!(m.contains("Ainda fecha.\n\nFeedbacks anteriores") && m.contains("2. [validação] Fecha ao salvar."), "{m}");
+        // Muitos: só os últimos, e cada um cortado.
+        for n in 0..10 {
+            t.add_feedback("revisão", &format!("pedido {n} {}", "x".repeat(2 * HISTORY_ITEM_CHARS)));
+        }
+        let m = return_message(&t, "mais um");
+        assert!(m.contains("(mais 7 anterior(es) omitido(s))") && m.contains("pedido 9") && !m.contains("pedido 4"), "{m}");
+        assert!(m.contains('…') && m.chars().count() < 6 * (HISTORY_ITEM_CHARS + 60) + 800, "{}", m.chars().count());
+    }
+
+    #[test]
+    fn only_the_latest_feedbacks_are_kept() {
+        let mut t = sample();
+        for n in 0..(MAX_FEEDBACKS + 5) {
+            t.add_feedback("revisão", &n.to_string());
+        }
+        assert_eq!(t.feedbacks.len(), MAX_FEEDBACKS);
+        assert_eq!(t.feedbacks.first().map(|f| f.text.as_str()), Some("5"));
+        // Tarefas gravadas antes do campo existir continuam abrindo.
+        let old: Task = serde_json::from_str(r#"{"id":"t1","title":"x"}"#).unwrap();
+        assert!(old.feedbacks.is_empty());
     }
 
     #[test]

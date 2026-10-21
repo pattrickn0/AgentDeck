@@ -223,7 +223,11 @@ pub fn classify(kind: &str, models: Vec<String>) -> AgentModels {
     let list = if kind.starts_with("ollama:") {
         ModelList::InName
     } else if has_model_list(kind) {
-        if models.is_empty() { ModelList::Failed } else { ModelList::Models(models) }
+        if models.is_empty() {
+            ModelList::Failed
+        } else {
+            ModelList::Models(models)
+        }
     } else if accepts_model(kind) {
         ModelList::Unlisted
     } else {
@@ -258,12 +262,18 @@ pub fn format_inventory(items: &[AgentModels]) -> String {
                     lines.push(format!("{agent} --model: {}", join_marked(models, |m| m)));
                 } else {
                     lines.push(format!("{agent} --model <provedor>/<modelo>:"));
-                    lines.extend(groups.iter().map(|(p, list)| format!("  {p}/: {}", join_marked(list, |m| m.strip_prefix(&format!("{p}/")).unwrap_or(m)))));
+                    lines.extend(
+                        groups
+                            .iter()
+                            .map(|(p, list)| format!("  {p}/: {}", join_marked(list, |m| m.strip_prefix(&format!("{p}/")).unwrap_or(m)))),
+                    );
                 }
             }
             ModelList::Unlisted => lines.push(format!("{agent} --model <nome> (este computador não lista os modelos)")),
             ModelList::Fixed => lines.push(format!("{agent}: sem escolha de modelo (usa o padrão do CLI)")),
-            ModelList::Failed => lines.push(format!("{agent}: não consegui listar os modelos (o CLI não respondeu); sem --model ele usa o padrão")),
+            ModelList::Failed => {
+                lines.push(format!("{agent}: não consegui listar os modelos (o CLI não respondeu); sem --model ele usa o padrão"))
+            }
             ModelList::InName => {
                 // Todos os modelos do Ollama saem juntos, na posição do primeiro.
                 if local.first() == Some(&agent.as_str()) {
