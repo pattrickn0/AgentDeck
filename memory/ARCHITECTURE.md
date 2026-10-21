@@ -142,7 +142,9 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
   `Deck::request_models`), com limite de 15 s e cache de 10 min (60 s se falhou); sem lista o menu mostra
   só "Padrão". Como o `opencode models` mistura todos os provedores conectados, os dois menus usam
   `models::by_provider` e pedem o **provedor antes do modelo** (`opencode`, `opencode-go`, `ollama`…, o
-  prefixo antes da `/`); os modelos `-free` levam a marca "grátis" (`models::is_free`).
+  prefixo antes da `/`); os modelos `-free` levam a marca "grátis" (`models::is_free`) e vêm primeiro em
+  cada lista. Com um provedor só, `models::sole_provider` pula o passo do provedor e mostra os modelos
+  dele direto.
 - **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet)`, pelos campos `models` de `/agents` e `/team`), o
   cabeçalho da aba, a barra lateral e o menu de contexto da aba (só leitura: trocar o modelo de uma aba aberta exige
   reiniciar o agente e não existe ainda).

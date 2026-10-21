@@ -282,7 +282,8 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
 }
 
 /// Segundo passo do menu de novo agente: "Padrão" e os modelos conhecidos de `kind`. Quando o CLI
-/// mistura provedores (`opencode models`), o primeiro passo é o provedor e o segundo, os modelos dele.
+/// mistura provedores (`opencode models`), o primeiro passo é o provedor e o segundo, os modelos dele;
+/// com um provedor só, os modelos aparecem direto.
 fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
     // A lista chega de uma thread: pede de novo se ainda não veio (ou venceu).
     deck.request_models(kind);
@@ -299,8 +300,9 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
 
     // Claude e Antigravity: a lista de sempre ("Padrão" + modelos).
     if groups.is_empty() {
+        let flat = models::free_first(&models);
         let mut rows = vec![StepRow::new("Padrão")];
-        rows.extend(models.iter().map(|m| StepRow { free: models::is_free(m), ..StepRow::new(m.as_str()) }));
+        rows.extend(flat.iter().map(|m| StepRow { free: models::is_free(m), ..StepRow::new(m.as_str()) }));
         if let Some(text) = models_status(loading, models.is_empty()) {
             rows.push(StepRow { enabled: false, ..StepRow::new(text) });
         }
@@ -310,7 +312,7 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
                 deck.open_tab_with_model(kind, None, false);
             }
             StepOutcome::Chosen(i) => {
-                let model = models[i - 1].clone();
+                let model = flat[i - 1].clone();
                 close_all(deck);
                 deck.open_tab_with_model(kind, Some(&model), false);
             }
@@ -322,7 +324,10 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
     }
 
     // OpenCode: o provedor escolhido fica no estado do menu; sem ele, o passo é a lista de provedores.
-    if let Some(provider) = deck.new_tab_provider.clone().filter(|p| groups.iter().any(|(g, _)| g == p)) {
+    // Com um provedor só não há o que escolher: os modelos dele aparecem direto (sem "‹ Provedores").
+    let sole = models::sole_provider(&groups).map(str::to_owned);
+    let chosen = deck.new_tab_provider.clone().filter(|p| groups.iter().any(|(g, _)| g == p)).or(sole.clone());
+    if let Some(provider) = chosen {
         let list = groups.iter().find(|(g, _)| *g == provider).map(|(_, l)| l.as_slice()).unwrap_or_default();
         let rows: Vec<StepRow> =
             list.iter().map(|m| StepRow { free: models::is_free(m), ..StepRow::new(models::short_model(m)) }).collect();
@@ -332,7 +337,14 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
                 close_all(deck);
                 deck.open_tab_with_model(kind, Some(&model), false);
             }
-            StepOutcome::Back => deck.new_tab_provider = None,
+            StepOutcome::Back => {
+                if sole.is_some() {
+                    // Não houve passo dos provedores: o cabeçalho volta à lista de agentes.
+                    deck.new_tab_models_for = None;
+                } else {
+                    deck.new_tab_provider = None;
+                }
+            }
             StepOutcome::Closed => close_all(deck),
             StepOutcome::Pending => {}
         }

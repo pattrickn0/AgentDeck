@@ -127,11 +127,13 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
-- [x] **OpenCode: escolher o provedor antes do modelo** (tarefa `t3`). O `opencode models` mistura os
+- [x] **OpenCode: escolher o provedor antes do modelo** (tarefa `t3`, ajustes da revisão incluídos). O `opencode models` mistura os
   provedores conectados (`opencode`, `opencode-go`, `ollama`…), e a lista única oferecia modelos de um plano
   que o usuário não tem. Agora o menu de modelo (no formulário "Nova tarefa" e no "+ Novo agente") pede o
   provedor primeiro — `models::by_provider`, com a contagem de modelos por provedor — e mostra só os modelos
-  dele; `‹ Provedores` volta um passo. Os modelos `-free` levam a marca "grátis" (`models::is_free`).
+  dele; `‹ Provedores` volta um passo. Os modelos `-free` levam a marca "grátis" e vêm primeiro (ordenação
+  estável, também na lista plana). Com um provedor só, `models::sole_provider` vai direto aos modelos, sem o
+  passo extra.
 
 - [x] **Regras da tarefa: o agente não pede merge.** O `start_message` (`tasks.rs`) agora diz que o agente não
   pede a ninguém que mescle nem rode `--task merge`: o trabalho dele termina no `--task done`. Veio do primeiro

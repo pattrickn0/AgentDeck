@@ -1086,13 +1086,18 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     // O OpenCode lista todos os provedores conectados (`opencode`, `opencode-go`, `ollama`…): o menu
     // pede o provedor antes e mostra só os modelos dele. Os outros agentes têm uma lista só.
     let groups = models::by_provider(&known);
-    let step = deck.tasks.form.provider.clone().filter(|p| groups.iter().any(|(name, _)| name == p));
+    let sole = models::sole_provider(&groups).map(str::to_owned);
+    let step = deck.tasks.form.provider.clone().filter(|p| groups.iter().any(|(name, _)| name == p)).or(sole.clone());
     let model_label = deck.tasks.form.model.clone().unwrap_or_else(|| "Padrão".to_owned());
     let rows: Vec<(MenuItem, Act)> = if let Some(provider) = &step {
-        let mut rows = vec![(
-            MenuItem { label: "‹ Provedores".into(), dot: None, selected: false, enabled: true, detail: None, submenu: false },
-            Act::SetProvider(None),
-        )];
+        let mut rows = Vec::new();
+        // Com um provedor só não há passo anterior: o menu abre direto nos modelos dele.
+        if sole.is_none() {
+            rows.push((
+                MenuItem { label: "‹ Provedores".into(), dot: None, selected: false, enabled: true, detail: None, submenu: false },
+                Act::SetProvider(None),
+            ));
+        }
         rows.push((
             MenuItem {
                 label: "Padrão".into(),
@@ -1130,7 +1135,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             },
             Act::SetModel(None),
         )];
-        rows.extend(known.iter().map(|m| {
+        rows.extend(models::free_first(&known).iter().map(|m| {
             let item = MenuItem {
                 label: m.clone(),
                 dot: None,
@@ -1226,7 +1231,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 open_menu == Some(FormMenu::Model),
                 if !picks_model {
                     "Este agente não permite escolher o modelo"
-                } else if groups.is_empty() {
+                } else if groups.is_empty() || sole.is_some() {
                     "Modelo de LLM do agente"
                 } else {
                     "Escolha o provedor e depois o modelo"
