@@ -455,7 +455,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-agent,tasks-new-model,settings,newtab,newtab-models:<agente>,drop,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -465,9 +465,16 @@ fn apply_debug_ui(deck: &mut Deck) {
             "shortcuts" => deck.toggle_shortcuts = true,
             "newtab" => deck.new_tab_menu_open = true,
             // Segundo passo do menu de novo agente (escolher o modelo): `newtab-models:claude`, `newtab-models:opencode`…
+            // e, no OpenCode, `newtab-models:opencode@opencode` abre direto os modelos do provedor.
             k if k.starts_with("newtab-models:") => {
+                let rest = &k["newtab-models:".len()..];
+                let (kind, provider) = match rest.split_once('@') {
+                    Some((kind, provider)) => (kind, Some(provider.to_owned())),
+                    None => (rest, None),
+                };
                 deck.new_tab_menu_open = true;
-                deck.new_tab_models_for = Some(k["newtab-models:".len()..].to_owned());
+                deck.new_tab_models_for = Some(kind.to_owned());
+                deck.new_tab_provider = provider;
             }
             "drop" => deck.drop_hover = true,
             "git" => deck.set_right_view(crate::deck::RightView::Git),
@@ -595,10 +602,23 @@ fn apply_debug_ui(deck: &mut Deck) {
                     authenticated: false,
                 });
             }
-            "tasks" | "tasks-demo" | "tasks-empty" | "tasks-detail" | "tasks-running" | "tasks-failed" | "tasks-diff" | "tasks-confirm"
-            | "tasks-discard" | "tasks-return" | "tasks-error" | "tasks-busy" | "tasks-new" | "tasks-new-agent" | "tasks-new-model" => {
-                debug_tasks(deck, item)
-            }
+            "tasks"
+            | "tasks-demo"
+            | "tasks-empty"
+            | "tasks-detail"
+            | "tasks-running"
+            | "tasks-failed"
+            | "tasks-diff"
+            | "tasks-confirm"
+            | "tasks-discard"
+            | "tasks-return"
+            | "tasks-error"
+            | "tasks-busy"
+            | "tasks-new"
+            | "tasks-new-agent"
+            | "tasks-new-model"
+            | "tasks-new-provider"
+            | "tasks-new-provider-models" => debug_tasks(deck, item),
             "usage-demo" => deck.debug_usage = Some(debug_usage()),
             "projects-demo" => deck.debug_projects = Some(debug_projects()),
             "split-drag" => {
@@ -674,19 +694,25 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
         }
         "tasks-running" => deck.tasks.view = detail("t6"),
         "tasks-failed" => deck.tasks.view = detail("t3"),
-        "tasks-new" | "tasks-new-agent" | "tasks-new-model" => {
+        "tasks-new" | "tasks-new-agent" | "tasks-new-model" | "tasks-new-provider" | "tasks-new-provider-models" => {
             deck.tasks_open_new();
             let f = &mut deck.tasks.form;
-            f.kind = "claude".into();
+            f.kind = if item.starts_with("tasks-new-provider") { "opencode".into() } else { "claude".into() };
             f.base = "dev".into();
             f.title = "Documentar as rotas /tasks da ponte".into();
             f.brief = "Explicar no memory/ARCHITECTURE.md cada rota, com o corpo de exemplo e os códigos de erro.\n\nConferir também o texto do ask-agent --task.".into();
             f.focus_title = false;
             f.menu = match item {
                 "tasks-new-agent" => Some(FormMenu::Agent),
-                "tasks-new-model" => Some(FormMenu::Model),
+                "tasks-new-model" | "tasks-new-provider" | "tasks-new-provider-models" => Some(FormMenu::Model),
                 _ => None,
             };
+            if item == "tasks-new-provider-models" {
+                f.provider = Some("opencode".into());
+            }
+            if item.starts_with("tasks-new-provider") {
+                deck.request_models("opencode");
+            }
         }
         _ => {}
     }

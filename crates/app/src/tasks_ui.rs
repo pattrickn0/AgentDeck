@@ -372,6 +372,9 @@ pub struct NewForm {
     pub kind: String,
     /// `None` = "Padrão".
     pub model: Option<String>,
+    /// Provedor do passo do menu de modelo (`opencode`): `None` = a lista de provedores aparece
+    /// primeiro. Só vale enquanto o menu está aberto (o OpenCode mistura vários provedores).
+    pub provider: Option<String>,
     pub base: String,
     pub start_now: bool,
     pub error: Option<String>,
@@ -389,6 +392,7 @@ impl Default for NewForm {
             brief: String::new(),
             kind: String::new(),
             model: None,
+            provider: None,
             base: String::new(),
             start_now: true,
             error: None,
@@ -554,6 +558,7 @@ impl Deck {
         self.tasks_clear_detail_state();
         self.tasks.notice = None;
         self.tasks.form.menu = None;
+        self.tasks.form.provider = None;
     }
 
     /// Agentes que uma tarefa pode usar: instalados, com aba (nada de terminal comum).
@@ -566,6 +571,7 @@ impl Deck {
         let choices = self.tasks_agent_choices();
         let form = &mut self.tasks.form;
         form.menu = None;
+        form.provider = None;
         form.error = None;
         if form.kind.is_empty() || (!choices.is_empty() && !choices.contains(&form.kind)) {
             form.kind = if choices.iter().any(|k| k == "claude") {
@@ -592,6 +598,7 @@ impl Deck {
             self.tasks.form.kind = kind.clone();
         }
         self.tasks.form.menu = None;
+        self.tasks.form.provider = None;
         self.request_models(&kind);
     }
 
@@ -604,6 +611,7 @@ impl Deck {
         f.busy = true;
         f.error = None;
         f.menu = None;
+        f.provider = None;
         let spec = TaskSpec {
             title: f.title.clone(),
             brief: f.brief.clone(),

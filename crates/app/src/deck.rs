@@ -330,6 +330,9 @@ pub struct Deck {
     pub new_tab_menu_open: bool,
     /// Agente cujo segundo passo do menu (escolher o modelo) está aberto.
     pub new_tab_models_for: Option<String>,
+    /// Provedor escolhido no menu do modelo (`opencode`, `opencode-go`…): a lista mostra só os
+    /// modelos dele. `None` = o passo dos provedores.
+    pub new_tab_provider: Option<String>,
     /// Modelos conhecidos de cada agente e quando chegaram (buscados fora da thread da interface).
     model_lists: HashMap<String, (Vec<String>, Instant)>,
     /// Agentes cuja lista de modelos está sendo buscada agora.
@@ -520,6 +523,7 @@ impl Deck {
             composer_cursor_end: false,
             new_tab_menu_open: false,
             new_tab_models_for: None,
+            new_tab_provider: None,
             model_lists: HashMap::new(),
             models_loading: HashSet::new(),
             settings_open: false,
@@ -1951,6 +1955,8 @@ impl Deck {
         self.rename_tab = None;
         self.tab_context_menu = None;
         self.new_tab_menu_open = false;
+        self.new_tab_models_for = None;
+        self.new_tab_provider = None;
         self.pane_drag = None;
         if !old.is_empty() {
             let uid = self.active.and_then(|i| self.tabs.get(i)).map(|t| t.uid);
