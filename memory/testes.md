@@ -90,7 +90,9 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - [ ] Num projeto git, de uma aba orquestradora: `ask-agent --task new "teste" --start -` com o pedido na entrada. A aba da tarefa abre em segundo plano, o terminal dela está em `<repo>\.agentdeck\worktrees\t1`, o pedido e as regras chegam digitados, e o `git status` do repositório principal continua limpo.
 - [ ] Na aba da tarefa, fazer um commit e rodar `ask-agent --task done t1 -`. O `--task show t1` mostra o relatório e o diff, e o `--boss` da tarefa chega a quem a criou.
 - [ ] Na aba da tarefa, escrever o relatório num arquivo com acentos (ex.: `C:\Temp\relatorio.md`) e rodar `ask-agent --task done t1 --file C:\Temp\relatorio.md`: o `--task show t1` mostra os acentos inteiros (sem `?`).
-- [ ] `--task return t1 "ajuste"` digita o retorno na aba. Depois, `--task merge t1` cria o commit de merge, fecha a aba e apaga a pasta e a branch, mesmo com o processo do agente vivo.
+- [ ] `--task return t1 "ajuste"` digita o retorno na aba. Depois, `--task merge t1` cria o commit de merge e a tarefa fica **aguardando validação**: a aba, a pasta e a branch continuam, e a branch da tarefa aponta para o mesmo commit da base.
+- [ ] `--task validate t1` (aguardando validação) fecha a aba e apaga a pasta e a branch, mesmo com o processo do agente vivo; a tarefa vira "concluída". Fora de aguardando validação, recusa.
+- [ ] `--task reject t1 "não salva"` (aguardando validação) volta a tarefa ao mesmo agente: o texto chega na aba dizendo que o trabalho já foi mesclado e qual foi o motivo. Com a aba fechada e/ou a pasta apagada à mão, a aba reabre na worktree (recriada). Depois `done` → `merge` → `validate` fecham o ciclo.
 - [ ] Com o repositório principal em outra branch, ou com um arquivo rastreado alterado, o merge recusa com explicação e a tarefa fica em revisão.
 - [ ] Conflito (mesma linha alterada na base e na tarefa): o merge é desfeito, a tarefa fica em revisão e o repositório principal fica limpo.
 - [ ] `--task discard` numa tarefa em andamento fecha a aba e apaga a worktree e a branch, também com a pasta já apagada à mão.
@@ -102,8 +104,9 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - [ ] O agente roda `ask-agent --task done tN -`: o cartão vai sozinho para "Em revisão", o selo do ícone sobe e aparece "N arquivos +X −Y".
 - [ ] No detalhe em revisão: relatório, alterações por arquivo, e "Ver diff completo" abre o diff (cores, rolagem horizontal); "←" volta.
 - [ ] "Devolver" com Ctrl+Enter: a tarefa volta a andamento e o texto chega à aba do agente, reabrindo-a se estiver fechada.
-- [ ] "Mesclar em <base>" pede confirmação. Com o repositório principal sujo, mostra a recusa e a tarefa fica em revisão. Limpo, mescla, fecha a aba, move para Concluídas e apaga a worktree.
-- [ ] "Descartar" pede confirmação; depois a aba fecha e a worktree e a branch somem.
+- [ ] "Mesclar em <base>" pede confirmação. Com o repositório principal sujo, mostra a recusa e a tarefa fica em revisão. Limpo, mescla e move para **Aguardando validação** (o selo do ícone continua contando); a aba do agente segue aberta.
+- [ ] Aguardando validação: "Validar" conclui sem perguntar (fecha a aba, apaga a worktree, move para Concluídas). "Reprovar" abre o campo do motivo (Ctrl+Enter envia): a tarefa volta a andamento e o motivo chega ao mesmo agente.
+- [ ] "Descartar" pede confirmação (aguardando validação, avisa que o que já foi mesclado continua na base); depois a aba fecha e a worktree e a branch somem.
 - [ ] Na largura mínima (280 px), nada vaza na lista, no detalhe nem no formulário; trocar de projeto mostra as tarefas do outro.
 - [ ] Uma tarefa criada por outro agente (`ask-agent --task new --start`) aparece sem clicar em atualizar.
 

@@ -310,7 +310,11 @@ fn merge_makes_a_no_ff_commit_and_waits_for_validation() {
     assert!(!events(&env).iter().any(|e| matches!(e, CoreEvent::CloseInstance { .. })));
     assert!(core.project_instance_ids(&env.project).contains(&"claude@t1".to_owned()));
     assert_eq!(core.task_of_instance(&env.project, "claude@t1").map(|t| t.status), Some(TaskStatus::Validating));
-    assert!(merged.events.iter().any(|e| e.text.contains("mesclada em main") && e.text.contains("aguardando validação")), "{:?}", merged.events);
+    assert!(
+        merged.events.iter().any(|e| e.text.contains("mesclada em main") && e.text.contains("aguardando validação")),
+        "{:?}",
+        merged.events
+    );
     // A branch da tarefa foi alinhada com a base (fast-forward): o mesmo commit, e a worktree já tem o merge.
     assert_eq!(git(&t.worktree, &["rev-parse", "HEAD"]), git(&env.ws, &["rev-parse", "main"]));
     assert_eq!(git(&env.ws, &["rev-parse", &t.branch]), git(&env.ws, &["rev-parse", "main"]));
@@ -527,6 +531,29 @@ fn a_task_awaiting_validation_survives_a_restart() {
     assert_eq!(core.task_of_instance(env_project, "claude@t1").map(|t| t.id), Some("t1".to_owned()));
     assert!(same_path(&core.spawn_spec_for(env_project, &Ident::parse("claude@t1").expect("id")).expect("spec").cwd, &t.worktree));
     assert_eq!(core.task_validate(env_project, "t1").expect("validate").status, TaskStatus::Merged);
+    core.shutdown();
+    drop(_tmp);
+}
+
+#[test]
+fn a_failed_merge_keeps_the_agent_terminal_in_the_worktree_after_a_restart() {
+    need_git!();
+    let env = start();
+    let t = task_in_review(&env, "Mesclagem falhou", "feature.txt");
+    // Simula o erro de infraestrutura na mesclagem: o arquivo grava `Failed` com o relatório já entregue.
+    let file = env.root.join("dados").join("tarefas").join(format!("{}.json", env.project));
+    let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
+    let Env { _tmp, core: first, rx, .. } = env;
+    first.shutdown();
+    drop((first, rx));
+    let text = std::fs::read_to_string(&file).expect("json");
+    assert!(text.contains("\"status\": \"review\""), "{text}");
+    std::fs::write(&file, text.replace("\"status\": \"review\"", "\"status\": \"failed\"")).expect("w");
+    let (core, _rx) = start_core(&root, config, true);
+    let failed = core.task(&project, "t1").expect("t1");
+    assert_eq!((failed.status, failed.report.is_some()), (TaskStatus::Failed, true));
+    let ident = Ident::parse("claude@t1").expect("id");
+    assert!(same_path(&core.spawn_spec_for(&project, &ident).expect("spec").cwd, &t.worktree), "na worktree, não no repositório principal");
     core.shutdown();
     drop(_tmp);
 }

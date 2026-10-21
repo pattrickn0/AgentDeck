@@ -847,10 +847,7 @@ fn return_form(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &
         ui.add_space(2.0);
         text_field(ui, id, &mut deck.tasks.feedback, hint, Some(4));
     });
-    let b = [
-        (send.to_owned(), BtnKind::Primary, ready, send_tip),
-        ("Cancelar".to_owned(), BtnKind::Secondary, true, cancel_tip),
-    ];
+    let b = [(send.to_owned(), BtnKind::Primary, ready, send_tip), ("Cancelar".to_owned(), BtnKind::Secondary, true, cancel_tip)];
     ui.add_space(6.0);
     match button_flow(ui, &b, "return") {
         Some(0) => acts.push(Act::SendReturn(task.id.clone())),

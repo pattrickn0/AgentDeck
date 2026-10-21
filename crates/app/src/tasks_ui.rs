@@ -913,7 +913,10 @@ pub fn demo_tasks() -> Vec<Task> {
         created_ms: now - 3 * 60 * min,
         started_ms: Some(now - 170 * min),
         finished_ms: Some(now - 8 * min),
-        report: Some("Cabeçalho do detalhe mostra a mesclagem.\n\nArquivos: crates/app/src/ui/tasks.rs.\n\nTestes: cargo test --workspace passa.".into()),
+        report: Some(
+            "Cabeçalho do detalhe mostra a mesclagem.\n\nArquivos: crates/app/src/ui/tasks.rs.\n\nTestes: cargo test --workspace passa."
+                .into(),
+        ),
         diff_stat: Some(" crates/app/src/ui/tasks.rs | 18 ++++++++++++++----\n 1 file changed, 14 insertions(+), 4 deletions(-)\n".into()),
         events: vec![
             ev(180, "criada"),
@@ -1149,7 +1152,10 @@ mod tests {
         // Só a ação principal vem cheia; mesclar mostra a base.
         assert!(TaskAct::Merge.is_primary() && !TaskAct::Discard.is_primary() && !TaskAct::Return.is_primary());
         assert!(TaskAct::Validate.is_primary() && !TaskAct::Reject.is_primary());
-        assert_eq!((TaskAct::Validate.label(&t(TaskStatus::Validating, true)), TaskAct::Reject.label(&t(TaskStatus::Validating, true))), ("Validar".to_owned(), "Reprovar".to_owned()));
+        assert_eq!(
+            (TaskAct::Validate.label(&t(TaskStatus::Validating, true)), TaskAct::Reject.label(&t(TaskStatus::Validating, true))),
+            ("Validar".to_owned(), "Reprovar".to_owned())
+        );
         assert_eq!(TaskAct::Merge.label(&t(TaskStatus::Review, true)), "Mesclar em dev");
     }
 

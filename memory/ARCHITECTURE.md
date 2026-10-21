@@ -179,11 +179,16 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
 pedido (brief), um agente com modelo, uma worktree + branch próprias, um relatório, um diff e um ciclo de vida.
 
 ```
-Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Merged
-  │                 ▲  ▲              │ └─discard──▶ Discarded (de qualquer estado não final)
-  │                 │  └───return─────┘
+Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged ("concluída")
+  │                 ▲  ▲  ▲           │                  │ └─discard──▶ Discarded (de qualquer estado não final)
+  │                 │  │  └──return───┘                  │
+  │                 │  └────────────reject───────────────┘
   └─ erro ao iniciar ▶ Failed ──start de novo──▶ Running
 ```
+
+Mesclar quer dizer "o diff parecia certo"; o teste de verdade o usuário faz depois, no app compilado. Por isso mesclar **não**
+encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com a aba, a worktree e a branch vivas. O valor
+`Merged` continua no enum e no JSON (tarefas antigas), mas para o usuário é "concluída".
 
 - **Dados.** `Task { id (t1, t2…: contador por projeto, nunca reaproveitado), title, brief, status, base, branch
   (tarefa/<id>-<slug>), worktree, kind, model, instance (<modelo>@<id>, ex.: claude@t3), creator, created_ms, started_ms,
@@ -197,7 +202,7 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
 - **Iniciar** (`Core::task_start`, só com as abas dos agentes ligadas: tarefas não rodam em headless). `git worktree add -b
   <branch> <pasta> <base>`; registra a instância `<modelo>@<id>` com o modelo da tarefa (`models.rs`); quem criou a tarefa,
   se for um agente aberto, vira o chefe da instância (`ask-agent --boss` chega nele); `agents::spawn_spec_for` abre o terminal
-  **na worktree** (`Core::task_cwd`: tarefa em andamento ou em revisão); o brief mais as regras da tarefa (trabalhar só na
+  **na worktree** (`Core::task_cwd`: tarefa em andamento, em revisão ou aguardando validação); o brief mais as regras da tarefa (trabalhar só na
   worktree, commits pequenos, nada de merge nem push, o relatório em um arquivo com `ask-agent --task done <id> --file <arq>`, dúvidas ao chefe) vão
   para a aba por `CoreEvent::Deliver { request: 0 }`, o mesmo caminho das mensagens entre agentes (fila e regras de `delivery.rs`,
   sem esperar resposta). Erro ao iniciar = `Failed` com a mensagem; `start` de novo tenta outra vez.
@@ -208,24 +213,38 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
   nada e com a explicação, se ele não está na base, está no meio de outra operação, tem alterações sem commit em arquivos
   rastreados (o `AGENTS.md`, que o app reescreve, não conta; o git ainda protege o arquivo se a mesclagem o tocar), se a worktree da
   tarefa tem trabalho sem commit ou se a branch não tem commits novos. Depois `git merge --no-ff -m "Merge tarefa <id>: <título>"`.
-  Conflito: `git merge --abort`, a tarefa continua em `Review` e a mensagem lista os arquivos. Sucesso: fecha a aba
-  (`CoreEvent::CloseInstance`), `git worktree remove --force` (com tentativas, porque no Windows o terminal ainda segura a
-  pasta logo depois de a aba fechar), `git branch -d`, `Merged`. Erro inesperado do git = `Failed`.
-- **Descartar** (`task_discard`): qualquer estado não final; fecha a aba, remove a worktree à força (mesmo que a pasta já tenha
-  sumido) e a branch (`-D`), `git worktree prune`, `Discarded`. Sem repositório disponível, só o registro muda.
+  Conflito: `git merge --abort`, a tarefa continua em `Review` e a mensagem lista os arquivos. Sucesso: **não** fecha a aba nem
+  remove worktree/branch; alinha a branch da tarefa com a base já mesclada (na worktree, `git merge --ff-only <base>`: a branch é
+  ancestral do commit de mesclagem) e vai a `Validating` ("mesclada em <base> (<hash>); aguardando validação"). Se o alinhamento
+  falhar, só registra um aviso (o merge já aconteceu); a reprovação tenta de novo. Erro inesperado do git = `Failed`.
+- **Validar** (`task_validate`): só `Validating`. Recusa, sem mudar nada, se a worktree tem trabalho sem commit ou se a branch tem
+  commits que a base não tem (o agente seguiu trabalhando: reprove ou descarte). Senão fecha a aba (`CoreEvent::CloseInstance`),
+  `git worktree remove --force` (com tentativas, porque no Windows o terminal ainda segura a pasta logo depois de a aba fechar),
+  `git branch -D` e vai a `Merged`. Se a pasta não sai, a tarefa continua em `Validating` com a explicação (dá para tentar de novo).
+- **Reprovar** (`task_reject(feedback)`): só `Validating`, com o motivo e as abas dos agentes ligadas. Recria a pasta da worktree se
+  foi apagada à mão (a partir da branch, ou da base se a branch também sumiu), alinha a branch com a base, volta a `Running` na
+  mesma worktree e entrega ao mesmo agente `tasks::reject_message` (o trabalho anterior já foi mesclado em <base>, o usuário testou e
+  reprovou pelo motivo X, corrija na mesma branch e avise com `--task done` de novo); a aba é reaberta se foi fechada. O ciclo
+  segue: done → revisão → mesclar → aguardando validação.
+- **Descartar** (`task_discard`): qualquer estado não final (inclusive `Validating`: o que já foi mesclado continua na base, descartar
+  não desfaz o merge); fecha a aba, remove a worktree à força (mesmo que a pasta já tenha sumido) e a branch (`-D`),
+  `git worktree prune`, `Discarded`. Sem repositório disponível, só o registro muda.
 - **Permissões na ponte** (`bridge::task_permission`). O **agente de uma tarefa** (a instância `<modelo>@<id>` de uma tarefa
-  em andamento ou em revisão) só consulta (`GET`) e entrega o relatório da **própria** tarefa; criar, iniciar, devolver, mesclar e
-  descartar dão 403, e entregar o relatório de outra tarefa também. Qualquer outro agente faz o resto, menos entregar relatório
+  que ainda não terminou) só consulta (`GET`) e entrega o relatório da **própria** tarefa; criar, iniciar, devolver, mesclar,
+  validar, reprovar e descartar dão 403, e entregar o relatório de outra tarefa também. Qualquer outro agente faz o resto, menos entregar relatório
   por outro. O token mestre (nenhum agente o recebe) pode tudo. O projeto vem do token.
 - **Erros** (`TaskError` → HTTP): `Invalid` 400, `NotFound` 404, `Conflict` 409, `Failed` 500.
 - **Para a interface** (`Core`, tudo bloqueante: chame numa thread): `tasks(projeto)`, `task(projeto, id)`,
   `task_of_instance(projeto, instância)`, `task_create(projeto, TaskSpec)`, `task_start`, `task_done`, `task_return`,
-  `task_merge`, `task_discard`, e `task_diff(projeto, id)` (só leitura: o `git diff base...branch` no mesmo `GitDiff` da aba Git).
+  `task_merge`, `task_validate`, `task_reject`, `task_discard`, e `task_diff(projeto, id)` (só leitura: o `git diff base...branch` no mesmo `GitDiff` da aba Git).
   Eventos: `CoreEvent::TasksChanged { project }` a cada gravação (também as vindas da ponte) e
   `CoreEvent::CloseInstance { project, id }` quando o core encerra a instância (a interface fecha a aba). Reabrir a aba de uma
-  tarefa em andamento é abrir a instância dela (`restore_instance` + aba): o terminal já abre na worktree.
+  tarefa em andamento, em revisão ou aguardando validação é abrir a instância dela (`restore_instance` + aba): o terminal já abre na worktree.
 - **Interface** (`crates/app/src/tasks_ui.rs`, `ui/tasks.rs`): a aba Tarefas da barra direita. Cada chamada acima roda numa thread
-  (`Deck::spawn_bg`) e volta como `UiMsg::Tasks`; a lista é relida a cada `TasksChanged` do projeto ativo.
+  (`Deck::spawn_bg`) e volta como `UiMsg::Tasks`; a lista é relida a cada `TasksChanged` do projeto ativo. Grupos da lista: Em
+  revisão, **Aguardando validação**, Em andamento, Rascunho, Falhou, Concluídas, Canceladas; o selo do ícone conta revisão + validação.
+  Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
+  (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base.
 
 **Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
 bloqueantes; a UI chama numa thread):

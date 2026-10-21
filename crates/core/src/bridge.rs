@@ -1156,7 +1156,17 @@ mod tests {
             assert_eq!(task_permission(action, target, false, Some("t1")).is_ok(), ok, "{action:?} {target:?}");
         }
         // Qualquer outro agente faz o resto, menos entregar relatório.
-        for (action, ok) in [(List, true), (Create, true), (Start, true), (Return, true), (Merge, true), (Validate, true), (Reject, true), (Discard, true), (Done, false)] {
+        for (action, ok) in [
+            (List, true),
+            (Create, true),
+            (Start, true),
+            (Return, true),
+            (Merge, true),
+            (Validate, true),
+            (Reject, true),
+            (Discard, true),
+            (Done, false),
+        ] {
             assert_eq!(task_permission(action, Some("t1"), false, None).is_ok(), ok, "{action:?}");
         }
         // O token mestre pode tudo.

@@ -213,10 +213,7 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     assert!(env.ws.join("novo.txt").exists(), "a mesclagem trouxe o arquivo para a base");
     assert!(env.tab_open("t1") && env.task("t1").worktree.is_dir(), "o agente continua vivo até validar");
     assert_eq!((env.deck.tasks.review_count(), env.deck.tasks.validating_count(), env.deck.tasks.attention_count()), (0, 1, 1));
-    assert_eq!(
-        actions_for(&env.task("t1"), true),
-        [TaskAct::Validate, TaskAct::Reject, TaskAct::GoToTab, TaskAct::Discard]
-    );
+    assert_eq!(actions_for(&env.task("t1"), true), [TaskAct::Validate, TaskAct::Reject, TaskAct::GoToTab, TaskAct::Discard]);
 
     // Reprovar: abre o mesmo formulário de feedback; enviar volta a tarefa ao agente, na mesma worktree.
     env.deck.tasks_act("t1", TaskAct::Reject);

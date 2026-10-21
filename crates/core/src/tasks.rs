@@ -355,7 +355,10 @@ pub fn reject_message(task: &Task, feedback: &str, aligned: bool) -> String {
     let align = if aligned {
         String::new()
     } else {
-        format!(" Atenção: não consegui alinhar a sua branch com {base}; antes de continuar, rode na sua pasta: git merge {base}.", base = task.base)
+        format!(
+            " Atenção: não consegui alinhar a sua branch com {base}; antes de continuar, rode na sua pasta: git merge {base}.",
+            base = task.base
+        )
     };
     terminal_text(&format!(
         "[CommandDeck · Tarefa {id}: {title} — reprovada na validação]\n\n\
@@ -526,12 +529,20 @@ impl Core {
     }
 
     /// A pasta em que o terminal da instância deve abrir: a worktree da tarefa em andamento, em revisão ou
-    /// aguardando validação.
+    /// aguardando validação. Uma tarefa `Failed` que já entregou o relatório (a mesclagem falhou) também
+    /// segue na worktree: reabrir o app não pode soltar o agente no repositório principal.
     pub(crate) fn task_cwd(&self, project: &str, instance: &str) -> Option<PathBuf> {
         self.with_tasks(project, false, |p| {
             p.tasks
                 .iter()
-                .find(|t| t.instance == instance && matches!(t.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Validating))
+                .find(|t| {
+                    t.instance == instance
+                        && match t.status {
+                            TaskStatus::Running | TaskStatus::Review | TaskStatus::Validating => true,
+                            TaskStatus::Failed => t.report.is_some(),
+                            _ => false,
+                        }
+                })
                 .map(|t| t.worktree.clone())
         })
     }
@@ -1031,7 +1042,10 @@ impl Core {
         });
         let task = merged.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         self.emit(CoreEvent::GitChanged);
-        self.feed(FeedEntry::system(format!("Tarefa {} mesclada em {}, aguardando validação: {}", task.id, task.base, task.title)).in_project(project));
+        self.feed(
+            FeedEntry::system(format!("Tarefa {} mesclada em {}, aguardando validação: {}", task.id, task.base, task.title))
+                .in_project(project),
+        );
         Ok(task)
     }
 
@@ -1080,6 +1094,14 @@ impl Core {
         // Limpeza: aba, worktree, branch (o que ela trouxe já está na base).
         self.close_task_instance(project, &task);
         let mut warnings = self.remove_task_worktree(&repo, &task);
+        if task.worktree.exists() {
+            // Algo ainda segura a pasta: concluir agora deixaria pasta e branch órfãs, sem como limpar depois.
+            let why = warnings.join("; ");
+            self.update_task(project, &task.id, |t| t.log(format!("validação incompleta: {why}")));
+            return Err(TaskError::Conflict(format!(
+                "não consegui apagar a pasta da worktree ({why}): feche o que a usa e valide de novo"
+            )));
+        }
         if let Err(e) = delete_branch(&repo, &task.branch, true) {
             warnings.push(format!("a branch {} ficou: {e}", task.branch));
         }
@@ -1142,7 +1164,13 @@ impl Core {
         });
         let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         let ident = self.open_task_instance(project, &task);
-        self.deliver_to_task(project, &task, ident, reject_message(&task, &feedback, aligned.is_ok()), "motivo da reprovação entregue ao agente");
+        self.deliver_to_task(
+            project,
+            &task,
+            ident,
+            reject_message(&task, &feedback, aligned.is_ok()),
+            "motivo da reprovação entregue ao agente",
+        );
         Ok(task)
     }
 
@@ -1431,11 +1459,16 @@ mod tests {
     fn the_reject_message_says_what_was_merged_and_why_it_failed() {
         let m = reject_message(&sample(), "  Fecha ao salvar.  ", true);
         assert!(m.contains("reprovada na validação") && m.contains("já foi mesclado em main"), "{m}");
-        assert!(m.contains("pelo seguinte motivo:
+        assert!(
+            m.contains(
+                "pelo seguinte motivo:
 
 Fecha ao salvar.
 
-"), "{m}");
+"
+            ),
+            "{m}"
+        );
         assert!(m.contains("mesma branch tarefa/t3-corrigir-o-login") && m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(!m.contains("alinhar") && !m.contains(''), "{m:?}");
         // Branch que não pôde ser alinhada: o agente recebe o comando para fazê-lo.
