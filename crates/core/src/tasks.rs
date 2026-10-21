@@ -311,6 +311,7 @@ pub fn start_message(task: &Task, boss: Option<&str>) -> String {
 Regras da tarefa {id}:\n\
 - Trabalhe SOMENTE na pasta {wt}, na branch {branch} (criada a partir de {base}). Não mexa no repositório principal nem em outras pastas.\n\
 - Faça commits pequenos nessa branch. Não faça merge nem push: quem mescla é o CommandDeck, depois da revisão.\n\
+- Não peça a ninguém (outro agente ou o usuário) que mescle ou rode ask-agent --task merge: a decisão é de quem revisa. O seu trabalho termina no --task done.\n\
 - Ao terminar, escreva o relatório (o que foi feito, arquivos alterados, testes rodados e o que falta) em um arquivo e rode: ask-agent --task done {id} --file <arquivo>.\n\
   (Entregar por arquivo preserva os acentos; canalizar pela entrada padrão (-) faz o shell do Windows trocá-los por \"?\".)\n\
 - {doubts}",
@@ -1220,6 +1221,7 @@ mod tests {
         assert!(m.contains("SOMENTE na pasta") && m.contains("tarefa/t3-corrigir-o-login") && m.contains("criada a partir de main"), "{m}");
         assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(m.contains("Não faça merge nem push"), "{m}");
+        assert!(m.contains("Não peça a ninguém") && m.contains("termina no --task done"), "{m}");
         assert!(m.contains("ask-agent --boss") && m.contains("\"claude\""), "{m}");
         // Sem chefe agente, as dúvidas ficam no terminal; sem brief, vale o título; sem ESC.
         let mut t = sample();

@@ -30,6 +30,7 @@ dados/prompts/*
 !dados/prompts/.gitkeep
 dados/sessions.json
 dados/hooks/
+dados/tarefas/
 dados/.commanddeck.lock
 !dados/README.md
 

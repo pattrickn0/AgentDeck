@@ -62,6 +62,10 @@ Proposta:
 
 ## 4. Interface
 
+- [ ] **Identidade visual e temas** (pedido do usuário, 18/10). O app funciona, mas o visual é inconsistente: a barra lateral esquerda parece de outro tema que a barra direita, e algumas partes estão sem personalidade.
+  - Primeiro, padronizar: revisar barra lateral, barra direita, barra de título, abas e modais com as mesmas cores, espaçamentos, cantos e estados (hover, seleção), tudo vindo dos tokens de `theme.rs`, sem cor fixa espalhada pelo código.
+  - Depois, temas para o usuário escolher: trocar as constantes de `theme.rs` por uma paleta carregada em tempo de execução, escolhida nas configurações e gravada em `Config`. A paleta inclui o fundo e as 16 cores do terminal (`TERM_BG`/`TERM_FG`, `terminal/colors.rs`), então um tema muda o fundo de todas as abas de uma vez (CLIs com tema próprio, como o OpenCode, continuam usando o tema deles).
+
 - [ ] Janela estreita (perto do mínimo de 820 px): com muitas abas, as de trás encolhem até virar só o ponto colorido.
 
 - [ ] Emojis monocromáticos (limitação do egui). Avaliar fonte de emoji colorida ou renderização própria.
@@ -109,7 +113,8 @@ Proposta:
 - [ ] **Mesa de tarefas, depois:** pedido e relatório aparecem como texto puro (o markdown não é desenhado); a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`) usam nomes de modelos antigos.
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
 - [ ] **OpenCode: escolher o provedor antes do modelo** (pedido do usuário, 2026-10-18). Hoje o `opencode models` mistura todos os provedores conectados (`/connect`), e o formulário de nova tarefa oferece modelos sem acesso: a `t1` foi registrada com `opencode-go/deepseek-v4.1-flash` (plano Go, que o usuário não tem; 0 tokens no `opencode stats`). Fazer em dois passos: provedor (`opencode`, `opencode-go`, `ollama`…, o prefixo antes da `/`) e depois os modelos daquele provedor. Avaliar destacar os `-free`.
-- [ ] **Regras da tarefa: o agente não pede merge.** No primeiro uso real, o `opencode@t2` pediu ao Claude, por `ask-agent`, que rodasse `--task merge t2` no trabalho dele. As regras devem dizer que o merge é de quem revisa.
+- [ ] **Mesa de tarefas: áudio e anexos no pedido** (pedido do usuário, 2026-10-18). O formulário "Nova tarefa" só aceita texto. Reaproveitar o microfone (Whisper local) e os anexos do compositor (`ui/composer.rs`, cópia em `dados/anexos`), com os anexos citados no arquivo do pedido.
+- [ ] **Ditado em qualquer aba de CLI** (pedido do usuário, 2026-10-18). Hoje o áudio só sai pelo compositor, que envia para a aba ativa: dá para mandar para o modelo errado. O usuário só não aposenta a Conversa integrada por causa do ditado. Proposta: microfone (e atalho) presos à aba do terminal, que grava, transcreve e digita o texto no PTY daquela aba **sem Enter**, para conferir antes de enviar. Funciona em qualquer CLI, porque é só entrada de teclado; o destino fica fixo na aba onde a gravação começou.
 
 ## 7. Git
 
@@ -123,6 +128,9 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
+- [x] **Regras da tarefa: o agente não pede merge.** O `start_message` (`tasks.rs`) agora diz que o agente não
+  pede a ninguém que mescle nem rode `--task merge`: o trabalho dele termina no `--task done`. Veio do primeiro
+  uso real (o `opencode@t2` pediu ao Claude que mesclasse a própria tarefa).
 - [x] **Mapa de agentes removido** (tarefa `t1`): saíram a aba Mapa da barra direita, o módulo `agent_map` (e
   `ui/map.rs`), o ícone de diagrama, o `Core::conversation_map` com o rastreio de perguntas headless e os estados
   de depuração `map`/`map-demo`. A árvore de agentes da barra lateral já cobre o "quem é de quem".
