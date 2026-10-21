@@ -11,21 +11,20 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
 - Abas de terminal reais (ConPTY no Windows) para cada agente, com cores próprias, restauradas ao reabrir.
 - **Tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama…) ganha uma janela com as próprias
   abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar ou desligar a divisão.
-- **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real.
-- **Compositor** na barra direita: a mensagem (com anexos e áudio transcrito) vai para a **aba ativa**.
+- **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real (somente leitura).
 - **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
 - **GitHub** do projeto noutra aba: PRs abertos com os checks, issues, execuções do Actions e o fim do log do job que
   falhou; um clique manda o PR ou a falha para um agente.
-- Explorador de arquivos do workspace: clique insere `@arquivo` na mensagem, duplo clique abre no sistema.
-- Anexos por botão, arrastar e soltar ou colar imagem (Ctrl+V).
-- Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU) preso a cada aba de CLI (ou pelo compositor); o áudio é apagado logo após transcrever.
+- Explorador de arquivos do workspace: clique insere o caminho do arquivo na aba ativa, duplo clique abre no sistema.
+- Anexos por botão no cabeçalho de cada janela de agente (e no formulário "Nova tarefa"), arrastar e soltar sobre a janela/formulário ou colar imagem (Ctrl+V).
+- Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU) no cabeçalho de cada janela de agente, preso à aba visível daquela janela (com indicador de gravação/transcrição na aba); o áudio é apagado logo após transcrever.
 - Agente **Ollama** autônomo com ferramentas no workspace (ler/escrever/editar arquivos, rodar comandos).
 - Som de notificação quando um agente termina.
 
 Atalhos: `Ctrl+T` nova aba · `Ctrl+Tab` / `Ctrl+Shift+Tab` alternar · `Ctrl+B` barra lateral ·
-`Ctrl+L` focar mensagem · `Ctrl+Shift+M` ditar na aba · `Enter` envia · `Shift+Enter` quebra linha · `Ctrl+/` lista os atalhos.
-Com o terminal focado, `Ctrl+B` e `Ctrl+L` vão para o terminal (tmux, limpar a tela); a opção
-"Atalhos do app acima do terminal" (☰) os devolve ao app.
+`Ctrl+Shift+M` ditar na aba · `Ctrl+/` lista os atalhos.
+Com o terminal focado, `Ctrl+B` vai para o terminal (tmux); a opção
+"Atalhos do app acima do terminal" (☰) o devolve ao app.
 
 ## Compilar e rodar (Windows)
 

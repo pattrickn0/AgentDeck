@@ -349,11 +349,12 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Arquivos soltos numa mesma operação são anexados juntos.
+        // Arquivos soltos numa mesma operação são anexados juntos no painel/formulário sob o ponteiro.
         if !self.dropped.is_empty() {
             let files = std::mem::take(&mut self.dropped);
+            let pointer = self.egui.as_ref().and_then(|e| e.egui_ctx.input(|i| i.pointer.latest_pos()));
             if let Some(deck) = self.deck.as_mut() {
-                deck.attach_paths(files);
+                deck.attach_dropped_files(files, pointer);
             }
         }
         let now = Instant::now();
@@ -455,12 +456,13 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
     for item in v.split(',').map(str::trim) {
         match item {
+            "conversa" => deck.set_right_view(crate::deck::RightView::Conversa),
             "settings" => deck.settings_open = true,
             "shortcuts" => deck.toggle_shortcuts = true,
             "newtab" => deck.new_tab_menu_open = true,
@@ -477,6 +479,15 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.new_tab_provider = provider;
             }
             "drop" => deck.drop_hover = true,
+            k if k.starts_with("drop-pane:") => {
+                deck.drop_hover = true;
+                deck.debug_drop_slot = k["drop-pane:".len()..].parse().ok();
+            }
+            "drop-task" => {
+                debug_tasks(deck, "tasks-new-attach");
+                deck.drop_hover = true;
+                deck.debug_drop_task_form = true;
+            }
             "git" => deck.set_right_view(crate::deck::RightView::Git),
             "git-demo" | "git-diff" | "git-branches" => {
                 deck.set_right_view(crate::deck::RightView::Git);
@@ -618,6 +629,7 @@ fn apply_debug_ui(deck: &mut Deck) {
             | "tasks-error"
             | "tasks-busy"
             | "tasks-new"
+            | "tasks-new-attach"
             | "tasks-new-agent"
             | "tasks-new-model"
             | "tasks-new-provider"
@@ -629,9 +641,7 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.debug_pane_drop = Some(1);
             }
             "sidebar-collapsed" => deck.sidebar_collapsed = true,
-            "attach" => deck.attachments = vec!["dados/anexos/1a2b3c-captura de tela.png".into(), "dados/anexos/9f8e-relatorio.pdf".into()],
-            "text" => deck.input = "Revisa o @README.md e sugere melhorias na seção de instalação".into(),
-            "needs-text" => deck.needs_text = true,
+            "attach" => debug_tasks(deck, "tasks-new-attach"),
             "empty" => deck.debug_close_all = true,
             "download" | "download-retry" | "download-error" => {
                 deck.download = Some((debug_download(item), None));
@@ -708,13 +718,19 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
         }
         "tasks-running" => deck.tasks.view = detail("t6"),
         "tasks-failed" => deck.tasks.view = detail("t3"),
-        "tasks-new" | "tasks-new-agent" | "tasks-new-model" | "tasks-new-provider" | "tasks-new-provider-models" => {
+        "tasks-new" | "tasks-new-attach" | "tasks-new-agent" | "tasks-new-model" | "tasks-new-provider" | "tasks-new-provider-models" => {
             deck.tasks_open_new();
             let f = &mut deck.tasks.form;
             f.kind = if item.starts_with("tasks-new-provider") { "opencode".into() } else { "claude".into() };
             f.base = "dev".into();
             f.title = "Documentar as rotas /tasks da ponte".into();
             f.brief = "Explicar no memory/ARCHITECTURE.md cada rota, com o corpo de exemplo e os códigos de erro.\n\nConferir também o texto do ask-agent --task.".into();
+            if item == "tasks-new-attach" {
+                f.attachments = vec![
+                    r"C:\Users\voce\commanddeck-dev\dados\anexos\1a2b3c-captura de tela.png".into(),
+                    r"C:\Users\voce\commanddeck-dev\dados\anexos\9f8e-relatorio.pdf".into(),
+                ];
+            }
             f.focus_title = false;
             f.menu = match item {
                 "tasks-new-agent" => Some(FormMenu::Agent),

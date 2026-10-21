@@ -23,10 +23,7 @@ pub const SHORTCUTS: &[ShortcutItem] = &[
     ShortcutItem { keys: &["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: "Alternar abas (próxima / anterior)" },
     ShortcutItem { keys: &["Ctrl+Alt+setas"], desc: "Ir para a janela vizinha (tela dividida)" },
     ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral *" },
-    ShortcutItem { keys: &["Ctrl+L"], desc: "Focar caixa de mensagem *" },
     ShortcutItem { keys: &["Ctrl+Shift+M"], desc: "Ditar por voz na aba ativa (sem enviar)" },
-    ShortcutItem { keys: &["Enter"], desc: "Enviar mensagem" },
-    ShortcutItem { keys: &["Shift+Enter"], desc: "Quebrar linha na mensagem" },
     ShortcutItem { keys: &["Duplo clique"], desc: "Renomear aba (modelo@cargo@nome)" },
     ShortcutItem { keys: &["Ctrl+/"], desc: "Mostrar ou fechar estes atalhos" },
 ];
@@ -36,7 +33,7 @@ pub fn terminal_note(app_first: bool) -> &'static str {
     if app_first {
         "* Também com o terminal focado (opção em ☰ Configurações)."
     } else {
-        "* Com o terminal focado, vão para o terminal (tmux, limpar a tela). Mude em ☰ Configurações."
+        "* Com o terminal focado, vai para o terminal (tmux). Mude em ☰ Configurações."
     }
 }
 
@@ -218,12 +215,10 @@ mod tests {
         assert!(all_keys.contains("Ctrl+Tab"), "deve conter Ctrl+Tab");
         assert!(all_keys.contains("Ctrl+Shift+Tab"), "deve conter Ctrl+Shift+Tab");
         assert!(all_keys.contains("Ctrl+B"), "deve conter Ctrl+B");
-        assert!(all_keys.contains("Ctrl+L"), "deve conter Ctrl+L");
         assert!(all_keys.contains("Ctrl+Shift+M"), "deve conter Ctrl+Shift+M");
-        assert!(all_keys.contains("Enter"), "deve conter Enter");
-        assert!(all_keys.contains("Shift+Enter"), "deve conter Shift+Enter");
         assert!(all_keys.contains("Duplo clique"), "deve conter Duplo clique");
         assert!(all_keys.contains("Ctrl+/"), "deve conter Ctrl+/");
+        assert!(!all_keys.contains("Ctrl+L"), "não deve conter Ctrl+L (compositor removido)");
         assert!(terminal_note(false).contains("terminal") && terminal_note(true).contains('*'));
     }
 

@@ -1,6 +1,8 @@
 //! Funções puras compartilhadas pela UI (fáceis de testar).
 
-/// Referência de arquivo para o compositor: `@rel` ou `@"rel"` quando há espaços.
+use std::path::PathBuf;
+
+/// Referência de arquivo estilo `@caminho` (ou `@"caminho"` quando há espaços).
 pub fn file_ref(rel_path: &str) -> String {
     if rel_path.contains(' ') {
         format!("@\"{rel_path}\"")
@@ -9,16 +11,42 @@ pub fn file_ref(rel_path: &str) -> String {
     }
 }
 
-/// Insere a referência no texto do compositor com o espaçamento do renderer original:
-/// vazio → `ref `; termina em espaço → `val + ref `; senão → `val + ' ' + ref + ' '`.
-pub fn insert_ref(value: &str, rel_path: &str) -> String {
-    let r = file_ref(rel_path);
-    if value.is_empty() {
-        format!("{r} ")
-    } else if value.ends_with(' ') {
-        format!("{value}{r} ")
+/// Formata um caminho de arquivo para o prompt da CLI da aba (`kind`).
+///
+/// - No Claude (`kind == "claude"`): `@caminho` (ou `@"caminho"` se houver espaço).
+/// - Nos demais terminais/agentes: `"caminho"` se houver espaço, ou `caminho` direto.
+pub fn tab_file_ref(kind: &str, path: &str) -> String {
+    if kind == "claude" {
+        file_ref(path)
+    } else if path.contains(' ') {
+        format!("\"{path}\"")
     } else {
-        format!("{value} {r} ")
+        path.to_owned()
+    }
+}
+
+/// Junta múltiplos caminhos para digitar no prompt da aba (`kind`), separados por espaço e com
+/// espaço final para que o usuário continue digitando sem colar no caminho.
+pub fn tab_file_refs_text(kind: &str, paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let joined = paths.iter().map(|p| tab_file_ref(kind, p)).collect::<Vec<_>>().join(" ");
+    format!("{joined} ")
+}
+
+/// Acrescenta a lista de anexos (caminhos absolutos em `dados/anexos`) ao final do pedido da
+/// tarefa quando houver anexos no formulário "Nova tarefa".
+pub fn append_brief_attachments(brief: &str, attachments: &[PathBuf]) -> String {
+    let base = brief.trim();
+    if attachments.is_empty() {
+        return base.to_owned();
+    }
+    let list = attachments.iter().map(|p| format!("- {}", p.display())).collect::<Vec<_>>().join("\n");
+    if base.is_empty() {
+        format!("Anexos:\n{list}")
+    } else {
+        format!("{base}\n\nAnexos:\n{list}")
     }
 }
 
@@ -43,23 +71,37 @@ pub fn time_pt_br(epoch_ms: u64) -> String {
     }
 }
 
-/// Texto completo enviado: instrução + referências `@anexo` separadas por espaço.
-pub fn compose_full(text: &str, attachments: &[String]) -> String {
-    let refs = attachments.iter().map(|a| format!("@{a}")).collect::<Vec<_>>().join(" ");
-    [text.to_owned(), refs].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn tree_ref_insertion_spacing() {
-        assert_eq!(insert_ref("", "src/main.rs"), "@src/main.rs ");
-        assert_eq!(insert_ref("analisa ", "a.md"), "analisa @a.md ");
-        assert_eq!(insert_ref("analisa", "a.md"), "analisa @a.md ");
-        assert_eq!(insert_ref("", "minha pasta/x.txt"), "@\"minha pasta/x.txt\" ");
-        assert_eq!(insert_ref("@a.md ", "b.md"), "@a.md @b.md ");
+    fn tab_file_reference_per_cli() {
+        assert_eq!(tab_file_ref("claude", "dados/anexos/a.png"), "@dados/anexos/a.png");
+        assert_eq!(tab_file_ref("claude", "minha pasta/a.png"), "@\"minha pasta/a.png\"");
+        assert_eq!(tab_file_ref("antigravity", "dados/anexos/a.png"), "dados/anexos/a.png");
+        assert_eq!(tab_file_ref("opencode", "minha pasta/a.png"), "\"minha pasta/a.png\"");
+        assert_eq!(
+            tab_file_refs_text("claude", &["dados/anexos/1.png".into(), "pasta 2/b.txt".into()]),
+            "@dados/anexos/1.png @\"pasta 2/b.txt\" "
+        );
+        assert_eq!(
+            tab_file_refs_text("codex", &["dados/anexos/1.png".into(), "pasta 2/b.txt".into()]),
+            "dados/anexos/1.png \"pasta 2/b.txt\" "
+        );
+        assert_eq!(tab_file_refs_text("claude", &[]), "");
+    }
+
+    #[test]
+    fn brief_attachments_appended_at_end() {
+        let p1 = PathBuf::from(r"C:\proj\dados\anexos\1a-print.png");
+        let p2 = PathBuf::from(r"C:\proj\dados\anexos\2b-log.txt");
+        assert_eq!(append_brief_attachments("Corrigir bug", &[]), "Corrigir bug");
+        assert_eq!(
+            append_brief_attachments("Corrigir bug", &[p1.clone(), p2.clone()]),
+            "Corrigir bug\n\nAnexos:\n- C:\\proj\\dados\\anexos\\1a-print.png\n- C:\\proj\\dados\\anexos\\2b-log.txt"
+        );
+        assert_eq!(append_brief_attachments("", &[p1]), "Anexos:\n- C:\\proj\\dados\\anexos\\1a-print.png");
     }
 
     #[test]
@@ -70,12 +112,6 @@ mod tests {
         assert_eq!(chip_label("semhifen"), "semhifen");
         assert_eq!(chip_label("C:/Users/x/AB-1.png"), "AB-1.png");
         assert_eq!(chip_label(r"C:\dados\anexos\1a2b-foto.png"), "foto.png");
-    }
-
-    #[test]
-    fn compose_text_with_attachments() {
-        assert_eq!(compose_full("faz", &[]), "faz");
-        assert_eq!(compose_full("faz", &["a.png".into(), "b c.txt".into()]), "faz @a.png @b c.txt");
     }
 
     #[test]

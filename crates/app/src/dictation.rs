@@ -1,5 +1,5 @@
 //! Ditado por voz: estados (parado, abrindo o microfone, gravando, transcrevendo) e o destino
-//! fixo no início da gravação (compositor ou uma aba específica pelo `uid`).
+//! fixo no início da gravação (uma aba específica pelo `uid`).
 //!
 //! Lógica pura e independente da pintura, com testes, no estilo de [`crate::split`].
 
@@ -8,8 +8,6 @@ use crate::audio;
 /// Para onde vai o texto quando a transcrição terminar, fixado no início da gravação.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MicTarget {
-    /// O rascunho do compositor da Conversa integrada.
-    Composer,
     /// O terminal (PTY) da aba com este `uid` (digitado como colagem, sem Enter).
     Tab(u64),
 }
@@ -42,7 +40,7 @@ pub enum ToggleOutcome {
     CancelOpening,
     /// Para a gravação atual e manda transcrever.
     StopAndTranscribe,
-    /// Já está transcrevendo (ou gravando em outro lugar): ignora o clique.
+    /// Já está transcrevendo (ou gravando em outra aba): ignora o clique.
     Busy,
 }
 
@@ -53,7 +51,7 @@ pub enum ButtonVisual {
     Opening,
     Recording,
     Transcribing,
-    /// Outra aba (ou o compositor) está usando o microfone: este botão fica desabilitado.
+    /// Outra aba está usando o microfone: este botão fica desabilitado.
     DisabledOther,
 }
 
@@ -75,7 +73,7 @@ pub fn button_visual(phase: MicPhase, button: MicTarget) -> ButtonVisual {
     }
 }
 
-/// Transição pura ao acionar o microfone em `clicked` (botão do compositor, botão da aba ou atalho).
+/// Transição pura ao acionar o microfone em `clicked` (botão do cabeçalho do painel ou atalho).
 ///
 /// Só existe uma gravação por vez no app inteiro: se já está abrindo ou gravando em `clicked`, o
 /// segundo clique cancela/para; se está ocupado em outro destino ou transcrevendo, devolve `Busy`
@@ -114,23 +112,12 @@ pub fn on_opened(phase: &mut MicPhase, ok: bool) -> bool {
     }
 }
 
-/// Para a gravação em andamento (limite de tempo ou "Enviar" do compositor) e entra em
+/// Para a gravação em andamento (ex.: limite de tempo) e entra em
 /// `Transcribing`, preservando o destino original.
 pub fn begin_transcribe(phase: &mut MicPhase) -> Option<MicTarget> {
     match *phase {
         MicPhase::Recording(t) => {
             *phase = MicPhase::Transcribing(t);
-            Some(t)
-        }
-        _ => None,
-    }
-}
-
-/// Cancela abertura ou gravação em andamento e volta a `Idle`.
-pub fn cancel(phase: &mut MicPhase) -> Option<MicTarget> {
-    match *phase {
-        MicPhase::Opening(t) | MicPhase::Recording(t) => {
-            *phase = MicPhase::Idle;
             Some(t)
         }
         _ => None,
@@ -172,21 +159,21 @@ pub fn finish_transcribe(phase: &mut MicPhase) -> Option<MicTarget> {
     }
 }
 
-/// Dica (tooltip) do botão de microfone em qualquer lugar (compositor ou cabeçalho da aba).
-/// `shortcut` aparece entre parênteses quando é um botão de aba (ex.: `Some("Ctrl+Shift+M")`).
+/// Dica (tooltip) do botão de microfone no cabeçalho do painel.
+/// `shortcut` aparece entre parênteses quando aplicável (ex.: `Some("Ctrl+Shift+M")`).
 pub fn mic_tooltip(visual: ButtonVisual, available: bool, engine_label: &str, shortcut: Option<&str>) -> String {
     let sc = shortcut.map(|s| format!(" ({s})")).unwrap_or_default();
     match visual {
         ButtonVisual::Recording => format!("Parar gravação e transcrever{sc} (até {} min)", audio::MAX_RECORDING_SECS / 60),
         ButtonVisual::Opening => format!("Abrindo o microfone…{sc} (clique para desistir)"),
         ButtonVisual::Transcribing => "Transcrevendo áudio…".to_owned(),
-        ButtonVisual::DisabledOther => "Microfone em uso em outra aba ou na Conversa".to_owned(),
+        ButtonVisual::DisabledOther => "Microfone em uso em outra aba".to_owned(),
         ButtonVisual::Idle if !available => "Ditado por voz (indisponível: compilado sem o recurso de áudio)".to_owned(),
         ButtonVisual::Idle => {
             let eng = if engine_label.is_empty() { "…" } else { engine_label };
             match shortcut {
                 Some(s) => format!("Ditar nesta aba ({s} · transcrição: {eng})"),
-                None => format!("Gravar áudio (transcrição: {eng})"),
+                None => format!("Ditar nesta aba (transcrição: {eng})"),
             }
         }
     }
@@ -204,10 +191,9 @@ mod tests {
         assert!(on_opened(&mut phase, true));
         assert_eq!(phase, MicPhase::Recording(MicTarget::Tab(7)));
 
-        // Mesmo que o usuário troque de aba e tente clicar em outra (uid 9) ou no compositor,
+        // Mesmo que o usuário troque de aba e tente clicar em outra (uid 9),
         // a gravação continua presa à aba 7.
         assert_eq!(toggle(&mut phase, MicTarget::Tab(9)), ToggleOutcome::Busy);
-        assert_eq!(toggle(&mut phase, MicTarget::Composer), ToggleOutcome::Busy);
         assert_eq!(phase, MicPhase::Recording(MicTarget::Tab(7)));
 
         // Parar na aba 7 (ou pelo atalho): transcreve para a aba 7.
@@ -244,13 +230,12 @@ mod tests {
     fn button_visuals_reflect_all_four_states_and_lock_out_other_buttons() {
         let tab1 = MicTarget::Tab(1);
         let tab2 = MicTarget::Tab(2);
-        let comp = MicTarget::Composer;
 
         assert_eq!(button_visual(MicPhase::Idle, tab1), ButtonVisual::Idle);
         assert_eq!(button_visual(MicPhase::Opening(tab1), tab1), ButtonVisual::Opening);
         assert_eq!(button_visual(MicPhase::Opening(tab1), tab2), ButtonVisual::DisabledOther);
         assert_eq!(button_visual(MicPhase::Recording(tab1), tab1), ButtonVisual::Recording);
-        assert_eq!(button_visual(MicPhase::Recording(tab1), comp), ButtonVisual::DisabledOther);
+        assert_eq!(button_visual(MicPhase::Recording(tab1), tab2), ButtonVisual::DisabledOther);
         assert_eq!(button_visual(MicPhase::Transcribing(tab1), tab1), ButtonVisual::Transcribing);
         assert!(button_visual(MicPhase::Transcribing(tab1), tab1).is_busy());
         assert!(button_visual(MicPhase::Recording(tab1), tab2).is_busy());

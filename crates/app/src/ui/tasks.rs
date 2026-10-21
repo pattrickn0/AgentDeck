@@ -7,7 +7,7 @@ use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect,
 
 use commanddeck_core::{models, Task, TaskStatus};
 
-use super::{clickable, frame, galley, galley_trunc, place, shadow, text_in, tip};
+use super::{clickable, frame, galley, galley_trunc, place, shadow, text_in, text_w, tip};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::tasks_ui::{
@@ -15,10 +15,12 @@ use crate::tasks_ui::{
     FormMenu, Group, Section, TaskAct, TasksView,
 };
 use crate::theme;
+use crate::util;
 
 const HEAD_H: f32 = 34.0;
 const ROW_H: f32 = 22.0;
 const BTN_H: f32 = 28.0;
+const CHIP_H: f32 = 21.0;
 const PAD: f32 = 12.0;
 /// Quantos caracteres do pedido e do relatório vão para a tela.
 const TEXT_MAX: usize = 20_000;
@@ -51,6 +53,8 @@ enum Act {
     /// Passo do menu de modelo: o provedor cujos modelos estão à mostra (`None` = lista de provedores).
     SetProvider(Option<String>),
     ToggleStartNow,
+    PickAttachments,
+    RemoveAttachment(usize),
     Submit,
 }
 
@@ -122,6 +126,8 @@ fn apply(deck: &mut Deck, act: Act) {
             deck.tasks.form.menu = None;
         }
         Act::ToggleStartNow => deck.tasks.form.start_now = !deck.tasks.form.start_now,
+        Act::PickAttachments => deck.tasks_pick_attachments(),
+        Act::RemoveAttachment(i) => deck.tasks_remove_attachment(i),
         Act::Submit => deck.tasks_submit_form(),
     }
 }
@@ -964,6 +970,101 @@ fn field_label(ui: &mut Ui, text: &str) {
     );
 }
 
+fn chip_width(painter: &egui::Painter, reference: &str) -> f32 {
+    let t = text_w(painter, &util::chip_label(reference), theme::ui(12.0)).min(220.0);
+    10.0 + t + 4.0 + (8.0 + text_w(painter, "×", theme::ui(13.0))) + 4.0 + 2.0
+}
+
+/// Botão "Anexar arquivos" e chips dos arquivos anexados ao pedido da nova tarefa.
+fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
+    let avail = ui.available_width();
+    let attachments = &deck.tasks.form.attachments;
+    let busy = deck.tasks.form.busy;
+
+    if !attachments.is_empty() {
+        ui.add_space(6.0);
+        let painter = ui.painter().clone();
+        let mut i = 0;
+        while i < attachments.len() {
+            let mut end = i;
+            let mut w = 0.0;
+            while end < attachments.len() {
+                let cw = chip_width(&painter, &attachments[end].to_string_lossy()).min(avail);
+                let next = w + cw + if end > i { 6.0 } else { 0.0 };
+                if end > i && next > avail {
+                    break;
+                }
+                w = next;
+                end += 1;
+            }
+            let (row, _) = ui.allocate_exact_size(Vec2::new(avail, CHIP_H + 4.0), Sense::hover());
+            let mut cx = row.min.x;
+            for (idx, a) in attachments.iter().enumerate().take(end).skip(i) {
+                let cw = chip_width(&painter, &a.to_string_lossy()).min(avail);
+                let r = Rect::from_min_size(Pos2::new(cx, row.min.y + 2.0), Vec2::new(cw, CHIP_H));
+                cx = r.max.x + 6.0;
+                frame(ui.painter(), r, 11.0, theme::PANEL_2, theme::BORDER);
+                let xw = 8.0 + text_w(ui.painter(), "×", theme::ui(13.0));
+                let x_rect = Rect::from_min_size(Pos2::new(r.max.x - 5.0 - xw, r.min.y + 1.0), Vec2::new(xw, r.height() - 2.0));
+                let tr = Rect::from_min_max(Pos2::new(r.min.x + 10.0, r.min.y), Pos2::new(x_rect.min.x - 4.0, r.max.y));
+                let g = galley_trunc(ui.painter(), &util::chip_label(&a.to_string_lossy()), theme::ui(12.0), theme::CHIP_TEXT, tr.width());
+                place(ui.painter(), tr, Align2::LEFT_CENTER, g, theme::CHIP_TEXT);
+                let chip_resp = ui.interact(r, Id::new(("task-chip", idx)), Sense::hover());
+                tip(chip_resp, a.display().to_string());
+                let xr = if !busy {
+                    clickable(ui, x_rect, Id::new(("task-chip-x", idx)))
+                } else {
+                    ui.interact(x_rect, Id::new(("task-chip-x", idx)), Sense::hover())
+                };
+                text_in(
+                    ui.painter(),
+                    x_rect,
+                    Align2::CENTER_CENTER,
+                    "×",
+                    theme::ui(13.0),
+                    if xr.hovered() && !busy { theme::TEXT } else { theme::MUTED },
+                );
+                if tip(xr, "Remover anexo").clicked() && !busy {
+                    acts.push(Act::RemoveAttachment(idx));
+                }
+            }
+            i = end;
+        }
+    }
+
+    ui.add_space(6.0);
+    let label = "Anexar arquivos";
+    let lw = text_w(ui.painter(), label, theme::ui(12.0));
+    let bw = 10.0 + 14.0 + 6.0 + lw + 12.0;
+    let (row, _) = ui.allocate_exact_size(Vec2::new(avail, 26.0), Sense::hover());
+    let btn = Rect::from_min_size(row.min, Vec2::new(bw.min(avail), 26.0));
+    let resp =
+        if !busy { clickable(ui, btn, Id::new("tasks-new-attach")) } else { ui.interact(btn, Id::new("tasks-new-attach"), Sense::hover()) };
+    let hot = !busy && resp.hovered();
+    frame(ui.painter(), btn, 6.0, if hot { theme::BORDER } else { theme::PANEL_2 }, theme::BORDER);
+    let fg = if !busy {
+        if hot {
+            theme::TEXT
+        } else {
+            theme::SELECT_TEXT
+        }
+    } else {
+        theme::SEND_IDLE_TEXT
+    };
+    deck.icons.paint(ui.painter(), Icon::Attach, Pos2::new(btn.min.x + 16.0, btn.center().y), 13.5, fg, 0.0);
+    text_in(
+        ui.painter(),
+        Rect::from_min_max(Pos2::new(btn.min.x + 28.0, btn.min.y), Pos2::new(btn.max.x - 8.0, btn.max.y)),
+        Align2::LEFT_CENTER,
+        label,
+        theme::ui(12.0),
+        fg,
+    );
+    if tip(resp, "Anexar arquivos ou imagens ao pedido (também pode arrastar e soltar sobre o formulário)").clicked() && !busy {
+        acts.push(Act::PickAttachments);
+    }
+}
+
 /// Botão em forma de campo que abre um menu: texto (com a bolinha do agente, se houver) e "▾".
 fn dropdown_button(ui: &mut Ui, id: Id, label: &str, dot: Option<Color32>, enabled: bool, open: bool, tooltip: &str) -> (Rect, bool) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
@@ -1226,6 +1327,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             ui.add_space(8.0);
             field_label(ui, "Pedido");
             text_field(ui, brief_id, &mut deck.tasks.form.brief, "Detalhes, arquivos, critérios de aceite… (opcional)", Some(6));
+            form_attachments(deck, ui, acts);
             ui.add_space(8.0);
             field_label(ui, "Agente");
             let (r, click) = dropdown_button(
