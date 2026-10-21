@@ -7,7 +7,10 @@ use egui::{Align2, CursorIcon, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use super::tabs::{self, StripClick};
 use super::{clickable, empty_state, galley, paint_splitter, place, tip};
+use crate::audio;
 use crate::deck::{Deck, PanePlan};
+use crate::dictation::{self, ButtonVisual, MicTarget};
+use crate::icons::Icon;
 use crate::split;
 use crate::terminal::view::{self, Metrics};
 use crate::theme;
@@ -15,7 +18,7 @@ use crate::theme;
 /// Altura do cabeçalho de abas de cada janela.
 pub const HEAD_H: f32 = 32.0;
 const GRIP_W: f32 = 18.0;
-const PLUS_W: f32 = 30.0;
+const ICON_BTN: f32 = 20.0;
 
 /// Área do terminal dentro de uma janela (abaixo do cabeçalho).
 pub fn pane_body(rect: Rect) -> Rect {
@@ -30,6 +33,7 @@ enum Click {
     NewTab(String),
     Swap(usize, usize),
     Mic(u64),
+    Attach(u64),
 }
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
@@ -64,6 +68,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             Click::NewTab(kind) => deck.open_tab(&kind, false),
             Click::Swap(a, b) => deck.swap_panes(a, b),
             Click::Mic(uid) => deck.toggle_tab_mic(uid),
+            Click::Attach(uid) => deck.pick_tab_attachments(uid),
         }
     }
 }
@@ -93,11 +98,6 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::BORDER);
     let group = plan.groups.first().cloned().unwrap_or_default();
 
-    // Clique no espaço vazio do cabeçalho foca a janela (as abas, por cima, têm a própria ação).
-    if ui.interact(head, Id::new(("pane-head", &group)), Sense::click()).clicked() {
-        clicks.push(Click::Focus(plan.shown));
-    }
-
     // ---------- Alça (arrastar sobre outra janela troca as duas de lugar) ----------
     let mut x0 = head.min.x;
     if multi {
@@ -124,25 +124,92 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         x0 = grip.max.x;
     }
 
+    // ---------- Botões de ação à direita do cabeçalho (20×20, cantos de 4 px) ----------
+    let cy = head.min.y + (HEAD_H - 1.0) / 2.0;
+    let plus = Rect::from_min_size(Pos2::new(head.max.x - 6.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
+    let attach = Rect::from_min_size(Pos2::new(plus.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
+    let mic = Rect::from_min_size(Pos2::new(attach.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
+
     // ---------- Abas ----------
-    let plus = Rect::from_min_max(Pos2::new(head.max.x - PLUS_W, head.min.y), Pos2::new(head.max.x, head.max.y - 1.0));
-    let strip_rect = Rect::from_min_max(Pos2::new(x0, head.min.y), Pos2::new(plus.min.x.max(x0), head.max.y - 1.0));
+    let strip_rect = Rect::from_min_max(Pos2::new(x0, head.min.y), Pos2::new((mic.min.x - 4.0).max(x0), head.max.y - 1.0));
+    // Clique no espaço vazio da faixa de abas foca a janela (as abas, por cima, têm a própria ação).
+    if ui.interact(strip_rect, Id::new(("pane-head", &group)), Sense::click()).clicked() {
+        clicks.push(Click::Focus(plan.shown));
+    }
     match tabs::strip(deck, ui, strip_rect, &plan.tabs, plan.shown, focused || !multi, Id::new(("pane-tabs", &group))) {
         Some(StripClick::Activate(i)) => clicks.push(Click::Focus(i)),
         Some(StripClick::Close(i)) => clicks.push(Click::Close(i)),
         Some(StripClick::Rename(i)) => deck.start_rename_tab(i),
         Some(StripClick::ContextMenu(i, pos)) => deck.tab_context_menu = Some((i, pos)),
-        Some(StripClick::Mic(uid)) => clicks.push(Click::Mic(uid)),
         None => {}
     }
 
-    // ---------- "+": outra aba do mesmo tipo da visível ----------
+    // ---------- Microfone e anexo da aba visível (`plan.shown`) + "+" ----------
+    let shown_uid = deck.tabs[plan.shown].uid;
+    let shown_alive = deck.tabs[plan.shown].alive;
+    let shown_label = deck.tabs[plan.shown].label.clone();
     let kind = deck.tabs[plan.shown].kind.clone();
+
+    let visual = dictation::button_visual(deck.mic_phase, MicTarget::Tab(shown_uid));
+    let mic_busy = visual.is_busy() || !shown_alive;
+    let mic_resp = ui.interact(mic, Id::new(("pane-mic", &group)), if mic_busy { Sense::hover() } else { Sense::click() });
+    let mic_hot = mic_resp.hovered() && !mic_busy;
+    if mic_hot {
+        ctx.set_cursor_icon(CursorIcon::PointingHand);
+    }
+    let mut mic_opacity = 1.0;
+    if visual == ButtonVisual::Recording {
+        mic_opacity = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
+        ctx.request_repaint_after(Duration::from_millis(50));
+        painter.rect_filled(mic, 4.0, theme::with_opacity(theme::RED, mic_opacity));
+    } else if mic_hot {
+        painter.rect_filled(mic, 4.0, theme::PANEL_2);
+    }
+    if mic_busy || !audio::AVAILABLE || visual == ButtonVisual::Opening {
+        mic_opacity = 0.45;
+    }
+    let mic_fg = if visual == ButtonVisual::Recording {
+        theme::WHITE
+    } else if mic_hot {
+        theme::TEXT
+    } else {
+        theme::MUTED
+    };
+    deck.icons.paint(&painter, Icon::Mic, mic.center(), 14.0, theme::with_opacity(mic_fg, mic_opacity), 0.0);
+    let mic_tip = if !shown_alive {
+        "Ditado indisponível (processo encerrado)".to_owned()
+    } else {
+        dictation::mic_tooltip(visual, audio::AVAILABLE, &deck.engine_label, Some("Ctrl+Shift+M"))
+    };
+    if tip(mic_resp, mic_tip).clicked() && !mic_busy {
+        clicks.push(Click::Mic(shown_uid));
+    }
+
+    let att_resp = ui.interact(attach, Id::new(("pane-attach", &group)), if shown_alive { Sense::click() } else { Sense::hover() });
+    let att_hot = att_resp.hovered() && shown_alive;
+    if att_hot {
+        ctx.set_cursor_icon(CursorIcon::PointingHand);
+        painter.rect_filled(attach, 4.0, theme::PANEL_2);
+    }
+    let att_fg = if att_hot {
+        theme::TEXT
+    } else if shown_alive {
+        theme::MUTED
+    } else {
+        theme::with_opacity(theme::MUTED, 0.45)
+    };
+    deck.icons.paint(&painter, Icon::Attach, attach.center(), 14.0, att_fg, 0.0);
+    let att_tip =
+        if shown_alive { format!("Anexar arquivos em {shown_label}") } else { "Anexo indisponível (processo encerrado)".to_owned() };
+    if tip(att_resp, att_tip).clicked() && shown_alive {
+        clicks.push(Click::Attach(shown_uid));
+    }
+
     let r = clickable(ui, plus, Id::new(("pane-plus", &group)));
     if r.hovered() {
-        painter.rect_filled(plus, 0.0, theme::PANEL_2);
+        painter.rect_filled(plus, 4.0, theme::PANEL_2);
     }
-    let pg = galley(&painter, "+", theme::ui(17.0), theme::MUTED);
+    let pg = galley(&painter, "+", theme::ui(16.0), theme::MUTED);
     place(&painter, plus, Align2::CENTER_CENTER, pg, if r.hovered() { theme::TEXT } else { theme::MUTED });
     if tip(r, format!("Nova aba de {}", deck.agents.name(&kind))).clicked() {
         clicks.push(Click::NewTab(kind));

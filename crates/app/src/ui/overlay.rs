@@ -1,36 +1,48 @@
-//! `#drop-overlay`: aparece enquanto arquivos são arrastados sobre a janela.
+//! Destaque de arrastar e soltar arquivos (`#drop-overlay`): destaca o painel de agente (ou o
+//! formulário "Nova tarefa") que vai receber os arquivos soltos.
 
 use egui::{Align2, Id, LayerId, Order, Pos2, Rect, Stroke, Vec2};
 
-use super::{galley, place};
+use super::{galley_trunc, place};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
 
 pub fn drop_overlay(deck: &mut Deck, ctx: &egui::Context, full: Rect) {
-    if !deck.drop_hover {
+    let hovering = deck.drop_hover || ctx.input(|i| !i.raw.hovered_files.is_empty());
+    if !hovering {
         return;
     }
+    let pointer = ctx.input(|i| i.pointer.latest_pos());
+    let Some(zone) = deck.resolve_drop_zone(pointer, full) else {
+        return;
+    };
+    deck.last_drop_target = Some(zone.target);
+
+    let r = zone.rect;
     let p = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::new("drop-overlay")));
-    p.rect_filled(full, 0.0, theme::rgba(11, 11, 13, 0.85));
+    p.rect_filled(r, 0.0, theme::rgba(11, 11, 13, 0.78));
+    p.rect_stroke(r.shrink(1.0), 0.0, Stroke::new(2.0, theme::DROP_BLUE), egui::StrokeKind::Inside);
 
-    let title = galley(&p, "Solte arquivos ou imagens aqui", theme::ui_semibold(17.0), theme::WHITE);
-    let sub = galley(&p, "Eles serão anexados automaticamente à sua mensagem", theme::ui(13.0), theme::MUTED);
-    // padding 36px 54px, gap 10px, ícone 48px
-    let content_w = title.size().x.max(sub.size().x).max(48.0);
-    let content_h = 48.0 + 10.0 + title.size().y + 10.0 + sub.size().y;
-    let size = Vec2::new(content_w + 108.0 + 4.0, content_h + 72.0 + 4.0);
-    let b = Rect::from_center_size(full.center(), size);
-    p.rect_filled(b, 16.0, theme::rgba(79, 140, 247, 0.08));
-    dashed_round_rect(&p, b.shrink(1.0), 15.0, Stroke::new(2.0, theme::DROP_BLUE));
+    let max_card_w = (r.width() - 24.0).max(160.0);
+    let max_text_w = (max_card_w - 48.0).max(100.0);
+    let title = galley_trunc(&p, &zone.title, theme::ui_semibold(15.0), theme::WHITE, max_text_w);
+    let sub = galley_trunc(&p, &zone.subtitle, theme::ui(12.5), theme::MUTED, max_text_w);
+    let icon_sz = 40.0;
+    let content_w = title.size().x.max(sub.size().x).max(icon_sz);
+    let content_h = icon_sz + 10.0 + title.size().y + 8.0 + sub.size().y;
+    let size = Vec2::new((content_w + 56.0).min(max_card_w), (content_h + 48.0).min((r.height() - 16.0).max(120.0)));
+    let b = Rect::from_center_size(r.center(), size);
+    p.rect_filled(b, 14.0, theme::rgba(79, 140, 247, 0.10));
+    dashed_round_rect(&p, b.shrink(1.0), 13.0, Stroke::new(2.0, theme::DROP_BLUE));
 
-    let mut y = b.min.y + 2.0 + 36.0;
-    deck.icons.paint(&p, Icon::CloudUpload, Pos2::new(b.center().x, y + 24.0), 48.0, theme::DROP_BLUE, 0.0);
-    y += 48.0 + 10.0;
-    let tr = Rect::from_min_size(Pos2::new(b.min.x, y), Vec2::new(b.width(), title.size().y));
+    let mut y = b.center().y - content_h / 2.0;
+    deck.icons.paint(&p, Icon::CloudUpload, Pos2::new(b.center().x, y + icon_sz / 2.0), icon_sz, theme::DROP_BLUE, 0.0);
+    y += icon_sz + 10.0;
+    let tr = Rect::from_min_size(Pos2::new(b.min.x + 12.0, y), Vec2::new(b.width() - 24.0, title.size().y));
     place(&p, tr, Align2::CENTER_CENTER, title, theme::WHITE);
-    y += tr.height() + 10.0;
-    let sr = Rect::from_min_size(Pos2::new(b.min.x, y), Vec2::new(b.width(), sub.size().y));
+    y += tr.height() + 8.0;
+    let sr = Rect::from_min_size(Pos2::new(b.min.x + 12.0, y), Vec2::new(b.width() - 24.0, sub.size().y));
     place(&p, sr, Align2::CENTER_CENTER, sub, theme::MUTED);
 }
 

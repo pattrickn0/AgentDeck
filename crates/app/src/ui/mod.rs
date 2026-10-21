@@ -1,7 +1,6 @@
 //! Pintura da interface (equivalente ao `index.html` + `styles.css`).
 //! O layout é calculado à mão para reproduzir as medidas do CSS ao pixel.
 
-mod composer;
 mod empty_state;
 mod git;
 mod git_views;
@@ -25,7 +24,6 @@ use egui::{Align2, Color32, CursorIcon, FontId, Galley, Id, Order, Painter, Pos2
 use crate::deck::Deck;
 use crate::theme;
 
-pub use composer::COMPOSER_INPUT_ID;
 pub use panes::pane_body;
 
 /// Largura mínima que sobra para o terminal ao lado da barra direita.
@@ -57,8 +55,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let term_rect = center;
     // A barra tem sempre a mesma largura: as listas e o diff do Git rolam dentro dela.
     let panel = Rect::from_min_max(Pos2::new(full.max.x - right_w, full.min.y), full.max);
-    // Nas abas Tarefas, Git e GitHub o compositor some para dar espaço às listas, diffs e logs.
-    let comp_h = if deck.right_view.hides_composer() { 0.0 } else { composer::measure(deck, ui, right_w) };
+    deck.right_panel_rect = Some(panel);
 
     // ---------- Terminais (tela dividida por tipo de agente) ----------
     panes::draw(deck, ui, term_rect);
@@ -82,7 +79,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     // ---------- Barra direita (numa camada acima dos terminais) ----------
     egui::Area::new(Id::new("right-panel")).order(Order::Middle).fixed_pos(panel.min).show(&ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(panel.size(), Sense::hover());
-        right_panel::draw_panel(deck, ui, rect, comp_h);
+        right_panel::draw_panel(deck, ui, rect);
     });
 
     // ---------- Menus suspensos e overlay ----------
@@ -93,9 +90,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     shortcuts::shortcuts_modal(deck, &ctx);
     overlay::drop_overlay(deck, &ctx, window);
 
-    // O compositor tem foco de teclado → o terminal não.
+    // Um campo de texto do egui (ex.: formulário de tarefa ou commit) tem foco de teclado → o terminal não.
     let egui_focus = ctx.memory(|m| m.focused());
-    deck.composer_focused = egui_focus == Some(Id::new(COMPOSER_INPUT_ID));
     if egui_focus.is_some() {
         deck.term_focus = false;
         deck.ime_preedit.clear();

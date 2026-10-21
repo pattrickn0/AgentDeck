@@ -1,12 +1,12 @@
-//! Barra lateral direita (fixa, não recolhe): abas "Tarefas | Conversa | Git | GitHub", faixa de download,
-//! mensagens da Conversa integrada e o compositor colado embaixo.
+//! Barra lateral direita (fixa, não recolhe): abas "Tarefas | Conversa | Git | GitHub", faixa de download
+//! e mensagens da Conversa integrada (somente leitura).
 
 use std::time::Duration;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use super::{composer, galley, paint_splitter, place, text_in, tip};
+use super::{galley, paint_splitter, place, text_in, tip};
 use crate::deck::{Deck, FeedItem, RightView};
 use crate::icons::Icon;
 use crate::theme;
@@ -15,8 +15,8 @@ use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
 /// Altura da faixa de download (abaixo do cabeçalho, só durante um download).
 const DOWNLOAD_H: f32 = 22.0;
 
-/// Desenha a barra em `rect` (cabeçalho da altura da topbar, corpo e compositor).
-pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) {
+/// Desenha a barra em `rect` (cabeçalho da altura da topbar e corpo da aba ativa).
+pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     ui.painter().rect_filled(rect, 0.0, theme::BG);
     let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), theme::TOPBAR_H));
     draw_head(deck, ui, head);
@@ -27,8 +27,7 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) {
         draw_download(ui, ui.painter(), p, strip, strip.min.x + 12.0, strip.max.x - 12.0);
         body_top = strip.max.y;
     }
-    let comp = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - comp_h), rect.max);
-    let body = Rect::from_min_max(Pos2::new(rect.min.x, body_top), Pos2::new(rect.max.x, comp.min.y));
+    let body = Rect::from_min_max(Pos2::new(rect.min.x, body_top), rect.max);
     if body.height() > 1.0 {
         match deck.right_view {
             RightView::Tarefas => super::tasks::draw(deck, ui, body),
@@ -36,9 +35,6 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect, comp_h: f32) {
             RightView::Git => super::git::draw(deck, ui, body),
             RightView::GitHub => super::github::draw(deck, ui, body),
         }
-    }
-    if comp_h > 0.0 {
-        composer::draw(deck, ui, comp);
     }
 }
 
@@ -249,13 +245,9 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
     super::place(&painter, info_rect, Align2::LEFT_CENTER, g, color);
 }
 
-fn draw_feed(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
-    // border-bottom: 1px solid var(--border)
-    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
-    let area = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.max.y - 1.0));
+fn draw_feed(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     let ctx = ui.ctx().clone();
 
-    // Se a conversa estava no fim e a área mudou de altura (compositor cresceu), mantém no fim.
     let h_id = Id::new("feed-last-h");
     let last_h = ctx.data(|d| d.get_temp::<f32>(h_id)).unwrap_or(area.height());
     if (last_h - area.height()).abs() > 0.5 && deck.feed_near_bottom {
@@ -318,7 +310,7 @@ fn empty_text(ui: &mut Ui, w: f32) {
     job.append("Aqui aparecem as conversas entre os agentes (via ", 0.0, base.clone());
     // Espaços que não quebram: o chip não se parte entre duas linhas (o fundo ficava solto).
     job.append("\u{a0}ask-agent\u{a0}", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::PANEL_2, ..base.clone() });
-    job.append(") e as mensagens que você envia.", 0.0, base);
+    job.append(") e os avisos do sistema.", 0.0, base);
     let g = ui.painter().layout_job(job);
     let (r, _) = ui.allocate_exact_size(Vec2::new(w + 28.0, g.size().y + 16.0), Sense::hover());
     ui.painter().galley(Pos2::new(r.min.x + 14.0, r.min.y + 8.0), g, theme::MUTED);

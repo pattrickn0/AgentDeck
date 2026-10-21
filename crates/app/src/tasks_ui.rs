@@ -6,11 +6,12 @@
 //! ficam as funções puras que decidem o que a tela mostra (grupos, textos, ações por estado), com testes.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use commanddeck_core::git::GitDiff;
 use commanddeck_core::{models, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 
-use crate::deck::{Deck, RightView, UiMsg};
+use crate::deck::{AttachTarget, Deck, UiMsg};
 
 // ---------------------------------------------------------------------------
 // Funções puras
@@ -368,6 +369,8 @@ pub enum FormMenu {
 pub struct NewForm {
     pub title: String,
     pub brief: String,
+    /// Arquivos anexados ao pedido (caminhos absolutos em `dados/anexos`).
+    pub attachments: Vec<PathBuf>,
     /// Agente (`claude`); vazio até o formulário abrir.
     pub kind: String,
     /// `None` = "Padrão".
@@ -390,6 +393,7 @@ impl Default for NewForm {
         Self {
             title: String::new(),
             brief: String::new(),
+            attachments: Vec::new(),
             kind: String::new(),
             model: None,
             provider: None,
@@ -602,6 +606,20 @@ impl Deck {
         self.request_models(&kind);
     }
 
+    /// Botão "Anexar arquivos" do formulário "Nova tarefa".
+    pub fn tasks_pick_attachments(&self) {
+        self.pick_attachments_for(AttachTarget::TaskForm(self.active_project.clone()));
+    }
+
+    /// "×" do chip de anexo no formulário "Nova tarefa": tira da lista e apaga a cópia em `dados/anexos`.
+    pub fn tasks_remove_attachment(&mut self, i: usize) {
+        if i >= self.tasks.form.attachments.len() {
+            return;
+        }
+        let path = self.tasks.form.attachments.remove(i);
+        self.delete_attachment_copy(path);
+    }
+
     /// Cria a tarefa (e a inicia, com "Iniciar agora") numa thread.
     pub fn tasks_submit_form(&mut self) {
         let f = &mut self.tasks.form;
@@ -614,7 +632,7 @@ impl Deck {
         f.provider = None;
         let spec = TaskSpec {
             title: f.title.clone(),
-            brief: f.brief.clone(),
+            brief: crate::util::append_brief_attachments(&f.brief, &f.attachments),
             kind: f.kind.clone(),
             model: f.model.clone(),
             base: Some(f.base.trim().to_owned()).filter(|b| !b.is_empty()),
@@ -744,6 +762,7 @@ impl Deck {
                         let form = &mut self.tasks.form;
                         form.title.clear();
                         form.brief.clear();
+                        form.attachments.clear();
                         form.error = None;
                         let notice = self.tasks.notice.take();
                         self.tasks_open_detail(&id);
@@ -794,13 +813,6 @@ impl Deck {
     /// Chamado quando a barra direita passa a mostrar a aba Tarefas.
     pub fn tasks_on_open(&mut self) {
         self.tasks_refresh();
-    }
-}
-
-impl RightView {
-    /// A aba esconde o compositor (listas, diffs e formulários ocupam o espaço).
-    pub fn hides_composer(self) -> bool {
-        matches!(self, RightView::Tarefas | RightView::Git | RightView::GitHub)
     }
 }
 

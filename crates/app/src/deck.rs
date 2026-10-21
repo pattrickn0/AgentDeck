@@ -27,11 +27,29 @@ use crate::terminal::{GridSize, Session, Wake};
 use crate::theme;
 use crate::util;
 
+/// Destino de arquivos anexados pelo botão de anexo, arrastar e soltar ou Ctrl+V de imagem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttachTarget {
+    /// Digita os caminhos anexados no PTY da aba `uid` (sem Enter).
+    Tab(u64),
+    /// Adiciona os anexos ao formulário "Nova tarefa" do projeto `project_id`.
+    TaskForm(String),
+}
+
+/// Área destacada enquanto arquivos são arrastados sobre a janela (`ui/overlay.rs`).
+#[derive(Debug, Clone)]
+pub struct DropZone {
+    pub rect: egui::Rect,
+    pub target: AttachTarget,
+    pub title: String,
+    pub subtitle: String,
+}
+
 /// Mensagens de tarefas em segundo plano para a UI.
 pub enum UiMsg {
     Agents(Vec<AgentInfo>),
-    /// Anexos copiados (caminhos absolutos em `dados/anexos`) para o rascunho do projeto (id).
-    Attached(String, Vec<PathBuf>),
+    /// Anexos copiados (caminhos absolutos em `dados/anexos`) para uma aba ou formulário de tarefa.
+    Attached(AttachTarget, Vec<PathBuf>),
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
@@ -60,7 +78,6 @@ pub enum Action {
         dx: i32,
         dy: i32,
     },
-    FocusComposer,
     /// Ctrl+Shift+M: inicia/para o ditado na aba de CLI focada (ou na que já está gravando).
     ToggleTabMic,
     CopyText(String),
@@ -141,6 +158,8 @@ pub struct PaneSlot {
     /// Área do terminal.
     pub body: egui::Rect,
     pub uids: Vec<u64>,
+    /// `uid` da aba visível (`plan.shown`) desta janela.
+    pub shown_uid: u64,
     /// Grupos da janela (mais de um quando não cabem todos e os que sobram dividem a última).
     pub groups: Vec<String>,
 }
@@ -192,9 +211,6 @@ struct ProjectState {
     split_ratios: split::Ratios,
     /// Conversa integrada (a do projeto ativo fica em `Deck`).
     feed: Vec<FeedItem>,
-    /// Rascunho do compositor e anexos (os do projeto ativo ficam em `Deck`).
-    input: String,
-    attachments: Vec<PathBuf>,
 }
 
 /// O que a tela dividida mostra neste quadro.
@@ -257,6 +273,7 @@ pub struct Deck {
     pub right_w: f32,
     pub right_dragging: Option<(f32, f32)>,
     pub right_view: RightView,
+    pub right_panel_rect: Option<egui::Rect>,
 
     // Tela dividida (ver `split.rs`)
     pub split_enabled: bool,
@@ -295,7 +312,7 @@ pub struct Deck {
     projects: HashMap<String, ProjectState>,
     pub tree: TreeState,
 
-    // Conversa integrada
+    // Conversa integrada (somente leitura)
     pub feed: Vec<FeedItem>,
     thinking: HashMap<String, u64>,
     next_feed_id: u64,
@@ -307,24 +324,12 @@ pub struct Deck {
     pub feed_scroll_to_bottom: bool,
     pub feed_near_bottom: bool,
 
-    // Compositor e ditado
-    pub input: String,
-    /// Anexos do rascunho, em caminho absoluto: a referência `@...` é feita no envio, relativa ao
-    /// projeto em que a mensagem sai.
-    pub attachments: Vec<PathBuf>,
-    pub needs_text: bool,
+    // Ditado por voz (preso ao `uid` da aba onde começou)
     recorder: Option<audio::Recorder>,
     pub recording_since: Option<Instant>,
-    /// Estado global do microfone e seu destino (compositor ou `Tab(uid)`).
+    /// Estado global do microfone e seu destino (`Tab(uid)`).
     pub mic_phase: MicPhase,
-    pub send_after_transcribe: bool,
-    /// Aba ativa quando o Enviar foi clicado durante a gravação: a transcrição só sai sozinha se
-    /// ela ainda for a ativa (senão a mensagem iria para outro agente ou projeto).
-    send_target: Option<u64>,
     pub engine_label: String,
-    pub focus_composer: bool,
-    pub composer_focused: bool,
-    pub composer_cursor_end: bool,
 
     // Menus e diversos
     pub new_tab_menu_open: bool,
@@ -352,6 +357,11 @@ pub struct Deck {
     /// Ctrl+/ pedido pelo teclado (abre/fecha o modal de atalhos no próximo quadro).
     pub toggle_shortcuts: bool,
     pub drop_hover: bool,
+    pub last_drop_target: Option<AttachTarget>,
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=drop-pane:<n>`): destaca este painel no arrastar e soltar.
+    pub debug_drop_slot: Option<usize>,
+    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=drop-task`): destaca o formulário "Nova tarefa" no arrastar e soltar.
+    pub debug_drop_task_form: bool,
     pub term_focus: bool,
     /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
     pub ime_preedit: String,
@@ -413,16 +423,16 @@ fn in_attachments_dir(data_dir: &Path, path: &Path) -> bool {
     path.parent().is_some_and(|p| p == data_dir.join("anexos"))
 }
 
-/// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+L (limpar a tela no shell) e Ctrl+B (prefixo
-/// do tmux) vão ao terminal quando ele tem o foco, a não ser que o usuário dê prioridade ao app.
 /// O redimensionamento pendente do PTY já pode ser aplicado: tamanho parado e mouse solto.
 fn resize_due(now: Instant, at: Instant, dragging: bool) -> bool {
     now >= at && !dragging
 }
 
+/// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+B (prefixo do tmux) vai ao terminal quando
+/// ele tem o foco, a não ser que o usuário dê prioridade ao app.
 fn app_claims_ctrl(key: &str, term_focused: bool, app_first: bool) -> bool {
     match key {
-        "l" | "b" => !term_focused || app_first,
+        "b" => !term_focused || app_first,
         _ => true,
     }
 }
@@ -483,6 +493,7 @@ impl Deck {
             right_dragging: None,
             // A mesa de tarefas é a primeira aba e a que abre: o app não grava a aba escolhida.
             right_view: RightView::Tarefas,
+            right_panel_rect: None,
             split_enabled: cfg.split_enabled,
             group_order: Vec::new(),
             split_ratios: cfg
@@ -509,18 +520,10 @@ impl Deck {
             debug_hold_download: false,
             feed_scroll_to_bottom: false,
             feed_near_bottom: true,
-            input: String::new(),
-            attachments: Vec::new(),
-            needs_text: false,
             recorder: None,
             recording_since: None,
             mic_phase: MicPhase::Idle,
-            send_after_transcribe: false,
-            send_target: None,
             engine_label: String::new(),
-            focus_composer: false,
-            composer_focused: false,
-            composer_cursor_end: false,
             new_tab_menu_open: false,
             new_tab_models_for: None,
             new_tab_provider: None,
@@ -535,6 +538,9 @@ impl Deck {
             modal_open: false,
             toggle_shortcuts: false,
             drop_hover: false,
+            last_drop_target: None,
+            debug_drop_slot: None,
+            debug_drop_task_form: false,
             term_focus: false,
             ime_preedit: String::new(),
             metrics: None,
@@ -647,7 +653,6 @@ impl Deck {
                 }
             }
             Action::FocusPane { dx, dy } => self.focus_pane(dx, dy),
-            Action::FocusComposer => self.request_composer_focus(),
             Action::ToggleTabMic => self.toggle_active_tab_mic(),
             Action::CopyText(t) => ctx.copy_text(t),
         }
@@ -715,69 +720,68 @@ impl Deck {
                     }
                 }
             }
-            UiMsg::Attached(project, files) => {
-                if project != self.active_project {
-                    // O projeto mudou durante a cópia: o anexo fica no rascunho de quem o pediu.
-                    self.projects.entry(project).or_default().attachments.extend(files);
-                } else if !files.is_empty() {
-                    self.attachments.extend(files);
-                    self.request_composer_focus();
+            UiMsg::Attached(target, files) => {
+                if files.is_empty() {
+                    return;
                 }
-            }
-            UiMsg::Transcribed(res) => {
-                let target = dictation::finish_transcribe(&mut self.mic_phase).unwrap_or(MicTarget::Composer);
-                self.refresh_engine();
                 match target {
-                    MicTarget::Composer => {
-                        let mut ok = false;
-                        match res {
-                            Ok(text) => {
-                                let text = text.trim();
-                                self.input = if self.input.is_empty() { text.to_owned() } else { format!("{} {text}", self.input) };
-                                self.composer_cursor_end = true;
-                                ok = true;
-                            }
-                            Err(e) => self.system(format!("Não foi possível transcrever: {e}.")),
-                        }
-                        self.request_composer_focus();
-                        let send = self.send_after_transcribe && ok;
-                        self.send_after_transcribe = false;
-                        let send_target = self.send_target.take();
-                        if send && send_target == self.active_tab().map(|t| t.uid) {
-                            self.send_message();
-                        } else if send {
-                            self.system(
-                                "A aba mudou durante a transcrição: o texto ficou na caixa de mensagem para você conferir e enviar.",
-                            );
-                        }
-                    }
-                    MicTarget::Tab(uid) => {
-                        self.send_after_transcribe = false;
-                        self.send_target = None;
-                        let text = match res {
-                            Ok(t) => t.trim().to_owned(),
-                            Err(e) => {
-                                self.system(format!("Não foi possível transcrever: {e}."));
-                                return;
-                            }
-                        };
-                        if text.is_empty() {
-                            return;
-                        }
+                    AttachTarget::Tab(uid) => {
                         let pairs: Vec<(u64, bool)> = self.tabs.iter().map(|t| (t.uid, t.alive)).collect();
                         match dictation::resolve_tab_delivery(&pairs, uid) {
                             TabDelivery::TypeInTab(idx) => {
-                                let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                                let safe = commanddeck_core::util::terminal_text(&text);
-                                self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
+                                let refs: Vec<String> =
+                                    files.iter().map(|f| commanddeck_core::util::ref_path(&self.workspace, f)).collect();
+                                let text = util::tab_file_refs_text(&self.tabs[idx].kind, &refs);
+                                if !text.is_empty() {
+                                    let bracketed =
+                                        self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
+                                    let safe = commanddeck_core::util::terminal_text(&text);
+                                    self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
+                                    self.activate(idx);
+                                }
                             }
                             TabDelivery::TabDead => {
-                                self.system("O processo da aba encerrou durante a transcrição: o texto foi descartado.");
+                                self.system("O processo da aba encerrou antes de receber o anexo.");
                             }
                             TabDelivery::TabClosed => {
-                                self.system("A aba do ditado foi fechada antes do fim da transcrição: o texto foi descartado.");
+                                self.system("A aba do anexo foi fechada antes da cópia terminar.");
                             }
                         }
+                    }
+                    AttachTarget::TaskForm(project) => {
+                        if project == self.active_project {
+                            self.tasks.form.attachments.extend(files);
+                        }
+                    }
+                }
+            }
+            UiMsg::Transcribed(res) => {
+                let Some(MicTarget::Tab(uid)) = dictation::finish_transcribe(&mut self.mic_phase) else {
+                    return;
+                };
+                self.refresh_engine();
+                let text = match res {
+                    Ok(t) => t.trim().to_owned(),
+                    Err(e) => {
+                        self.system(format!("Não foi possível transcrever: {e}."));
+                        return;
+                    }
+                };
+                if text.is_empty() {
+                    return;
+                }
+                let pairs: Vec<(u64, bool)> = self.tabs.iter().map(|t| (t.uid, t.alive)).collect();
+                match dictation::resolve_tab_delivery(&pairs, uid) {
+                    TabDelivery::TypeInTab(idx) => {
+                        let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
+                        let safe = commanddeck_core::util::terminal_text(&text);
+                        self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
+                    }
+                    TabDelivery::TabDead => {
+                        self.system("O processo da aba encerrou durante a transcrição: o texto foi descartado.");
+                    }
+                    TabDelivery::TabClosed => {
+                        self.system("A aba do ditado foi fechada antes do fim da transcrição: o texto foi descartado.");
                     }
                 }
             }
@@ -835,9 +839,15 @@ impl Deck {
             if now >= at + TREE_CLICK_DELAY {
                 self.tree.pending_click = None;
                 self.tree.active_file = Some(rel.clone());
-                self.input = util::insert_ref(&self.input, &rel);
-                self.composer_cursor_end = true;
-                self.request_composer_focus();
+                if let Some(idx) = self.active.filter(|&i| self.tabs[i].alive) {
+                    let text = util::tab_file_refs_text(&self.tabs[idx].kind, &[rel]);
+                    if !text.is_empty() {
+                        let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
+                        let safe = commanddeck_core::util::terminal_text(&text);
+                        self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
+                        self.set_term_focus(true);
+                    }
+                }
             } else {
                 want(at + TREE_CLICK_DELAY);
             }
@@ -1407,6 +1417,7 @@ impl Deck {
                 rect: p.rect,
                 body: crate::ui::pane_body(p.rect),
                 uids: p.tabs.iter().map(|&i| self.tabs[i].uid).collect(),
+                shown_uid: self.tabs[p.shown].uid,
                 groups: p.groups.clone(),
             })
             .collect();
@@ -1737,11 +1748,7 @@ impl Deck {
                     self.push_action(Action::ToggleSidebar);
                     return true;
                 }
-                "l" if !self.composer_focused && app_key => {
-                    self.push_action(Action::FocusComposer);
-                    return true;
-                }
-                "v" => self.check_clipboard_image(),
+                "v" => self.check_clipboard_image(egui_has_focus),
                 _ => {}
             }
             if ev.logical_key == Key::Named(NamedKey::Tab) {
@@ -1830,21 +1837,28 @@ impl Deck {
         }
     }
 
-    /// Se a área de transferência não tem texto mas tem imagem, anexa como PNG.
+    /// Se a área de transferência não tem texto mas tem imagem, anexa como PNG (no formulário
+    /// "Nova tarefa" quando focado, ou no prompt da aba ativa).
     ///
-    /// O clipboard é lido aqui, na thread da UI (a mesma em que o egui o usa para colar no
-    /// compositor): duas threads nele ao mesmo tempo corrompiam o heap do Windows (`0xC0000374`).
-    /// Só a conversão para PNG e o anexo vão para segundo plano, já sem tocar no clipboard.
-    fn check_clipboard_image(&self) {
+    /// O clipboard é lido aqui, na thread da UI: duas threads nele ao mesmo tempo corrompiam o
+    /// heap do Windows (`0xC0000374`). Só a conversão para PNG e o anexo vão para segundo plano.
+    fn check_clipboard_image(&self, egui_has_focus: bool) {
+        let target =
+            if egui_has_focus && self.right_view == RightView::Tarefas && matches!(self.tasks.view, crate::tasks_ui::TasksView::New) {
+                AttachTarget::TaskForm(self.active_project.clone())
+            } else if let Some(tab) = self.active_tab().filter(|t| t.alive) {
+                AttachTarget::Tab(tab.uid)
+            } else {
+                return;
+            };
         let Ok(mut cb) = arboard::Clipboard::new() else { return };
         if cb.get_text().is_ok_and(|t| !t.is_empty()) {
             return;
         }
         let Ok(img) = cb.get_image() else { return };
         let (width, height, bytes) = (img.width as u32, img.height as u32, img.bytes.into_owned());
-        let project = self.active_project.clone();
         self.spawn_bg("clipboard-image", move |core| match core.attach_rgba_png(width, height, &bytes) {
-            Ok(r) => Some(UiMsg::Attached(project, attachment_paths(&core, vec![r]))),
+            Ok(r) => Some(UiMsg::Attached(target, attachment_paths(&core, vec![r]))),
             Err(e) => {
                 log::warn!("colar imagem: {e}");
                 None
@@ -1965,16 +1979,6 @@ impl Deck {
             state.group_order = std::mem::take(&mut self.group_order);
             state.split_ratios = std::mem::take(&mut self.split_ratios);
             state.feed = std::mem::take(&mut self.feed);
-            state.input = std::mem::take(&mut self.input);
-            state.attachments = std::mem::take(&mut self.attachments);
-        } else {
-            self.input.clear();
-            self.attachments.clear();
-        }
-        // O rascunho é de cada projeto (os anexos citados ficam relativos à pasta dele).
-        if let Some(state) = self.projects.get_mut(id) {
-            self.input = std::mem::take(&mut state.input);
-            self.attachments = std::mem::take(&mut state.attachments);
         }
         self.active = None;
         self.unseen = 0;
@@ -2237,38 +2241,10 @@ impl Deck {
     }
 
     // ------------------------------------------------------------------
-    // Compositor / envio
+    // Anexos, arrastar e soltar e ditado por voz
     // ------------------------------------------------------------------
 
-    pub fn request_composer_focus(&mut self) {
-        // Nas abas sem compositor (Tarefas, Git e GitHub) ele fica escondido: volta para a Conversa.
-        if self.right_view.hides_composer() {
-            self.set_right_view(RightView::Conversa);
-        }
-        self.focus_composer = true;
-        self.term_focus = false;
-    }
-
-    /// O compositor está gravando agora.
-    pub fn is_composer_recording(&self) -> bool {
-        self.mic_phase == MicPhase::Recording(MicTarget::Composer)
-    }
-
-    /// O compositor está transcrevendo agora.
-    pub fn is_composer_transcribing(&self) -> bool {
-        self.mic_phase == MicPhase::Transcribing(MicTarget::Composer)
-    }
-
-    /// `ready` do botão Enviar.
-    pub fn send_ready(&self) -> bool {
-        !self.input.trim().is_empty()
-            || !self.attachments.is_empty()
-            || self.is_composer_recording()
-            || self.is_composer_transcribing()
-            || self.send_after_transcribe
-    }
-
-    /// `--send-color`: cor da aba ativa, se não for um shell.
+    /// `--send-color`: cor de destaque da aba ativa, se não for um shell.
     pub fn send_color(&self) -> Color32 {
         if let Some(t) = self.active_tab() {
             if t.kind != "shell" {
@@ -2280,28 +2256,21 @@ impl Deck {
         theme::SEND_DEFAULT
     }
 
-    pub fn send_label(&self) -> &'static str {
-        if self.send_after_transcribe && (self.is_composer_recording() || self.is_composer_transcribing()) {
-            "Enviando…"
-        } else {
-            "Enviar"
-        }
+    /// Abre o seletor de arquivos para anexar à aba `uid` (botão de anexo no cabeçalho do painel).
+    pub fn pick_tab_attachments(&self, uid: u64) {
+        self.pick_attachments_for(AttachTarget::Tab(uid));
     }
 
-    pub fn pick_attachments(&self) {
-        let project = self.active_project.clone();
+    /// Abre o seletor de arquivos para `target` (aba ou formulário "Nova tarefa").
+    pub fn pick_attachments_for(&self, target: AttachTarget) {
         self.spawn_bg("pick-attachments", move |core| {
             let files = rfd::FileDialog::new().pick_files()?;
-            Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&files))))
+            Some(UiMsg::Attached(target, attachment_paths(&core, core.attach_files(&files))))
         });
     }
 
-    /// "×" do chip: tira o anexo do rascunho e apaga a cópia em `dados/anexos`.
-    pub fn remove_attachment(&mut self, i: usize) {
-        if i >= self.attachments.len() {
-            return;
-        }
-        let path = self.attachments.remove(i);
+    /// Apaga uma cópia em `dados/anexos` (chamado ao remover chip de anexo no formulário de tarefa).
+    pub fn delete_attachment_copy(&self, path: PathBuf) {
         if !in_attachments_dir(&self.core.paths().data_dir, &path) {
             return;
         }
@@ -2313,23 +2282,58 @@ impl Deck {
         });
     }
 
-    pub fn attach_paths(&mut self, paths: Vec<PathBuf>) {
+    /// Decide qual painel de agente (ou o formulário "Nova tarefa") recebe arquivos arrastados
+    /// na posição `pointer`. Funciona em tela dividida, com um único painel e sobre o formulário.
+    pub fn resolve_drop_zone(&self, pointer: Option<egui::Pos2>, fallback_rect: egui::Rect) -> Option<DropZone> {
+        let task_form_open = self.right_view == RightView::Tarefas && matches!(self.tasks.view, crate::tasks_ui::TasksView::New);
+        let over_right = self.right_panel_rect.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));
+        if self.debug_drop_task_form || (task_form_open && (over_right || self.panes.is_empty())) {
+            let rect = self.right_panel_rect.unwrap_or(fallback_rect);
+            return Some(DropZone {
+                rect,
+                target: AttachTarget::TaskForm(self.active_project.clone()),
+                title: "Solte para anexar à nova tarefa".to_owned(),
+                subtitle: "Cópia em dados/anexos citada no pedido".to_owned(),
+            });
+        }
+        let slot = if let Some(s) = self.debug_drop_slot {
+            self.panes.get(s)
+        } else if let Some(p) = pointer {
+            self.panes
+                .iter()
+                .find(|s| s.rect.contains(p))
+                .or_else(|| self.focused_slot().and_then(|s| self.panes.get(s)).or_else(|| self.panes.first()))
+        } else {
+            self.focused_slot().and_then(|s| self.panes.get(s)).or_else(|| self.panes.first())
+        }?;
+        let tab = self.tabs.iter().find(|t| t.uid == slot.shown_uid)?;
+        Some(DropZone {
+            rect: slot.rect,
+            target: AttachTarget::Tab(slot.shown_uid),
+            title: format!("Solte para anexar em {}", tab.label),
+            subtitle: "O caminho será inserido no prompt desta aba".to_owned(),
+        })
+    }
+
+    /// Arquivos soltos na janela (`WindowEvent::DroppedFile`): envia ao painel sob o ponteiro
+    /// (na aba visível dele) ou ao formulário "Nova tarefa".
+    pub fn attach_dropped_files(&mut self, paths: Vec<PathBuf>, pointer: Option<egui::Pos2>) {
         if paths.is_empty() {
             return;
         }
-        if self.right_view.hides_composer() {
-            self.set_right_view(RightView::Conversa);
-        }
-        let project = self.active_project.clone();
-        self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(project, attachment_paths(&core, core.attach_files(&paths)))));
+        let target = self
+            .resolve_drop_zone(pointer, egui::Rect::NOTHING)
+            .map(|z| z.target)
+            .or_else(|| self.last_drop_target.take())
+            .or_else(|| self.active_tab().map(|t| AttachTarget::Tab(t.uid)));
+        let Some(target) = target else {
+            self.system("Abra um agente ou o formulário de nova tarefa para anexar arquivos.");
+            return;
+        };
+        self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(target, attachment_paths(&core, core.attach_files(&paths)))));
     }
 
-    /// Clique no microfone do compositor.
-    pub fn toggle_mic(&mut self) {
-        self.toggle_mic_for(MicTarget::Composer);
-    }
-
-    /// Clique no microfone de uma aba de terminal (pelo `uid` da aba).
+    /// Clique no microfone do cabeçalho de um painel (pelo `uid` da aba visível nele).
     pub fn toggle_tab_mic(&mut self, uid: u64) {
         self.toggle_mic_for(MicTarget::Tab(uid));
     }
@@ -2355,7 +2359,7 @@ impl Deck {
         }
     }
 
-    /// Aciona o microfone para `target` (compositor ou `Tab(uid)`). Abrir o dispositivo pode levar
+    /// Aciona o microfone para `target` (`Tab(uid)`). Abrir o dispositivo pode levar
     /// até 5 s: vai para uma thread, e um segundo clique enquanto isso desiste.
     fn toggle_mic_for(&mut self, target: MicTarget) {
         match dictation::toggle(&mut self.mic_phase, target) {
@@ -2402,53 +2406,6 @@ impl Deck {
             };
             Some(UiMsg::Transcribed(res))
         });
-    }
-
-    pub fn cancel_recording(&mut self) {
-        if let Some(rec) = self.recorder.take() {
-            discard_recorder(rec);
-        }
-        let target = dictation::cancel(&mut self.mic_phase);
-        self.recording_since = None;
-        self.send_after_transcribe = false;
-        if target == Some(MicTarget::Composer) {
-            self.request_composer_focus();
-        }
-    }
-
-    /// Porta de `sendMessage()`: o compositor envia sempre para a aba ativa.
-    pub fn send_message(&mut self) {
-        if self.is_composer_recording() || self.is_composer_transcribing() {
-            self.send_after_transcribe = true;
-            self.send_target = self.active_tab().map(|t| t.uid);
-            if self.is_composer_recording() {
-                self.stop_recording();
-            }
-            return;
-        }
-        let text = self.input.trim().to_owned();
-        if text.is_empty() && self.attachments.is_empty() {
-            return;
-        }
-        // Anexo sozinho não vai: o agente leria o arquivo sem saber o que fazer, gastando tokens à toa.
-        if text.is_empty() {
-            self.system("Escreva uma instrução junto com os anexos (ex.: \"analisa essas imagens\").");
-            self.needs_text = true;
-            self.request_composer_focus();
-            return;
-        }
-        let refs: Vec<String> = self.attachments.iter().map(|a| commanddeck_core::util::ref_path(&self.workspace, a)).collect();
-        let full = util::compose_full(&text, &refs);
-        let Some(idx) = self.active.filter(|&i| self.tabs[i].alive) else {
-            self.system("A aba ativa não tem um processo rodando.");
-            return;
-        };
-        self.submit(idx, &full);
-        self.set_term_focus(true);
-        let to = self.tabs[idx].ident.id();
-        self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&to), full.clone()));
-        self.input.clear();
-        self.attachments.clear();
     }
 
     /// `pty:submit`: cola entre colchetes e confirma com Enter após 250 ms (e de novo após
@@ -2547,14 +2504,13 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_l_and_ctrl_b_go_to_the_focused_terminal_unless_the_app_comes_first() {
-        // Terminal focado: Ctrl+L limpa a tela, Ctrl+B é do tmux; Ctrl+T continua do app.
-        assert!(!app_claims_ctrl("l", true, false));
+    fn ctrl_b_goes_to_the_focused_terminal_unless_the_app_comes_first() {
+        // Terminal focado: Ctrl+B é do tmux; Ctrl+T continua do app.
         assert!(!app_claims_ctrl("b", true, false));
         assert!(app_claims_ctrl("t", true, false));
         // Fora do terminal, ou com a opção ligada, todos são do app.
-        assert!(app_claims_ctrl("l", false, false) && app_claims_ctrl("b", false, false));
-        assert!(app_claims_ctrl("l", true, true) && app_claims_ctrl("b", true, true));
+        assert!(app_claims_ctrl("b", false, false));
+        assert!(app_claims_ctrl("b", true, true));
     }
 
     #[test]

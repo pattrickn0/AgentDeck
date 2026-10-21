@@ -5,10 +5,8 @@ use egui::{Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use commanddeck_core::models::short_model;
 
 use super::{dot, galley_trunc, place, text_in, text_w, tip};
-use crate::audio;
 use crate::deck::Deck;
 use crate::dictation::{self, ButtonVisual, MicTarget};
-use crate::icons::Icon;
 use crate::theme;
 
 pub enum StripClick {
@@ -16,7 +14,6 @@ pub enum StripClick {
     Close(usize),
     Rename(usize),
     ContextMenu(usize, Pos2),
-    Mic(u64),
 }
 
 const TAB_FONT: f32 = 13.0;
@@ -25,7 +22,8 @@ const LABEL_MAX: f32 = 140.0;
 const MODEL_MAX: f32 = 80.0;
 const MODEL_FONT: f32 = 11.5;
 const MODEL_GAP: f32 = 6.0;
-const MIC_BTN: f32 = 21.0;
+/// Espaço do indicador vermelho pulsante quando a aba está gravando áudio.
+const REC_INDICATOR_W: f32 = 14.0;
 
 /// Pinta as abas `tabs` (índices de `deck.tabs`) em `rect`, com rolagem horizontal quando não
 /// cabem. `shown` é a aba visível da janela; `focused`, se a janela tem o foco.
@@ -41,13 +39,13 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             let lw = text_w(&painter, &tab.label, font.clone()).min(LABEL_MAX);
             let mw =
                 tab.model.as_deref().map_or(0.0, |m| MODEL_GAP + text_w(&painter, short_model(m), theme::ui(MODEL_FONT)).min(MODEL_MAX));
-            let status_txt = match dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid)) {
-                ButtonVisual::Opening => Some("Abrindo…"),
-                ButtonVisual::Transcribing => Some("Transcrevendo…"),
-                _ => None,
+            let sw = match dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid)) {
+                ButtonVisual::Recording => REC_INDICATOR_W,
+                ButtonVisual::Opening => 6.0 + text_w(&painter, "Abrindo…", theme::ui(MODEL_FONT)),
+                ButtonVisual::Transcribing => 6.0 + text_w(&painter, "Transcrevendo…", theme::ui(MODEL_FONT)),
+                _ => 0.0,
             };
-            let sw = status_txt.map_or(0.0, |s| 6.0 + text_w(&painter, s, theme::ui(MODEL_FONT)));
-            12.0 + 8.0 + 8.0 + lw + mw + sw + 4.0 + MIC_BTN + 2.0 + close_w + 6.0 + 1.0
+            12.0 + 8.0 + 8.0 + lw + mw + sw + 6.0 + close_w + 6.0 + 1.0
         })
         .collect();
     let total: f32 = widths.iter().sum();
@@ -89,17 +87,12 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         let is_shown = i == shown;
         let resp = ui.interact(vis, Id::new(("tab", tab.uid)), Sense::click());
         let close_rect = Rect::from_min_size(Pos2::new(r.max.x - 6.0 - close_w, r.center().y - 10.5), Vec2::new(close_w, 21.0));
-        // Centrado no espaço abaixo da linha de 2 px do topo da aba, não na aba inteira.
-        let mic_rect = Rect::from_min_size(Pos2::new(close_rect.min.x - 2.0 - MIC_BTN, r.center().y + 1.0 - MIC_BTN / 2.0), Vec2::splat(MIC_BTN));
         let visual = dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid));
-        let mic_busy = visual.is_busy() || !tab.alive;
-        let mic_resp =
-            ui.interact(mic_rect.intersect(rect), Id::new(("tab-mic", tab.uid)), if mic_busy { Sense::hover() } else { Sense::click() });
         let close_resp = ui.interact(close_rect.intersect(rect), Id::new(("tab-close", tab.uid)), Sense::click());
 
         let bg = if is_shown {
             Some(theme::BG)
-        } else if resp.hovered() || mic_resp.hovered() || close_resp.hovered() {
+        } else if resp.hovered() || close_resp.hovered() {
             Some(theme::PANEL_2)
         } else {
             None
@@ -158,70 +151,44 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             );
             after_x = mr.max.x;
         }
-        let status_txt = match visual {
-            ButtonVisual::Opening => Some("Abrindo…"),
-            ButtonVisual::Transcribing => Some("Transcrevendo…"),
-            _ => None,
-        };
-        if let Some(st) = status_txt {
-            let scolor = theme::MUTED;
-            let sg = galley_trunc(&painter, st, theme::ui(MODEL_FONT), scolor, (mic_rect.min.x - after_x - 8.0).max(10.0));
-            let x0 = after_x + 6.0;
-            place(
-                &painter,
-                Rect::from_min_max(Pos2::new(x0, r.min.y), Pos2::new(mic_rect.min.x - 2.0, r.max.y)),
-                Align2::LEFT_CENTER,
-                sg,
-                scolor,
-            );
+        // Indicador de estado do ditado na aba (o botão fica no cabeçalho do painel).
+        match visual {
+            ButtonVisual::Recording => {
+                let alpha = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                let rec_pos = Pos2::new(after_x + 10.0, r.center().y);
+                painter.circle_filled(rec_pos, 5.5, theme::with_opacity(theme::RED, alpha * 0.28));
+                painter.circle_filled(rec_pos, 3.6, theme::with_opacity(theme::RED, alpha));
+            }
+            ButtonVisual::Opening | ButtonVisual::Transcribing => {
+                let st = if visual == ButtonVisual::Opening { "Abrindo…" } else { "Transcrevendo…" };
+                let scolor = theme::MUTED;
+                let sg = galley_trunc(&painter, st, theme::ui(MODEL_FONT), scolor, (close_rect.min.x - after_x - 8.0).max(10.0));
+                let x0 = after_x + 6.0;
+                place(
+                    &painter,
+                    Rect::from_min_max(Pos2::new(x0, r.min.y), Pos2::new(close_rect.min.x - 2.0, r.max.y)),
+                    Align2::LEFT_CENTER,
+                    sg,
+                    scolor,
+                );
+            }
+            _ => {}
         }
-
-        // Botão de microfone da aba
-        let mic_hot = mic_resp.hovered() && !mic_busy;
-        let mut mic_opacity = 1.0;
-        if visual == ButtonVisual::Recording {
-            mic_opacity = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
-            painter.rect_filled(mic_rect, 4.0, theme::with_opacity(theme::RED, mic_opacity));
-        } else if mic_hot {
-            painter.rect_filled(mic_rect, 4.0, theme::BORDER);
-        } else {
-            // Parado: contorno leve para o botão ser visto sem passar o mouse.
-            painter.rect_stroke(mic_rect, 4.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-        }
-        if mic_busy || !audio::AVAILABLE || visual == ButtonVisual::Opening {
-            mic_opacity = 0.5;
-        }
-        let mic_fg = if visual == ButtonVisual::Recording {
-            theme::WHITE
-        } else if mic_hot {
-            theme::TEXT
-        } else {
-            theme::brighten(theme::MUTED, 1.2)
-        };
-        deck.icons.paint(&painter, Icon::Mic, mic_rect.center(), 13.5, theme::with_opacity(mic_fg, mic_opacity), 0.0);
 
         let close_hot = close_resp.hovered();
         if close_hot {
             painter.rect_filled(close_rect, 4.0, theme::BORDER);
         }
-        if close_hot || mic_hot || resp.hovered() {
+        if close_hot || resp.hovered() {
             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         text_in(&painter, close_rect, Align2::CENTER_CENTER, "×", font.clone(), if close_hot { theme::TEXT } else { theme::MUTED });
 
-        let mic_tip = if !tab.alive {
-            "Ditado indisponível (processo encerrado)".to_owned()
-        } else {
-            dictation::mic_tooltip(visual, audio::AVAILABLE, &deck.engine_label, Some("Ctrl+Shift+M"))
-        };
-        let tab_uid = tab.uid;
         let tab_label = tab.label.clone();
         let tab_model = tab.model.clone();
         if tip(close_resp, "Fechar").clicked() {
             click = Some(StripClick::Close(i));
-        } else if tip(mic_resp, mic_tip).clicked() && !mic_busy {
-            click = Some(StripClick::Mic(tab_uid));
         } else if resp.double_clicked() {
             click = Some(StripClick::Rename(i));
         } else if resp.secondary_clicked() {
