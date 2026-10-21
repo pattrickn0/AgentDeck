@@ -23,12 +23,14 @@ pub enum Group {
     Running,
     Draft,
     Failed,
-    /// Mescladas e descartadas.
+    /// Mescladas.
     Done,
+    /// Descartadas (canceladas): ficam à parte das concluídas.
+    Cancelled,
 }
 
 impl Group {
-    pub const ORDER: [Group; 5] = [Group::Review, Group::Running, Group::Draft, Group::Failed, Group::Done];
+    pub const ORDER: [Group; 6] = [Group::Review, Group::Running, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -37,6 +39,7 @@ impl Group {
             Group::Draft => "Rascunho",
             Group::Failed => "Falhou",
             Group::Done => "Concluídas",
+            Group::Cancelled => "Canceladas",
         }
     }
 
@@ -46,7 +49,8 @@ impl Group {
             TaskStatus::Running => Group::Running,
             TaskStatus::Draft => Group::Draft,
             TaskStatus::Failed => Group::Failed,
-            TaskStatus::Merged | TaskStatus::Discarded => Group::Done,
+            TaskStatus::Merged => Group::Done,
+            TaskStatus::Discarded => Group::Cancelled,
         }
     }
 }
@@ -429,8 +433,8 @@ impl Default for TasksUi {
             loaded: false,
             refreshing: false,
             dirty: false,
-            // As concluídas já foram resolvidas: começam recolhidas.
-            collapsed: HashSet::from([Group::Done]),
+            // As concluídas e as canceladas já foram resolvidas: começam recolhidas.
+            collapsed: HashSet::from([Group::Done, Group::Cancelled]),
             closed_sections: HashSet::new(),
             diff: None,
             confirm: None,
@@ -903,13 +907,54 @@ mod tests {
                 (Group::Running, vec!["t2"]),
                 (Group::Draft, vec!["t7"]),
                 (Group::Failed, vec!["t6"]),
-                (Group::Done, vec!["t5", "t1"]),
+                (Group::Done, vec!["t1"]),
+                (Group::Cancelled, vec!["t5"]),
             ]
         );
         // Grupos vazios não aparecem.
         assert_eq!(group_tasks(&tasks[..1]).len(), 1);
         assert!(group_tasks(&[]).is_empty());
         assert_eq!(review_count(&tasks), 2);
+    }
+
+    #[test]
+    fn cancelled_tasks_are_apart_from_the_merged_ones() {
+        assert_eq!(Group::of(TaskStatus::Merged), Group::Done);
+        assert_eq!(Group::of(TaskStatus::Discarded), Group::Cancelled);
+        assert_eq!(Group::Done.title(), "Concluídas");
+        assert_eq!(Group::Cancelled.title(), "Canceladas");
+        // Os dois no fim, nessa ordem.
+        let n = Group::ORDER.len();
+        assert_eq!(Group::ORDER[n - 2..], [Group::Done, Group::Cancelled]);
+        // Os grupos resolvidos começam recolhidos.
+        let ui = TasksUi::default();
+        assert!(ui.collapsed.contains(&Group::Done));
+        assert!(ui.collapsed.contains(&Group::Cancelled));
+        assert!(!ui.collapsed.contains(&Group::Review));
+    }
+
+    #[test]
+    fn the_real_list_with_two_discarded_keeps_them_out_of_the_merged_group() {
+        // O caso que apareceu na revisão: t8 e t4 descartadas convivendo com t1 e t2 mescladas.
+        let tasks = vec![
+            task("t1", TaskStatus::Merged, 100),
+            task("t2", TaskStatus::Merged, 200),
+            task("t3", TaskStatus::Review, 300),
+            task("t4", TaskStatus::Discarded, 400),
+            task("t5", TaskStatus::Running, 500),
+            task("t6", TaskStatus::Review, 600),
+            task("t7", TaskStatus::Running, 700),
+            task("t8", TaskStatus::Discarded, 800),
+        ];
+        let groups = group_tasks(&tasks);
+        let ids = |g: Group| -> Vec<&str> {
+            groups.iter().find(|(group, _)| *group == g).map(|(_, l)| l.iter().map(|t| t.id.as_str()).collect()).unwrap_or_default()
+        };
+        assert_eq!(ids(Group::Done), ["t2", "t1"]);
+        assert_eq!(ids(Group::Cancelled), ["t8", "t4"]);
+        // Nenhuma descartada pode sobrar em "Concluídas".
+        let done = groups.iter().find(|(g, _)| *g == Group::Done).expect("concluídas");
+        assert!(done.1.iter().all(|t| t.status == TaskStatus::Merged));
     }
 
     #[test]

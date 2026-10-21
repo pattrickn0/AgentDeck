@@ -634,7 +634,7 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
     deck.tasks.debug_hold = true;
     deck.tasks.loaded = true;
     deck.tasks.tasks = if item == "tasks-empty" { Vec::new() } else { t::demo_tasks() };
-    // A lista de capturas mostra todas as tarefas: as concluídas ficam abertas.
+    // A lista de capturas mostra todas as tarefas: os grupos recolhidos ficam abertos.
     deck.tasks.collapsed.clear();
     let detail = |id: &str| TasksView::Detail(id.to_owned());
     match item {
