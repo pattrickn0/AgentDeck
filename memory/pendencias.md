@@ -117,7 +117,6 @@ Proposta:
 - [ ] **Mesa de tarefas: o agente não começa sozinho** (uso real, 2026-10-20, tarefas t3/t5). Depois do `--start`, o usuário precisa digitar "pode começar" na aba, como se o agente estivesse esperando uma ação dele. O brief vai por `deliver_to_task` (`tasks.rs`) → `CoreEvent::Deliver` com `create: true`, o mesmo caminho do `ask-agent` para uma aba nova. Hipóteses a conferir: o texto chega enquanto o CLI ainda está subindo (e se perde ou fica só no campo de entrada, sem o Enter), ou chega inteiro e o agente lê o brief como contexto e espera uma ordem. Ver na aba se o brief aparece e como; se for o segundo caso, terminar o brief com uma ordem explícita ("Comece agora; não espere confirmação").
 - [ ] **Mesa de tarefas: definir o esforço** (pedido do usuário, 2026-10-20). O formulário escolhe só o modelo. Ter um campo de esforço (baixo/médio/alto) que cada CLI traduz do seu jeito: no Claude, `--effort`; no Antigravity o esforço já vem no nome do modelo (`gemini-4-argon-low|medium|high`); no OpenCode é a variante (`modelo#variante`), que hoje só vale no headless: a aba interativa recebe só o modelo (`models::opencode_tui` descarta o `#`). Mostrar o esforço no cartão da tarefa.
 - [ ] **Mesa de tarefas: áudio e anexos no pedido** (pedido do usuário, 2026-10-18). O formulário "Nova tarefa" só aceita texto. Reaproveitar o microfone (Whisper local) e os anexos do compositor (`ui/composer.rs`, cópia em `dados/anexos`), com os anexos citados no arquivo do pedido.
-- [ ] **Ditado em qualquer aba de CLI** (pedido do usuário, 2026-10-18). Hoje o áudio só sai pelo compositor, que envia para a aba ativa: dá para mandar para o modelo errado. O usuário só não aposenta a Conversa integrada por causa do ditado. Proposta: microfone (e atalho) presos à aba do terminal, que grava, transcreve e digita o texto no PTY daquela aba **sem Enter**, para conferir antes de enviar. Funciona em qualquer CLI, porque é só entrada de teclado; o destino fica fixo na aba onde a gravação começou.
 
 ## 7. Git
 
@@ -131,6 +130,7 @@ a melhoria 5 dele (tentar o motor da CPU quando o da GPU sai com código 0 sem s
 
 ## Concluído
 
+- [x] **Ditado preso a cada aba de CLI** (tarefa `t5`): botão de microfone no cabeçalho de cada aba de terminal (e atalho `Ctrl+Shift+M`) que grava, transcreve com o Whisper local e digita o texto no PTY daquela aba (como colagem segura, sem Enter). O destino fica fixo no `uid` da aba onde a gravação começou (`crates/app/src/dictation.rs`), descartando com aviso se a aba fechar antes do fim da transcrição.
 - [x] **Regras da tarefa: o agente não pede merge.** O `start_message` (`tasks.rs`) agora diz que o agente não
   pede a ninguém que mescle nem rode `--task merge`: o trabalho dele termina no `--task done`. Veio do primeiro
   uso real (o `opencode@t2` pediu ao Claude que mesclasse a própria tarefa).

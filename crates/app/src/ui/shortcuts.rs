@@ -24,6 +24,7 @@ pub const SHORTCUTS: &[ShortcutItem] = &[
     ShortcutItem { keys: &["Ctrl+Alt+setas"], desc: "Ir para a janela vizinha (tela dividida)" },
     ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral *" },
     ShortcutItem { keys: &["Ctrl+L"], desc: "Focar caixa de mensagem *" },
+    ShortcutItem { keys: &["Ctrl+Shift+M"], desc: "Ditar por voz na aba ativa (sem enviar)" },
     ShortcutItem { keys: &["Enter"], desc: "Enviar mensagem" },
     ShortcutItem { keys: &["Shift+Enter"], desc: "Quebrar linha na mensagem" },
     ShortcutItem { keys: &["Duplo clique"], desc: "Renomear aba (modelo@cargo@nome)" },
@@ -218,6 +219,7 @@ mod tests {
         assert!(all_keys.contains("Ctrl+Shift+Tab"), "deve conter Ctrl+Shift+Tab");
         assert!(all_keys.contains("Ctrl+B"), "deve conter Ctrl+B");
         assert!(all_keys.contains("Ctrl+L"), "deve conter Ctrl+L");
+        assert!(all_keys.contains("Ctrl+Shift+M"), "deve conter Ctrl+Shift+M");
         assert!(all_keys.contains("Enter"), "deve conter Enter");
         assert!(all_keys.contains("Shift+Enter"), "deve conter Shift+Enter");
         assert!(all_keys.contains("Duplo clique"), "deve conter Duplo clique");

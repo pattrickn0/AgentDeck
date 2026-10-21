@@ -614,6 +614,15 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.download = Some((debug_download(item), None));
                 deck.debug_hold_download = true;
             }
+            "mic-recording" => {
+                deck.mic_phase = crate::dictation::MicPhase::Recording(crate::dictation::MicTarget::Tab(1));
+            }
+            "mic-transcribing" => {
+                deck.mic_phase = crate::dictation::MicPhase::Transcribing(crate::dictation::MicTarget::Tab(1));
+            }
+            "mic-opening" => {
+                deck.mic_phase = crate::dictation::MicPhase::Opening(crate::dictation::MicTarget::Tab(1));
+            }
             other => {
                 if let Some(id) = other.strip_prefix("project:") {
                     deck.debug_switch_project = Some(id.to_owned());

@@ -209,7 +209,7 @@ ela dura.
   branches, merge/rebase com resolução de conflitos, buscar, puxar e enviar.
 - Ver **PRs, issues e execuções do Actions** do GitHub pela aba GitHub e mandar um PR, uma issue ou um job que
   falhou (com o fim do log) para um agente.
-- Citar arquivos do workspace (`@arquivo`), anexar arquivos e imagens, ditar por voz (whisper.cpp local).
+- Citar arquivos do workspace (`@arquivo`), anexar arquivos e imagens, ditar por voz (whisper.cpp local) direto em cada aba de CLI (`Ctrl+Shift+M` ou ícone de microfone na aba, que digita no terminal sem enviar) ou pelo compositor.
 
 **Como agente, dentro de uma aba:**
 

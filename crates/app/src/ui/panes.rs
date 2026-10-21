@@ -29,6 +29,7 @@ enum Click {
     Close(usize),
     NewTab(String),
     Swap(usize, usize),
+    Mic(u64),
 }
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
@@ -62,6 +63,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             Click::Close(i) => deck.close_tab(i),
             Click::NewTab(kind) => deck.open_tab(&kind, false),
             Click::Swap(a, b) => deck.swap_panes(a, b),
+            Click::Mic(uid) => deck.toggle_tab_mic(uid),
         }
     }
 }
@@ -130,6 +132,7 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         Some(StripClick::Close(i)) => clicks.push(Click::Close(i)),
         Some(StripClick::Rename(i)) => deck.start_rename_tab(i),
         Some(StripClick::ContextMenu(i, pos)) => deck.tab_context_menu = Some((i, pos)),
+        Some(StripClick::Mic(uid)) => clicks.push(Click::Mic(uid)),
         None => {}
     }
 
