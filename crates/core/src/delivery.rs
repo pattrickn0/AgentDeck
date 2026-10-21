@@ -26,6 +26,10 @@ pub const READY_TIMEOUT: Duration = Duration::from_secs(30);
 pub const USER_QUIET: Duration = Duration::from_secs(2);
 /// Depois de uma tecla do usuário que deixou texto começado na linha (sem Enter).
 pub const TYPING_QUIET: Duration = Duration::from_secs(20);
+/// Aba recém-aberta (sem hooks): nada é digitado antes disso, mesmo que a saída já tenha sossegado.
+/// Uma TUI pode ficar calada mais de [`READY_IDLE`] entre o primeiro desenho e o campo de entrada
+/// estar de pé (carregando sessão, MCP, modelo); o texto colado nessa janela se perde.
+pub const BOOT_GRACE: Duration = Duration::from_secs(5);
 /// Intervalo para conferir de novo enquanto a aba está ocupada.
 pub const POLL: Duration = Duration::from_millis(300);
 
@@ -38,6 +42,8 @@ pub struct TabState {
     pub busy: bool,
     /// A aba já recebeu algum aviso por hook: `busy` vem do agente, não da heurística.
     pub hooked: bool,
+    /// Quando o processo da aba foi iniciado.
+    pub spawned_at: Option<Instant>,
     /// Última saída do processo.
     pub last_output: Option<Instant>,
     /// Última tecla do usuário nesta aba.
@@ -70,6 +76,12 @@ pub fn gate(tab: &TabState, queued_at: Instant, now: Instant) -> Gate {
     }
     if tab.busy {
         return Gate::WaitUntil(now + POLL);
+    }
+    // Com hooks o agente já provou que está de pé; sem eles, dê tempo de a TUI subir.
+    if let Some(boot) = tab.spawned_at.filter(|_| !tab.hooked).map(|at| at + BOOT_GRACE) {
+        if now < boot {
+            return Gate::WaitUntil(boot);
+        }
     }
     let settle = if tab.hooked { HOOK_SETTLE } else { READY_IDLE };
     match tab.last_output {
@@ -149,7 +161,7 @@ mod tests {
     }
 
     fn idle_tab(t0: Instant) -> TabState {
-        TabState { alive: true, busy: false, hooked: false, last_output: Some(t0), last_key: None, typing: false }
+        TabState { alive: true, busy: false, hooked: false, spawned_at: None, last_output: Some(t0), last_key: None, typing: false }
     }
 
     #[test]
@@ -216,6 +228,19 @@ mod tests {
         // Com hooks não há "vai mesmo assim": sem saída nenhuma, espera.
         let blank = TabState { last_output: None, ..hooked };
         assert!(matches!(gate(&blank, t0, t0 + READY_TIMEOUT * 2), Gate::WaitUntil(_)));
+    }
+
+    #[test]
+    fn a_fresh_tab_waits_for_the_boot_grace_even_when_quiet() {
+        let t0 = Instant::now();
+        // Saída parada há 2 s (> READY_IDLE), mas o processo subiu há 2 s: a TUI ainda pode estar carregando.
+        let tab = TabState { spawned_at: Some(t0), last_output: Some(t0), ..idle_tab(t0) };
+        let now = t0 + ms(2000);
+        assert_eq!(gate(&tab, t0, now), Gate::WaitUntil(t0 + BOOT_GRACE));
+        assert_eq!(gate(&tab, t0, t0 + BOOT_GRACE), Gate::Ready);
+        // Com hooks o agente já se apresentou: vale só a saída assentada.
+        let hooked = TabState { hooked: true, ..tab };
+        assert_eq!(gate(&hooked, t0, t0 + HOOK_SETTLE), Gate::Ready);
     }
 
     #[test]

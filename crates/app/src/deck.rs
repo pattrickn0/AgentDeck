@@ -127,6 +127,8 @@ pub struct Tab {
     busy_output: bool,
     spec: Option<SpawnSpec>,
     pending_resize: Option<(GridSize, Instant)>,
+    /// Quando o processo atual foi iniciado (a regra de entrega dá tempo de a TUI subir).
+    spawned_at: Option<Instant>,
 }
 
 /// Uma janela da tela dividida, como ficou no último quadro.
@@ -1180,6 +1182,7 @@ impl Deck {
             // Um envio cujo Enter ainda não saiu também ocupa a aba.
             busy: tab.busy || !tab.pending_enter.is_empty(),
             hooked: tab.hooked,
+            spawned_at: tab.spawned_at,
             last_output: *tab.session.shared.last_output.lock(),
             last_key: tab.last_key,
             typing: tab.typing,
@@ -1243,6 +1246,7 @@ impl Deck {
             busy_output: false,
             spec: None,
             pending_resize: None,
+            spawned_at: None,
         };
         self.next_uid += 1;
         // A aba de outro projeto roda escondida: não mexe nas janelas nem no foco.
@@ -1290,6 +1294,7 @@ impl Deck {
         match spec.and_then(|s| tab.session.spawn(&s, wake).map(|_| s).map_err(|e| e.to_string())) {
             Ok(spec) => {
                 tab.alive = true;
+                tab.spawned_at = Some(Instant::now());
                 tab.model = spec.model.clone();
                 tab.spec = Some(spec);
             }
