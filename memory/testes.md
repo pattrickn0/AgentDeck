@@ -182,6 +182,7 @@ Com a pasta de trabalho num repositório git:
 
 - [ ] **IME real**: teclado chinês/japonês/coreano ou o seletor de emoji `Win+.` dentro do terminal — a pré-edição aparece sublinhada no cursor e o texto confirmado chega ao programa.
 - [ ] Acentos do português no terminal e no compositor.
+- [ ] **Ditado preso à aba (`Ctrl+Shift+M` ou ícone de microfone na aba)**: clicar no microfone da aba grava (pisca em vermelho), clicar de novo transcreve ("Transcrevendo…" na aba) e digita o texto no PTY daquela aba **sem Enter**; trocar de aba durante a gravação/transcrição mantém o destino na aba onde começou; fechar a aba antes do fim descarta o texto com aviso na Conversa.
 
 ## 10. Para fechar
 

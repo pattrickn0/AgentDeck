@@ -7,6 +7,7 @@ use egui::{Align2, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use super::{clickable, frame, galley_trunc, place, text_in, text_w, tip};
 use crate::audio;
 use crate::deck::Deck;
+use crate::dictation::{self, ButtonVisual, MicTarget};
 use crate::icons::Icon;
 use crate::theme;
 use crate::util;
@@ -84,7 +85,7 @@ fn layout(deck: &Deck, painter: &egui::Painter, rect: Rect) -> Layout {
     }
 
     // ---------- Moldura: campo de texto na largura toda; botões numa linha embaixo dele ----------
-    let recording = deck.is_recording();
+    let recording = deck.is_composer_recording();
     let input_x = x0 + 1.0 + 6.0;
     let input_w = (x1 - 1.0 - 6.0 - input_x).max(40.0);
     let ih = input_height(deck, painter, input_w);
@@ -144,7 +145,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     input_field(deck, ui, l.input, &ctx);
 
     // Microfone / cancelar
-    let recording = deck.is_recording();
+    let visual = dictation::button_visual(deck.mic_phase, MicTarget::Composer);
+    let recording = visual == ButtonVisual::Recording;
     if let Some(c) = l.cancel {
         let r = clickable(ui, c, Id::new("mic-cancel"));
         let (bg, fg) = if r.hovered() { (theme::RED, theme::WHITE) } else { (theme::rgba(229, 72, 77, 0.15), theme::RED_TEXT) };
@@ -160,7 +162,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             deck.cancel_recording();
         }
     }
-    let busy = deck.transcribing;
+    let busy = visual.is_busy();
     let mr = if busy { ui.interact(l.mic, Id::new("mic"), Sense::hover()) } else { clickable(ui, l.mic, Id::new("mic")) };
     let (mut bg, mut fg) = if mr.hovered() && !busy { (theme::BORDER, theme::TEXT) } else { (theme::PANEL_2, theme::MUTED) };
     let mut opacity = 1.0;
@@ -171,20 +173,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         opacity = super::right_panel::blink_alpha(ctx.input(|i| i.time), 1.2);
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
-    if busy || !audio::AVAILABLE || deck.mic_opening {
+    if busy || !audio::AVAILABLE || visual == ButtonVisual::Opening {
         opacity = 0.5;
     }
     painter.rect_filled(l.mic, 7.0, theme::with_opacity(bg, opacity));
     deck.icons.paint(&painter, Icon::Mic, l.mic.center(), 17.0, theme::with_opacity(fg, opacity), 0.0);
-    let mic_title = if recording {
-        format!("Parar gravação (até {} min)", audio::MAX_RECORDING_SECS / 60)
-    } else if deck.mic_opening {
-        "Abrindo o microfone… (clique para desistir)".to_owned()
-    } else if !audio::AVAILABLE {
-        "Gravar áudio (indisponível: compilado sem o recurso de áudio)".to_owned()
-    } else {
-        format!("Gravar áudio (transcrição: {})", if deck.engine_label.is_empty() { "…" } else { &deck.engine_label })
-    };
+    let mic_title = dictation::mic_tooltip(visual, audio::AVAILABLE, &deck.engine_label, None);
     if tip(mr, mic_title).clicked() && !busy {
         deck.toggle_mic();
     }
@@ -229,7 +223,7 @@ fn input_field(deck: &mut Deck, ui: &mut Ui, r: Rect, ctx: &egui::Context) {
         }
     }
 
-    let placeholder = if deck.transcribing { "Transcrevendo áudio…" } else { PLACEHOLDER };
+    let placeholder = if deck.is_composer_transcribing() { "Transcrevendo áudio…" } else { PLACEHOLDER };
     let ph_color = if deck.needs_text { theme::RED } else { theme::PLACEHOLDER };
     let before = deck.input.clone();
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r));

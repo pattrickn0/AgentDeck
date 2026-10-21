@@ -18,12 +18,12 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
   falhou; um clique manda o PR ou a falha para um agente.
 - Explorador de arquivos do workspace: clique insere `@arquivo` na mensagem, duplo clique abre no sistema.
 - Anexos por botão, arrastar e soltar ou colar imagem (Ctrl+V).
-- Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU); o áudio é apagado logo após transcrever.
+- Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU) preso a cada aba de CLI (ou pelo compositor); o áudio é apagado logo após transcrever.
 - Agente **Ollama** autônomo com ferramentas no workspace (ler/escrever/editar arquivos, rodar comandos).
 - Som de notificação quando um agente termina.
 
 Atalhos: `Ctrl+T` nova aba · `Ctrl+Tab` / `Ctrl+Shift+Tab` alternar · `Ctrl+B` barra lateral ·
-`Ctrl+L` focar mensagem · `Enter` envia · `Shift+Enter` quebra linha · `Ctrl+/` lista os atalhos.
+`Ctrl+L` focar mensagem · `Ctrl+Shift+M` ditar na aba · `Enter` envia · `Shift+Enter` quebra linha · `Ctrl+/` lista os atalhos.
 Com o terminal focado, `Ctrl+B` e `Ctrl+L` vão para o terminal (tmux, limpar a tela); a opção
 "Atalhos do app acima do terminal" (☰) os devolve ao app.
 

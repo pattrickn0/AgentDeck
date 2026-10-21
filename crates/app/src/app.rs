@@ -634,6 +634,15 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.download = Some((debug_download(item), None));
                 deck.debug_hold_download = true;
             }
+            "mic-recording" => {
+                deck.mic_phase = crate::dictation::MicPhase::Recording(crate::dictation::MicTarget::Tab(1));
+            }
+            "mic-transcribing" => {
+                deck.mic_phase = crate::dictation::MicPhase::Transcribing(crate::dictation::MicTarget::Tab(1));
+            }
+            "mic-opening" => {
+                deck.mic_phase = crate::dictation::MicPhase::Opening(crate::dictation::MicTarget::Tab(1));
+            }
             other => {
                 if let Some(id) = other.strip_prefix("project:") {
                     deck.debug_switch_project = Some(id.to_owned());
@@ -654,7 +663,7 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
     deck.tasks.debug_hold = true;
     deck.tasks.loaded = true;
     deck.tasks.tasks = if item == "tasks-empty" { Vec::new() } else { t::demo_tasks() };
-    // A lista de capturas mostra todas as tarefas: as concluídas ficam abertas.
+    // A lista de capturas mostra todas as tarefas: os grupos recolhidos ficam abertos.
     deck.tasks.collapsed.clear();
     let detail = |id: &str| TasksView::Detail(id.to_owned());
     match item {
