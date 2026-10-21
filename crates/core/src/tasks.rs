@@ -367,6 +367,15 @@ fn history_section(task: &Task) -> String {
     out
 }
 
+/// Os aprendizados dos arquivos que o feedback cita (já prontos, de [`crate::learnings::render_specific`]) para a
+/// devolução ou reprovação, seguidos de uma linha em branco. Vazio quando não há nenhum.
+fn learned_section(learnings: &str) -> String {
+    match learnings.trim() {
+        "" => String::new(),
+        l => format!("O que o projeto já aprendeu sobre os arquivos citados:\n\n{l}\n\n"),
+    }
+}
+
 /// A mensagem que entrega o brief ao agente: o pedido, a memória do projeto (`memory`, de [`memory_block`]) e
 /// as regras da tarefa. `boss` é quem criou a tarefa quando é um agente (as dúvidas vão a ele por
 /// `ask-agent --boss`).
@@ -403,9 +412,9 @@ Comece agora, por conta própria: este brief é a sua ordem de trabalho. Não es
 }
 
 /// A mensagem que devolve a tarefa ao agente com o feedback da revisão.
-pub fn return_message(task: &Task, feedback: &str) -> String {
+pub fn return_message(task: &Task, feedback: &str, learnings: &str) -> String {
     terminal_text(&format!(
-        "[CommandDeck · Tarefa {id}: {title} — ajustes pedidos na revisão]\n\n{feedback}\n\n{history}---\n\
+        "[CommandDeck · Tarefa {id}: {title} — ajustes pedidos na revisão]\n\n{feedback}\n\n{history}{learned}---\n\
 Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
 (entregar por arquivo preserva os acentos).",
         id = task.id,
@@ -414,12 +423,13 @@ Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao te
         branch = task.branch,
         feedback = feedback.trim(),
         history = history_section(task),
+        learned = learned_section(learnings),
     ))
 }
 
 /// A mensagem que devolve ao agente uma tarefa reprovada na validação: o trabalho já foi mesclado na base,
 /// o usuário testou e reprovou. `aligned` = a branch da tarefa já está alinhada com a base.
-pub fn reject_message(task: &Task, feedback: &str, aligned: bool) -> String {
+pub fn reject_message(task: &Task, feedback: &str, aligned: bool, learnings: &str) -> String {
     let align = if aligned {
         String::new()
     } else {
@@ -430,7 +440,7 @@ pub fn reject_message(task: &Task, feedback: &str, aligned: bool) -> String {
     };
     terminal_text(&format!(
         "[CommandDeck · Tarefa {id}: {title} — reprovada na validação]\n\n\
-O seu trabalho anterior já foi mesclado em {base}, mas o usuário testou e reprovou pelo seguinte motivo:\n\n{feedback}\n\n{history}---\n\
+O seu trabalho anterior já foi mesclado em {base}, mas o usuário testou e reprovou pelo seguinte motivo:\n\n{feedback}\n\n{history}{learned}---\n\
 Corrija na mesma pasta ({wt}) e na mesma branch {branch}, com commits pequenos.{align} Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
 (entregar por arquivo preserva os acentos).",
         id = task.id,
@@ -440,6 +450,7 @@ Corrija na mesma pasta ({wt}) e na mesma branch {branch}, com commits pequenos.{
         branch = task.branch,
         feedback = feedback.trim(),
         history = history_section(task),
+        learned = learned_section(learnings),
     ))
 }
 
@@ -807,6 +818,23 @@ impl Core {
         memory_block(&learnings, &self.task_situation(project, task, &cited))
     }
 
+    /// Os aprendizados específicos dos arquivos que o `feedback` novo cita e que o agente ainda não viu (nem no
+    /// pedido, nem nos feedbacks anteriores de `before`), lidos da worktree. O índice e os globais ele já recebeu
+    /// no início da tarefa. Vazio se não há arquivo novo ou aprendizado que case.
+    fn feedback_learnings(&self, before: &Task, feedback: &str) -> String {
+        let brief = if before.brief.trim().is_empty() { before.title.as_str() } else { before.brief.as_str() };
+        let seen: Vec<String> = std::iter::once(brief)
+            .chain(before.feedbacks.iter().map(|f| f.text.as_str()))
+            .flat_map(|text| crate::learnings::paths_in_text(text, &before.worktree))
+            .collect();
+        let fresh: Vec<String> =
+            crate::learnings::paths_in_text(feedback, &before.worktree).into_iter().filter(|p| !seen.contains(p)).collect();
+        if fresh.is_empty() {
+            return String::new();
+        }
+        crate::learnings::render_specific(&crate::learnings::load(&before.worktree), &fresh, crate::learnings::FEEDBACK_BUDGET)
+    }
+
     /// A "situação atual" ([`crate::situation::render`]): as outras tarefas em andamento do projeto, com os
     /// arquivos que a branch delas já mexeu, e os últimos commits da base. Vazia se não há repositório.
     fn task_situation(&self, project: &str, task: &Task, cited: &[String]) -> String {
@@ -817,9 +845,10 @@ impl Core {
             .filter(|t| t.id != task.id && matches!(t.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Validating))
             .map(|t| {
                 // `Validating` já está na base (a branch foi alinhada): não há diff a mostrar.
+                // Em andamento, junta o que já está na branch com o que ainda não foi commitado.
                 let files = match t.status {
                     TaskStatus::Validating => Vec::new(),
-                    _ => changed_files(&repo, &t.base, &t.branch),
+                    _ => union_files(changed_files(&repo, &t.base, &t.branch), worktree_dirty_unlocked(&repo, &t.worktree)),
                 };
                 crate::situation::OtherTask { id: t.id, title: t.title, instance: t.instance, status: t.status.label().to_owned(), files }
             })
@@ -1055,7 +1084,7 @@ impl Core {
         });
         let (before, task) = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         let ident = self.open_task_instance(project, &task);
-        let prompt = return_message(&before, &feedback);
+        let prompt = return_message(&before, &feedback, &self.feedback_learnings(&before, &feedback));
         let boot = self.task_boot_prompt(project, &task, "feedback", "foi devolvida na revisao com ajustes, descritos no arquivo", &prompt);
         self.deliver_to_task(project, &task, ident, prompt, boot, "feedback entregue ao agente");
         Ok(task)
@@ -1323,7 +1352,7 @@ impl Core {
         });
         let (before, task) = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         let ident = self.open_task_instance(project, &task);
-        let prompt = reject_message(&before, &feedback, aligned.is_ok());
+        let prompt = reject_message(&before, &feedback, aligned.is_ok(), &self.feedback_learnings(&before, &feedback));
         let boot = self.task_boot_prompt(project, &task, "feedback", "foi reprovada na validacao, com o motivo no arquivo", &prompt);
         self.deliver_to_task(project, &task, ident, prompt, boot, "motivo da reprovação entregue ao agente");
         Ok(task)
@@ -1499,6 +1528,31 @@ fn worktree_dirty(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
     Some(dirty_paths(&String::from_utf8_lossy(&out.stdout)))
 }
 
+/// Como [`worktree_dirty`], mas pedindo ao git que não tome o `index.lock` da worktree (`--no-optional-locks`):
+/// serve para olhar a pasta de outro agente sem atrapalhar o `git add`/`commit` dele.
+fn worktree_dirty_unlocked(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
+    if !worktree.is_dir() {
+        return None;
+    }
+    let cmd = crate::git::base_command(&repo.git, worktree, &["--no-optional-locks", "status", "--porcelain=v1"]);
+    let out = run(cmd, None, WRITE_TIMEOUT).ok()?;
+    Some(dirty_paths(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Une os arquivos da branch com os sem commit: normalizados (`/`), sem repetição, em ordem alfabética e sem o
+/// `AGENTS.md`, que o app reescreve e não é trabalho do agente.
+fn union_files(committed: Vec<String>, dirty: Option<Vec<String>>) -> Vec<String> {
+    let mut files: Vec<String> = committed
+        .into_iter()
+        .chain(dirty.unwrap_or_default())
+        .map(|f| crate::learnings::normalize_path(&f))
+        .filter(|f| !f.is_empty() && f != "AGENTS.md")
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
 /// A branch existe neste repositório.
 fn branch_exists(repo: &Repo, branch: &str) -> bool {
     repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}")]).is_ok()
@@ -1639,21 +1693,54 @@ mod tests {
     fn feedbacks_come_back_in_the_return_and_reject_messages() {
         let mut t = sample();
         // Primeira devolução: nada anterior.
-        assert!(!return_message(&t, "Faltou o teste.").contains("Feedbacks anteriores"));
+        assert!(!return_message(&t, "Faltou o teste.", "").contains("Feedbacks anteriores"));
         t.add_feedback("revisão", "Faltou o teste.");
         t.add_feedback("validação", "Fecha ao salvar.");
-        let m = return_message(&t, "Agora o log.");
+        let m = return_message(&t, "Agora o log.", "");
         assert!(m.contains("\n\nAgora o log.\n\nFeedbacks anteriores desta tarefa"), "{m}");
         assert!(m.contains("1. [revisão] Faltou o teste.\n2. [validação] Fecha ao salvar.\n\n---"), "{m}");
-        let m = reject_message(&t, "Ainda fecha.", true);
+        let m = reject_message(&t, "Ainda fecha.", true, "");
         assert!(m.contains("Ainda fecha.\n\nFeedbacks anteriores") && m.contains("2. [validação] Fecha ao salvar."), "{m}");
         // Muitos: só os últimos, e cada um cortado.
         for n in 0..10 {
             t.add_feedback("revisão", &format!("pedido {n} {}", "x".repeat(2 * HISTORY_ITEM_CHARS)));
         }
-        let m = return_message(&t, "mais um");
+        let m = return_message(&t, "mais um", "");
         assert!(m.contains("(mais 7 anterior(es) omitido(s))") && m.contains("pedido 9") && !m.contains("pedido 4"), "{m}");
         assert!(m.contains('…') && m.chars().count() < 6 * (HISTORY_ITEM_CHARS + 60) + 800, "{}", m.chars().count());
+    }
+
+    #[test]
+    fn the_learnings_of_the_cited_files_come_before_the_closing_rule() {
+        let learned = "### T (memory/aprendizados/a.md)\ncorpo";
+        let mut t = sample();
+        t.add_feedback("revisão", "Primeiro.");
+        for m in [return_message(&t, "Mexa em x.rs.", learned), reject_message(&t, "Mexa em x.rs.", true, learned)] {
+            let (feedback, history, section, rule) = (
+                m.find("Mexa em x.rs."),
+                m.find("Feedbacks anteriores"),
+                m.find("O que o projeto já aprendeu sobre os arquivos citados:\n\n### T"),
+                m.find("corpo\n\n---\n"),
+            );
+            assert!(feedback < history && history < section && section < rule && rule.is_some(), "{m}");
+        }
+        // Vazio ou só espaços: a mensagem fica idêntica à de sempre.
+        for blank in ["", "  \n "] {
+            assert_eq!(return_message(&t, "x", blank), return_message(&t, "x", ""));
+            assert!(!reject_message(&t, "x", true, blank).contains("sobre os arquivos citados"));
+        }
+    }
+
+    #[test]
+    fn the_situation_files_join_the_branch_and_the_uncommitted_work() {
+        let got = union_files(
+            vec!["b.rs".into(), "a.rs".into(), "AGENTS.md".into()],
+            Some(vec!["c\\d.rs".into(), "a.rs".into(), "AGENTS.md".into()]),
+        );
+        assert_eq!(got, ["a.rs", "b.rs", "c/d.rs"]);
+        // A worktree que o git não respondeu não apaga o que a branch já tem.
+        assert_eq!(union_files(vec!["a.rs".into()], None), ["a.rs"]);
+        assert!(union_files(Vec::new(), Some(Vec::new())).is_empty());
     }
 
     #[test]
@@ -1671,14 +1758,14 @@ mod tests {
 
     #[test]
     fn the_return_message_has_the_feedback() {
-        let m = return_message(&sample(), "  Faltou o teste.  ");
+        let m = return_message(&sample(), "  Faltou o teste.  ", "");
         assert!(m.contains("ajustes pedidos") && m.contains("\n\nFaltou o teste.\n\n"), "{m}");
         assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
     }
 
     #[test]
     fn the_reject_message_says_what_was_merged_and_why_it_failed() {
-        let m = reject_message(&sample(), "  Fecha ao salvar.  ", true);
+        let m = reject_message(&sample(), "  Fecha ao salvar.  ", true, "");
         assert!(m.contains("reprovada na validação") && m.contains("já foi mesclado em main"), "{m}");
         assert!(
             m.contains(
@@ -1693,7 +1780,7 @@ Fecha ao salvar.
         assert!(m.contains("mesma branch tarefa/t3-corrigir-o-login") && m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(!m.contains("alinhar") && !m.contains(''), "{m:?}");
         // Branch que não pôde ser alinhada: o agente recebe o comando para fazê-lo.
-        assert!(reject_message(&sample(), "x", false).contains("rode na sua pasta: git merge main"));
+        assert!(reject_message(&sample(), "x", false, "").contains("rode na sua pasta: git merge main"));
     }
 
     #[test]

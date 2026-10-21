@@ -270,14 +270,22 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
 - **Escrita.** A regra da tarefa manda criar um arquivo em `memory/aprendizados/` na própria branch para algo não óbvio e citá-lo no
   relatório: o aprendizado passa pela mesma revisão e mescla que o código.
 - **Curto prazo: "Situação atual"** (`situation::render`, orçamento de 1 500 caracteres): as **outras tarefas em andamento** do projeto
-  (em andamento, em revisão e aguardando validação; id, título, instância, estado e os arquivos da branch dela via
-  `git diff --name-only base...branch`, com um aviso quando algum deles é citado no pedido desta tarefa) e os **últimos 8 commits da
+  (em andamento, em revisão e aguardando validação; id, título, instância, estado e os arquivos dela: os da branch via
+  `git diff --name-only base...branch` **mais** os ainda sem commit na worktree, lidos por `worktree_dirty_unlocked`
+  (`git --no-optional-locks status`, sem tomar o `index.lock` do outro agente), sem repetição, em ordem alfabética e sem o `AGENTS.md`;
+  em `Validating` a lista é vazia; com um aviso quando algum deles é citado no pedido desta tarefa) e os **últimos 8 commits da
   base** (`git log --oneline -8`). O que não couber é cortado do fim (primeiro os commits). `Core::task_memory` junta as duas
   camadas (`tasks::memory_block`) e entra entre o pedido e as regras; qualquer falha deixa só aquela parte de fora.
 - **Histórico de feedbacks.** `Task::feedbacks` (`Vec<Feedback { at_ms, origin, text }>`, `serde(default)`: tarefas gravadas antes
   continuam abrindo; no máximo 20) guarda cada devolução da revisão e cada reprovação da validação. `return_message` e
   `reject_message` repetem os anteriores (os últimos 5, cada um cortado em 700 caracteres) antes das regras, para o agente não
   repetir o que já lhe foi pedido; o feedback que está sendo entregue não entra na lista.
+- **Aprendizados na devolução e na reprovação.** `Core::feedback_learnings` pega os arquivos que o feedback novo cita
+  (`paths_in_text` na worktree), tira os que já apareciam no pedido (`brief`, ou o título) ou nos feedbacks anteriores e entrega
+  só os aprendizados **específicos** que casam (`learnings::render_specific`, até `FEEDBACK_BUDGET`, 3 000 caracteres; sem índice
+  e sem globais, que o agente já recebeu no início). O texto pronto entra em `return_message`/`reject_message` (que continuam
+  puras, sem ler disco) como "O que o projeto já aprendeu sobre os arquivos citados", depois do histórico; sem nada novo, a
+  mensagem fica como antes.
 - **Fora desta fase** (ver `pendencias.md`, seção 2): resumo de API por arquivo (estilo skeleton), RAG/embeddings, injeção nas abas que
   não são de tarefa e o `ContextProvider` geral.
 

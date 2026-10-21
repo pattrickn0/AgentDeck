@@ -393,3 +393,71 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     );
     assert_eq!(back.feedbacks.len(), 2, "a tarefa devolvida guarda os dois");
 }
+
+#[test]
+fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitted_work() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes", |d| d.initialized);
+    let dir = env.ws.join("memory").join("aprendizados");
+    std::fs::create_dir_all(&dir).expect("dir");
+    for (name, touches, body) in
+        [("global", "[]", "Vale para todo mundo."), ("do-a", "[a.txt]", "Cuidado com o a."), ("do-b", "[b.txt]", "Cuidado com o b.")]
+    {
+        let text = format!("---\ntitulo: Aprendizado {name}\nresumo: Resumo {name}.\ntouches: {touches}\n---\n{body}\n");
+        std::fs::write(dir.join(format!("{name}.md")), text).expect("w");
+    }
+    git(&env.ws, &["add", "-A"]);
+    git(&env.ws, &["commit", "-q", "-m", "docs: aprendizados"]);
+
+    let project = env.project();
+    let tasks_dir = env._tmp.path().join("dados").join("tarefas");
+    fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
+        let spec =
+            commanddeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("usuário".into()), ..Default::default() };
+        let t = env.core.task_create(project, spec).expect("criar");
+        env.core.task_start(project, &t.id).expect("iniciar");
+        t.id
+    }
+    let feedback_file = |id: &str| std::fs::read_to_string(tasks_dir.join(format!("{project}-{id}-feedback.md"))).expect("feedback");
+
+    // A t1 cita só o a.txt e entrega o b.txt.
+    let t1 = create(&env, &project, "Primeira", "Ajuste o a.txt.");
+    env.pump("a t1 na lista", |d| d.tasks.task("t1").is_some());
+    env.agent_commits(&t1, "b.txt", "b\n");
+    env.core.task_done(&project, &t1, "Feito.").expect("done");
+
+    // Devolução citando o a.txt (já no pedido) e o b.txt (novo): só o aprendizado do b.txt vai, sem global nem índice.
+    env.core.task_return(&project, &t1, "Revise a.txt e também b.txt.").expect("return");
+    let first = feedback_file(&t1);
+    assert!(first.contains("O que o projeto já aprendeu sobre os arquivos citados:"), "{first}");
+    assert!(first.contains("Cuidado com o b.") && !first.contains("Cuidado com o a."), "{first}");
+    assert!(!first.contains("Vale para todo mundo.") && !first.contains("Outros aprendizados"), "{first}");
+
+    // O b.txt agora já foi citado num feedback anterior: citar de novo não repete o aprendizado.
+    env.core.task_done(&project, &t1, "Feito de novo.").expect("done 2");
+    env.core.task_return(&project, &t1, "Ainda falta no b.txt.").expect("return 2");
+    let second = feedback_file(&t1);
+    assert!(second.contains("Feedbacks anteriores") && !second.contains("sobre os arquivos citados"), "{second}");
+    assert!(!second.contains("Cuidado com o b."), "{second}");
+
+    // A reprovação segue a mesma regra: depois de mesclar, o a.txt (pedido) e o b.txt (feedback) já foram vistos.
+    env.core.task_done(&project, &t1, "Pronto.").expect("done 3");
+    env.core.task_merge(&project, &t1).expect("merge");
+    env.core.task_reject(&project, &t1, "Não funciona: veja a.txt e b.txt.").expect("reject");
+    let rejected = feedback_file(&t1);
+    assert!(rejected.contains("reprovada na validação") && !rejected.contains("sobre os arquivos citados"), "{rejected}");
+
+    // Uma tarefa nova vê o trabalho ainda sem commit da t2 na situação atual.
+    let t2 = create(&env, &project, "Segunda", "Faça outra coisa.");
+    env.pump("a t2 na lista", |d| d.tasks.task("t2").is_some());
+    let work = env.task(&t2).worktree;
+    std::fs::write(work.join("novo.txt"), "x\n").expect("w");
+    std::fs::write(work.join("a.txt"), "mudou\n").expect("w");
+    let t3 = create(&env, &project, "Terceira", "Nada.");
+    let brief = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t3}-brief.md"))).expect("brief da t3");
+    assert!(brief.contains(&format!("- {t2} \"Segunda\" (claude@{t2}, em andamento): mexe em a.txt, novo.txt")), "{brief}");
+}

@@ -341,6 +341,26 @@ pub fn render(all: &[Learning], paths: &[String], budget: usize) -> String {
     out
 }
 
+/// Orçamento dos aprendizados entregues numa devolução ou reprovação ([`render_specific`]).
+pub const FEEDBACK_BUDGET: usize = 3_000;
+
+/// Só os aprendizados específicos que casam com `paths`, por inteiro, enquanto couberem em `budget` caracteres;
+/// sem índice e sem os globais (o agente já os recebeu no início da tarefa). Vazio se `paths` é vazio ou nada casa.
+pub fn render_specific(all: &[Learning], paths: &[String], budget: usize) -> String {
+    let mut used = 0usize;
+    let mut full: Vec<String> = Vec::new();
+    for l in all.iter().filter(|l| !l.is_global() && l.touches_any(paths)) {
+        let text = l.full_text();
+        let cost = text.chars().count();
+        if used + cost > budget {
+            break;
+        }
+        used += cost;
+        full.push(text);
+    }
+    full.join("\n\n")
+}
+
 /// Resposta de `ask-agent --learn [<caminho>…]`: o que o projeto aprendeu sobre esses arquivos; sem caminhos, os
 /// globais por inteiro e o índice dos específicos.
 pub fn learn_report(all: &[Learning], paths: &[String]) -> String {
@@ -348,9 +368,12 @@ pub fn learn_report(all: &[Learning], paths: &[String]) -> String {
         return format!("O projeto ainda não tem aprendizados ({DIR}/ está vazia ou não existe).");
     }
     if paths.is_empty() {
-        return format!("Aprendizados do projeto:
+        return format!(
+            "Aprendizados do projeto:
 
-{}", render(all, &[], LEARN_BUDGET));
+{}",
+            render(all, &[], LEARN_BUDGET)
+        );
     }
     let specific = all.iter().filter(|l| !l.is_global() && l.touches_any(paths)).count();
     let body = render(all, paths, LEARN_BUDGET);
@@ -520,6 +543,27 @@ mod tests {
         assert!(out.contains("c-ui.md — R c-ui") && !out.contains("b-cli.md — R"), "{out}");
         // Pasta vazia: nada a entregar.
         assert_eq!(render(&[], &[], 100), "");
+    }
+
+    #[test]
+    fn only_the_specific_learnings_that_match_are_rendered() {
+        let big = "x".repeat(300);
+        let all = vec![
+            learning("a-global", &[], "g"),
+            learning("b-cli", &["crates/cli/**"], "c"),
+            learning("c-ui", &["crates/app/**"], "u"),
+            learning("d-cli", &["crates/cli/**"], &big),
+        ];
+        let out = render_specific(&all, &strings(&["crates/cli/a.rs"]), 10_000);
+        // Sem globais, sem os que não casam e sem linha de índice.
+        assert!(out.contains("### T b-cli") && out.contains("### T d-cli"), "{out}");
+        assert!(!out.contains("T a-global") && !out.contains("T c-ui") && !out.contains("- memory/"), "{out}");
+        // O que passa do orçamento fica de fora (e não vira índice).
+        let out = render_specific(&all, &strings(&["crates/cli/a.rs"]), 100);
+        assert!(out.contains("### T b-cli") && !out.contains("T d-cli"), "{out}");
+        // Sem caminhos ou sem nada que case: vazio.
+        assert_eq!(render_specific(&all, &[], 10_000), "");
+        assert_eq!(render_specific(&all, &strings(&["docs/x.md"]), 10_000), "");
     }
 
     #[test]
