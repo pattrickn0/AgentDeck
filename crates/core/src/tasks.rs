@@ -1,14 +1,19 @@
 //! Mesa de tarefas: a unidade de trabalho do AgentDeck.
 //!
 //! Uma **tarefa** tem um pedido (o brief), um agente com modelo, uma worktree + branch próprias, um
-//! relatório, um diff e um ciclo de vida que termina em mesclagem ou descarte:
+//! relatório, um diff e um ciclo de vida que termina em validação (concluída) ou descarte:
 //!
 //! ```text
-//! Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Merged
-//!   │                 ▲                 │ └─discard──▶ Discarded
-//!   │                 └───return────────┘
+//! Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged (concluída)
+//!   │                 ▲                 │ └─discard──▶ Discarded     │ └─discard──▶ Discarded
+//!   │                 ├───return────────┘                            │
+//!   │                 └───────────────reject─────────────────────────┘
 //!   └─ start com erro ─▶ Failed ──(start de novo)──▶ Running
 //! ```
+//!
+//! Mesclar é "o diff parecia certo"; o teste de verdade o usuário faz depois, no app compilado. Por isso
+//! mesclar **não** encerra o agente: a tarefa fica em `Validating` (aba, worktree e branch vivas, a branch
+//! alinhada com a base) até o usuário validar (limpa tudo) ou reprovar (volta ao mesmo agente).
 //!
 //! - **Armazenamento:** `dados/tarefas/<projeto>.json`, gravado por arquivo temporário + `rename`
 //!   (uma gravação por vez), fora do repositório do usuário. O contador (`t1`, `t2`…) nunca reaproveita número.
@@ -69,8 +74,11 @@ pub enum TaskStatus {
     Running,
     /// O agente entregou o relatório: espera a revisão (mesclar, devolver ou descartar).
     Review,
-    /// Mesclada na base; worktree e branch removidas.
+    /// Mesclada na base e testada pelo usuário: concluída; worktree e branch removidas. (O nome `Merged`
+    /// fica no JSON para não quebrar tarefas antigas; para o usuário é "concluída".)
     Merged,
+    /// Mesclada na base, esperando o usuário testar: o agente, a worktree e a branch continuam.
+    Validating,
     /// Descartada; worktree e branch removidas.
     Discarded,
     /// Erro ao iniciar (ou de infraestrutura ao mesclar); a mensagem fica em `Task::error`.
@@ -85,6 +93,7 @@ impl TaskStatus {
             TaskStatus::Running => "running",
             TaskStatus::Review => "review",
             TaskStatus::Merged => "merged",
+            TaskStatus::Validating => "validating",
             TaskStatus::Discarded => "discarded",
             TaskStatus::Failed => "failed",
         }
@@ -96,13 +105,14 @@ impl TaskStatus {
             TaskStatus::Draft => "rascunho",
             TaskStatus::Running => "em andamento",
             TaskStatus::Review => "em revisão",
-            TaskStatus::Merged => "mesclada",
+            TaskStatus::Merged => "concluída",
+            TaskStatus::Validating => "aguardando validação",
             TaskStatus::Discarded => "descartada",
             TaskStatus::Failed => "com erro",
         }
     }
 
-    /// Mesclada ou descartada: não há mais o que fazer com ela.
+    /// Concluída ou descartada: não há mais o que fazer com ela. `Validating` não é final: o agente continua vivo.
     pub fn is_terminal(self) -> bool {
         matches!(self, TaskStatus::Merged | TaskStatus::Discarded)
     }
@@ -141,7 +151,7 @@ pub struct Task {
     pub creator: Option<String>,
     pub created_ms: u64,
     pub started_ms: Option<u64>,
-    /// Quando o relatório chegou (`Review`) ou quando a tarefa terminou (`Merged`/`Discarded`).
+    /// Quando o relatório chegou (`Review`), quando foi mesclada (`Validating`) ou quando a tarefa terminou (`Merged`/`Discarded`).
     pub finished_ms: Option<u64>,
     /// O que o agente entregou em `ask-agent --task done`.
     pub report: Option<String>,
@@ -339,6 +349,28 @@ Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao te
     ))
 }
 
+/// A mensagem que devolve ao agente uma tarefa reprovada na validação: o trabalho já foi mesclado na base,
+/// o usuário testou e reprovou. `aligned` = a branch da tarefa já está alinhada com a base.
+pub fn reject_message(task: &Task, feedback: &str, aligned: bool) -> String {
+    let align = if aligned {
+        String::new()
+    } else {
+        format!(" Atenção: não consegui alinhar a sua branch com {base}; antes de continuar, rode na sua pasta: git merge {base}.", base = task.base)
+    };
+    terminal_text(&format!(
+        "[CommandDeck · Tarefa {id}: {title} — reprovada na validação]\n\n\
+O seu trabalho anterior já foi mesclado em {base}, mas o usuário testou e reprovou pelo seguinte motivo:\n\n{feedback}\n\n---\n\
+Corrija na mesma pasta ({wt}) e na mesma branch {branch}, com commits pequenos.{align} Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
+(entregar por arquivo preserva os acentos).",
+        id = task.id,
+        title = task.title,
+        base = task.base,
+        wt = task.worktree.display(),
+        branch = task.branch,
+        feedback = feedback.trim(),
+    ))
+}
+
 /// Caminhos sujos de um `git status --porcelain=v1` (o destino, nas renomeações).
 pub fn dirty_paths(porcelain: &str) -> Vec<String> {
     porcelain
@@ -493,12 +525,13 @@ impl Core {
         })
     }
 
-    /// A pasta em que o terminal da instância deve abrir: a worktree da tarefa em andamento ou em revisão.
+    /// A pasta em que o terminal da instância deve abrir: a worktree da tarefa em andamento, em revisão ou
+    /// aguardando validação.
     pub(crate) fn task_cwd(&self, project: &str, instance: &str) -> Option<PathBuf> {
         self.with_tasks(project, false, |p| {
             p.tasks
                 .iter()
-                .find(|t| t.instance == instance && matches!(t.status, TaskStatus::Running | TaskStatus::Review))
+                .find(|t| t.instance == instance && matches!(t.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Validating))
                 .map(|t| t.worktree.clone())
         })
     }
@@ -863,9 +896,10 @@ impl Core {
 
     // ---------- Mesclar ----------
 
-    /// Mescla a branch da tarefa na base (`git merge --no-ff`) no repositório principal e limpa tudo:
-    /// fecha a aba, remove a worktree e a branch. Exige `Review` (ou `Failed` com relatório, para tentar de
-    /// novo). Recusa, sem mudar nada, se o repositório principal não está na base ou tem alterações
+    /// Mescla a branch da tarefa na base (`git merge --no-ff`) no repositório principal e põe a tarefa em
+    /// `Validating`: a aba, a worktree e a branch ficam (o usuário ainda vai testar) e a branch da tarefa é
+    /// alinhada com a base já mesclada (`git merge --ff-only`). Exige `Review` (ou `Failed` com relatório,
+    /// para tentar de novo). Recusa, sem mudar nada, se o repositório principal não está na base ou tem alterações
     /// sem commit em arquivos rastreados (o `AGENTS.md`, que o app reescreve, não conta), ou se a worktree
     /// da tarefa tem trabalho sem commit. Em conflito, desfaz a mesclagem (`merge --abort`) e a tarefa continua em
     /// `Review`, com os arquivos em conflito na mensagem.
@@ -983,38 +1017,169 @@ impl Core {
         }
         let head = git_out(&repo, &["rev-parse", "--short", "HEAD"]).map(|s| s.trim().to_owned()).unwrap_or_default();
 
-        // Limpeza: aba, worktree, branch.
-        self.close_task_instance(project, &task);
-        let mut warnings = self.remove_task_worktree(&repo, &task);
-        if let Err(e) = delete_branch(&repo, &task.branch, false) {
-            warnings.push(format!("a branch {} ficou: {e}", task.branch));
-        }
+        // A branch da tarefa passa a ser a própria base: se for reprovada, o agente continua dali.
+        let aligned = align_with_base(&repo, &task);
         let merged = self.update_task(project, &task.id, |t| {
-            t.status = TaskStatus::Merged;
+            t.status = TaskStatus::Validating;
             t.finished_ms = Some(now_ms());
             t.error = None;
-            t.log(format!("mesclada em {} ({head}); worktree e branch removidas", t.base));
-            for w in &warnings {
-                t.log(format!("aviso: {w}"));
+            t.log(format!("mesclada em {} ({head}); aguardando validação", t.base));
+            if let Err(e) = &aligned {
+                t.log(format!("aviso: não consegui alinhar a branch {} com {}: {e}", t.branch, t.base));
             }
             t.clone()
         });
         let task = merged.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         self.emit(CoreEvent::GitChanged);
-        self.feed(FeedEntry::system(format!("Tarefa {} mesclada em {}: {}", task.id, task.base, task.title)).in_project(project));
+        self.feed(FeedEntry::system(format!("Tarefa {} mesclada em {}, aguardando validação: {}", task.id, task.base, task.title)).in_project(project));
         Ok(task)
+    }
+
+    // ---------- Validar ----------
+
+    /// O usuário testou e aprovou: fecha a aba, remove a worktree e a branch e marca a tarefa como
+    /// concluída (`Merged`). Exige `Validating`. Recusa, sem mudar nada, se a worktree tem trabalho sem
+    /// commit ou se a branch tem commits que a base não tem (o agente seguiu trabalhando): reprove a
+    /// tarefa ou descarte-a.
+    pub fn task_validate(&self, project: &str, id: &str) -> Result<Task, TaskError> {
+        let _op = self.inner.tasks.op.lock();
+        let task = self.task_or_404(project, id)?;
+        if task.status != TaskStatus::Validating {
+            return Err(TaskError::Conflict(format!(
+                "a tarefa {} está {}: só se valida uma tarefa aguardando validação",
+                task.id,
+                task.status.label()
+            )));
+        }
+        let repo = self.task_repo(project)?;
+        let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
+        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &expected) {
+            return Err(TaskError::Failed(format!("dados da tarefa {} fora do esperado; não removi nada", task.id)));
+        }
+        let _git = self.inner.git.op.lock();
+        let refuse = |msg: String| -> TaskError {
+            self.update_task(project, &task.id, |t| t.log(format!("validação recusada: {msg}")));
+            TaskError::Conflict(msg)
+        };
+        if let Some(d) = worktree_dirty(&repo, &task.worktree).filter(|d| !d.is_empty()) {
+            return Err(refuse(format!(
+                "a worktree da tarefa tem trabalho sem commit ({}): reprove a tarefa pedindo o commit, ou descarte-a",
+                short_list(&d)
+            )));
+        }
+        if branch_exists(&repo, &task.branch) {
+            let ahead = git_out(&repo, &["rev-list", "--count", &format!("{}..{}", task.base, task.branch)]).map_err(git_error)?;
+            if ahead.trim() != "0" {
+                return Err(refuse(format!(
+                    "a branch {} tem commits que ainda não foram mesclados em \"{}\": reprove a tarefa para o agente entregá-los, ou descarte-a",
+                    task.branch, task.base
+                )));
+            }
+        }
+
+        // Limpeza: aba, worktree, branch (o que ela trouxe já está na base).
+        self.close_task_instance(project, &task);
+        let mut warnings = self.remove_task_worktree(&repo, &task);
+        if let Err(e) = delete_branch(&repo, &task.branch, true) {
+            warnings.push(format!("a branch {} ficou: {e}", task.branch));
+        }
+        let done = self.update_task(project, &task.id, |t| {
+            t.status = TaskStatus::Merged;
+            t.finished_ms = Some(now_ms());
+            t.error = None;
+            t.log("validada; concluída; worktree e branch removidas");
+            for w in &warnings {
+                t.log(format!("aviso: {w}"));
+            }
+            t.clone()
+        });
+        let task = done.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+        self.emit(CoreEvent::GitChanged);
+        self.feed(FeedEntry::system(format!("Tarefa {} concluída: {}", task.id, task.title)).in_project(project));
+        Ok(task)
+    }
+
+    // ---------- Reprovar ----------
+
+    /// O usuário testou e reprovou: `Validating` volta a `Running` na mesma worktree (que já tem o código da
+    /// base) e o motivo é entregue ao mesmo agente (a aba é reaberta se foi fechada). Se a pasta da worktree
+    /// sumiu nesse meio-tempo, é recriada a partir da branch (ou da base). O ciclo segue: done → revisão →
+    /// mesclar → aguardando validação.
+    pub fn task_reject(&self, project: &str, id: &str, feedback: &str) -> Result<Task, TaskError> {
+        let _op = self.inner.tasks.op.lock();
+        let task = self.task_or_404(project, id)?;
+        if task.status != TaskStatus::Validating {
+            return Err(TaskError::Conflict(format!(
+                "a tarefa {} está {}: só se reprova uma tarefa aguardando validação",
+                task.id,
+                task.status.label()
+            )));
+        }
+        let feedback = feedback.trim();
+        if feedback.is_empty() {
+            return Err(TaskError::Invalid("o motivo está vazio: diga o que não funcionou no teste".into()));
+        }
+        if !self.tab_delivery() {
+            return Err(TaskError::Conflict(
+                "as tarefas rodam nas abas dos agentes: ligue \"Abrir abas dos agentes\" nas Configurações".into(),
+            ));
+        }
+        let feedback = cap_text(feedback, MAX_TEXT);
+        let aligned = {
+            let repo = self.task_repo(project)?;
+            let _git = self.inner.git.op.lock();
+            self.restore_worktree(&repo, &task)?;
+            align_with_base(&repo, &task)
+        };
+        let updated = self.update_task(project, &task.id, |t| {
+            t.status = TaskStatus::Running;
+            t.finished_ms = None;
+            t.log("reprovada na validação; devolvida ao agente com o motivo");
+            if let Err(e) = &aligned {
+                t.log(format!("aviso: não consegui alinhar a branch {} com {}: {e}", t.branch, t.base));
+            }
+            t.clone()
+        });
+        let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+        let ident = self.open_task_instance(project, &task);
+        self.deliver_to_task(project, &task, ident, reject_message(&task, &feedback, aligned.is_ok()), "motivo da reprovação entregue ao agente");
+        Ok(task)
+    }
+
+    /// Garante a pasta da worktree: se foi apagada à mão, recria a partir da branch da tarefa (ou da base,
+    /// se a branch também sumiu). Só mexe em `<raiz>/.agentdeck/worktrees`.
+    fn restore_worktree(&self, repo: &Repo, task: &Task) -> Result<(), TaskError> {
+        let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
+        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &expected) {
+            return Err(TaskError::Failed(format!("dados da tarefa {} fora do esperado; não mexi em nada", task.id)));
+        }
+        if task.worktree.is_dir() {
+            return Ok(());
+        }
+        let _ = repo.write(&["worktree", "prune"], None);
+        let path = task.worktree.to_string_lossy().into_owned();
+        let args: Vec<&str> = if branch_exists(repo, &task.branch) {
+            vec!["worktree", "add", &path, &task.branch]
+        } else {
+            vec!["worktree", "add", "-b", &task.branch, &path, &task.base]
+        };
+        run(repo.cmd(&args), None, COMMIT_TIMEOUT)
+            .map(|_| ())
+            .map_err(|e| TaskError::Failed(format!("a pasta da worktree sumiu e não consegui recriá-la: {e}")))
     }
 
     // ---------- Descartar ----------
 
     /// Descarta a tarefa (qualquer estado que não seja final): fecha a aba, remove a worktree (à força,
-    /// mesmo se a pasta já sumiu) e a branch. Funciona sem o repositório: aí só o registro muda.
+    /// mesmo se a pasta já sumiu) e a branch. Funciona sem o repositório: aí só o registro muda. Em
+    /// `Validating` o que já foi mesclado continua na base: descartar não desfaz o merge.
     pub fn task_discard(&self, project: &str, id: &str) -> Result<Task, TaskError> {
         let _op = self.inner.tasks.op.lock();
         let task = self.task_or_404(project, id)?;
         if task.status.is_terminal() {
             return Err(TaskError::Conflict(format!("a tarefa {} já está {}", task.id, task.status.label())));
         }
+        let was_validating = task.status == TaskStatus::Validating;
         let mut warnings = Vec::new();
         if task.started_ms.is_some() {
             self.close_task_instance(project, &task);
@@ -1034,7 +1199,11 @@ impl Core {
         let updated = self.update_task(project, &task.id, |t| {
             t.status = TaskStatus::Discarded;
             t.finished_ms = Some(now_ms());
-            t.log("descartada; worktree e branch removidas");
+            if was_validating {
+                t.log(format!("descartada; worktree e branch removidas (o que já foi mesclado continua em {})", t.base));
+            } else {
+                t.log("descartada; worktree e branch removidas");
+            }
             for w in &warnings {
                 t.log(format!("aviso: {w}"));
             }
@@ -1133,6 +1302,21 @@ fn worktree_dirty(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
     let cmd = crate::git::base_command(&repo.git, worktree, &["status", "--porcelain=v1"]);
     let out = run(cmd, None, WRITE_TIMEOUT).ok()?;
     Some(dirty_paths(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// A branch existe neste repositório.
+fn branch_exists(repo: &Repo, branch: &str) -> bool {
+    repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}")]).is_ok()
+}
+
+/// Põe a branch da tarefa no mesmo commit da base já mesclada, dentro da worktree (`git merge --ff-only`:
+/// a branch é ancestral do commit de mesclagem, então avança sem criar commit). Erro = a mensagem do git.
+fn align_with_base(repo: &Repo, task: &Task) -> Result<(), String> {
+    if !task.worktree.is_dir() {
+        return Err(format!("a pasta {} não existe", task.worktree.display()));
+    }
+    let cmd = crate::git::base_command(&repo.git, &task.worktree, &["merge", "--ff-only", &task.base]);
+    run(cmd, None, COMMIT_TIMEOUT).map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Apaga a branch (se existir). `force` = `-D`.

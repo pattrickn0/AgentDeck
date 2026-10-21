@@ -10,9 +10,10 @@
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
 //!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|"pedido"|--file <arq>
-//!      ask-agent --task list | show <id> | start <id> | merge <id> | discard <id>
+//!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
 //!      ask-agent --task done <id> -|"relatório"|--file <arq>   (só o agente da própria tarefa)
-//!      ask-agent --task return <id> "feedback"|--file <arq>
+//!      ask-agent --task return <id> "feedback"|--file <arq>   (devolve uma tarefa em revisão)
+//!      ask-agent --task reject <id> "motivo"|--file <arq>|-   (reprova uma tarefa aguardando validação)
 //!
 //! `<agente>` é `modelo[@cargo[@nome]]`: `claude`, `claude@dev`, `claude@dev@ana`.
 //!
@@ -39,7 +40,7 @@ use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"   |   ask-agent --task new|list|show|start|merge|discard|done|return ... (tarefas: ask-agent --task)";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --boss \"mensagem\"   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -293,7 +294,7 @@ fn team(bridge: &Bridge) -> Result<Team, String> {
 
 // ---------- Tarefas (`--task`) ----------
 
-const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|\"pedido\"|--file <arq>   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|discard <id>   |   ask-agent --task done <id> -|\"relatório\"|--file <arq>   |   ask-agent --task return <id> \"feedback\"|--file <arq>";
+const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|\"pedido\"|--file <arq>   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|validate|discard <id>   |   ask-agent --task done <id> -|\"relatório\"|--file <arq>   |   ask-agent --task return|reject <id> \"feedback\"|--file <arq>|-";
 
 /// De onde vem um texto longo (pedido, relatório, feedback).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,9 +317,11 @@ enum TaskCmd {
     Show(String),
     Start(String),
     Merge(String),
+    Validate(String),
     Discard(String),
     Done { id: String, report: Body },
     Return { id: String, feedback: Body },
+    Reject { id: String, feedback: Body },
 }
 
 /// `-` sozinho = entrada padrão; `--file <caminho>` = arquivo; texto = linha de comando; nada = `Missing`.
@@ -368,7 +371,7 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
             [] => Ok(TaskCmd::List),
             _ => Err("--task list não recebe argumentos.".into()),
         },
-        "show" | "start" | "merge" | "discard" => {
+        "show" | "start" | "merge" | "validate" | "discard" => {
             if rest.len() > 1 {
                 return Err(format!("--task {sub} recebe só o id da tarefa."));
             }
@@ -377,11 +380,13 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                 "show" => TaskCmd::Show(id),
                 "start" => TaskCmd::Start(id),
                 "merge" => TaskCmd::Merge(id),
+                "validate" => TaskCmd::Validate(id),
                 _ => TaskCmd::Discard(id),
             })
         }
         "done" => Ok(TaskCmd::Done { id: task_id(rest.first())?, report: body_of(&rest[1..])? }),
         "return" => Ok(TaskCmd::Return { id: task_id(rest.first())?, feedback: body_of(&rest[1..])? }),
+        "reject" => Ok(TaskCmd::Reject { id: task_id(rest.first())?, feedback: body_of(&rest[1..])? }),
         "new" => {
             let (mut agent, mut model, mut base, mut start) = (None, None, None, false);
             let mut brief_file: Option<String> = None;
@@ -461,7 +466,8 @@ fn status_label(status: &str) -> &str {
         "draft" => "rascunho",
         "running" => "andamento",
         "review" => "revisão",
-        "merged" => "mesclada",
+        "validating" => "validação",
+        "merged" => "concluída",
         "discarded" => "descartada",
         "failed" => "erro",
         other => other,
@@ -525,6 +531,7 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
         TaskCmd::Show(id) => ("GET", format!("/tasks/{id}"), None),
         TaskCmd::Start(id) => ("POST", format!("/tasks/{id}/start"), Some(json!({}))),
         TaskCmd::Merge(id) => ("POST", format!("/tasks/{id}/merge"), Some(json!({}))),
+        TaskCmd::Validate(id) => ("POST", format!("/tasks/{id}/validate"), Some(json!({}))),
         TaskCmd::Discard(id) => ("POST", format!("/tasks/{id}/discard"), Some(json!({}))),
         TaskCmd::Done { id, report } => match read_body(report, "o relatório") {
             Ok(r) if r.trim().is_empty() => return fail("relatório vazio: diga o que foi feito, os arquivos, os testes e o que falta.", 2),
@@ -534,6 +541,11 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
         TaskCmd::Return { id, feedback } => match read_body(feedback, "o feedback") {
             Ok(f) if f.trim().is_empty() => return fail("feedback vazio: diga o que precisa mudar.", 2),
             Ok(f) => ("POST", format!("/tasks/{id}/return"), Some(json!({ "feedback": f }))),
+            Err(e) => return fail(e, 2),
+        },
+        TaskCmd::Reject { id, feedback } => match read_body(feedback, "o motivo") {
+            Ok(f) if f.trim().is_empty() => return fail("motivo vazio: diga o que não funcionou no teste.", 2),
+            Ok(f) => ("POST", format!("/tasks/{id}/reject"), Some(json!({ "feedback": f }))),
             Err(e) => return fail(e, 2),
         },
         TaskCmd::New { title, brief, agent, model, base, start } => match read_body(brief, "o pedido da tarefa") {
@@ -584,7 +596,11 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
             }
         }
         (_, "start") => println!("Tarefa {id} iniciada: {} trabalha na worktree {}", who(&task), field(&task, "worktree")),
-        (_, "merge") => println!("Tarefa {id} mesclada em {}; worktree e branch removidas.", field(&task, "base")),
+        (_, "merge") => {
+            println!("Tarefa {id} mesclada em {}; aguardando validação (o agente, a worktree e a branch continuam).", field(&task, "base"))
+        }
+        (_, "validate") => println!("Tarefa {id} validada e concluída; worktree e branch removidas."),
+        (_, "reject") => println!("Tarefa {id} reprovada; {} recebeu o motivo e volta a trabalhar.", field(&task, "instance")),
         (_, "discard") => println!("Tarefa {id} descartada; worktree e branch removidas."),
         (_, "done") => println!("Relatório da tarefa {id} entregue; ela está em revisão."),
         (_, "return") => println!("Tarefa {id} devolvida a {} com o seu feedback.", field(&task, "instance")),
@@ -809,6 +825,7 @@ mod tests {
         assert_eq!(task(&["show", "3"]), Ok(TaskCmd::Show("t3".into())));
         assert_eq!(task(&["start", "T4"]), Ok(TaskCmd::Start("t4".into())));
         assert_eq!(task(&["merge", "t5"]), Ok(TaskCmd::Merge("t5".into())));
+        assert_eq!(task(&["validate", "5"]), Ok(TaskCmd::Validate("t5".into())));
         assert_eq!(task(&["discard", "t6"]), Ok(TaskCmd::Discard("t6".into())));
         assert_eq!(task(&["done", "t3", "-"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::Stdin }));
         assert_eq!(task(&["done", "t3"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::Missing }));
@@ -821,6 +838,12 @@ mod tests {
             Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Inline("Faltou o teste.".into()) })
         );
         assert_eq!(task(&["return", "t3", "-"]), Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Stdin }));
+        assert_eq!(
+            task(&["reject", "t3", "Não", "salva."]),
+            Ok(TaskCmd::Reject { id: "t3".into(), feedback: Body::Inline("Não salva.".into()) })
+        );
+        assert_eq!(task(&["reject", "t3", "-"]), Ok(TaskCmd::Reject { id: "t3".into(), feedback: Body::Stdin }));
+        assert_eq!(task(&["reject", "t3", "--file", "m.md"]), Ok(TaskCmd::Reject { id: "t3".into(), feedback: Body::File("m.md".into()) }));
         // Relatório/feedback de um arquivo (mantém os acentos).
         assert_eq!(task(&["done", "t3", "--file", "r.md"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::File("r.md".into()) }));
         assert_eq!(task(&["done", "t3", "--file=r.md"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::File("r.md".into()) }));
@@ -836,6 +859,9 @@ mod tests {
             &["done", "t3", "--file"],
             &["done", "xyz", "-"],
             &["return"],
+            &["reject"],
+            &["validate"],
+            &["validate", "t1", "t2"],
         ] {
             assert!(task(bad).is_err(), "{bad:?}");
         }
