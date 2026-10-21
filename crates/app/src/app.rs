@@ -667,6 +667,17 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
     deck.tasks.collapsed.clear();
     let detail = |id: &str| TasksView::Detail(id.to_owned());
     match item {
+        "tasks-validating" | "tasks-reject" | "tasks-discard-validating" => {
+            deck.tasks.view = detail("t8");
+            match item {
+                "tasks-reject" => {
+                    deck.tasks.return_open = true;
+                    deck.tasks.feedback = "Ao abrir uma tarefa mesclada, o cabeçalho continua mostrando \"em revisão\".".into();
+                }
+                "tasks-discard-validating" => deck.tasks.confirm = Some(Confirm::Discard("t8".into())),
+                _ => {}
+            }
+        }
         "tasks-detail" | "tasks-confirm" | "tasks-return" | "tasks-error" | "tasks-busy" | "tasks-diff" => {
             deck.tasks.view = detail("t4");
             match item {

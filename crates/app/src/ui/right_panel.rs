@@ -95,10 +95,16 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     };
     let gh_badge = deck.github.open_prs_count();
     let gh_tip = deck.github.tab_tooltip();
-    let review = deck.tasks.review_count() as u32;
-    let tasks_tip = if review > 0 { format!("Tarefas · {review} em revisão") } else { "Tarefas".to_string() };
+    let (review, validating) = (deck.tasks.review_count() as u32, deck.tasks.validating_count() as u32);
+    let review_badge = deck.tasks.attention_count() as u32;
+    let tasks_tip = match (review, validating) {
+        (0, 0) => "Tarefas".to_string(),
+        (r, 0) => format!("Tarefas · {r} em revisão"),
+        (0, v) => format!("Tarefas · {v} aguardando validação"),
+        (r, v) => format!("Tarefas · {r} em revisão, {v} aguardando validação"),
+    };
     let tabs = [
-        (RightView::Tarefas, HeadTab { id: "tarefas", icon: Icon::Tasks, tip: &tasks_tip, badge: review }),
+        (RightView::Tarefas, HeadTab { id: "tarefas", icon: Icon::Tasks, tip: &tasks_tip, badge: review_badge }),
         (RightView::Conversa, HeadTab { id: "conversa", icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
         (RightView::Git, HeadTab { id: "git", icon: Icon::GitBranch, tip: &git_tip, badge: git_badge }),
         (RightView::GitHub, HeadTab { id: "github", icon: Icon::GitHub, tip: &gh_tip, badge: gh_badge }),

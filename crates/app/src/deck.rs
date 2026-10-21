@@ -1191,8 +1191,8 @@ impl Deck {
         Ok(self.tabs[idx].label.clone())
     }
 
-    /// Mostra a aba do agente de uma tarefa. Se ela foi fechada e a tarefa ainda está em andamento ou
-    /// em revisão, registra a instância de novo e abre a aba: o terminal abre na worktree da tarefa
+    /// Mostra a aba do agente de uma tarefa. Se ela foi fechada e a tarefa ainda está em andamento, em
+    /// revisão ou aguardando validação, registra a instância de novo e abre a aba: o terminal abre na worktree da tarefa
     /// (`spawn_spec_for`) com o modelo da tarefa. Devolve o motivo da recusa.
     pub fn open_task_tab(&mut self, task: &commanddeck_core::Task) -> Result<(), String> {
         use commanddeck_core::TaskStatus;
@@ -1201,7 +1201,7 @@ impl Deck {
             self.activate(i);
             return Ok(());
         }
-        if !matches!(task.status, TaskStatus::Running | TaskStatus::Review) {
+        if !matches!(task.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Validating) {
             return Err(format!("A tarefa {} está {}: não há agente rodando.", task.id, task.status.label()));
         }
         let Some(ident) = Ident::parse(&task.instance).filter(|i| self.agents.knows(&i.kind)) else {
