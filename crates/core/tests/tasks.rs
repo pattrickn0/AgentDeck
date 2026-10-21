@@ -1,5 +1,5 @@
 //! Mesa de tarefas com o git real (pula com aviso se o `git` não estiver instalado): criar, iniciar,
-//! relatório, devolver, mesclar, descartar e persistência. A ponte fica em `tasks_bridge.rs`.
+//! relatório, devolver, mesclar, validar, reprovar, descartar e persistência. A ponte fica em `tasks_bridge.rs`.
 use std::process::Command;
 
 use commanddeck_core::util::same_path;
@@ -282,7 +282,7 @@ fn return_sends_the_feedback_and_goes_back_to_running() {
 }
 
 #[test]
-fn merge_makes_a_no_ff_commit_and_cleans_up() {
+fn merge_makes_a_no_ff_commit_and_waits_for_validation() {
     need_git!();
     let env = start();
     let core = &env.core;
@@ -295,7 +295,7 @@ fn merge_makes_a_no_ff_commit_and_cleans_up() {
     let head_before = git(&env.ws, &["rev-parse", "HEAD"]);
 
     let merged = core.task_merge(&env.project, &t.id).expect("merge");
-    assert_eq!(merged.status, TaskStatus::Merged);
+    assert_eq!(merged.status, TaskStatus::Validating);
     assert!(merged.finished_ms.is_some() && merged.error.is_none());
     // Commit de mesclagem (dois pais) com a mensagem da tarefa, na base.
     assert_eq!(git(&env.ws, &["log", "-1", "--format=%s"]).trim(), "Merge tarefa t1: Mesclar isto");
@@ -303,21 +303,259 @@ fn merge_makes_a_no_ff_commit_and_cleans_up() {
     assert_eq!(git(&env.ws, &["symbolic-ref", "--short", "HEAD"]).trim(), "main");
     assert!(env.ws.join("feature.txt").is_file());
     assert_ne!(git(&env.ws, &["rev-parse", "HEAD"]), head_before);
+    // Nada foi limpo: worktree, pasta, branch e instância seguem; a aba não foi fechada.
+    assert!(t.worktree.is_dir());
+    assert_eq!(worktree_count(&env.ws), 2);
+    assert_eq!(branches(&env.ws), ["main", t.branch.as_str()]);
+    assert!(!events(&env).iter().any(|e| matches!(e, CoreEvent::CloseInstance { .. })));
+    assert!(core.project_instance_ids(&env.project).contains(&"claude@t1".to_owned()));
+    assert_eq!(core.task_of_instance(&env.project, "claude@t1").map(|t| t.status), Some(TaskStatus::Validating));
+    assert!(
+        merged.events.iter().any(|e| e.text.contains("mesclada em main") && e.text.contains("aguardando validação")),
+        "{:?}",
+        merged.events
+    );
+    // A branch da tarefa foi alinhada com a base (fast-forward): o mesmo commit, e a worktree já tem o merge.
+    assert_eq!(git(&t.worktree, &["rev-parse", "HEAD"]), git(&env.ws, &["rev-parse", "main"]));
+    assert_eq!(git(&env.ws, &["rev-parse", &t.branch]), git(&env.ws, &["rev-parse", "main"]));
+    // O terminal de uma aba reaberta continua na worktree.
+    let ident = Ident::parse("claude@t1").expect("id");
+    assert!(same_path(&core.spawn_spec_for(&env.project, &ident).expect("spec").cwd, &t.worktree));
+    // A alteração do AGENTS.md seguiu intacta no diretório de trabalho.
+    assert!(std::fs::read_to_string(&agents_md).expect("AGENTS.md").contains("reescrito pelo app"));
+    // Mesclar de novo não vale; descartar vale (e deixa o merge na base).
+    assert!(matches!(core.task_merge(&env.project, &t.id), Err(TaskError::Conflict(_))));
+    core.shutdown();
+}
+
+#[test]
+fn validate_cleans_up_and_completes() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Validar isto", "feature.txt");
+    // Antes de mesclar não se valida.
+    match core.task_validate(&env.project, &t.id) {
+        Err(TaskError::Conflict(m)) => assert!(m.contains("só se valida uma tarefa aguardando validação"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    core.task_merge(&env.project, &t.id).expect("merge");
+    events(&env);
+
+    let done = core.task_validate(&env.project, &t.id).expect("validate");
+    assert_eq!(done.status, TaskStatus::Merged);
+    assert!(done.finished_ms.is_some() && done.error.is_none());
+    assert!(done.events.iter().any(|e| e.text.contains("validada")), "{:?}", done.events);
     // Limpeza: worktree, pasta e branch sumiram; a aba foi fechada e a instância esquecida.
     assert!(!t.worktree.exists());
     assert_eq!(worktree_count(&env.ws), 1);
     assert_eq!(branches(&env.ws), ["main"]);
     assert!(events(&env).iter().any(|e| matches!(e, CoreEvent::CloseInstance { id, .. } if id == "claude@t1")));
     assert!(!core.project_instance_ids(&env.project).contains(&"claude@t1".to_owned()));
-    assert!(merged.events.iter().any(|e| e.text.contains("mesclada em main")), "{:?}", merged.events);
-    // A alteração do AGENTS.md seguiu intacta no diretório de trabalho.
-    assert!(std::fs::read_to_string(&agents_md).expect("AGENTS.md").contains("reescrito pelo app"));
-    // Depois de mesclada, nada mais vale; o terminal de uma nova aba com esse id volta à pasta do projeto.
-    assert!(matches!(core.task_merge(&env.project, &t.id), Err(TaskError::Conflict(_))));
-    assert!(matches!(core.task_discard(&env.project, &t.id), Err(TaskError::Conflict(_))));
+    assert!(env.ws.join("feature.txt").is_file(), "o merge continua na base");
+    // Concluída é final: nada mais vale, e o terminal de uma nova aba com esse id volta à pasta do projeto.
+    for r in [core.task_validate(&env.project, &t.id), core.task_merge(&env.project, &t.id), core.task_discard(&env.project, &t.id)] {
+        assert!(matches!(r, Err(TaskError::Conflict(_))), "{r:?}");
+    }
+    assert!(matches!(core.task_reject(&env.project, &t.id, "x"), Err(TaskError::Conflict(_))));
+    assert!(core.task_of_instance(&env.project, "claude@t1").is_none());
     let ident = Ident::parse("claude@t1").expect("id");
     assert!(same_path(&core.spawn_spec_for(&env.project, &ident).expect("spec").cwd, &env.ws));
     core.shutdown();
+}
+
+#[test]
+fn validate_is_refused_while_there_is_unmerged_work() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Trabalho solto", "feature.txt");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    let refused = |expect: &str| match core.task_validate(&env.project, &t.id) {
+        Err(TaskError::Conflict(m)) => assert!(m.contains(expect), "{m}"),
+        other => panic!("esperava recusa com \"{expect}\", veio {other:?}"),
+    };
+    // O agente seguiu mexendo: arquivo sem commit...
+    std::fs::write(t.worktree.join("solto.txt"), "x").expect("w");
+    refused("sem commit (solto.txt)");
+    // ...e commit que a base não tem.
+    git(&t.worktree, &["add", "-A"]);
+    git(&t.worktree, &["commit", "-q", "-m", "feat: a mais"]);
+    refused("commits que ainda não foram mesclados");
+    let now = core.task(&env.project, &t.id).expect("task");
+    assert_eq!(now.status, TaskStatus::Validating, "{now:?}");
+    assert!(now.worktree.is_dir() && branches(&env.ws).contains(&now.branch), "nada foi removido");
+    assert!(now.events.iter().any(|e| e.text.contains("validação recusada")), "{:?}", now.events);
+    // Reprovar entrega esse trabalho de volta ao ciclo normal.
+    core.task_reject(&env.project, &t.id, "Entregue o que falta.").expect("reject");
+    core.task_done(&env.project, &t.id, "Agora sim.").expect("done");
+    core.task_merge(&env.project, &t.id).expect("merge 2");
+    assert_eq!(core.task_validate(&env.project, &t.id).expect("validate").status, TaskStatus::Merged);
+    assert!(env.ws.join("solto.txt").is_file());
+    core.shutdown();
+}
+
+#[test]
+fn reject_returns_the_task_to_the_same_agent_in_the_same_worktree() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Reprovar isto", "feature.txt");
+    // Fora de aguardando validação não se reprova.
+    assert!(matches!(core.task_reject(&env.project, &t.id, "x"), Err(TaskError::Conflict(_))), "em revisão");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    let base_head = git(&env.ws, &["rev-parse", "main"]);
+    assert!(matches!(core.task_reject(&env.project, &t.id, " \n "), Err(TaskError::Invalid(_))), "sem motivo");
+    assert_eq!(core.task(&env.project, &t.id).map(|t| t.status), Some(TaskStatus::Validating), "a recusa não muda nada");
+    events(&env);
+
+    let back = core.task_reject(&env.project, &t.id, "  Ao salvar, o app fecha.  ").expect("reject");
+    assert_eq!((back.status, back.finished_ms), (TaskStatus::Running, None));
+    assert_eq!(back.worktree, t.worktree);
+    assert!(back.events.iter().any(|e| e.text.contains("reprovada")), "{:?}", back.events);
+    // O motivo chega ao mesmo agente, dizendo que o trabalho já foi mesclado.
+    let evs = events(&env);
+    let sent = deliveries(&evs);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let (to, prompt) = &sent[0];
+    assert_eq!(to, "claude@t1");
+    for needle in [
+        "reprovada na validação",
+        "já foi mesclado em main",
+        "reprovou pelo seguinte motivo",
+        "Ao salvar, o app fecha.",
+        "mesma branch tarefa/t1-reprovar-isto",
+        "ask-agent --task done t1 --file",
+    ] {
+        assert!(prompt.contains(needle), "{needle}: {prompt}");
+    }
+    assert!(!prompt.contains("alinhar"), "a branch estava alinhada: {prompt}");
+    // A worktree segue a mesma, com o código da base (o merge incluso), sem tocar na base.
+    assert!(t.worktree.join("feature.txt").is_file());
+    assert_eq!(git(&env.ws, &["rev-parse", "main"]), base_head);
+    // O ciclo segue: corrige, entrega, revisão, mesclar, aguardando validação, validar.
+    commit_file(&t.worktree, "correcao.txt", "ok\n", "fix: o app não fecha");
+    let again = core.task_done(&env.project, &t.id, "Corrigido.").expect("done");
+    assert_eq!(again.status, TaskStatus::Review);
+    assert!(again.diff_stat.as_deref().is_some_and(|s| s.contains("correcao.txt") && !s.contains("feature.txt")), "{:?}", again.diff_stat);
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge 2").status, TaskStatus::Validating);
+    assert!(env.ws.join("correcao.txt").is_file());
+    assert_eq!(core.task_validate(&env.project, &t.id).expect("validate").status, TaskStatus::Merged);
+    assert!(!t.worktree.exists());
+    core.shutdown();
+}
+
+#[test]
+fn reject_reopens_the_tab_and_recreates_a_missing_worktree() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Aba fechada", "feature.txt");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    // O usuário fechou a aba (o core esqueceu a instância) e a pasta foi apagada à mão.
+    core.close_instance(&env.project, &t.instance);
+    std::fs::remove_dir_all(&t.worktree).expect("rm");
+    events(&env);
+
+    let back = core.task_reject(&env.project, &t.id, "Não funciona.").expect("reject");
+    assert_eq!(back.status, TaskStatus::Running);
+    // A pasta voltou, na branch da tarefa e com o código da base; a entrega pede a abertura da aba (`create`).
+    assert!(t.worktree.is_dir() && t.worktree.join("feature.txt").is_file());
+    assert_eq!(git(&t.worktree, &["symbolic-ref", "--short", "HEAD"]).trim(), t.branch);
+    assert!(core.project_instance_ids(&env.project).contains(&"claude@t1".to_owned()), "a instância voltou ao core");
+    let evs = events(&env);
+    assert!(evs.iter().any(|e| matches!(e, CoreEvent::Deliver(d) if d.request == 0 && d.create && d.ident.id() == "claude@t1")), "{evs:?}");
+    assert!(same_path(&core.spawn_spec_for(&env.project, &Ident::parse("claude@t1").expect("id")).expect("spec").cwd, &t.worktree));
+    // Sem a pasta E sem a branch (apagadas por fora): recria a partir da base.
+    commit_file(&t.worktree, "x.txt", "x\n", "feat: x");
+    core.task_done(&env.project, &t.id, "De novo.").expect("done");
+    core.task_merge(&env.project, &t.id).expect("merge 2");
+    git(&env.ws, &["worktree", "remove", "--force", &t.worktree.to_string_lossy()]);
+    git(&env.ws, &["branch", "-D", &t.branch]);
+    core.task_reject(&env.project, &t.id, "Ainda não.").expect("reject 2");
+    assert!(t.worktree.join("x.txt").is_file());
+    assert_eq!(git(&env.ws, &["rev-parse", &t.branch]), git(&env.ws, &["rev-parse", "main"]));
+    core.shutdown();
+}
+
+#[test]
+fn reject_needs_the_agent_tabs() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Sem abas", "feature.txt");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    core.update_config(|c| c.auto_open_agent_tabs = false);
+    match core.task_reject(&env.project, &t.id, "x") {
+        Err(TaskError::Conflict(m)) => assert!(m.contains("Abrir abas dos agentes"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(core.task(&env.project, &t.id).map(|t| t.status), Some(TaskStatus::Validating));
+    core.shutdown();
+}
+
+#[test]
+fn a_task_awaiting_validation_can_be_discarded_and_the_merge_stays() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Descartar depois", "feature.txt");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    events(&env);
+    let gone = core.task_discard(&env.project, &t.id).expect("discard");
+    assert_eq!((gone.status, gone.worktree.exists()), (TaskStatus::Discarded, false));
+    assert_eq!(branches(&env.ws), ["main"]);
+    assert_eq!(worktree_count(&env.ws), 1);
+    assert!(gone.events.iter().any(|e| e.text.contains("o que já foi mesclado continua em main")), "{:?}", gone.events);
+    assert!(events(&env).iter().any(|e| matches!(e, CoreEvent::CloseInstance { id, .. } if id == "claude@t1")));
+    assert!(env.ws.join("feature.txt").is_file(), "descartar não desfaz o merge");
+    core.shutdown();
+}
+
+#[test]
+fn a_task_awaiting_validation_survives_a_restart() {
+    need_git!();
+    let env = start();
+    let t = task_in_review(&env, "Reinício", "feature.txt");
+    env.core.task_merge(&env.project, &t.id).expect("merge");
+    let text = std::fs::read_to_string(env.root.join("dados").join("tarefas").join(format!("{}.json", env.project))).expect("json");
+    assert!(text.contains("\"status\": \"validating\""), "{text}");
+    let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
+    let Env { _tmp, core: first, rx, .. } = env;
+    first.shutdown();
+    drop((first, rx));
+    let (core, _rx) = start_core(&root, config, true);
+    let (env_project, back) = (project.as_str(), core.task(&project, "t1").expect("t1"));
+    assert_eq!(back.status, TaskStatus::Validating);
+    // O agente continua sendo o da tarefa e o terminal abre na worktree.
+    assert_eq!(core.task_of_instance(env_project, "claude@t1").map(|t| t.id), Some("t1".to_owned()));
+    assert!(same_path(&core.spawn_spec_for(env_project, &Ident::parse("claude@t1").expect("id")).expect("spec").cwd, &t.worktree));
+    assert_eq!(core.task_validate(env_project, "t1").expect("validate").status, TaskStatus::Merged);
+    core.shutdown();
+    drop(_tmp);
+}
+
+#[test]
+fn a_failed_merge_keeps_the_agent_terminal_in_the_worktree_after_a_restart() {
+    need_git!();
+    let env = start();
+    let t = task_in_review(&env, "Mesclagem falhou", "feature.txt");
+    // Simula o erro de infraestrutura na mesclagem: o arquivo grava `Failed` com o relatório já entregue.
+    let file = env.root.join("dados").join("tarefas").join(format!("{}.json", env.project));
+    let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
+    let Env { _tmp, core: first, rx, .. } = env;
+    first.shutdown();
+    drop((first, rx));
+    let text = std::fs::read_to_string(&file).expect("json");
+    assert!(text.contains("\"status\": \"review\""), "{text}");
+    std::fs::write(&file, text.replace("\"status\": \"review\"", "\"status\": \"failed\"")).expect("w");
+    let (core, _rx) = start_core(&root, config, true);
+    let failed = core.task(&project, "t1").expect("t1");
+    assert_eq!((failed.status, failed.report.is_some()), (TaskStatus::Failed, true));
+    let ident = Ident::parse("claude@t1").expect("id");
+    assert!(same_path(&core.spawn_spec_for(&project, &ident).expect("spec").cwd, &t.worktree), "na worktree, não no repositório principal");
+    core.shutdown();
+    drop(_tmp);
 }
 
 #[test]
@@ -356,7 +594,7 @@ fn merge_is_refused_until_the_main_worktree_is_ready() {
 
     // Tudo pronto: agora vai (a recusa não deixou rastro).
     assert!(t.events.len() < core.task(&env.project, &t.id).expect("task").events.len(), "as recusas ficam no histórico");
-    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Merged);
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
     core.shutdown();
 }
 
@@ -412,7 +650,7 @@ fn a_conflicting_merge_is_aborted_and_the_task_stays_in_review() {
     git(&t.worktree, &["add", "-A"]);
     git(&t.worktree, &["commit", "-q", "-m", "merge: resolve"]);
     core.task_done(&env.project, &t.id, "Resolvido.").expect("done 2");
-    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Merged);
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
     assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "resolvido\ndois\n");
     core.shutdown();
 }
@@ -493,7 +731,15 @@ fn tasks_survive_a_restart_and_numbers_are_never_reused() {
     let text = std::fs::read_to_string(&file).expect("arquivo das tarefas");
     assert!(text.contains("\"id\": \"t1\"") && text.contains("\"status\": \"discarded\"") && text.contains("\"next\": 3"), "{text}");
     assert!(!ws.join("tarefas").exists());
-    assert_eq!(std::fs::read_dir(file.parent().expect("pasta")).expect("dir").count(), 1, "sem arquivos temporários sobrando");
+    let names: Vec<String> = std::fs::read_dir(file.parent().expect("pasta"))
+        .expect("dir")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.ends_with(".tmp")) && names.iter().any(|n| n == &format!("{project}.json")),
+        "sem arquivos temporários sobrando: {names:?}"
+    );
 
     // Reinicia o app (mesma pasta de dados e mesma configuração).
     let Env { _tmp, core: first, rx, .. } = env;
@@ -521,4 +767,129 @@ fn removing_a_project_keeps_its_tasks_file() {
     assert!(file.is_file(), "o arquivo das tarefas não some com o projeto");
     assert!(std::fs::read_to_string(&file).expect("ler").contains(&t.id));
     env.core.shutdown();
+}
+
+/// O `Deliver` de tarefa (request 0) mais recente: `(instância, prompt, boot)`.
+fn last_task_delivery(evs: &[CoreEvent]) -> (String, String, Option<String>) {
+    evs.iter()
+        .rev()
+        .find_map(|e| match e {
+            CoreEvent::Deliver(d) if d.request == 0 => Some((d.ident.id(), d.prompt.clone(), d.boot.clone())),
+            _ => None,
+        })
+        .expect("nenhuma entrega de tarefa")
+}
+
+#[test]
+fn the_brief_goes_to_a_file_and_the_boot_line_is_short_ascii() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = core.task_create(&env.project, spec("Corrigir o botão de Ação")).expect("create");
+    events(&env);
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    let (to, prompt, boot) = last_task_delivery(&events(&env));
+    assert_eq!(to, "claude@t1");
+    // O texto completo (com acentos e quebras de linha) fica num arquivo da pasta de dados...
+    let file = env.root.join("dados").join("tarefas").join(format!("{}-t1-brief.md", env.project));
+    assert_eq!(std::fs::read_to_string(&file).expect("brief gravado"), prompt);
+    assert!(prompt.contains("Corrigir o botão de Ação") && prompt.contains('\n'));
+    // ...e a linha de comando leva só uma frase curta, em ASCII, de uma linha, que aponta para ele.
+    let line = boot.expect("claude aceita prompt inicial");
+    assert!(line.is_ascii() && !line.contains(['\n', '"']) && line.len() < 400, "{line}");
+    assert!(line.starts_with("Tarefa t1: ") && line.contains("comece agora"), "{line}");
+    assert!(line.contains(&file.to_string_lossy().into_owned()), "{line} / {}", file.display());
+    // Devolver e reprovar também: o arquivo é o do feedback (sobrescrito a cada vez).
+    core.task_done(&env.project, &t.id, "Feito.").expect("done");
+    core.task_return(&env.project, &t.id, "Falta o teste de açaí.").expect("return");
+    let (_, prompt, boot) = last_task_delivery(&events(&env));
+    let feedback = env.root.join("dados").join("tarefas").join(format!("{}-t1-feedback.md", env.project));
+    assert_eq!(std::fs::read_to_string(&feedback).expect("feedback gravado"), prompt);
+    assert!(prompt.contains("Falta o teste de açaí."));
+    let line = boot.expect("boot da devolução");
+    assert!(line.is_ascii() && line.contains("devolvida") && line.contains("-t1-feedback.md"), "{line}");
+    commit_file(&t.worktree, "x.txt", "x\n", "feat: x");
+    core.task_done(&env.project, &t.id, "De novo.").expect("done 2");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    core.task_reject(&env.project, &t.id, "Quebrou ao salvar.").expect("reject");
+    let (_, prompt, boot) = last_task_delivery(&events(&env));
+    assert_eq!(std::fs::read_to_string(&feedback).expect("feedback regravado"), prompt);
+    assert!(prompt.contains("reprovada na validação") && prompt.contains("Quebrou ao salvar."));
+    assert!(boot.is_some_and(|l| l.is_ascii() && l.contains("reprovada")));
+    core.shutdown();
+}
+
+#[test]
+fn a_cli_without_an_initial_prompt_keeps_the_typed_delivery() {
+    need_git!();
+    let env = start();
+    let t = env.core.task_create(&env.project, TaskSpec { kind: "aider".into(), ..spec("Com aider") }).expect("create");
+    events(&env);
+    env.core.task_start(&env.project, &t.id).expect("start");
+    let (to, prompt, boot) = last_task_delivery(&events(&env));
+    assert_eq!(to, "aider@t1");
+    assert_eq!(boot, None, "aider não tem prompt inicial: o brief é digitado");
+    assert!(prompt.contains("Faça: Com aider"));
+    assert!(!env.root.join("dados").join("tarefas").join(format!("{}-t1-brief.md", env.project)).exists());
+    env.core.shutdown();
+}
+
+#[test]
+fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    install_fake_agent(&env.root, "agy");
+    install_fake_agent(&env.root, "opencode");
+    install_fake_agent(&env.root, "codex");
+    let line = "Tarefa t7: o pedido completo esta no arquivo C:/Users/Ana Bia/dados/tarefas/p1-t7-brief.md. Leia o arquivo e comece agora.";
+    let spec_of = |id: &str, boot: bool| {
+        let ident = Ident::parse(id).expect("id");
+        core.register_instance(&env.project, id);
+        if boot {
+            core.set_boot_prompt(&env.project, id, line.to_owned());
+        }
+        core.spawn_spec_for(&env.project, &ident).expect("spec")
+    };
+
+    // Claude: posicional, ANTES das opções (`--add-dir` e `--allowedTools` aceitam vários valores e o engoliriam).
+    let claude = spec_of("claude@t7", true);
+    assert_eq!(claude.args[0], line, "{:?}", claude.args);
+    assert_eq!(claude.args[1], "--append-system-prompt");
+    assert!(claude.args.iter().filter(|a| a.as_str() == line).count() == 1);
+    // Antigravity: `-i "<prompt>"` (--prompt-interactive), no fim.
+    let agy = spec_of("antigravity@t7", true);
+    assert_eq!(agy.args[agy.args.len() - 2..], ["-i".to_owned(), line.to_owned()], "{:?}", agy.args);
+    // OpenCode (TUI): `--prompt "<prompt>"` no fim (com modelo, o `--standalone` vem antes).
+    let opencode = spec_of("opencode@t7", true);
+    assert_eq!(opencode.args[opencode.args.len() - 2..], ["--prompt".to_owned(), line.to_owned()], "{:?}", opencode.args);
+    // Os demais ignoram: mesmo com um prompt guardado, o spec não muda e o prompt não vaza para outra abertura.
+    let codex = spec_of("codex@t7", true);
+    assert!(!codex.args.iter().any(|a| a.contains("Tarefa t7")), "{:?}", codex.args);
+    let aider = spec_of("aider@t7", true);
+    assert!(!aider.args.iter().any(|a| a.contains("Tarefa t7")), "{:?}", aider.args);
+
+    // Uma vez só: a abertura seguinte (reiniciar a aba, reabrir o app) sobe sem o prompt.
+    for id in ["claude@t7", "antigravity@t7", "opencode@t7"] {
+        let again = spec_of(id, false);
+        assert!(!again.args.iter().any(|a| a == line || a == "-i" || a == "--prompt"), "{id}: {:?}", again.args);
+    }
+    // Sem prompt guardado, o spec do Claude começa como sempre.
+    assert_eq!(spec_of("claude@t8", false).args[0], "--append-system-prompt");
+    assert_eq!(core.take_boot_prompt(&env.project, "claude@t7"), None);
+    core.shutdown();
+}
+
+#[test]
+fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
+    use commanddeck_core::tasks::boot_line;
+    let t = commanddeck_core::Task { id: "t3".into(), ..commanddeck_core::Task::default() };
+    let ok = boot_line(&t, "o pedido esta no arquivo", std::path::Path::new("C:/dados/tarefas/p1-t3-brief.md")).expect("ascii");
+    assert!(
+        ok.starts_with("Tarefa t3: o pedido esta no arquivo. Leia o arquivo C:/dados") && ok.ends_with("sem esperar confirmacao."),
+        "{ok}"
+    );
+    // Caminho com acento (ou aspas): a linha de comando de um shim `.cmd` não o carregaria inteiro; cai na entrega digitada.
+    assert_eq!(boot_line(&t, "x", std::path::Path::new("C:/Usuários/Ana/brief.md")), None);
+    assert_eq!(boot_line(&t, "x", std::path::Path::new("C:/a\"b/brief.md")), None);
 }

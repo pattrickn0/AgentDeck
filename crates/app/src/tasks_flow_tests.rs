@@ -1,6 +1,6 @@
 //! O `Deck` da mesa de tarefas de ponta a ponta, com o core e o git de verdade (pula com aviso sem o
-//! `git`): criar e iniciar pelo formulário, o relatório chegando, mesclar com confirmação, devolver e
-//! descartar. Sem janela: o quadro é só `before_frame` (eventos do core e respostas das threads).
+//! `git`): criar e iniciar pelo formulário, o relatório chegando, mesclar com confirmação, devolver,
+//! validar, reprovar e descartar. Sem janela: o quadro é só `before_frame` (eventos do core e respostas das threads).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -201,19 +201,52 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     env.core.task_done(&env.project(), "t1", "Agora tem teste.").expect("done 2");
     env.pump("a segunda revisão", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
 
-    // Mesclar pede confirmação; o "sim" mescla, fecha a aba e o arquivo entra na base.
+    // Mesclar pede confirmação; o "sim" mescla e a tarefa fica aguardando validação: a aba segue aberta.
     env.deck.tasks_act("t1", TaskAct::Merge);
     assert_eq!(env.deck.tasks.confirm, Some(Confirm::Merge("t1".into())));
     assert_eq!(env.task("t1").status, TaskStatus::Review, "nada mudou antes do sim");
     env.deck.tasks_confirm_accepted();
     assert!(env.deck.tasks.confirm.is_none() && env.deck.tasks.busy.is_some());
     env.pump("a mesclagem", |d| d.tasks.busy.is_none());
-    assert_eq!(env.task("t1").status, TaskStatus::Merged);
+    assert_eq!(env.task("t1").status, TaskStatus::Validating);
     assert!(env.deck.tasks.notice.is_none());
     assert!(env.ws.join("novo.txt").exists(), "a mesclagem trouxe o arquivo para a base");
+    assert!(env.tab_open("t1") && env.task("t1").worktree.is_dir(), "o agente continua vivo até validar");
+    assert_eq!((env.deck.tasks.review_count(), env.deck.tasks.validating_count(), env.deck.tasks.attention_count()), (0, 1, 1));
+    assert_eq!(actions_for(&env.task("t1"), true), [TaskAct::Validate, TaskAct::Reject, TaskAct::GoToTab, TaskAct::Discard]);
+
+    // Reprovar: abre o mesmo formulário de feedback; enviar volta a tarefa ao agente, na mesma worktree.
+    env.deck.tasks_act("t1", TaskAct::Reject);
+    assert!(env.deck.tasks.return_open);
+    env.deck.tasks_send_return("t1");
+    assert!(env.deck.tasks.busy.is_none(), "sem motivo não envia");
+    env.deck.tasks.feedback = "  O arquivo novo não aparece no app.  ".into();
+    env.deck.tasks_send_return("t1");
+    assert!(env.deck.tasks.busy.is_some());
+    env.pump("a reprovação", |d| d.tasks.busy.is_none());
+    let back = env.task("t1");
+    assert_eq!(back.status, TaskStatus::Running);
+    assert!(back.worktree.is_dir() && env.tab_open("t1"));
+    assert!(!env.deck.tasks.return_open && env.deck.tasks.feedback.is_empty());
+    assert_eq!(env.deck.tasks.attention_count(), 0);
+    // O agente corrige e o ciclo segue: revisão, mesclar, aguardando validação.
+    env.agent_commits("t1", "corrigido.txt", "ok\n");
+    env.core.task_done(&env.project(), "t1", "Corrigi.").expect("done 3");
+    env.pump("a terceira revisão", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
+    env.deck.tasks_act("t1", TaskAct::Merge);
+    env.deck.tasks_confirm_accepted();
+    env.pump("a segunda mesclagem", |d| d.tasks.busy.is_none());
+    assert_eq!(env.task("t1").status, TaskStatus::Validating);
+
+    // Validar não pergunta: conclui, fecha a aba e apaga a worktree.
+    env.deck.tasks_act("t1", TaskAct::Validate);
+    assert!(env.deck.tasks.confirm.is_none() && env.deck.tasks.busy.is_some());
+    env.pump("a validação", |d| d.tasks.busy.is_none());
+    assert_eq!(env.task("t1").status, TaskStatus::Merged);
+    assert!(env.deck.tasks.notice.is_none() && !env.task("t1").worktree.exists());
     env.pump("a aba fechar", |d| d.tasks.task("t1").is_some_and(|t| !d.tasks_tab_open(t)));
     assert!(actions_for(&env.task("t1"), false).is_empty());
-    assert_eq!(env.deck.tasks.review_count(), 0);
+    assert_eq!(env.deck.tasks.attention_count(), 0);
 }
 
 #[test]
@@ -288,4 +321,7 @@ fn reopening_the_tab_of_a_running_task_registers_the_instance_again() {
     assert!(env.deck.open_task_tab(&merged).is_ok(), "a aba aberta só é ativada");
     env.deck.close_tab(env.deck.active.expect("ativa"));
     assert!(env.deck.open_task_tab(&merged).is_err());
+    // Aguardando validação o agente continua vivo: a aba fechada pode ser reaberta.
+    let validating = Task { status: TaskStatus::Validating, ..env.task(&id) };
+    assert!(env.deck.open_task_tab(&validating).is_ok() && env.tab_open(&id));
 }

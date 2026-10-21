@@ -125,7 +125,7 @@ agente, com `request: 0`). Para ver sem rede: `COMMANDDECK_DEBUG_UI=github-demo`
 `cargo test -p commanddeck-core --test github -- --ignored --nocapture`.
 
 **Mexer nas tarefas.** O modelo e o ciclo de vida ficam em `crates/core/src/tasks.rs` (`impl Core`: `task_create`, `task_start`,
-`task_done`, `task_return`, `task_merge`, `task_discard`; o git usa o executor seguro de `git.rs`); as rotas e as permissões, em
+`task_done`, `task_return`, `task_merge`, `task_validate`, `task_reject`, `task_discard`; o git usa o executor seguro de `git.rs`); as rotas e as permissões, em
 `bridge.rs` (`tasks_route`, `task_permission`); o comando, em `crates/cli/src/bin/ask-agent.rs` (`parse_task`, com testes). Textos
 puros (slug, branch, mensagens ao agente, `exclude`) têm testes no próprio `tasks.rs`; o fluxo com o git real, em
 `tests/tasks.rs` e `tests/tasks_bridge.rs` (cenário em `tests/support/tasks_env.rs`; a identidade do git vem de um

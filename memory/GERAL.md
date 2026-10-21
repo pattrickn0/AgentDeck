@@ -225,9 +225,10 @@ ela dura.
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
 | `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
-| `ask-agent --task start <id>` / `merge <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e limpa / descarta e limpa |
+| `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e a deixa **aguardando validação** (o agente e a worktree continuam) / conclui a tarefa aguardando validação e limpa / descarta e limpa |
 | `ask-agent --task done <id> -\|"relatório"\|--file <arq>` | o agente da tarefa entrega o relatório (pela entrada padrão, como argumento ou de um arquivo) e a põe em revisão |
 | `ask-agent --task return <id> "feedback"` | devolve a tarefa em revisão ao agente com ajustes a fazer (o feedback também vem de um arquivo: `--file <arq>`) |
+| `ask-agent --task reject <id> "motivo"\|--file <arq>\|-` | reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, dizendo que o trabalho já foi mesclado e o que falhou no teste |
 | `ask-agent --signal busy\|idle` | uso interno dos hooks (sai sempre com 0) |
 
 ---

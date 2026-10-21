@@ -80,6 +80,18 @@ pub fn cli_args(kind: &str, model: &str) -> Vec<String> {
     }
 }
 
+/// Como o CLI recebe um prompt inicial interativo ao abrir (o texto não é digitado no terminal, então não
+/// depende de a TUI já estar pronta). `None` = o CLI não tem a opção: a entrega continua digitada.
+/// `Some(None)` = argumento posicional (Claude: `claude "<prompt>"`); `Some(Some(flag))` = `flag "<prompt>"`.
+pub fn boot_prompt_flag(kind: &str) -> Option<Option<&'static str>> {
+    match kind {
+        "claude" => Some(None),
+        "antigravity" => Some(Some("-i")),
+        "opencode" => Some(Some("--prompt")),
+        _ => None,
+    }
+}
+
 /// Como [`cli_args`], para a execução headless: o `opencode run` tem `-m provedor/modelo[#variante]`.
 pub fn headless_args(kind: &str, model: &str) -> Vec<String> {
     match kind {
