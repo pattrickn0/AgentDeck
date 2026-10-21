@@ -934,6 +934,30 @@ mod tests {
     }
 
     #[test]
+    fn the_real_list_with_two_discarded_keeps_them_out_of_the_merged_group() {
+        // O caso que apareceu na revisão: t8 e t4 descartadas convivendo com t1 e t2 mescladas.
+        let tasks = vec![
+            task("t1", TaskStatus::Merged, 100),
+            task("t2", TaskStatus::Merged, 200),
+            task("t3", TaskStatus::Review, 300),
+            task("t4", TaskStatus::Discarded, 400),
+            task("t5", TaskStatus::Running, 500),
+            task("t6", TaskStatus::Review, 600),
+            task("t7", TaskStatus::Running, 700),
+            task("t8", TaskStatus::Discarded, 800),
+        ];
+        let groups = group_tasks(&tasks);
+        let ids = |g: Group| -> Vec<&str> {
+            groups.iter().find(|(group, _)| *group == g).map(|(_, l)| l.iter().map(|t| t.id.as_str()).collect()).unwrap_or_default()
+        };
+        assert_eq!(ids(Group::Done), ["t2", "t1"]);
+        assert_eq!(ids(Group::Cancelled), ["t8", "t4"]);
+        // Nenhuma descartada pode sobrar em "Concluídas".
+        let done = groups.iter().find(|(g, _)| *g == Group::Done).expect("concluídas");
+        assert!(done.1.iter().all(|t| t.status == TaskStatus::Merged));
+    }
+
+    #[test]
     fn ties_in_activity_put_the_newest_number_first() {
         let tasks = vec![task("t2", TaskStatus::Draft, 5), task("t10", TaskStatus::Draft, 5), task("t9", TaskStatus::Draft, 5)];
         let ids: Vec<&str> = group_tasks(&tasks)[0].1.iter().map(|t| t.id.as_str()).collect();
