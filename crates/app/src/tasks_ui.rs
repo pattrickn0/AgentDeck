@@ -21,21 +21,25 @@ use crate::deck::{AttachTarget, Deck, UiMsg};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Group {
     Review,
+    /// Mescladas, esperando o usuário testar.
+    Validating,
     Running,
     Draft,
     Failed,
-    /// Mescladas.
+    /// Validadas (concluídas).
     Done,
     /// Descartadas (canceladas): ficam à parte das concluídas.
     Cancelled,
 }
 
 impl Group {
-    pub const ORDER: [Group; 6] = [Group::Review, Group::Running, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
+    pub const ORDER: [Group; 7] =
+        [Group::Review, Group::Validating, Group::Running, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
 
     pub fn title(self) -> &'static str {
         match self {
             Group::Review => "Em revisão",
+            Group::Validating => "Aguardando validação",
             Group::Running => "Em andamento",
             Group::Draft => "Rascunho",
             Group::Failed => "Falhou",
@@ -47,6 +51,7 @@ impl Group {
     pub fn of(status: TaskStatus) -> Group {
         match status {
             TaskStatus::Review => Group::Review,
+            TaskStatus::Validating => Group::Validating,
             TaskStatus::Running => Group::Running,
             TaskStatus::Draft => Group::Draft,
             TaskStatus::Failed => Group::Failed,
@@ -62,7 +67,8 @@ pub fn status_name(status: TaskStatus) -> &'static str {
         TaskStatus::Draft => "Rascunho",
         TaskStatus::Running => "Em andamento",
         TaskStatus::Review => "Em revisão",
-        TaskStatus::Merged => "Mesclada",
+        TaskStatus::Validating => "Aguardando validação",
+        TaskStatus::Merged => "Concluída",
         TaskStatus::Discarded => "Descartada",
         TaskStatus::Failed => "Falhou",
     }
@@ -90,9 +96,14 @@ fn task_number(id: &str) -> u64 {
     id.trim_start_matches('t').parse().unwrap_or(0)
 }
 
-/// Quantas tarefas esperam a revisão do humano (o número do ícone da aba).
+/// Quantas tarefas esperam a revisão do humano.
 pub fn review_count(tasks: &[Task]) -> usize {
     tasks.iter().filter(|t| t.status == TaskStatus::Review).count()
+}
+
+/// Quantas tarefas, já mescladas, esperam o teste do humano.
+pub fn validating_count(tasks: &[Task]) -> usize {
+    tasks.iter().filter(|t| t.status == TaskStatus::Validating).count()
 }
 
 /// O resumo do `git diff --stat`: arquivos, linhas novas e linhas removidas.
@@ -191,7 +202,8 @@ pub fn status_age(task: &Task, now_ms: u64) -> String {
         TaskStatus::Running => ("iniciada", task.started_ms.unwrap_or(task.created_ms)),
         TaskStatus::Review => ("pronta", task.finished_ms.unwrap_or_else(|| last_activity(task))),
         TaskStatus::Failed => ("falhou", last_activity(task)),
-        TaskStatus::Merged => ("mesclada", task.finished_ms.unwrap_or_else(|| last_activity(task))),
+        TaskStatus::Validating => ("mesclada", task.finished_ms.unwrap_or_else(|| last_activity(task))),
+        TaskStatus::Merged => ("concluída", task.finished_ms.unwrap_or_else(|| last_activity(task))),
         TaskStatus::Discarded => ("descartada", task.finished_ms.unwrap_or_else(|| last_activity(task))),
     };
     let age = age_text(now_ms, at);
@@ -214,6 +226,8 @@ pub enum TaskAct {
     Retry,
     Merge,
     Return,
+    Validate,
+    Reject,
     GoToTab,
     ReopenTab,
     Discard,
@@ -226,6 +240,8 @@ impl TaskAct {
             TaskAct::Retry => "Tentar de novo".to_owned(),
             TaskAct::Merge => format!("Mesclar em {}", task.base),
             TaskAct::Return => "Devolver".to_owned(),
+            TaskAct::Validate => "Validar".to_owned(),
+            TaskAct::Reject => "Reprovar".to_owned(),
             TaskAct::GoToTab => "Ir para a aba".to_owned(),
             TaskAct::ReopenTab => "Reabrir aba".to_owned(),
             TaskAct::Discard => "Descartar".to_owned(),
@@ -236,8 +252,10 @@ impl TaskAct {
         match self {
             TaskAct::Start => "Cria a worktree e a branch, abre o agente e entrega o pedido",
             TaskAct::Retry => "Tenta de novo o que falhou (iniciar, ou mesclar se o agente já entregou o relatório)",
-            TaskAct::Merge => "Mescla a branch da tarefa na base (git merge --no-ff) e remove a worktree",
+            TaskAct::Merge => "Mescla a branch da tarefa na base (git merge --no-ff); o agente e a worktree ficam até você validar",
             TaskAct::Return => "Devolve a tarefa ao agente com um pedido de ajustes",
+            TaskAct::Validate => "Você testou e está certo: conclui a tarefa e apaga a worktree e a branch",
+            TaskAct::Reject => "Você testou e reprovou: devolve a tarefa ao mesmo agente, com o motivo",
             TaskAct::GoToTab => "Mostra o terminal do agente desta tarefa",
             TaskAct::ReopenTab => "Abre de novo a aba do agente, no terminal da worktree da tarefa",
             TaskAct::Discard => "Descarta a tarefa: apaga a worktree e a branch (sem mesclar)",
@@ -246,7 +264,7 @@ impl TaskAct {
 
     /// Ação principal (botão cheio).
     pub fn is_primary(self) -> bool {
-        matches!(self, TaskAct::Start | TaskAct::Retry | TaskAct::Merge)
+        matches!(self, TaskAct::Start | TaskAct::Retry | TaskAct::Merge | TaskAct::Validate)
     }
 
     /// Pede confirmação dentro do painel antes de rodar.
@@ -267,6 +285,7 @@ pub fn actions_for(task: &Task, tab_open: bool) -> Vec<TaskAct> {
         TaskStatus::Draft => vec![TaskAct::Start, TaskAct::Discard],
         TaskStatus::Running => vec![tab, TaskAct::Discard],
         TaskStatus::Review => vec![TaskAct::Merge, TaskAct::Return, tab, TaskAct::Discard],
+        TaskStatus::Validating => vec![TaskAct::Validate, TaskAct::Reject, tab, TaskAct::Discard],
         TaskStatus::Failed => vec![TaskAct::Retry, TaskAct::Discard],
         TaskStatus::Merged | TaskStatus::Discarded => Vec::new(),
     }
@@ -420,7 +439,7 @@ pub struct TasksUi {
     pub closed_sections: HashSet<Section>,
     pub diff: Option<OpenDiff>,
     pub confirm: Option<Confirm>,
-    /// O campo de feedback do "Devolver" está aberto.
+    /// O campo de feedback do "Devolver" (em revisão) ou do "Reprovar" (aguardando validação) está aberto.
     pub return_open: bool,
     pub feedback: String,
     pub busy: Option<Busy>,
@@ -465,6 +484,15 @@ impl TasksUi {
     pub fn review_count(&self) -> usize {
         review_count(&self.tasks)
     }
+
+    pub fn validating_count(&self) -> usize {
+        validating_count(&self.tasks)
+    }
+
+    /// O número do selo do ícone da aba: o que espera uma decisão do humano (revisar ou validar).
+    pub fn attention_count(&self) -> usize {
+        self.review_count() + self.validating_count()
+    }
 }
 
 /// O que uma operação do ciclo de vida faz.
@@ -472,8 +500,10 @@ impl TasksUi {
 pub enum TaskOp {
     Start,
     Merge,
+    Validate,
     Discard,
     Return(String),
+    Reject(String),
 }
 
 impl TaskOp {
@@ -481,8 +511,10 @@ impl TaskOp {
         match self {
             TaskOp::Start => "Iniciando…",
             TaskOp::Merge => "Mesclando…",
+            TaskOp::Validate => "Validando…",
             TaskOp::Discard => "Descartando…",
             TaskOp::Return(_) => "Devolvendo…",
+            TaskOp::Reject(_) => "Reprovando…",
         }
     }
 }
@@ -663,8 +695,10 @@ impl Deck {
             let result = Box::new(match &op {
                 TaskOp::Start => core.task_start(&project, &id),
                 TaskOp::Merge => core.task_merge(&project, &id),
+                TaskOp::Validate => core.task_validate(&project, &id),
                 TaskOp::Discard => core.task_discard(&project, &id),
                 TaskOp::Return(feedback) => core.task_return(&project, &id, feedback),
+                TaskOp::Reject(feedback) => core.task_reject(&project, &id, feedback),
             });
             Some(UiMsg::Tasks(generation, TaskReply::Done { id, op, result }))
         });
@@ -682,8 +716,9 @@ impl Deck {
             TaskAct::Start => self.tasks_run(id.to_owned(), TaskOp::Start),
             TaskAct::Retry => self.tasks_run(id.to_owned(), TaskOp::Start),
             TaskAct::Merge => self.tasks_run(id.to_owned(), TaskOp::Merge),
+            TaskAct::Validate => self.tasks_run(id.to_owned(), TaskOp::Validate),
             TaskAct::Discard => self.tasks_run(id.to_owned(), TaskOp::Discard),
-            TaskAct::Return => {
+            TaskAct::Return | TaskAct::Reject => {
                 self.tasks.return_open = !self.tasks.return_open;
             }
             TaskAct::GoToTab | TaskAct::ReopenTab => {
@@ -703,13 +738,15 @@ impl Deck {
         }
     }
 
-    /// Envia o feedback do "Devolver".
+    /// Envia o feedback do formulário: "Devolver" (em revisão) ou "Reprovar" (aguardando validação).
     pub fn tasks_send_return(&mut self, id: &str) {
         let feedback = self.tasks.feedback.trim().to_owned();
+        let Some(task) = self.tasks.task(id) else { return };
         if feedback.is_empty() {
             return;
         }
-        self.tasks_run(id.to_owned(), TaskOp::Return(feedback));
+        let op = if task.status == TaskStatus::Validating { TaskOp::Reject(feedback) } else { TaskOp::Return(feedback) };
+        self.tasks_run(id.to_owned(), op);
     }
 
     /// Abre o diff completo da tarefa no lugar do detalhe.
@@ -779,12 +816,12 @@ impl Deck {
                     Ok(task) => {
                         upsert(&mut self.tasks.tasks, task);
                         self.tasks.notice = None;
-                        if matches!(op, TaskOp::Return(_)) {
+                        if matches!(op, TaskOp::Return(_) | TaskOp::Reject(_)) {
                             self.tasks.return_open = false;
                             self.tasks.feedback.clear();
                         }
-                        // A branch some com a mesclagem ou o descarte: o diff aberto não vale mais.
-                        if matches!(op, TaskOp::Merge | TaskOp::Discard) {
+                        // Mesclada, a branch é a própria base; validada ou descartada, ela some: o diff aberto não vale mais.
+                        if matches!(op, TaskOp::Merge | TaskOp::Validate | TaskOp::Discard) {
                             self.tasks.diff = None;
                         }
                     }
@@ -883,11 +920,29 @@ pub fn demo_tasks() -> Vec<Task> {
         ],
         ..base("t3", "Trocar o parser de markdown do relatório", TaskStatus::Failed, "opencode", Some("opencode/glm-5.3"))
     };
+    let validating = Task {
+        brief: "Mostrar o estado da mesclagem no cabeçalho do detalhe.".into(),
+        created_ms: now - 3 * 60 * min,
+        started_ms: Some(now - 170 * min),
+        finished_ms: Some(now - 8 * min),
+        report: Some(
+            "Cabeçalho do detalhe mostra a mesclagem.\n\nArquivos: crates/app/src/ui/tasks.rs.\n\nTestes: cargo test --workspace passa."
+                .into(),
+        ),
+        diff_stat: Some(" crates/app/src/ui/tasks.rs | 18 ++++++++++++++----\n 1 file changed, 14 insertions(+), 4 deletions(-)\n".into()),
+        events: vec![
+            ev(180, "criada"),
+            ev(170, "iniciada: worktree … na branch tarefa/t8"),
+            ev(20, "relatório recebido; em revisão"),
+            ev(8, "mesclada em dev (a1b2c3d); aguardando validação"),
+        ],
+        ..base("t8", "Estado da mesclagem no cabeçalho do detalhe", TaskStatus::Validating, "claude", Some("sonnet"))
+    };
     let merged = Task {
         created_ms: now - 26 * 60 * min,
         started_ms: Some(now - 26 * 60 * min),
         finished_ms: Some(now - 24 * 60 * min),
-        events: vec![ev(24 * 60, "mesclada em dev (a1b2c3d); worktree e branch removidas")],
+        events: vec![ev(24 * 60, "validada; concluída; worktree e branch removidas")],
         ..base("t2", "Rotas /tasks na ponte", TaskStatus::Merged, "claude", Some("opus"))
     };
     let discarded = Task {
@@ -896,7 +951,7 @@ pub fn demo_tasks() -> Vec<Task> {
         events: vec![ev(48 * 60, "descartada; worktree e branch removidas")],
         ..base("t1", "Experimento com cache de galleys", TaskStatus::Discarded, "claude", None)
     };
-    vec![discarded, merged, failed, review, running, draft, review2]
+    vec![discarded, merged, failed, review, running, draft, review2, validating]
 }
 
 #[cfg(test)]
@@ -935,6 +990,39 @@ mod tests {
         assert_eq!(group_tasks(&tasks[..1]).len(), 1);
         assert!(group_tasks(&[]).is_empty());
         assert_eq!(review_count(&tasks), 2);
+        assert_eq!(validating_count(&tasks), 0);
+    }
+
+    #[test]
+    fn awaiting_validation_sits_between_review_and_the_rest() {
+        let tasks = vec![
+            task("t1", TaskStatus::Merged, 100),
+            task("t2", TaskStatus::Validating, 300),
+            task("t3", TaskStatus::Review, 200),
+            task("t4", TaskStatus::Running, 400),
+            task("t5", TaskStatus::Validating, 500),
+        ];
+        let shape: Vec<(Group, Vec<&str>)> =
+            group_tasks(&tasks).iter().map(|(g, l)| (*g, l.iter().map(|t| t.id.as_str()).collect())).collect();
+        assert_eq!(
+            shape,
+            vec![
+                (Group::Review, vec!["t3"]),
+                (Group::Validating, vec!["t5", "t2"]),
+                (Group::Running, vec!["t4"]),
+                (Group::Done, vec!["t1"]),
+            ]
+        );
+        assert_eq!(Group::Validating.title(), "Aguardando validação");
+        assert_eq!(Group::of(TaskStatus::Validating), Group::Validating);
+        assert_eq!(status_name(TaskStatus::Validating), "Aguardando validação");
+        // Concluída é o nome da tarefa validada (o estado gravado continua `Merged`).
+        assert_eq!(status_name(TaskStatus::Merged), "Concluída");
+        // Os grupos que esperam o humano contam no selo; as validadas não.
+        let ui = TasksUi { tasks, ..TasksUi::default() };
+        assert_eq!((ui.review_count(), ui.validating_count(), ui.attention_count()), (1, 2, 3));
+        // Grupo "Aguardando validação" começa aberto: é trabalho para você.
+        assert!(!ui.collapsed.contains(&Group::Validating));
     }
 
     #[test]
@@ -1038,6 +1126,11 @@ mod tests {
         t.created_ms = now - 3_600_000;
         t.events = vec![TaskEvent { at_ms: now - 120_000, text: "erro".into() }];
         assert_eq!(status_age(&t, now), "falhou há 2 min");
+        t.status = TaskStatus::Validating;
+        t.finished_ms = Some(now - 5 * 60_000);
+        assert_eq!(status_age(&t, now), "mesclada há 5 min");
+        t.status = TaskStatus::Merged;
+        assert_eq!(status_age(&t, now), "concluída há 5 min");
     }
 
     #[test]
@@ -1057,11 +1150,24 @@ mod tests {
         assert_eq!(actions_for(&t(TaskStatus::Running, false), true), [TaskAct::GoToTab, TaskAct::Discard]);
         assert_eq!(actions_for(&t(TaskStatus::Running, false), false), [TaskAct::ReopenTab, TaskAct::Discard]);
         assert_eq!(actions_for(&t(TaskStatus::Review, true), true), [TaskAct::Merge, TaskAct::Return, TaskAct::GoToTab, TaskAct::Discard]);
+        assert_eq!(
+            actions_for(&t(TaskStatus::Validating, true), true),
+            [TaskAct::Validate, TaskAct::Reject, TaskAct::GoToTab, TaskAct::Discard]
+        );
+        assert_eq!(
+            actions_for(&t(TaskStatus::Validating, true), false),
+            [TaskAct::Validate, TaskAct::Reject, TaskAct::ReopenTab, TaskAct::Discard]
+        );
         assert_eq!(actions_for(&t(TaskStatus::Failed, false), false), [TaskAct::Retry, TaskAct::Discard]);
         assert!(actions_for(&t(TaskStatus::Merged, true), false).is_empty());
         assert!(actions_for(&t(TaskStatus::Discarded, false), false).is_empty());
         // Só a ação principal vem cheia; mesclar mostra a base.
         assert!(TaskAct::Merge.is_primary() && !TaskAct::Discard.is_primary() && !TaskAct::Return.is_primary());
+        assert!(TaskAct::Validate.is_primary() && !TaskAct::Reject.is_primary());
+        assert_eq!(
+            (TaskAct::Validate.label(&t(TaskStatus::Validating, true)), TaskAct::Reject.label(&t(TaskStatus::Validating, true))),
+            ("Validar".to_owned(), "Reprovar".to_owned())
+        );
         assert_eq!(TaskAct::Merge.label(&t(TaskStatus::Review, true)), "Mesclar em dev");
     }
 
@@ -1070,6 +1176,7 @@ mod tests {
         let review = Task { status: TaskStatus::Review, report: Some("x".into()), ..Task::default() };
         assert!(TaskAct::Discard.needs_confirm(&review) && TaskAct::Merge.needs_confirm(&review));
         assert!(!TaskAct::Return.needs_confirm(&review) && !TaskAct::Start.needs_confirm(&review));
+        assert!(!TaskAct::Validate.needs_confirm(&review) && !TaskAct::Reject.needs_confirm(&review));
         assert!(!TaskAct::GoToTab.needs_confirm(&review) && !TaskAct::ReopenTab.needs_confirm(&review));
         // Tentar de novo: iniciar não pergunta; mesclar (já tem relatório) pergunta.
         let failed_start = Task { status: TaskStatus::Failed, ..Task::default() };
@@ -1087,6 +1194,7 @@ mod tests {
         assert!(!can_show_diff(&t(TaskStatus::Failed, false)));
         assert!(!can_show_diff(&t(TaskStatus::Draft, false)));
         assert!(!can_show_diff(&t(TaskStatus::Merged, true)));
+        assert!(!can_show_diff(&t(TaskStatus::Validating, true)), "mesclada: a branch é a própria base, o diff é vazio");
         assert!(!can_show_diff(&t(TaskStatus::Discarded, true)));
     }
 
@@ -1127,9 +1235,15 @@ mod tests {
     #[test]
     fn the_demo_has_one_task_per_status() {
         let tasks = demo_tasks();
-        for status in
-            [TaskStatus::Draft, TaskStatus::Running, TaskStatus::Review, TaskStatus::Merged, TaskStatus::Discarded, TaskStatus::Failed]
-        {
+        for status in [
+            TaskStatus::Draft,
+            TaskStatus::Running,
+            TaskStatus::Review,
+            TaskStatus::Validating,
+            TaskStatus::Merged,
+            TaskStatus::Discarded,
+            TaskStatus::Failed,
+        ] {
             assert!(tasks.iter().any(|t| t.status == status), "{status:?}");
         }
     }

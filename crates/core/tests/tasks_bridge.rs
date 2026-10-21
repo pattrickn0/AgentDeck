@@ -78,8 +78,20 @@ fn the_bridge_serves_the_whole_lifecycle_with_the_master_token() {
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("running")));
     assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "Com teste." })).0, 200);
     let (st, b) = call("POST", "/tasks/t1/merge", json!({}));
+    assert_eq!((st, b["task"]["status"].as_str()), (200, Some("validating")), "{b}");
+    assert!(env.ws.join("ponte.txt").is_file() && t1.worktree.is_dir(), "mesclar não limpa");
+    // Reprovar: sem motivo é erro de uso; com motivo volta a andamento. Depois, entrega, mescla e valida.
+    assert_eq!(call("POST", "/tasks/t1/reject", json!({})).0, 400);
+    let (st, b) = call("POST", "/tasks/t1/reject", json!({ "feedback": "Não abre no app." }));
+    assert_eq!((st, b["task"]["status"].as_str()), (200, Some("running")), "{b}");
+    assert_eq!(call("POST", "/tasks/t1/validate", json!({})).0, 409, "validar só a partir de aguardando validação");
+    assert_eq!(call("POST", "/tasks/t1/reject", json!({ "feedback": "x" })).0, 409);
+    commit_file(&t1.worktree, "ponte2.txt", "ok\n", "fix: abre no app");
+    assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "Corrigido." })).0, 200);
+    assert_eq!(call("POST", "/tasks/t1/merge", json!({})).0, 200);
+    let (st, b) = call("POST", "/tasks/t1/validate", json!({}));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("merged")), "{b}");
-    assert!(env.ws.join("ponte.txt").is_file());
+    assert!(!t1.worktree.exists());
     let (st, b) = call("POST", "/tasks/t2/discard", json!({}));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("discarded")));
     assert_eq!(call("POST", "/tasks/t2/discard", json!({})).0, 409);
@@ -113,6 +125,8 @@ fn a_task_agent_cannot_merge_discard_or_create() {
         ("/tasks/t1/start", json!({})),
         ("/tasks/t1/return", json!({ "feedback": "x" })),
         ("/tasks/t1/merge", json!({})),
+        ("/tasks/t1/validate", json!({})),
+        ("/tasks/t1/reject", json!({ "feedback": "x" })),
         ("/tasks/t1/discard", json!({})),
         ("/tasks/t2/discard", json!({})),
         ("/tasks/t2/merge", json!({})),
@@ -138,8 +152,14 @@ fn a_task_agent_cannot_merge_discard_or_create() {
     commit_file(Path::new(t1["worktree"].as_str().expect("worktree")), "feito.txt", "ok\n", "feat: feito");
     let (st, b) = call(&agent, "POST", "/tasks/t1/done", json!({ "report": "Feito por mim." }));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("review")), "{b}");
-    // Quem criou (o orquestrador, não o agente da tarefa) mescla e descarta.
+    // Quem criou (o orquestrador, não o agente da tarefa) mescla, valida e descarta.
     let (st, b) = call(&boss, "POST", "/tasks/t1/merge", json!({}));
+    assert_eq!((st, b["task"]["status"].as_str()), (200, Some("validating")), "{b}");
+    // Aguardando validação o agente segue vivo (o token vale), mas continua sem poder validar nem reprovar.
+    assert_eq!(call(&agent, "GET", "/tasks", json!(null)).0, 200);
+    assert_eq!(call(&agent, "POST", "/tasks/t1/validate", json!({})).0, 403);
+    assert_eq!(call(&agent, "POST", "/tasks/t1/reject", json!({ "feedback": "x" })).0, 403);
+    let (st, b) = call(&boss, "POST", "/tasks/t1/validate", json!({}));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("merged")), "{b}");
     let (st, _) = call(&boss, "POST", "/tasks/t2/discard", json!({}));
     assert_eq!(st, 200);

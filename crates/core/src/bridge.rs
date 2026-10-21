@@ -512,6 +512,7 @@ Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Co
         from: target.to_owned(),
         prompt,
         answer: true,
+        boot: None,
     }));
 }
 
@@ -612,6 +613,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         from: from.to_owned(),
         prompt,
         answer: false,
+        boot: None,
     }));
 
     let sent = Instant::now();
@@ -846,6 +848,8 @@ enum TaskAction {
     Done,
     Return,
     Merge,
+    Validate,
+    Reject,
     Discard,
 }
 
@@ -871,6 +875,8 @@ fn parse_task_route(method: &Method, url: &str) -> Result<TaskRoute, (u16, Strin
                 "done" => TaskAction::Done,
                 "return" => TaskAction::Return,
                 "merge" => TaskAction::Merge,
+                "validate" => TaskAction::Validate,
+                "reject" => TaskAction::Reject,
                 "discard" => TaskAction::Discard,
                 _ => return Err(unknown()),
             };
@@ -896,7 +902,7 @@ fn task_permission(action: TaskAction, target: Option<&str>, master: bool, own: 
     }
 }
 
-/// `GET /tasks`, `GET /tasks/<id>`, `POST /tasks` e `POST /tasks/<id>/start|done|return|merge|discard`.
+/// `GET /tasks`, `GET /tasks/<id>`, `POST /tasks` e `POST /tasks/<id>/start|done|return|merge|validate|reject|discard`.
 /// O projeto vem do token (com o mestre, do corpo ou de `?project=`).
 fn tasks_route(core: &Core, mut req: Request, auth: &Auth, bodies: &Arc<AtomicU64>) {
     let method = req.method().clone();
@@ -986,6 +992,7 @@ fn run_task_action(core: &Core, caller: &Caller, action: TaskAction, id: Option<
         }
         TaskAction::Start => core.task_start(project, id),
         TaskAction::Merge => core.task_merge(project, id),
+        TaskAction::Validate => core.task_validate(project, id),
         TaskAction::Discard => core.task_discard(project, id),
         TaskAction::Done => match body_text(msg, "report") {
             Ok(report) => core.task_done(project, id, &report.unwrap_or_default()),
@@ -993,6 +1000,10 @@ fn run_task_action(core: &Core, caller: &Caller, action: TaskAction, id: Option<
         },
         TaskAction::Return => match body_text(msg, "feedback") {
             Ok(feedback) => core.task_return(project, id, &feedback.unwrap_or_default()),
+            Err(e) => return e,
+        },
+        TaskAction::Reject => match body_text(msg, "feedback") {
+            Ok(feedback) => core.task_reject(project, id, &feedback.unwrap_or_default()),
             Err(e) => return e,
         },
     };
@@ -1109,6 +1120,8 @@ mod tests {
             ("done", TaskAction::Done),
             ("return", TaskAction::Return),
             ("merge", TaskAction::Merge),
+            ("validate", TaskAction::Validate),
+            ("reject", TaskAction::Reject),
             ("discard", TaskAction::Discard),
         ] {
             assert_eq!(ok(Method::Post, &format!("/tasks/t3/{verb}?project=p9")), (action, Some("t3".into()), Some("p9".into())));
@@ -1138,12 +1151,24 @@ mod tests {
             (Start, Some("t1"), false),
             (Return, Some("t1"), false),
             (Merge, Some("t1"), false),
+            (Validate, Some("t1"), false),
+            (Reject, Some("t1"), false),
             (Discard, Some("t1"), false),
         ] {
             assert_eq!(task_permission(action, target, false, Some("t1")).is_ok(), ok, "{action:?} {target:?}");
         }
         // Qualquer outro agente faz o resto, menos entregar relatório.
-        for (action, ok) in [(List, true), (Create, true), (Start, true), (Return, true), (Merge, true), (Discard, true), (Done, false)] {
+        for (action, ok) in [
+            (List, true),
+            (Create, true),
+            (Start, true),
+            (Return, true),
+            (Merge, true),
+            (Validate, true),
+            (Reject, true),
+            (Discard, true),
+            (Done, false),
+        ] {
             assert_eq!(task_permission(action, Some("t1"), false, None).is_ok(), ok, "{action:?}");
         }
         // O token mestre pode tudo.

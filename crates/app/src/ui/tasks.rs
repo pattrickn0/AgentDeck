@@ -142,6 +142,7 @@ fn status_color(deck: &Deck, task: &Task) -> Color32 {
         TaskStatus::Draft => theme::MUTED,
         TaskStatus::Running => deck.agents.tab_color(&task.kind),
         TaskStatus::Review => theme::OLLAMA,
+        TaskStatus::Validating => theme::SEND_DEFAULT,
         TaskStatus::Merged => theme::BADGE_JSON,
         TaskStatus::Discarded => theme::with_opacity(theme::MUTED, 0.6),
         TaskStatus::Failed => theme::RED,
@@ -438,7 +439,7 @@ fn empty_state(ui: &mut Ui, body: Rect, loaded: bool, acts: &mut Vec<Act>) {
     painter.galley(Pos2::new(x, y), title.clone(), theme::TEXT);
     y += title.size().y + 8.0;
     let text = "Uma tarefa é um pedido que um agente faz numa cópia isolada do projeto (uma branch com a própria pasta). \
-Quando ele termina, você revisa o relatório e o diff e então mescla, devolve com ajustes ou descarta.";
+Quando ele termina, você revisa o relatório e o diff, mescla, testa e valida. Se algo falhar, devolve ou reprova com o motivo.";
     let g = painter.layout(text.to_owned(), theme::ui(12.5), theme::MUTED, w);
     painter.galley(Pos2::new(x, y), g.clone(), theme::MUTED);
     y += g.size().y + 14.0;
@@ -564,7 +565,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
     let agent_color = deck.agents.tab_color(&task.kind);
     let agent_name = deck.agents.name(&task.kind);
     let notice = deck.tasks.notice.clone();
-    let return_open = deck.tasks.return_open && task.status == TaskStatus::Review;
+    let return_open = deck.tasks.return_open && matches!(task.status, TaskStatus::Review | TaskStatus::Validating);
     let body = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
     let mut child = ui.new_child(UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(body);
@@ -828,18 +829,31 @@ fn history(ui: &mut Ui, events: &[&commanddeck_core::TaskEvent]) {
 
 /// Campo de feedback do "Devolver", com "Enviar" e "Cancelar".
 fn return_form(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &mut Vec<Act>) {
+    // Em revisão devolve-se com ajustes; aguardando validação, reprova-se com o que não funcionou no teste.
+    let (hint, send, send_tip, cancel_tip) = if task.status == TaskStatus::Validating {
+        (
+            "O que não funcionou no teste? (Ctrl+Enter envia)",
+            "Reprovar e enviar",
+            "Devolve a tarefa ao mesmo agente, dizendo que o trabalho já foi mesclado e o que falhou no teste",
+            "Fecha sem reprovar",
+        )
+    } else {
+        (
+            "O que o agente precisa mudar? (Ctrl+Enter envia)",
+            "Enviar ao agente",
+            "Devolve a tarefa ao agente com este pedido de ajustes",
+            "Fecha sem devolver",
+        )
+    };
     let id = Id::new("tasks-return-feedback");
     let focused = ui.ctx().memory(|m| m.has_focus(id));
     let ready = !working && !deck.tasks.feedback.trim().is_empty();
     let ctrl_enter = focused && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
     padded(ui, |ui| {
         ui.add_space(2.0);
-        text_field(ui, id, &mut deck.tasks.feedback, "O que o agente precisa mudar? (Ctrl+Enter envia)", Some(4));
+        text_field(ui, id, &mut deck.tasks.feedback, hint, Some(4));
     });
-    let b = [
-        ("Enviar ao agente".to_owned(), BtnKind::Primary, ready, "Devolve a tarefa ao agente com este pedido de ajustes"),
-        ("Cancelar".to_owned(), BtnKind::Secondary, true, "Fecha sem devolver"),
-    ];
+    let b = [(send.to_owned(), BtnKind::Primary, ready, send_tip), ("Cancelar".to_owned(), BtnKind::Secondary, true, cancel_tip)];
     ui.add_space(6.0);
     match button_flow(ui, &b, "return") {
         Some(0) => acts.push(Act::SendReturn(task.id.clone())),
@@ -886,7 +900,7 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
         (
             format!("Mesclar \"{}\" em {}?", task.title, task.base),
             format!(
-                "A branch {} entra em {} com um commit de mesclagem (git merge --no-ff). Depois a aba do agente fecha e a worktree e a branch da tarefa são apagadas.",
+                "A branch {} entra em {} com um commit de mesclagem (git merge --no-ff). O agente, a worktree e a branch continuam até você testar e validar a tarefa.",
                 task.branch, task.base
             ),
             "Mesclar",
@@ -894,7 +908,14 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
     } else {
         (
             format!("Descartar \"{}\"?", task.title),
-            "A aba do agente fecha e a worktree e a branch da tarefa são apagadas, com tudo o que o agente fez e não foi mesclado. Não dá para desfazer.".to_owned(),
+            if task.status == TaskStatus::Validating {
+                format!(
+                    "A aba do agente fecha e a worktree e a branch da tarefa são apagadas. O que já foi mesclado continua em {}: descartar não desfaz a mesclagem.",
+                    task.base
+                )
+            } else {
+                "A aba do agente fecha e a worktree e a branch da tarefa são apagadas, com tudo o que o agente fez e não foi mesclado. Não dá para desfazer.".to_owned()
+            },
             "Descartar",
         )
     };
