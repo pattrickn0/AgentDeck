@@ -145,8 +145,8 @@ pasta muda e quando a janela volta a ter foco. Nada de agentes por enquanto: tud
 A aba **Tarefas** é a mesa de tarefas do projeto ativo (o projeto precisa ser um repositório git com ao menos um
 commit, e "Abrir abas dos agentes" ligado). Uma tarefa é um pedido que um agente executa numa branch e numa pasta
 (worktree) só dela; quando ele entrega o relatório, a tarefa espera a sua revisão:
-- **Lista** agrupada por estado: *Em revisão*, *Em andamento*, *Rascunho*, *Falhou* e *Concluídas* (mescladas e
-  descartadas, recolhidas até você abrir). Cada cartão mostra o estado (o ponto), `tN`, o título, o agente com o
+- **Lista** agrupada por estado: *Em revisão*, *Em andamento*, *Rascunho*, *Falhou*, *Concluídas* e *Canceladas*
+  (as mescladas e as descartadas, nessa ordem, recolhidas até você abrir). Cada cartão mostra o estado (o ponto), `tN`, o título, o agente com o
   modelo e o tempo ("pronta há 3 min"); na revisão, também o resumo do diff ("3 arquivos, +120 −8");
 - **+ Nova** abre o formulário: título, pedido, agente (os instalados), modelo ("Padrão" ou os conhecidos do
   agente), base (a branch atual) e "Iniciar agora". Ctrl+Enter cria; sem "Iniciar agora" a tarefa fica em rascunho;
