@@ -23,12 +23,14 @@ pub enum Group {
     Running,
     Draft,
     Failed,
-    /// Mescladas e descartadas.
+    /// Mescladas.
     Done,
+    /// Descartadas (canceladas): ficam à parte das concluídas.
+    Cancelled,
 }
 
 impl Group {
-    pub const ORDER: [Group; 5] = [Group::Review, Group::Running, Group::Draft, Group::Failed, Group::Done];
+    pub const ORDER: [Group; 6] = [Group::Review, Group::Running, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -37,6 +39,7 @@ impl Group {
             Group::Draft => "Rascunho",
             Group::Failed => "Falhou",
             Group::Done => "Concluídas",
+            Group::Cancelled => "Canceladas",
         }
     }
 
@@ -46,7 +49,8 @@ impl Group {
             TaskStatus::Running => Group::Running,
             TaskStatus::Draft => Group::Draft,
             TaskStatus::Failed => Group::Failed,
-            TaskStatus::Merged | TaskStatus::Discarded => Group::Done,
+            TaskStatus::Merged => Group::Done,
+            TaskStatus::Discarded => Group::Cancelled,
         }
     }
 }
@@ -429,8 +433,8 @@ impl Default for TasksUi {
             loaded: false,
             refreshing: false,
             dirty: false,
-            // As concluídas já foram resolvidas: começam recolhidas.
-            collapsed: HashSet::from([Group::Done]),
+            // As concluídas e as canceladas já foram resolvidas: começam recolhidas.
+            collapsed: HashSet::from([Group::Done, Group::Cancelled]),
             closed_sections: HashSet::new(),
             diff: None,
             confirm: None,
@@ -903,13 +907,30 @@ mod tests {
                 (Group::Running, vec!["t2"]),
                 (Group::Draft, vec!["t7"]),
                 (Group::Failed, vec!["t6"]),
-                (Group::Done, vec!["t5", "t1"]),
+                (Group::Done, vec!["t1"]),
+                (Group::Cancelled, vec!["t5"]),
             ]
         );
         // Grupos vazios não aparecem.
         assert_eq!(group_tasks(&tasks[..1]).len(), 1);
         assert!(group_tasks(&[]).is_empty());
         assert_eq!(review_count(&tasks), 2);
+    }
+
+    #[test]
+    fn cancelled_tasks_are_apart_from_the_merged_ones() {
+        assert_eq!(Group::of(TaskStatus::Merged), Group::Done);
+        assert_eq!(Group::of(TaskStatus::Discarded), Group::Cancelled);
+        assert_eq!(Group::Done.title(), "Concluídas");
+        assert_eq!(Group::Cancelled.title(), "Canceladas");
+        // Os dois no fim, nessa ordem.
+        let n = Group::ORDER.len();
+        assert_eq!(Group::ORDER[n - 2..], [Group::Done, Group::Cancelled]);
+        // Os grupos resolvidos começam recolhidos.
+        let ui = TasksUi::default();
+        assert!(ui.collapsed.contains(&Group::Done));
+        assert!(ui.collapsed.contains(&Group::Cancelled));
+        assert!(!ui.collapsed.contains(&Group::Review));
     }
 
     #[test]
