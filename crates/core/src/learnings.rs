@@ -318,7 +318,7 @@ pub fn render(all: &[Learning], paths: &[String], budget: usize) -> String {
 
     let mut out = String::new();
     if !full.is_empty() {
-        out.push_str("Valem para o seu trabalho (projeto todo ou arquivos citados no pedido):\n\n");
+        out.push_str("Valem para este trabalho (projeto todo ou os arquivos em questão):\n\n");
         out.push_str(&full.join("\n\n"));
     }
     if !index.is_empty() {
@@ -362,7 +362,8 @@ pub fn relativize(path: &str, roots: &[std::path::PathBuf]) -> String {
     let norm = normalize_path(path);
     for root in roots {
         let root = normalize_path(&crate::util::strip_verbatim(root).to_string_lossy());
-        let inside = norm.get(..root.len()).is_some_and(|head| head.eq_ignore_ascii_case(&root)) && norm.as_bytes().get(root.len()) == Some(&b'/');
+        let inside =
+            norm.get(..root.len()).is_some_and(|head| head.eq_ignore_ascii_case(&root)) && norm.as_bytes().get(root.len()) == Some(&b'/');
         if !root.is_empty() && inside {
             return norm[root.len() + 1..].to_owned();
         }
@@ -473,11 +474,8 @@ mod tests {
 
     #[test]
     fn matching_puts_the_specific_before_the_global() {
-        let all = vec![
-            learning("a-global", &[], "g"),
-            learning("b-cli", &["crates/cli/**"], "c"),
-            learning("c-ui", &["crates/app/**"], "u"),
-        ];
+        let all =
+            vec![learning("a-global", &[], "g"), learning("b-cli", &["crates/cli/**"], "c"), learning("c-ui", &["crates/app/**"], "u")];
         let got: Vec<&str> = matching(&all, &strings(&["crates/cli/src/x.rs"])).iter().map(|l| l.file.as_str()).collect();
         assert_eq!(got, [format!("{DIR}/b-cli.md"), format!("{DIR}/a-global.md")]);
         // Sem arquivos citados, só os globais.
@@ -552,6 +550,26 @@ mod tests {
         std::fs::write(learn.join("nota.txt"), GOOD).unwrap();
         let got = load(dir.path());
         assert_eq!(got.iter().map(|l| l.file.as_str()).collect::<Vec<_>>(), [format!("{DIR}/a.md"), format!("{DIR}/b.md")]);
+    }
+
+    #[test]
+    fn every_learning_in_the_repository_is_valid() {
+        // Os aprendizados reais do projeto: um frontmatter quebrado seria ignorado em silêncio no app.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let files = std::fs::read_dir(root.join(DIR))
+            .expect("memory/aprendizados existe")
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "md") && e.file_name() != "README.md")
+            .count();
+        let loaded = load(&root);
+        assert!(files >= 4, "o projeto deve ter aprendizados semeados");
+        assert_eq!(loaded.len(), files, "algum aprendizado da pasta não passou na validação");
+        // Cada `touches` literal (sem curinga) aponta para um arquivo que existe.
+        for l in &loaded {
+            for g in l.touches.iter().filter(|g| !g.contains(['*', '?'])) {
+                assert!(root.join(g).exists(), "{}: touches aponta para {g}, que não existe", l.file);
+            }
+        }
     }
 
     #[test]

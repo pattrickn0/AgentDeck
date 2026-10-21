@@ -53,7 +53,7 @@ pub fn render(others: &[OtherTask], commits: &[String], base: &str, own_paths: &
                 }
                 let clash: Vec<&str> = t.files.iter().filter(|f| own_paths.contains(f)).map(String::as_str).collect();
                 if !clash.is_empty() {
-                    line.push_str(&format!(". ATENÇÃO: o seu pedido cita {}; combine com ela antes de mexer", clash.join(", ")));
+                    line.push_str(&format!(". ATENÇÃO: o seu pedido cita {}; combine com essa tarefa antes de mexer", clash.join(", ")));
                 }
             }
             lines.push(line);
@@ -114,7 +114,10 @@ mod tests {
             &["crates/core/src/tasks.rs".to_owned()],
             BUDGET,
         );
-        assert!(out.contains("- t12 \"Título t12\" (claude@t12, em andamento): mexe em crates/app/src/ui/tabs.rs, crates/core/src/tasks.rs"), "{out}");
+        assert!(
+            out.contains("- t12 \"Título t12\" (claude@t12, em andamento): mexe em crates/app/src/ui/tabs.rs, crates/core/src/tasks.rs"),
+            "{out}"
+        );
         assert!(out.contains("ATENÇÃO: o seu pedido cita crates/core/src/tasks.rs"), "{out}");
         assert!(out.contains("- t14 \"Título t14\" (claude@t14, em andamento): ainda sem arquivos na branch"), "{out}");
         assert!(!out.contains("Últimos commits"), "{out}");

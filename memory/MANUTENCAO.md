@@ -45,6 +45,8 @@ crates/
 │   ├── whisper.rs    transcrição de voz (whisper.cpp)
 │   ├── attachments.rs, sessions.rs, workspace.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── context.rs    ponto de extensão para RAG (vazio hoje)
+│   ├── learnings.rs  memória de longo prazo: aprendizados de memory/aprendizados/ (frontmatter, globs, caminhos do brief, entrega com orçamento)
+│   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas e commits da base)
 │   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
 │   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
@@ -123,6 +125,10 @@ entregue por `Deck::send_to_instance` (abre a aba se não existir e enfileira co
 agente, com `request: 0`). Para ver sem rede: `COMMANDDECK_DEBUG_UI=github-demo` (ou `github-issues`,
 `github-actions`, `github-menu`, `github-norepo`, `github-error`). Para testar a rede e o login reais:
 `cargo test -p commanddeck-core --test github -- --ignored --nocapture`.
+
+**Novo aprendizado.** Crie `memory/aprendizados/<nome>.md` (formato e critérios no `README.md` da pasta). Um frontmatter inválido é
+ignorado com um aviso no log, e o teste `every_learning_in_the_repository_is_valid` (`learnings.rs`) falha se algum arquivo da pasta não
+passar na validação ou se um `touches` literal apontar para um arquivo que não existe.
 
 **Mexer nas tarefas.** O modelo e o ciclo de vida ficam em `crates/core/src/tasks.rs` (`impl Core`: `task_create`, `task_start`,
 `task_done`, `task_return`, `task_merge`, `task_validate`, `task_reject`, `task_discard`; o git usa o executor seguro de `git.rs`); as rotas e as permissões, em

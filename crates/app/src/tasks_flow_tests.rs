@@ -325,3 +325,71 @@ fn reopening_the_tab_of_a_running_task_registers_the_instance_again() {
     let validating = Task { status: TaskStatus::Validating, ..env.task(&id) };
     assert!(env.deck.open_task_tab(&validating).is_ok() && env.tab_open(&id));
 }
+
+#[test]
+fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_back() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes", |d| d.initialized);
+    // O projeto já tem aprendizados na base: um global, um de a.txt e um de outra área.
+    let dir = env.ws.join("memory").join("aprendizados");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let write = |name: &str, touches: &str, body: &str| {
+        let text = format!("---\ntitulo: Aprendizado {name}\nresumo: Resumo {name}.\ntouches: {touches}\n---\n{body}\n");
+        std::fs::write(dir.join(format!("{name}.md")), text).expect("w");
+    };
+    write("global", "[]", "Vale para todo mundo.");
+    write("do-arquivo", "[a.txt]", "Cuidado ao mexer no a.txt.");
+    write("de-outra-area", "[crates/**]", "Só para o código.");
+    git(&env.ws, &["add", "-A"]);
+    git(&env.ws, &["commit", "-q", "-m", "docs: aprendizados"]);
+
+    let project = env.project();
+    let tasks_dir = env._tmp.path().join("dados").join("tarefas");
+    fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
+        let spec =
+            commanddeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("usuário".into()), ..Default::default() };
+        let t = env.core.task_create(project, spec).expect("criar");
+        env.core.task_start(project, &t.id).expect("iniciar");
+        t.id
+    }
+
+    // A primeira tarefa mexe no a.txt: ainda sem outras tarefas, com os commits da base.
+    let t1 = create(&env, &project, "Primeira", "Ajuste o a.txt e nada mais.");
+    let first = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t1}-brief.md"))).expect("brief da t1");
+    assert!(first.contains("O que o projeto já aprendeu:") && first.contains("### Aprendizado do-arquivo"), "{first}");
+    assert!(first.contains("Cuidado ao mexer no a.txt.") && first.contains("Vale para todo mundo."), "{first}");
+    assert!(first.contains("Outras tarefas em andamento: nenhuma.") && first.contains("docs: aprendizados"), "{first}");
+    // O que não casa vira só a linha do índice.
+    assert!(
+        first.contains("- memory/aprendizados/de-outra-area.md — Resumo de-outra-area.") && !first.contains("Só para o código."),
+        "{first}"
+    );
+
+    // A t1 já mexeu no a.txt; a t2 também o cita, e ainda vê o aviso.
+    env.pump("a t1 na lista", |d| d.tasks.task("t1").is_some());
+    env.agent_commits(&t1, "a.txt", "dois\n");
+    let t2 = create(&env, &project, "Segunda", "Também mexa no `a.txt`.");
+    let second = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-brief.md"))).expect("brief da t2");
+    assert!(second.contains(&format!("- {t1} \"Primeira\" (claude@{t1}, em andamento): mexe em a.txt")), "{second}");
+    assert!(second.contains("ATENÇÃO: o seu pedido cita a.txt"), "{second}");
+
+    // O feedback anterior volta na devolução seguinte.
+    env.pump("a t2 na lista", |d| d.tasks.task("t2").is_some());
+    env.agent_commits(&t2, "b.txt", "b\n");
+    env.core.task_done(&project, &t2, "Feito.").expect("done");
+    env.core.task_return(&project, &t2, "Primeiro ajuste: renomeie.").expect("return 1");
+    let after_first = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-feedback.md"))).expect("feedback 1");
+    assert!(!after_first.contains("Feedbacks anteriores"), "{after_first}");
+    env.core.task_done(&project, &t2, "Feito de novo.").expect("done 2");
+    let back = env.core.task_return(&project, &t2, "Segundo ajuste: teste.").expect("return 2");
+    let after_second = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-feedback.md"))).expect("feedback 2");
+    assert!(
+        after_second.contains("1. [revisão] Primeiro ajuste: renomeie.") && after_second.contains("Segundo ajuste: teste."),
+        "{after_second}"
+    );
+    assert_eq!(back.feedbacks.len(), 2, "a tarefa devolvida guarda os dois");
+}

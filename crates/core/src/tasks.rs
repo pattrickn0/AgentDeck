@@ -1622,8 +1622,12 @@ mod tests {
         // Com memória: entre o pedido e as regras, cada parte com o seu título.
         let memory = memory_block("### T (memory/aprendizados/a.md)\ncorpo", "Outras tarefas em andamento: nenhuma.");
         let m = start_message(&sample(), None, &memory);
-        let (brief, learned, situation, rules) =
-            (m.find("Depois Y."), m.find("O que o projeto já aprendeu:\n### T"), m.find("Situação atual:\nOutras tarefas"), m.find("Regras da tarefa t3"));
+        let (brief, learned, situation, rules) = (
+            m.find("Depois Y."),
+            m.find("O que o projeto já aprendeu:\n### T"),
+            m.find("Situação atual:\nOutras tarefas"),
+            m.find("Regras da tarefa t3"),
+        );
         assert!(brief < learned && learned < situation && situation < rules && rules.is_some(), "{m}");
         // As regras mandam consultar e registrar aprendizados.
         assert!(m.contains("ask-agent --learn <arquivo>") && m.contains("memory/aprendizados/"), "{m}");

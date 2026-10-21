@@ -31,7 +31,11 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
 2. ~~**Mesa de tarefas**~~ (fases A e B feitas em 2026-10-17; próximos passos em pendencias.md) no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
    acompanhar, receber o relatório, revisar o diff e mesclar ou descartar com um botão. É o fluxo que hoje o
    orquestrador faz à mão.
-3. **Memória em duas camadas, nossa.** Longo prazo: "aprendizados" em markdown versionado no repositório, com
+3. **Memória em duas camadas, nossa.** **Fase 1 feita** (tarefa `t13`): `memory/aprendizados/*.md` com `touches`, entregues
+   no início de cada tarefa e por `ask-agent --learn`; seção "Situação atual" (outras tarefas e commits da base); histórico de
+   feedbacks nas devoluções. Como funciona: [ARCHITECTURE.md](ARCHITECTURE.md) ("Memória em duas camadas"). **Fase 2** (resumo
+   de API por arquivo, injeção nas abas que não são de tarefa, `ContextProvider` geral): [pendencias.md](pendencias.md), seção 2.
+   O plano original, para referência: Longo prazo: "aprendizados" em markdown versionado no repositório, com
    frontmatter que diz que arquivos tocam (`touches`), entregues ao agente quando a tarefa dele mexe nesses arquivos;
    e um resumo da API de um arquivo (estilo `skeleton`) para o agente ler menos. Curto prazo: o pedido da tarefa, as
    decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto" da seção 2 de
