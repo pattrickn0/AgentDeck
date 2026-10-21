@@ -140,4 +140,8 @@ pub struct Delivery {
     /// É a resposta (atrasada) a uma pergunta que a instância fez, não uma pergunta nova:
     /// se a aba dela já fechou, não é reaberta.
     pub answer: bool,
+    /// Prompt inicial curto (ASCII) que substitui `prompt` quando a aba precisa ser aberta (ou reaberta):
+    /// vai na linha de comando do CLI (`Core::set_boot_prompt`) em vez de ser digitado num terminal que
+    /// ainda está subindo. Só as tarefas usam; a interface digita `prompt` se o CLI não aceita ou a aba já está viva.
+    pub boot: Option<String>,
 }

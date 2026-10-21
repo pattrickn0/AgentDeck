@@ -512,6 +512,7 @@ Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Co
         from: target.to_owned(),
         prompt,
         answer: true,
+        boot: None,
     }));
 }
 
@@ -612,6 +613,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         from: from.to_owned(),
         prompt,
         answer: false,
+        boot: None,
     }));
 
     let sent = Instant::now();

@@ -1125,6 +1125,12 @@ impl Deck {
             }
             return;
         }
+        // Aba nova ou processo encerrado: o CLI sobe já com o prompt inicial da tarefa (linha de comando), em vez de o
+        // texto ser digitado num terminal que ainda está subindo e se perder.
+        let boots = d.boot.as_deref().filter(|_| found.is_none_or(|i| !self.tabs[i].alive));
+        if let Some(line) = boots {
+            self.core.set_boot_prompt(&d.project, &id, line.to_owned());
+        }
         let idx = match found {
             Some(i) => i,
             None => {
@@ -1138,6 +1144,7 @@ impl Deck {
                     None
                 };
                 if let Some(reason) = reason {
+                    self.core.take_boot_prompt(&d.project, &id);
                     self.core.fail_delivery(d.request, &reason);
                     self.core.close_instance(&d.project, &id);
                     return;
@@ -1154,7 +1161,11 @@ impl Deck {
         if !self.tabs[idx].alive {
             self.start(idx); // o processo tinha encerrado: sobe de novo para receber a pergunta
         }
-        self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: false });
+        // O prompt inicial é de uma abertura só: sobrou (CLI não o aceitou, ou a aba já estava viva) = digita o texto.
+        let booted = boots.is_some() && self.core.take_boot_prompt(&d.project, &id).is_none() && self.tabs[idx].alive;
+        if !booted {
+            self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: false });
+        }
     }
 
     /// Mensagem da própria interface (aba GitHub) para uma instância do projeto ativo: abre a aba

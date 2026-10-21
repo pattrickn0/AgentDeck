@@ -374,6 +374,19 @@ Corrija na mesma pasta ({wt}) e na mesma branch {branch}, com commits pequenos.{
     ))
 }
 
+/// A linha curta (ASCII) que abre o agente de uma tarefa no lugar do texto completo: aspas, quebras de linha e
+/// acentos na linha de comando se perdem nos shims `.cmd` do Windows, então o texto vai num arquivo e a linha só
+/// manda lê-lo. `intro` diz o que aconteceu (`o pedido esta no arquivo`, `foi devolvida na revisao`…).
+/// `None` se o caminho não é ASCII (a linha de comando não o carregaria inteiro).
+pub fn boot_line(task: &Task, intro: &str, file: &Path) -> Option<String> {
+    let line = format!(
+        "Tarefa {}: {intro}. Leia o arquivo {} e comece agora, por conta propria, sem esperar confirmacao.",
+        task.id,
+        file.display()
+    );
+    (line.is_ascii() && !line.contains(['\n', '\r', '"'])).then_some(line)
+}
+
 /// Caminhos sujos de um `git status --porcelain=v1` (o destino, nas renomeações).
 pub fn dirty_paths(porcelain: &str) -> Vec<String> {
     porcelain
@@ -441,6 +454,8 @@ pub(crate) struct TaskStore {
     projects: Mutex<HashMap<String, ProjectTasks>>,
     /// Uma operação do ciclo de vida por vez (criar, iniciar, mesclar…): cada uma pode rodar o git.
     op: Mutex<()>,
+    /// Prompt inicial à espera da abertura do processo (`projeto/instância` → linha), ver `Core::set_boot_prompt`.
+    boot: Mutex<HashMap<String, String>>,
 }
 
 fn load_file(path: &Path) -> ProjectTasks {
@@ -706,7 +721,9 @@ impl Core {
         let Some(task) = started else { return Err(TaskError::NotFound(format!("tarefa {id} sumiu"))) };
         let ident = self.open_task_instance(project, &task);
         let boss = self.task_boss(project, &task);
-        self.deliver_to_task(project, &task, ident, start_message(&task, boss.as_deref()), "brief entregue ao agente");
+        let prompt = start_message(&task, boss.as_deref());
+        let boot = self.task_boot_prompt(project, &task, "brief", "o pedido completo esta no arquivo", &prompt);
+        self.deliver_to_task(project, &task, ident, prompt, boot, "brief entregue ao agente");
         self.feed(FeedEntry::system(format!("Tarefa {} iniciada: {} ({})", task.id, task.title, task.instance)).in_project(project));
         Ok(task)
     }
@@ -781,8 +798,38 @@ impl Core {
         (creator != task.instance && self.project_instance_ids(project).iter().any(|o| o == creator)).then(|| creator.to_owned())
     }
 
-    /// Manda `prompt` à aba da tarefa (abre a aba se preciso) pelo caminho das mensagens entre agentes.
-    fn deliver_to_task(&self, project: &str, task: &Task, ident: Ident, prompt: String, log: &str) {
+    /// Prompt inicial para a abertura do processo da tarefa: grava `prompt` em `dados/tarefas/<projeto>-<id>-<stem>.md`
+    /// e devolve a linha curta que manda o agente lê-lo. `None` se o CLI não aceita prompt inicial, se o arquivo
+    /// não pôde ser gravado ou se a linha não cabe em ASCII: a entrega fica digitada, como sempre.
+    fn task_boot_prompt(&self, project: &str, task: &Task, stem: &str, intro: &str, prompt: &str) -> Option<String> {
+        models::boot_prompt_flag(Ident::parse(&task.instance)?.kind.as_str())?;
+        let dir = self.paths().data_dir.join("tarefas");
+        let file = util::absolutize(&dir.join(format!("{project}-{}-{stem}.md", task.id)));
+        let file = util::strip_verbatim(&file);
+        match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, prompt)) {
+            Ok(()) => boot_line(task, intro, &file),
+            Err(e) => {
+                log::warn!("não consegui gravar {}: {e}", file.display());
+                None
+            }
+        }
+    }
+
+    /// Guarda o prompt inicial da próxima abertura do processo de `instance`: `agents::spawn_spec_for` o leva
+    /// na linha de comando (uma vez). A interface chama antes de abrir ou reabrir a aba.
+    pub fn set_boot_prompt(&self, project: &str, instance: &str, line: String) {
+        self.inner.tasks.boot.lock().insert(format!("{project}/{instance}"), line);
+    }
+
+    /// Pega (e esquece) o prompt inicial guardado para `instance`.
+    pub fn take_boot_prompt(&self, project: &str, instance: &str) -> Option<String> {
+        self.inner.tasks.boot.lock().remove(&format!("{project}/{instance}"))
+    }
+
+    /// Manda `prompt` à aba da tarefa (abre a aba se preciso) pelo caminho das mensagens entre agentes. Se a
+    /// aba precisar ser aberta e o CLI aceitar um prompt inicial, a interface usa `boot` na linha de comando em
+    /// vez de digitar `prompt` (ver [`Delivery::boot`]).
+    fn deliver_to_task(&self, project: &str, task: &Task, ident: Ident, prompt: String, boot: Option<String>, log: &str) {
         let from = task.creator.clone().unwrap_or_else(|| "usuário".to_owned());
         self.emit(CoreEvent::Deliver(Delivery {
             request: 0,
@@ -792,6 +839,7 @@ impl Core {
             from,
             prompt,
             answer: false,
+            boot,
         }));
         self.update_task(project, &task.id, |t| t.log(log));
     }
@@ -901,7 +949,9 @@ impl Core {
         });
         let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         let ident = self.open_task_instance(project, &task);
-        self.deliver_to_task(project, &task, ident, return_message(&task, &feedback), "feedback entregue ao agente");
+        let prompt = return_message(&task, &feedback);
+        let boot = self.task_boot_prompt(project, &task, "feedback", "foi devolvida na revisao com ajustes, descritos no arquivo", &prompt);
+        self.deliver_to_task(project, &task, ident, prompt, boot, "feedback entregue ao agente");
         Ok(task)
     }
 
@@ -1164,13 +1214,9 @@ impl Core {
         });
         let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         let ident = self.open_task_instance(project, &task);
-        self.deliver_to_task(
-            project,
-            &task,
-            ident,
-            reject_message(&task, &feedback, aligned.is_ok()),
-            "motivo da reprovação entregue ao agente",
-        );
+        let prompt = reject_message(&task, &feedback, aligned.is_ok());
+        let boot = self.task_boot_prompt(project, &task, "feedback", "foi reprovada na validacao, com o motivo no arquivo", &prompt);
+        self.deliver_to_task(project, &task, ident, prompt, boot, "motivo da reprovação entregue ao agente");
         Ok(task)
     }
 

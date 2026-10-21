@@ -731,7 +731,15 @@ fn tasks_survive_a_restart_and_numbers_are_never_reused() {
     let text = std::fs::read_to_string(&file).expect("arquivo das tarefas");
     assert!(text.contains("\"id\": \"t1\"") && text.contains("\"status\": \"discarded\"") && text.contains("\"next\": 3"), "{text}");
     assert!(!ws.join("tarefas").exists());
-    assert_eq!(std::fs::read_dir(file.parent().expect("pasta")).expect("dir").count(), 1, "sem arquivos temporários sobrando");
+    let names: Vec<String> = std::fs::read_dir(file.parent().expect("pasta"))
+        .expect("dir")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.ends_with(".tmp")) && names.iter().any(|n| n == &format!("{project}.json")),
+        "sem arquivos temporários sobrando: {names:?}"
+    );
 
     // Reinicia o app (mesma pasta de dados e mesma configuração).
     let Env { _tmp, core: first, rx, .. } = env;
@@ -759,4 +767,129 @@ fn removing_a_project_keeps_its_tasks_file() {
     assert!(file.is_file(), "o arquivo das tarefas não some com o projeto");
     assert!(std::fs::read_to_string(&file).expect("ler").contains(&t.id));
     env.core.shutdown();
+}
+
+/// O `Deliver` de tarefa (request 0) mais recente: `(instância, prompt, boot)`.
+fn last_task_delivery(evs: &[CoreEvent]) -> (String, String, Option<String>) {
+    evs.iter()
+        .rev()
+        .find_map(|e| match e {
+            CoreEvent::Deliver(d) if d.request == 0 => Some((d.ident.id(), d.prompt.clone(), d.boot.clone())),
+            _ => None,
+        })
+        .expect("nenhuma entrega de tarefa")
+}
+
+#[test]
+fn the_brief_goes_to_a_file_and_the_boot_line_is_short_ascii() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = core.task_create(&env.project, spec("Corrigir o botão de Ação")).expect("create");
+    events(&env);
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    let (to, prompt, boot) = last_task_delivery(&events(&env));
+    assert_eq!(to, "claude@t1");
+    // O texto completo (com acentos e quebras de linha) fica num arquivo da pasta de dados...
+    let file = env.root.join("dados").join("tarefas").join(format!("{}-t1-brief.md", env.project));
+    assert_eq!(std::fs::read_to_string(&file).expect("brief gravado"), prompt);
+    assert!(prompt.contains("Corrigir o botão de Ação") && prompt.contains('\n'));
+    // ...e a linha de comando leva só uma frase curta, em ASCII, de uma linha, que aponta para ele.
+    let line = boot.expect("claude aceita prompt inicial");
+    assert!(line.is_ascii() && !line.contains(['\n', '"']) && line.len() < 400, "{line}");
+    assert!(line.starts_with("Tarefa t1: ") && line.contains("comece agora"), "{line}");
+    assert!(line.contains(&file.to_string_lossy().into_owned()), "{line} / {}", file.display());
+    // Devolver e reprovar também: o arquivo é o do feedback (sobrescrito a cada vez).
+    core.task_done(&env.project, &t.id, "Feito.").expect("done");
+    core.task_return(&env.project, &t.id, "Falta o teste de açaí.").expect("return");
+    let (_, prompt, boot) = last_task_delivery(&events(&env));
+    let feedback = env.root.join("dados").join("tarefas").join(format!("{}-t1-feedback.md", env.project));
+    assert_eq!(std::fs::read_to_string(&feedback).expect("feedback gravado"), prompt);
+    assert!(prompt.contains("Falta o teste de açaí."));
+    let line = boot.expect("boot da devolução");
+    assert!(line.is_ascii() && line.contains("devolvida") && line.contains("-t1-feedback.md"), "{line}");
+    commit_file(&t.worktree, "x.txt", "x\n", "feat: x");
+    core.task_done(&env.project, &t.id, "De novo.").expect("done 2");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    core.task_reject(&env.project, &t.id, "Quebrou ao salvar.").expect("reject");
+    let (_, prompt, boot) = last_task_delivery(&events(&env));
+    assert_eq!(std::fs::read_to_string(&feedback).expect("feedback regravado"), prompt);
+    assert!(prompt.contains("reprovada na validação") && prompt.contains("Quebrou ao salvar."));
+    assert!(boot.is_some_and(|l| l.is_ascii() && l.contains("reprovada")));
+    core.shutdown();
+}
+
+#[test]
+fn a_cli_without_an_initial_prompt_keeps_the_typed_delivery() {
+    need_git!();
+    let env = start();
+    let t = env.core.task_create(&env.project, TaskSpec { kind: "aider".into(), ..spec("Com aider") }).expect("create");
+    events(&env);
+    env.core.task_start(&env.project, &t.id).expect("start");
+    let (to, prompt, boot) = last_task_delivery(&events(&env));
+    assert_eq!(to, "aider@t1");
+    assert_eq!(boot, None, "aider não tem prompt inicial: o brief é digitado");
+    assert!(prompt.contains("Faça: Com aider"));
+    assert!(!env.root.join("dados").join("tarefas").join(format!("{}-t1-brief.md", env.project)).exists());
+    env.core.shutdown();
+}
+
+#[test]
+fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    install_fake_agent(&env.root, "agy");
+    install_fake_agent(&env.root, "opencode");
+    install_fake_agent(&env.root, "codex");
+    let line = "Tarefa t7: o pedido completo esta no arquivo C:/Users/Ana Bia/dados/tarefas/p1-t7-brief.md. Leia o arquivo e comece agora.";
+    let spec_of = |id: &str, boot: bool| {
+        let ident = Ident::parse(id).expect("id");
+        core.register_instance(&env.project, id);
+        if boot {
+            core.set_boot_prompt(&env.project, id, line.to_owned());
+        }
+        core.spawn_spec_for(&env.project, &ident).expect("spec")
+    };
+
+    // Claude: posicional, ANTES das opções (`--add-dir` e `--allowedTools` aceitam vários valores e o engoliriam).
+    let claude = spec_of("claude@t7", true);
+    assert_eq!(claude.args[0], line, "{:?}", claude.args);
+    assert_eq!(claude.args[1], "--append-system-prompt");
+    assert!(claude.args.iter().filter(|a| a.as_str() == line).count() == 1);
+    // Antigravity: `-i "<prompt>"` (--prompt-interactive), no fim.
+    let agy = spec_of("antigravity@t7", true);
+    assert_eq!(agy.args[agy.args.len() - 2..], ["-i".to_owned(), line.to_owned()], "{:?}", agy.args);
+    // OpenCode (TUI): `--prompt "<prompt>"` no fim (com modelo, o `--standalone` vem antes).
+    let opencode = spec_of("opencode@t7", true);
+    assert_eq!(opencode.args[opencode.args.len() - 2..], ["--prompt".to_owned(), line.to_owned()], "{:?}", opencode.args);
+    // Os demais ignoram: mesmo com um prompt guardado, o spec não muda e o prompt não vaza para outra abertura.
+    let codex = spec_of("codex@t7", true);
+    assert!(!codex.args.iter().any(|a| a.contains("Tarefa t7")), "{:?}", codex.args);
+    let aider = spec_of("aider@t7", true);
+    assert!(!aider.args.iter().any(|a| a.contains("Tarefa t7")), "{:?}", aider.args);
+
+    // Uma vez só: a abertura seguinte (reiniciar a aba, reabrir o app) sobe sem o prompt.
+    for id in ["claude@t7", "antigravity@t7", "opencode@t7"] {
+        let again = spec_of(id, false);
+        assert!(!again.args.iter().any(|a| a == line || a == "-i" || a == "--prompt"), "{id}: {:?}", again.args);
+    }
+    // Sem prompt guardado, o spec do Claude começa como sempre.
+    assert_eq!(spec_of("claude@t8", false).args[0], "--append-system-prompt");
+    assert_eq!(core.take_boot_prompt(&env.project, "claude@t7"), None);
+    core.shutdown();
+}
+
+#[test]
+fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
+    use commanddeck_core::tasks::boot_line;
+    let t = commanddeck_core::Task { id: "t3".into(), ..commanddeck_core::Task::default() };
+    let ok = boot_line(&t, "o pedido esta no arquivo", std::path::Path::new("C:/dados/tarefas/p1-t3-brief.md")).expect("ascii");
+    assert!(
+        ok.starts_with("Tarefa t3: o pedido esta no arquivo. Leia o arquivo C:/dados") && ok.ends_with("sem esperar confirmacao."),
+        "{ok}"
+    );
+    // Caminho com acento (ou aspas): a linha de comando de um shim `.cmd` não o carregaria inteiro; cai na entrega digitada.
+    assert_eq!(boot_line(&t, "x", std::path::Path::new("C:/Usuários/Ana/brief.md")), None);
+    assert_eq!(boot_line(&t, "x", std::path::Path::new("C:/a\"b/brief.md")), None);
 }

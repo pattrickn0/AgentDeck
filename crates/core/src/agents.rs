@@ -809,6 +809,12 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     } else {
         let resolved = reg.resolve(base).ok_or_else(|| def.missing.to_owned())?;
         let mut args = Vec::new();
+        // Prompt inicial de uma tarefa recém-aberta (ver `Core::set_boot_prompt`). No Claude é posicional e vai
+        // primeiro: `--add-dir` e `--allowedTools` aceitam vários valores e engoliriam o texto.
+        let boot = models::boot_prompt_flag(base).and_then(|flag| core.take_boot_prompt(project, &id).map(|p| (flag, p)));
+        if let Some((None, prompt)) = &boot {
+            args.push(prompt.clone());
+        }
         if base == "claude" {
             args.push("--append-system-prompt".into());
             args.push(reg.bridge_instructions_for(ident));
@@ -843,6 +849,10 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
             } else {
                 args.extend(models::cli_args(base, m));
             }
+        }
+        if let Some((Some(flag), prompt)) = boot {
+            args.push(flag.into());
+            args.push(prompt);
         }
         if resolved.shim.is_some() {
             args = args.iter().map(|a| cmd_safe_arg(a)).collect();
