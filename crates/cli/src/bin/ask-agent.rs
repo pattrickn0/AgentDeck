@@ -10,7 +10,7 @@
 //!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
-//!      ask-agent --learn <arquivo> [<arquivo>...]   (o que o projeto já aprendeu sobre esses arquivos)
+//!      ask-agent --learn [<arquivo>...]   (o que o projeto já aprendeu, no geral ou sobre esses arquivos)
 //!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|"pedido"|--file <arq>
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
 //!      ask-agent --task done <id> -|"relatório"|--file <arq>   (só o agente da própria tarefa)
@@ -42,7 +42,7 @@ use commanddeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn <arquivo>...   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -319,13 +319,14 @@ fn team(bridge: &Bridge) -> Result<Team, String> {
 
 // ---------- Aprendizados (`--learn`) ----------
 
-const LEARN_USAGE: &str = "Uso: ask-agent --learn <arquivo> [<arquivo>...]   (o que o projeto já aprendeu sobre esses arquivos)";
+const LEARN_USAGE: &str = "Uso: ask-agent --learn [<arquivo>...]   (o que o projeto já aprendeu, no geral ou sobre esses arquivos)";
 
-/// `ask-agent --learn <caminho>...`: imprime os aprendizados (`memory/aprendizados/`) que valem para os arquivos.
+/// `ask-agent --learn [<caminho>...]`: imprime os aprendizados (`memory/aprendizados/`) que valem para os
+/// arquivos; sem caminhos, os globais e o índice dos demais.
 fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
-    if paths.is_empty() || paths.iter().any(|p| p == "-h" || p == "--help") {
+    if paths.iter().any(|p| p == "-h" || p == "--help") {
         println!("{LEARN_USAGE}");
-        return ExitCode::from(if paths.is_empty() { 2 } else { 0 });
+        return ExitCode::SUCCESS;
     }
     match bridge.request("POST", "/learn", Some(&json!({ "paths": paths })), Some(Duration::from_secs(15))) {
         Ok((200, json)) => {

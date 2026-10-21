@@ -27,7 +27,8 @@ O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
 
 - No início de cada tarefa: o texto dos globais e dos que casam com arquivos citados no pedido, mais o índice dos
   outros.
-- Sob demanda: `ask-agent --learn <arquivo> [<arquivo>...]` imprime os que valem para esses arquivos.
+- Sob demanda: `ask-agent --learn [<arquivo>...]` imprime os que valem para esses arquivos; sem argumentos, mostra
+  os globais por inteiro e o índice de todos os outros.
 
 ## Quando criar um
 
