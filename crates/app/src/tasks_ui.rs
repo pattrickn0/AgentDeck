@@ -35,6 +35,7 @@ impl Group {
     pub const ORDER: [Group; 7] =
         [Group::Review, Group::Validating, Group::Running, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
 
+    #[cfg(test)]
     pub fn title(self) -> &'static str {
         match self {
             Group::Review => "Em revisão",
@@ -70,6 +71,93 @@ pub fn status_name(status: TaskStatus) -> &'static str {
         TaskStatus::Merged => "Concluída",
         TaskStatus::Discarded => "Descartada",
         TaskStatus::Failed => "Falhou",
+    }
+}
+
+/// Nome curto do estado para o cartão e o histórico (`em revisão`, `aguarda validação`, `concluída`…).
+pub fn card_state_label(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Draft => "rascunho",
+        TaskStatus::Running => "em andamento",
+        TaskStatus::Review => "em revisão",
+        TaskStatus::Validating => "aguarda validação",
+        TaskStatus::Merged => "concluída",
+        TaskStatus::Discarded => "descartada",
+        TaskStatus::Failed => "falhou",
+    }
+}
+
+/// O cartão pede ação imediata do usuário (`Review` ou `Validating`) e recebe destaque visual.
+pub fn is_focused_card(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Review | TaskStatus::Validating)
+}
+
+/// Etapa atual da barra de progresso de 5 segmentos (`1..=5`; `0` para descartada).
+pub fn task_step(status: TaskStatus) -> usize {
+    match status {
+        TaskStatus::Draft => 1,
+        TaskStatus::Running | TaskStatus::Failed => 2,
+        TaskStatus::Review => 3,
+        TaskStatus::Validating => 4,
+        TaskStatus::Merged => 5,
+        TaskStatus::Discarded => 0,
+    }
+}
+
+/// Filtro da seção "HISTÓRICO" (tarefas encerradas).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HistoryFilter {
+    #[default]
+    All,
+    Done,
+    Discarded,
+}
+
+impl HistoryFilter {
+    pub const ALL: [HistoryFilter; 3] = [HistoryFilter::All, HistoryFilter::Done, HistoryFilter::Discarded];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            HistoryFilter::All => "Concluídas e descartadas",
+            HistoryFilter::Done => "Só concluídas",
+            HistoryFilter::Discarded => "Só descartadas",
+        }
+    }
+
+    pub fn matches(self, status: TaskStatus) -> bool {
+        match self {
+            HistoryFilter::All => matches!(status, TaskStatus::Merged | TaskStatus::Discarded),
+            HistoryFilter::Done => status == TaskStatus::Merged,
+            HistoryFilter::Discarded => status == TaskStatus::Discarded,
+        }
+    }
+}
+
+/// Tarefas em andamento (não encerradas: `Draft`, `Running`, `Review`, `Validating`, `Failed`),
+/// ordenadas por prioridade do grupo (quem pede ação do humano vem primeiro) e atividade recente.
+pub fn active_tasks(tasks: &[Task]) -> Vec<&Task> {
+    group_tasks(tasks).into_iter().filter(|(g, _)| !matches!(g, Group::Done | Group::Cancelled)).flat_map(|(_, list)| list).collect()
+}
+
+/// Tarefas encerradas (`Merged`, `Discarded`) filtradas por `filter`, da mais recente para a mais antiga.
+pub fn history_tasks(tasks: &[Task], filter: HistoryFilter) -> Vec<&Task> {
+    let mut list: Vec<&Task> = tasks.iter().filter(|t| filter.matches(t.status)).collect();
+    list.sort_by(|a, b| last_activity(b).cmp(&last_activity(a)).then_with(|| task_number(&b.id).cmp(&task_number(&a.id))));
+    list
+}
+
+/// Tempo relativo da última atividade da tarefa (`agora`, `há 6 min`, `há 2 h`).
+pub fn task_age(task: &Task, now_ms: u64) -> String {
+    age_text(now_ms, last_activity(task))
+}
+
+/// Data curta `dd/mm` do encerramento (ou última atividade) para a linha do histórico.
+pub fn task_date_ddmm(task: &Task) -> String {
+    use chrono::TimeZone;
+    let at_ms = task.finished_ms.unwrap_or_else(|| last_activity(task));
+    match chrono::Local.timestamp_millis_opt(at_ms as i64) {
+        chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => t.format("%d/%m").to_string(),
+        chrono::LocalResult::None => String::new(),
     }
 }
 
@@ -475,6 +563,8 @@ pub struct TasksUi {
     /// Pediram outra leitura enquanto uma estava em andamento.
     dirty: bool,
     pub collapsed: HashSet<Group>,
+    pub history_filter: HistoryFilter,
+    pub history_menu: bool,
     pub closed_sections: HashSet<Section>,
     pub confirm: Option<Confirm>,
     /// O campo de feedback do "Devolver" (em revisão) ou do "Reprovar" (aguardando validação) está aberto.
@@ -500,6 +590,8 @@ impl Default for TasksUi {
             dirty: false,
             // As concluídas e as canceladas já foram resolvidas: começam recolhidas.
             collapsed: HashSet::from([Group::Done, Group::Cancelled]),
+            history_filter: HistoryFilter::All,
+            history_menu: false,
             closed_sections: HashSet::new(),
             confirm: None,
             return_open: false,
@@ -622,6 +714,7 @@ impl Deck {
         self.tasks.view = TasksView::List;
         self.tasks_clear_detail_state();
         self.tasks.notice = None;
+        self.tasks.history_menu = false;
         self.tasks.form.menu = None;
         self.tasks.form.provider = None;
     }
@@ -937,6 +1030,7 @@ pub fn demo_tasks() -> Vec<Task> {
                 .into(),
         ),
         diff_stat: Some(" crates/app/src/ui/tasks.rs | 18 ++++++++++++++----\n 1 file changed, 14 insertions(+), 4 deletions(-)\n".into()),
+        merge_commit: Some("a1b2c3d4e5f60123456789abcdef0123456789ab".into()),
         events: vec![
             ev(180, "criada"),
             ev(170, "iniciada: worktree … na branch tarefa/t8"),
@@ -1287,5 +1381,44 @@ mod tests {
         ] {
             assert!(tasks.iter().any(|t| t.status == status), "{status:?}");
         }
+    }
+
+    #[test]
+    fn active_tasks_and_history_split_and_filter_demo_tasks() {
+        let tasks = demo_tasks();
+        let active = active_tasks(&tasks);
+        let active_ids: Vec<&str> = active.iter().map(|t| t.id.as_str()).collect();
+        // Só as não encerradas (Review, Validating, Running, Draft, Failed), na ordem de prioridade e recência.
+        assert_eq!(active_ids, ["t4", "t5", "t8", "t6", "t7", "t3"]);
+        assert!(active.iter().all(|t| !matches!(t.status, TaskStatus::Merged | TaskStatus::Discarded)));
+
+        // Histórico: todas (Merged + Discarded), da mais recente (t2, há 24h) para a mais antiga (t1, há 48h).
+        let all_hist = history_tasks(&tasks, HistoryFilter::All);
+        assert_eq!(all_hist.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t2", "t1"]);
+
+        // Filtro só concluídas / só descartadas.
+        let done_only = history_tasks(&tasks, HistoryFilter::Done);
+        assert_eq!(done_only.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t2"]);
+        let discarded_only = history_tasks(&tasks, HistoryFilter::Discarded);
+        assert_eq!(discarded_only.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t1"]);
+
+        // Etapas de 5 segmentos e destaque dos cartões que pedem ação do humano.
+        assert_eq!(task_step(TaskStatus::Draft), 1);
+        assert_eq!(task_step(TaskStatus::Running), 2);
+        assert_eq!(task_step(TaskStatus::Failed), 2);
+        assert_eq!(task_step(TaskStatus::Review), 3);
+        assert_eq!(task_step(TaskStatus::Validating), 4);
+        assert_eq!(task_step(TaskStatus::Merged), 5);
+        assert_eq!(task_step(TaskStatus::Discarded), 0);
+        assert!(is_focused_card(TaskStatus::Review) && is_focused_card(TaskStatus::Validating));
+        assert!(!is_focused_card(TaskStatus::Running) && !is_focused_card(TaskStatus::Draft));
+        assert_eq!(card_state_label(TaskStatus::Review), "em revisão");
+        assert_eq!(card_state_label(TaskStatus::Validating), "aguarda validação");
+        assert_eq!(card_state_label(TaskStatus::Merged), "concluída");
+        assert_eq!(card_state_label(TaskStatus::Discarded), "descartada");
+
+        // Data dd/mm tem 5 caracteres com '/' no meio.
+        let ddmm = task_date_ddmm(&tasks[0]);
+        assert_eq!((ddmm.len(), ddmm.as_bytes()[2]), (5, b'/'), "{ddmm}");
     }
 }

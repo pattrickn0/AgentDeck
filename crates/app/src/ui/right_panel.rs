@@ -6,9 +6,8 @@ use std::time::Duration;
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use super::{galley, paint_splitter, place, text_in, tip};
+use super::{button, button_width, galley, paint_splitter, place, section_label, separator, text_in, tip, ButtonKind};
 use crate::deck::{Deck, FeedItem, RightView};
-use crate::icons::Icon;
 use crate::theme;
 use agentdeck_core::{DownloadProgress, DownloadState, FeedKind};
 
@@ -37,49 +36,53 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     }
 }
 
-/// Uma aba do cabeçalho: ícone, dica (tooltip) e o número de não vistas.
+/// Uma aba do cabeçalho: rótulo, dica (tooltip) e contador opcional.
 struct HeadTab<'a> {
     id: &'static str,
-    icon: Icon,
+    label: &'static str,
     tip: &'a str,
     badge: u32,
 }
 
-/// Largura de cada aba do cabeçalho (fixa: o número de não vistas fica sobre o ícone).
-const HEAD_TAB_W: f32 = 36.0;
-
-/// Pinta uma aba do cabeçalho. Devolve se foi clicada.
-fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: HeadTab<'_>, active: bool) -> bool {
+/// Pinta uma aba em pílula (22 px de altura, cantos 5) no cabeçalho da barra direita. Devolve `(largura, clicou)`.
+fn head_tab(ui: &Ui, painter: &egui::Painter, at: Pos2, tab: HeadTab<'_>, active: bool) -> (f32, bool) {
+    let p = theme::pal();
+    let font = if active { theme::ui_semibold(11.5) } else { theme::ui(11.5) };
+    let text_g = galley(painter, tab.label, font.clone(), p.text_strong);
+    let badge_txt = (tab.badge > 0).then(|| if tab.badge > 99 { "99+".to_owned() } else { tab.badge.to_string() });
+    let badge_font = if active { theme::ui_bold(10.0) } else { theme::meta(10.0) };
+    let badge_g = badge_txt.as_deref().map(|t| galley(painter, t, badge_font, p.text_strong));
+    let badge_w = badge_g.as_ref().map(|g| (g.size().x + 10.0).max(14.0)).unwrap_or(0.0);
+    let w = 16.0 + text_g.size().x + if badge_w > 0.0 { 5.0 + badge_w } else { 0.0 };
+    let rect = Rect::from_min_size(at, Vec2::new(w, 22.0));
     let r = super::clickable(ui, rect, Id::new(("right-tab", tab.id)));
     let hovered = r.hovered();
-    if active || hovered {
-        painter.rect_filled(rect.shrink2(Vec2::new(2.0, 6.0)), 6.0, if active { theme::pal().hover } else { theme::pal().chip });
-    }
-    let color = if active || hovered { theme::pal().text } else { theme::pal().text_2 };
-    let center = rect.center();
-    deck.icons.paint(painter, tab.icon, center, 16.0, color, 0.0);
-    if tab.badge > 0 {
-        // Pílula sobre o canto superior direito do ícone.
-        let txt = if tab.badge > 99 { "99+".to_owned() } else { tab.badge.to_string() };
-        let g = galley(painter, &txt, theme::ui(10.0), theme::pal().on_accent);
-        let size = Vec2::new((g.size().x + 8.0).max(14.0), 14.0);
-        let b = Rect::from_min_size(Pos2::new(center.x + 3.0, center.y - 13.0), size);
-        painter.rect_filled(b.expand(1.5), 8.0, theme::glass_solid());
-        painter.rect_filled(b, 7.0, theme::accent());
-        place(painter, b, Align2::CENTER_CENTER, g, theme::pal().on_accent);
-    }
     if active {
-        // Sublinhado na cor do agente ativo.
-        let line = Rect::from_min_max(Pos2::new(rect.min.x + 6.0, rect.max.y - 2.0), Pos2::new(rect.max.x - 6.0, rect.max.y));
-        painter.rect_filled(line, 1.0, deck.accent());
+        painter.rect_filled(rect, 5.0, p.selected);
+    } else if hovered {
+        painter.rect_filled(rect, 5.0, p.hover);
     }
-    tip(r, tab.tip).clicked()
+    let fg = if active {
+        p.text_strong
+    } else if hovered {
+        p.text
+    } else {
+        p.text_2
+    };
+    let text_rect = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, rect.min.y), Vec2::new(text_g.size().x, rect.height()));
+    place(painter, text_rect, Align2::LEFT_CENTER, text_g, fg);
+    if let Some(bg) = badge_g {
+        let pill = Rect::from_min_size(Pos2::new(text_rect.max.x + 5.0, rect.center().y - 7.0), Vec2::new(badge_w, 14.0));
+        let (pill_fill, pill_fg) = if active { (theme::accent(), p.on_accent) } else { (p.chip, p.text_2) };
+        painter.rect_filled(pill, 7.0, pill_fill);
+        place(painter, pill, Align2::CENTER_CENTER, bg, pill_fg);
+    }
+    (w, tip(r, tab.tip).clicked())
 }
 
 fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
-    // Borda inferior alinhada à da topbar.
-    painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::pal().separator);
+    separator(&painter, Pos2::new(rect.min.x, rect.max.y - 0.5), Pos2::new(rect.max.x, rect.max.y - 0.5));
     let view = deck.right_view;
     let git_st = deck.git.status();
     let git_badge = git_st.as_ref().map(|s| s.entries.len() as u32).unwrap_or(0);
@@ -98,29 +101,19 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         (r, v) => format!("Tarefas · {r} em revisão, {v} aguardando validação"),
     };
     let tabs = [
-        (RightView::Tarefas, HeadTab { id: "tarefas", icon: Icon::Tasks, tip: &tasks_tip, badge: review_badge }),
-        (RightView::Conversa, HeadTab { id: "conversa", icon: Icon::Chat, tip: "Conversa integrada", badge: deck.unseen }),
-        (RightView::Git, HeadTab { id: "git", icon: Icon::GitBranch, tip: &git_tip, badge: git_badge }),
-        (RightView::GitHub, HeadTab { id: "github", icon: Icon::GitHub, tip: &gh_tip, badge: gh_badge }),
+        (RightView::Tarefas, HeadTab { id: "tarefas", label: "Tarefas", tip: &tasks_tip, badge: review_badge }),
+        (RightView::Conversa, HeadTab { id: "conversa", label: "Conversa", tip: "Conversa integrada", badge: deck.unseen }),
+        (RightView::Git, HeadTab { id: "git", label: "Git", tip: &git_tip, badge: git_badge }),
+        (RightView::GitHub, HeadTab { id: "github", label: "GitHub", tip: &gh_tip, badge: gh_badge }),
     ];
+    let y = rect.min.y + (rect.height() - 1.0 - 22.0) * 0.5;
     let mut x = rect.min.x + 6.0;
     for (target, tab) in tabs {
-        let r = Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(HEAD_TAB_W, rect.height() - 1.0));
-        if head_tab(deck, ui, &painter, r, tab, view == target) {
+        let (w, clicked) = head_tab(ui, &painter, Pos2::new(x, y), tab, view == target);
+        if clicked {
             deck.set_right_view(target);
         }
-        x = r.max.x + 2.0;
-    }
-    // "Limpar" à direita, só na Conversa.
-    if view == RightView::Conversa {
-        let font = theme::ui(13.0);
-        let cw = galley(&painter, "Limpar", font.clone(), theme::pal().text_2).size().x + 8.0;
-        let clear = Rect::from_min_size(Pos2::new(rect.max.x - 10.0 - cw, rect.min.y + 6.0), Vec2::new(cw, rect.height() - 13.0));
-        let r = super::clickable(ui, clear, Id::new("feed-clear"));
-        text_in(&painter, clear, Align2::CENTER_CENTER, "Limpar", font, if r.hovered() { theme::pal().text } else { theme::pal().text_2 });
-        if tip(r, "Limpar a conversa integrada").clicked() {
-            deck.clear_feed();
-        }
+        x += w + 2.0;
     }
 }
 
@@ -252,22 +245,35 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
 fn draw_feed(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     let ctx = ui.ctx().clone();
 
+    let body = if !deck.feed.is_empty() {
+        let head = Rect::from_min_size(area.min, Vec2::new(area.width(), super::SECTION_LABEL_H + 4.0));
+        let painter = ui.painter_at(head);
+        section_label(&painter, Rect::from_min_size(Pos2::new(head.min.x, head.min.y + 2.0), head.size()), "CONVERSA");
+        let cw = button_width(&painter, "Limpar", ButtonKind::Ghost);
+        let clear = Rect::from_min_size(Pos2::new(head.max.x - 8.0 - cw, head.center().y - 10.0), Vec2::new(cw, 20.0));
+        if tip(button(ui, clear, Id::new("feed-clear"), "Limpar", ButtonKind::Ghost), "Limpar a conversa integrada").clicked() {
+            deck.clear_feed();
+        }
+        Rect::from_min_max(Pos2::new(area.min.x, head.max.y), area.max)
+    } else {
+        area
+    };
+
     let h_id = Id::new("feed-last-h");
-    let last_h = ctx.data(|d| d.get_temp::<f32>(h_id)).unwrap_or(area.height());
-    if (last_h - area.height()).abs() > 0.5 && deck.feed_near_bottom {
+    let last_h = ctx.data(|d| d.get_temp::<f32>(h_id)).unwrap_or(body.height());
+    if (last_h - body.height()).abs() > 0.5 && deck.feed_near_bottom {
         deck.feed_scroll_to_bottom = true;
     }
-    ctx.data_mut(|d| d.insert_temp(h_id, area.height()));
+    ctx.data_mut(|d| d.insert_temp(h_id, body.height()));
 
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(Align::Min)));
-    child.set_clip_rect(area);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(Align::Min)));
+    child.set_clip_rect(body);
     let scroll_to_bottom = std::mem::take(&mut deck.feed_scroll_to_bottom);
     let thinking_alpha = blink_alpha(ctx.input(|i| i.time), 1.0);
     let has_thinking = deck.feed.iter().any(|f| f.kind == FeedKind::Thinking);
     let out = egui::ScrollArea::vertical().id_salt("feed").auto_shrink([false, false]).animated(false).show(&mut child, |ui| {
         let full_w = ui.available_width();
-        // padding: 4px 14px 8px
-        let content_w = (full_w - 28.0).max(40.0);
+        let content_w = (full_w - 20.0).max(40.0);
         ui.add_space(4.0);
         if deck.feed.is_empty() {
             empty_text(ui, content_w);
@@ -275,12 +281,11 @@ fn draw_feed(deck: &mut Deck, ui: &mut Ui, area: Rect) {
         let mut last = None;
         let n = deck.feed.len();
         for (i, item) in deck.feed.iter().enumerate() {
-            // Margens verticais de 8px colapsam entre irmãos.
-            ui.add_space(8.0);
+            ui.add_space(6.0);
             let r = message(ui, item, content_w, thinking_alpha);
             last = Some(r);
             if i + 1 == n {
-                ui.add_space(8.0);
+                ui.add_space(6.0);
             }
         }
         ui.add_space(8.0);
@@ -310,84 +315,82 @@ fn empty_text(ui: &mut Ui, w: f32) {
     let mut job = LayoutJob::default();
     job.wrap.max_width = w;
     let base = TextFormat {
-        font_id: theme::ui(13.0),
+        font_id: theme::ui(12.0),
         color: theme::pal().text_2,
-        line_height: Some(13.0 * theme::LINE_HEIGHT),
+        line_height: Some(12.0 * theme::LINE_HEIGHT),
         ..Default::default()
     };
     job.append("Aqui aparecem as conversas entre os agentes (via ", 0.0, base.clone());
     // Espaços que não quebram: o chip não se parte entre duas linhas (o fundo ficava solto).
-    job.append("\u{a0}ask-agent\u{a0}", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::pal().hover, ..base.clone() });
+    job.append("\u{a0}ask-agent\u{a0}", 0.0, TextFormat { font_id: theme::mono(11.5), background: theme::pal().chip, ..base.clone() });
     job.append(") e os avisos do sistema.", 0.0, base);
     let g = ui.painter().layout_job(job);
-    let (r, _) = ui.allocate_exact_size(Vec2::new(w + 28.0, g.size().y + 16.0), Sense::hover());
-    ui.painter().galley(Pos2::new(r.min.x + 14.0, r.min.y + 8.0), g, theme::pal().text_2);
+    let (r, _) = ui.allocate_exact_size(Vec2::new(w + 20.0, g.size().y + 16.0), Sense::hover());
+    ui.painter().galley(Pos2::new(r.min.x + 10.0, r.min.y + 8.0), g, theme::pal().text_2);
 }
 
 /// `.msg` (article). Devolve o retângulo ocupado.
 fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
+    let p = theme::pal();
     let plain = matches!(item.kind, FeedKind::System | FeedKind::Thinking);
     let (pad_x, pad_y) = (10.0, if plain { 2.0 } else { 8.0 });
     let inner_w = (w - 3.0 - pad_x * 2.0).max(20.0);
     let painter = ui.painter().clone();
 
-    // Cabeçalho: "quem → para" + hora à direita (12px, muted).
-    let hfont = theme::ui(12.0);
-    let time_g = galley(&painter, &item.time, hfont.clone(), theme::pal().text_2);
+    // Cabeçalho: "quem → para" + hora à direita (11,5px, muted).
+    let hfont = theme::ui(11.5);
+    let time_g = galley(&painter, &item.time, theme::meta(10.5), p.text_3);
     let mut head = LayoutJob::default();
     head.wrap.max_width = (inner_w - time_g.size().x - 6.0).max(10.0);
     head.wrap.max_rows = 1;
     head.wrap.overflow_character = Some('…');
-    let hfmt = TextFormat {
-        font_id: hfont.clone(),
-        color: theme::pal().text_2,
-        line_height: Some(12.0 * theme::LINE_HEIGHT),
-        ..Default::default()
-    };
+    let hfmt = TextFormat { font_id: hfont, color: p.text_2, line_height: Some(11.5 * theme::LINE_HEIGHT), ..Default::default() };
     if let Some(who) = &item.who {
-        head.append(who, 0.0, TextFormat { font_id: theme::ui_semibold(12.0), color: item.color, ..hfmt.clone() });
+        head.append(who, 0.0, TextFormat { font_id: theme::ui_semibold(11.5), color: item.color, ..hfmt.clone() });
     }
     if let Some(to) = &item.to {
         head.append(&format!(" → {to}"), if item.who.is_some() { 6.0 } else { 0.0 }, hfmt.clone());
     }
     let head_g = painter.layout_job(head);
-    let head_h = 12.0 * theme::LINE_HEIGHT;
+    let head_h = 11.5 * theme::LINE_HEIGHT;
 
-    // Corpo (pre-wrap, 13px, line-height 1.5).
+    // Corpo (pre-wrap, 12px, line-height 1.45).
     let body_color = match item.kind {
-        FeedKind::Error => theme::pal().danger_text,
-        FeedKind::System | FeedKind::Thinking => theme::pal().text_2,
-        _ => theme::pal().text,
+        FeedKind::Error => p.danger_text,
+        FeedKind::System | FeedKind::Thinking => p.text_2,
+        _ => p.text,
     };
     let mut body = LayoutJob::default();
     body.wrap.max_width = inner_w;
-    let bfmt = TextFormat { font_id: theme::ui(13.0), color: body_color, line_height: Some(13.0 * 1.5), ..Default::default() };
+    let bfmt =
+        TextFormat { font_id: theme::ui(12.0), color: body_color, line_height: Some(12.0 * theme::LINE_HEIGHT), ..Default::default() };
     body.append(&item.text, 0.0, bfmt.clone());
     if item.kind == FeedKind::Thinking {
         body.append(" ●", 0.0, TextFormat { color: theme::with_opacity(body_color, thinking_alpha), ..bfmt });
     }
     let body_g = painter.layout_job(body);
 
-    let h = pad_y * 2.0 + head_h + 4.0 + body_g.size().y.max(13.0 * 1.5);
-    let (outer, _) = ui.allocate_exact_size(Vec2::new(w + 28.0, h), Sense::hover());
-    let r = Rect::from_min_size(Pos2::new(outer.min.x + 14.0, outer.min.y), Vec2::new(w, h));
+    let h = pad_y * 2.0 + head_h + 4.0 + body_g.size().y.max(12.0 * theme::LINE_HEIGHT);
+    let (outer, _) = ui.allocate_exact_size(Vec2::new(w + 20.0, h), Sense::hover());
+    let r = Rect::from_min_size(Pos2::new(outer.min.x + 10.0, outer.min.y), Vec2::new(w, h));
 
     if !plain {
         let border = match item.kind {
-            FeedKind::Error => theme::pal().danger,
-            FeedKind::User => theme::pal().success,
+            FeedKind::Error => p.danger,
+            FeedKind::User => p.user,
             _ => item.color,
         };
         // Indicador colorido vertical na borda esquerda de 3px acompanhando o raio de 8px.
         painter.rect_filled(r, 8.0, border);
         let inner = Rect::from_min_max(Pos2::new(r.min.x + 3.0, r.min.y), r.max);
-        painter.rect_filled(inner, egui::CornerRadius { nw: 5, sw: 5, ne: 8, se: 8 }, theme::pal().hover);
+        painter.rect_filled(inner, egui::CornerRadius { nw: 5, sw: 5, ne: 8, se: 8 }, theme::with_alpha(p.text_strong, 0.03));
+        painter.rect_stroke(r, 8.0, egui::Stroke::new(1.0, theme::with_alpha(p.text_strong, 0.06)), egui::StrokeKind::Inside);
     }
     let x = r.min.x + 3.0 + pad_x;
     let y = r.min.y + pad_y;
     let head_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(inner_w, head_h));
-    place(&painter, head_rect, Align2::LEFT_CENTER, head_g, theme::pal().text_2);
-    place(&painter, head_rect, Align2::RIGHT_CENTER, time_g, theme::pal().text_2);
+    place(&painter, head_rect, Align2::LEFT_CENTER, head_g, p.text_2);
+    place(&painter, head_rect, Align2::RIGHT_CENTER, time_g, p.text_3);
     painter.galley(Pos2::new(x, y + head_h + 4.0), body_g, body_color);
     let _: Color32 = body_color;
     r

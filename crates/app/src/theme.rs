@@ -177,13 +177,11 @@ pub fn accent_soft(a: Color32) -> Color32 {
 }
 
 /// Destaque a 10% de alfa: fundo de um cartão em foco.
-#[allow(dead_code)] // Para a parte 3 (cartão em foco).
 pub fn accent_wash(a: Color32) -> Color32 {
     with_alpha(a, 0.10)
 }
 
 /// Destaque a 50% de alfa: borda de um cartão em foco.
-#[allow(dead_code)] // Para a parte 3 (cartão em foco).
 pub fn accent_edge(a: Color32) -> Color32 {
     with_alpha(a, 0.50)
 }
@@ -208,7 +206,7 @@ pub const ISLAND_GAP: f32 = 6.0;
 /// Cantos arredondados das ilhas.
 pub const ISLAND_RADIUS: u8 = 10;
 /// Cabeçalho da barra direita (abas Tarefas/Conversa/Git/GitHub).
-pub const TOPBAR_H: f32 = 38.0;
+pub const TOPBAR_H: f32 = 32.0;
 pub const SIDEBAR_DEFAULT_W: f32 = 220.0;
 pub const SIDEBAR_MIN_W: f32 = 150.0;
 pub const SIDEBAR_MAX_W: f32 = 480.0;
