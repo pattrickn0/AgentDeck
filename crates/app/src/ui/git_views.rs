@@ -624,8 +624,8 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
     let mut y = r.min.y + 24.0;
     let font = theme::mono(11.5);
     for (title, label, lines, tint) in [
-        ("NOSSO", &b.ours_label, &b.ours, theme::rgba(74, 222, 128, 0.12)),
-        ("DELES", &b.theirs_label, &b.theirs, theme::rgba(79, 140, 247, 0.14)),
+        ("NOSSO", &b.ours_label, &b.ours, theme::with_alpha(theme::pal().success, 0.12)),
+        ("DELES", &b.theirs_label, &b.theirs, theme::with_alpha(theme::pal().info, 0.14)),
     ] {
         let t = if label.is_empty() { title.to_owned() } else { format!("{title} · {label}") };
         let g = galley_trunc(&p, &t, theme::ui_bold(10.5), theme::pal().text_2, w - 20.0);

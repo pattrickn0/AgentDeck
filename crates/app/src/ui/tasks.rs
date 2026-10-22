@@ -283,8 +283,8 @@ fn error_box(ui: &mut Ui, text: &str, dismiss: bool) -> bool {
     let h = g.size().y + 16.0;
     let (outer, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 12.0), Sense::hover());
     let r = Rect::from_min_size(Pos2::new(outer.min.x + PAD, outer.min.y + 3.0), Vec2::new(w, h));
-    ui.painter().rect_filled(r, 7.0, theme::rgba(229, 72, 77, 0.12));
-    ui.painter().rect_stroke(r, 7.0, Stroke::new(1.0, theme::rgba(229, 72, 77, 0.45)), egui::StrokeKind::Inside);
+    ui.painter().rect_filled(r, 7.0, theme::with_alpha(theme::pal().danger, 0.12));
+    ui.painter().rect_stroke(r, 7.0, Stroke::new(1.0, theme::with_alpha(theme::pal().danger, 0.45)), egui::StrokeKind::Inside);
     ui.painter().galley(Pos2::new(r.min.x + 10.0, r.min.y + 8.0), g, theme::pal().danger_text);
     let mut closed = false;
     if dismiss {
@@ -955,7 +955,7 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
         let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), theme::pal().text_2, w - 28.0);
         let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + BTN_H + 14.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
-        shadow(ui.painter(), rect, 10, 10, 30, theme::rgba(0, 0, 0, 0.6));
+        shadow(ui.painter(), rect, 10, 10, 30, theme::with_alpha(theme::pal().shadow, 0.6));
         frame(ui.painter(), rect, 10.0, theme::pal().hover, theme::pal().separator);
         let mut y = rect.min.y + 14.0;
         ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g1.clone(), theme::pal().text);
@@ -1159,7 +1159,7 @@ fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem]
     let mut chosen = None;
     Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-        shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.5));
+        shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.5));
         frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
         let list = rect.shrink(4.0);
         let mut child = ui.new_child(UiBuilder::new().max_rect(list));

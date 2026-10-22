@@ -81,7 +81,7 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     Area::new(Id::new("new-tab-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
-        shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
+        shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0x88 as f32 / 255.0));
         frame(p, rect, 8.0, theme::pal().hover, theme::pal().separator);
         let mut y = rect.min.y + 5.0;
         for (m, &arrow) in items.iter().zip(&with_arrow) {
@@ -199,7 +199,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
     let mut chosen = None;
     Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-        shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
+        shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0x88 as f32 / 255.0));
         frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
         // Cabeçalho: "‹ título" volta um passo.
         let head = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, rect.min.y + 5.0), Vec2::new(w - 10.0, head_h));
@@ -390,7 +390,7 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     Area::new(Id::new("settings-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         let p = ui.painter();
-        shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0xaa as f32 / 255.0));
+        shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0xaa as f32 / 255.0));
         frame(p, rect, 8.0, theme::pal().hover, theme::pal().separator);
         let inner = rect.shrink(9.0);
         // Título: 11px, 700, maiúsculas, letter-spacing .5px
@@ -516,7 +516,7 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     Area::new(Id::new("tab-context-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
-        shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.55));
+        shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.55));
         frame(p, rect, 6.0, theme::pal().hover, theme::pal().separator);
         let font = theme::ui(12.5);
 
@@ -592,7 +592,7 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
     Area::new(Id::new("rename-tab-modal")).order(Order::Tooltip).fixed_pos(rect.min).show(ctx, |ui| {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
-        shadow(&p, r, 0, 8, 30, theme::rgba(0, 0, 0, 0.7));
+        shadow(&p, r, 0, 8, 30, theme::with_alpha(theme::pal().shadow, 0.7));
         frame(&p, r, 10.0, theme::pal().hover, theme::pal().separator);
 
         let mut y = r.min.y + 16.0;

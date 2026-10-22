@@ -447,7 +447,7 @@ fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize
         let menu = Rect::from_min_size(pos, Vec2::new(w, h));
         Area::new(id.with("menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-            shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.55));
+            shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.55));
             frame(ui.painter(), rect, 6.0, theme::pal().hover, theme::pal().separator);
             let inner = rect.shrink(4.0);
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {

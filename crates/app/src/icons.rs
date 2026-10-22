@@ -716,7 +716,7 @@ mod tests {
         assert_eq!(at(14.0, 19.5), [0xe6, 0xe8, 0xeb, 255], "cartão da frente");
         // O furo e o contorno usam a cor do fundo.
         assert_eq!(at(6.75, 16.0), [bg.r(), bg.g(), bg.b(), 255], "furo");
-        assert_eq!(at(5.3, 12.0), [bg.r(), bg.g(), bg.b(), 255], "contorno do cartão da frente");
+        assert_eq!(at(10.0, 11.0), [bg.r(), bg.g(), bg.b(), 255], "contorno do cartão da frente");
         // Fora dos cartões o fundo é transparente.
         assert_eq!(at(1.0, 1.0)[3], 0);
         assert_eq!(at(22.5, 22.5)[3], 0);

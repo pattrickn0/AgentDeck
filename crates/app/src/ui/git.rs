@@ -765,9 +765,9 @@ pub(super) fn diff_lines_at(
             let (r, _) = ui.allocate_exact_size(Vec2::new(content_w, DIFF_ROW_H), Sense::hover());
             let p = ui.painter();
             let (bg, fg) = match line.kind {
-                DiffKind::Add => (Some(theme::rgba(74, 222, 128, 0.12)), theme::pal().text),
-                DiffKind::Del => (Some(theme::rgba(229, 72, 77, 0.14)), theme::pal().text),
-                DiffKind::Hunk => (Some(theme::rgba(79, 140, 247, 0.10)), theme::pal().info),
+                DiffKind::Add => (Some(theme::with_alpha(theme::pal().success, 0.12)), theme::pal().text),
+                DiffKind::Del => (Some(theme::with_alpha(theme::pal().danger, 0.14)), theme::pal().text),
+                DiffKind::Hunk => (Some(theme::with_alpha(theme::pal().info, 0.10)), theme::pal().info),
                 DiffKind::Meta => (None, theme::pal().text_2),
                 DiffKind::Context => (None, theme::pal().text_2),
             };
@@ -820,7 +820,7 @@ fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut
     let total: f32 = items.iter().map(|(l, ..)| galley(ui.painter(), l, theme::ui(11.0), theme::pal().text).size().x + 16.0).sum();
     let strip = Rect::from_min_max(Pos2::new(right - total - 6.0, row.min.y), Pos2::new(area.max.x, row.max.y));
     ui.painter().rect_filled(strip, 0.0, theme::pal().bg);
-    ui.painter().rect_filled(strip, 0.0, theme::rgba(79, 140, 247, 0.10));
+    ui.painter().rect_filled(strip, 0.0, theme::with_alpha(theme::pal().info, 0.10));
     for (label, tooltip, danger) in items {
         let g = galley(ui.painter(), label, theme::ui(11.0), theme::pal().text);
         let w = g.size().x + 12.0;
@@ -955,7 +955,7 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
     };
     Area::new(Id::new("git-branch-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-        shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.5));
+        shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.5));
         frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
         // Filtro / nome da branch nova.
         let fr = Rect::from_min_size(rect.min + Vec2::new(8.0, 8.0), Vec2::new(w - 16.0, 26.0));
@@ -1134,7 +1134,7 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect) {
         let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), theme::pal().text_2, w - 28.0);
         let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + BTN_H + 14.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
-        shadow(ui.painter(), rect, 10, 10, 30, theme::rgba(0, 0, 0, 0.6));
+        shadow(ui.painter(), rect, 10, 10, 30, theme::with_alpha(theme::pal().shadow, 0.6));
         frame(ui.painter(), rect, 10.0, theme::pal().hover, theme::pal().separator);
         let mut y = rect.min.y + 14.0;
         ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g1.clone(), theme::pal().text);

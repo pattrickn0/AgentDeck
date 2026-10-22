@@ -568,9 +568,11 @@ mod tests {
         assert_eq!(Some(p.text), parse_hex_color("#e6e8eb"));
         assert_eq!(Some(p.text_3), parse_hex_color("#939aa4"));
         // rgba(44,47,54,.50) e rgba(255,255,255,.13): o alfa é arredondado para 0..=255.
-        assert_eq!(p.glass.to_srgba_unmultiplied(), [44, 47, 54, 128]);
-        assert_eq!(p.glass_border.to_srgba_unmultiplied(), [255, 255, 255, 33]);
-        assert_eq!(p.well.to_srgba_unmultiplied(), [22, 24, 28, 235]);
+        // Color32 guarda o alfa pré-multiplicado: ao desfazer, cada canal pode variar em 1.
+        let near = |c: Color32, want: [u8; 4]| c.to_srgba_unmultiplied().iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1);
+        assert!(near(p.glass, [44, 47, 54, 128]), "{:?}", p.glass);
+        assert!(near(p.glass_border, [255, 255, 255, 33]), "{:?}", p.glass_border);
+        assert!(near(p.well, [22, 24, 28, 235]), "{:?}", p.well);
     }
 
     #[test]
@@ -594,6 +596,70 @@ mod tests {
         let c = over(white(128), Color32::from_rgb(0, 0, 0));
         assert_eq!(c.to_srgba_unmultiplied(), [128, 128, 128, 255]);
         assert_eq!(over(Color32::from_rgb(1, 2, 3), Color32::from_rgb(9, 9, 9)), Color32::from_rgb(1, 2, 3));
+    }
+
+    /// Arquivos que podem criar cores: a paleta, as cores do terminal e os ícones (a marca).
+    const COLOR_HOMES: [&str; 3] = ["theme.rs", "terminal/colors.rs", "icons.rs"];
+
+    /// Arquivos que ainda têm cor solta e as partes 2 e 3 do visual vão migrar para a paleta. A lista
+    /// só encolhe: um arquivo que ficou limpo tem de sair daqui (o teste cobra). Está vazia desde a parte 1.
+    const STILL_LOOSE: [&str; 0] = [];
+
+    const LOOSE_COLOR: [&str; 5] = ["Color32::from_rgb", "Color32::from_rgba", "from_gray", "from_rgba_", "theme::rgba("];
+
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("pasta de código") {
+            let path = entry.expect("entrada").path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Linhas com cor solta fora dos testes (tudo depois de `#[cfg(test)]` é teste) e fora de comentários.
+    fn loose_colors(text: &str) -> Vec<String> {
+        text.lines()
+            .take_while(|l| !l.trim_start().starts_with("#[cfg(test)]"))
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .filter(|l| LOOSE_COLOR.iter().any(|p| l.contains(p)))
+            .map(|l| l.trim().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn colors_come_from_the_palette() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&root, &mut files);
+        let mut loose = Vec::new();
+        for f in files {
+            let rel = f.strip_prefix(&root).expect("dentro de src").to_string_lossy().replace('\\', "/");
+            if COLOR_HOMES.contains(&rel.as_str()) || rel.ends_with("_tests.rs") {
+                continue;
+            }
+            let lines = loose_colors(&std::fs::read_to_string(&f).expect("ler o arquivo"));
+            let listed = STILL_LOOSE.contains(&rel.as_str());
+            if lines.is_empty() && listed {
+                panic!("{rel} já não tem cor solta: tire-o de STILL_LOOSE");
+            }
+            if !lines.is_empty() && !listed {
+                loose.push(format!("{rel}: {}", lines.join(" | ")));
+            }
+        }
+        assert!(loose.is_empty(), "cor solta fora de theme.rs, terminal/colors.rs e icons.rs (use theme::pal()):\n{}", loose.join("\n"));
+    }
+
+    #[test]
+    fn the_loose_color_scan_knows_what_to_catch() {
+        assert_eq!(loose_colors("let a = Color32::from_rgb(1, 2, 3);\nlet b = 1;").len(), 1);
+        assert_eq!(loose_colors("x(theme::rgba(0, 0, 0, 0.5))").len(), 1);
+        assert_eq!(loose_colors("Color32::from_rgba_unmultiplied(1, 2, 3, 4)").len(), 1);
+        assert!(loose_colors("// Color32::from_rgb(1, 2, 3)").is_empty());
+        assert!(loose_colors("let c = theme::pal().text;").is_empty());
+        // O que vem depois de `#[cfg(test)]` é teste.
+        assert!(loose_colors("fn a() {}\n#[cfg(test)]\nmod t { let c = Color32::from_rgb(1, 2, 3); }").is_empty());
     }
 
     #[test]

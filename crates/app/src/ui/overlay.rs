@@ -21,7 +21,7 @@ pub fn drop_overlay(deck: &mut Deck, ctx: &egui::Context, full: Rect) {
 
     let r = zone.rect;
     let p = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::new("drop-overlay")));
-    p.rect_filled(r, 0.0, theme::rgba(11, 11, 13, 0.78));
+    p.rect_filled(r, 0.0, theme::with_alpha(theme::pal().bg, 0.78));
     p.rect_stroke(r.shrink(1.0), 0.0, Stroke::new(2.0, theme::accent()), egui::StrokeKind::Inside);
 
     let max_card_w = (r.width() - 24.0).max(160.0);
@@ -33,7 +33,7 @@ pub fn drop_overlay(deck: &mut Deck, ctx: &egui::Context, full: Rect) {
     let content_h = icon_sz + 10.0 + title.size().y + 8.0 + sub.size().y;
     let size = Vec2::new((content_w + 56.0).min(max_card_w), (content_h + 48.0).min((r.height() - 16.0).max(120.0)));
     let b = Rect::from_center_size(r.center(), size);
-    p.rect_filled(b, 14.0, theme::rgba(79, 140, 247, 0.10));
+    p.rect_filled(b, 14.0, theme::accent_wash(theme::accent()));
     dashed_round_rect(&p, b.shrink(1.0), 13.0, Stroke::new(2.0, theme::accent()));
 
     let mut y = b.center().y - content_h / 2.0;

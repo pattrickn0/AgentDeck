@@ -246,7 +246,7 @@ mod tests {
             assert_eq!(rects.len(), n);
             let covered: f32 = rects.iter().map(|r| r.area()).sum();
             let gaps = a.area() - covered;
-            assert!(gaps >= 0.0 && gaps < 3.0 * a.width() + 3.0 * a.height(), "n={n} sobra {gaps}");
+            assert!(gaps >= 0.0 && gaps < GAP * (3.0 * a.width() + 3.0 * a.height()), "n={n} sobra {gaps}");
             for (i, r) in rects.iter().enumerate() {
                 assert!(a.contains_rect(*r), "n={n} {r:?}");
                 for s in &rects[i + 1..] {
@@ -257,9 +257,12 @@ mod tests {
         // 3 grupos: dois em cima, um largo embaixo.
         let shape = grid_shape(3, 1001.0, 601.0);
         let r = layout(a, &shape, &Ratios::equal(&shape));
-        assert_eq!((r[0].width(), r[1].width(), r[2].width()), (500.0, 500.0, 1001.0));
-        assert_eq!(r[0].height(), 300.0);
-        assert_eq!((r[2].min.y, r[2].max.y), (301.0, 601.0));
+        assert_eq!(r[2].width(), 1001.0);
+        assert_eq!(r[0].width() + GAP + r[1].width(), 1001.0);
+        assert!((r[0].width() - r[1].width()).abs() <= 1.0);
+        // (601 - 6) / 2 = 297,5 de cada linha, arredondado.
+        assert_eq!(r[0].height(), 298.0);
+        assert_eq!((r[2].min.y, r[2].max.y), (304.0, 601.0));
     }
 
     #[test]
@@ -285,13 +288,14 @@ mod tests {
 
     #[test]
     fn sizes_keep_the_minimum() {
-        assert_eq!(sizes(1001.0, &[0.5, 0.5], 260.0), [500.0, 500.0]);
+        let half = (1001.0 - GAP) / 2.0;
+        assert_eq!(sizes(1001.0, &[0.5, 0.5], 260.0), [half, half]);
         // Uma parte arrastada para quase nada volta ao mínimo.
         let s = sizes(1001.0, &[0.95, 0.05], 260.0);
         assert_eq!(s[1], 260.0);
-        assert!((s[0] + s[1] - 1000.0).abs() < 0.01);
+        assert!((s[0] + s[1] - (1001.0 - GAP)).abs() < 0.01);
         // Sem espaço para o mínimo de todas: só proporcional.
-        assert_eq!(sizes(301.0, &[0.5, 0.5], 260.0), [150.0, 150.0]);
+        assert_eq!(sizes(301.0, &[0.5, 0.5], 260.0), [(301.0 - GAP) / 2.0; 2]);
     }
 
     #[test]

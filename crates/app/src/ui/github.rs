@@ -21,8 +21,6 @@ use crate::icons::Icon;
 use crate::theme;
 
 /// Verde de "aprovado" e âmbar de "em andamento" (o vermelho é `theme::pal().danger`).
-const OK: Color32 = Color32::from_rgb(0x4a, 0xde, 0x80);
-const WARN: Color32 = Color32::from_rgb(0xfa, 0xcc, 0x15);
 
 const PAD: f32 = 10.0;
 const REPO_BAR_H: f32 = 34.0;
@@ -126,7 +124,7 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), 24.0));
         let p = ui.painter_at(strip);
         let (bg, fg) =
-            if is_err { (theme::rgba(0xe5, 0x48, 0x4d, 0.14), theme::pal().danger_text) } else { (theme::pal().hover, theme::pal().text) };
+            if is_err { (theme::with_alpha(theme::pal().danger, 0.14), theme::pal().danger_text) } else { (theme::pal().hover, theme::pal().text) };
         p.rect_filled(strip, 0.0, bg);
         p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
         let close_r = Rect::from_min_size(Pos2::new(strip.max.x - 22.0, strip.min.y + 2.0), Vec2::splat(20.0));
@@ -183,7 +181,7 @@ fn draw_repo_bar(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) 
 
     let slug_r = Rect::from_min_max(Pos2::new(rect.min.x + PAD, rect.min.y + 4.0), Pos2::new(open_r.min.x - 6.0, rect.max.y - 4.0));
     let sr = ui.interact(slug_r, Id::new("gh-repo-slug"), Sense::hover());
-    dot(&p, Pos2::new(slug_r.min.x + 4.0, slug_r.center().y), if ov.authenticated { OK } else { theme::pal().text_2 });
+    dot(&p, Pos2::new(slug_r.min.x + 4.0, slug_r.center().y), if ov.authenticated { theme::pal().success } else { theme::pal().text_2 });
     let txt_r = Rect::from_min_max(Pos2::new(slug_r.min.x + 14.0, slug_r.min.y), slug_r.max);
     let g = galley_trunc(&p, &ov.repo.to_string(), theme::ui_bold(12.0), theme::pal().text, txt_r.width());
     place(&p, txt_r, Align2::LEFT_CENTER, g, theme::pal().text);
@@ -392,7 +390,7 @@ fn draw_issues_tab(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview
 fn draw_issue_row(p: &egui::Painter, row: Rect, issue: &Issue, selected: bool) {
     let top_y = row.min.y + 4.0;
     let bot_y = row.min.y + 22.0;
-    dot(p, Pos2::new(row.min.x + PAD + 5.0, top_y + 8.0), OK);
+    dot(p, Pos2::new(row.min.x + PAD + 5.0, top_y + 8.0), theme::pal().success);
 
     let num_txt = format!("#{}", issue.number);
     let num_font = theme::mono(11.0);
@@ -806,7 +804,7 @@ fn log_lines(ui: &mut Ui, body: Rect, log: &JobLog, job_id: u64) {
                 let first_clipped = log.truncated && range.start + i == 0;
                 let is_err = is_error_line(line);
                 if is_err {
-                    p.rect_filled(r, 0.0, theme::rgba(0xe5, 0x48, 0x4d, 0.14));
+                    p.rect_filled(r, 0.0, theme::with_alpha(theme::pal().danger, 0.14));
                 }
                 let fg = if is_err {
                     theme::pal().danger_text
@@ -867,7 +865,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
 
     Area::new(Id::new("gh-agent-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-        shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.5));
+        shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.5));
         frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
         let p = ui.painter().clone();
         let mut y = rect.min.y + 8.0;
@@ -986,9 +984,9 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
 /// Bolinha do estado dos checks: cheia (verde/vermelho/âmbar) ou só o anel quando não há checks.
 fn paint_check_badge(p: &egui::Painter, center: Pos2, status: CheckStatus) {
     let color = match status {
-        CheckStatus::Success => OK,
+        CheckStatus::Success => theme::pal().success,
         CheckStatus::Failure => theme::pal().danger,
-        CheckStatus::Pending => WARN,
+        CheckStatus::Pending => theme::pal().warning,
         CheckStatus::Neutral => {
             p.circle_stroke(center, 3.5, egui::Stroke::new(1.0, theme::pal().text_2));
             return;

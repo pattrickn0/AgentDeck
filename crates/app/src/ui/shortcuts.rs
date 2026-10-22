@@ -110,7 +110,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
     egui::Area::new(Id::new("shortcuts-modal")).order(Order::Tooltip).fixed_pos(rect.min).show(ctx, |ui| {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
-        shadow(&p, r, 0, 8, 30, theme::rgba(0, 0, 0, 0.7));
+        shadow(&p, r, 0, 8, 30, theme::with_alpha(theme::pal().shadow, 0.7));
         frame(&p, r, 10.0, theme::pal().hover, theme::pal().separator);
 
         let mut y = r.min.y + 16.0;
