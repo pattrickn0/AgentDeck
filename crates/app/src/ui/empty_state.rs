@@ -3,7 +3,7 @@
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Id, Pos2, Rect, Ui, Vec2};
 
-use super::{clickable, dot, frame, galley, place};
+use super::{button, dot, galley, place, ButtonKind};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
@@ -88,22 +88,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             let m = &items[i];
             let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(widths[i], btn_h));
             x += widths[i] + 10.0;
-            let resp = clickable(ui, r, Id::new(("empty-btn", &m.kind)));
-            let hot = resp.hovered();
-            // :hover → fundo panel-2, borda na cor do agente, sobe 1px
-            let rr = if hot { r.translate(Vec2::new(0.0, -1.0)) } else { r };
-            frame(
-                &painter,
-                rr,
-                6.0,
-                if hot { theme::pal().hover } else { theme::pal().chip },
-                if hot { m.color } else { theme::pal().separator },
-            );
-            dot(&painter, Pos2::new(rr.min.x + 15.0 + 4.0, rr.center().y), m.color);
+            // O botão secundário da base (borda, fundo e hover); o ponto do agente e o nome vão por cima.
+            let resp = button(ui, r, Id::new(("empty-btn", &m.kind)), "", ButtonKind::Secondary);
+            dot(&painter, Pos2::new(r.min.x + 15.0 + 4.0, r.center().y), m.color);
             let g = galley(&painter, &m.label, font.clone(), theme::pal().text);
             place(
                 &painter,
-                Rect::from_min_max(Pos2::new(rr.min.x + 15.0 + 8.0 + 8.0 + 6.0, rr.min.y), rr.max),
+                Rect::from_min_max(Pos2::new(r.min.x + 15.0 + 8.0 + 8.0 + 6.0, r.min.y), r.max),
                 Align2::LEFT_CENTER,
                 g,
                 theme::pal().text,

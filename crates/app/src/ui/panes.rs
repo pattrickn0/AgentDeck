@@ -16,7 +16,7 @@ use crate::terminal::view::{self, Metrics};
 use crate::theme;
 
 /// Altura do cabeçalho de abas de cada janela.
-pub const HEAD_H: f32 = 32.0;
+pub const HEAD_H: f32 = 30.0;
 const GRIP_W: f32 = 18.0;
 const ICON_BTN: f32 = 20.0;
 

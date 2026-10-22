@@ -19,10 +19,6 @@ pub enum Icon {
     CloudUpload,
     /// Chevron da árvore de arquivos (viewBox 16).
     TreeChevron,
-    /// Pasta aberta (viewBox 16).
-    FolderOpen,
-    /// Pasta fechada (viewBox 16).
-    FolderClosed,
     /// Arquivo genérico (viewBox 16).
     FileGeneric,
     /// Aba "Git" e chip da branch: Octicons `git-branch-16` (MIT, viewBox 16).
@@ -37,8 +33,6 @@ pub enum Icon {
     ArrowUp,
     /// Git: descartar alterações. Material Icons `undo` (Apache-2.0, viewBox 24).
     Undo,
-    /// Barra lateral (ORGANIZAÇÃO): liga/desliga a tela dividida. Material Icons `space_dashboard` (Apache-2.0, viewBox 24).
-    Split,
     /// Logo do Claude: o "spark", o asterisco laranja (viewBox 24).
     ClaudeLogo,
     /// Logo do Google Antigravity (viewBox 112).
@@ -60,13 +54,10 @@ impl Icon {
             Icon::Attach => ("M16.5 6.5v10a4.5 4.5 0 0 1-9 0V5a3 3 0 0 1 6 0v10.5a1.5 1.5 0 0 1-3 0V6.5H9v9a3 3 0 0 0 6 0V5a4.5 4.5 0 0 0-9 0v11.5a6 6 0 0 0 12 0v-10h-1.5Z", 24.0),
             Icon::CloudUpload => ("M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z", 24.0),
             Icon::TreeChevron => ("M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z", 16.0),
-            Icon::FolderOpen => ("M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 14.5 4H7.414L5.707 2.293A1 1 0 0 0 5 2H1.5zm0 1H5l1.707 1.707A1 1 0 0 0 7.414 5H14.5a.5.5 0 0 1 .5.5v1.25H1V3.5a.5.5 0 0 1 .5-.5z", 16.0),
-            Icon::FolderClosed => ("M14.5 3H7.71l-.85-.85L6.51 2h-5l-.5.5v11l.5.5h13l.5-.5v-10l-.5-.5zm-.5 10H2V3h4.29l.86.85.35.15H14v9z", 16.0),
             Icon::FileGeneric => ("M9 1H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7L9 1zm4 12H3V3h5v5h5v5z", 16.0),
             Icon::GitBranch => ("M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z", 16.0),
             Icon::GitHub => ("M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z", 16.0),
             Icon::Refresh => ("M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z", 24.0),
-            Icon::Split => ("M11 21H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h6v18zm2 0h6c1.1 0 2-.9 2-2v-7h-8v9zm8-11V5c0-1.1-.9-2-2-2h-6v7h8z", 24.0),
             Icon::ArrowDown => ("m20 12-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z", 24.0),
             Icon::ArrowUp => ("m4 12 1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z", 24.0),
             Icon::Undo => ("M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z", 24.0),
@@ -649,8 +640,6 @@ mod tests {
             Icon::Attach,
             Icon::CloudUpload,
             Icon::TreeChevron,
-            Icon::FolderOpen,
-            Icon::FolderClosed,
             Icon::FileGeneric,
             Icon::GitBranch,
             Icon::GitHub,
@@ -658,7 +647,6 @@ mod tests {
             Icon::ArrowDown,
             Icon::ArrowUp,
             Icon::Undo,
-            Icon::Split,
             Icon::ClaudeLogo,
             Icon::AntigravityLogo,
             Icon::OllamaLogo,

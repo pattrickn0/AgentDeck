@@ -186,7 +186,7 @@ Conversa
 
 Documentos no centro ★ (t19)
 
-- [ ] **A chave**: na barra de título, ao lado de "AgentDeck", aparecem **Agentes** e **Documentos (0)**; "Documentos" fica apagado e não clica sem documentos. Passar o mouse mostra a dica com o atalho.
+- [ ] **A chave**: no topo da barra lateral aparecem **Agentes** e **Documentos 0** (o ativo na cor do agente); recolhendo a barra (Ctrl+B) a chave passa para a barra de título, logo depois do logo; com a barra estreita (150 px) o segundo lado vira "Docs"; "Documentos" fica apagado e não clica sem documentos. Passar o mouse mostra a dica com o atalho.
 - [ ] **Abrir o diff pela mesa**: numa tarefa em revisão, "Ver diff completo". O centro troca sozinho para Documentos, com uma aba `t1 · diff`; o contador vira "Documentos (1)"; os botões Mesclar, Devolver, Validar e Reprovar seguem na barra direita. Clicar de novo em "Ver diff completo" só foca a aba (não abre outra). Depois de mesclar, "Ver o que foi mesclado" abre outra aba (`t1 · mesclagem`).
 - [ ] **A lista de arquivos do diff**: cada arquivo com a letra (A/M/D/R), o nome e `+`/`−`; clicar num arquivo rola o diff até ele; a seleção fica marcada. Num diff de uma tarefa com vários arquivos, conferir se a lista bate com o "N arquivos" do detalhe.
 - [ ] **O selo e os agentes escondidos**: com os terminais rodando, mudar para Documentos. Os terminais não somem nem reiniciam: ao voltar para Agentes, o que o agente escreveu enquanto isso está lá. Quando um agente termina um turno com o centro em Documentos, "Agentes" ganha um número (até o agente da aba que estava ativa); se só trabalha, um ponto pulsa. Voltar para Agentes limpa o número da aba ativa.
@@ -199,7 +199,7 @@ Documentos no centro ★ (t19)
 - [ ] **Arquivo grande ou binário**: duplo clique num `.exe`/`.png` ou num arquivo com mais de 1 MB mostra a explicação em vez do conteúdo, sem travar.
 - [ ] **Pedido e relatório** (mesa): "Abrir ao centro" no Pedido e no Relatório de uma tarefa abre cada um formatado (um `- [x]` vira caixa marcada, uma tabela vira tabela). O relatório de uma tarefa sem relatório diz isso.
 - [ ] **Aba Git**: no diff de um arquivo alterado e no detalhe de um commit do Histórico, "Abrir ao centro" abre o diff só para ler; o preparo por trecho continua na barra direita. Na largura mínima da barra (280 px) o botão vai para uma linha abaixo do título, sem vazar.
-- [ ] **Largura mínima da janela (~820 px)**: com Documentos à vista, nada vaza no centro nem na barra de título (a chave cabe ao lado do nome; o uso dos agentes encolhe); o diff põe a lista de arquivos em cima do diff quando o centro é estreito.
+- [ ] **Largura mínima da janela (~820 px)**: com Documentos à vista, nada vaza no centro nem na barra de título (a chave compacta cabe ao lado do logo com a barra recolhida; o uso dos agentes encolhe); o diff põe a lista de arquivos em cima do diff quando o centro é estreito.
 
 Tela dividida ★
 
@@ -258,7 +258,7 @@ Barra de título, uso dos agentes e barra lateral ★
 - [ ] Ollama: anel cinza, "local, sem limite". Fechar a última aba de um modelo tira o item da barra.
 - [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
-- [x] Seção **ORGANIZAÇÃO** na barra lateral: a chave "Tela dividida" liga/desliga a divisão (a chave anima e fica na cor do agente ativo).
+- [x] Seção **ORGANIZAÇÃO** na barra lateral: o controle **Abas | Dividida** liga/desliga a divisão.
 - [ ] Uso: passado o horário de renovação da sessão sem o agente rodar, o círculo mostra 0% esmaecido e "sessão renovada (sem dados novos)".
 - [ ] Antigravity com token vencido no Credential Manager e válido em `~\.gemini\oauth_creds.json`: a cota aparece. Sem login, o círculo reaparece em até 20 s depois do login.
 - [ ] Codex: abrir uma aba nova (rollout sem `rate_limits`): o uso da sessão anterior continua visível.
