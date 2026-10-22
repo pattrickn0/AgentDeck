@@ -90,8 +90,7 @@ fn old_commanddeck_variables_still_work() {
     let out = cmd.output().expect("ask-agent");
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     if cfg!(unix) {
-        assert_eq!(text(&out.stdout), "claude
-");
+        assert_eq!(text(&out.stdout), "claude\n");
     }
 
     // A nova vence quando as duas existem: com a antiga errada, a nova ainda funciona.
