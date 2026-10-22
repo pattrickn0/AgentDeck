@@ -206,7 +206,10 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
     // Sem caminhos: os globais e o índice dos específicos. O orquestrador (sem tarefa) lê do repositório do projeto.
     let (st, b) = ask(&agent, json!([]));
     assert!(
-        st == 200 && b["text"].as_str().is_some_and(|t| t.starts_with("Aprendizados do projeto:") && t.contains("memory/aprendizados/src.md — Regra de src.")),
+        st == 200
+            && b["text"]
+                .as_str()
+                .is_some_and(|t| t.starts_with("Aprendizados do projeto:") && t.contains("memory/aprendizados/src.md — Regra de src.")),
         "{st} {b}"
     );
     let (st, b) = ask(&boss, json!(["src/lib.rs"]));

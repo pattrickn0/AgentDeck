@@ -607,12 +607,12 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
 
         // `branch → base` e o agente com o modelo.
         padded(ui, |ui| {
-            let line = format!("{} → {}", task.branch, task.base);
+            let line = tasks_ui::branch_line(task);
             let g = ui.painter().layout(line, theme::mono(11.5), theme::SELECT_TEXT, ui.available_width() - 20.0);
             let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), g.size().y + 4.0), Sense::hover());
             deck.icons.paint(ui.painter(), Icon::GitBranch, r.min + Vec2::new(6.0, 8.5), 12.0, theme::MUTED, 0.0);
             ui.painter().galley(Pos2::new(r.min.x + 20.0, r.min.y + 1.0), g, theme::SELECT_TEXT);
-            tip(resp, "Branch da tarefa → branch em que ela será mesclada");
+            tip(resp, "Branch da tarefa → branch em que ela será mesclada (e o commit da mesclagem, se já houve)");
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
             let mut x = r.min.x;
             if let Some(icon) = super::projects::agent_icon(&task.kind) {
@@ -715,8 +715,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 None => muted_line(ui, if can_show_diff(task) { "O resumo chega com o relatório." } else { "Sem alterações registradas." }),
             }
             if can_show_diff(task) {
-                let b =
-                    [("Ver diff completo".to_owned(), BtnKind::Secondary, true, "Abre o git diff da branch da tarefa em relação à base")];
+                let b = [(tasks_ui::diff_button_label(task).to_owned(), BtnKind::Secondary, true, tasks_ui::diff_button_tip(task))];
                 if button_flow(ui, &b, "diff").is_some() {
                     acts.push(Act::OpenDiff(task.id.clone()));
                 }
@@ -865,7 +864,7 @@ fn return_form(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &
 
 /// O diff completo da tarefa, no mesmo desenho do diff da aba Git (só leitura).
 fn diff_screen(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, acts: &mut Vec<Act>) {
-    let head = head_bar(ui, rect, Some("Voltar à tarefa"), &format!("{} · alterações em relação a {}", task.id, task.base), 0.0, acts);
+    let head = head_bar(ui, rect, Some("Voltar à tarefa"), &tasks_ui::diff_title(task), 0.0, acts);
     let area = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
     match deck.tasks.diff.as_ref().and_then(|d| d.diff.as_ref()) {
         None => {

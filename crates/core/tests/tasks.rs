@@ -1054,7 +1054,9 @@ fn validate_completes_with_a_warning_when_the_base_branch_is_gone() {
     let done = core.task_validate(&env.project, &t.id).expect("validate sem a base");
     assert_eq!(done.status, TaskStatus::Merged);
     assert!(
-        done.events.iter().any(|e| e.text.contains("aviso: a base estavel não existe mais; não conferi se a branch tinha commits fora dela")),
+        done.events
+            .iter()
+            .any(|e| e.text.contains("aviso: a base estavel não existe mais; não conferi se a branch tinha commits fora dela")),
         "{:?}",
         done.events
     );

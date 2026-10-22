@@ -291,9 +291,57 @@ pub fn actions_for(task: &Task, tab_open: bool) -> Vec<TaskAct> {
     }
 }
 
-/// Dá para ver o diff da branch (ela existe: a tarefa foi iniciada e não terminou).
+/// Aguardando validação ou concluída, com o commit da mesclagem guardado: o diff é o que a mesclagem trouxe
+/// (a branch já é a própria base, e `base...branch` ficaria vazio).
+pub fn shows_merged_diff(task: &Task) -> bool {
+    matches!(task.status, TaskStatus::Validating | TaskStatus::Merged) && task.merge_commit.as_deref().is_some_and(|h| !h.is_empty())
+}
+
+/// Dá para ver o diff: a branch existe (a tarefa foi iniciada e não terminou) ou, depois da mesclagem, o
+/// commit dela está guardado.
 pub fn can_show_diff(task: &Task) -> bool {
-    task.started_ms.is_some() && matches!(task.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Failed)
+    shows_merged_diff(task)
+        || (task.started_ms.is_some() && matches!(task.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Failed))
+}
+
+/// O rótulo do botão que abre o diff.
+pub fn diff_button_label(task: &Task) -> &'static str {
+    if shows_merged_diff(task) {
+        "Ver o que foi mesclado"
+    } else {
+        "Ver diff completo"
+    }
+}
+
+/// A dica do botão que abre o diff.
+pub fn diff_button_tip(task: &Task) -> &'static str {
+    if shows_merged_diff(task) {
+        "Abre o diff do commit de mesclagem: o que a tarefa trouxe para a base"
+    } else {
+        "Abre o git diff da branch da tarefa em relação à base"
+    }
+}
+
+/// O título da tela do diff.
+pub fn diff_title(task: &Task) -> String {
+    if shows_merged_diff(task) {
+        format!("{} · o que a mesclagem trouxe para {}", task.id, task.base)
+    } else {
+        format!("{} · alterações em relação a {}", task.id, task.base)
+    }
+}
+
+/// O hash curto (7 caracteres) do commit da última mesclagem, se a tarefa já foi mesclada.
+pub fn merge_short(task: &Task) -> Option<&str> {
+    task.merge_commit.as_deref().filter(|h| !h.is_empty()).map(|h| h.get(..7).unwrap_or(h))
+}
+
+/// `branch → base`, com o hash curto da mesclagem ao lado quando há.
+pub fn branch_line(task: &Task) -> String {
+    match merge_short(task) {
+        Some(h) => format!("{} → {} · {h}", task.branch, task.base),
+        None => format!("{} → {}", task.branch, task.base),
+    }
 }
 
 /// Troca a tarefa de mesmo id na lista (ou a acrescenta).
@@ -1186,16 +1234,50 @@ mod tests {
     }
 
     #[test]
-    fn the_diff_is_available_only_while_the_branch_exists() {
+    fn the_diff_is_available_while_the_branch_exists_or_after_the_merge_commit_is_kept() {
         let t = |status, started: bool| Task { status, started_ms: started.then_some(1), ..Task::default() };
+        let merged = |status| Task { merge_commit: Some("0123456789abcdef0123456789abcdef01234567".into()), ..t(status, true) };
         assert!(can_show_diff(&t(TaskStatus::Review, true)));
         assert!(can_show_diff(&t(TaskStatus::Running, true)));
         assert!(can_show_diff(&t(TaskStatus::Failed, true)));
         assert!(!can_show_diff(&t(TaskStatus::Failed, false)));
         assert!(!can_show_diff(&t(TaskStatus::Draft, false)));
-        assert!(!can_show_diff(&t(TaskStatus::Merged, true)));
-        assert!(!can_show_diff(&t(TaskStatus::Validating, true)), "mesclada: a branch é a própria base, o diff é vazio");
         assert!(!can_show_diff(&t(TaskStatus::Discarded, true)));
+        // Sem o commit da mesclagem (tarefa antiga), aguardando validação ou concluída não tem diff: a branch é a própria base.
+        assert!(!can_show_diff(&t(TaskStatus::Validating, true)));
+        assert!(!can_show_diff(&t(TaskStatus::Merged, true)));
+        // Com o commit, os dois estados mostram o que foi mesclado.
+        assert!(can_show_diff(&merged(TaskStatus::Validating)) && can_show_diff(&merged(TaskStatus::Merged)));
+        // Descartada continua sem diff, mesmo que já tenha sido mesclada antes.
+        assert!(!can_show_diff(&merged(TaskStatus::Discarded)));
+    }
+
+    #[test]
+    fn the_diff_button_says_what_it_shows_in_each_state() {
+        let hash = "0123456789abcdef0123456789abcdef01234567";
+        let t = |status, commit: Option<&str>| Task {
+            status,
+            started_ms: Some(1),
+            id: "t5".into(),
+            base: "dev".into(),
+            branch: "tarefa/t5-x".into(),
+            merge_commit: commit.map(str::to_owned),
+            ..Task::default()
+        };
+        for status in [TaskStatus::Running, TaskStatus::Review, TaskStatus::Failed] {
+            assert_eq!(diff_button_label(&t(status, None)), "Ver diff completo");
+            assert_eq!(diff_title(&t(status, None)), "t5 · alterações em relação a dev");
+        }
+        // Reprovada e de novo em revisão, o commit antigo continua guardado: o diff é o da branch.
+        assert_eq!(diff_button_label(&t(TaskStatus::Review, Some(hash))), "Ver diff completo");
+        for status in [TaskStatus::Validating, TaskStatus::Merged] {
+            assert_eq!(diff_button_label(&t(status, Some(hash))), "Ver o que foi mesclado");
+            assert_eq!(diff_title(&t(status, Some(hash))), "t5 · o que a mesclagem trouxe para dev");
+        }
+        // O detalhe mostra o hash curto ao lado de `branch → base`.
+        assert_eq!(branch_line(&t(TaskStatus::Validating, Some(hash))), "tarefa/t5-x → dev · 0123456");
+        assert_eq!(branch_line(&t(TaskStatus::Running, None)), "tarefa/t5-x → dev");
+        assert_eq!(merge_short(&t(TaskStatus::Merged, Some(""))), None);
     }
 
     #[test]
