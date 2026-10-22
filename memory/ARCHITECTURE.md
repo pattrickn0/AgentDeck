@@ -11,7 +11,7 @@ Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com a
 | Janela/eventos | **winit 0.30** (loop próprio, `ApplicationHandler`) | pedido do projeto; controle total do loop e de DnD |
 | Render | **glutin + glow** com **egui** (`egui-winit` + `egui_glow`) | widgets prontos e estilização fina para reproduzir o CSS; OpenGL leve (roda até em Xvfb/llvmpipe para testes) |
 | Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação madura; o render da grade é nosso (pintado no egui) |
-| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/ask`, `/reply`, `/signal`, `/tasks`; token por processo de agente + validação de Host |
+| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/models`, `/team`, `/ask`, `/reply`, `/signal`, `/usage`, `/learn`, `/tasks`; token por processo de agente + validação de Host |
 | Cliente HTTP | **ureq** (Ollama `/api/chat`, `/api/tags`, downloads) | bloqueante e simples, roda em threads |
 | Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
 | Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
@@ -67,16 +67,19 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | Rota | Descrição |
 | :-- | :-- |
 | `GET /agents` | `{"agents": [...], "models": {id: modelo}}` com os agentes instalados e as instâncias abertas no projeto de quem chama, e o modelo de LLM das instâncias que têm um |
+| `GET /models`, `GET /models?agent=<id>` | `{"text"}`: o inventário de `ask-agent --models` (um bloco por agente instalado, ou só o de `agent`; ver "Inventário para os agentes" abaixo); 400 para `agent` fora de `[A-Za-z0-9:._/#@+-]{1,128}` e 404 para um agente que não está instalado |
 | `GET /team` | `{"id","boss","crew","models"}`: a posição de quem chama na equipe (só token de aba); `models` traz o modelo de quem aparece na resposta |
 | `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido, profundidade `>= 2`, `model` fora de `[A-Za-z0-9:._/#@+-]{1,128}` ou agente que não escolhe modelo (`o agente X não aceita escolher modelo`); 404 para `reply_to` que não está pendente; 409 para ciclo de espera ou para `model` diferente do da instância já aberta (`claude@dev já está aberta com sonnet; use --new para abrir outra com opus`); 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
+| `POST /learn` | `{"paths": [...]}` (até 50 caminhos; vazio = sem arquivos) → `{"text"}`: o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos (`ask-agent --learn`); sem caminhos, os globais por inteiro e o índice dos demais; 400 se não acha o repositório do projeto (ver "Memória em duas camadas") |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
 | `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
 | `GET /tasks`, `GET /tasks/<id>` | as tarefas do projeto de quem chama (`{"tasks": […]}`, sem brief, relatório nem histórico) ou uma tarefa completa (`{"task": {…}}`); com o token mestre, `?project=<id>` escolhe o projeto. Qualquer token pode ler |
 | `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"base"][,"start"]}` → `{"task"}`: cria a tarefa (`kind` padrão `claude`; `start: true` já a inicia) e grava quem pediu como criador; 400 para título vazio, agente ou modelo inválidos, base que não é branch local ou projeto sem git/commit; se `start` falha, devolve o erro com a tarefa criada |
-| `POST /tasks/<id>/start`, `/merge`, `/discard` | `{}` → `{"task"}`: inicia, mescla ou descarta (409 se o estado não permite, se o repositório principal não está pronto ou se há conflito; 500 em erro do git) |
+| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` → `{"task"}`: inicia, mescla (a tarefa fica aguardando validação), valida (conclui e limpa) ou descarta (409 se o estado não permite, se o repositório principal não está pronto, se há conflito ou se a validação não pode limpar; 500 em erro do git) |
 | `POST /tasks/<id>/done` | `{"report"}` → `{"task"}`: o agente da tarefa entrega o relatório (só o dono da tarefa, ou o token mestre) |
 | `POST /tasks/<id>/return` | `{"feedback"}` → `{"task"}`: devolve a tarefa em revisão ao agente, com o feedback |
+| `POST /tasks/<id>/reject` | `{"feedback"}` → `{"task"}`: reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, com o motivo (400 para motivo vazio; 409 fora de `Validating` ou com as abas dos agentes desligadas) |
 
 Toda requisição exige o cabeçalho `x-commanddeck-token` (comparado em tempo constante) e um `Host`
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
@@ -84,6 +87,8 @@ mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupan
 os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
 mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e memória em
 processo no Ollama.
+
+**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do CommandDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
@@ -264,8 +269,9 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   caminho absoluto) e `render` monta o texto: os que valem por inteiro até `START_BUDGET` (6 000 caracteres); o que passar do orçamento
   e os demais viram uma linha de índice (`arquivo — resumo`), com teto de 2 500 caracteres e "e mais N". Os arquivos são lidos da
   **worktree da tarefa** (já tem a base), então um aprendizado que o agente cria na branch dele é visível a ele mesmo.
-- **Sob demanda: `ask-agent --learn <arquivo>…`** (`POST /learn` na ponte → `Core::learn`): imprime os que valem para esses
-  arquivos (até `LEARN_BUDGET`, 12 000 caracteres). Caminhos absolutos dentro da worktree ou do repositório viram caminhos do
+- **Sob demanda: `ask-agent --learn [<arquivo>…]`** (`POST /learn` na ponte → `Core::learn`): imprime os que valem para esses
+  arquivos (até `LEARN_BUDGET`, 12 000 caracteres); sem arquivos, os globais por inteiro e o índice de todos os outros
+  (`learnings::learn_report`). As instruções da ponte (`agents.rs`) mandam rodá-lo antes de mexer em arquivos. Caminhos absolutos dentro da worktree ou do repositório viram caminhos do
   repositório (`learnings::relativize`). Lê a pasta da worktree da tarefa de quem pergunta ou, sem tarefa, do repositório do projeto.
 - **Escrita.** A regra da tarefa manda criar um arquivo em `memory/aprendizados/` na própria branch para algo não óbvio e citá-lo no
   relatório: o aprendizado passa pela mesma revisão e mescla que o código.
@@ -342,7 +348,12 @@ uso de cada modelo (`AgentUsage`: sessão e semana em 0..=1, quando renovam); mu
 `Deck::plan_panes` calcula a grade (`grid_shape` → `layout` com as proporções salvas, que voltam a iguais quando
 o formato muda), distribui os grupos (`assign`: os que não cabem dividem a última janela) e escolhe a aba
 visível de cada janela (a de `shown` mais alto). `Deck::active` continua sendo a aba que recebe o teclado: é a
-visível da janela focada, por isso o resto do código (teclado, IME, compositor, cores) não mudou. Cada aba
+visível da janela focada, por isso o resto do código (teclado, IME, cores) não mudou. O cabeçalho de cada janela leva, além das
+abas (`ui/tabs.rs`), a alça de arrastar, o microfone, o anexo e o "+" (`ui/panes.rs`): o microfone e o anexo agem na aba visível da
+janela (`PanePlan::shown`, em `deck.rs`), e a aba guarda só o indicador de gravação/transcrição (`dictation.rs`); arquivos soltos na janela vão para a
+aba visível da janela sob o ponteiro ou para o formulário "Nova tarefa" (`Deck::resolve_drop_zone`). Quando as abas não cabem, a faixa
+rola: o lado com aba escondida ganha um degradê e uma seta ‹ / › e o fim da faixa, o menu ▾ com todas as abas (contas puras em
+`ui/tabs.rs`: `hidden_tabs`, `scroll_to_show`). Cada aba
 visível é redimensionada para a sua janela (`fit_tab`, com o debounce de 60 ms); as escondidas mantêm o tamanho
 até aparecerem. O retrato das janelas do último quadro (`Deck::panes`) serve aos atalhos (Ctrl+Tab dentro da
 janela, Ctrl+Alt+setas) e ao tamanho inicial das abas novas. Ordem, proporções e liga/desliga ficam em
