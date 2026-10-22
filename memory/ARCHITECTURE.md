@@ -267,7 +267,15 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
   (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base. O botão do diff (`can_show_diff`) vale também em `Validating`/`Merged` com
   `merge_commit`, e aí diz **"Ver o que foi mesclado"** ("Ver diff completo" nos outros estados); o detalhe mostra o hash curto ao lado de
-  `branch → base`.
+  `branch → base`. O diff abre no centro, no modo Documentos (abaixo); o pedido e o relatório também (**Abrir ao centro**).
+
+**Modo Documentos (centro).** `crates/app/src/docs.rs` (estado e lógica pura) e `ui/docs.rs` (pintura). O centro mostra os agentes
+(`panes::draw`) ou os documentos do projeto ativo (`docs::draw`), conforme `Deck::docs.view` (`CenterView`); a chave fica em `ui/titlebar.rs`
+e o atalho é Ctrl+Shift+D (`Action::ToggleCenter`). Cada documento é um `DocTab { uid, project, kind: DocKind, title, subtitle, state:
+DocState }` (`TaskDiff`, `CommitDiff`, `FileDiff`, `File`, `Markdown`); abrir um igual só o foca; não são gravados. A leitura roda fora da
+thread da interface e volta como `UiMsg::Doc(uid, Loaded)`. Do core só entram o que já existia (`task_diff`, `git_commit_detail`,
+`git_diff`, `parse_diff`) e `Core::read_text(rel)` (`workspace::read_text`: caminho relativo e seguro, links simbólicos resolvidos
+para dentro da pasta, até 1 MB, `TextFile::{Text, TooLarge, Binary}`). Terminais escondidos: o PTY não é redimensionado nem recebe teclado.
 
 **Memória em duas camadas** (fase 1 do passo 3 do roadmap; `learnings.rs`, `situation.rs` e `tasks.rs`). O app entrega ao
 agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agora, no `start_message`:

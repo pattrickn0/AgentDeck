@@ -1,6 +1,7 @@
 //! Pintura da interface (equivalente ao `index.html` + `styles.css`).
 //! O layout é calculado à mão para reproduzir as medidas do CSS ao pixel.
 
+mod docs;
 mod empty_state;
 mod git;
 mod git_views;
@@ -57,8 +58,17 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let panel = Rect::from_min_max(Pos2::new(full.max.x - right_w, full.min.y), full.max);
     deck.right_panel_rect = Some(panel);
 
-    // ---------- Terminais (tela dividida por tipo de agente) ----------
-    panes::draw(deck, ui, term_rect);
+    // ---------- Centro: os terminais (tela dividida por tipo de agente) ou os documentos ----------
+    deck.docs.sync(&deck.active_project);
+    if deck.docs.view == crate::docs::CenterView::Docs {
+        // Os terminais continuam rodando escondidos, e o PTY não é redimensionado: sem `fit_tab` aqui.
+        deck.terminal_rect = Some(panes::pane_body(term_rect));
+        deck.panes.clear();
+        deck.pane_drag = None;
+        docs::draw(deck, ui, term_rect);
+    } else {
+        panes::draw(deck, ui, term_rect);
+    }
 
     // ---------- Barra lateral ----------
     if !collapsed {

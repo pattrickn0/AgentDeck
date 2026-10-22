@@ -20,16 +20,17 @@ Combinado em 2026-10-21, nesta ordem.
 - [ ] **Definir o esforço** (pedido do usuário, 2026-10-20). O formulário escolhe só o modelo. Ter um campo de esforço (baixo/médio/alto) que cada CLI traduz do seu jeito: no Claude, `--effort`; no Antigravity o esforço já vem no nome do modelo (`gemini-4-argon-low|medium|high`); no OpenCode é a variante (`modelo#variante`), que hoje só vale no headless: a aba interativa recebe só o modelo (`models::opencode_tui` descarta o `#`). Mostrar o esforço no cartão da tarefa.
 - [ ] **Seletor de modelos só com os que o usuário pode usar** (filtro por acesso; t14, 2026-10-21). A lista vem do `agy models` / `opencode models`, que mostram o que o CLI conhece, não o que o plano permite: modelos de provedores sem plano ativo (ex.: `opencode-go/…`) aparecem iguais aos que o usuário realmente pode usar. `ask-agent --models` herda o problema: só marca "(grátis)" pelo sufixo `-free` e não confirma acesso. Quando o seletor da Mesa passar a filtrar por acesso, `models::AgentModels`/`Core::models_inventory` devem usar o mesmo filtro (um único ponto). O Codex não tem lista (aparece como "não lista os modelos") e os demais CLIs (aider, goose…) saem como "sem escolha de modelo".
 
-### b) Diff legível e "abas de documento" no centro
+### b) Modo Documentos, fase 2
 
-Para o usuário validar o que o agente fez sem sair do app. O centro hoje só tem janelas de terminal.
+A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [historico.md](historico.md) (`t19`). O que falta:
 
-- [ ] **Diff legível no centro**, em aba própria: o diff de uma tarefa (e o de um commit ou de uma alteração do Git) lido com conforto, em largura de tela cheia, em vez de espremido na barra direita. Reaproveitar o desenho de `ui::git::diff_lines`.
-- [ ] **Abas de documento ao lado das abas de terminal** (a base do editor, do diff legível e do explorador): um tipo de aba que não é terminal, com a mesma faixa de abas e a mesma tela dividida.
-- [ ] **Editor de arquivos.** Abrir e editar arquivos do workspace dentro do app, em vez de mandar para o programa padrão do sistema (`Core::open_path`).
+- [ ] **Editor de arquivos.** Editar os arquivos do workspace dentro do modo Documentos (hoje só se leem; "Abrir no programa padrão" é o caminho para editar).
   - egui não tem editor de código pronto: avaliar `egui_extras::syntax_highlighting`/`syntect` para realce, ou um componente de editor de terceiros.
-  - Mínimo útil: abas de arquivo ao lado das abas de terminal, realce de sintaxe, salvar (Ctrl+S), aviso quando um agente alterar o arquivo aberto (o watcher de `workspace.rs` já avisa) e pré-visualização de Markdown.
-  - Clique na árvore continua inserindo `@arquivo`; o duplo clique passaria a abrir no editor (com opção de manter o programa do sistema).
+  - Mínimo útil: editar e salvar (Ctrl+S), realce de sintaxe e aviso quando um agente alterar o arquivo aberto e ele tiver edição não salva (hoje a visualização só relê, sem aviso). A pré-visualização de Markdown já existe (só leitura).
+- [ ] **Realce de sintaxe** na visualização de arquivo e no diff (hoje monocromático).
+- [ ] **Diff lado a lado** (hoje só o unificado).
+- [ ] **Gravar as abas de documento** (hoje somem ao fechar o app) e **documento ao lado de um agente** (hoje a chave troca o centro inteiro; ver a razão em [GERAL.md](GERAL.md), "Documentos").
+- [ ] **Selecionar e copiar texto** da visualização de arquivo e do diff (hoje só rolam; o markdown segue o egui). Também: buscar dentro do documento.
 - [ ] **Explorador mais útil:** hoje só mostra a árvore. Ideias: marcar o que mudou (git), filtrar/buscar e abrir os arquivos de uma tarefa a partir do detalhe dela.
 
 ### c) Identidade visual e temas
@@ -46,7 +47,7 @@ Para o usuário validar o que o agente fez sem sair do app. O centro hoje só te
 
 O que sobrou da mesa está no bloco "Próximo", item a).
 
-- [ ] **Mesa de tarefas, depois:** pedido e relatório aparecem como texto puro (o markdown não é desenhado); a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`, em `tasks_ui.rs`) usam nomes de modelos antigos (`claude-opus-4-5`).
+- [ ] **Mesa de tarefas, depois:** a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`, em `tasks_ui.rs`) usam nomes de modelos antigos (`claude-opus-4-5`).
 
 ## Modelos
 

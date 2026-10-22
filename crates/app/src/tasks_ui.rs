@@ -8,7 +8,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use commanddeck_core::git::GitDiff;
 use commanddeck_core::{models, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 
 use crate::deck::{AttachTarget, Deck, UiMsg};
@@ -409,14 +408,6 @@ pub enum Confirm {
     Discard(String),
 }
 
-/// Diff completo aberto no lugar do detalhe.
-#[derive(Debug, Clone)]
-pub struct OpenDiff {
-    pub id: String,
-    /// `None` = carregando.
-    pub diff: Option<Result<GitDiff, String>>,
-}
-
 /// Uma operação do ciclo de vida em andamento (botões desligados, rodinha girando).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Busy {
@@ -485,7 +476,6 @@ pub struct TasksUi {
     dirty: bool,
     pub collapsed: HashSet<Group>,
     pub closed_sections: HashSet<Section>,
-    pub diff: Option<OpenDiff>,
     pub confirm: Option<Confirm>,
     /// O campo de feedback do "Devolver" (em revisão) ou do "Reprovar" (aguardando validação) está aberto.
     pub return_open: bool,
@@ -511,7 +501,6 @@ impl Default for TasksUi {
             // As concluídas e as canceladas já foram resolvidas: começam recolhidas.
             collapsed: HashSet::from([Group::Done, Group::Cancelled]),
             closed_sections: HashSet::new(),
-            diff: None,
             confirm: None,
             return_open: false,
             feedback: String::new(),
@@ -580,10 +569,6 @@ pub enum TaskReply {
         op: TaskOp,
         result: Box<Result<Task, TaskError>>,
     },
-    Diff {
-        id: String,
-        result: Result<GitDiff, TaskError>,
-    },
 }
 
 // ---------------------------------------------------------------------------
@@ -627,17 +612,13 @@ impl Deck {
     }
 
     fn tasks_clear_detail_state(&mut self) {
-        self.tasks.diff = None;
         self.tasks.confirm = None;
         self.tasks.return_open = false;
         self.tasks.feedback.clear();
     }
 
-    /// "←": do diff ao detalhe, do detalhe e do formulário à lista.
+    /// "←": do detalhe e do formulário à lista.
     pub fn tasks_back(&mut self) {
-        if self.tasks.diff.take().is_some() {
-            return;
-        }
         self.tasks.view = TasksView::List;
         self.tasks_clear_detail_state();
         self.tasks.notice = None;
@@ -797,19 +778,6 @@ impl Deck {
         self.tasks_run(id.to_owned(), op);
     }
 
-    /// Abre o diff completo da tarefa no lugar do detalhe.
-    pub fn tasks_open_diff(&mut self, id: &str) {
-        self.tasks.diff = Some(OpenDiff { id: id.to_owned(), diff: None });
-        if self.tasks.debug_hold || self.active_project.is_empty() {
-            return;
-        }
-        let (generation, project, id) = (self.tasks.generation, self.active_project.clone(), id.to_owned());
-        self.spawn_bg("task-diff", move |core| {
-            let result = core.task_diff(&project, &id);
-            Some(UiMsg::Tasks(generation, TaskReply::Diff { id, result }))
-        });
-    }
-
     /// A aba do agente da tarefa está aberta?
     pub fn tasks_tab_open(&self, task: &Task) -> bool {
         self.tabs.iter().any(|t| t.project == self.active_project && t.ident.id() == task.instance)
@@ -868,19 +836,10 @@ impl Deck {
                             self.tasks.return_open = false;
                             self.tasks.feedback.clear();
                         }
-                        // Mesclada, a branch é a própria base; validada ou descartada, ela some: o diff aberto não vale mais.
-                        if matches!(op, TaskOp::Merge | TaskOp::Validate | TaskOp::Discard) {
-                            self.tasks.diff = None;
-                        }
                     }
                     Err(e) => self.tasks.notice = Some(e.message().to_owned()),
                 }
                 self.tasks_refresh();
-            }
-            TaskReply::Diff { id, result } => {
-                if let Some(open) = self.tasks.diff.as_mut().filter(|d| d.id == id) {
-                    open.diff = Some(result.map_err(|e| e.message().to_owned()));
-                }
             }
         }
     }

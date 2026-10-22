@@ -456,7 +456,7 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-diff,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
@@ -619,7 +619,6 @@ fn apply_debug_ui(deck: &mut Deck) {
             | "tasks-detail"
             | "tasks-running"
             | "tasks-failed"
-            | "tasks-diff"
             | "tasks-confirm"
             | "tasks-discard"
             | "tasks-validating"
@@ -634,6 +633,13 @@ fn apply_debug_ui(deck: &mut Deck) {
             | "tasks-new-model"
             | "tasks-new-provider"
             | "tasks-new-provider-models" => debug_tasks(deck, item),
+            "docs-demo"
+            | "docs-demo-file"
+            | "docs-demo-md"
+            | "docs-demo-report"
+            | "docs-demo-unreadable"
+            | "docs-demo-many"
+            | "docs-demo-badge" => crate::docs_demo::apply(deck, item),
             "usage-demo" => deck.debug_usage = Some(debug_usage()),
             "projects-demo" => deck.debug_projects = Some(debug_projects()),
             "split-drag" => {
@@ -671,7 +677,7 @@ fn apply_debug_ui(deck: &mut Deck) {
 
 /// SOMENTE DEPURAÇÃO: estados fictícios da aba Tarefas (`COMMANDDECK_DEBUG_UI=tasks-*`), sem git nem core.
 fn debug_tasks(deck: &mut Deck, item: &str) {
-    use crate::tasks_ui::{self as t, Confirm, FormMenu, OpenDiff, TasksView};
+    use crate::tasks_ui::{self as t, Confirm, FormMenu, TasksView};
     deck.set_right_view(crate::deck::RightView::Tarefas);
     deck.tasks.debug_hold = true;
     deck.tasks.loaded = true;
@@ -691,7 +697,7 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                 _ => {}
             }
         }
-        "tasks-detail" | "tasks-confirm" | "tasks-return" | "tasks-error" | "tasks-busy" | "tasks-diff" => {
+        "tasks-detail" | "tasks-confirm" | "tasks-return" | "tasks-error" | "tasks-busy" => {
             deck.tasks.view = detail("t4");
             match item {
                 "tasks-confirm" => deck.tasks.confirm = Some(Confirm::Merge("t4".into())),
@@ -706,9 +712,6 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                     )
                 }
                 "tasks-busy" => deck.tasks.busy = Some(t::Busy { id: "t4".into(), label: "Mesclando…" }),
-                "tasks-diff" => {
-                    deck.tasks.diff = Some(OpenDiff { id: "t4".into(), diff: Some(Ok(crate::git_ui::demo_diff())) });
-                }
                 _ => {}
             }
         }

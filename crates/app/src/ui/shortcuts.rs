@@ -20,9 +20,10 @@ pub struct ShortcutItem {
 /// Lista de atalhos do CommandDeck (conforme README).
 pub const SHORTCUTS: &[ShortcutItem] = &[
     ShortcutItem { keys: &["Ctrl+T"], desc: "Nova aba do mesmo agente (barra recolhida: escolher)" },
-    ShortcutItem { keys: &["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: "Alternar abas (próxima / anterior)" },
+    ShortcutItem { keys: &["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: "Alternar abas (ou documentos, no modo Documentos)" },
     ShortcutItem { keys: &["Ctrl+Alt+setas"], desc: "Ir para a janela vizinha (tela dividida)" },
     ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral *" },
+    ShortcutItem { keys: &["Ctrl+Shift+D"], desc: "Alternar o centro: Agentes / Documentos" },
     ShortcutItem { keys: &["Ctrl+Shift+M"], desc: "Ditar por voz na aba ativa (sem enviar)" },
     ShortcutItem { keys: &["Duplo clique"], desc: "Renomear aba (modelo@cargo@nome)" },
     ShortcutItem { keys: &["Ctrl+/"], desc: "Mostrar ou fechar estes atalhos" },
@@ -216,6 +217,7 @@ mod tests {
         assert!(all_keys.contains("Ctrl+Shift+Tab"), "deve conter Ctrl+Shift+Tab");
         assert!(all_keys.contains("Ctrl+B"), "deve conter Ctrl+B");
         assert!(all_keys.contains("Ctrl+Shift+M"), "deve conter Ctrl+Shift+M");
+        assert!(all_keys.contains("Ctrl+Shift+D"), "deve conter Ctrl+Shift+D");
         assert!(all_keys.contains("Duplo clique"), "deve conter Duplo clique");
         assert!(all_keys.contains("Ctrl+/"), "deve conter Ctrl+/");
         assert!(!all_keys.contains("Ctrl+L"), "não deve conter Ctrl+L (compositor removido)");

@@ -52,7 +52,8 @@ crates/
 │   ├── context.rs    ponto de extensão para RAG (ContextProvider; o Ollama e o headless o consultam)
 │   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
 │   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
-│   ├── attachments.rs, sessions.rs, workspace.rs, config.rs, paths.rs, process.rs, util.rs
+│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher e `read_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
+│   ├── attachments.rs, sessions.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
 │   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
 │   ├── tests/tasks.rs    ciclo de vida das tarefas com o git real (pula se o git não estiver instalado)
@@ -70,6 +71,8 @@ crates/
 │   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
 │   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
 │   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, validar, descartar, reabrir a aba)
+│   ├── docs.rs       modo Documentos do centro: `CenterView`, `DocKind`/`DocTab`/`DocState`, `Docs` (abrir, focar, fechar, duplicata, por projeto), a lista de arquivos de um diff (`diff_files`), o selo da chave (`Badge`) e, em `impl Deck`, abrir cada tipo de documento e ler fora da thread da interface (`UiMsg::Doc`); testes puros
+│   ├── docs_demo.rs  documentos fictícios do `COMMANDDECK_DEBUG_UI=docs-demo*`
 │   ├── dictation.rs  ditado por voz: estados do microfone e destino fixo na aba onde a gravação começou (funções puras, com testes)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas), anexos e arquivos soltos
@@ -77,7 +80,8 @@ crates/
 │   ├── crash.rs      registro de quedas em dados/crash.log; smoke.rs, a captura de tela (COMMANDDECK_SMOKE)
 │   └── ui/           mod.rs (pintura, modais)
 │       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
-│       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾)
+│       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾; pinta uma lista de `Item`, serve às abas dos agentes e às dos documentos)
+│       ├── docs.rs (modo Documentos: a chave Agentes | Documentos da barra de título, a faixa de documentos, o diff com a lista de arquivos, o arquivo de texto e o markdown)
 │       ├── sidebar.rs (explorador e ORGANIZAÇÃO) + projects.rs (projetos e agentes em árvore)
 │       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
 │       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
@@ -165,12 +169,24 @@ Toda chamada de tarefa do core roda git, então vai para `Deck::spawn_bg` e volt
 (a geração muda a cada troca de projeto e descarta respostas do anterior); a lista é relida ao abrir a aba, a cada
 `CoreEvent::TasksChanged` e depois de cada ação. `tasks_flow_tests.rs` roda esse fluxo com o core e o git reais. O número do ícone da aba é `TasksUi::review_count`. Quais botões cada
 estado tem é `actions_for` (função pura, com testes); o agrupamento da lista, o resumo do diff (`parse_diff_stat`) e os
-textos de tempo também. O diff completo vem de `Core::task_diff` e é desenhado por `ui::git::diff_lines`, o mesmo
-desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
+textos de tempo também. O diff completo vem de `Core::task_diff` e abre no centro (`Deck::docs_open_task_diff`, ver "Mexer no modo
+Documentos"), desenhado por `ui::git::diff_lines_at`, o mesmo desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
 de novo; o terminal abre na worktree sozinho). Para ver sem git nem agentes: `COMMANDDECK_DEBUG_UI=tasks-demo` (ou
-`tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-diff`, `tasks-confirm`, `tasks-discard`,
+`tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-confirm`, `tasks-discard`,
 `tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` em `app.rs`).
 Para a largura mínima da barra, ponha `{"rightPanelWidth": 280}` em `cfg/config.json` da pasta de `COMMANDDECK_HOME`.
+
+**Mexer no modo Documentos.** O estado e a lógica pura ficam em `crates/app/src/docs.rs` (`Docs`: abrir/focar/fechar por projeto, sem
+duplicata; `diff_files`: a lista de arquivos de um `GitDiff`; `DocTab::apply`: o que cada tipo mostra ao receber a leitura), com
+testes; a pintura, em `ui/docs.rs` (a chave é chamada pela barra de título; `ui/mod.rs` escolhe entre `panes::draw` e `docs::draw`) e a
+faixa de abas, em `ui/tabs.rs` (`strip_items`, o mesmo desenho dos agentes). Documento novo = um `DocKind`, o `DocState` que ele mostra,
+a leitura em `Deck::docs_load` (numa thread, volta como `UiMsg::Doc`) e o corpo em `ui/docs.rs::document`. O arquivo vem de
+`Core::read_text` (1 MB, `safe_rel`); o diff, de `Core::task_diff`, `git_commit_detail` ou `git_diff`; o markdown é desenhado pelo
+**`egui_commonmark`** (a versão acompanha a do egui: a 0.25 é a do egui 0.36; ver `memory/aprendizados/egui-commonmark-acompanha-o-egui.md`).
+Regras que não se quebram: com o centro em Documentos **nenhum `fit_tab`** roda (o PTY não muda de tamanho), o terminal não recebe teclado
+nem IME (`handle_key`, `handle_ime`) e o fim de turno marca `Tab.done` mesmo na aba ativa. O watcher (`CoreEvent::WorkspaceChanged`) relê
+os arquivos abertos (`docs_reload_files`). `tasks_flow_tests.rs` cobre o fluxo com o core e o git reais. Para ver sem nada disso:
+`COMMANDDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`; `docs_demo.rs`).
 
 **Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
 
@@ -186,7 +202,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas

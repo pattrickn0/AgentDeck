@@ -10,6 +10,7 @@ use commanddeck_core::paths::AppPaths;
 use commanddeck_core::{Config, Core, StartOptions, Task, TaskStatus};
 
 use crate::deck::Deck;
+use crate::docs::{CenterView, DiffDoc, DocState};
 use crate::tasks_ui::{actions_for, can_show_diff, diff_button_label, parse_diff_stat, Confirm, TaskAct, TasksView};
 
 fn git_available() -> bool {
@@ -128,6 +129,25 @@ impl Env {
         }
     }
 
+    /// O estado do documento `uid` (que precisa existir).
+    fn doc_state(&self, uid: u64) -> &DocState {
+        &self.deck.docs.get(uid).unwrap_or_else(|| panic!("documento {uid} não está aberto")).state
+    }
+
+    /// Abre o diff da tarefa no centro e espera ele chegar (a leitura roda numa thread). Devolve o uid do documento
+    /// e o diff.
+    fn open_task_diff(&mut self, id: &str) -> (u64, DiffDoc) {
+        self.deck.docs_open_task_diff(id);
+        let uid = self.deck.docs.current_uid(&self.project()).expect("documento em foco");
+        assert!(matches!(self.doc_state(uid), DocState::Loading), "carregando");
+        assert_eq!(self.deck.docs.view, CenterView::Docs, "abrir um documento leva o centro para Documentos");
+        self.pump("o diff", |d| !matches!(d.docs.get(uid).map(|t| &t.state), Some(DocState::Loading)));
+        match self.doc_state(uid) {
+            DocState::Diff(doc) => (uid, doc.clone()),
+            other => panic!("esperava o diff, veio {other:?}"),
+        }
+    }
+
     /// O agente faz um commit na worktree da tarefa.
     fn agent_commits(&self, id: &str, file: &str, content: &str) {
         let t = self.task(id);
@@ -180,14 +200,15 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     assert_eq!(env.deck.tasks.review_count(), 1);
     assert!(parse_diff_stat(env.task("t1").diff_stat.as_deref().unwrap_or("")).is_some_and(|s| s.files == 1));
 
-    // O diff completo vem do core numa thread.
-    env.deck.tasks_open_diff("t1");
-    assert!(env.deck.tasks.diff.as_ref().is_some_and(|d| d.diff.is_none()), "carregando");
-    env.pump("o diff", |d| d.tasks.diff.as_ref().is_some_and(|d| d.diff.is_some()));
-    let diff = env.deck.tasks.diff.as_ref().and_then(|d| d.diff.clone()).expect("diff").expect("sem erro");
-    assert!(diff.lines.iter().any(|l| l.text == "+dois"), "{:?}", diff.lines);
-    env.deck.tasks_back();
-    assert!(env.deck.tasks.diff.is_none() && env.deck.tasks.view == TasksView::Detail("t1".into()));
+    // O diff completo vem do core numa thread e abre no centro (a barra direita continua no detalhe).
+    let (diff_uid, doc) = env.open_task_diff("t1");
+    assert!(doc.diff.lines.iter().any(|l| l.text == "+dois"), "{:?}", doc.diff.lines);
+    assert_eq!(doc.files.iter().map(|f| (f.path.as_str(), f.status, f.added)).collect::<Vec<_>>(), [("novo.txt", 'A', 1)]);
+    assert_eq!(env.deck.tasks.view, TasksView::Detail("t1".into()));
+    // Abrir de novo só foca o mesmo documento.
+    env.deck.docs_open_task_diff("t1");
+    assert_eq!(env.deck.docs.count(&env.project()), 1);
+    assert_eq!(env.deck.docs.current_uid(&env.project()), Some(diff_uid));
 
     // Devolver: pede o feedback, vai para a thread, volta a andamento.
     env.deck.tasks_act("t1", TaskAct::Return);
@@ -219,11 +240,16 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     let validating = env.task("t1");
     assert!(can_show_diff(&validating) && validating.merge_commit.is_some());
     assert_eq!(diff_button_label(&validating), "Ver o que foi mesclado");
-    env.deck.tasks_open_diff("t1");
-    env.pump("o diff da mesclagem", |d| d.tasks.diff.as_ref().is_some_and(|d| d.diff.is_some()));
-    let diff = env.deck.tasks.diff.as_ref().and_then(|d| d.diff.clone()).expect("diff").expect("sem erro");
-    assert!(diff.lines.iter().any(|l| l.text == "+dois"), "{:?}", diff.lines);
-    env.deck.tasks_back();
+    let (merged_uid, doc) = env.open_task_diff("t1");
+    assert_ne!(merged_uid, diff_uid, "o diff da mesclagem é outro documento, não o da branch de antes");
+    assert!(doc.diff.lines.iter().any(|l| l.text == "+dois"), "{:?}", doc.diff.lines);
+    assert_eq!(env.deck.docs.count(&env.project()), 2);
+    // Fechar o último documento volta o centro para os agentes.
+    env.deck.docs_close(diff_uid);
+    assert_eq!(env.deck.docs.view, CenterView::Docs);
+    env.deck.docs_close(merged_uid);
+    env.deck.docs.sync(&env.project());
+    assert_eq!(env.deck.docs.view, CenterView::Agents);
 
     // Reprovar: abre o mesmo formulário de feedback; enviar volta a tarefa ao agente, na mesma worktree.
     env.deck.tasks_act("t1", TaskAct::Reject);
@@ -470,4 +496,197 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     let t3 = create(&env, &project, "Terceira", "Nada.");
     let brief = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t3}-brief.md"))).expect("brief da t3");
     assert!(brief.contains(&format!("- {t2} \"Segunda\" (claude@{t2}, em andamento): mexe em a.txt, novo.txt")), "{brief}");
+}
+
+#[test]
+fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_change() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    let project = env.project();
+    std::fs::write(env.ws.join("a.rs"), "fn a() {}\n\tfn b() {}\n").expect("w");
+    std::fs::write(env.ws.join("nota.md"), "# Título\n\n- [ ] um\n").expect("w");
+    std::fs::write(env.ws.join("bin.dat"), b"MZ\0\0").expect("w");
+    let wait = |env: &mut Env, uid: u64| {
+        env.pump("o documento", |d| !matches!(d.docs.get(uid).map(|t| &t.state), Some(DocState::Loading)));
+    };
+
+    // Duplo clique no explorador: texto, markdown e binário.
+    env.deck.tree_file_double_click("a.rs");
+    let rs = env.deck.docs.current_uid(&project).expect("a.rs");
+    wait(&mut env, rs);
+    assert!(matches!(env.doc_state(rs), DocState::Text(t) if t.lines == ["fn a() {}", "    fn b() {}"]));
+    env.deck.tree_file_double_click("nota.md");
+    let md = env.deck.docs.current_uid(&project).expect("nota.md");
+    wait(&mut env, md);
+    assert!(matches!(env.doc_state(md), DocState::Markdown(t) if t.starts_with("# Título")));
+    env.deck.tree_file_double_click("bin.dat");
+    let bin = env.deck.docs.current_uid(&project).expect("bin.dat");
+    wait(&mut env, bin);
+    assert!(matches!(env.doc_state(bin), DocState::Unreadable(m) if m.contains("binário")));
+    env.deck.tree_file_double_click("sumiu.txt");
+    let gone = env.deck.docs.current_uid(&project).expect("sumiu.txt");
+    wait(&mut env, gone);
+    assert!(matches!(env.doc_state(gone), DocState::Failed(m) if m.contains("sumiu.txt")));
+    assert_eq!(env.deck.docs.count(&project), 4);
+    // Abrir o mesmo arquivo só o foca.
+    env.deck.tree_file_double_click("a.rs");
+    assert_eq!((env.deck.docs.count(&project), env.deck.docs.current_uid(&project)), (4, Some(rs)));
+
+    // O arquivo muda no disco (o watcher avisa): o documento é relido sem passar por "Carregando…".
+    std::fs::write(env.ws.join("a.rs"), "fn a() {}\nfn c() {}\n").expect("w");
+    env.deck.docs_reload_files();
+    assert!(matches!(env.doc_state(rs), DocState::Text(_)), "a leitura antiga continua na tela até a nova chegar");
+    env.pump(
+        "o arquivo relido",
+        |d| matches!(d.docs.get(rs).map(|t| &t.state), Some(DocState::Text(t)) if t.lines.len() == 2 && t.lines[1] == "fn c() {}"),
+    );
+    // O arquivo que sumiu aparece como erro; o que voltou, lido de novo.
+    std::fs::write(env.ws.join("sumiu.txt"), "voltei\n").expect("w");
+    env.deck.docs_reload_files();
+    env.pump("o arquivo que voltou", |d| matches!(d.docs.get(gone).map(|t| &t.state), Some(DocState::Text(_))));
+
+    // O diff de um commit (Histórico) e o de um arquivo alterado (aba Git).
+    git(&env.ws, &["add", "-A"]);
+    git(&env.ws, &["commit", "-q", "-m", "feat: arquivos novos"]);
+    let out = Command::new("git").current_dir(&env.ws).args(["rev-parse", "HEAD"]).output().expect("rev-parse");
+    let hash = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    env.deck.docs_open_commit(&hash, &hash[..7], "feat: arquivos novos");
+    let commit = env.deck.docs.current_uid(&project).expect("commit");
+    wait(&mut env, commit);
+    let DocState::Diff(doc) = env.doc_state(commit) else { panic!("esperava o diff do commit") };
+    let paths: Vec<&str> = doc.files.iter().map(|f| f.path.as_str()).collect();
+    for expected in ["a.rs", "bin.dat", "nota.md", "sumiu.txt"] {
+        assert!(paths.contains(&expected), "{expected} não está em {paths:?}");
+    }
+
+    std::fs::write(env.ws.join("a.rs"), "fn a() {}\nfn d() {}\n").expect("w");
+    let entry = commanddeck_core::git::GitEntry {
+        path: "a.rs".into(),
+        orig_path: None,
+        index: '.',
+        worktree: 'M',
+        kind: commanddeck_core::git::EntryKind::Ordinary,
+    };
+    env.deck.docs_open_file_diff(&entry, false);
+    let file_diff = env.deck.docs.current_uid(&project).expect("diff do arquivo");
+    wait(&mut env, file_diff);
+    let DocState::Diff(doc) = env.doc_state(file_diff) else { panic!("esperava o diff do arquivo") };
+    assert!(doc.diff.lines.iter().any(|l| l.text == "+fn d() {}"), "{:?}", doc.diff.lines);
+    // O lado preparado do mesmo arquivo é outro documento.
+    env.deck.docs_open_file_diff(&entry, true);
+    assert_ne!(env.deck.docs.current_uid(&project), Some(file_diff));
+
+    // O documento é do projeto: um documento fechado durante a leitura não quebra nada, e "Recarregar" relê.
+    env.deck.docs_reload(rs);
+    assert!(matches!(env.doc_state(rs), DocState::Loading));
+    env.deck.docs_close(rs);
+    env.pump("a resposta de um documento fechado", |d| d.docs.get(rs).is_none());
+    env.deck.before_frame(&env.ctx);
+}
+
+#[test]
+fn the_task_request_and_report_open_as_markdown_from_the_loaded_task() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    let id = env.create_from_form("Pedido e relatório", true);
+    env.agent_commits(&id, "novo.txt", "dois\n");
+    env.core.task_done(&env.project(), &id, "## Feito\n\n- [x] criei o novo.txt").expect("done");
+    env.pump("a revisão", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
+    let project = env.project();
+
+    env.deck.docs_open_task_text(&id, false);
+    let brief = env.deck.docs.current_uid(&project).expect("pedido");
+    assert!(matches!(env.doc_state(brief), DocState::Markdown(t) if t == "Faça o pedido."), "o pedido já vem da tarefa carregada");
+    env.deck.docs_open_task_text(&id, true);
+    let report = env.deck.docs.current_uid(&project).expect("relatório");
+    assert!(matches!(env.doc_state(report), DocState::Markdown(t) if t.starts_with("## Feito")));
+    assert_ne!(brief, report);
+    // Não são relidos do disco: o botão de recarregar não existe para eles.
+    env.deck.docs_reload(report);
+    assert!(matches!(env.doc_state(report), DocState::Markdown(_)));
+    assert_eq!(env.deck.docs.view, CenterView::Docs);
+}
+
+#[test]
+fn reading_documents_keeps_the_terminals_running_unresized_and_marks_finished_turns_as_unseen() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    // A pintura usa as fontes do app (a família `ui-semibold`…).
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    let id = env.create_from_form("Agente que trabalha", true);
+    env.pump("a aba do agente", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+    let project = env.project();
+    let instance = env.task(&id).instance;
+    let frame = |env: &mut Env, w: f32, h: f32| {
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, h))), ..Default::default() };
+        let Env { deck, ctx, .. } = env;
+        let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+        out.textures_delta.clear();
+    };
+    let tab = |env: &Env| env.deck.tabs.iter().position(|t| t.project == project && t.ident.id() == instance).expect("aba");
+
+    // Com os agentes à vista, o terminal se ajusta ao centro e o PTY muda depois do tamanho parado.
+    frame(&mut env, 1280.0, 860.0);
+    let i = tab(&env);
+    assert!(env.deck.tabs[i].resize_pending(), "o terminal pede o tamanho do centro");
+    env.pump("o PTY mudar de tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+    let size = env.deck.tabs[i].session.size();
+
+    // Lendo documentos: a janela muda de tamanho e o PTY não é tocado (nem com o centro escondido, nem a zero).
+    env.deck.docs_open_file("a.txt");
+    env.deck.before_frame(&env.ctx);
+    assert_eq!(env.deck.docs.view, CenterView::Docs);
+    assert!(!env.deck.term_focus, "o terminal não recebe o teclado enquanto está escondido");
+    frame(&mut env, 900.0, 600.0);
+    frame(&mut env, 1100.0, 700.0);
+    let i = tab(&env);
+    assert!(!env.deck.tabs[i].resize_pending(), "nenhum redimensionamento pedido com o terminal escondido");
+    assert_eq!(env.deck.tabs[i].session.size(), size);
+
+    // O agente termina um turno enquanto se lê: conta como não visto, mesmo sendo a aba ativa.
+    assert_eq!(env.deck.agents_badge(), crate::docs::Badge::default());
+    env.deck.on_agent_signal(&project, &instance, true);
+    assert_eq!(env.deck.agents_badge(), crate::docs::Badge { done: 0, busy: 1 });
+    env.deck.on_agent_signal(&project, &instance, false);
+    assert!(env.deck.tabs[i].done);
+    assert_eq!(env.deck.agents_badge(), crate::docs::Badge { done: 1, busy: 0 });
+    // Ativar a aba sem sair dos documentos (ex.: um anexo) não a dá como vista.
+    env.deck.activate(i);
+    assert!(env.deck.tabs[i].done && !env.deck.term_focus);
+
+    // Voltar aos agentes (a chave, o atalho ou clicar num agente): a aba ativa é vista e o terminal recebe o teclado.
+    env.deck.show_agents();
+    env.deck.before_frame(&env.ctx);
+    assert!(!env.deck.tabs[i].done && env.deck.term_focus);
+    frame(&mut env, 1100.0, 700.0);
+    assert!(env.deck.tabs[tab(&env)].resize_pending(), "ao voltar, o terminal se ajusta ao tamanho novo");
+
+    // O atalho alterna (só com documentos abertos) e Ctrl+Tab passa pelos documentos no modo Documentos.
+    env.deck.push_action(crate::deck::Action::ToggleCenter);
+    env.deck.before_frame(&env.ctx);
+    assert_eq!(env.deck.docs.view, CenterView::Docs);
+    env.deck.docs_open_file("b.txt");
+    let second = env.deck.docs.current_uid(&project);
+    env.deck.push_action(crate::deck::Action::CycleTab { back: false });
+    env.deck.before_frame(&env.ctx);
+    assert_ne!(env.deck.docs.current_uid(&project), second);
+    env.deck.push_action(crate::deck::Action::ToggleCenter);
+    env.deck.before_frame(&env.ctx);
+    assert_eq!(env.deck.docs.view, CenterView::Agents);
 }

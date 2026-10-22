@@ -97,9 +97,9 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 
 | Área | O que tem |
 | :-- | :-- |
-| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
+| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); a **chave Agentes | Documentos** (ver abaixo); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
-| Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo; ver abaixo |
+| Centro | duas visões, escolhidas pela **chave** da barra de título: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
@@ -125,7 +125,37 @@ A **tela dividida** organiza as abas por tipo de agente:
 - uma aba aberta por outro agente (`ask-agent codex …`) entra na janela do tipo dela (ou cria a janela) sem tirar
   o foco de onde você está digitando;
 - atalhos: Ctrl+Tab / Ctrl+Shift+Tab trocam de aba dentro da janela focada; Ctrl+Alt+setas mudam o foco para a
-  janela vizinha; Ctrl+T abre outra aba do tipo focado.
+  janela vizinha; Ctrl+T abre outra aba do tipo focado; Ctrl+Shift+D alterna entre Agentes e Documentos.
+
+**Documentos (a chave do centro).** O diff que o usuário valida e o que ele lê (pedido, relatório, arquivos) ficavam espremidos
+na barra direita (280–400 px). Por isso o **centro inteiro** alterna, em vez de ganhar uma janela ao lado dos agentes (com 3 agentes,
+cada janela tem 1/3 da largura). Fase 1: **só leitura**; edição, realce de sintaxe, diff lado a lado e gravar os documentos abertos
+ficam para a fase 2 (ver [pendencias.md](pendencias.md)).
+- **A chave** fica na barra de título, ao lado do nome, para não gastar altura: dois segmentos, **Agentes** e **Documentos (n)** (n =
+  documentos abertos do projeto ativo). Ctrl+Shift+D alterna (o app o toma mesmo com o terminal focado, como o Ctrl+Shift+M; sem
+  documentos abertos não faz nada). Abrir qualquer documento muda para Documentos sozinho; fechar o último volta para Agentes; clicar
+  num agente, "Ir para a aba"/"Reabrir aba" da mesa ou abrir uma aba nova também voltam para Agentes.
+- **O selo de "Agentes"**: o que acontece nos terminais enquanto se lê. Um número sobre fundo de destaque conta as abas do projeto
+  que **terminaram um turno sem você ver** (`Tab.done`; lendo documentos, até a aba ativa conta); sem nenhuma, um ponto que pulsa
+  indica que alguma está **trabalhando** (`Tab.busy`), só no modo Documentos. As ações da validação (Mesclar, Devolver, Validar,
+  Reprovar) ficam na barra direita, que continua visível.
+- **Escondidos, os terminais continuam rodando** e o PTY **não é redimensionado** (nenhum `fit_tab` enquanto o centro mostra
+  documentos: ver `claude-code-sem-esc3j-no-windows.md`); ao voltar, o terminal se ajusta ao tamanho de então, com a espera de sempre. O
+  teclado, o IME e o arrastar arquivos não chegam ao terminal escondido.
+- **Faixa de abas de documento**: o mesmo desenho das abas dos agentes (setas ‹ › quando não cabem, menu ▾ com todos, × em cada
+  aba), um sinal do tipo antes do nome (`±` diff, `≡` arquivo, `¶` markdown). Embaixo, o título do documento e as ações
+  (**Recarregar**; **Abrir no programa padrão** nos arquivos). Os documentos são **por projeto** (trocar de projeto troca a lista) e
+  **não são gravados**; abrir um documento já aberto só o foca. Ctrl+Tab passa pelos documentos.
+- **Diff**: lista de arquivos à esquerda (letra `A`/`M`/`D`/`R`, nome e `+`/`−`; clicar rola o diff até o arquivo) e o diff à direita,
+  no mesmo desenho do diff da aba Git, sem as ações por trecho. Em janela estreita (centro < 560 px) a lista vai para cima do diff.
+  Vem de: **Ver diff completo** / **Ver o que foi mesclado** do detalhe da tarefa (a barra direita não tem mais a tela do diff), o botão
+  **Abrir ao centro** do detalhe de um commit (Histórico da aba Git) e o do diff de um arquivo alterado (aba Git, que mantém o diff dela
+  para preparar por trecho).
+- **Arquivo**: duplo clique no explorador abre uma visualização monoespaçada, com número de linha e rolagem, que relê sozinha
+  quando o arquivo muda no disco (o watcher da pasta). Acima de 1 MB ou binário, uma explicação no lugar do conteúdo. O clique simples
+  continua inserindo `@arquivo` no terminal.
+- **Markdown**: os `.md` abertos pelo explorador e, no detalhe da tarefa, o **Pedido** e o **Relatório** (botão **Abrir ao centro** em
+  cada um) aparecem formatados: títulos, listas (com `- [ ]`), negrito e itálico, código, tabelas e citações.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
 - topo: branch atual e menu de branches (trocar, criar, **mesclar** ou fazer **rebase** da branch escolhida); buscar, puxar
@@ -134,9 +164,9 @@ A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado
 - quatro visões: **Alterações**, **Histórico**, **Stash** e, só quando há conflito, **Conflitos**;
 - Alterações: seções (conflitos, preparadas, alterações, não rastreados) com preparar (+), tirar (−) e descartar (↶, com
   confirmação); clique abre o diff (rola dentro da barra), que tem **Preparar / Tirar / Descartar por trecho** (hunk);
-  duplo clique abre o arquivo; caixa de commit (Ctrl+Enter) com a opção de corrigir o último commit;
+  duplo clique abre o arquivo; **Abrir ao centro** abre o diff, só para ler, em Documentos; caixa de commit (Ctrl+Enter) com a opção de corrigir o último commit;
 - Histórico: commits da branch (hash, autor, data, assunto; "Carregar mais") e, ao clicar, o detalhe do commit (mensagem,
-  arquivos e diff);
+  arquivos e diff, com **Abrir ao centro**);
 - Stash: guardar (com mensagem; opção de incluir não rastreados), ver o diff, aplicar, aplicar e apagar e apagar;
 - Conflitos: cada arquivo mostra os blocos com "o nosso", "o deles" ou "ambos" por bloco ou no arquivo inteiro, e "Marcar como resolvido";
 - commit com `commit.gpgsign` e chave travada falha na hora, explicando como destravar (o app não desliga a assinatura);
@@ -158,7 +188,7 @@ na validação devolve a tarefa ao mesmo agente:
   agente), base (a branch atual), anexos ("Anexar arquivos", ou arrastar arquivos sobre o formulário: os caminhos vão ao
   final do pedido) e "Iniciar agora". Ctrl+Enter cria; sem "Iniciar agora" a tarefa fica em rascunho;
 - **Detalhe** (clicar no cartão; "←" volta): estado, `branch → base`, agente, o pedido, o relatório, as alterações
-  (resumo por arquivo e **Ver diff completo**, no mesmo desenho do diff da aba Git, só leitura; aguardando validação e concluída, com o hash curto da mesclagem ao lado de `branch → base`, o botão vira **Ver o que foi mesclado** e mostra o que a mesclagem trouxe) e o histórico. Os
+  (resumo por arquivo e **Ver diff completo**, que abre o diff no centro, em Documentos; aguardando validação e concluída, com o hash curto da mesclagem ao lado de `branch → base`, o botão vira **Ver o que foi mesclado** e abre o que a mesclagem trouxe) e o histórico. Os
   botões dependem do estado: rascunho **Iniciar** e **Descartar**; em andamento **Ir para a aba** (ou **Reabrir
   aba**, se você a fechou) e **Descartar**; em revisão **Mesclar em \<base>**, **Devolver** (escreve o que mudar e
   envia ao agente), a aba e **Descartar**; aguardando validação **Validar** (limpa a aba, a pasta e a branch),
@@ -212,6 +242,7 @@ O `ask-agent` é um cliente da ponte local; o contrato completo (corpos, código
 | Tamanho de uma mensagem / requisições simultâneas na ponte | 16 MB / 128 |
 | Texto de outro agente digitado num terminal | sem ESC nem caracteres de controle |
 | Prompt para um shim `.cmd` no Windows | vai por arquivo, nunca na linha de comando |
+| Arquivo aberto no modo Documentos (`Core::read_text`) | até 1 MB, sem bytes nulos; acima ou binário, só uma explicação |
 
 ### Modo headless
 
@@ -237,6 +268,8 @@ ela dura.
 - Falar com um agente pelo terminal da aba dele, com **anexos** (botão no cabeçalho da janela, arrastar arquivos sobre ela
   ou colar imagem) e **ditado por voz** (microfone no cabeçalho da janela).
 - Acompanhar as conversas entre agentes pela Conversa integrada (só leitura) e intervir pelas próprias abas.
+- Ler com conforto, no centro (chave **Agentes | Documentos**, Ctrl+Shift+D), o diff de uma tarefa, de um commit ou de um arquivo,
+  o pedido e o relatório de uma tarefa e os arquivos do projeto (duplo clique no explorador), sem tirar os agentes de funcionar.
 - Dar **tarefas** a agentes pela aba Tarefas (cada uma numa branch e pasta próprias), revisar o relatório e o diff e
   **mesclar**, **devolver** com ajustes ou **descartar**; depois de mesclar, **validar** ou **reprovar** (a tarefa volta
   ao mesmo agente).

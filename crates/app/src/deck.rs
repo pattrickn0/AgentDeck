@@ -19,6 +19,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use crate::agents::Agents;
 use crate::audio;
 use crate::dictation::{self, MicPhase, MicTarget, TabDelivery, ToggleOutcome};
+use crate::docs::CenterView;
 use crate::icons::IconCache;
 use crate::split;
 use crate::terminal::input::{self, Mods};
@@ -63,6 +64,8 @@ pub enum UiMsg {
     Models(String, Vec<String>),
     /// Resposta da mesa de tarefas, com a geração do projeto em que foi pedida (ver `TasksUi::generation`).
     Tasks(u64, crate::tasks_ui::TaskReply),
+    /// Um documento do modo Documentos terminou de carregar (uid do documento).
+    Doc(u64, crate::docs::Loaded),
 }
 
 /// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
@@ -81,6 +84,8 @@ pub enum Action {
     /// Ctrl+Shift+M: inicia/para o ditado na aba de CLI focada (ou na que já está gravando).
     ToggleTabMic,
     CopyText(String),
+    /// Ctrl+Shift+D: alterna o centro entre Agentes e Documentos.
+    ToggleCenter,
 }
 
 /// Mensagem de outro agente (ou da UI) esperando para ser digitada no terminal da aba.
@@ -149,6 +154,14 @@ pub struct Tab {
     pending_resize: Option<(GridSize, Instant)>,
     /// Quando o processo atual foi iniciado (a regra de entrega dá tempo de a TUI subir).
     spawned_at: Option<Instant>,
+}
+
+impl Tab {
+    /// Um redimensionamento do PTY espera o tamanho parar (ver `Deck::fit_tab`).
+    #[cfg(test)]
+    pub(crate) fn resize_pending(&self) -> bool {
+        self.pending_resize.is_some()
+    }
 }
 
 /// Uma janela da tela dividida, como ficou no último quadro.
@@ -303,6 +316,10 @@ pub struct Deck {
     pub github: crate::github_ui::GithubUi,
     /// Aba Tarefas (ver `tasks_ui.rs`).
     pub tasks: crate::tasks_ui::TasksUi,
+    /// Modo Documentos do centro (ver `docs.rs`).
+    pub docs: crate::docs::Docs,
+    /// O que o centro mostrava no quadro anterior (para perceber a troca; ver `Deck::center_changed`).
+    pub(crate) center_seen: crate::docs::CenterView,
 
     // Árvore e Projetos
     /// Pasta do projeto ativo (vazia sem projeto).
@@ -511,6 +528,8 @@ impl Deck {
             git: crate::git_ui::GitUi::default(),
             github: crate::github_ui::GithubUi::default(),
             tasks: crate::tasks_ui::TasksUi::default(),
+            docs: crate::docs::Docs::default(),
+            center_seen: crate::docs::CenterView::Agents,
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
             feed: Vec::new(),
             thinking: HashMap::new(),
@@ -620,6 +639,9 @@ impl Deck {
         for a in std::mem::take(&mut self.actions) {
             self.apply_action(ctx, a);
         }
+        if self.docs.view != self.center_seen {
+            self.center_changed();
+        }
         while let Ok(ev) = self.events.try_recv() {
             self.on_core_event(ev);
         }
@@ -642,6 +664,8 @@ impl Deck {
                 self.open_tab(&kind, false);
             }
             Action::ToggleSidebar => self.toggle_sidebar(),
+            Action::ToggleCenter => self.docs.toggle(&self.active_project),
+            Action::CycleTab { back } if self.docs.view == CenterView::Docs => self.docs.cycle(&self.active_project, back),
             Action::CycleTab { back } => {
                 // Só entre as abas da janela focada.
                 let ring = self.focused_pane_tabs();
@@ -669,6 +693,7 @@ impl Deck {
             }
             CoreEvent::WorkspaceChanged => {
                 self.refresh_tree();
+                self.docs_reload_files();
                 self.git_refresh_soon();
             }
             CoreEvent::GitChanged => self.git_refresh_soon(),
@@ -793,6 +818,7 @@ impl Deck {
             UiMsg::MicOpened(res) => self.on_mic_opened(res),
             UiMsg::Git(generation, reply) => self.on_git(generation, reply),
             UiMsg::Tasks(generation, reply) => self.on_tasks(generation, reply),
+            UiMsg::Doc(uid, loaded) => self.on_doc_loaded(uid, loaded),
         }
     }
 
@@ -858,6 +884,8 @@ impl Deck {
         let dragging = ctx.input(|i| i.pointer.primary_down());
         let mut exits = Vec::new();
         let active = self.active;
+        // Lendo documentos, nenhuma aba está à vista: o fim de um turno também conta como "não visto".
+        let reading = self.docs.view == CenterView::Docs;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             if let Some(code) = tab.session.take_exit() {
                 exits.push((i, code));
@@ -907,7 +935,7 @@ impl Deck {
                     if tab.busy {
                         tab.busy = false;
                         if std::mem::take(&mut tab.busy_output) {
-                            if active != Some(i) {
+                            if active != Some(i) || reading {
                                 tab.done = true;
                             }
                             chime = true;
@@ -1099,6 +1127,9 @@ impl Deck {
 
     /// Como [`Deck::open_tab`], com o modelo de LLM escolhido no menu (`None` = o padrão do cargo ou do CLI).
     pub fn open_tab_with_model(&mut self, kind: &str, model: Option<&str>, restoring: bool) {
+        if !restoring {
+            self.show_agents();
+        }
         let project = self.active_project.clone();
         if project.is_empty() {
             self.system("Abra uma pasta como projeto antes de abrir um agente.");
@@ -1218,6 +1249,7 @@ impl Deck {
     pub fn open_task_tab(&mut self, task: &commanddeck_core::Task) -> Result<(), String> {
         use commanddeck_core::TaskStatus;
         let project = self.active_project.clone();
+        self.show_agents();
         if let Some(i) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == task.instance) {
             self.activate(i);
             return Ok(());
@@ -1250,7 +1282,7 @@ impl Deck {
     }
 
     /// Hook do agente (`ask-agent --signal`): início ou fim de turno.
-    fn on_agent_signal(&mut self, project: &str, id: &str, busy: bool) {
+    pub(crate) fn on_agent_signal(&mut self, project: &str, id: &str, busy: bool) {
         let Some((idx, tab)) = self.tabs.iter_mut().enumerate().find(|(_, t)| t.project == project && t.ident.id() == id) else {
             return;
         };
@@ -1265,7 +1297,7 @@ impl Deck {
         if busy {
             tab.done = false;
         } else if finished {
-            if self.active != Some(idx) {
+            if self.active != Some(idx) || self.docs.view == CenterView::Docs {
                 tab.done = true;
             }
             self.play_sound(false);
@@ -1383,7 +1415,10 @@ impl Deck {
         self.active = Some(idx);
         self.show_seq += 1;
         self.tabs[idx].shown = self.show_seq;
-        self.tabs[idx].done = false;
+        // Lendo documentos, a aba ativada continua fora da vista: o selo da chave segue valendo.
+        if self.docs.view == CenterView::Agents {
+            self.tabs[idx].done = false;
+        }
         self.set_term_focus(true);
         self.persist_tabs();
     }
@@ -1676,8 +1711,8 @@ impl Deck {
     }
 
     pub fn set_term_focus(&mut self, on: bool) {
-        self.term_focus = on;
-        if on {
+        self.term_focus = on && self.docs.view == CenterView::Agents;
+        if self.term_focus {
             self.blink_epoch = Instant::now();
             if let Some(i) = self.active {
                 if let Some(tab) = self.tabs.get_mut(i) {
@@ -1699,7 +1734,7 @@ impl Deck {
             Ime::Preedit(text, _) => self.ime_preedit = text.clone(),
             Ime::Commit(text) => {
                 self.ime_preedit.clear();
-                if let (false, Some(idx)) = (text.is_empty(), self.active) {
+                if let (false, Some(idx), CenterView::Agents) = (text.is_empty(), self.active, self.docs.view) {
                     self.blink_epoch = Instant::now();
                     self.terminal_data(idx, text.as_bytes());
                 }
@@ -1711,7 +1746,10 @@ impl Deck {
 
     /// Trata uma tecla vinda do winit. Retorna `true` se consumiu (não repassar ao egui).
     pub fn handle_key(&mut self, ev: &KeyEvent, mods: ModifiersState, egui_has_focus: bool) -> bool {
-        let term_keys = !egui_has_focus && self.term_focus && self.active.is_some() && !self.modal_open;
+        // Lendo documentos o terminal está escondido: não recebe tecla nenhuma, mesmo no quadro em que a chave trocou
+        // e `term_focus` ainda não foi desligado (ver `Deck::center_changed`).
+        let term_visible = self.docs.view == CenterView::Agents;
+        let term_keys = term_visible && !egui_has_focus && self.term_focus && self.active.is_some() && !self.modal_open;
         if ev.state != ElementState::Pressed {
             return term_keys;
         }
@@ -1749,6 +1787,12 @@ impl Deck {
                 self.push_action(Action::ToggleTabMic);
                 return true;
             }
+            if mods.shift_key() && lower == "d" {
+                if !ev.repeat {
+                    self.push_action(Action::ToggleCenter);
+                }
+                return true;
+            }
             let app_key = app_claims_ctrl(&lower, term_keys, self.app_shortcuts_first);
             match lower.as_str() {
                 "t" if !ev.repeat => {
@@ -1767,7 +1811,7 @@ impl Deck {
                 return true;
             }
         }
-        if egui_has_focus || !self.term_focus {
+        if egui_has_focus || !self.term_focus || !term_visible {
             return false;
         }
         let Some(idx) = self.active else { return false };
@@ -1928,11 +1972,10 @@ impl Deck {
         self.tree.pending_click = Some((rel.to_owned(), Instant::now()));
     }
 
+    /// Duplo clique no explorador: abre o arquivo no modo Documentos (texto ou markdown, só leitura).
     pub fn tree_file_double_click(&mut self, rel: &str) {
         self.tree.pending_click = None;
-        if let Err(e) = self.core.open_path(rel) {
-            log::warn!("abrir {rel}: {e}");
-        }
+        self.docs_open_file(rel);
     }
 
     pub fn pick_workspace(&self) {
@@ -2022,6 +2065,9 @@ impl Deck {
         self.tasks_reset_for_project();
         self.tasks_refresh();
         self.github_reset_for_project();
+        // Os documentos são do projeto: o centro só fica em Documentos se o projeto novo tem algum.
+        self.docs.sync(&self.active_project);
+        self.docs_reload_files();
         self.persist_tabs();
     }
 
@@ -2106,6 +2152,7 @@ impl Deck {
     /// se ainda não abriram) e ativa a aba.
     pub fn focus_agent(&mut self, project: &str, id: &str) {
         self.switch_project(project);
+        self.show_agents();
         if let Some(i) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == id) {
             self.activate(i);
         }
@@ -2131,6 +2178,7 @@ impl Deck {
             self.close_tab(i);
         }
         self.projects.remove(id);
+        self.docs.drop_project(id);
         let was_active = id == self.active_project;
         self.core.remove_project(id);
         if was_active {

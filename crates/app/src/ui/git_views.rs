@@ -154,9 +154,14 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
 
 fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>) {
     let title = format!("{}  {}", open.short_hash, open.subject);
-    let (head, back, _) = header(ui, body, "commit", &title, &open.subject, 0.0);
+    let center_w = pill_w(ui, "Abrir ao centro") + 6.0;
+    let (head, back, mut right) = header(ui, body, "commit", &title, &open.subject, center_w);
     if back {
         acts.push(Act::CloseCommit);
+    }
+    let tip_text = "Abre o diff deste commit, só para ler, com a largura toda do centro";
+    if pill(ui, &mut right, head.min.y + 3.0, 22.0, "Abrir ao centro", tip_text, Look::Normal, true, Id::new("git-commit-center")) {
+        acts.push(Act::OpenCommitCenter(open.hash.clone(), open.short_hash.clone(), open.subject.clone()));
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
     let d = match &open.detail {
