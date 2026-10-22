@@ -10,7 +10,8 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 | [GERAL.md](GERAL.md) (este) | quiser o mapa geral |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | for mexer na ponte, nas abas, nas instâncias ou no protocolo entre agentes |
 | [MANUTENCAO.md](MANUTENCAO.md) | for compilar, testar, achar um arquivo ou seguir uma receita (ex.: novo agente) |
-| [pendencias.md](pendencias.md) | quiser saber o que falta desenvolver, o que está adiado e o que já foi feito |
+| [pendencias.md](pendencias.md) | quiser saber o que falta desenvolver, na ordem em que será feito, por área, e o que está adiado |
+| [historico.md](historico.md) | quiser saber o que já foi feito (o destino de todo item concluído de pendencias.md) |
 | [testes.md](testes.md) | for testar à mão, no Windows, com os agentes reais (roteiro com caixas de marcar) |
 
 ---
@@ -21,8 +22,8 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 
 Terminal desktop nativo em Rust (winit + egui). São três executáveis, que precisam ficar **na mesma pasta**:
 
-- `commanddeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (Conversa integrada
-  e compositor);
+- `commanddeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (mesa de tarefas, Conversa
+  integrada, Git e GitHub);
 - `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si;
 - `ollama-agent` (crate `cli`): o agente local com ferramentas, que roda numa aba.
 
@@ -33,8 +34,8 @@ volta eventos `CoreEvent`.
 
 | Pasta | Conteúdo |
 | :-- | :-- |
-| `workspace/` | pasta de trabalho padrão dos agentes (o `cwd` de cada aba). Dá para trocar nas Configurações |
-| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), sessões, `crash.log` e a trava `.commanddeck.lock` |
+| `workspace/` | o workspace antigo, do tempo em que havia uma pasta global. Hoje cada **projeto** tem a sua pasta (o `cwd` das abas dele); `workspace/` só serve de destino na migração de uma config antiga (`Config::migrate_legacy`) |
+| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log` e a trava `.commanddeck.lock` |
 | `whisper/` | motor e modelos do ditado por voz (whisper.cpp) |
 | `%APPDATA%\CommandDeck\config.json` | configuração. Com `COMMANDDECK_HOME`, tudo isso fica dentro dessa pasta |
 
@@ -98,8 +99,8 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | :-- | :-- |
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
-| Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; ver abaixo |
-| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão), **Conversa** (balões; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Embaixo, o compositor ("Enviar para", anexos, mensagem, microfone/anexo/Enviar), que some nas abas Tarefas, Git e GitHub |
+| Centro | **tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama, Codex, Terminal…) tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo; ver abaixo |
+| Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
 que foi aberta (o terminal roda na pasta dele) e só aparece com ele na tela; trocar de projeto esconde as abas do
@@ -113,9 +114,12 @@ A **tela dividida** organiza as abas por tipo de agente:
   `claude@dev` fica na janela do Claude); um tipo novo abre mais uma janela;
 - as janelas ficam numa grade automática: 2 lado a lado; 3 = 2 em cima + 1 largo embaixo; 4 = 2×2; 5 = 3+2;
   6 = 3×2. Se não cabem no tamanho mínimo (~260 × 140 px), os tipos que sobram viram abas da última janela;
-- cada janela tem o cabeçalho com as abas dela, a alça ⋮⋮ (arrastar sobre outra janela troca as duas de lugar) e
-  um "+" que abre outra aba do mesmo tipo. A janela focada tem o contorno na cor do agente e recebe o teclado,
-  o IME e o "Enviar para → Aba ativa";
+- cada janela tem o cabeçalho com as abas dela, a alça ⋮⋮ (arrastar sobre outra janela troca as duas de lugar) e,
+  à direita, o **microfone** (ditado), o **anexo** (escolher arquivos) e o "+" que abre outra aba do mesmo tipo;
+  o microfone e o anexo agem na **aba visível da janela** (`ui/panes.rs`; a aba só mostra o indicador de
+  gravação/transcrição). A janela focada tem o contorno na cor do agente e recebe o teclado e o IME;
+- quando as abas de uma janela não cabem, o lado com aba escondida ganha um degradê e uma seta ‹ / › que rola a
+  faixa até a aba escondida mais próxima, e um botão ▾ no fim abre o menu com todas as abas da janela (`ui/tabs.rs`);
 - os divisores entre janelas se arrastam (duplo clique iguala); tamanhos, ordem e o liga/desliga ficam salvos.
   Desligada (botão na barra de título), volta a ser uma janela só com todas as abas;
 - uma aba aberta por outro agente (`ask-agent codex …`) entra na janela do tipo dela (ou cria a janela) sem tirar
@@ -144,19 +148,27 @@ pasta muda e quando a janela volta a ter foco. Nada de agentes por enquanto: tud
 
 A aba **Tarefas** é a mesa de tarefas do projeto ativo (o projeto precisa ser um repositório git com ao menos um
 commit, e "Abrir abas dos agentes" ligado). Uma tarefa é um pedido que um agente executa numa branch e numa pasta
-(worktree) só dela; quando ele entrega o relatório, a tarefa espera a sua revisão:
-- **Lista** agrupada por estado: *Em revisão*, *Em andamento*, *Rascunho*, *Falhou*, *Concluídas* e *Canceladas*
-  (as mescladas e as descartadas, nessa ordem, recolhidas até você abrir). Cada cartão mostra o estado (o ponto), `tN`, o título, o agente com o
+(worktree) só dela. O ciclo: em andamento → quando o agente entrega o relatório, **em revisão** → ao mesclar, **aguardando
+validação** (o agente, a aba e a pasta continuam, para você testar o que foi mesclado) → ao validar, **concluída**; reprovar
+na validação devolve a tarefa ao mesmo agente:
+- **Lista** agrupada por estado: *Em revisão*, *Aguardando validação*, *Em andamento*, *Rascunho*, *Falhou*, *Concluídas* e
+  *Canceladas* (as concluídas e as descartadas, nessa ordem, recolhidas até você abrir). Cada cartão mostra o estado (o ponto), `tN`, o título, o agente com o
   modelo e o tempo ("pronta há 3 min"); na revisão, também o resumo do diff ("3 arquivos, +120 −8");
 - **+ Nova** abre o formulário: título, pedido, agente (os instalados), modelo ("Padrão" ou os conhecidos do
-  agente), base (a branch atual) e "Iniciar agora". Ctrl+Enter cria; sem "Iniciar agora" a tarefa fica em rascunho;
+  agente), base (a branch atual), anexos ("Anexar arquivos", ou arrastar arquivos sobre o formulário: os caminhos vão ao
+  final do pedido) e "Iniciar agora". Ctrl+Enter cria; sem "Iniciar agora" a tarefa fica em rascunho;
 - **Detalhe** (clicar no cartão; "←" volta): estado, `branch → base`, agente, o pedido, o relatório, as alterações
   (resumo por arquivo e **Ver diff completo**, no mesmo desenho do diff da aba Git, só leitura) e o histórico. Os
   botões dependem do estado: rascunho **Iniciar** e **Descartar**; em andamento **Ir para a aba** (ou **Reabrir
   aba**, se você a fechou) e **Descartar**; em revisão **Mesclar em \<base>**, **Devolver** (escreve o que mudar e
-  envia ao agente), a aba e **Descartar**; com erro **Tentar de novo** e **Descartar**. Mesclar e descartar pedem
-  confirmação no painel; enquanto a operação roda os botões ficam desligados, e uma recusa (repositório com
-  alterações sem commit, conflito…) aparece numa faixa vermelha com a explicação do core.
+  envia ao agente), a aba e **Descartar**; aguardando validação **Validar** (limpa a aba, a pasta e a branch),
+  **Reprovar** (escreve o que falhou no teste e volta ao mesmo agente), a aba e **Descartar** (o que já foi mesclado
+  continua na base); com erro **Tentar de novo** e **Descartar**. Mesclar e descartar pedem
+  confirmação no painel (validar não pede); enquanto a operação roda os botões ficam desligados, e uma recusa (repositório com
+  alterações sem commit, conflito…) aparece numa faixa vermelha com a explicação do core;
+- **Memória**: ao começar (e a cada devolução ou reprovação), o agente recebe o que o projeto já aprendeu
+  (`memory/aprendizados/`) e a "Situação atual" (as outras tarefas em andamento, os arquivos que elas mexem e os
+  últimos commits da base); ver "Memória em duas camadas" em [ARCHITECTURE.md](ARCHITECTURE.md).
 
 A aba **GitHub** mostra o repositório do remoto `origin` do projeto ativo (sem remoto do GitHub, ela só explica):
 - **PRs** abertos (número, título, autor, branch, rascunho e o estado dos checks), **Issues** abertas (sem os PRs) e
@@ -201,15 +213,17 @@ ela dura.
 - Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente), com a chave na seção
   ORGANIZAÇÃO da barra lateral.
 - Acompanhar o **uso** de cada agente aberto (sessão e semana) na barra de título.
-- Mandar uma mensagem (com anexos ou áudio transcrito) para a aba ativa pelo compositor.
-- Acompanhar e intervir nas conversas entre agentes pela Conversa integrada e pelas próprias abas.
+- Falar com um agente pelo terminal da aba dele, com **anexos** (botão no cabeçalho da janela, arrastar arquivos sobre ela
+  ou colar imagem) e **ditado por voz** (microfone no cabeçalho da janela).
+- Acompanhar as conversas entre agentes pela Conversa integrada (só leitura) e intervir pelas próprias abas.
 - Dar **tarefas** a agentes pela aba Tarefas (cada uma numa branch e pasta próprias), revisar o relatório e o diff e
-  **mesclar**, **devolver** com ajustes ou **descartar**.
+  **mesclar**, **devolver** com ajustes ou **descartar**; depois de mesclar, **validar** ou **reprovar** (a tarefa volta
+  ao mesmo agente).
 - Usar o **git** do projeto pela aba Git: alterações e diffs (inclusive por trecho), commit, histórico, stash,
   branches, merge/rebase com resolução de conflitos, buscar, puxar e enviar.
 - Ver **PRs, issues e execuções do Actions** do GitHub pela aba GitHub e mandar um PR, uma issue ou um job que
   falhou (com o fim do log) para um agente.
-- Citar arquivos do workspace (`@arquivo`), anexar arquivos e imagens, ditar por voz (whisper.cpp local) direto em cada aba de CLI (`Ctrl+Shift+M` ou ícone de microfone na aba, que digita no terminal sem enviar) ou pelo compositor.
+- Citar arquivos do workspace (`@arquivo`) e ditar por voz (whisper.cpp local) direto em cada aba de CLI (`Ctrl+Shift+M` ou o microfone do cabeçalho da janela, que digita no terminal da aba visível sem enviar).
 
 **Como agente, dentro de uma aba:**
 
@@ -222,15 +236,18 @@ ela dura.
 | `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão (`--file <arquivo>` lê de um arquivo; preserva acentos, que o PowerShell troca por `?` no stdin) |
 | `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
 | `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
+| `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor; Ollama como `ollama:<modelo>`), ou só os de um agente; antes de escolher `--agent`/`--model` |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
-| `ask-agent --learn <arquivo> [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; o agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
+| `ask-agent --learn [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; sem argumentos, os aprendizados globais por inteiro e o índice dos demais. O agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
 | `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
 | `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
 | `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e a deixa **aguardando validação** (o agente e a worktree continuam) / conclui a tarefa aguardando validação e limpa / descarta e limpa |
 | `ask-agent --task done <id> -\|"relatório"\|--file <arq>` | o agente da tarefa entrega o relatório (pela entrada padrão, como argumento ou de um arquivo) e a põe em revisão |
-| `ask-agent --task return <id> "feedback"` | devolve a tarefa em revisão ao agente com ajustes a fazer (o feedback também vem de um arquivo: `--file <arq>`) |
+| `ask-agent --task return <id> "feedback"` | devolve a tarefa em revisão ao agente com ajustes a fazer (o feedback também vem de um arquivo: `--file <arq>`; o agente também recebe os aprendizados dos arquivos que o feedback cita) |
 | `ask-agent --task reject <id> "motivo"\|--file <arq>\|-` | reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, dizendo que o trabalho já foi mesclado e o que falhou no teste |
 | `ask-agent --signal busy\|idle` | uso interno dos hooks (sai sempre com 0) |
+| `ask-agent --usage` | uso interno: a statusline do Claude, que manda o uso do plano à ponte (`POST /usage`) |
+| `ask-agent --help` (`-h`) | imprime o uso resumido de todos os comandos acima |
 
 ---
 
@@ -241,10 +258,13 @@ Cada documento cuida de um assunto. Mudou o assunto? Atualize o documento **no m
 | Arquivo | Para que serve | Regras que define / como manter |
 | :-- | :-- | :-- |
 | `memory/GERAL.md` | visão geral e este mapa | atualizar quando surgir um documento, uma pasta, um comando ou um limite novo |
+| `memory/AGENTDECK.md` | visão e rumo do produto | quem decide a ordem do que vem a seguir é o orquestrador; atualizar quando o rumo mudar |
+| `memory/aprendizados/` | a memória de longo prazo: um arquivo por armadilha, decisão ou convenção que não é óbvia no código | formato e quando criar em `aprendizados/README.md`; os `touches` precisam existir (o teste `every_learning_in_the_repository_is_valid` confere) |
 | `memory/ARCHITECTURE.md` | stack, crates, protocolo da ponte, instâncias, entrega nas abas | **contrato**: rotas, códigos HTTP, variáveis de ambiente e limites da ponte. Mudou o protocolo? Atualize aqui |
 | `memory/MANUTENCAO.md` | guia prático: Rust, comandos, mapa do código, receitas | mapa do código e receitas (ex.: novo agente: prompt nunca cru na linha de comando, hooks se o CLI tiver) |
-| `memory/pendencias.md` | trabalho de desenvolvimento por prioridade e o que já foi concluído | item concluído vai para "Concluído" com uma linha do que foi feito; limitação nova vira item; só desenvolvimento (testes manuais ficam em `testes.md`) |
-| `memory/testes.md` | roteiro de testes manuais (Windows, agentes reais) | marcar `[x]` o que passou; o que falhar vira item em `pendencias.md`; funcionalidade nova que só dá para validar à mão ganha um item aqui |
+| `memory/pendencias.md` | o que falta desenvolver: o bloco "Próximo" no topo e depois por área, com os adiados no fim | item concluído sai de `pendencias.md` e vai para `historico.md` com uma linha do que foi feito; limitação nova vira item; só desenvolvimento (testes manuais ficam em `testes.md`); o arquivo não guarda `[x]` |
+| `memory/historico.md` | o que já foi feito, do mais recente para o mais antigo (inclui a auditoria de 15/10) | só recebe o que saiu de `pendencias.md`; o texto de cada entrada fica como foi escrito na época |
+| `memory/testes.md` | roteiro de testes manuais (Windows, agentes reais), por área (as mesmas de `pendencias.md`) | marcar `[x]` o que passou; o que falhar vira item em `pendencias.md`; funcionalidade nova que só dá para validar à mão ganha um item na área dela; função removida leva os itens dela embora |
 | `README.md` (raiz) | apresentação, como compilar e rodar, exemplos de `ask-agent` | fica na raiz porque o GitHub mostra na página do repositório |
 | `CONTRIBUTING.md` (raiz) | como contribuir e os **princípios do projeto** | rodar `cargo fmt`, `clippy -D warnings` e `cargo test` antes do PR; privacidade; UI nunca trava; textos em pt-BR. Fica na raiz porque o GitHub o mostra ao abrir PRs |
 | `AGENTS.md` (raiz) e `workspace/AGENTS.md` | instruções lidas pelos CLIs de agentes | **gerados pelo app**: o bloco entre `<!-- commanddeck:start -->` e `<!-- commanddeck:end -->` é reescrito a cada início; edite só fora dele. Ficam na raiz da pasta de trabalho porque é lá que os CLIs os procuram |
@@ -270,4 +290,4 @@ mínima do Rust).
    nunca criar `AGENTS.md` na pasta pessoal do usuário. (CONTRIBUTING, dados/README)
 6. Textos para o usuário e comentários de código em português. (CONTRIBUTING)
 7. Documentação junto com o código: mudou comportamento, protocolo ou pendência, atualize o `.md`
-   correspondente em `memory/` no mesmo commit. (este documento)
+   correspondente em `memory/` no mesmo commit; item concluído de `pendencias.md` vai para `historico.md`. (este documento)
