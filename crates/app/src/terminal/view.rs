@@ -428,7 +428,7 @@ pub fn show(
 
     if let Some(t) = thumb {
         let hot = on_scrollbar || state.dragging_scrollbar.is_some();
-        painter.rect_filled(t, 3.0, theme::rgba(255, 255, 255, if hot { 0.25 } else { 0.12 }));
+        painter.rect_filled(t, 3.0, theme::with_alpha(theme::pal().text_strong, if hot { 0.25 } else { 0.12 }));
     }
 
     out

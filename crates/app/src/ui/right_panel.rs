@@ -17,13 +17,12 @@ const DOWNLOAD_H: f32 = 22.0;
 
 /// Desenha a barra em `rect` (cabeçalho da altura da topbar e corpo da aba ativa).
 pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
-    ui.painter().rect_filled(rect, 0.0, theme::BG);
     let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), theme::TOPBAR_H));
     draw_head(deck, ui, head);
     let mut body_top = head.max.y;
     if let Some((p, _)) = &deck.download {
         let strip = Rect::from_min_size(Pos2::new(rect.min.x, body_top), Vec2::new(rect.width(), DOWNLOAD_H));
-        ui.painter().rect_filled(strip, 0.0, theme::PANEL);
+        ui.painter().rect_filled(strip, 0.0, theme::pal().chip);
         draw_download(ui, ui.painter(), p, strip, strip.min.x + 12.0, strip.max.x - 12.0);
         body_top = strip.max.y;
     }
@@ -54,34 +53,33 @@ fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: 
     let r = super::clickable(ui, rect, Id::new(("right-tab", tab.id)));
     let hovered = r.hovered();
     if active || hovered {
-        painter.rect_filled(rect.shrink2(Vec2::new(2.0, 6.0)), 6.0, if active { theme::PANEL_2 } else { theme::PANEL });
+        painter.rect_filled(rect.shrink2(Vec2::new(2.0, 6.0)), 6.0, if active { theme::pal().hover } else { theme::pal().chip });
     }
-    let color = if active || hovered { theme::TEXT } else { theme::MUTED };
+    let color = if active || hovered { theme::pal().text } else { theme::pal().text_2 };
     let center = rect.center();
     deck.icons.paint(painter, tab.icon, center, 16.0, color, 0.0);
     if tab.badge > 0 {
         // Pílula sobre o canto superior direito do ícone.
         let txt = if tab.badge > 99 { "99+".to_owned() } else { tab.badge.to_string() };
-        let g = galley(painter, &txt, theme::ui(10.0), theme::WHITE);
+        let g = galley(painter, &txt, theme::ui(10.0), theme::pal().on_accent);
         let size = Vec2::new((g.size().x + 8.0).max(14.0), 14.0);
         let b = Rect::from_min_size(Pos2::new(center.x + 3.0, center.y - 13.0), size);
-        painter.rect_filled(b.expand(1.5), 8.0, theme::PANEL);
-        painter.rect_filled(b, 7.0, theme::ACCENT);
-        place(painter, b, Align2::CENTER_CENTER, g, theme::WHITE);
+        painter.rect_filled(b.expand(1.5), 8.0, theme::glass_solid());
+        painter.rect_filled(b, 7.0, theme::accent());
+        place(painter, b, Align2::CENTER_CENTER, g, theme::pal().on_accent);
     }
     if active {
         // Sublinhado na cor do agente ativo.
         let line = Rect::from_min_max(Pos2::new(rect.min.x + 6.0, rect.max.y - 2.0), Pos2::new(rect.max.x - 6.0, rect.max.y));
-        painter.rect_filled(line, 1.0, deck.active_color());
+        painter.rect_filled(line, 1.0, deck.accent());
     }
     tip(r, tab.tip).clicked()
 }
 
 fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, theme::PANEL);
     // Borda inferior alinhada à da topbar.
-    painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
+    painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::pal().separator);
     let view = deck.right_view;
     let git_st = deck.git.status();
     let git_badge = git_st.as_ref().map(|s| s.entries.len() as u32).unwrap_or(0);
@@ -116,10 +114,10 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     // "Limpar" à direita, só na Conversa.
     if view == RightView::Conversa {
         let font = theme::ui(13.0);
-        let cw = galley(&painter, "Limpar", font.clone(), theme::MUTED).size().x + 8.0;
+        let cw = galley(&painter, "Limpar", font.clone(), theme::pal().text_2).size().x + 8.0;
         let clear = Rect::from_min_size(Pos2::new(rect.max.x - 10.0 - cw, rect.min.y + 6.0), Vec2::new(cw, rect.height() - 13.0));
         let r = super::clickable(ui, clear, Id::new("feed-clear"));
-        text_in(&painter, clear, Align2::CENTER_CENTER, "Limpar", font, if r.hovered() { theme::TEXT } else { theme::MUTED });
+        text_in(&painter, clear, Align2::CENTER_CENTER, "Limpar", font, if r.hovered() { theme::pal().text } else { theme::pal().text_2 });
         if tip(r, "Limpar a conversa integrada").clicked() {
             deck.clear_feed();
         }
@@ -129,7 +127,7 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
 /// Divisor arrastável na borda esquerda da barra (muda a largura; a barra nunca recolhe).
 /// `cur_w` é a largura efetiva agora; `max_w`, o máximo que a janela permite.
 pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect, cur_w: f32, max_w: f32) {
-    let hit = line.expand2(Vec2::new(3.0, 0.0));
+    let hit = line;
     let r = ui.interact(hit, Id::new("right-splitter"), Sense::drag());
     if r.hovered() || r.dragged() {
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -150,7 +148,7 @@ pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect, cur_w: f32
     }
     let hot = r.hovered() || deck.right_dragging.is_some();
     let painter = ui.painter_at(full);
-    paint_splitter(&painter, line, hot, deck.active_color());
+    paint_splitter(&painter, line, hot, deck.accent());
     tip(r, "Arraste para redimensionar a conversa");
 }
 
@@ -216,20 +214,20 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
     let font = theme::ui(11.0);
     let cy = head.center().y;
 
-    let label_w = galley(&painter, &p.label, font.clone(), theme::TEXT).size().x;
+    let label_w = galley(&painter, &p.label, font.clone(), theme::pal().text).size().x;
     text_in(
         &painter,
         Rect::from_min_size(Pos2::new(left, head.min.y), Vec2::new(label_w, head.height())),
         Align2::LEFT_CENTER,
         &p.label,
         font.clone(),
-        if error { theme::RED_TEXT } else { theme::TEXT },
+        if error { theme::pal().danger_text } else { theme::pal().text },
     );
 
     // Trilho ×6 (até 140px, menor na barra estreita) e preenchimento (indeterminado: vai e volta).
     let track_w = ((limit - left) * 0.25).clamp(60.0, 140.0);
     let track = Rect::from_min_size(Pos2::new(left + label_w + 8.0, cy - 3.0), Vec2::new(track_w, 6.0));
-    painter.rect_filled(track, 3.0, theme::PANEL_2);
+    painter.rect_filled(track, 3.0, theme::pal().hover);
     let fill = match frac {
         Some(f) => Some(Rect::from_min_size(track.min, Vec2::new(track.width() * f, track.height()))),
         None => {
@@ -242,11 +240,11 @@ fn draw_download(ui: &Ui, painter: &egui::Painter, p: &DownloadProgress, head: R
         }
     };
     if let Some(r) = fill.filter(|r| r.width() > 0.5) {
-        painter.rect_filled(r, 3.0, theme::ACCENT);
+        painter.rect_filled(r, 3.0, theme::accent());
     }
     let info_rect = Rect::from_min_max(Pos2::new(track.max.x + 8.0, head.min.y), Pos2::new(limit, head.max.y));
     // Na barra estreita o detalhe termina em reticências em vez de cortar no meio.
-    let color = if error { theme::RED_TEXT } else { theme::MUTED };
+    let color = if error { theme::pal().danger_text } else { theme::pal().text_2 };
     let g = super::galley_trunc(&painter, &info, font, color, info_rect.width());
     super::place(&painter, info_rect, Align2::LEFT_CENTER, g, color);
 }
@@ -311,15 +309,19 @@ pub fn blink_alpha(time: f64, period: f64) -> f32 {
 fn empty_text(ui: &mut Ui, w: f32) {
     let mut job = LayoutJob::default();
     job.wrap.max_width = w;
-    let base =
-        TextFormat { font_id: theme::ui(13.0), color: theme::MUTED, line_height: Some(13.0 * theme::LINE_HEIGHT), ..Default::default() };
+    let base = TextFormat {
+        font_id: theme::ui(13.0),
+        color: theme::pal().text_2,
+        line_height: Some(13.0 * theme::LINE_HEIGHT),
+        ..Default::default()
+    };
     job.append("Aqui aparecem as conversas entre os agentes (via ", 0.0, base.clone());
     // Espaços que não quebram: o chip não se parte entre duas linhas (o fundo ficava solto).
-    job.append("\u{a0}ask-agent\u{a0}", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::PANEL_2, ..base.clone() });
+    job.append("\u{a0}ask-agent\u{a0}", 0.0, TextFormat { font_id: theme::mono(12.0), background: theme::pal().hover, ..base.clone() });
     job.append(") e os avisos do sistema.", 0.0, base);
     let g = ui.painter().layout_job(job);
     let (r, _) = ui.allocate_exact_size(Vec2::new(w + 28.0, g.size().y + 16.0), Sense::hover());
-    ui.painter().galley(Pos2::new(r.min.x + 14.0, r.min.y + 8.0), g, theme::MUTED);
+    ui.painter().galley(Pos2::new(r.min.x + 14.0, r.min.y + 8.0), g, theme::pal().text_2);
 }
 
 /// `.msg` (article). Devolve o retângulo ocupado.
@@ -331,13 +333,17 @@ fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
 
     // Cabeçalho: "quem → para" + hora à direita (12px, muted).
     let hfont = theme::ui(12.0);
-    let time_g = galley(&painter, &item.time, hfont.clone(), theme::MUTED);
+    let time_g = galley(&painter, &item.time, hfont.clone(), theme::pal().text_2);
     let mut head = LayoutJob::default();
     head.wrap.max_width = (inner_w - time_g.size().x - 6.0).max(10.0);
     head.wrap.max_rows = 1;
     head.wrap.overflow_character = Some('…');
-    let hfmt =
-        TextFormat { font_id: hfont.clone(), color: theme::MUTED, line_height: Some(12.0 * theme::LINE_HEIGHT), ..Default::default() };
+    let hfmt = TextFormat {
+        font_id: hfont.clone(),
+        color: theme::pal().text_2,
+        line_height: Some(12.0 * theme::LINE_HEIGHT),
+        ..Default::default()
+    };
     if let Some(who) = &item.who {
         head.append(who, 0.0, TextFormat { font_id: theme::ui_semibold(12.0), color: item.color, ..hfmt.clone() });
     }
@@ -349,9 +355,9 @@ fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
 
     // Corpo (pre-wrap, 13px, line-height 1.5).
     let body_color = match item.kind {
-        FeedKind::Error => theme::RED_TEXT,
-        FeedKind::System | FeedKind::Thinking => theme::MUTED,
-        _ => theme::TEXT,
+        FeedKind::Error => theme::pal().danger_text,
+        FeedKind::System | FeedKind::Thinking => theme::pal().text_2,
+        _ => theme::pal().text,
     };
     let mut body = LayoutJob::default();
     body.wrap.max_width = inner_w;
@@ -368,20 +374,20 @@ fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
 
     if !plain {
         let border = match item.kind {
-            FeedKind::Error => theme::RED,
-            FeedKind::User => theme::USER,
+            FeedKind::Error => theme::pal().danger,
+            FeedKind::User => theme::pal().success,
             _ => item.color,
         };
         // Indicador colorido vertical na borda esquerda de 3px acompanhando o raio de 8px.
         painter.rect_filled(r, 8.0, border);
         let inner = Rect::from_min_max(Pos2::new(r.min.x + 3.0, r.min.y), r.max);
-        painter.rect_filled(inner, egui::CornerRadius { nw: 5, sw: 5, ne: 8, se: 8 }, theme::PANEL_2);
+        painter.rect_filled(inner, egui::CornerRadius { nw: 5, sw: 5, ne: 8, se: 8 }, theme::pal().hover);
     }
     let x = r.min.x + 3.0 + pad_x;
     let y = r.min.y + pad_y;
     let head_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(inner_w, head_h));
-    place(&painter, head_rect, Align2::LEFT_CENTER, head_g, theme::MUTED);
-    place(&painter, head_rect, Align2::RIGHT_CENTER, time_g, theme::MUTED);
+    place(&painter, head_rect, Align2::LEFT_CENTER, head_g, theme::pal().text_2);
+    place(&painter, head_rect, Align2::RIGHT_CENTER, time_g, theme::pal().text_2);
     painter.galley(Pos2::new(x, y + head_h + 4.0), body_g, body_color);
     let _: Color32 = body_color;
     r

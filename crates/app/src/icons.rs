@@ -9,8 +9,6 @@ use egui::{Color32, Mesh, Pos2, Rect, TextureHandle, TextureOptions, Vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
-    /// Ícone do estado vazio (viewBox 24).
-    TerminalBox,
     /// `#mic-cancel` (viewBox 24).
     Close,
     /// `#mic` (viewBox 24).
@@ -53,12 +51,14 @@ pub enum Icon {
     OllamaLogo,
     /// Logo do Codex / OpenAI (viewBox 24).
     CodexLogo,
+    /// A marca do AgentDeck: um "baralho" de três cartões (grade 24×24). Não tem `path d`: tem as cores próprias de
+    /// [`LOGO_CARDS`] e é rasterizado por [`logo_rgba`]; o `color` de `paint` vira só o matiz (branco = como é).
+    AgentDeck,
 }
 
 impl Icon {
     fn path(self) -> (&'static str, f32) {
         match self {
-            Icon::TerminalBox => ("M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10zm-2-1h-4v-2h4v2zm-6.29-2.71a.996.996 0 0 0 0-1.41L9.42 11.6l2.3-2.3a.996.996 0 1 0-1.41-1.41L7.59 10.6c-.39.39-.39 1.02 0 1.41l2.71 2.71c.39.39 1.02.39 1.41-.01z", 24.0),
             Icon::Close => ("M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z", 24.0),
             Icon::Mic => ("M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z", 24.0),
             Icon::Attach => ("M16.5 6.5v10a4.5 4.5 0 0 1-9 0V5a3 3 0 0 1 6 0v10.5a1.5 1.5 0 0 1-3 0V6.5H9v9a3 3 0 0 0 6 0V5a4.5 4.5 0 0 0-9 0v11.5a6 6 0 0 0 12 0v-10h-1.5Z", 24.0),
@@ -80,6 +80,7 @@ impl Icon {
             Icon::AntigravityLogo => ("M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z", 112.0),
             Icon::OllamaLogo => ("M16.361 10.26a.894.894 0 0 0-.558.47l-.072.148.001.207c0 .193.004.217.059.353.076.193.152.312.291.448.24.238.51.3.872.205a.86.86 0 0 0 .517-.436.752.752 0 0 0 .08-.498c-.064-.453-.33-.782-.724-.897a1.06 1.06 0 0 0-.466 0zm-9.203.005c-.305.096-.533.32-.65.639a1.187 1.187 0 0 0-.06.52c.057.309.31.59.598.667.362.095.632.033.872-.205.14-.136.215-.255.291-.448.055-.136.059-.16.059-.353l.001-.207-.072-.148a.894.894 0 0 0-.565-.472 1.02 1.02 0 0 0-.474.007Zm4.184 2c-.131.071-.223.25-.195.383.031.143.157.288.353.407.105.063.112.072.117.136.004.038-.01.146-.029.243-.02.094-.036.194-.036.222.002.074.07.195.143.253.064.052.076.054.255.059.164.005.198.001.264-.03.169-.082.212-.234.15-.525-.052-.243-.042-.28.087-.355.137-.08.281-.219.324-.314a.365.365 0 0 0-.175-.48.394.394 0 0 0-.181-.033c-.126 0-.207.03-.355.124l-.085.053-.053-.032c-.219-.13-.259-.145-.391-.143a.396.396 0 0 0-.193.032zm.39-2.195c-.373.036-.475.05-.654.086-.291.06-.68.195-.951.328-.94.46-1.589 1.226-1.787 2.114-.04.176-.045.234-.045.53 0 .294.005.357.043.524.264 1.16 1.332 2.017 2.714 2.173.3.033 1.596.033 1.896 0 1.11-.125 2.064-.727 2.493-1.571.114-.226.169-.372.22-.602.039-.167.044-.23.044-.523 0-.297-.005-.355-.045-.531-.288-1.29-1.539-2.304-3.072-2.497a6.873 6.873 0 0 0-.855-.031zm.645.937a3.283 3.283 0 0 1 1.44.514c.223.148.537.458.671.662.166.251.26.508.303.82.02.143.01.251-.043.482-.08.345-.332.705-.672.957a3.115 3.115 0 0 1-.689.348c-.382.122-.632.144-1.525.138-.582-.006-.686-.01-.853-.042-.57-.107-1.022-.334-1.35-.68-.264-.28-.385-.535-.45-.946-.03-.192.025-.509.137-.776.136-.326.488-.73.836-.963.403-.269.934-.46 1.422-.512.187-.02.586-.02.773-.002zm-5.503-11a1.653 1.653 0 0 0-.683.298C5.617.74 5.173 1.666 4.985 2.819c-.07.436-.119 1.04-.119 1.503 0 .544.064 1.24.155 1.721.02.107.031.202.023.208a8.12 8.12 0 0 1-.187.152 5.324 5.324 0 0 0-.949 1.02 5.49 5.49 0 0 0-.94 2.339 6.625 6.625 0 0 0-.023 1.357c.091.78.325 1.438.727 2.04l.13.195-.037.064c-.269.452-.498 1.105-.605 1.732-.084.496-.095.629-.095 1.294 0 .67.009.803.088 1.266.095.555.288 1.143.503 1.534.071.128.243.393.264.407.007.003-.014.067-.046.141a7.405 7.405 0 0 0-.548 1.873c-.062.417-.071.552-.071.991 0 .56.031.832.148 1.279L3.42 24h1.478l-.05-.091c-.297-.552-.325-1.575-.068-2.597.117-.472.25-.819.498-1.296l.148-.29v-.177c0-.165-.003-.184-.057-.293a.915.915 0 0 0-.194-.25 1.74 1.74 0 0 1-.385-.543c-.424-.92-.506-2.286-.208-3.451.124-.486.329-.918.544-1.154a.787.787 0 0 0 .223-.531c0-.195-.07-.355-.224-.522a3.136 3.136 0 0 1-.817-1.729c-.14-.96.114-2.005.69-2.834.563-.814 1.353-1.336 2.237-1.475.199-.033.57-.028.776.01.226.04.367.028.512-.041.179-.085.268-.19.374-.431.093-.215.165-.333.36-.576.234-.29.46-.489.822-.729.413-.27.884-.467 1.352-.561.17-.035.25-.04.569-.04.319 0 .398.005.569.04a4.07 4.07 0 0 1 1.914.997c.117.109.398.457.488.602.034.057.095.177.132.267.105.241.195.346.374.43.14.068.286.082.503.045.343-.058.607-.053.943.016 1.144.23 2.14 1.173 2.581 2.437.385 1.108.276 2.267-.296 3.153-.097.15-.193.27-.333.419-.301.322-.301.722-.001 1.053.493.539.801 1.866.708 3.036-.062.772-.26 1.463-.533 1.854a2.096 2.096 0 0 1-.224.258.916.916 0 0 0-.194.25c-.054.109-.057.128-.057.293v.178l.148.29c.248.476.38.823.498 1.295.253 1.008.231 2.01-.059 2.581a.845.845 0 0 0-.044.098c0 .006.329.009.732.009h.73l.02-.074.036-.134c.019-.076.057-.3.088-.516.029-.217.029-1.016 0-1.258-.11-.875-.295-1.57-.597-2.226-.032-.074-.053-.138-.046-.141.008-.005.057-.074.108-.152.376-.569.607-1.284.724-2.228.031-.26.031-1.378 0-1.628-.083-.645-.182-1.082-.348-1.525a6.083 6.083 0 0 0-.329-.7l-.038-.064.131-.194c.402-.604.636-1.262.727-2.04a6.625 6.625 0 0 0-.024-1.358 5.512 5.512 0 0 0-.939-2.339 5.325 5.325 0 0 0-.95-1.02 8.097 8.097 0 0 1-.186-.152.692.692 0 0 1 .023-.208c.208-1.087.201-2.443-.017-3.503-.19-.924-.535-1.658-.98-2.082-.354-.338-.716-.482-1.15-.455-.996.059-1.8 1.205-2.116 3.01a6.805 6.805 0 0 0-.097.726c0 .036-.007.066-.015.066a.96.96 0 0 1-.149-.078A4.857 4.857 0 0 0 12 3.03c-.832 0-1.687.243-2.456.698a.958.958 0 0 1-.148.078c-.008 0-.015-.03-.015-.066a6.71 6.71 0 0 0-.097-.725C8.997 1.392 8.337.319 7.46.048a2.096 2.096 0 0 0-.585-.041Zm.293 1.402c.248.197.523.759.682 1.388.03.113.06.244.069.292.007.047.026.152.041.233.067.365.098.76.102 1.24l.002.475-.12.175-.118.178h-.278c-.324 0-.646.041-.954.124l-.238.06c-.033.007-.038-.003-.057-.144a8.438 8.438 0 0 1 .016-2.323c.124-.788.413-1.501.696-1.711.067-.05.079-.049.157.013zm9.825-.012c.17.126.358.46.498.888.28.854.36 2.028.212 3.145-.019.14-.024.151-.057.144l-.238-.06a3.693 3.693 0 0 0-.954-.124h-.278l-.119-.178-.119-.175.002-.474c.004-.669.066-1.19.214-1.772.157-.623.434-1.185.68-1.382.078-.062.09-.063.159-.012z", 24.0),
             Icon::CodexLogo => ("M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z", 24.0),
+            Icon::AgentDeck => ("", 24.0),
         }
     }
 }
@@ -88,9 +89,31 @@ impl Icon {
 #[derive(Default)]
 pub struct IconCache {
     textures: HashMap<(Icon, u32), TextureHandle>,
+    /// A marca do app, em cores (por tamanho em pixels físicos).
+    logos: HashMap<u32, TextureHandle>,
 }
 
 impl IconCache {
+    /// A marca em cores (texturas pré-multiplicadas); `tint` branco a deixa como é.
+    fn paint_logo(&mut self, painter: &egui::Painter, center: Pos2, size: f32, tint: Color32) {
+        let ppp = painter.pixels_per_point();
+        let px = (size * ppp).round().max(1.0) as u32;
+        let ctx = painter.ctx();
+        let tex = self
+            .logos
+            .entry(px)
+            .or_insert_with(|| {
+                let rgba = logo_rgba(px as usize, crate::theme::pal().bg);
+                let img = egui::ColorImage::from_rgba_unmultiplied([px as usize; 2], &rgba);
+                ctx.load_texture(format!("icon-logo-{px}"), img, TextureOptions::LINEAR)
+            })
+            .id();
+        let rect = Rect::from_center_size(center, Vec2::splat(px as f32 / ppp));
+        let mut mesh = Mesh::with_texture(tex);
+        mesh.add_rect_with_uv(rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint);
+        painter.add(egui::Shape::mesh(mesh));
+    }
+
     fn texture(&mut self, ctx: &egui::Context, icon: Icon, px: u32) -> &TextureHandle {
         self.textures.entry((icon, px)).or_insert_with(|| {
             let (d, vb) = icon.path();
@@ -112,6 +135,9 @@ impl IconCache {
     /// Pinta o ícone centralizado em `rect` (quadrado de lado `size` pontos), tingido com `color`
     /// e girado `angle` radianos em torno do centro (para os chevrons animados).
     pub fn paint(&mut self, painter: &egui::Painter, icon: Icon, center: Pos2, size: f32, color: Color32, angle: f32) {
+        if icon == Icon::AgentDeck {
+            return self.paint_logo(painter, center, size, color);
+        }
         let ppp = painter.pixels_per_point();
         let px = (size * ppp).round().max(1.0) as u32;
         let tex = self.texture(painter.ctx(), icon, px).id();
@@ -129,7 +155,129 @@ impl IconCache {
 }
 
 // ---------------------------------------------------------------------------
-// Parser de `path d` (M L H V C S Q T A Z, absolutos e relativos) → polígonos.
+// A marca do AgentDeck: três cartões em baralho e um furo (grade 24×24)
+// ---------------------------------------------------------------------------
+
+/// Um cartão do baralho, na grade 24×24 da marca.
+pub struct LogoCard {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub r: f32,
+    pub fill: Color32,
+    /// Contorno de [`LOGO_STROKE`] na cor do fundo (separa o cartão do que está atrás).
+    pub outlined: bool,
+}
+
+/// Do fundo para a frente: traseiro, meio e frente.
+pub const LOGO_CARDS: [LogoCard; 3] = [
+    LogoCard { x: 8.0, y: 2.5, w: 13.5, h: 10.0, r: 2.5, fill: crate::theme::DARK.text_faint, outlined: false },
+    LogoCard { x: 5.25, y: 6.75, w: 13.5, h: 10.0, r: 2.5, fill: crate::theme::DARK.text_2, outlined: true },
+    LogoCard { x: 2.5, y: 11.0, w: 13.5, h: 10.0, r: 2.5, fill: crate::theme::DARK.text, outlined: true },
+];
+/// Furo no cartão da frente: centro e raio, na cor do fundo.
+pub const LOGO_HOLE: (f32, f32, f32) = (6.75, 16.0, 1.7);
+/// Espessura do contorno (centrado na borda, como o `stroke` do SVG).
+pub const LOGO_STROKE: f32 = 1.5;
+
+/// Distância assinada (negativa dentro) de `p` ao retângulo arredondado do cartão.
+fn card_distance(p: (f32, f32), c: &LogoCard) -> f32 {
+    let qx = (p.0 - (c.x + c.w / 2.0)).abs() - (c.w / 2.0 - c.r);
+    let qy = (p.1 - (c.y + c.h / 2.0)).abs() - (c.h / 2.0 - c.r);
+    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - c.r
+}
+
+/// A cor da marca no ponto `p` da grade 24×24 (`None`: fundo transparente). `outline` é a cor do
+/// contorno dos cartões e do furo.
+fn logo_sample(p: (f32, f32), outline: Color32) -> Option<Color32> {
+    let mut out = None;
+    for c in &LOGO_CARDS {
+        let d = card_distance(p, c);
+        if c.outlined && d.abs() <= LOGO_STROKE / 2.0 {
+            out = Some(outline);
+        } else if d <= 0.0 {
+            out = Some(c.fill);
+        }
+    }
+    let (hx, hy, hr) = LOGO_HOLE;
+    if (p.0 - hx).hypot(p.1 - hy) <= hr {
+        out = Some(outline);
+    }
+    out
+}
+
+/// A marca rasterizada em `size`×`size` pixels: RGBA não pré-multiplicado, fundo transparente, com
+/// 4×4 amostras por pixel para as bordas ficarem lisas. É o mesmo desenho do ícone da janela e do `.ico`.
+pub fn logo_rgba(size: usize, outline: Color32) -> Vec<u8> {
+    const N: usize = 4;
+    let scale = 24.0 / size as f32;
+    let mut out = Vec::with_capacity(size * size * 4);
+    for y in 0..size {
+        for x in 0..size {
+            let (mut r, mut g, mut b, mut hits) = (0u32, 0u32, 0u32, 0u32);
+            for sy in 0..N {
+                for sx in 0..N {
+                    let p = ((x as f32 + (sx as f32 + 0.5) / N as f32) * scale, (y as f32 + (sy as f32 + 0.5) / N as f32) * scale);
+                    if let Some(c) = logo_sample(p, outline) {
+                        r += c.r() as u32;
+                        g += c.g() as u32;
+                        b += c.b() as u32;
+                        hits += 1;
+                    }
+                }
+            }
+            if hits == 0 {
+                out.extend_from_slice(&[0, 0, 0, 0]);
+            } else {
+                let a = (hits as f32 / (N * N) as f32 * 255.0).round() as u8;
+                out.extend_from_slice(&[(r / hits) as u8, (g / hits) as u8, (b / hits) as u8, a]);
+            }
+        }
+    }
+    out
+}
+
+/// Tamanhos (px) do ícone do executável.
+#[cfg(test)]
+const ICO_SIZES: [usize; 5] = [16, 24, 32, 48, 256];
+
+/// O `.ico` do executável: um PNG por tamanho de [`ICO_SIZES`], com fundo transparente e contorno
+/// e furo em `#16181c`. Gerado por `scripts/gerar-icone.ps1`.
+#[cfg(test)]
+fn logo_ico() -> Vec<u8> {
+    let images: Vec<Vec<u8>> = ICO_SIZES
+        .iter()
+        .map(|&s| {
+            let mut png_bytes = Vec::new();
+            let mut enc = png::Encoder::new(&mut png_bytes, s as u32, s as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().expect("cabeçalho do PNG");
+            w.write_image_data(&logo_rgba(s, crate::theme::pal().bg)).expect("pixels do PNG");
+            w.finish().expect("fim do PNG");
+            png_bytes
+        })
+        .collect();
+    let mut ico = Vec::new();
+    ico.extend_from_slice(&[0, 0, 1, 0]);
+    ico.extend_from_slice(&(images.len() as u16).to_le_bytes());
+    let mut offset = 6 + 16 * images.len();
+    for (&s, img) in ICO_SIZES.iter().zip(&images) {
+        let dim = if s >= 256 { 0 } else { s as u8 };
+        ico.extend_from_slice(&[dim, dim, 0, 0, 1, 0, 32, 0]);
+        ico.extend_from_slice(&(img.len() as u32).to_le_bytes());
+        ico.extend_from_slice(&(offset as u32).to_le_bytes());
+        offset += img.len();
+    }
+    for img in &images {
+        ico.extend_from_slice(img);
+    }
+    ico
+}
+
+// ---------------------------------------------------------------------------
+// Parser de `path d`(M L H V C S Q T A Z, absolutos e relativos) → polígonos.
 // ---------------------------------------------------------------------------
 
 type Poly = Vec<(f32, f32)>;
@@ -502,7 +650,6 @@ mod tests {
     #[test]
     fn every_icon_rasterizes() {
         for icon in [
-            Icon::TerminalBox,
             Icon::Close,
             Icon::Mic,
             Icon::Attach,
@@ -546,6 +693,62 @@ mod tests {
             let total: f32 = cov.iter().sum();
             assert!(total > 20.0 && total < 400.0, "{name} cobertura estranha: {total}");
         }
+    }
+
+    fn pixel(rgba: &[u8], size: usize, gx: f32, gy: f32) -> [u8; 4] {
+        let (x, y) = ((gx / 24.0 * size as f32) as usize, (gy / 24.0 * size as f32) as usize);
+        let i = (y * size + x) * 4;
+        [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]]
+    }
+
+    #[test]
+    fn the_logo_is_three_cards_and_a_hole() {
+        let bg = crate::theme::pal().bg;
+        let rgba = logo_rgba(96, bg);
+        let at = |x, y| pixel(&rgba, 96, x, y);
+        // Cada cartão na sua cor (nos trechos que o da frente não cobre).
+        assert_eq!(at(19.0, 4.0), [0x6b, 0x71, 0x7c, 255], "cartão de trás");
+        assert_eq!(at(17.0, 9.0), [0xaa, 0xb1, 0xbb, 255], "cartão do meio");
+        assert_eq!(at(14.0, 19.5), [0xe6, 0xe8, 0xeb, 255], "cartão da frente");
+        // O furo e o contorno usam a cor do fundo.
+        assert_eq!(at(6.75, 16.0), [bg.r(), bg.g(), bg.b(), 255], "furo");
+        assert_eq!(at(10.0, 11.0), [bg.r(), bg.g(), bg.b(), 255], "contorno do cartão da frente");
+        // Fora dos cartões o fundo é transparente.
+        assert_eq!(at(1.0, 1.0)[3], 0);
+        assert_eq!(at(22.5, 22.5)[3], 0);
+    }
+
+    #[test]
+    fn the_logo_survives_the_small_sizes() {
+        for size in [16, 24, 32] {
+            let rgba = logo_rgba(size, crate::theme::pal().bg);
+            assert_eq!(rgba.len(), size * size * 4);
+            let covered = rgba.chunks(4).filter(|p| p[3] > 0).count();
+            assert!(covered > size * size / 3, "{size}px quase vazio: {covered}");
+        }
+    }
+
+    /// O `.ico` versionado tem os cinco tamanhos e é o que `logo_ico` gera hoje.
+    #[test]
+    fn the_committed_ico_has_the_five_sizes() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.ico");
+        let ico = std::fs::read(path).expect("crates/app/assets/agentdeck.ico (rode scripts/gerar-icone.ps1)");
+        assert_eq!(&ico[..4], &[0, 0, 1, 0]);
+        assert_eq!(u16::from_le_bytes([ico[4], ico[5]]) as usize, ICO_SIZES.len());
+        for (i, &s) in ICO_SIZES.iter().enumerate() {
+            let entry = &ico[6 + 16 * i..6 + 16 * (i + 1)];
+            let dim = if s >= 256 { 0 } else { s as u8 };
+            assert_eq!((entry[0], entry[1]), (dim, dim), "tamanho {s}");
+        }
+        assert_eq!(ico, logo_ico(), "o .ico está desatualizado: rode scripts/gerar-icone.ps1");
+    }
+
+    /// Gera `assets/agentdeck.ico`. Não roda sozinho: `scripts/gerar-icone.ps1`.
+    #[test]
+    #[ignore = "gera o arquivo; use scripts/gerar-icone.ps1"]
+    fn write_the_ico_file() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.ico");
+        std::fs::write(path, logo_ico()).expect("gravar o .ico");
     }
 
     #[test]

@@ -31,43 +31,43 @@ pub(super) enum Look {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn pill(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, tooltip: &str, look: Look, enabled: bool, id: Id) -> bool {
     let painter = ui.painter();
-    let w = galley(painter, label, theme::ui_semibold(11.5), theme::TEXT).size().x + 18.0;
+    let w = galley(painter, label, theme::ui_semibold(11.5), theme::pal().text).size().x + 18.0;
     let r = Rect::from_min_size(Pos2::new(*right - w, y), Vec2::new(w, h));
     *right = r.min.x - 6.0;
     let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
     let hot = enabled && resp.hovered();
     let (bg, fg) = match look {
-        Look::Primary => (if hot { theme::brighten(theme::ACCENT, 1.15) } else { theme::ACCENT }, theme::WHITE),
-        Look::Danger => (if hot { theme::BORDER } else { theme::PANEL_2 }, theme::RED_TEXT),
-        Look::Normal => (if hot { theme::BORDER } else { theme::PANEL_2 }, theme::TEXT),
+        Look::Primary => (if hot { theme::brighten(theme::accent(), 1.15) } else { theme::accent() }, theme::pal().on_accent),
+        Look::Danger => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().danger_text),
+        Look::Normal => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().text),
     };
     let fg = if enabled { fg } else { theme::with_opacity(fg, 0.4) };
-    painter.rect_filled(r, 6.0, if enabled || look != Look::Primary { bg } else { theme::PANEL_2 });
+    painter.rect_filled(r, 6.0, if enabled || look != Look::Primary { bg } else { theme::pal().hover });
     text_in(painter, r, Align2::CENTER_CENTER, label, theme::ui_semibold(11.5), fg);
     tip(resp, tooltip.to_owned()).clicked() && enabled
 }
 
 /// Largura de uma pílula (para alinhar à esquerda ou calcular o espaço).
 fn pill_w(ui: &Ui, label: &str) -> f32 {
-    galley(ui.painter(), label, theme::ui_semibold(11.5), theme::TEXT).size().x + 18.0
+    galley(ui.painter(), label, theme::ui_semibold(11.5), theme::pal().text).size().x + 18.0
 }
 
 /// Cabeçalho com "←", o título e o espaço livre à direita (`right`) para botões. Devolve (cabeçalho, voltar clicado, `right`).
 fn header(ui: &Ui, body: Rect, id: &str, title: &str, hint: &str, reserved_right: f32) -> (Rect, bool, f32) {
     let painter = ui.painter_at(body);
     let head = Rect::from_min_size(body.min, Vec2::new(body.width(), HEADER_H));
-    painter.rect_filled(head, 0.0, theme::PANEL);
+    painter.rect_filled(head, 0.0, theme::pal().chip);
     let back = Rect::from_min_size(Pos2::new(head.min.x + 6.0, head.min.y + 3.0), Vec2::new(26.0, 22.0));
     let br = clickable(ui, back, Id::new(("git-back", id)));
     if br.hovered() {
-        painter.rect_filled(back, 5.0, theme::BORDER);
+        painter.rect_filled(back, 5.0, theme::pal().separator);
     }
-    text_in(&painter, back, Align2::CENTER_CENTER, "←", theme::ui(15.0), theme::TEXT);
+    text_in(&painter, back, Align2::CENTER_CENTER, "←", theme::ui(15.0), theme::pal().text);
     let back_clicked = tip(br, "Voltar").clicked();
     let right = head.max.x - 6.0 - reserved_right;
     let tr = Rect::from_min_max(Pos2::new(back.max.x + 8.0, head.min.y), Pos2::new(right, head.max.y));
-    let g = galley_trunc(&painter, title, theme::ui(12.0), theme::TEXT, tr.width());
-    place(&painter, tr, Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(&painter, title, theme::ui(12.0), theme::pal().text, tr.width());
+    place(&painter, tr, Align2::LEFT_CENTER, g, theme::pal().text);
     tip(ui.interact(tr, Id::new(("git-head-title", id)), Sense::hover()), hint.to_owned());
     (head, back_clicked, head.max.x - 6.0)
 }
@@ -94,7 +94,7 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
     }
     if deck.git.log.is_empty() {
         let text = if deck.git.log_loading { "Lendo o histórico…" } else { "Nenhum commit ainda nesta branch." };
-        note(ui, body, text, theme::MUTED);
+        note(ui, body, text, theme::pal().text_2);
         return;
     }
     let log = &deck.git.log;
@@ -112,38 +112,45 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
                 if hot {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
-                text_in(p, r, Align2::CENTER_CENTER, label, theme::ui_semibold(12.0), if hot { theme::TEXT } else { theme::MUTED });
+                text_in(
+                    p,
+                    r,
+                    Align2::CENTER_CENTER,
+                    label,
+                    theme::ui_semibold(12.0),
+                    if hot { theme::pal().text } else { theme::pal().text_2 },
+                );
                 if resp.clicked() && !loading {
                     acts.push(Act::MoreLog);
                 }
                 continue;
             };
             if resp.hovered() {
-                p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::PANEL_2);
+                p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::pal().hover);
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             let w = r.width() - 28.0;
-            let g = galley_trunc(p, &c.subject, theme::ui(12.5), theme::TEXT, w);
+            let g = galley_trunc(p, &c.subject, theme::ui(12.5), theme::pal().text, w);
             place(
                 p,
                 Rect::from_min_size(Pos2::new(r.min.x + 14.0, r.min.y + 5.0), Vec2::new(w, 17.0)),
                 Align2::LEFT_CENTER,
                 g,
-                theme::TEXT,
+                theme::pal().text,
             );
             // Segunda linha: hash (mono) · autor · data.
-            let hg = galley(p, &c.short_hash, theme::mono(11.0), theme::SEND_DEFAULT);
+            let hg = galley(p, &c.short_hash, theme::mono(11.0), theme::pal().info);
             let hw = hg.size().x;
             let y2 = r.min.y + 24.0;
-            place(p, Rect::from_min_size(Pos2::new(r.min.x + 14.0, y2), Vec2::new(hw, 14.0)), Align2::LEFT_CENTER, hg, theme::SEND_DEFAULT);
+            place(p, Rect::from_min_size(Pos2::new(r.min.x + 14.0, y2), Vec2::new(hw, 14.0)), Align2::LEFT_CENTER, hg, theme::pal().info);
             let meta = format!("{} · {}", c.author, c.date);
-            let mg = galley_trunc(p, &meta, theme::ui(11.0), theme::MUTED, (w - hw - 8.0).max(20.0));
+            let mg = galley_trunc(p, &meta, theme::ui(11.0), theme::pal().text_2, (w - hw - 8.0).max(20.0));
             place(
                 p,
                 Rect::from_min_size(Pos2::new(r.min.x + 14.0 + hw + 8.0, y2), Vec2::new(w - hw - 8.0, 14.0)),
                 Align2::LEFT_CENTER,
                 mg,
-                theme::MUTED,
+                theme::pal().text_2,
             );
             if tip(resp, format!("{}\n{} · {} · {}", c.subject, c.short_hash, c.author, c.date)).clicked() {
                 acts.push(Act::OpenCommit(c.clone()));
@@ -165,24 +172,24 @@ fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
     let d = match &open.detail {
-        None => return note(ui, area, "Carregando o commit…", theme::MUTED),
-        Some(Err(e)) => return note(ui, area, e, theme::RED_TEXT),
+        None => return note(ui, area, "Carregando o commit…", theme::pal().text_2),
+        Some(Err(e)) => return note(ui, area, e, theme::pal().danger_text),
         Some(Ok(d)) => d,
     };
     let p = ui.painter_at(area);
     let mut y = area.min.y + 8.0;
     let w = area.width() - 28.0;
     let meta = format!("{} <{}> · {}", d.author, d.email, d.date);
-    let g = galley_trunc(&p, &meta, theme::ui(11.5), theme::MUTED, w);
-    place(&p, Rect::from_min_size(Pos2::new(area.min.x + 14.0, y), Vec2::new(w, 16.0)), Align2::LEFT_CENTER, g, theme::MUTED);
+    let g = galley_trunc(&p, &meta, theme::ui(11.5), theme::pal().text_2, w);
+    place(&p, Rect::from_min_size(Pos2::new(area.min.x + 14.0, y), Vec2::new(w, 16.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
     y += 20.0;
     // A mensagem inteira, no máximo 5 linhas de altura.
-    let mut job = egui::text::LayoutJob::simple(d.message.clone(), theme::ui(12.5), theme::TEXT, w);
+    let mut job = egui::text::LayoutJob::simple(d.message.clone(), theme::ui(12.5), theme::pal().text, w);
     job.wrap.max_rows = 5;
     job.wrap.overflow_character = Some('…');
     let mg = p.layout_job(job);
     let mh = mg.size().y;
-    p.galley(Pos2::new(area.min.x + 14.0, y), mg, theme::TEXT);
+    p.galley(Pos2::new(area.min.x + 14.0, y), mg, theme::pal().text);
     y += mh + 8.0;
     // Arquivos alterados (até 5 linhas).
     let title = format!("{} ARQUIVO(S) ALTERADO(S)", d.files.len());
@@ -192,15 +199,15 @@ fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>
         Align2::LEFT_CENTER,
         &title,
         theme::ui_bold(10.5),
-        theme::MUTED,
+        theme::pal().text_2,
     );
     y += 18.0;
     for (letter, path) in d.files.iter().take(5) {
         let color = match letter {
             'A' => theme::BADGE_JSON,
-            'D' => theme::RED_TEXT,
+            'D' => theme::pal().danger_text,
             'M' => theme::OLLAMA,
-            _ => theme::SEND_DEFAULT,
+            _ => theme::pal().info,
         };
         text_in(
             &p,
@@ -210,13 +217,13 @@ fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>
             theme::mono_bold(11.5),
             color,
         );
-        let g = galley_trunc(&p, path, theme::ui(12.0), theme::TEXT, w - 20.0);
+        let g = galley_trunc(&p, path, theme::ui(12.0), theme::pal().text, w - 20.0);
         place(
             &p,
             Rect::from_min_size(Pos2::new(area.min.x + 34.0, y), Vec2::new(w - 20.0, FILE_ROW_H)),
             Align2::LEFT_CENTER,
             g,
-            theme::TEXT,
+            theme::pal().text,
         );
         y += FILE_ROW_H;
     }
@@ -227,12 +234,12 @@ fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>
             Align2::LEFT_CENTER,
             &format!("+{} outros (veja no diff abaixo)", d.files.len() - 5),
             theme::ui(11.5),
-            theme::MUTED,
+            theme::pal().text_2,
         );
         y += FILE_ROW_H;
     }
     y += 6.0;
-    p.rect_filled(Rect::from_min_size(Pos2::new(area.min.x, y), Vec2::new(area.width(), 1.0)), 0.0, theme::BORDER);
+    p.rect_filled(Rect::from_min_size(Pos2::new(area.min.x, y), Vec2::new(area.width(), 1.0)), 0.0, theme::pal().separator);
     let diff_area = Rect::from_min_max(Pos2::new(area.min.x, y + 1.0), area.max);
     if diff_area.height() > 40.0 {
         diff_lines(ui, diff_area, &d.diff, None, acts);
@@ -252,15 +259,15 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     let x0 = body.min.x + 10.0;
     let x1 = body.max.x - 10.0;
     let input = Rect::from_min_size(Pos2::new(x0, body.min.y + 8.0), Vec2::new(x1 - x0, 28.0));
-    frame(&p, input, 7.0, theme::PANEL, theme::BORDER);
+    frame(&p, input, 7.0, theme::pal().recess, theme::pal().glass_border);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input.shrink(1.0)));
     let out = egui::TextEdit::singleline(&mut deck.git.stash_message)
         .id(Id::new("git-stash-msg"))
         .frame(egui::Frame::NONE)
         .margin(egui::Margin { left: 9, right: 9, top: 5, bottom: 5 })
         .font(theme::ui(12.5))
-        .text_color(theme::INPUT_TEXT)
-        .hint_text(egui::RichText::new("Mensagem do stash (opcional)").font(theme::ui(12.5)).color(theme::PLACEHOLDER))
+        .text_color(theme::pal().text)
+        .hint_text(egui::RichText::new("Mensagem do stash (opcional)").font(theme::ui(12.5)).color(theme::pal().text_3))
         .desired_width(input.width() - 2.0)
         .show(&mut child);
     let has_changes = !st.entries.is_empty();
@@ -275,13 +282,19 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     }
     let box_r = Rect::from_min_size(Pos2::new(x0 + 2.0, by + (BTN_H - 14.0) / 2.0), Vec2::splat(14.0));
     let label = "Incluir não rastreados";
-    let lw = galley(&p, label, theme::ui(12.0), theme::MUTED).size().x;
+    let lw = galley(&p, label, theme::ui(12.0), theme::pal().text_2).size().x;
     let hit = Rect::from_min_max(Pos2::new(x0, by), Pos2::new(box_r.max.x + 8.0 + lw, by + BTN_H));
     let ar = clickable(ui, hit, Id::new("git-stash-untracked"));
     let on = deck.git.stash_include_untracked;
-    p.rect(box_r, 3.0, if on { theme::ACCENT } else { theme::PANEL_2 }, egui::Stroke::new(1.0, theme::MUTED), egui::StrokeKind::Inside);
+    p.rect(
+        box_r,
+        3.0,
+        if on { theme::accent() } else { theme::pal().hover },
+        egui::Stroke::new(1.0, theme::pal().text_2),
+        egui::StrokeKind::Inside,
+    );
     if on {
-        text_in(&p, box_r, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::WHITE);
+        text_in(&p, box_r, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::pal().on_accent);
     }
     text_in(
         &p,
@@ -289,13 +302,13 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
         Align2::LEFT_CENTER,
         label,
         theme::ui(12.0),
-        if ar.hovered() { theme::TEXT } else { theme::MUTED },
+        if ar.hovered() { theme::pal().text } else { theme::pal().text_2 },
     );
     if tip(ar, "Também guarda (e tira da pasta) os arquivos ainda não rastreados").clicked() {
         acts.push(Act::StashToggleUntracked);
     }
     let top = by + BTN_H + 8.0;
-    p.rect_filled(Rect::from_min_size(Pos2::new(body.min.x, top), Vec2::new(body.width(), 1.0)), 0.0, theme::BORDER);
+    p.rect_filled(Rect::from_min_size(Pos2::new(body.min.x, top), Vec2::new(body.width(), 1.0)), 0.0, theme::pal().separator);
     let list = Rect::from_min_max(Pos2::new(body.min.x, top + 1.0), body.max);
     if deck.git.stashes.is_empty() {
         let text = if deck.git.stash_loading {
@@ -303,7 +316,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
         } else {
             "Nenhum stash. Guarde o trabalho em andamento para voltar a ele depois."
         };
-        return note(ui, list, text, theme::MUTED);
+        return note(ui, list, text, theme::pal().text_2);
     }
     let stashes = &deck.git.stashes;
     let mut child = scroll_child(ui, list);
@@ -318,16 +331,16 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
                 let hovered = ui.rect_contains_pointer(r);
                 let p = ui.painter();
                 if hovered {
-                    p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::PANEL_2);
+                    p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::pal().hover);
                 }
                 let w = r.width() - 28.0;
-                let g = galley_trunc(p, &s.message, theme::ui(12.5), theme::TEXT, w);
+                let g = galley_trunc(p, &s.message, theme::ui(12.5), theme::pal().text, w);
                 place(
                     p,
                     Rect::from_min_size(Pos2::new(r.min.x + 14.0, r.min.y + 5.0), Vec2::new(w, 17.0)),
                     Align2::LEFT_CENTER,
                     g,
-                    theme::TEXT,
+                    theme::pal().text,
                 );
                 // Segunda linha: índice/data à esquerda; ações à direita.
                 let y2 = r.min.y + 24.0;
@@ -345,13 +358,13 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
                     }
                 }
                 let meta = s.date.clone();
-                let mg = galley_trunc(ui.painter(), &meta, theme::ui(11.0), theme::MUTED, (right - r.min.x - 20.0).max(20.0));
+                let mg = galley_trunc(ui.painter(), &meta, theme::ui(11.0), theme::pal().text_2, (right - r.min.x - 20.0).max(20.0));
                 place(
                     ui.painter(),
                     Rect::from_min_max(Pos2::new(r.min.x + 14.0, y2), Pos2::new(right, y2 + h)),
                     Align2::LEFT_CENTER,
                     mg,
-                    theme::MUTED,
+                    theme::pal().text_2,
                 );
                 if tip(
                     resp,
@@ -375,16 +388,16 @@ Clique para ver as alterações guardadas",
 #[allow(clippy::too_many_arguments)]
 fn pill_small(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, tooltip: &str, look: Look, enabled: bool, id: Id) -> bool {
     let painter = ui.painter();
-    let w = galley(painter, label, theme::ui(11.0), theme::TEXT).size().x + 12.0;
+    let w = galley(painter, label, theme::ui(11.0), theme::pal().text).size().x + 12.0;
     let r = Rect::from_min_size(Pos2::new(*right - w, y), Vec2::new(w, h));
     *right = r.min.x - 4.0;
     let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
     let hot = enabled && resp.hovered();
     let fg = match look {
-        Look::Danger => theme::RED_TEXT,
-        _ => theme::TEXT,
+        Look::Danger => theme::pal().danger_text,
+        _ => theme::pal().text,
     };
-    painter.rect_filled(r, 5.0, if hot { theme::BORDER } else { theme::PANEL });
+    painter.rect_filled(r, 5.0, if hot { theme::pal().separator } else { theme::pal().chip });
     text_in(painter, r, Align2::CENTER_CENTER, label, theme::ui(11.0), if enabled { fg } else { theme::with_opacity(fg, 0.4) });
     tip(resp, tooltip.to_owned()).clicked() && enabled
 }
@@ -398,7 +411,7 @@ fn stash_diff(ui: &mut Ui, body: Rect, open: &OpenStashDiff, busy: bool, acts: &
     }
     // Segunda linha: as ações (não cabem junto do título).
     let bar = Rect::from_min_size(Pos2::new(body.min.x, head.max.y), Vec2::new(body.width(), 30.0));
-    ui.painter().rect_filled(bar, 0.0, theme::PANEL);
+    ui.painter().rect_filled(bar, 0.0, theme::pal().chip);
     let mut right = bar.max.x - 8.0;
     let (y, h) = (bar.min.y + 3.0, 24.0);
     if pill(ui, &mut right, y, h, "Apagar", "Apaga este stash (não dá para desfazer)", Look::Danger, !busy, Id::new("git-sd-drop")) {
@@ -413,8 +426,8 @@ fn stash_diff(ui: &mut Ui, body: Rect, open: &OpenStashDiff, busy: bool, acts: &
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, bar.max.y), body.max);
     match &open.diff {
-        None => note(ui, area, "Carregando o stash…", theme::MUTED),
-        Some(Err(e)) => note(ui, area, e, theme::RED_TEXT),
+        None => note(ui, area, "Carregando o stash…", theme::pal().text_2),
+        Some(Err(e)) => note(ui, area, e, theme::pal().danger_text),
         Some(Ok(diff)) => diff_lines(ui, area, diff, None, acts),
     }
 }
@@ -447,19 +460,19 @@ pub(super) fn conflicts(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus
         } else {
             "Todos os conflitos foram resolvidos. Clique em Continuar na faixa acima para concluir."
         };
-        return note(ui, body, text, theme::MUTED);
+        return note(ui, body, text, theme::pal().text_2);
     }
     let mut child = scroll_child(ui, body);
     egui::ScrollArea::vertical().id_salt("git-conflicts").auto_shrink([false, false]).show(&mut child, |ui| {
         ui.add_space(6.0);
         let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
         let hint = "Abra cada arquivo e escolha, bloco a bloco, ficar com o nosso lado, o deles ou os dois.";
-        let g = ui.painter().layout(hint.to_owned(), theme::ui(11.5), theme::MUTED, r.width() - 28.0);
-        ui.painter().galley(r.min + Vec2::new(14.0, 0.0), g, theme::MUTED);
+        let g = ui.painter().layout(hint.to_owned(), theme::ui(11.5), theme::pal().text_2, r.width() - 28.0);
+        ui.painter().galley(r.min + Vec2::new(14.0, 0.0), g, theme::pal().text_2);
         for (i, e) in files.iter().enumerate() {
             let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
             if resp.hovered() {
-                ui.painter().rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::PANEL_2);
+                ui.painter().rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::pal().hover);
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             let p = ui.painter();
@@ -470,24 +483,24 @@ pub(super) fn conflicts(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus
                 Align2::CENTER_CENTER,
                 &letters,
                 theme::mono_bold(12.0),
-                theme::RED_TEXT,
+                theme::pal().danger_text,
             );
             let w = r.width() - 56.0;
-            let g = galley_trunc(p, &e.path, theme::ui(12.5), theme::TEXT, w);
+            let g = galley_trunc(p, &e.path, theme::ui(12.5), theme::pal().text, w);
             place(
                 p,
                 Rect::from_min_size(Pos2::new(r.min.x + 42.0, r.min.y + 4.0), Vec2::new(w, 17.0)),
                 Align2::LEFT_CENTER,
                 g,
-                theme::TEXT,
+                theme::pal().text,
             );
-            let g = galley_trunc(p, conflict_kind(e.index, e.worktree), theme::ui(11.0), theme::MUTED, w);
+            let g = galley_trunc(p, conflict_kind(e.index, e.worktree), theme::ui(11.0), theme::pal().text_2, w);
             place(
                 p,
                 Rect::from_min_size(Pos2::new(r.min.x + 42.0, r.min.y + 21.0), Vec2::new(w, 14.0)),
                 Align2::LEFT_CENTER,
                 g,
-                theme::MUTED,
+                theme::pal().text_2,
             );
             if tip(resp, format!("{}\nClique para resolver", e.path)).clicked() {
                 acts.push(Act::OpenConflict(e.path.clone()));
@@ -519,8 +532,8 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
     let file = match &open.file {
-        None => return note(ui, area, "Lendo o arquivo…", theme::MUTED),
-        Some(Err(e)) => return note(ui, area, e, theme::RED_TEXT),
+        None => return note(ui, area, "Lendo o arquivo…", theme::pal().text_2),
+        Some(Err(e)) => return note(ui, area, e, theme::pal().danger_text),
         Some(Ok(f)) => f,
     };
     let still = st.entries.iter().find(|e| e.path == open.path && e.kind == EntryKind::Unmerged);
@@ -545,7 +558,7 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
         Align2::LEFT_CENTER,
         &status_line,
         theme::ui_semibold(12.0),
-        theme::TEXT,
+        theme::pal().text,
     );
     y += 22.0;
     text_in(
@@ -554,7 +567,7 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
         Align2::LEFT_CENTER,
         "ARQUIVO INTEIRO",
         theme::ui_bold(10.5),
-        theme::MUTED,
+        theme::pal().text_2,
     );
     let mut right = x1;
     for (label, choice, tooltip) in [
@@ -576,7 +589,7 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
         acts.push(Act::Stage(vec![open.path.clone()]));
     }
     y += BTN_H + 8.0;
-    p.rect_filled(Rect::from_min_size(Pos2::new(area.min.x, y), Vec2::new(area.width(), 1.0)), 0.0, theme::BORDER);
+    p.rect_filled(Rect::from_min_size(Pos2::new(area.min.x, y), Vec2::new(area.width(), 1.0)), 0.0, theme::pal().separator);
     let list = Rect::from_min_max(Pos2::new(area.min.x, y + 1.0), area.max);
     if file.blocks.is_empty() || list.height() < 40.0 {
         return;
@@ -599,24 +612,30 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
     let (r, _) = ui.allocate_exact_size(Vec2::new(w + 20.0, h), Sense::hover());
     let r = Rect::from_min_size(r.min + Vec2::new(10.0, 0.0), Vec2::new(w, h));
     let p = ui.painter().clone();
-    frame(&p, r, 8.0, theme::PANEL, theme::BORDER);
+    frame(&p, r, 8.0, theme::pal().recess, theme::pal().glass_border);
     text_in(
         &p,
         Rect::from_min_size(r.min + Vec2::new(10.0, 0.0), Vec2::new(w - 20.0, 24.0)),
         Align2::LEFT_CENTER,
         &format!("Bloco {} · linha {}", index + 1, b.start_line),
         theme::ui_semibold(11.5),
-        theme::TEXT,
+        theme::pal().text,
     );
     let mut y = r.min.y + 24.0;
     let font = theme::mono(11.5);
     for (title, label, lines, tint) in [
-        ("NOSSO", &b.ours_label, &b.ours, theme::rgba(74, 222, 128, 0.12)),
-        ("DELES", &b.theirs_label, &b.theirs, theme::rgba(79, 140, 247, 0.14)),
+        ("NOSSO", &b.ours_label, &b.ours, theme::with_alpha(theme::pal().success, 0.12)),
+        ("DELES", &b.theirs_label, &b.theirs, theme::with_alpha(theme::pal().info, 0.14)),
     ] {
         let t = if label.is_empty() { title.to_owned() } else { format!("{title} · {label}") };
-        let g = galley_trunc(&p, &t, theme::ui_bold(10.5), theme::MUTED, w - 20.0);
-        place(&p, Rect::from_min_size(Pos2::new(r.min.x + 10.0, y), Vec2::new(w - 20.0, 18.0)), Align2::LEFT_CENTER, g, theme::MUTED);
+        let g = galley_trunc(&p, &t, theme::ui_bold(10.5), theme::pal().text_2, w - 20.0);
+        place(
+            &p,
+            Rect::from_min_size(Pos2::new(r.min.x + 10.0, y), Vec2::new(w - 20.0, 18.0)),
+            Align2::LEFT_CENTER,
+            g,
+            theme::pal().text_2,
+        );
         y += 18.0;
         let sh = side_h(lines);
         let box_r = Rect::from_min_size(Pos2::new(r.min.x + 8.0, y), Vec2::new(w - 16.0, sh));
@@ -628,7 +647,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
                 Align2::LEFT_CENTER,
                 "(vazio)",
                 font.clone(),
-                theme::MUTED,
+                theme::pal().text_2,
             );
         }
         for (k, line) in lines.iter().take(BLOCK_LINES).enumerate() {
@@ -638,7 +657,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
                 Align2::LEFT_CENTER,
                 shown,
                 font.clone(),
-                theme::TEXT,
+                theme::pal().text,
             );
         }
         if lines.len() > BLOCK_LINES {
@@ -648,7 +667,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
                 Align2::LEFT_CENTER,
                 format!("… +{} linha(s)", lines.len() - BLOCK_LINES),
                 font.clone(),
-                theme::MUTED,
+                theme::pal().text_2,
             );
         }
         y += sh;
@@ -671,8 +690,8 @@ pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &G
     let h = 30.0;
     let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), h));
     let p = ui.painter_at(strip);
-    p.rect_filled(strip, 0.0, theme::PANEL);
-    p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::BORDER);
+    p.rect_filled(strip, 0.0, theme::pal().chip);
+    p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
     let conflicts = crate::git_ui::conflict_count(st);
     let changes = st.entries.len();
     let mut tabs: Vec<(GitSubView, String)> = vec![
@@ -692,11 +711,11 @@ pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &G
         let active = deck.git.subview == view;
         let danger = view == GitSubView::Conflicts;
         let color = if danger {
-            theme::RED_TEXT
+            theme::pal().danger_text
         } else if active {
-            theme::TEXT
+            theme::pal().text
         } else {
-            theme::MUTED
+            theme::pal().text_2
         };
         let font = if active { theme::ui_semibold(12.0) } else { theme::ui(12.0) };
         let w = galley(&p, &label, font.clone(), color).size().x + 16.0;
@@ -704,14 +723,14 @@ pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &G
         x = r.max.x + 2.0;
         let resp = clickable(ui, r, Id::new(("git-subtab", label.split(' ').next().unwrap_or(""))));
         if resp.hovered() && !active {
-            p.rect_filled(r.shrink2(Vec2::new(0.0, 3.0)), 5.0, theme::PANEL_2);
+            p.rect_filled(r.shrink2(Vec2::new(0.0, 3.0)), 5.0, theme::pal().hover);
         }
-        text_in(&p, r, Align2::CENTER_CENTER, &label, font, if resp.hovered() { theme::TEXT } else { color });
+        text_in(&p, r, Align2::CENTER_CENTER, &label, font, if resp.hovered() { theme::pal().text } else { color });
         if active {
             p.rect_filled(
                 Rect::from_min_size(Pos2::new(r.min.x + 6.0, strip.max.y - 2.0), Vec2::new(w - 12.0, 2.0)),
                 1.0,
-                if danger { theme::RED } else { deck.active_color() },
+                if danger { theme::pal().danger } else { deck.accent() },
             );
         }
         if resp.clicked() && !active {

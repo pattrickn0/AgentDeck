@@ -143,12 +143,12 @@ impl App {
             }
             // Enquanto o backend inicia: só o fundo.
             None => {
-                ui.painter().rect_filled(ui.max_rect(), 0.0, theme::BG);
+                ui.painter().rect_filled(ui.max_rect(), 0.0, theme::pal().bg);
             }
         });
         // SAFETY: contexto GL corrente nesta thread.
         unsafe {
-            let c = theme::BG;
+            let c = theme::pal().bg;
             gl.clear_color(c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, 1.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
@@ -220,6 +220,7 @@ impl ApplicationHandler<UserEvent> for App {
             .with_inner_size(winit::dpi::LogicalSize::new(w, h))
             // A barra direita (≥ 260px) e o terminal (≥ 360px) precisam caber ao lado da esquerda.
             .with_min_inner_size(winit::dpi::LogicalSize::new(820.0, 480.0))
+            .with_window_icon(window_icon())
             .with_visible(false);
         // Sem decoração, o Windows tira também a sombra da janela; ela volta assim.
         #[cfg(windows)]
@@ -773,4 +774,11 @@ fn debug_download(kind: &str) -> agentdeck_core::DownloadProgress {
         _ => {}
     }
     p
+}
+
+/// O ícone da janela (barra de tarefas e Alt+Tab): a marca do app, a partir do mesmo desenho do `.ico`.
+fn window_icon() -> Option<winit::window::Icon> {
+    const SIZE: usize = 64;
+    let rgba = crate::icons::logo_rgba(SIZE, theme::pal().bg);
+    winit::window::Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).ok()
 }

@@ -40,3 +40,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[build-dependencies]
+# Ícone e dados de versão do executável no Windows (recurso embutido por `build.rs`).
+winresource.workspace = true

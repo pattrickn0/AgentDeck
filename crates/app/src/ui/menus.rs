@@ -81,8 +81,8 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     Area::new(Id::new("new-tab-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
-        shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
-        frame(p, rect, 8.0, theme::PANEL_2, theme::BORDER);
+        shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0x88 as f32 / 255.0));
+        frame(p, rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         let mut y = rect.min.y + 5.0;
         for (m, &arrow) in items.iter().zip(&with_arrow) {
             let r = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, y), Vec2::new(w - 10.0, item_h));
@@ -95,7 +95,7 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             });
             let arrow_hot = arrow_resp.as_ref().is_some_and(|a| a.hovered());
             if resp.hovered() || arrow_hot {
-                p.rect_filled(r, 6.0, theme::BORDER);
+                p.rect_filled(r, 6.0, theme::pal().separator);
             }
             dot(p, Pos2::new(r.min.x + 10.0 + 4.0, r.center().y), m.color);
             text_in(
@@ -104,11 +104,18 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
                 Align2::LEFT_CENTER,
                 &m.label,
                 font.clone(),
-                theme::TEXT,
+                theme::pal().text,
             );
             if let Some(a) = arrow_resp {
                 let ar = Rect::from_min_max(Pos2::new(r.max.x - CHEVRON_W, r.min.y), r.max);
-                text_in(p, ar, Align2::CENTER_CENTER, "›", theme::ui(16.0), if arrow_hot { theme::TEXT } else { theme::MUTED });
+                text_in(
+                    p,
+                    ar,
+                    Align2::CENTER_CENTER,
+                    "›",
+                    theme::ui(16.0),
+                    if arrow_hot { theme::pal().text } else { theme::pal().text_2 },
+                );
                 if super::tip(a, format!("Escolher o modelo de {}", m.label)).clicked() {
                     pick_model_of = Some(m.kind.clone());
                 }
@@ -152,7 +159,7 @@ impl StepRow {
     /// O texto discreto à direita e a cor.
     fn detail(&self) -> Option<(String, Color32)> {
         if self.count > 0 {
-            Some((format!("{} modelo{}", self.count, if self.count == 1 { "" } else { "s" }), theme::MUTED))
+            Some((format!("{} modelo{}", self.count, if self.count == 1 { "" } else { "s" }), theme::pal().text_2))
         } else if self.free {
             Some(("grátis".to_owned(), theme::BADGE_JSON))
         } else {
@@ -192,13 +199,13 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
     let mut chosen = None;
     Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-        shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0x88 as f32 / 255.0));
-        frame(ui.painter(), rect, 8.0, theme::PANEL_2, theme::BORDER);
+        shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0x88 as f32 / 255.0));
+        frame(ui.painter(), rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         // Cabeçalho: "‹ título" volta um passo.
         let head = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, rect.min.y + 5.0), Vec2::new(w - 10.0, head_h));
         let resp = super::clickable(ui, head, Id::new((id, "back")));
         if resp.hovered() {
-            ui.painter().rect_filled(head, 6.0, theme::BORDER);
+            ui.painter().rect_filled(head, 6.0, theme::pal().separator);
         }
         text_in(
             ui.painter(),
@@ -206,7 +213,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
             Align2::CENTER_CENTER,
             "‹",
             theme::ui(16.0),
-            theme::MUTED,
+            theme::pal().text_2,
         );
         dot(ui.painter(), Pos2::new(head.min.x + 28.0, head.center().y), color);
         text_in(
@@ -215,7 +222,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
             Align2::LEFT_CENTER,
             title,
             theme::ui_semibold(12.5),
-            theme::TEXT,
+            theme::pal().text,
         );
         if super::tip(resp, "Voltar").clicked() {
             back = true;
@@ -223,7 +230,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
         ui.painter().rect_filled(
             Rect::from_min_size(Pos2::new(rect.min.x + 10.0, head.max.y), Vec2::new(w - 20.0, 1.0)),
             0.0,
-            theme::BORDER,
+            theme::pal().separator,
         );
         let list = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, head.max.y + 1.0), Vec2::new(w - 10.0, list_h));
         let mut lc = ui.new_child(egui::UiBuilder::new().max_rect(list));
@@ -234,9 +241,9 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
                 let resp =
                     if row.enabled { super::clickable(ui, r, Id::new((id, i))) } else { ui.interact(r, Id::new((id, i)), Sense::hover()) };
                 if row.enabled && resp.hovered() {
-                    ui.painter().rect_filled(r, 6.0, theme::BORDER);
+                    ui.painter().rect_filled(r, 6.0, theme::pal().separator);
                 }
-                let text_color = if row.enabled { theme::TEXT } else { theme::MUTED };
+                let text_color = if row.enabled { theme::pal().text } else { theme::pal().text_2 };
                 let mut right = r.max.x - 10.0;
                 if row.submenu {
                     text_in(
@@ -245,7 +252,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
                         Align2::CENTER_CENTER,
                         "›",
                         theme::ui(14.0),
-                        theme::MUTED,
+                        theme::pal().text_2,
                     );
                     right -= 16.0;
                 }
@@ -383,8 +390,8 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     Area::new(Id::new("settings-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         let p = ui.painter();
-        shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0xaa as f32 / 255.0));
-        frame(p, rect, 8.0, theme::PANEL_2, theme::BORDER);
+        shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0xaa as f32 / 255.0));
+        frame(p, rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         let inner = rect.shrink(9.0);
         // Título: 11px, 700, maiúsculas, letter-spacing .5px
         let title = Rect::from_min_size(Pos2::new(inner.min.x + 4.0, inner.min.y), Vec2::new(inner.width() - 8.0, title_h));
@@ -393,19 +400,19 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             job.append(
                 &ch.to_string(),
                 0.0,
-                egui::TextFormat { font_id: theme::ui_bold(11.0), color: theme::MUTED, extra_letter_spacing: 0.5, ..Default::default() },
+                egui::TextFormat { font_id: theme::ui_bold(11.0), color: theme::pal().text_2, extra_letter_spacing: 0.5, ..Default::default() },
             );
         }
         let g = p.layout_job(job);
-        place(p, title, Align2::LEFT_CENTER, g, theme::MUTED);
+        place(p, title, Align2::LEFT_CENTER, g, theme::pal().text_2);
 
         // Item com checkbox
         let item = Rect::from_min_size(Pos2::new(inner.min.x, title.max.y + 8.0), Vec2::new(inner.width(), item_h));
         let r = super::clickable(ui, item, Id::new("setting-sound"));
         if r.hovered() {
-            p.rect_filled(item, 6.0, theme::BORDER);
+            p.rect_filled(item, 6.0, theme::pal().separator);
         }
-        text_in(p, item.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Sons de notificação", theme::ui(13.0), theme::TEXT);
+        text_in(p, item.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Sons de notificação", theme::ui(13.0), theme::pal().text);
         let cb = Rect::from_center_size(Pos2::new(item.max.x - 8.0 - 8.0, item.center().y), Vec2::splat(16.0));
         checkbox(p, cb, sound);
         if r.clicked() {
@@ -416,9 +423,9 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         let item2 = Rect::from_min_size(Pos2::new(inner.min.x, item.max.y + 2.0), Vec2::new(inner.width(), item_h));
         let r = super::clickable(ui, item2, Id::new("setting-auto-tabs"));
         if r.hovered() {
-            p.rect_filled(item2, 6.0, theme::BORDER);
+            p.rect_filled(item2, 6.0, theme::pal().separator);
         }
-        text_in(p, item2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Abrir abas dos agentes", theme::ui(13.0), theme::TEXT);
+        text_in(p, item2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Abrir abas dos agentes", theme::ui(13.0), theme::pal().text);
         let cb2 = Rect::from_center_size(Pos2::new(item2.max.x - 8.0 - 8.0, item2.center().y), Vec2::splat(16.0));
         checkbox(p, cb2, auto_tabs);
         if r.clicked() {
@@ -429,9 +436,9 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         let item3 = Rect::from_min_size(Pos2::new(inner.min.x, item2.max.y + 2.0), Vec2::new(inner.width(), item_h));
         let r = super::clickable(ui, item3, Id::new("setting-app-keys"));
         if r.hovered() {
-            p.rect_filled(item3, 6.0, theme::BORDER);
+            p.rect_filled(item3, 6.0, theme::pal().separator);
         }
-        text_in(p, item3.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Atalhos do app acima do terminal", theme::ui(13.0), theme::TEXT);
+        text_in(p, item3.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Atalhos do app acima do terminal", theme::ui(13.0), theme::pal().text);
         let cb3 = Rect::from_center_size(Pos2::new(item3.max.x - 8.0 - 8.0, item3.center().y), Vec2::splat(16.0));
         checkbox(p, cb3, app_keys);
         if r.clicked() {
@@ -446,8 +453,8 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         let btn = Rect::from_min_size(Pos2::new(inner.min.x, item3.max.y + 6.0), Vec2::new(inner.width(), btn_h));
         let r = super::clickable(ui, btn, Id::new("setting-test-sound"));
         let hot = r.hovered();
-        frame(p, btn, 6.0, if hot { theme::BORDER } else { theme::PANEL }, theme::BORDER);
-        text_in(p, btn, Align2::CENTER_CENTER, "▶ Testar som", theme::ui(12.0), if hot { theme::WHITE } else { theme::TEXT });
+        frame(p, btn, 6.0, if hot { theme::pal().separator } else { theme::pal().chip }, theme::pal().separator);
+        text_in(p, btn, Align2::CENTER_CENTER, "▶ Testar som", theme::ui(12.0), if hot { theme::pal().text_strong } else { theme::pal().text });
         if r.clicked() {
             test = true;
         }
@@ -478,15 +485,15 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
 /// Checkbox nativo com `accent-color: var(--claude)`.
 fn checkbox(p: &egui::Painter, r: Rect, checked: bool) {
     if checked {
-        p.rect_filled(r, 3.0, theme::CLAUDE);
-        let s = Stroke::new(2.0, theme::WHITE);
+        p.rect_filled(r, 3.0, theme::accent());
+        let s = Stroke::new(2.0, theme::pal().on_accent);
         let a = Pos2::new(r.min.x + 3.5, r.center().y + 0.5);
         let b = Pos2::new(r.min.x + 6.8, r.max.y - 4.0);
         let c = Pos2::new(r.max.x - 3.5, r.min.y + 4.0);
         p.line_segment([a, b], s);
         p.line_segment([b, c], s);
     } else {
-        p.rect(r, 3.0, theme::PANEL_2, Stroke::new(1.0, theme::MUTED), egui::StrokeKind::Inside);
+        p.rect(r, 3.0, theme::pal().hover, Stroke::new(1.0, theme::pal().text_2), egui::StrokeKind::Inside);
     }
 }
 
@@ -509,29 +516,29 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     Area::new(Id::new("tab-context-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
-        shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.55));
-        frame(p, rect, 6.0, theme::PANEL_2, theme::BORDER);
+        shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.55));
+        frame(p, rect, 6.0, theme::pal().popup, theme::pal().glass_border);
         let font = theme::ui(12.5);
 
         let mut top = rect.min.y + 4.0;
         if let Some(m) = &model {
             let r0 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, top), Vec2::new(w - 8.0, item_h));
             top += item_h;
-            let g = super::galley_trunc(p, &format!("Modelo: {m}"), theme::ui(12.0), theme::MUTED, r0.width() - 16.0);
-            super::place(p, r0.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, g, theme::MUTED);
+            let g = super::galley_trunc(p, &format!("Modelo: {m}"), theme::ui(12.0), theme::pal().text_2, r0.width() - 16.0);
+            super::place(p, r0.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
             p.rect_filled(
                 Rect::from_min_size(Pos2::new(r0.min.x + 4.0, r0.max.y - 1.0), Vec2::new(r0.width() - 8.0, 1.0)),
                 0.0,
-                theme::BORDER,
+                theme::pal().separator,
             );
         }
         // "Renomear"
         let r1 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, top), Vec2::new(w - 8.0, item_h));
         let resp1 = super::clickable(ui, r1, Id::new("tab-ctx-rename"));
         if resp1.hovered() {
-            p.rect_filled(r1, 4.0, theme::BORDER);
+            p.rect_filled(r1, 4.0, theme::pal().separator);
         }
-        text_in(p, r1.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Renomear", font.clone(), theme::TEXT);
+        text_in(p, r1.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Renomear", font.clone(), theme::pal().text);
         if resp1.clicked() {
             action = Some(1);
         }
@@ -540,9 +547,9 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         let r2 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, r1.max.y), Vec2::new(w - 8.0, item_h));
         let resp2 = super::clickable(ui, r2, Id::new("tab-ctx-close"));
         if resp2.hovered() {
-            p.rect_filled(r2, 4.0, theme::BORDER);
+            p.rect_filled(r2, 4.0, theme::pal().separator);
         }
-        text_in(p, r2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Fechar", font, theme::TEXT);
+        text_in(p, r2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Fechar", font, theme::pal().text);
         if resp2.clicked() {
             action = Some(2);
         }
@@ -585,43 +592,44 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
     Area::new(Id::new("rename-tab-modal")).order(Order::Tooltip).fixed_pos(rect.min).show(ctx, |ui| {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
-        shadow(&p, r, 0, 8, 30, theme::rgba(0, 0, 0, 0.7));
-        frame(&p, r, 10.0, theme::PANEL_2, theme::BORDER);
+        shadow(&p, r, 0, 8, 30, theme::with_alpha(theme::pal().shadow, 0.7));
+        frame(&p, r, 10.0, theme::pal().popup, theme::pal().glass_border);
 
         let mut y = r.min.y + 16.0;
         // Título
-        let title_g = super::galley(&p, "Renomear Agente", theme::ui_semibold(15.0), theme::TEXT);
+        let title_g = super::galley(&p, "Renomear Agente", theme::ui_semibold(15.0), theme::pal().text);
         super::place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 20.0)),
             Align2::LEFT_CENTER,
             title_g,
-            theme::TEXT,
+            theme::pal().text,
         );
         y += 24.0;
 
         // Explicação
-        let hint_g = super::galley(&p, "Formato: modelo@cargo@nome (ex: claude@dev ou antigravity@lead)", theme::ui(11.5), theme::MUTED);
+        let hint_g =
+            super::galley(&p, "Formato: modelo@cargo@nome (ex: claude@dev ou antigravity@lead)", theme::ui(11.5), theme::pal().text_2);
         super::place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)),
             Align2::LEFT_CENTER,
             hint_g,
-            theme::MUTED,
+            theme::pal().text_2,
         );
         y += 22.0;
 
         // Caixa de texto
         let input_r = Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 28.0));
-        p.rect_filled(input_r, 6.0, theme::BG);
-        p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        p.rect_filled(input_r, 6.0, theme::pal().recess);
+        p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::pal().separator), egui::StrokeKind::Inside);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink2(Vec2::new(8.0, 4.0))));
         let input_id = Id::new("rename-tab-input");
         let te = egui::TextEdit::singleline(&mut buffer)
             .id(input_id)
             .frame(egui::Frame::NONE)
             .font(theme::mono(13.0))
-            .text_color(theme::TEXT)
+            .text_color(theme::pal().text)
             .desired_width(input_r.width() - 16.0);
         let out = te.show(&mut child);
         out.response.request_focus();
@@ -638,13 +646,13 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
 
         // Erro se houver
         if let Some(err) = &error {
-            let err_g = super::galley_trunc(&p, err, theme::ui(11.5), theme::RED_TEXT, w - 40.0);
+            let err_g = super::galley_trunc(&p, err, theme::ui(11.5), theme::pal().danger_text, w - 40.0);
             super::place(
                 &p,
                 Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)),
                 Align2::LEFT_CENTER,
                 err_g,
-                theme::RED_TEXT,
+                theme::pal().danger_text,
             );
             y += 20.0;
         }
@@ -657,22 +665,22 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
 
         let cr = super::clickable(ui, cancel_r, Id::new("rename-cancel-btn"));
         if cr.hovered() {
-            p.rect_filled(cancel_r, 6.0, theme::BORDER);
+            p.rect_filled(cancel_r, 6.0, theme::pal().separator);
         } else {
-            p.rect_filled(cancel_r, 6.0, theme::PANEL);
+            p.rect_filled(cancel_r, 6.0, theme::pal().chip);
         }
-        text_in(&p, cancel_r, Align2::CENTER_CENTER, "Cancelar", theme::ui(12.5), theme::MUTED);
+        text_in(&p, cancel_r, Align2::CENTER_CENTER, "Cancelar", theme::ui(12.5), theme::pal().text_2);
         if cr.clicked() {
             close = true;
         }
 
         let sr = super::clickable(ui, save_r, Id::new("rename-save-btn"));
         if sr.hovered() {
-            p.rect_filled(save_r, 6.0, theme::brighten(theme::ACCENT, 1.15));
+            p.rect_filled(save_r, 6.0, theme::brighten(theme::accent(), 1.15));
         } else {
-            p.rect_filled(save_r, 6.0, theme::ACCENT);
+            p.rect_filled(save_r, 6.0, theme::accent());
         }
-        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::WHITE);
+        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::pal().on_accent);
         if sr.clicked() {
             apply = true;
         }

@@ -1,10 +1,12 @@
-//! Barra de título própria (a janela não tem decoração do sistema): menu ☰, botão da barra
-//! lateral, nome, área de arrastar, uso dos agentes e minimizar/maximizar/fechar.
+//! Barra de título própria (a janela não tem decoração do sistema e a barra não tem fundo): menu ☰,
+//! botão da barra lateral, marca, projeto e branch, a chave Agentes | Documentos, o uso das
+//! assinaturas e minimizar/maximizar/fechar.
 
 use egui::{Align2, CursorIcon, Id, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand};
 
-use super::{clickable, text_in, tip};
+use super::{chip, clickable, galley, galley_spaced, place, tip};
 use crate::deck::Deck;
+use crate::icons::Icon;
 use crate::theme;
 
 pub struct Anchors {
@@ -14,22 +16,41 @@ pub struct Anchors {
 }
 
 /// Largura de cada botão da janela (minimizar, maximizar, fechar).
-const WIN_BTN_W: f32 = 34.0;
+const WIN_BTN_W: f32 = 40.0;
 /// Tamanho dos glifos dos botões da janela.
 const WIN_GLYPH: f32 = 9.0;
 /// Espessura das faixas de redimensionar nas bordas da janela.
 const RESIZE_EDGE: f32 = 5.0;
+/// Botões de ícone da esquerda (menu, barra lateral).
+const ICON_BTN: Vec2 = Vec2::new(26.0, 24.0);
+/// Espaço entre os itens da esquerda.
+const GAP: f32 = 8.0;
+
+/// A branch a mostrar na etiqueta: o nome, ou o início do commit com o HEAD solto.
+fn branch_label(deck: &Deck) -> Option<String> {
+    let st = deck.git.status()?;
+    st.branch.clone().or_else(|| st.head.as_deref().map(|h| h.chars().take(7).collect()))
+}
+
+/// Botão de ícone da barra (26×24, cantos 5, fundo `hover`). Devolve a resposta e se está aceso.
+fn icon_button(ui: &Ui, painter: &egui::Painter, rect: Rect, id: &str, lit: bool) -> (egui::Response, bool) {
+    let r = clickable(ui, rect, Id::new(id));
+    let hot = r.hovered() || lit;
+    if hot {
+        painter.rect_filled(rect, 5.0, theme::pal().hover);
+    }
+    (r, hot)
+}
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, theme::PANEL);
-    let inner = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.max.y - 1.0));
-    painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
+    let p = theme::pal();
     let ctx = ui.ctx().clone();
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+    let cy = rect.center().y;
 
     // ---------- Área de arrastar (por baixo de tudo: os botões, criados depois, ganham o clique) ----------
-    let drag = ui.interact(inner, Id::new("titlebar-drag"), Sense::click_and_drag());
+    let drag = ui.interact(rect, Id::new("titlebar-drag"), Sense::click_and_drag());
     if drag.double_clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
     } else if drag.drag_started_by(PointerButton::Primary) {
@@ -37,51 +58,57 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     }
 
     // ---------- ☰ Menu (configurações) ----------
-    let menu = Rect::from_min_size(inner.min, Vec2::new(40.0, inner.height()));
-    let r = clickable(ui, menu, Id::new("settings-btn"));
-    let hot = r.hovered() || deck.settings_open;
-    if hot {
-        painter.rect_filled(menu.shrink2(Vec2::new(4.0, 6.0)), 6.0, theme::PANEL_2);
-    }
-    let c = if hot { theme::TEXT } else { theme::MUTED };
+    let mut x = rect.min.x + theme::ISLAND_GAP + 2.0;
+    let menu = Rect::from_min_size(Pos2::new(x, cy - ICON_BTN.y / 2.0), ICON_BTN);
+    let (r, hot) = icon_button(ui, &painter, menu, "settings-btn", deck.settings_open);
+    let c = if hot { p.text } else { p.text_2 };
     for dy in [-4.0, 0.0, 4.0] {
         let y = menu.center().y + dy;
-        painter.line_segment([Pos2::new(menu.center().x - 7.0, y), Pos2::new(menu.center().x + 7.0, y)], Stroke::new(1.5, c));
+        painter.line_segment([Pos2::new(menu.center().x - 5.5, y), Pos2::new(menu.center().x + 5.5, y)], Stroke::new(1.5, c));
     }
     if tip(r, "Menu").clicked() {
         deck.settings_open = !deck.settings_open;
         deck.new_tab_menu_open = false;
     }
+    x = menu.max.x + GAP;
 
-    // ---------- Barra lateral (recolher/expandir), colada ao ☰ ----------
-    let toggle = Rect::from_min_size(Pos2::new(menu.max.x, inner.min.y), Vec2::new(32.0, inner.height()));
-    let r = clickable(ui, toggle, Id::new("sidebar-toggle"));
-    let hovered = r.hovered();
-    if hovered {
-        painter.rect_filled(toggle.shrink2(Vec2::new(2.0, 6.0)), 6.0, theme::PANEL_2);
-    }
+    // ---------- Barra lateral (recolher/expandir) ----------
+    let toggle = Rect::from_min_size(Pos2::new(x, cy - ICON_BTN.y / 2.0), ICON_BTN);
+    let (r, hovered) = icon_button(ui, &painter, toggle, "sidebar-toggle", false);
     let expanded = 1.0 - ctx.animate_bool_with_time(Id::new("sidebar-toggle-anim"), deck.sidebar_collapsed, 0.15);
-    paint_sidebar_icon(&painter, toggle.center(), if hovered { theme::TEXT } else { theme::MUTED }, expanded);
+    paint_sidebar_icon(&painter, toggle.center(), if hovered { p.text } else { p.text_2 }, expanded);
     let title = if deck.sidebar_collapsed { "Expandir barra lateral (Ctrl+B)" } else { "Recolher barra lateral (Ctrl+B)" };
     if tip(r, title).clicked() {
         deck.toggle_sidebar();
     }
+    x = toggle.max.x + GAP;
 
-    // ---------- Nome ----------
-    let title_r = text_in(
-        &painter,
-        Rect::from_min_max(Pos2::new(toggle.max.x + 6.0, inner.min.y), inner.max),
-        Align2::LEFT_CENTER,
-        "AgentDeck",
-        theme::ui_semibold(13.0),
-        theme::TEXT,
-    );
+    // ---------- Separador, marca, nome do app, projeto e branch ----------
+    super::separator(&painter, Pos2::new(x + 0.5, cy - 8.0), Pos2::new(x + 0.5, cy + 8.0));
+    x += 1.0 + GAP;
+    deck.icons.paint(&painter, Icon::AgentDeck, Pos2::new(x + 8.0, cy), 16.0, p.text_strong, 0.0);
+    x += 16.0 + GAP;
+    let name = galley_spaced(&painter, "AgentDeck", theme::ui_bold(13.0), p.text, -0.26);
+    x = place(&painter, Rect::from_min_max(Pos2::new(x, rect.min.y), Pos2::new(rect.max.x, rect.max.y)), Align2::LEFT_CENTER, name, p.text)
+        .max
+        .x
+        + GAP;
+    let project = deck.project_views().into_iter().find(|v| v.active).map(|v| v.name);
+    if let Some(project) = project {
+        let slash = galley(&painter, "/", theme::ui(12.0), p.text_faint);
+        x = place(&painter, Rect::from_min_max(Pos2::new(x, rect.min.y), rect.max), Align2::LEFT_CENTER, slash, p.text_faint).max.x + GAP;
+        let g = galley(&painter, &project, theme::ui(12.0), p.text_2);
+        x = place(&painter, Rect::from_min_max(Pos2::new(x, rect.min.y), rect.max), Align2::LEFT_CENTER, g, p.text_2).max.x + GAP;
+        if let Some(branch) = branch_label(deck) {
+            x = chip(&painter, Pos2::new(x, cy), &branch, 10.5, p.text_soft).max.x;
+        }
+    }
 
-    // ---------- Chave Agentes | Documentos ----------
-    let switch = super::docs::switch(deck, ui, &painter, Pos2::new(title_r.max.x + 16.0, inner.min.y), inner.height());
+    // ---------- Chave Agentes | Documentos (vai para a barra lateral na parte 2) ----------
+    let switch = super::docs::switch(deck, ui, &painter, Pos2::new(x + 16.0, rect.min.y), rect.height());
 
     // ---------- Botões da janela ----------
-    let close = Rect::from_min_max(Pos2::new(inner.max.x - WIN_BTN_W, inner.min.y), inner.max);
+    let close = Rect::from_min_max(Pos2::new(rect.max.x - WIN_BTN_W, rect.min.y), rect.max);
     let max_btn = close.translate(Vec2::new(-WIN_BTN_W, 0.0));
     let min_btn = max_btn.translate(Vec2::new(-WIN_BTN_W, 0.0));
     if window_button(ui, &painter, min_btn, "win-min", Glyph::Minimize, false) {
@@ -95,8 +122,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         deck.quit_requested = true;
     }
 
-    // ---------- Uso dos agentes (à esquerda dos botões da janela) ----------
-    let usage = Rect::from_min_max(Pos2::new(switch.max.x + 12.0, inner.min.y), Pos2::new(min_btn.min.x - 10.0, inner.max.y));
+    // ---------- Uso das assinaturas (à esquerda dos botões da janela) ----------
+    let usage = Rect::from_min_max(Pos2::new(switch.max.x + 12.0, rect.min.y), Pos2::new(min_btn.min.x - 6.0, rect.max.y));
     if usage.width() > 0.0 {
         super::usage::draw(deck, ui, usage);
     }
@@ -105,21 +132,21 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         resize_edges(&ctx);
     }
 
-    Anchors { settings_anchor: menu, fallback_anchor: Rect::from_min_size(Pos2::new(toggle.max.x, inner.max.y), Vec2::new(34.0, 0.0)) }
+    Anchors { settings_anchor: menu, fallback_anchor: Rect::from_min_size(Pos2::new(toggle.max.x, rect.max.y), Vec2::new(34.0, 0.0)) }
 }
 
-/// Ícone "painel lateral": janela arredondada com a coluna da esquerda, preenchida conforme a
+/// Ícone "painel lateral": janela arredondada (12×10) com a coluna da esquerda, preenchida conforme a
 /// barra está aberta (`expanded` de 0 a 1, animado).
 fn paint_sidebar_icon(painter: &egui::Painter, center: Pos2, color: egui::Color32, expanded: f32) {
-    let frame = Rect::from_center_size(center, Vec2::new(16.0, 13.0));
-    let col = Rect::from_min_max(frame.min, Pos2::new(frame.min.x + 5.5, frame.max.y));
+    let frame = Rect::from_center_size(center, Vec2::new(12.0, 10.0));
+    let col = Rect::from_min_max(frame.min, Pos2::new(frame.min.x + 4.0, frame.max.y));
     if expanded > 0.0 {
         let fill = col.shrink(1.5);
         let fill = Rect::from_min_max(fill.min, Pos2::new(fill.min.x + fill.width() * expanded, fill.max.y));
         painter.rect_filled(fill, 1.0, theme::with_opacity(color, 0.85));
     }
-    painter.rect_stroke(frame, 3.0, Stroke::new(1.2, color), egui::StrokeKind::Inside);
-    painter.line_segment([Pos2::new(col.max.x, frame.min.y + 1.0), Pos2::new(col.max.x, frame.max.y - 1.0)], Stroke::new(1.2, color));
+    painter.rect_stroke(frame, 2.0, Stroke::new(1.4, color), egui::StrokeKind::Inside);
+    painter.line_segment([Pos2::new(col.max.x, frame.min.y + 1.0), Pos2::new(col.max.x, frame.max.y - 1.0)], Stroke::new(1.4, color));
 }
 
 #[derive(Clone, Copy)]
@@ -135,14 +162,14 @@ fn window_button(ui: &Ui, painter: &egui::Painter, rect: Rect, id: &str, glyph: 
     let r = ui.interact(rect, Id::new(id), Sense::click());
     let hot = r.hovered();
     if hot {
-        painter.rect_filled(rect, 0.0, if danger { theme::RED } else { theme::PANEL_2 });
+        painter.rect_filled(rect, 0.0, if danger { theme::pal().danger } else { theme::pal().hover });
     }
     let c = if hot && danger {
-        theme::WHITE
+        theme::pal().text_strong
     } else if hot {
-        theme::TEXT
+        theme::pal().text
     } else {
-        theme::MUTED
+        theme::pal().text_3
     };
     let s = Stroke::new(1.0, c);
     let ctr = rect.center();

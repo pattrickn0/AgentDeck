@@ -33,33 +33,59 @@ Decisões já tomadas pelo usuário (não reabrir sem ele pedir):
 
 ## Tokens (`crates/app/src/theme.rs`)
 
-Use sempre as constantes; não escreva cor solta no código.
+Cores vêm da paleta semântica: `theme::pal().<token>` (`Palette`, `DARK`). Nunca escreva cor solta: o teste
+`colors_come_from_the_palette` falha com `Color32::from_rgb`/`from_rgba_*`/`from_gray`/`theme::rgba(` fora de
+`theme.rs`, `terminal/colors.rs` e `icons.rs` (lista `STILL_LOOSE`, hoje vazia: só encolhe).
 
-| Uso | Token |
-| :-- | :-- |
-| Fundo da janela / terminal | `BG` (#0b0b0d) |
-| Barras (título, cabeçalhos de janela) | `PANEL` (#131317) |
-| Hover, item ativo, menus | `PANEL_2` (#1b1b21) |
-| Bordas, separadores, linhas-guia, item selecionado | `BORDER` (#2a2a33) |
-| Texto principal / secundário | `TEXT` / `MUTED`; árvore: `TREE_TEXT`, `TREE_ICON` |
-| Ação primária (botão Salvar) | `ACCENT` |
-| Perigo / erro | `RED`, `RED_TEXT` |
-| Cor de cada agente | `CLAUDE`, `ANTIGRAVITY`, `OLLAMA`, `SHELL` (ou `deck.agents.tab_color(kind)`) |
-| Cor do projeto/aba em foco | `deck.active_color()` |
+| Token | Valor | Uso |
+| :-- | :-- | :-- |
+| `bg` | #16181c | fundo da janela, por trás das ilhas |
+| `glass` / `glass_border` / `glass_highlight` | branco-cinza 50% / branco 13% / branco 8% | fundo, borda de 1 px e filete do topo das ilhas |
+| `well` | rgba(22,24,28,.92) | ilha central (terminal) |
+| `strip` | rgba(44,47,54,.55) | faixa de abas |
+| `separator`, `guide` | branco 10% / 8% | linhas dentro das ilhas, guias da árvore |
+| `hover`, `selected`, `selected_soft` | branco 7% / 12% / 8% | hover, seleção neutra, arquivo selecionado |
+| `recess`, `chip` | preto 25% / branco 7% | trilho de controles e campos; etiquetas |
+| `popup` | #23262c | menus, modais, dicas (opaco) |
+| `text`, `text_strong`, `text_2`, `text_3`, `text_soft`, `text_faint` | #e6e8eb, #fff, #aab1bb, #939aa4, #c9cdd3, #6b717c | texto: principal, selecionado, secundário, rótulos/metadados, valores, separadores |
+| `on_accent` | #16181c | texto sobre a cor de destaque |
+| `danger`, `danger_text`, `success`, `warning`, `info` | | estados |
+| `scrim`, `shadow` | preto 50% / 28% | película do modal, sombra das ilhas |
 
-Ajustes: `with_opacity(c, a)`, `brighten(c, f)`, `rgba(...)`. Fontes: `theme::ui(px)`, `ui_semibold`,
-`ui_bold`; texto de interface 12–13 px, títulos de seção 11 px semibold em MAIÚSCULAS e `MUTED`.
+Cores dos agentes (não são da paleta): `CLAUDE`, `ANTIGRAVITY`, `OLLAMA`, `SHELL` ou `deck.agents.tab_color(kind)`.
+Terminal: `TERM_BG` #16181c, `TERM_FG`, `TERM_SELECTION` #2f3542.
+
+**A cor de destaque é a do agente ativo**, nunca uma cor fixa de marca: `deck.accent()` (ou `theme::accent()`, que
+`ui::draw` atualiza a cada quadro; sem aba, cinza neutro `#c9cdd3`). Ela marca seleção, ação primária, divisor ativo e o
+brilho do canto do fundo. Texto sobre ela: `on_accent`. Ajudantes: `accent_soft` (18%, linha selecionada),
+`accent_wash` (10%, cartão em foco), `accent_edge` (50%, borda do cartão), `with_alpha`, `with_opacity`, `brighten`, `over`.
+
+Fontes (embutidas, OFL, `assets/fonts/`): `theme::ui(px)` Inter, `ui_medium`, `ui_semibold`, `ui_bold`; `theme::label(px)`
+IBM Plex Mono Medium para rótulos de seção em MAIÚSCULAS (10 px, espaçamento 0,1 em, `ui::section_label`);
+`theme::meta(px)` Plex Mono Regular para metadados (10–10,5 px). Texto base 12 px. O terminal mantém a fonte do sistema.
+Símbolos (▾ ▸ ✕) caem no fallback do sistema.
+
+## Ilhas e fundo
+
+- Barras e centro são **ilhas** de cantos 10 px (`ISLAND_RADIUS`), com margem e fresta de 6 px (`ISLAND_GAP`), sobre o
+  fundo `bg` com dois brilhos radiais (`ui/background.rs`, `Mesh` em leque). Sem desfoque (o egui não tem).
+- Ordem: `island_shadows` (sombra só nas frestas, o vidro é translúcido) → `island(ui, rect, kind)` (`Glass`/`Well`) →
+  conteúdo → `island_edge(ui, rect)` (repinta os cantos com a cor do fundo, borda e filete). Cada janela da tela dividida é
+  uma ilha `Well`. Divisores ficam na fresta (`paint_splitter` só aparece com o mouse).
+- Componentes comuns em `ui/mod.rs`: `segmented`, `button` (`ButtonKind::{Primary, Secondary, Ghost}`), `section_label`,
+  `chip`, `separator`, `galley_spaced`.
+- Logo: `Icon::AgentDeck` (`icons.rs`, `LOGO_CARDS`); o `.ico` sai de `scripts/gerar-icone.ps1`.
 
 ## Medidas
 
-- Linha de lista: `ROW_H = 22`; título de seção: `SECTION_H = 24`; margem lateral do texto: 12 px.
+- Linha de lista: `ROW_H = 22`; título de seção: 22 px (`SECTION_LABEL_H`), margem de 10 px.
 - Árvore de agentes: logo no x 28 da linha, recuo de 14 px por nível (até 5 níveis), logo de 12 px, texto 6 px
   depois do logo.
-- Botões de ícone no cabeçalho: 20×20, cantos de 4 px, hover `PANEL_2`, ícone `MUTED` → `TEXT` no hover.
-- Menus e modais: `frame(p, r, 6–10, PANEL_2, BORDER)` + `shadow(...)`; itens de 26 px; posição com
-  `menus::keep_on_screen` (não use `Area::constrain`, ele fecha o menu no clique — ver o comentário em
-  `menus.rs`).
-- Barra de título: `TITLEBAR_H = 36`. Barra lateral: 150–480 px (padrão 220). Barra direita: 280–640 (padrão 330).
+- Botões de ícone: na barra de título 26×24, cantos 5; nos cabeçalhos 20×20, cantos 4; hover `hover`.
+- Menus e modais: `frame(p, r, 6–10, popup, glass_border)` + `shadow(...)`; itens de 26 px; posição com
+  `menus::keep_on_screen` (não use `Area::constrain`, ele fecha o menu no clique — ver o comentário em `menus.rs`).
+- Barra de título: `TITLEBAR_H = 32`, sem fundo; botões da janela 40×32. Barra lateral: 150–480 px (padrão 220).
+  Barra direita: 280–640 (padrão 330).
 
 ## Padrões de código
 

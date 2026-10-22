@@ -46,6 +46,7 @@ cpal = "0.18"
 rfd = "0.17"
 arboard = "3"
 png = "0.18"
+winresource = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # Markdown renderizado no modo Documentos (ui/docs.rs); sem os recursos de realce, imagem e link.
 egui_commonmark = { version = "0.25", default-features = false }

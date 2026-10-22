@@ -120,7 +120,7 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
    o resultado observando o CLI de verdade. Para listar modelos no menu, acrescente o agente em `Core::known_models`.
 5. Opcionalmente, crie um alias em `ALIASES`, e atualize a lista de ids no teste `workspace_agents_md_and_spawn_specs`.
 
-**Mudar uma cor ou tamanho.** Edite `crates/app/src/theme.rs` (larguras da barra direita: `RIGHT_*_W`).
+**Mudar uma cor ou tamanho.** Edite `crates/app/src/theme.rs`: as cores são os campos de `Palette` (leia com `theme::pal()`); a cor de destaque é a do agente ativo (`theme::accent()`). Larguras da barra direita: `RIGHT_*_W`. O ícone (`assets/agentdeck.ico`) se regenera com `scripts/gerar-icone.ps1`.
 
 **Mexer na tela dividida.** O cálculo é puro e testado em `crates/app/src/split.rs` (grupo de cada aba,
 formato da grade, retângulos, divisores, vizinho para os atalhos, ordem das janelas, foco ao fechar); o
