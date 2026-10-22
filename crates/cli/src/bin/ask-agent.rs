@@ -69,9 +69,16 @@ impl Bridge {
             ureq::Agent::config_builder().proxy(None).http_status_as_error(false).timeout_global(timeout).build().into();
         let url = format!("http://127.0.0.1:{}{route}", self.port);
         let resp = match (method, body) {
-            ("GET", _) => agent.get(&url).header("x-agentdeck-token", &self.token).header("content-type", "application/json").call(),
-            (_, Some(b)) => agent.post(&url).header("x-agentdeck-token", &self.token).send_json(b),
-            (_, None) => agent.post(&url).header("x-agentdeck-token", &self.token).send_empty(),
+            ("GET", _) => agent
+                .get(&url)
+                .header("x-agentdeck-token", &self.token)
+                .header("x-commanddeck-token", &self.token)
+                .header("content-type", "application/json")
+                .call(),
+            (_, Some(b)) => {
+                agent.post(&url).header("x-agentdeck-token", &self.token).header("x-commanddeck-token", &self.token).send_json(b)
+            }
+            (_, None) => agent.post(&url).header("x-agentdeck-token", &self.token).header("x-commanddeck-token", &self.token).send_empty(),
         };
         let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();

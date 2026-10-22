@@ -121,6 +121,31 @@ fn marker_re() -> &'static regex::Regex {
     })
 }
 
+/// Troca o primeiro bloco marcado por `block` e apaga os demais (com as linhas em branco que os
+/// separavam do resto): um app de versão anterior que não reconhece o marcador novo acrescenta o
+/// seu próprio bloco no fim, e sem isso os dois ficariam para sempre.
+fn replace_marker_blocks(old: &str, block: &str) -> String {
+    let mut out = String::with_capacity(old.len());
+    let mut pos = 0;
+    for (i, m) in marker_re().find_iter(old).enumerate() {
+        out.push_str(&old[pos..m.start()]);
+        if i == 0 {
+            out.push_str(block);
+        } else {
+            for _ in 0..2 {
+                if out.ends_with("\r\n") {
+                    out.truncate(out.len() - 2);
+                } else if out.ends_with('\n') {
+                    out.pop();
+                }
+            }
+        }
+        pos = m.end();
+    }
+    out.push_str(&old[pos..]);
+    out
+}
+
 /// Resultado de [`ensure_agent_context`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentContext {
@@ -155,7 +180,7 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
     let instructions = instructions.replace("\r\n", "\n").replace('\n', eol);
     let block = format!("{MARKER_START}{eol}{instructions}{eol}{MARKER_END}");
     let new = if marker_re().is_match(&old) {
-        marker_re().replace(&old, regex::NoExpand(&block)).into_owned()
+        replace_marker_blocks(&old, &block)
     } else if old.is_empty() {
         format!("{block}{eol}")
     } else {
@@ -564,6 +589,37 @@ mod tests {
             assert!(!text.contains("commanddeck"), "{text:?}");
             // Com o bloco novo, nada mais muda.
             assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+        }
+    }
+
+    /// O app antigo não reconhece `agentdeck:` e acrescenta o seu bloco no fim: o app novo troca o
+    /// primeiro e apaga os demais, sem deixar linhas em branco acumuladas nem tocar no resto.
+    #[test]
+    fn extra_blocks_from_an_old_app_are_removed() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        let file = ws.join("AGENTS.md");
+        for eol in ["\n", "\r\n"] {
+            let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
+            let new_a = format!("<!-- agentdeck:start -->{eol}velho{eol}<!-- agentdeck:end -->");
+            let old_b = format!("<!-- commanddeck:start -->{eol}antigo{eol}<!-- commanddeck:end -->");
+            // No fim (caso do app antigo), no meio e colado ao primeiro.
+            let cases = [
+                (format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}"), format!("# Regras{eol}{eol}{new_block}{eol}")),
+                (
+                    format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}{eol}Fim.{eol}"),
+                    format!("# Regras{eol}{eol}{new_block}{eol}{eol}Fim.{eol}"),
+                ),
+                (format!("{new_a}{eol}{old_b}{eol}"), format!("{new_block}{eol}")),
+            ];
+            for (start, expected) in cases {
+                std::fs::write(&file, &start).expect("write");
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
+                assert_eq!(std::fs::read_to_string(&file).expect("read"), expected, "{start:?}");
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+                assert_eq!(std::fs::read_to_string(&file).expect("read"), expected);
+            }
         }
     }
 

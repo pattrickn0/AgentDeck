@@ -104,6 +104,35 @@ fn old_commanddeck_variables_still_work() {
     assert_eq!(cmd.output().expect("ask-agent").status.code(), Some(0));
 }
 
+/// A ponte da versão antiga só lê `x-commanddeck-token`: o `ask-agent` novo, que cai na pasta
+/// compartilhada e é usado por abas antigas, manda os dois cabeçalhos para não levar 403.
+#[test]
+fn old_bridge_that_reads_only_the_old_header_accepts_the_request() {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let server = std::thread::spawn(move || {
+        let (mut sock, _) = listener.accept().expect("accept");
+        let mut buf = [0u8; 4096];
+        let n = sock.read(&mut buf).expect("read");
+        let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+        let ok = req.contains("\r\nx-commanddeck-token: segredo\r\n");
+        let (status, body) = if ok { ("200 OK", r#"{"agents":["claude"]}"#) } else { ("403 Forbidden", r#"{"error":"token"}"#) };
+        let resp = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        sock.write_all(resp.as_bytes()).expect("write");
+        ok
+    });
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    scrub_app_env(&mut cmd);
+    cmd.arg("--list").env("COMMANDDECK_PORT", port.to_string()).env("COMMANDDECK_TOKEN", "segredo").env("COMMANDDECK_AGENT", "shell");
+    let out = cmd.output().expect("ask-agent");
+    assert!(server.join().expect("servidor"), "a ponte antiga não recebeu x-commanddeck-token");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+}
+
 #[test]
 fn list_help_and_errors() {
     let tmp = tempfile::tempdir().expect("tmp");

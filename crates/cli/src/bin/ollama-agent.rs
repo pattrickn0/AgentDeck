@@ -362,6 +362,7 @@ fn reply_to_bridge(asker: &str, request: Option<u64>, answer: &str) -> Result<bo
     let resp = agent
         .post(format!("http://127.0.0.1:{port}/reply"))
         .header("x-agentdeck-token", &token)
+        .header("x-commanddeck-token", &token)
         .send_json(&body)
         .map_err(|e| e.to_string())?;
     match resp.status().as_u16() {
@@ -408,7 +409,12 @@ fn app_env(name: &str) -> Option<String> {
 fn bridge_peers() -> Option<Vec<String>> {
     let (port, token) = (app_env("PORT")?, app_env("TOKEN")?);
     let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_millis(1500))).build().into();
-    let mut resp = agent.get(format!("http://127.0.0.1:{port}/agents")).header("x-agentdeck-token", &token).call().ok()?;
+    let mut resp = agent
+        .get(format!("http://127.0.0.1:{port}/agents"))
+        .header("x-agentdeck-token", &token)
+        .header("x-commanddeck-token", &token)
+        .call()
+        .ok()?;
     let v: serde_json::Value = resp.body_mut().read_json().ok()?;
     let me = app_env("AGENT").unwrap_or_default();
     Some(v.get("agents")?.as_array()?.iter().filter_map(|a| a.as_str()).filter(|a| *a != me && *a != "ollama").map(str::to_owned).collect())
