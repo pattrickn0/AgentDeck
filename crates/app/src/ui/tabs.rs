@@ -263,7 +263,13 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
             p.text_2
         };
         // Sem processo, a aba fica a 40%.
-        let lead_color = if solid { p.on_accent } else if item.alive { item.color } else { theme::with_opacity(item.color, 0.4) };
+        let lead_color = if solid {
+            p.on_accent
+        } else if item.alive {
+            item.color
+        } else {
+            theme::with_opacity(item.color, 0.4)
+        };
         let dot_pos = Pos2::new(r.min.x + PILL_PAD + DOT_BOX / 2.0, r.center().y);
         match item.lead {
             Lead::Glyph(g) => {
@@ -288,7 +294,13 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         let label_x = dot_pos.x + DOT_BOX / 2.0 + PILL_GAP;
         let font = if is_shown { theme::ui_semibold(TAB_FONT) } else { theme::ui(TAB_FONT) };
         let g = galley_trunc(&painter, &item.label, font, color, LABEL_MAX);
-        let lr = place(&painter, Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + LABEL_MAX, r.max.y)), Align2::LEFT_CENTER, g, color);
+        let lr = place(
+            &painter,
+            Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + LABEL_MAX, r.max.y)),
+            Align2::LEFT_CENTER,
+            g,
+            color,
+        );
         if !item.alive {
             painter.hline(lr.min.x..=lr.max.x, lr.center().y + 0.5, Stroke::new(1.0, color));
         }
@@ -307,7 +319,13 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
                 let scolor = if solid { theme::with_opacity(p.on_accent, 0.75) } else { p.text_2 };
                 let sg = galley_trunc(&painter, st, theme::ui(TAB_FONT), scolor, (close_rect.min.x - after_x - 8.0).max(10.0));
                 let x0 = after_x + 6.0;
-                place(&painter, Rect::from_min_max(Pos2::new(x0, r.min.y), Pos2::new(close_rect.min.x - 2.0, r.max.y)), Align2::LEFT_CENTER, sg, scolor);
+                place(
+                    &painter,
+                    Rect::from_min_max(Pos2::new(x0, r.min.y), Pos2::new(close_rect.min.x - 2.0, r.max.y)),
+                    Align2::LEFT_CENTER,
+                    sg,
+                    scolor,
+                );
             }
             _ => {}
         }
@@ -571,6 +589,14 @@ mod tests {
             }
             assert_eq!(scroll, 0.0);
         }
+    }
+
+    #[test]
+    fn a_pill_is_as_wide_as_its_parts() {
+        // padding 8 + ponto 7 + 6 + nome + 6 + ✕ 16 + padding 8.
+        assert_eq!(pill_width(50.0, 0.0), 8.0 + 7.0 + 3.0 + 50.0 + 3.0 + 16.0 + 8.0);
+        // O estado do ditado ("Transcrevendo…") alarga a pílula.
+        assert_eq!(pill_width(50.0, 20.0) - pill_width(50.0, 0.0), 20.0);
     }
 
     #[test]

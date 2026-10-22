@@ -206,7 +206,13 @@ fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::R
     if let Some(m) = mark {
         let g = super::galley(painter, &m.to_string(), theme::meta(10.0), p.text_2);
         let w = g.size().x;
-        place(painter, Rect::from_min_max(Pos2::new(right - w, rect.min.y), Pos2::new(right, rect.max.y)), Align2::LEFT_CENTER, g, p.text_2);
+        place(
+            painter,
+            Rect::from_min_max(Pos2::new(right - w, rect.min.y), Pos2::new(right, rect.max.y)),
+            Align2::LEFT_CENTER,
+            g,
+            p.text_2,
+        );
         name_right = right - w - 6.0;
     }
     // Nome com reticências.

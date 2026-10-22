@@ -385,7 +385,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let count_str = count.to_string();
                     let g = galley(&p, &count_str, theme::ui(10.5), theme::pal().text_3);
                     let w = g.size().x;
-                    place(&p, Rect::from_min_max(Pos2::new(right - w, row_r.min.y), Pos2::new(right, row_r.max.y)), Align2::LEFT_CENTER, g, theme::pal().text_3);
+                    place(
+                        &p,
+                        Rect::from_min_max(Pos2::new(right - w, row_r.min.y), Pos2::new(right, row_r.max.y)),
+                        Align2::LEFT_CENTER,
+                        g,
+                        theme::pal().text_3,
+                    );
                     right -= w + 6.0;
                 }
 
@@ -393,7 +399,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 let name_x = inner.min.x + 6.0 + 9.0 + 6.0;
                 let name_color = if proj.active || hovered { theme::pal().text } else { theme::pal().text_2 };
                 let name_g = galley_trunc(&p, &proj.name, theme::ui_semibold(12.0), name_color, (right - name_x).max(1.0));
-                place(&p, Rect::from_min_max(Pos2::new(name_x, row_r.min.y), Pos2::new(right, row_r.max.y)), Align2::LEFT_CENTER, name_g, name_color);
+                place(
+                    &p,
+                    Rect::from_min_max(Pos2::new(name_x, row_r.min.y), Pos2::new(right, row_r.max.y)),
+                    Align2::LEFT_CENTER,
+                    name_g,
+                    name_color,
+                );
 
                 // Tooltip com caminho completo
                 let resp = tip(resp, proj.path.display().to_string());
@@ -465,7 +477,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let model_w = model.as_deref().map_or(0.0, |m| {
                         let mg = galley_trunc(&p, m, theme::meta(10.0), mcolor, MODEL_MAX_W);
                         let w = mg.size().x;
-                        place(&p, Rect::from_min_max(Pos2::new(right - w, tab_r.min.y), Pos2::new(right, tab_r.max.y)), Align2::LEFT_CENTER, mg, mcolor);
+                        place(
+                            &p,
+                            Rect::from_min_max(Pos2::new(right - w, tab_r.min.y), Pos2::new(right, tab_r.max.y)),
+                            Align2::LEFT_CENTER,
+                            mg,
+                            mcolor,
+                        );
                         w
                     });
 
@@ -526,7 +544,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
                 let add_color = if add_hov { theme::pal().text_2 } else { theme::pal().text_3 };
-                let add_text = Rect::from_min_max(Pos2::new(add_r.min.x + AGENT_X - MARK_BOX / 2.0, add_r.min.y), Pos2::new(add_r.max.x - 10.0, add_r.max.y));
+                let add_text = Rect::from_min_max(
+                    Pos2::new(add_r.min.x + AGENT_X - MARK_BOX / 2.0, add_r.min.y),
+                    Pos2::new(add_r.max.x - 10.0, add_r.max.y),
+                );
                 text_in(&p, add_text, Align2::LEFT_CENTER, "+ Novo agente", theme::ui(11.5), add_color);
                 if ui.is_rect_visible(add_r) {
                     new_agent_anchor = Some(add_r);

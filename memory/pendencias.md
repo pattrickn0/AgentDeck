@@ -41,7 +41,7 @@ A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [his
 
 É a tarefa logo depois do rename (o nome já é AgentDeck, ver [historico.md](historico.md), `t20`), e vem antes da promoção para a `main`: o visual novo e o nome chegam a quem usa a `main` numa vez só. Logo e ícone entram aqui.
 
-- [ ] **Identidade visual e temas** (pedido do usuário, 18/10). **Parte 1 (base) feita na `t21`; faltam a parte 2 (barra lateral e centro) e a 3 (barra direita, menus e modais), que ainda usam o visual antigo sobre o fundo novo.** O app funciona, mas o visual é inconsistente: a barra lateral esquerda parece de outro tema que a barra direita, e algumas partes estão sem personalidade.
+- [ ] **Identidade visual e temas** (pedido do usuário, 18/10). **Partes 1 (base, `t21`) e 2 (barra lateral e centro, `t22`) feitas; falta a parte 3 (barra direita, menus e modais), que ainda usa o visual antigo sobre o fundo novo.** O app funciona, mas o visual é inconsistente: a barra lateral esquerda parece de outro tema que a barra direita, e algumas partes estão sem personalidade.
   - Primeiro, padronizar: revisar barra lateral, barra direita, barra de título, abas e modais com as mesmas cores, espaçamentos, cantos e estados (hover, seleção), tudo vindo dos tokens de `theme.rs`, sem cor fixa espalhada pelo código.
   - Depois, temas para o usuário escolher: trocar as constantes de `theme.rs` por uma paleta carregada em tempo de execução, escolhida nas configurações e gravada em `Config`. A paleta inclui o fundo e as 16 cores do terminal (`TERM_BG`/`TERM_FG`, `terminal/colors.rs`), então um tema muda o fundo de todas as abas de uma vez (CLIs com tema próprio, como o OpenCode, continuam usando o tema deles).
 

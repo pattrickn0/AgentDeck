@@ -81,8 +81,8 @@ crates/
 │   └── ui/           mod.rs (pintura, modais)
 │       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
 │       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾; pinta uma lista de `Item`, serve às abas dos agentes e às dos documentos)
-│       ├── docs.rs (modo Documentos: a chave Agentes | Documentos da barra de título, a faixa de documentos, o diff com a lista de arquivos, o arquivo de texto e o markdown)
-│       ├── sidebar.rs (explorador e ORGANIZAÇÃO) + projects.rs (projetos e agentes em árvore)
+│       ├── docs.rs (modo Documentos: a chave Agentes | Documentos (`switch`, desenhada pela barra lateral ou, recolhida, pela barra de título), a faixa de documentos, o diff com a lista de arquivos, o arquivo de texto e o markdown)
+│       ├── sidebar.rs (a chave, ORGANIZAÇÃO e ARQUIVOS) + projects.rs (projetos e agentes em árvore; `model_tag` encurta o modelo)
 │       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
 │       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
 │       └── menus.rs (nova aba, configurações), shortcuts.rs (atalhos), overlay.rs (arrastar arquivos), empty_state.rs (nenhum agente aberto)
@@ -178,7 +178,7 @@ Para a largura mínima da barra, ponha `{"rightPanelWidth": 280}` em `cfg/config
 
 **Mexer no modo Documentos.** O estado e a lógica pura ficam em `crates/app/src/docs.rs` (`Docs`: abrir/focar/fechar por projeto, sem
 duplicata; `diff_files`: a lista de arquivos de um `GitDiff`; `DocTab::apply`: o que cada tipo mostra ao receber a leitura), com
-testes; a pintura, em `ui/docs.rs` (a chave é chamada pela barra de título; `ui/mod.rs` escolhe entre `panes::draw` e `docs::draw`) e a
+testes; a pintura, em `ui/docs.rs` (a chave é chamada pela barra lateral e, com ela recolhida, pela barra de título; `ui/mod.rs` escolhe entre `panes::draw` e `docs::draw`) e a
 faixa de abas, em `ui/tabs.rs` (`strip_items`, o mesmo desenho dos agentes). Documento novo = um `DocKind`, o `DocState` que ele mostra,
 a leitura em `Deck::docs_load` (numa thread, volta como `UiMsg::Doc`) e o corpo em `ui/docs.rs::document`. O arquivo vem de
 `Core::read_text` (1 MB, `safe_rel`); o diff, de `Core::task_diff`, `git_commit_detail` ou `git_diff`; o markdown é desenhado pelo

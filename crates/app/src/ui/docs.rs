@@ -6,7 +6,7 @@ use egui::{Align2, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
 
 use super::panes::HEAD_H;
 use super::tabs::{self, Item, Lead, StripClick, StripKind};
-use super::{clickable, galley, galley_trunc, place, text_in, text_w, tip};
+use super::{button, button_width, clickable, galley, galley_trunc, place, section_label, text_in, text_w, tip, ButtonKind};
 use crate::deck::Deck;
 use crate::docs::{file_name, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, TextDoc};
 use crate::theme;
@@ -14,8 +14,8 @@ use crate::theme;
 /// Altura da linha com o título do documento e as ações dele.
 const SUBHEAD_H: f32 = 28.0;
 /// Altura de uma linha da lista de arquivos de um diff e do cabeçalho dela.
-const FILE_ROW_H: f32 = 24.0;
-const FILE_HEAD_H: f32 = 26.0;
+const FILE_ROW_H: f32 = 20.0;
+const FILE_HEAD_H: f32 = super::SECTION_LABEL_H;
 /// Abaixo desta largura a lista de arquivos do diff passa para cima do diff.
 const NARROW_W: f32 = 560.0;
 /// Altura de uma linha do arquivo de texto e o tamanho da fonte (os mesmos do diff).
@@ -49,6 +49,16 @@ pub fn switch_compact_width(painter: &Painter, deck: &Deck) -> f32 {
     let agents = text_w(painter, "Agentes", font.clone()) + SELO_GAP + SELO;
     let docs = text_w(painter, &docs_label(deck.docs.count(&deck.active_project)), font);
     2.0 * (agents.max(docs) + 20.0) + 4.0
+}
+
+/// A palavra do segundo lado da chave: inteira se ela e a contagem (`full_w`) cabem no segmento de largura
+/// `seg_w` com folga, abreviada se não.
+fn docs_word(full_w: f32, seg_w: f32) -> &'static str {
+    if full_w + 8.0 <= seg_w {
+        "Documentos"
+    } else {
+        "Docs"
+    }
 }
 
 fn docs_label(n: usize) -> String {
@@ -93,10 +103,16 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
         }
         if which == Switched::Agents {
             let has_selo = badge.done > 0 || pulse;
-            let g = galley(&painter, "Agentes", font, fg);
+            let g = galley(painter, "Agentes", font, fg);
             let total = g.size().x + if has_selo { SELO_GAP + SELO } else { 0.0 };
             let x = seg.center().x - total / 2.0;
-            let text = place(&painter, Rect::from_min_size(Pos2::new(x, seg.min.y), Vec2::new(g.size().x, seg.height())), Align2::LEFT_CENTER, g, fg);
+            let text = place(
+                painter,
+                Rect::from_min_size(Pos2::new(x, seg.min.y), Vec2::new(g.size().x, seg.height())),
+                Align2::LEFT_CENTER,
+                g,
+                fg,
+            );
             let c = Pos2::new(text.max.x + SELO_GAP + SELO / 2.0, seg.center().y);
             let selo = if active { p.on_accent } else { accent };
             if badge.done > 0 {
@@ -109,16 +125,31 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
             }
         } else {
-            // "Documentos" e a contagem, esta em `text_3` (apagada sobre o destaque).
-            let g = galley(&painter, "Documentos", font, fg);
-            let count_color = if active { theme::with_opacity(p.on_accent, 0.7) } else if enabled { p.text_3 } else { fg };
-            let cg = galley(&painter, &n_docs.to_string(), theme::ui(11.5), count_color);
+            // "Documentos" (ou "Docs", na barra lateral mais estreita) e a contagem, esta em `text_3`
+            // (apagada sobre o destaque).
+            let count_w = text_w(painter, &n_docs.to_string(), theme::ui(11.5));
+            let label = docs_word(text_w(painter, "Documentos", font.clone()) + 5.0 + count_w, seg.width());
+            let g = galley(painter, label, font, fg);
+            let count_color = if active {
+                theme::with_opacity(p.on_accent, 0.7)
+            } else if enabled {
+                p.text_3
+            } else {
+                fg
+            };
+            let cg = galley(painter, &n_docs.to_string(), theme::ui(11.5), count_color);
             let total = g.size().x + 5.0 + cg.size().x;
             let x = seg.center().x - total / 2.0;
             let gw = g.size().x;
-            place(&painter, Rect::from_min_size(Pos2::new(x, seg.min.y), Vec2::new(gw, seg.height())), Align2::LEFT_CENTER, g, fg);
+            place(painter, Rect::from_min_size(Pos2::new(x, seg.min.y), Vec2::new(gw, seg.height())), Align2::LEFT_CENTER, g, fg);
             let cw = cg.size().x;
-            place(&painter, Rect::from_min_size(Pos2::new(x + gw + 5.0, seg.min.y), Vec2::new(cw, seg.height())), Align2::LEFT_CENTER, cg, count_color);
+            place(
+                painter,
+                Rect::from_min_size(Pos2::new(x + gw + 5.0, seg.min.y), Vec2::new(cw, seg.height())),
+                Align2::LEFT_CENTER,
+                cg,
+                count_color,
+            );
         }
         let tip_text = switch_tip(which, n_docs, badge.done, badge.busy);
         if tip(resp, tip_text).clicked() && enabled {
@@ -198,7 +229,15 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
     let strip_rect = Rect::from_min_max(head.min, Pos2::new(head.max.x, head.max.y - 1.0));
     let mut acts = Vec::new();
-    match tabs::strip_items(ui, strip_rect, &items, current, true, Id::new("doc-tabs"), StripKind { scope: "doc-tab", tab_menu: false, colored: false }) {
+    match tabs::strip_items(
+        ui,
+        strip_rect,
+        &items,
+        current,
+        true,
+        Id::new("doc-tabs"),
+        StripKind { scope: "doc-tab", tab_menu: false, colored: false },
+    ) {
         Some(StripClick::Activate(n)) => acts.push(Act::Focus(uids[n])),
         Some(StripClick::Close(n)) => acts.push(Act::Close(uids[n])),
         _ => {}
@@ -291,13 +330,10 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
 
 /// Um botão de texto no fim da linha de título; `right` anda para a esquerda. Devolve se foi clicado.
 fn action_button(ui: &Ui, painter: &Painter, right: &mut f32, cy: f32, label: &str, tooltip: &str, id: Id) -> bool {
-    let g = galley(painter, label, theme::ui(11.5), theme::pal().text);
-    let r = Rect::from_min_size(Pos2::new(*right - g.size().x - 16.0, cy - 10.0), Vec2::new(g.size().x + 16.0, 20.0));
+    let w = button_width(painter, label, ButtonKind::Secondary);
+    let r = Rect::from_min_size(Pos2::new(*right - w, cy - 11.0), Vec2::new(w, 22.0));
     *right = r.min.x - 6.0;
-    let resp = clickable(ui, r, id);
-    painter.rect_filled(r, 4.0, if resp.hovered() { theme::pal().separator } else { theme::pal().hover });
-    place(painter, r, Align2::CENTER_CENTER, g, theme::pal().text);
-    tip(resp, tooltip).clicked()
+    tip(button(ui, r, id, label, ButtonKind::Secondary), tooltip).clicked()
 }
 
 /// Uma mensagem no alto do corpo (carregando, erro, arquivo que não vira texto), com quebra de linha.
@@ -328,7 +364,6 @@ fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, acts: &mut Ve
         (list, Rect::from_min_max(Pos2::new(list.max.x + 1.0, body.min.y), body.max))
     };
     let painter = ui.painter_at(body);
-    painter.rect_filled(list, 0.0, theme::pal().chip);
     let sep = if narrow {
         Rect::from_min_size(Pos2::new(list.min.x, list.max.y), Vec2::new(list.width(), 1.0))
     } else {
@@ -344,11 +379,10 @@ fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, acts: &mut Ve
 fn file_list(ui: &mut Ui, area: Rect, uid: u64, doc: &DiffDoc, acts: &mut Vec<Act>) {
     let painter = ui.painter_at(area);
     let (added, removed) = doc.files.iter().fold((0, 0), |(a, r), f| (a + f.added, r + f.removed));
-    let title = format!("{} ARQUIVO(S)", doc.files.len());
-    let head = Rect::from_min_size(area.min, Vec2::new(area.width(), FILE_HEAD_H));
-    text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::LEFT_CENTER, &title, theme::ui_bold(10.5), theme::pal().text_2);
+    let title = format!("{} arquivo(s)", doc.files.len());
+    let head = section_label(&painter, Rect::from_min_size(area.min, Vec2::new(area.width(), FILE_HEAD_H)), &title);
     let totals = format!("+{added} −{removed}");
-    text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::RIGHT_CENTER, &totals, theme::mono(11.0), theme::pal().text_2);
+    text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::RIGHT_CENTER, &totals, theme::meta(10.0), theme::pal().text_2);
 
     let rows = Rect::from_min_max(Pos2::new(area.min.x, head.max.y), area.max);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rows).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -372,34 +406,35 @@ fn file_list(ui: &mut Ui, area: Rect, uid: u64, doc: &DiffDoc, acts: &mut Vec<Ac
 }
 
 fn file_row(p: &Painter, r: Rect, file: &DiffFile, selected: bool, hovered: bool) {
+    let pal = theme::pal();
     if selected {
-        p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::pal().separator);
+        p.rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), 4.0, pal.selected_soft);
     } else if hovered {
-        p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::pal().hover);
+        p.rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), 4.0, pal.hover);
     }
     let letter_color = match file.status {
-        'A' => theme::BADGE_JSON,
-        'D' => theme::pal().danger_text,
-        'R' => theme::pal().info,
-        _ => theme::OLLAMA,
+        'A' => pal.success,
+        'D' => pal.danger_text,
+        'R' => pal.info,
+        _ => pal.warning,
     };
     let letter = Rect::from_min_size(Pos2::new(r.min.x + 12.0, r.min.y), Vec2::new(12.0, r.height()));
-    text_in(p, letter, Align2::CENTER_CENTER, &file.status.to_string(), theme::mono_bold(11.5), letter_color);
+    text_in(p, letter, Align2::CENTER_CENTER, &file.status.to_string(), theme::meta(10.0), letter_color);
     let mut right = r.max.x - 12.0;
-    for (text, color) in [(format!("−{}", file.removed), theme::pal().danger_text), (format!("+{}", file.added), theme::BADGE_JSON)] {
+    for (text, color) in [(format!("−{}", file.removed), pal.danger_text), (format!("+{}", file.added), pal.success)] {
         if text.len() <= 2 && text.ends_with('0') {
             continue;
         }
-        let g = galley(p, &text, theme::mono(11.0), color);
+        let g = galley(p, &text, theme::meta(10.0), color);
         let w = g.size().x;
         place(p, Rect::from_min_size(Pos2::new(right - w, r.min.y), Vec2::new(w, r.height())), Align2::LEFT_CENTER, g, color);
         right -= w + 8.0;
     }
     let name_x = r.min.x + 32.0;
     let name = file_name(&file.path);
-    let font = if selected { theme::ui_semibold(12.0) } else { theme::ui(12.0) };
-    let g = galley_trunc(p, name, font, theme::pal().text, (right - name_x - 6.0).max(20.0));
-    place(p, Rect::from_min_max(Pos2::new(name_x, r.min.y), Pos2::new(right, r.max.y)), Align2::LEFT_CENTER, g, theme::pal().text);
+    let color = if selected { pal.text_strong } else { pal.text };
+    let g = galley_trunc(p, name, theme::ui(11.5), color, (right - name_x - 6.0).max(20.0));
+    place(p, Rect::from_min_max(Pos2::new(name_x, r.min.y), Pos2::new(right, r.max.y)), Align2::LEFT_CENTER, g, color);
 }
 
 // ---------------------------------------------------------------------------
@@ -478,4 +513,18 @@ fn markdown_style(ui: &mut Ui) {
     style.visuals.faint_bg_color = theme::pal().chip;
     style.visuals.extreme_bg_color = theme::pal().hover;
     style.visuals.hyperlink_color = theme::pal().info;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_documents_word_shrinks_in_a_narrow_segment() {
+        // "Documentos 13" precisa de ~80 px mais folga.
+        assert_eq!(docs_word(80.0, 100.0), "Documentos");
+        assert_eq!(docs_word(80.0, 88.0), "Documentos");
+        assert_eq!(docs_word(80.0, 87.0), "Docs");
+        assert_eq!(docs_word(80.0, 60.0), "Docs");
+    }
 }
