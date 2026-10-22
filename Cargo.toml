@@ -47,6 +47,8 @@ rfd = "0.17"
 arboard = "3"
 png = "0.18"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Markdown renderizado no modo Documentos (ui/docs.rs); sem os recursos de realce, imagem e link.
+egui_commonmark = { version = "0.25", default-features = false }
 
 [profile.release]
 opt-level = 3

@@ -662,7 +662,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
         deck.switch_project(&id);
     }
     match agent_click {
-        Some(AgentClick { tab: Some(i), .. }) => deck.activate(i),
+        Some(AgentClick { tab: Some(i), .. }) => {
+            deck.show_agents();
+            deck.activate(i);
+        }
         Some(AgentClick { project, id, tab: None }) => deck.focus_agent(&project, &id),
         None => {}
     }

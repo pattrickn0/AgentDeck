@@ -12,6 +12,7 @@ mod audio;
 mod crash;
 mod deck;
 mod dictation;
+mod docs;
 mod git_ui;
 mod github_ui;
 mod icons;

@@ -1,4 +1,6 @@
-//! Faixa de abas do cabeçalho de cada janela da tela dividida (antes ficava na topbar).
+//! Faixa de abas do cabeçalho de cada janela da tela dividida (antes ficava na topbar). O mesmo desenho
+//! (rolagem, setas ‹ ›, menu ▾) serve à faixa de documentos do modo Documentos (`ui/docs.rs`): a faixa
+//! pinta uma lista de [`Item`], e `strip` monta essa lista a partir das abas dos agentes.
 
 use egui::{Align2, Area, Color32, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
@@ -10,11 +12,49 @@ use crate::deck::Deck;
 use crate::dictation::{self, ButtonVisual, MicTarget};
 use crate::theme;
 
+/// O que um clique na faixa pede. Os números são posições na lista de itens (`strip` os converte nos
+/// índices de `Deck::tabs`).
 pub enum StripClick {
     Activate(usize),
     Close(usize),
     Rename(usize),
     ContextMenu(usize, Pos2),
+}
+
+/// O que vem antes do nome da aba.
+#[derive(Clone, Copy)]
+pub enum Lead {
+    /// A bolinha do agente (pulsa trabalhando, ganha o anel ao concluir sem ser vista).
+    Dot,
+    /// Um sinal do tipo de documento.
+    Glyph(&'static str),
+}
+
+/// Uma aba da faixa.
+pub struct Item {
+    /// Identifica a aba entre quadros (ids de interação).
+    pub uid: u64,
+    pub label: String,
+    /// O modelo de LLM, em cinza depois do nome.
+    pub model: Option<String>,
+    pub color: Color32,
+    pub alive: bool,
+    pub busy: bool,
+    /// Terminou um turno sem ser vista.
+    pub done: bool,
+    /// O estado do ditado nesta aba.
+    pub mic: ButtonVisual,
+    pub lead: Lead,
+    /// A dica ao passar o mouse.
+    pub tip: String,
+}
+
+/// Como a faixa se comporta: o prefixo dos ids (abas de agente e de documento não se misturam) e se
+/// duplo clique renomeia e botão direito abre o menu da aba.
+#[derive(Clone, Copy)]
+pub struct StripKind {
+    pub scope: &'static str,
+    pub tab_menu: bool,
 }
 
 const TAB_FONT: f32 = 13.0;
@@ -94,18 +134,49 @@ fn scroll_to_show(widths: &[f32], n: usize, scroll: f32, view_w: f32, edge: f32)
 /// Pinta as abas `tabs` (índices de `deck.tabs`) em `rect`, com rolagem horizontal quando não
 /// cabem. `shown` é a aba visível da janela; `focused`, se a janela tem o foco.
 pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize, focused: bool, scroll_id: Id) -> Option<StripClick> {
+    let items: Vec<Item> = tabs
+        .iter()
+        .map(|&i| {
+            let tab = &deck.tabs[i];
+            let is_active = deck.active == Some(i) || (i == shown && focused);
+            Item {
+                uid: tab.uid,
+                label: tab.label.clone(),
+                model: tab.model.clone(),
+                color: tab.color,
+                alive: tab.alive,
+                busy: tab.busy,
+                done: tab.done && !is_active,
+                mic: dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid)),
+                lead: Lead::Dot,
+                tip: tab_tip(&tab.label, tab.model.as_deref()),
+            }
+        })
+        .collect();
+    let at = tabs.iter().position(|&i| i == shown).unwrap_or(0);
+    let click = strip_items(ui, rect, &items, at, focused, scroll_id, StripKind { scope: "tab", tab_menu: true })?;
+    Some(match click {
+        StripClick::Activate(n) => StripClick::Activate(tabs[n]),
+        StripClick::Close(n) => StripClick::Close(tabs[n]),
+        StripClick::Rename(n) => StripClick::Rename(tabs[n]),
+        StripClick::ContextMenu(n, pos) => StripClick::ContextMenu(tabs[n], pos),
+    })
+}
+
+/// A faixa de abas propriamente dita: pinta `items`, com a de posição `shown` à vista, e devolve o clique
+/// (posições em `items`).
+pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: bool, scroll_id: Id, kind: StripKind) -> Option<StripClick> {
     let ctx = ui.ctx().clone();
     let painter = ui.painter_at(rect);
     let font = theme::ui(TAB_FONT);
     let close_w = 12.0 + text_w(&painter, "×", font.clone());
-    let widths: Vec<f32> = tabs
+    let widths: Vec<f32> = items
         .iter()
-        .map(|&i| {
-            let tab = &deck.tabs[i];
-            let lw = text_w(&painter, &tab.label, font.clone()).min(LABEL_MAX);
+        .map(|item| {
+            let lw = text_w(&painter, &item.label, font.clone()).min(LABEL_MAX);
             let mw =
-                tab.model.as_deref().map_or(0.0, |m| MODEL_GAP + text_w(&painter, short_model(m), theme::ui(MODEL_FONT)).min(MODEL_MAX));
-            let sw = match dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid)) {
+                item.model.as_deref().map_or(0.0, |m| MODEL_GAP + text_w(&painter, short_model(m), theme::ui(MODEL_FONT)).min(MODEL_MAX));
+            let sw = match item.mic {
                 ButtonVisual::Recording => REC_INDICATOR_W,
                 ButtonVisual::Opening => 6.0 + text_w(&painter, "Abrindo…", theme::ui(MODEL_FONT)),
                 ButtonVisual::Transcribing => 6.0 + text_w(&painter, "Transcrevendo…", theme::ui(MODEL_FONT)),
@@ -132,8 +203,8 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         let key = (shown, view.width().round() as i32);
         if ctx.data(|d| d.get_temp::<(usize, i32)>(scroll_id.with("seen"))) != Some(key) {
             ctx.data_mut(|d| d.insert_temp(scroll_id.with("seen"), key));
-            if let Some(a) = tabs.iter().position(|&i| i == shown) {
-                scroll = scroll_to_show(&widths, a, scroll, view.width(), ARROW_ZONE_W);
+            if shown < items.len() {
+                scroll = scroll_to_show(&widths, shown, scroll, view.width(), ARROW_ZONE_W);
             }
         }
         scroll = scroll.clamp(0.0, (total - view.width()).max(0.0));
@@ -144,8 +215,7 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
 
     let mut x = rect.min.x - scroll;
     let mut click = None;
-    for (n, &i) in tabs.iter().enumerate() {
-        let tab = &deck.tabs[i];
+    for (n, item) in items.iter().enumerate() {
         let w = widths[n];
         let r = Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(w - 1.0, rect.height()));
         x += w;
@@ -153,11 +223,10 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             continue;
         }
         let vis = r.intersect(view);
-        let is_shown = i == shown;
-        let resp = ui.interact(vis, Id::new(("tab", tab.uid)), Sense::click());
+        let is_shown = n == shown;
+        let resp = ui.interact(vis, Id::new((kind.scope, item.uid)), Sense::click());
         let close_rect = Rect::from_min_size(Pos2::new(r.max.x - 6.0 - close_w, r.center().y - 10.5), Vec2::new(close_w, 21.0));
-        let visual = dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid));
-        let close_resp = ui.interact(close_rect.intersect(view), Id::new(("tab-close", tab.uid)), Sense::click());
+        let close_resp = ui.interact(close_rect.intersect(view), Id::new((kind.scope, "close", item.uid)), Sense::click());
 
         let bg = if is_shown {
             Some(theme::BG)
@@ -171,31 +240,36 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         }
         if is_shown {
             // Linha superior na cor do agente (esmaecida se a janela não tem o foco).
-            let c = if focused { tab.color } else { theme::with_opacity(tab.color, 0.45) };
+            let c = if focused { item.color } else { theme::with_opacity(item.color, 0.45) };
             painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width(), 2.0)), 0.0, c);
         }
         painter.rect_filled(Rect::from_min_size(Pos2::new(r.max.x, r.min.y), Vec2::new(1.0, r.height())), 0.0, theme::BORDER);
 
         let color = if is_shown && focused { theme::TEXT } else { theme::MUTED };
         let dot_pos = Pos2::new(r.min.x + 12.0 + 4.0, r.center().y);
-        let is_active = deck.active == Some(i) || (is_shown && focused);
-        if tab.busy {
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
-            let t = ctx.input(|inp| inp.time);
-            let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
-            let halo_r = 4.0 + 2.8 * wave;
-            let halo_alpha = 0.35 * (1.0 - wave);
-            painter.circle_filled(dot_pos, halo_r, theme::with_opacity(tab.color, halo_alpha));
-            painter.circle_filled(dot_pos, 3.2 + 1.0 * wave, theme::with_opacity(tab.color, 0.75 + 0.25 * wave));
-        } else if tab.done && !is_active {
-            dot(&painter, dot_pos, tab.color);
-            painter.circle_stroke(dot_pos, 6.2, Stroke::new(1.2, theme::brighten(tab.color, 1.25)));
-            painter.circle_filled(dot_pos, 1.2, theme::with_opacity(Color32::WHITE, 0.75));
-        } else {
-            dot(&painter, dot_pos, tab.color);
+        match item.lead {
+            Lead::Glyph(g) => {
+                let cell = Rect::from_center_size(dot_pos, Vec2::splat(14.0));
+                text_in(&painter, cell, Align2::CENTER_CENTER, g, theme::mono_bold(11.0), item.color);
+            }
+            Lead::Dot if item.busy => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(33));
+                let t = ctx.input(|inp| inp.time);
+                let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
+                let halo_r = 4.0 + 2.8 * wave;
+                let halo_alpha = 0.35 * (1.0 - wave);
+                painter.circle_filled(dot_pos, halo_r, theme::with_opacity(item.color, halo_alpha));
+                painter.circle_filled(dot_pos, 3.2 + 1.0 * wave, theme::with_opacity(item.color, 0.75 + 0.25 * wave));
+            }
+            Lead::Dot if item.done => {
+                dot(&painter, dot_pos, item.color);
+                painter.circle_stroke(dot_pos, 6.2, Stroke::new(1.2, theme::brighten(item.color, 1.25)));
+                painter.circle_filled(dot_pos, 1.2, theme::with_opacity(Color32::WHITE, 0.75));
+            }
+            Lead::Dot => dot(&painter, dot_pos, item.color),
         }
         let label_x = r.min.x + 12.0 + 8.0 + 8.0;
-        let g = galley_trunc(&painter, &tab.label, font.clone(), color, LABEL_MAX);
+        let g = galley_trunc(&painter, &item.label, font.clone(), color, LABEL_MAX);
         let lr = place(
             &painter,
             Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + LABEL_MAX, r.max.y)),
@@ -203,12 +277,12 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             g,
             color,
         );
-        if !tab.alive {
+        if !item.alive {
             painter.hline(lr.min.x..=lr.max.x, lr.center().y + 0.5, Stroke::new(1.0, color));
         }
         let mut after_x = lr.max.x;
-        if let Some(model) = tab.model.as_deref() {
-            let mcolor = theme::with_opacity(theme::MUTED, if tab.alive { 0.75 } else { 0.45 });
+        if let Some(model) = item.model.as_deref() {
+            let mcolor = theme::with_opacity(theme::MUTED, if item.alive { 0.75 } else { 0.45 });
             let mg = galley_trunc(&painter, short_model(model), theme::ui(MODEL_FONT), mcolor, MODEL_MAX);
             let x0 = after_x + MODEL_GAP;
             let mr = place(
@@ -221,7 +295,7 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             after_x = mr.max.x;
         }
         // Indicador de estado do ditado na aba (o botão fica no cabeçalho do painel).
-        match visual {
+        match item.mic {
             ButtonVisual::Recording => {
                 let alpha = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -230,7 +304,7 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
                 painter.circle_filled(rec_pos, 3.6, theme::with_opacity(theme::RED, alpha));
             }
             ButtonVisual::Opening | ButtonVisual::Transcribing => {
-                let st = if visual == ButtonVisual::Opening { "Abrindo…" } else { "Transcrevendo…" };
+                let st = if item.mic == ButtonVisual::Opening { "Abrindo…" } else { "Transcrevendo…" };
                 let scolor = theme::MUTED;
                 let sg = galley_trunc(&painter, st, theme::ui(MODEL_FONT), scolor, (close_rect.min.x - after_x - 8.0).max(10.0));
                 let x0 = after_x + 6.0;
@@ -254,17 +328,15 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         }
         text_in(&painter, close_rect, Align2::CENTER_CENTER, "×", font.clone(), if close_hot { theme::TEXT } else { theme::MUTED });
 
-        let tab_label = tab.label.clone();
-        let tab_model = tab.model.clone();
         if tip(close_resp, "Fechar").clicked() {
-            click = Some(StripClick::Close(i));
-        } else if resp.double_clicked() {
-            click = Some(StripClick::Rename(i));
-        } else if resp.secondary_clicked() {
+            click = Some(StripClick::Close(n));
+        } else if kind.tab_menu && resp.double_clicked() {
+            click = Some(StripClick::Rename(n));
+        } else if kind.tab_menu && resp.secondary_clicked() {
             let pos = ui.input(|inp| inp.pointer.latest_pos()).unwrap_or_else(|| r.center());
-            click = Some(StripClick::ContextMenu(i, pos));
-        } else if tip(resp, tab_tip(&tab_label, tab_model.as_deref())).clicked() {
-            click = Some(StripClick::Activate(i));
+            click = Some(StripClick::ContextMenu(n, pos));
+        } else if tip(resp, item.tip.clone()).clicked() {
+            click = Some(StripClick::Activate(n));
         }
     }
 
@@ -273,13 +345,13 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         let mut new_scroll = None;
         if let Some(n) = hidden.left {
             let zone = Rect::from_min_size(rect.min, Vec2::new(ARROW_ZONE_W, rect.height()));
-            if edge_arrow(deck, ui, &painter, zone, Dir::Left, tabs[n], scroll_id.with("arrow-left")) {
+            if edge_arrow(ui, &painter, zone, Dir::Left, &items[n].label, scroll_id.with("arrow-left")) {
                 new_scroll = Some(scroll_to_show(&widths, n, scroll, view.width(), ARROW_ZONE_W));
             }
         }
         if let Some(n) = hidden.right {
             let zone = Rect::from_min_max(Pos2::new(view.max.x - ARROW_ZONE_W, rect.min.y), Pos2::new(view.max.x, rect.max.y));
-            if edge_arrow(deck, ui, &painter, zone, Dir::Right, tabs[n], scroll_id.with("arrow-right")) {
+            if edge_arrow(ui, &painter, zone, Dir::Right, &items[n].label, scroll_id.with("arrow-right")) {
                 new_scroll = Some(scroll_to_show(&widths, n, scroll, view.width(), ARROW_ZONE_W));
             }
         }
@@ -288,8 +360,8 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             ctx.request_repaint();
         }
         let list = Rect::from_min_max(Pos2::new(view.max.x, rect.min.y), rect.max);
-        if let Some(i) = tab_list(deck, ui, &painter, list, tabs, shown, scroll_id.with("list")) {
-            click = Some(StripClick::Activate(i));
+        if let Some(n) = tab_list(ui, &painter, list, items, shown, scroll_id.with("list"), kind.scope) {
+            click = Some(StripClick::Activate(n));
         }
     } else {
         ctx.data_mut(|d| d.remove::<bool>(scroll_id.with("list")));
@@ -330,8 +402,8 @@ fn fade(painter: &Painter, top: f32, bottom: f32, solid_x: f32, far_x: f32) {
 }
 
 /// Seta de uma borda da faixa (há abas escondidas desse lado): fundo sólido, degradê e botão.
-/// Devolve se foi clicada; `target` é a aba escondida mais próxima, que a dica cita.
-fn edge_arrow(deck: &Deck, ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, target: usize, id: Id) -> bool {
+/// Devolve se foi clicada; `target` é o nome da aba escondida mais próxima, que a dica cita.
+fn edge_arrow(ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, target: &str, id: Id) -> bool {
     painter.rect_filled(zone, 0.0, theme::PANEL);
     let (solid_x, far_x) = if dir == Dir::Left { (zone.max.x, zone.max.x + FADE_W) } else { (zone.min.x, zone.min.x - FADE_W) };
     fade(painter, zone.min.y, zone.max.y, solid_x, far_x);
@@ -341,11 +413,11 @@ fn edge_arrow(deck: &Deck, ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, tar
         painter.rect_filled(btn, 4.0, theme::PANEL_2);
     }
     chevron(painter, btn.center(), dir, if resp.hovered() { theme::TEXT } else { theme::MUTED });
-    tip(resp, format!("Mostrar «{}»", deck.tabs[target].label)).clicked()
+    tip(resp, format!("Mostrar «{target}»")).clicked()
 }
 
 /// Botão "▾" no fim da faixa e o menu com todas as abas da janela. Devolve a aba escolhida.
-fn tab_list(deck: &Deck, ui: &Ui, painter: &Painter, zone: Rect, tabs: &[usize], shown: usize, id: Id) -> Option<usize> {
+fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize, id: Id, scope: &'static str) -> Option<usize> {
     let ctx = ui.ctx();
     painter.rect_filled(zone, 0.0, theme::PANEL);
     let btn = Rect::from_center_size(zone.center(), Vec2::splat(ARROW_BTN));
@@ -356,13 +428,13 @@ fn tab_list(deck: &Deck, ui: &Ui, painter: &Painter, zone: Rect, tabs: &[usize],
         painter.rect_filled(btn, 4.0, theme::PANEL_2);
     }
     chevron(painter, btn.center(), Dir::Down, if hot { theme::TEXT } else { theme::MUTED });
-    if tip(resp, "Todas as abas").clicked() {
+    if tip(resp, if scope == "tab" { "Todas as abas" } else { "Todos os documentos" }).clicked() {
         open = !open;
     }
 
     let mut chosen = None;
     if open {
-        let rows = tabs.len().min(LIST_MAX_ROWS);
+        let rows = items.len().min(LIST_MAX_ROWS);
         let (w, h) = (LIST_MENU_W, LIST_ITEM_H * rows as f32 + 8.0);
         let pos = keep_on_screen(ctx, Pos2::new(btn.max.x - w, btn.max.y + 4.0), Vec2::new(w, h));
         let menu = Rect::from_min_size(pos, Vec2::new(w, h));
@@ -374,25 +446,31 @@ fn tab_list(deck: &Deck, ui: &Ui, painter: &Painter, zone: Rect, tabs: &[usize],
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
                 egui::ScrollArea::vertical().max_height(inner.height()).auto_shrink([false, false]).show(ui, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
-                    for &i in tabs {
-                        let tab = &deck.tabs[i];
+                    for (n, item) in items.iter().enumerate() {
                         let (r, _) = ui.allocate_exact_size(Vec2::new(inner.width(), LIST_ITEM_H), Sense::hover());
-                        let resp = clickable(ui, r, id.with(("item", tab.uid)));
+                        let resp = clickable(ui, r, id.with(("item", item.uid)));
                         let p = ui.painter();
-                        if resp.hovered() || i == shown {
+                        if resp.hovered() || n == shown {
                             p.rect_filled(r, 4.0, theme::BORDER);
                         }
-                        dot(p, Pos2::new(r.min.x + 14.0, r.center().y), tab.color);
-                        let color = if tab.alive { theme::TEXT } else { theme::MUTED };
+                        let lead = Pos2::new(r.min.x + 14.0, r.center().y);
+                        match item.lead {
+                            Lead::Dot => dot(p, lead, item.color),
+                            Lead::Glyph(g) => {
+                                let cell = Rect::from_center_size(lead, Vec2::splat(14.0));
+                                text_in(p, cell, Align2::CENTER_CENTER, g, theme::mono_bold(11.0), item.color);
+                            }
+                        }
+                        let color = if item.alive { theme::TEXT } else { theme::MUTED };
                         let text_x = r.min.x + 28.0;
-                        let g = galley_trunc(p, &tab.label, theme::ui(12.5), color, r.max.x - text_x - 8.0);
+                        let g = galley_trunc(p, &item.label, theme::ui(12.5), color, r.max.x - text_x - 8.0);
                         let area = Rect::from_min_max(Pos2::new(text_x, r.min.y), Pos2::new(r.max.x - 8.0, r.max.y));
                         let lr = place(p, area, Align2::LEFT_CENTER, g, color);
-                        if !tab.alive {
+                        if !item.alive {
                             p.hline(lr.min.x..=lr.max.x, lr.center().y + 0.5, Stroke::new(1.0, color));
                         }
                         if resp.clicked() {
-                            chosen = Some(i);
+                            chosen = Some(n);
                         }
                     }
                 });
