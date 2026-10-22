@@ -14,7 +14,7 @@ use agentdeck_core::github::{
 };
 use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, ScrollArea, Sense, TextEdit, Ui, Vec2};
 
-use super::{clickable, dot, frame, galley_trunc, place, shadow, text_in, text_w, tip};
+use super::{clickable, dot, frame, galley_trunc, place, section_label, shadow, text_in, text_w, tip};
 use crate::deck::Deck;
 use crate::github_ui::{instance_spec, normalize_role, GithubTab, GithubView};
 use crate::icons::Icon;
@@ -872,8 +872,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
 
         let head_r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, 18.0));
         let title = format!("ENVIAR {} PARA", target.title.to_uppercase());
-        let g = galley_trunc(&p, &title, theme::ui_bold(10.5), theme::pal().text_2, head_r.width());
-        place(&p, head_r, Align2::LEFT_CENTER, g, theme::pal().text_2);
+        section_label(&p, head_r, &title);
         y += 18.0;
 
         if open_tabs.is_empty() {
@@ -886,11 +885,11 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
             y += item_h;
             let resp = clickable(ui, r, Id::new(("gh-menu-tab", id)));
             if resp.hovered() {
-                p.rect_filled(r, 5.0, theme::pal().separator);
+                p.rect_filled(r, 5.0, theme::pal().hover);
             }
             dot(&p, Pos2::new(r.min.x + 14.0, r.center().y), *color);
             let tr = Rect::from_min_max(Pos2::new(r.min.x + 26.0, r.min.y), Pos2::new(r.max.x - 8.0, r.max.y));
-            let g = galley_trunc(&p, label, theme::ui(12.5), theme::pal().text, tr.width());
+            let g = galley_trunc(&p, label, theme::ui(12.0), theme::pal().text, tr.width());
             place(&p, tr, Align2::LEFT_CENTER, g, theme::pal().text);
             if resp.clicked() {
                 chosen = Some(id.clone());
@@ -901,7 +900,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         p.rect_filled(Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0, 1.0)), 0.0, theme::pal().separator);
         y += 7.0;
         let sub_r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, 18.0));
-        text_in(&p, sub_r, Align2::LEFT_CENTER, "OU ABRIR / USAR UM CARGO", theme::ui_bold(10.5), theme::pal().text_2);
+        section_label(&p, sub_r, "OU ABRIR / USAR UM CARGO");
         y += 18.0;
 
         for (kind, label, color) in &models {
@@ -910,7 +909,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
             let active = deck.github.new_role_kind == *kind;
             let resp = clickable(ui, r, Id::new(("gh-role-model", kind)));
             if resp.hovered() {
-                p.rect_filled(r, 5.0, theme::pal().separator);
+                p.rect_filled(r, 5.0, theme::pal().hover);
             }
             let c = Pos2::new(r.min.x + 14.0, r.center().y);
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, if active { *color } else { theme::pal().text_2 }));
@@ -931,10 +930,12 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         let btn_w = 70.0;
         let input_r = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0 - btn_w - 6.0, 22.0));
         let send_r = Rect::from_min_size(Pos2::new(input_r.max.x + 6.0, y), Vec2::new(btn_w, 22.0));
-        frame(&p, input_r, 6.0, theme::pal().recess, theme::pal().glass_border);
+        let input_id = Id::new("gh-role-input");
+        let focused = ctx.memory(|m| m.has_focus(input_id));
+        frame(&p, input_r, 6.0, theme::pal().recess, if focused { theme::accent() } else { theme::pal().separator });
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink(1.0)));
         let out = TextEdit::singleline(&mut deck.github.new_role_name)
-            .id(Id::new("gh-role-input"))
+            .id(input_id)
             .frame(egui::Frame::NONE)
             .margin(egui::Margin { left: 8, right: 8, top: 3, bottom: 3 })
             .font(theme::mono(11.5))
@@ -958,7 +959,19 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
             let rr = Rect::from_min_size(Pos2::new(rect.min.x + 8.0 + i as f32 * (rw + 4.0), y), Vec2::new(rw, 20.0));
             let resp = clickable(ui, rr, Id::new(("gh-quick-role", role)));
             let active = normalize_role(&deck.github.new_role_name) == *role;
-            frame(&p, rr, 5.0, if active { theme::pal().separator } else { theme::pal().chip }, theme::pal().separator);
+            frame(
+                &p,
+                rr,
+                5.0,
+                if active {
+                    theme::pal().selected
+                } else if resp.hovered() {
+                    theme::pal().hover
+                } else {
+                    theme::pal().chip
+                },
+                theme::pal().separator,
+            );
             let fg = if active || resp.hovered() { theme::pal().text } else { theme::pal().text_2 };
             text_in(&p, rr, Align2::CENTER_CENTER, &format!("@{role}"), theme::mono(10.5), fg);
             if resp.clicked() {
@@ -1033,18 +1046,18 @@ fn small_btn(
 ) -> bool {
     let r = clickable(ui, rect, Id::new(id));
     let hot = r.hovered();
-    let (bg, border) = match (strong, hot) {
-        (true, true) => (theme::accent(), theme::accent()),
-        (false, true) => (theme::pal().separator, theme::pal().separator),
-        _ => (theme::pal().hover, theme::pal().separator),
+    let pal = theme::pal();
+    let (bg, border, fg) = if strong {
+        let fill = if hot { theme::brighten(theme::accent(), 1.08) } else { theme::accent() };
+        (fill, fill, pal.on_accent)
+    } else {
+        let fill = if hot { theme::with_alpha(pal.text_strong, 0.08) } else { theme::with_alpha(pal.text_strong, 0.04) };
+        let border = theme::with_alpha(pal.text_strong, 0.14);
+        let fg = if hot { pal.text_strong } else { pal.text };
+        (fill, border, fg)
     };
-    frame(p, rect, 4.0, bg, border);
-    let fg = match (hot, strong) {
-        (true, true) => theme::pal().on_accent,
-        (true, false) => theme::pal().text_strong,
-        _ => theme::pal().text,
-    };
-    let font = if strong { theme::ui_bold(11.0) } else { theme::ui(11.0) };
+    frame(p, rect, 5.0, bg, border);
+    let font = if strong { theme::ui_bold(11.0) } else { theme::ui_semibold(11.0) };
     let g = galley_trunc(p, label, font, fg, rect.width() - 6.0);
     place(p, rect, Align2::CENTER_CENTER, g, fg);
     tip(r, tooltip).clicked()

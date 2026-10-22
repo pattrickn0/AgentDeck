@@ -6,7 +6,7 @@ use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
 use agentdeck_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
 
 use super::git::{diff_lines, Act, BTN_H};
-use super::{clickable, frame, galley, galley_trunc, place, text_in, tip};
+use super::{clickable, frame, galley, galley_spaced, galley_trunc, place, text_in, tip};
 use crate::deck::Deck;
 use crate::git_ui::{GitSubView, OpenCommit, OpenConflict, OpenStashDiff};
 use crate::theme;
@@ -36,13 +36,30 @@ pub(super) fn pill(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, toolti
     *right = r.min.x - 6.0;
     let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
     let hot = enabled && resp.hovered();
-    let (bg, fg) = match look {
-        Look::Primary => (if hot { theme::brighten(theme::accent(), 1.15) } else { theme::accent() }, theme::pal().on_accent),
-        Look::Danger => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().danger_text),
-        Look::Normal => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().text),
+    let p = theme::pal();
+    let (bg, border, fg) = match look {
+        Look::Primary => {
+            if enabled {
+                let fill = if hot { theme::brighten(theme::accent(), 1.08) } else { theme::accent() };
+                (fill, fill, p.on_accent)
+            } else {
+                (p.hover, p.separator, theme::with_opacity(p.text, 0.4))
+            }
+        }
+        Look::Danger => {
+            let fill = if hot { theme::with_alpha(p.danger, 0.18) } else { theme::with_alpha(p.danger, 0.10) };
+            let border = theme::with_alpha(p.danger, 0.35);
+            let fg = if enabled { p.danger_text } else { theme::with_opacity(p.danger_text, 0.4) };
+            (fill, border, fg)
+        }
+        Look::Normal => {
+            let fill = if hot { theme::with_alpha(p.text_strong, 0.08) } else { theme::with_alpha(p.text_strong, 0.04) };
+            let border = theme::with_alpha(p.text_strong, 0.14);
+            let fg = if enabled { p.text } else { theme::with_opacity(p.text, 0.4) };
+            (fill, border, fg)
+        }
     };
-    let fg = if enabled { fg } else { theme::with_opacity(fg, 0.4) };
-    painter.rect_filled(r, 6.0, if enabled || look != Look::Primary { bg } else { theme::pal().hover });
+    frame(painter, r, 5.0, bg, border);
     text_in(painter, r, Align2::CENTER_CENTER, label, theme::ui_semibold(11.5), fg);
     tip(resp, tooltip.to_owned()).clicked() && enabled
 }
@@ -193,20 +210,14 @@ fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>
     y += mh + 8.0;
     // Arquivos alterados (até 5 linhas).
     let title = format!("{} ARQUIVO(S) ALTERADO(S)", d.files.len());
-    text_in(
-        &p,
-        Rect::from_min_size(Pos2::new(area.min.x + 14.0, y), Vec2::new(w, 16.0)),
-        Align2::LEFT_CENTER,
-        &title,
-        theme::ui_bold(10.5),
-        theme::pal().text_2,
-    );
+    let g = galley_spaced(&p, &title, theme::label(10.0), theme::pal().text_2, 0.8);
+    place(&p, Rect::from_min_size(Pos2::new(area.min.x + 14.0, y), Vec2::new(w, 16.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
     y += 18.0;
     for (letter, path) in d.files.iter().take(5) {
         let color = match letter {
-            'A' => theme::BADGE_JSON,
+            'A' => theme::pal().success,
             'D' => theme::pal().danger_text,
-            'M' => theme::OLLAMA,
+            'M' => theme::pal().warning,
             _ => theme::pal().info,
         };
         text_in(
@@ -259,10 +270,12 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     let x0 = body.min.x + 10.0;
     let x1 = body.max.x - 10.0;
     let input = Rect::from_min_size(Pos2::new(x0, body.min.y + 8.0), Vec2::new(x1 - x0, 28.0));
-    frame(&p, input, 7.0, theme::pal().recess, theme::pal().glass_border);
+    let id = Id::new("git-stash-msg");
+    let focused = ui.ctx().memory(|m| m.has_focus(id));
+    frame(&p, input, 6.0, theme::pal().recess, if focused { theme::accent() } else { theme::pal().separator });
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input.shrink(1.0)));
     let out = egui::TextEdit::singleline(&mut deck.git.stash_message)
-        .id(Id::new("git-stash-msg"))
+        .id(id)
         .frame(egui::Frame::NONE)
         .margin(egui::Margin { left: 9, right: 9, top: 5, bottom: 5 })
         .font(theme::ui(12.5))
@@ -289,8 +302,8 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     p.rect(
         box_r,
         3.0,
-        if on { theme::accent() } else { theme::pal().hover },
-        egui::Stroke::new(1.0, theme::pal().text_2),
+        if on { theme::accent() } else { theme::pal().recess },
+        egui::Stroke::new(1.0, if on { theme::accent() } else { theme::pal().separator }),
         egui::StrokeKind::Inside,
     );
     if on {
@@ -393,11 +406,20 @@ fn pill_small(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, tooltip: &s
     *right = r.min.x - 4.0;
     let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
     let hot = enabled && resp.hovered();
-    let fg = match look {
-        Look::Danger => theme::pal().danger_text,
-        _ => theme::pal().text,
+    let p = theme::pal();
+    let (bg, border, fg) = match look {
+        Look::Danger => (
+            if hot { theme::with_alpha(p.danger, 0.18) } else { theme::with_alpha(p.danger, 0.10) },
+            theme::with_alpha(p.danger, 0.35),
+            p.danger_text,
+        ),
+        _ => (
+            if hot { theme::with_alpha(p.text_strong, 0.08) } else { theme::with_alpha(p.text_strong, 0.04) },
+            theme::with_alpha(p.text_strong, 0.14),
+            p.text,
+        ),
     };
-    painter.rect_filled(r, 5.0, if hot { theme::pal().separator } else { theme::pal().chip });
+    frame(painter, r, 5.0, bg, border);
     text_in(painter, r, Align2::CENTER_CENTER, label, theme::ui(11.0), if enabled { fg } else { theme::with_opacity(fg, 0.4) });
     tip(resp, tooltip.to_owned()).clicked() && enabled
 }
@@ -561,14 +583,8 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
         theme::pal().text,
     );
     y += 22.0;
-    text_in(
-        &p,
-        Rect::from_min_size(Pos2::new(x0, y), Vec2::new(90.0, 24.0)),
-        Align2::LEFT_CENTER,
-        "ARQUIVO INTEIRO",
-        theme::ui_bold(10.5),
-        theme::pal().text_2,
-    );
+    let g = galley_spaced(&p, "ARQUIVO INTEIRO", theme::label(10.0), theme::pal().text_2, 0.8);
+    place(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(110.0, 24.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
     let mut right = x1;
     for (label, choice, tooltip) in [
         ("Ambos", ConflictChoice::Both, "Junta os dois lados, o nosso primeiro"),
@@ -628,7 +644,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
         ("DELES", &b.theirs_label, &b.theirs, theme::with_alpha(theme::pal().info, 0.14)),
     ] {
         let t = if label.is_empty() { title.to_owned() } else { format!("{title} · {label}") };
-        let g = galley_trunc(&p, &t, theme::ui_bold(10.5), theme::pal().text_2, w - 20.0);
+        let g = galley_spaced(&p, &t, theme::label(10.0), theme::pal().text_2, 0.8);
         place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 10.0, y), Vec2::new(w - 20.0, 18.0)),
@@ -752,8 +768,9 @@ pub(super) fn op_banner(ui: &mut Ui, rect: Rect, y: f32, st: &GitStatus, busy: b
     let h = 32.0;
     let r = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), h));
     let p = ui.painter_at(r);
-    p.rect_filled(r, 0.0, theme::with_opacity(theme::OLLAMA, 0.10));
-    p.rect_filled(Rect::from_min_size(r.min, Vec2::new(3.0, h)), 0.0, theme::OLLAMA);
+    let warn = theme::pal().warning;
+    p.rect_filled(r, 0.0, theme::with_opacity(warn, 0.10));
+    p.rect_filled(Rect::from_min_size(r.min, Vec2::new(3.0, h)), 0.0, warn);
     let conflicts = crate::git_ui::conflict_count(st);
     let mut right = r.max.x - 8.0;
     let top = r.min.y + 4.0;
@@ -777,8 +794,8 @@ pub(super) fn op_banner(ui: &mut Ui, rect: Rect, y: f32, st: &GitStatus, busy: b
     }
     let text = if conflicts > 0 { format!("{name} · {conflicts} conflito(s)") } else { format!("{name} em andamento") };
     let tr = Rect::from_min_max(Pos2::new(r.min.x + 12.0, r.min.y), Pos2::new(right, r.max.y));
-    let g = galley_trunc(&p, &text, theme::ui_semibold(12.0), theme::OLLAMA, tr.width());
-    place(&p, tr, Align2::LEFT_CENTER, g, theme::OLLAMA);
+    let g = galley_trunc(&p, &text, theme::ui_semibold(12.0), warn, tr.width());
+    place(&p, tr, Align2::LEFT_CENTER, g, warn);
     tip(ui.interact(tr, Id::new("git-op-text"), Sense::hover()), text);
     h
 }
