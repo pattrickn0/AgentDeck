@@ -65,18 +65,6 @@ fn open_project_folder(deck: &Deck, path: &Path) {
     }
 }
 
-/// Título de seção da barra lateral (MAIÚSCULAS, 11 px, MUTED).
-fn section_title(painter: &egui::Painter, head: Rect, title: &str) {
-    let g = galley_trunc(painter, title, theme::ui_semibold(11.0), theme::pal().text_2, head.width() - 60.0);
-    place(
-        painter,
-        Rect::from_min_max(Pos2::new(head.min.x + 12.0, head.min.y), Pos2::new(head.max.x - 52.0, head.max.y)),
-        Align2::LEFT_CENTER,
-        g,
-        theme::pal().text_2,
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Árvore de agentes
 // ---------------------------------------------------------------------------
@@ -262,7 +250,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     // ---------- Cabeçalho da seção PROJETOS ----------
     let head_rect = Rect::from_min_size(Pos2::new(rect.min.x, *top_y + 4.0), Vec2::new(rect.width(), SECTION_H));
     *top_y = head_rect.max.y;
-    section_title(&painter, head_rect, "PROJETOS");
+    super::section_label(&painter, head_rect, "PROJETOS");
 
     // Botão "+" para novo projeto
     let plus_r = Rect::from_min_size(Pos2::new(head_rect.max.x - 24.0, head_rect.min.y + 2.0), Vec2::new(20.0, 20.0));

@@ -20,8 +20,6 @@ use crate::github_ui::{instance_spec, normalize_role, GithubTab, GithubView};
 use crate::icons::Icon;
 use crate::theme;
 
-/// Verde de "aprovado" e âmbar de "em andamento" (o vermelho é `theme::pal().danger`).
-
 const PAD: f32 = 10.0;
 const REPO_BAR_H: f32 = 34.0;
 const SUBTABS_H: f32 = 28.0;
@@ -811,7 +809,7 @@ fn log_lines(ui: &mut Ui, body: Rect, log: &JobLog, job_id: u64) {
                 let fg = if is_err {
                     theme::pal().danger_text
                 } else if first_clipped {
-                    theme::pal().text_2
+                    theme::pal().text_3
                 } else {
                     theme::pal().text_2
                 };

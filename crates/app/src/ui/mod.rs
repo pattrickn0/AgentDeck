@@ -383,6 +383,7 @@ pub fn section_label(painter: &Painter, rect: Rect, text: &str) -> Rect {
 /// Controle segmentado ("Abas | Dividida | Destaque"): trilho `recess` (cantos 7), segmentos de
 /// cantos 5. O ativo leva a cor de destaque com texto `on_accent` (`accent = true`) ou o fundo
 /// `selected` com texto `text_strong` (`accent = false`). Devolve o índice clicado, se houve.
+#[allow(dead_code)] // Para a parte 2 (barra lateral e centro).
 pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, accent: bool) -> Option<usize> {
     let painter = ui.painter();
     let p = theme::pal();
@@ -414,6 +415,7 @@ pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, a
 
 /// O jeito de um botão de texto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Para as partes 2 e 3.
 pub enum ButtonKind {
     /// Cor de destaque, texto `on_accent`, 600.
     Primary,
@@ -424,6 +426,7 @@ pub enum ButtonKind {
 }
 
 /// Botão de texto (cantos 5). Devolve a resposta; quem chama trata o clique.
+#[allow(dead_code)] // Para as partes 2 e 3.
 pub fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: ButtonKind) -> Response {
     let r = clickable(ui, rect, id);
     let painter = ui.painter();
@@ -451,6 +454,7 @@ pub fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: ButtonKind) -> Res
 }
 
 /// Largura de um botão de texto com `label` (10 px de cada lado).
+#[allow(dead_code)] // Para as partes 2 e 3.
 pub fn button_width(painter: &Painter, label: &str, kind: ButtonKind) -> f32 {
     let font = if kind == ButtonKind::Primary { theme::ui_semibold(11.5) } else { theme::ui(11.5) };
     text_w(painter, label, font) + 20.0

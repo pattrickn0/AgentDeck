@@ -158,16 +158,19 @@ pub fn set_accent(c: Option<Color32>) {
 }
 
 /// Destaque a 18% de alfa: fundo da linha selecionada.
+#[allow(dead_code)] // Para a parte 2 (linha selecionada).
 pub fn accent_soft(a: Color32) -> Color32 {
     with_alpha(a, 0.18)
 }
 
 /// Destaque a 10% de alfa: fundo de um cartão em foco.
+#[allow(dead_code)] // Para a parte 3 (cartão em foco).
 pub fn accent_wash(a: Color32) -> Color32 {
     with_alpha(a, 0.10)
 }
 
 /// Destaque a 50% de alfa: borda de um cartão em foco.
+#[allow(dead_code)] // Para a parte 3 (cartão em foco).
 pub fn accent_edge(a: Color32) -> Color32 {
     with_alpha(a, 0.50)
 }
@@ -297,6 +300,7 @@ const PLEX_MONO_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Medi
 pub fn ui(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
 }
+#[allow(dead_code)] // Para a parte 2 (nomes de agente).
 pub fn ui_medium(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_UI_MEDIUM.into()))
 }
