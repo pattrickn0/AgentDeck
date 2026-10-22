@@ -7,5 +7,5 @@ Alterações no `SKILL.md`: `name` passou de `desktop-applications` para `rust-d
 `user-invocable: false` e `disable-model-invocation: true` (com eles a skill nunca carregava). As referências
 estão como no original.
 
-Uso no CommandDeck: referência geral de Rust desktop. A maior parte é sobre Tauri; para egui vale
-`references/native-gui-frameworks.md`. As regras visuais do app ficam na skill `commanddeck-ui`.
+Uso no AgentDeck: referência geral de Rust desktop. A maior parte é sobre Tauri; para egui vale
+`references/native-gui-frameworks.md`. As regras visuais do app ficam na skill `agentdeck-ui`.

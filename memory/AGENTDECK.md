@@ -1,6 +1,6 @@
 # AgentDeck: visão e rumo
 
-O CommandDeck está virando o **AgentDeck**: o ambiente de desenvolvimento dos agentes de IA. Desde 2026-10-17 o
+O **AgentDeck** (antes CommandDeck) é o ambiente de desenvolvimento dos agentes de IA. Desde 2026-10-17 o
 produto é conduzido pelo Claude (o orquestrador); o usuário acompanha como cliente e colaborador e é quem aprova o
 que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia é na `dev`).
 
@@ -50,8 +50,9 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
    passa a ter "abas de documento" ao lado das abas de terminal, e o diff de uma tarefa (e depois o editor de arquivos e um
    explorador mais útil) abre nelas, em largura de tela cheia. É o que falta para o humano validar sem sair do app.
    Detalhes e subitens: [pendencias.md](pendencias.md), bloco "Próximo", item b).
-5. **Estabilizar e promover a `dev` para a `main`** (combinado em 2026-10-21): a `main` está 157 commits atrás da `dev`. Antes de
-   promover, rodar os testes de [testes.md](testes.md) das áreas novas (mesa, memória, janelas) e corrigir o que falhar; quem
-   aprova a promoção é o usuário.
-6. **Renomear para AgentDeck** (executáveis, variáveis `COMMANDDECK_*`, pasta de dados, marcadores do `AGENTS.md`),
-   com migração, depois do diff legível e da promoção para a `main`.
+5. **Renomear para AgentDeck e identidade visual** (combinado em 2026-10-22; vem antes da `main`, para quem usa a `main`
+   migrar uma vez só). **O nome foi feito** (tarefa `t20`, com migração dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md),
+   seção 6). **O visual é a tarefa seguinte**: cores, logo, ícone e temas ([pendencias.md](pendencias.md), bloco "Próximo").
+6. **Estabilizar e promover a `dev` para a `main`** (combinado em 2026-10-21): a `main` está 157 commits atrás da `dev`. Os testes
+   de [testes.md](testes.md) rodam uma vez só, já sobre o app renomeado e redesenhado: mesa, memória, janelas e Documentos.
+   Corrigir o que falhar; quem aprova a promoção é o usuário.

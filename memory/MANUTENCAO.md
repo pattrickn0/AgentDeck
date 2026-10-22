@@ -1,6 +1,6 @@
 # Guia de manutenção
 
-Este guia é para quem vai manter o CommandDeck, sozinho ou junto com agentes de IA. Ele não pressupõe experiência com Rust.
+Este guia é para quem vai manter o AgentDeck, sozinho ou junto com agentes de IA. Ele não pressupõe experiência com Rust.
 Visão geral e mapa dos documentos: [GERAL.md](GERAL.md).
 
 ## 1. Como o Rust funciona, na prática
@@ -16,7 +16,7 @@ Visão geral e mapa dos documentos: [GERAL.md](GERAL.md).
 ### Comandos do dia a dia
 
 ```bash
-cargo run -p commanddeck            # compila e abre o app (debug)
+cargo run -p agentdeck            # compila e abre o app (debug)
 cargo build --workspace --release   # gera os .exe otimizados em target/release/
 cargo test --workspace              # roda os testes
 cargo clippy --workspace --all-targets -- -D warnings   # "linter": aponta código suspeito
@@ -31,7 +31,7 @@ Versão mínima do Rust: **1.89** (`rust-version` no `Cargo.toml`). A primeira c
 ```
 Cargo.toml                 workspace + versões das dependências compartilhadas
 crates/
-├── core/   (commanddeck-core)   "backend": nada de interface gráfica
+├── core/   (agentdeck-core)   "backend": nada de interface gráfica
 │   ├── lib.rs        Core: a API que a interface usa (como os canais IPC)
 │   ├── events.rs     CoreEvent: o que o backend avisa à interface
 │   ├── agents.rs     lista de agentes, onde achar cada CLI, comando de cada aba, instruções da ponte
@@ -60,7 +60,7 @@ crates/
 │   ├── tests/tasks_bridge.rs   rotas /tasks e permissões do agente de uma tarefa
 │   ├── tests/support/tasks_env.rs   cenário compartilhado dos dois (repositório, agente falso, git isolado)
 │   └── tests/github.rs   remoto origin com o git real; um teste `--ignored` com a rede e a credencial reais
-├── app/    (commanddeck)        interface gráfica (o .exe principal)
+├── app/    (agentdeck)        interface gráfica (o .exe principal)
 │   ├── main.rs / app.rs / window.rs   janela winit, OpenGL, loop de eventos
 │   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
 │   ├── icons.rs      ícones SVG rasterizados em tempo de execução
@@ -72,12 +72,12 @@ crates/
 │   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
 │   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, validar, descartar, reabrir a aba)
 │   ├── docs.rs       modo Documentos do centro: `CenterView`, `DocKind`/`DocTab`/`DocState`, `Docs` (abrir, focar, fechar, duplicata, por projeto), a lista de arquivos de um diff (`diff_files`), o selo da chave (`Badge`) e, em `impl Deck`, abrir cada tipo de documento e ler fora da thread da interface (`UiMsg::Doc`); testes puros
-│   ├── docs_demo.rs  documentos fictícios do `COMMANDDECK_DEBUG_UI=docs-demo*`
+│   ├── docs_demo.rs  documentos fictícios do `AGENTDECK_DEBUG_UI=docs-demo*`
 │   ├── dictation.rs  ditado por voz: estados do microfone e destino fixo na aba onde a gravação começou (funções puras, com testes)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas), anexos e arquivos soltos
 │   ├── audio.rs      som de notificação e microfone (cpal)
-│   ├── crash.rs      registro de quedas em dados/crash.log; smoke.rs, a captura de tela (COMMANDDECK_SMOKE)
+│   ├── crash.rs      registro de quedas em dados/crash.log; smoke.rs, a captura de tela (AGENTDECK_SMOKE)
 │   └── ui/           mod.rs (pintura, modais)
 │       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
 │       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾; pinta uma lista de `Item`, serve às abas dos agentes e às dos documentos)
@@ -86,7 +86,7 @@ crates/
 │       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
 │       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
 │       └── menus.rs (nova aba, configurações), shortcuts.rs (atalhos), overlay.rs (arrastar arquivos), empty_state.rs (nenhum agente aberto)
-└── cli/    (commanddeck-cli)    ask-agent e ollama-agent
+└── cli/    (agentdeck-cli)    ask-agent e ollama-agent
     ├── src/bin/ask-agent.rs     o comando dos agentes (`parse_task`, `learn_command`, `models_command`, com testes)
     ├── src/bin/ollama-agent.rs  o agente local com ferramentas
     └── tests/ask_agent.rs, tests/tasks.rs   o `ask-agent` de verdade contra uma ponte real
@@ -126,7 +126,7 @@ Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/
 formato da grade, retângulos, divisores, vizinho para os atalhos, ordem das janelas, foco ao fechar); o
 `Deck` guarda a ordem (`group_order`), as proporções (`split_ratios`) e qual aba aparece em cada janela (a
 ativada mais recentemente, `Tab::shown`); a pintura fica em `crates/app/src/ui/panes.rs` (janelas, divisores,
-arrasto) e `ui/tabs.rs` (faixa de abas). Para ver o arrasto sem mouse: `COMMANDDECK_DEBUG_UI=split-drag`.
+arrasto) e `ui/tabs.rs` (faixa de abas). Para ver o arrasto sem mouse: `AGENTDECK_DEBUG_UI=split-drag`.
 
 **Mexer no ditado e nos anexos.** Os botões de microfone e de anexo ficam no cabeçalho de cada janela (`ui/panes.rs`) e agem na
 aba visível dela; o estado do microfone e o destino fixo da transcrição são funções puras e testadas em `crates/app/src/dictation.rs`;
@@ -138,7 +138,7 @@ tarefa" anexa pelo mesmo caminho (`util::append_brief_attachments` junta os cami
 `base_command`); o estado e as releituras, em `crates/app/src/git_ui.rs`; a pintura, em `crates/app/src/ui/git.rs`
 (o desenho só coleta as ações e aplica no fim). Comando novo do git: sempre `args([...])` com `--` antes de
 caminhos, nunca um shell; teste a interpretação da saída com bytes de exemplo e o fluxo em `tests/git.rs`. Para ver
-sem um repositório: `COMMANDDECK_DEBUG_UI=git-demo` (ou `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
+sem um repositório: `AGENTDECK_DEBUG_UI=git-demo` (ou `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
 
 **Mexer na aba GitHub.** A leitura fica em `crates/core/src/github.rs` (`impl Core`: `github_refresh`,
 `github_load_pr`, `github_load_run_jobs`, `github_load_job_log`, todas em thread própria e devolvendo
@@ -148,9 +148,9 @@ O token nunca sai de `SecretToken`: não o coloque em log, `format!` de erro nem
 dos eventos ficam em `crates/app/src/github_ui.rs`; a pintura, em `crates/app/src/ui/github.rs`. A mensagem
 enviada ao agente é montada no core (`format_pr_prompt`, `format_issue_prompt`, `format_failed_job_prompt`) e
 entregue por `Deck::send_to_instance` (abre a aba se não existir e enfileira como qualquer mensagem de outro
-agente, com `request: 0`). Para ver sem rede: `COMMANDDECK_DEBUG_UI=github-demo` (ou `github-issues`,
+agente, com `request: 0`). Para ver sem rede: `AGENTDECK_DEBUG_UI=github-demo` (ou `github-issues`,
 `github-actions`, `github-menu`, `github-norepo`, `github-error`). Para testar a rede e o login reais:
-`cargo test -p commanddeck-core --test github -- --ignored --nocapture`.
+`cargo test -p agentdeck-core --test github -- --ignored --nocapture`.
 
 **Novo aprendizado.** Crie `memory/aprendizados/<nome>.md` (formato e critérios no `README.md` da pasta). Um frontmatter inválido é
 ignorado com um aviso no log, e o teste `every_learning_in_the_repository_is_valid` (`learnings.rs`) falha se algum arquivo da pasta não
@@ -171,10 +171,10 @@ Toda chamada de tarefa do core roda git, então vai para `Deck::spawn_bg` e volt
 estado tem é `actions_for` (função pura, com testes); o agrupamento da lista, o resumo do diff (`parse_diff_stat`) e os
 textos de tempo também. O diff completo vem de `Core::task_diff` e abre no centro (`Deck::docs_open_task_diff`, ver "Mexer no modo
 Documentos"), desenhado por `ui::git::diff_lines_at`, o mesmo desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
-de novo; o terminal abre na worktree sozinho). Para ver sem git nem agentes: `COMMANDDECK_DEBUG_UI=tasks-demo` (ou
+de novo; o terminal abre na worktree sozinho). Para ver sem git nem agentes: `AGENTDECK_DEBUG_UI=tasks-demo` (ou
 `tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-confirm`, `tasks-discard`,
 `tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` em `app.rs`).
-Para a largura mínima da barra, ponha `{"rightPanelWidth": 280}` em `cfg/config.json` da pasta de `COMMANDDECK_HOME`.
+Para a largura mínima da barra, ponha `{"rightPanelWidth": 280}` em `cfg/config.json` da pasta de `AGENTDECK_HOME`.
 
 **Mexer no modo Documentos.** O estado e a lógica pura ficam em `crates/app/src/docs.rs` (`Docs`: abrir/focar/fechar por projeto, sem
 duplicata; `diff_files`: a lista de arquivos de um `GitDiff`; `DocTab::apply`: o que cada tipo mostra ao receber a leitura), com
@@ -186,14 +186,14 @@ a leitura em `Deck::docs_load` (numa thread, volta como `UiMsg::Doc`) e o corpo 
 Regras que não se quebram: com o centro em Documentos **nenhum `fit_tab`** roda (o PTY não muda de tamanho), o terminal não recebe teclado
 nem IME (`handle_key`, `handle_ime`) e o fim de turno marca `Tab.done` mesmo na aba ativa. O watcher (`CoreEvent::WorkspaceChanged`) relê
 os arquivos abertos (`docs_reload_files`). `tasks_flow_tests.rs` cobre o fluxo com o core e o git reais. Para ver sem nada disso:
-`COMMANDDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`; `docs_demo.rs`).
+`AGENTDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`; `docs_demo.rs`).
 
 **Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
 
 **Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O agente Ollama já consulta os provedores registrados.
 
 **Adicionar um teste.** Coloque um `#[test]` num bloco `#[cfg(test)] mod tests` no fim do arquivo. Para testes de ponta a ponta, use `crates/core/tests/`.
-Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident).env["COMMANDDECK_TOKEN"]`
+Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident).env["AGENTDECK_TOKEN"]`
 (veja `tab_token` em `tests/bridge.rs`); com o token mestre, o `from` do corpo é aceito. Os testes iniciam o
 `Core` com `system_dirs: false`, para não depender dos CLIs instalados na máquina.
 
@@ -202,9 +202,31 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `AGENTDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `AGENTDECK_DEBUG_FEED=1`, `AGENTDECK_DEBUG_FAKE_SHELL=1` e `AGENTDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas
 
 A lista fica em [pendencias.md](pendencias.md), por área; o que ainda não rodou no Windows está em [testes.md](testes.md).
+
+## 6. Migração do nome (CommandDeck → AgentDeck)
+
+O app se chamava CommandDeck e passou a AgentDeck (tarefa `t20`). Durante a transição o código **lê os dois nomes** e
+**escreve só o novo**:
+
+| O quê | Novo | Também aceito (antigo) |
+| :-- | :-- | :-- |
+| Variáveis de ambiente (`PORT`, `TOKEN`, `AGENT`, `ROLE`, `DEPTH`, `ASK_WAIT`, `HOME`, `SMOKE`, `DEBUG_*`, `OLLAMA_*`…) | `AGENTDECK_*` | `COMMANDDECK_*` (só se a nova faltar ou estiver vazia; ajudante `agentdeck_core::env_var`) |
+| Cabeçalho da ponte | `x-agentdeck-token` | `x-commanddeck-token` |
+| Marcadores do `AGENTS.md` | `<!-- agentdeck:start/end -->` | `commanddeck:`, `orquestra:`, `jwic:` (o bloco é trocado pelo novo) |
+| Trava da pasta de dados | `dados/.agentdeck.lock` | `dados/.commanddeck.lock` (travada também; o app novo não abre com o antigo aberto) |
+| Configuração | `%APPDATA%/AgentDeck/config.json` | `%APPDATA%/CommandDeck/config.json` (copiada para o novo na primeira abertura, com as abas; o antigo não é apagado) |
+
+Os executáveis são `agentdeck.exe`, `ask-agent` e `ollama-agent` (os dois últimos não mudaram de nome). `dados/` não mudou.
+
+**Até quando:** até a próxima versão depois da promoção da `dev` para a `main`. Depois disso, tire os fallbacks de uma vez
+(`env.rs`, `bridge::token_header`, `workspace::marker_re`, `LOCK_FILES` em `lib.rs`, `config::legacy_config_files`), junto com os
+testes que os cobrem. Por que não antes: [aprendizados/nomes-antigos-aceitos-na-migracao.md](aprendizados/nomes-antigos-aceitos-na-migracao.md).
+
+**Depois de atualizar:** o repositório do GitHub e a pasta local `commanddeck-dev` ainda têm o nome antigo; renomeá-los é
+ação do usuário (o GitHub redireciona a URL antiga).

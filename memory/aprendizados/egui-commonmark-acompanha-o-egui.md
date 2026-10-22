@@ -11,5 +11,5 @@ o desenho próprio com `pulldown-cmark` (títulos, listas com `- [ ]`, tabelas, 
 **Por quê:** o app zera `style.spacing.item_spacing` e `button_padding` (`theme::install_style`) porque quase tudo é pintado à mão; o
 `egui_commonmark` depende desse espaçamento para separar parágrafos e itens, e sem ele o texto sai colado. Por isso
 `ui/docs.rs::markdown_style` restaura o espaçamento, as fontes e as cores só dentro da coluna do documento.
-**Como aplicar:** ao atualizar o egui, atualize junto e confira o resultado com `COMMANDDECK_DEBUG_UI=docs-demo-report`; mexa no
+**Como aplicar:** ao atualizar o egui, atualize junto e confira o resultado com `AGENTDECK_DEBUG_UI=docs-demo-report`; mexa no
 estilo do markdown só em `markdown_style`, nunca em `install_style`.
