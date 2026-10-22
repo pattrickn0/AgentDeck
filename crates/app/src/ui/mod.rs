@@ -44,6 +44,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     // A cor de destaque do quadro (a do agente em foco) vale para tudo que for desenhado abaixo.
     theme::set_accent(deck.accent_opt());
     background::draw(ui.painter(), window, deck.accent());
+    theme::sync_selection(ui.ctx(), deck.accent());
     let ctx = ui.ctx().clone();
     // Cada modal desenhado neste quadro volta a marcar (ver `modal_backdrop`).
     deck.modal_open = false;
@@ -55,7 +56,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let collapsed = deck.sidebar_collapsed;
     let sw = deck.sidebar_w.clamp(theme::SIDEBAR_MIN_W, theme::SIDEBAR_MAX_W);
     let left = if collapsed { 0.0 } else { sw + gap };
-    let (right_w, right_max) = right_width(deck.right_w, body.width(), left);
+    let (right_w, right_max) = right_width(deck.right_w, body.width(), left + gap);
     let center = Rect::from_min_max(Pos2::new(body.min.x + left, body.min.y), Pos2::new(body.max.x - right_w - gap, body.max.y));
     let side = Rect::from_min_size(body.min, Vec2::new(sw, body.height()));
     // A barra tem sempre a mesma largura: as listas e o diff do Git rolam dentro dela.
@@ -80,7 +81,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
         deck.pane_drag = None;
         island(ui, center, IslandKind::Well);
         docs::draw(deck, ui, center);
-        island_edge(ui, center);
+        island_edge(ui, center, IslandKind::Well);
     } else {
         panes::draw(deck, ui, center);
     }
@@ -89,7 +90,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     if !collapsed {
         island(ui, side, IslandKind::Glass);
         sidebar::draw(deck, ui, side);
-        island_edge(ui, side);
+        island_edge(ui, side, IslandKind::Glass);
     }
 
     // ---------- Barra de título ----------
@@ -107,7 +108,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
         let (rect, _) = ui.allocate_exact_size(panel.size(), Sense::hover());
         island(ui, rect, IslandKind::Glass);
         right_panel::draw_panel(deck, ui, rect);
-        island_edge(ui, rect);
+        island_edge(ui, rect, IslandKind::Glass);
     });
 
     // ---------- Menus suspensos e overlay ----------
@@ -188,7 +189,8 @@ pub fn island_shadows(painter: &Painter, area: Rect, islands: &[Rect]) {
         |r: Rect| egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: theme::pal().shadow }.as_shape(r, theme::ISLAND_RADIUS);
     for free in free_rects(area, islands) {
         let clipped = painter.with_clip_rect(free.intersect(painter.clip_rect()));
-        for r in islands {
+        // Só as ilhas cuja sombra (até 32 px) alcança esta sobra.
+        for r in islands.iter().filter(|r| r.expand(32.0).intersects(free)) {
             clipped.add(shape(*r));
         }
     }
@@ -200,8 +202,8 @@ pub fn island(ui: &Ui, rect: Rect, kind: IslandKind) {
 }
 
 /// Acabamento de uma ilha, depois do conteúdo: repinta o fundo nos quatro cantos (o conteúdo é
-/// retangular e vazaria pelo arredondado), a borda de 1 px e o filete de luz no topo interno.
-pub fn island_edge(ui: &Ui, rect: Rect) {
+/// retangular e vazaria pelo arredondado), a borda de 1 px e, no vidro, o filete de luz no topo interno.
+pub fn island_edge(ui: &Ui, rect: Rect, kind: IslandKind) {
     let painter = ui.painter();
     let window = ui.ctx().content_rect();
     let accent = theme::accent();
@@ -230,11 +232,13 @@ pub fn island_edge(ui: &Ui, rect: Rect) {
         }
     }
     painter.add(egui::Shape::mesh(mesh));
-    // Filete no topo interno, entre os cantos.
-    painter.line_segment(
-        [Pos2::new(rect.min.x + r, rect.min.y + 1.0), Pos2::new(rect.max.x - r, rect.min.y + 1.0)],
-        Stroke::new(1.0, theme::pal().glass_highlight),
-    );
+    // Filete no topo interno, entre os cantos (só o vidro tem; o poço não).
+    if kind == IslandKind::Glass {
+        painter.line_segment(
+            [Pos2::new(rect.min.x + r, rect.min.y + 1.0), Pos2::new(rect.max.x - r, rect.min.y + 1.0)],
+            Stroke::new(1.0, theme::pal().glass_highlight),
+        );
+    }
     painter.rect_stroke(rect, r, Stroke::new(1.0, theme::pal().glass_border), egui::StrokeKind::Inside);
 }
 
@@ -360,7 +364,7 @@ pub fn separator(painter: &Painter, a: Pos2, b: Pos2) {
 /// ponta esquerda, centrada na vertical em `at.y`; devolve o retângulo ocupado.
 pub fn chip(painter: &Painter, at: Pos2, text: &str, size: f32, color: Color32) -> Rect {
     let g = galley(painter, text, theme::meta(size), color);
-    let rect = Rect::from_min_size(Pos2::new(at.x, at.y - 8.0), Vec2::new(g.size().x + 12.0, 16.0));
+    let rect = Rect::from_min_size(Pos2::new(at.x, at.y - 7.0), Vec2::new(g.size().x + 12.0, 14.0));
     painter.rect_filled(rect, 4.0, theme::pal().chip);
     place(painter, rect, Align2::CENTER_CENTER, g, color);
     rect

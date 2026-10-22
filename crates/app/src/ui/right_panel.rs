@@ -64,7 +64,7 @@ fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: 
         let g = galley(painter, &txt, theme::ui(10.0), theme::pal().on_accent);
         let size = Vec2::new((g.size().x + 8.0).max(14.0), 14.0);
         let b = Rect::from_min_size(Pos2::new(center.x + 3.0, center.y - 13.0), size);
-        painter.rect_filled(b.expand(1.5), 8.0, theme::pal().chip);
+        painter.rect_filled(b.expand(1.5), 8.0, theme::glass_solid());
         painter.rect_filled(b, 7.0, theme::accent());
         place(painter, b, Align2::CENTER_CENTER, g, theme::pal().on_accent);
     }

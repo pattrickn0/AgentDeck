@@ -34,7 +34,7 @@ fn glows(window: Rect, accent: Color32) -> [Glow; 2] {
             radii: Vec2::new(900.0, 520.0),
             color: theme::with_alpha(accent, 0.10),
         },
-        Glow { center: window.max, radii: Vec2::new(800.0, 600.0), color: Color32::from_white_alpha(9) },
+        Glow { center: window.max, radii: Vec2::new(800.0, 600.0), color: theme::pal().glow },
     ]
 }
 

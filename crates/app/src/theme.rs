@@ -63,6 +63,10 @@ pub struct Palette {
     pub info: Color32,
     /// Película escura atrás de um modal.
     pub scrim: Color32,
+    /// Brilho de baixo à direita do fundo (branco, 3,5%).
+    pub glow: Color32,
+    /// Cor de quem escreve na Conversa ("você"): identidade, não estado.
+    pub user: Color32,
     /// Sombra das ilhas.
     pub shadow: Color32,
 }
@@ -110,6 +114,8 @@ pub const DARK: Palette = Palette {
     warning: rgb(0xe5a23a),
     info: rgb(0x7cc4fa),
     scrim: rgba8(0, 0, 0, 128),
+    glow: white(9),
+    user: rgb(0x10b981),
     shadow: rgba8(0, 0, 0, 71),
 };
 
@@ -144,17 +150,24 @@ static ACCENT: AtomicU32 = AtomicU32::new(0);
 /// (`ui::draw`) a atualiza no começo de cada quadro com [`set_accent`]. Nunca use uma cor fixa de
 /// marca para seleção ou ação primária.
 pub fn accent() -> Color32 {
-    let v = ACCENT.load(Ordering::Relaxed);
+    unpack_accent(ACCENT.load(Ordering::Relaxed))
+}
+
+/// A cor guardada (ou o neutro, sem o bit de "há cor").
+fn unpack_accent(v: u32) -> Color32 {
     if v & ACCENT_SET == 0 {
         return pal().accent_neutral;
     }
     Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
+fn pack_accent(c: Option<Color32>) -> u32 {
+    c.map_or(0, |c| ACCENT_SET | (c.r() as u32) << 16 | (c.g() as u32) << 8 | c.b() as u32)
+}
+
 /// Guarda a cor de destaque do quadro (`None`: sem aba em foco).
 pub fn set_accent(c: Option<Color32>) {
-    let v = c.map_or(0, |c| ACCENT_SET | (c.r() as u32) << 16 | (c.g() as u32) << 8 | c.b() as u32);
-    ACCENT.store(v, Ordering::Relaxed);
+    ACCENT.store(pack_accent(c), Ordering::Relaxed);
 }
 
 /// Destaque a 18% de alfa: fundo da linha selecionada.
@@ -493,6 +506,16 @@ pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
     loaded
 }
 
+/// A seleção de texto do egui acompanha a cor de destaque (chame a cada quadro; só reescreve o estilo quando a cor muda).
+pub fn sync_selection(ctx: &egui::Context, accent: Color32) {
+    let id = egui::Id::new("selection-accent");
+    if ctx.data(|d| d.get_temp::<Color32>(id)) == Some(accent) {
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(id, accent));
+    ctx.all_styles_mut(|s| s.visuals.selection.bg_fill = with_alpha(accent, 0.35));
+}
+
 /// Estilo base do egui (tema escuro com a paleta). Quase tudo é pintado à mão; isto cobre os
 /// widgets nativos usados (TextEdit, ScrollArea, tooltips).
 pub fn install_style(ctx: &egui::Context) {
@@ -594,17 +617,13 @@ mod tests {
         assert!(near(p.well, [22, 24, 28, 235]), "{:?}", p.well);
     }
 
+    // Não toca no global (`ui::draw` o muda em outros testes, em paralelo): só a conversão.
     #[test]
     fn the_accent_is_the_active_agent_color_or_a_neutral_gray() {
-        set_accent(None);
-        assert_eq!(accent(), pal().accent_neutral);
-        set_accent(Some(CLAUDE));
-        assert_eq!(accent(), CLAUDE);
+        assert_eq!(unpack_accent(pack_accent(None)), pal().accent_neutral);
+        assert_eq!(unpack_accent(pack_accent(Some(CLAUDE))), CLAUDE);
         // Preto também é uma cor guardada.
-        set_accent(Some(Color32::BLACK));
-        assert_eq!(accent(), Color32::BLACK);
-        set_accent(None);
-        assert_eq!(accent(), pal().accent_neutral);
+        assert_eq!(unpack_accent(pack_accent(Some(Color32::BLACK))), Color32::BLACK);
         assert_eq!(accent_soft(CLAUDE).a(), 46);
         assert_eq!(accent_wash(CLAUDE).a(), 26);
         assert_eq!(accent_edge(CLAUDE).a(), 128);
@@ -624,7 +643,8 @@ mod tests {
     /// só encolhe: um arquivo que ficou limpo tem de sair daqui (o teste cobra). Está vazia desde a parte 1.
     const STILL_LOOSE: [&str; 0] = [];
 
-    const LOOSE_COLOR: [&str; 5] = ["Color32::from_rgb", "Color32::from_rgba", "from_gray", "from_rgba_", "theme::rgba("];
+    const LOOSE_COLOR: [&str; 7] =
+        ["Color32::from_rgb", "Color32::from_rgba", "from_gray", "from_rgba_", "from_white_alpha", "from_black_alpha", "theme::rgba("];
 
     fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         for entry in std::fs::read_dir(dir).expect("pasta de código") {

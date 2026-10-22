@@ -148,7 +148,9 @@ pub fn shown_usage(usage: &AgentUsage) -> Option<f32> {
     if usage.local {
         return None;
     }
-    usage.weekly.or(usage.session).map(|w| w.used.clamp(0.0, 1.0))
+    // A sessão esgotada manda: quem está bloqueado agora precisa ver (a semana sozinha esconderia isso).
+    let blocked = usage.session.filter(|s| s.used >= 1.0);
+    blocked.or(usage.weekly).or(usage.session).map(|w| w.used.clamp(0.0, 1.0))
 }
 
 /// Desenha um item por modelo aberto que tenha cota (`Deck::open_models`, dados de `Deck::usage`),
@@ -251,6 +253,9 @@ mod tests {
         let session_only = AgentUsage { session: w(0.9), weekly: None, updated_ms: 1, local: false };
         assert_eq!(shown_usage(&session_only), Some(0.9));
         // Local (Ollama), sem leitura e valores fora da faixa.
+        // Sessão esgotada aparece mesmo com a semana folgada.
+        let blocked = AgentUsage { session: w(1.0), weekly: w(0.3), updated_ms: 1, local: false };
+        assert_eq!(shown_usage(&blocked), Some(1.0));
         assert_eq!(shown_usage(&AgentUsage { local: true, ..Default::default() }), None);
         assert_eq!(shown_usage(&AgentUsage::default()), None);
         assert_eq!(shown_usage(&AgentUsage { weekly: w(1.7), ..Default::default() }), Some(1.0));

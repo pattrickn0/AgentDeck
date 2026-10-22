@@ -187,7 +187,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
 
     // ---------- Faixa de abas ----------
     let head = Rect::from_min_size(area.min, Vec2::new(area.width(), HEAD_H));
-    painter.rect_filled(head, 0.0, theme::pal().chip);
+    painter.rect_filled(head, 0.0, theme::pal().strip);
     painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
     let strip_rect = Rect::from_min_max(head.min, Pos2::new(head.max.x, head.max.y - 1.0));
     let mut acts = Vec::new();

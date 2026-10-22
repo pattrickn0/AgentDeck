@@ -53,7 +53,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             deck.pane_drag = None;
             empty_state::draw(deck, ui, area);
         }
-        super::island_edge(ui, area);
+        super::island_edge(ui, area, super::IslandKind::Well);
         return;
     }
     let Some(metrics) = deck.metrics.clone() else { return };
@@ -257,7 +257,7 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         ctx.request_repaint_after(Duration::from_millis(next));
     }
 
-    super::island_edge(ui, plan.rect);
+    super::island_edge(ui, plan.rect, super::IslandKind::Well);
     // Janela focada: contorno na cor do agente.
     if multi && focused {
         painter.rect_stroke(
@@ -288,8 +288,8 @@ fn drag_overlay(deck: &Deck, ui: &Ui) {
     }
     if let Some(to) = drop_target(deck, ui, from) {
         let r = deck.panes[to].rect;
-        painter.rect_filled(r, 0.0, theme::with_opacity(accent, 0.12));
-        painter.rect_stroke(r.shrink(1.0), 0.0, Stroke::new(2.0, accent), egui::StrokeKind::Inside);
+        painter.rect_filled(r, theme::ISLAND_RADIUS as f32, theme::accent_wash(accent));
+        painter.rect_stroke(r.shrink(1.0), theme::ISLAND_RADIUS as f32 - 1.0, Stroke::new(2.0, accent), egui::StrokeKind::Inside);
         super::text_in(painter, r, Align2::CENTER_CENTER, "Soltar para trocar de lugar", theme::ui_semibold(13.0), theme::pal().text);
     }
 }

@@ -264,7 +264,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
             Lead::Dot if item.done => {
                 dot(&painter, dot_pos, item.color);
                 painter.circle_stroke(dot_pos, 6.2, Stroke::new(1.2, theme::brighten(item.color, 1.25)));
-                painter.circle_filled(dot_pos, 1.2, theme::with_opacity(Color32::WHITE, 0.75));
+                painter.circle_filled(dot_pos, 1.2, theme::with_opacity(theme::pal().text_strong, 0.75));
             }
             Lead::Dot => dot(&painter, dot_pos, item.color),
         }
