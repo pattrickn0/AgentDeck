@@ -270,7 +270,7 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   `branch → base`. O diff abre no centro, no modo Documentos (abaixo); o pedido e o relatório também (**Abrir ao centro**).
 
 **Modo Documentos (centro).** `crates/app/src/docs.rs` (estado e lógica pura) e `ui/docs.rs` (pintura). O centro mostra os agentes
-(`panes::draw`) ou os documentos do projeto ativo (`docs::draw`), conforme `Deck::docs.view` (`CenterView`); a chave fica em `ui/titlebar.rs`
+(`panes::draw`) ou os documentos do projeto ativo (`docs::draw`), conforme `Deck::docs.view` (`CenterView`); a chave (`docs::switch`) fica no topo de `ui/sidebar.rs` e, com a barra lateral recolhida, em `ui/titlebar.rs`
 e o atalho é Ctrl+Shift+D (`Action::ToggleCenter`). Cada documento é um `DocTab { uid, project, kind: DocKind, title, subtitle, state:
 DocState }` (`TaskDiff`, `CommitDiff`, `FileDiff`, `File`, `Markdown`); abrir um igual só o foca; não são gravados. A leitura roda fora da
 thread da interface e volta como `UiMsg::Doc(uid, Loaded)`. Do core só entram o que já existia (`task_diff`, `git_commit_detail`,

@@ -131,14 +131,8 @@ pub const ANTIGRAVITY: Color32 = rgb(0x4f8cf7);
 pub const SHELL: Color32 = rgb(0x9aa0a6);
 pub const OLLAMA: Color32 = rgb(0xf59e0b);
 
-// Badges de extensão da árvore (estilo VS Code)
-pub const BADGE_JS: Color32 = rgb(0xf1e05a);
+// Verde do que foi adicionado ou está pronto (o teste de cor solta não deixa repeti-lo fora daqui)
 pub const BADGE_JSON: Color32 = rgb(0x4ade80);
-pub const BADGE_MD: Color32 = rgb(0x519aba);
-pub const BADGE_TS: Color32 = rgb(0x3178c6);
-pub const BADGE_HTML: Color32 = rgb(0xe34f26);
-pub const BADGE_CSS: Color32 = rgb(0x42a5f5);
-pub const BADGE_PY: Color32 = rgb(0x3572a5);
 
 // ---------- Cor de destaque = cor do agente ativo ----------
 

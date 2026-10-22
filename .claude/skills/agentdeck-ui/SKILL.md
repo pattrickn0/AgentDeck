@@ -78,10 +78,25 @@ Símbolos (▾ ▸ ✕) caem no fallback do sistema.
 
 ## Medidas
 
-- Linha de lista: `ROW_H = 22`; título de seção: 22 px (`SECTION_LABEL_H`), margem de 10 px.
-- Árvore de agentes: logo no x 28 da linha, recuo de 14 px por nível (até 5 níveis), logo de 12 px, texto 6 px
-  depois do logo.
+- Barra lateral, de cima para baixo: chave Agentes | Documentos (`docs::switch`, trilho de 28 px com segmentos de 24 px,
+  margem de 6 px, segmento ativo na cor de destaque; "Docs" se o segmento não comporta "Documentos n"; com a barra
+  recolhida vai para a barra de título, compacta, 24 px), `separator`, PROJETOS, ORGANIZAÇÃO (`segmented` sem
+  destaque, trilho de 24 px, margem de 10 px), ARQUIVOS. Separadores com a largura da ilha.
+- Linhas da barra lateral têm margem de 4 px (a seleção não encosta na borda): projeto 22 px (▾/▸, nome em 600,
+  contagem em `text_3`, anel 6 px do agente que terminou sem ser visto), **agente 24 px** (`AGENT_ROW_H`), "+ Novo agente"
+  22 px em `text_3`, arquivo 20 px (11,5 px; `FILE_ROW_H`).
+- Árvore de agentes: ícone do modelo (12 px numa caixa de 16) com o centro no x 30 da linha, recuo de 12 px por nível
+  (até 5), nome em Inter 12 px/500 (600 se selecionado) 7 px depois da caixa, **modelo à direita** em `meta(10)`,
+  `text_3`, encurtado por `projects::model_tag` (`sonnet`, `argon`, `flash`): o nome é quem corta (reticências), nada
+  quebra linha. Selecionado: `accent_soft` + filete de 2 px na cor de destaque, nome `text_strong`, modelo `text`.
+- Explorador: recuo de 12 px, ícones de extensão em `text_3` (cinza, menos cor), letra do Git (M, A, ?, D, R, U) em
+  `meta(10)` `text_2`; selecionado `selected_soft`, hover `hover`.
+- Abas (`ui/tabs.rs`): faixa de 30 px (`HEAD_H`), pílulas de 22 px, cantos 5, 3 px entre elas, padding 8; ativa com a
+  cor do agente, texto `on_accent` 600 e sombra leve; sem o foco da janela ou de documento, a ativa é `selected` +
+  `text_strong`; ponto de 7 px (halo trabalhando, anel de 1,5 px concluído sem ser visto, 40% sem processo); o ✕ é
+  desenhado (a Inter não o tem). `StripKind::colored` escolhe entre agente e documento.
 - Botões de ícone: na barra de título 26×24, cantos 5; nos cabeçalhos 20×20, cantos 4; hover `hover`.
+- Linha da lista de arquivos de um diff: 20 px, selecionada `selected_soft`; letras e `+`/`−` em `meta(10)`.
 - Menus e modais: `frame(p, r, 6–10, popup, glass_border)` + `shadow(...)`; itens de 26 px; posição com
   `menus::keep_on_screen` (não use `Area::constrain`, ele fecha o menu no clique — ver o comentário em `menus.rs`).
 - Barra de título: `TITLEBAR_H = 32`, sem fundo; botões da janela 40×32. Barra lateral: 150–480 px (padrão 220).

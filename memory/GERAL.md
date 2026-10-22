@@ -97,9 +97,9 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 
 | Área | O que tem |
 | :-- | :-- |
-| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); a **chave Agentes | Documentos** (ver abaixo); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
-| Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
-| Centro | duas visões, escolhidas pela **chave** da barra de título: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
+| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); com a barra lateral recolhida, a **chave Agentes | Documentos** compacta logo depois do logo (ver abaixo); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
+| Barra esquerda | a **chave Agentes | Documentos** no topo, **PROJETOS** (cada projeto com os seus agentes, o modelo de cada um à direita; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (controle Abas | Dividida) e **ARQUIVOS**, o explorador (cinza, com a letra do Git; atualizar, recolher tudo); recolhe com Ctrl+B |
+| Centro | duas visões, escolhidas pela **chave** do topo da barra lateral: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
@@ -131,7 +131,7 @@ A **tela dividida** organiza as abas por tipo de agente:
 na barra direita (280–400 px). Por isso o **centro inteiro** alterna, em vez de ganhar uma janela ao lado dos agentes (com 3 agentes,
 cada janela tem 1/3 da largura). Fase 1: **só leitura**; edição, realce de sintaxe, diff lado a lado e gravar os documentos abertos
 ficam para a fase 2 (ver [pendencias.md](pendencias.md)).
-- **A chave** fica na barra de título, ao lado do nome, para não gastar altura: dois segmentos, **Agentes** e **Documentos (n)** (n =
+- **A chave** fica no topo da barra lateral (com ela recolhida, na barra de título, logo depois do logo): dois segmentos, **Agentes** e **Documentos (n)** (n =
   documentos abertos do projeto ativo). Ctrl+Shift+D alterna (o app o toma mesmo com o terminal focado, como o Ctrl+Shift+M; sem
   documentos abertos não faz nada). Abrir qualquer documento muda para Documentos sozinho; fechar o último volta para Agentes; clicar
   num agente, "Ir para a aba"/"Reabrir aba" da mesa ou abrir uma aba nova também voltam para Agentes.

@@ -1,6 +1,6 @@
 //! Barra de título própria (a janela não tem decoração do sistema e a barra não tem fundo): menu ☰,
-//! botão da barra lateral, marca, projeto e branch, a chave Agentes | Documentos, o uso das
-//! assinaturas e minimizar/maximizar/fechar.
+//! botão da barra lateral, marca, a chave Agentes | Documentos (só com a barra lateral recolhida),
+//! projeto e branch, o uso das assinaturas e minimizar/maximizar/fechar.
 
 use egui::{Align2, CursorIcon, Id, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand};
 
@@ -88,6 +88,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     x += 1.0 + GAP;
     deck.icons.paint(&painter, Icon::AgentDeck, Pos2::new(x + 8.0, cy), 16.0, p.text_strong, 0.0);
     x += 16.0 + GAP;
+    // Com a barra lateral recolhida a chave Agentes | Documentos volta para cá, compacta (aberta, ela é a
+    // primeira coisa da barra lateral).
+    if deck.sidebar_collapsed {
+        let size = Vec2::new(super::docs::switch_compact_width(&painter, deck), super::docs::SWITCH_COMPACT_H);
+        super::docs::switch(deck, ui, Rect::from_min_size(Pos2::new(x, cy - size.y / 2.0), size), "title-center");
+        x += size.x + GAP;
+    }
     let name = galley_spaced(&painter, "AgentDeck", theme::ui_bold(13.0), p.text, -0.26);
     x = place(&painter, Rect::from_min_max(Pos2::new(x, rect.min.y), Pos2::new(rect.max.x, rect.max.y)), Align2::LEFT_CENTER, name, p.text)
         .max
@@ -103,9 +110,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
             x = chip(&painter, Pos2::new(x, cy), &branch, 10.5, p.text_soft).max.x;
         }
     }
-
-    // ---------- Chave Agentes | Documentos (vai para a barra lateral na parte 2) ----------
-    let switch = super::docs::switch(deck, ui, &painter, Pos2::new(x + 16.0, rect.min.y), rect.height());
 
     // ---------- Botões da janela ----------
     let close = Rect::from_min_max(Pos2::new(rect.max.x - WIN_BTN_W, rect.min.y), rect.max);
@@ -123,7 +127,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     }
 
     // ---------- Uso das assinaturas (à esquerda dos botões da janela) ----------
-    let usage = Rect::from_min_max(Pos2::new(switch.max.x + 12.0, rect.min.y), Pos2::new(min_btn.min.x - 6.0, rect.max.y));
+    let usage = Rect::from_min_max(Pos2::new(x + 12.0, rect.min.y), Pos2::new(min_btn.min.x - 6.0, rect.max.y));
     if usage.width() > 0.0 {
         super::usage::draw(deck, ui, usage);
     }

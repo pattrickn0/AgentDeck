@@ -4,8 +4,6 @@
 
 use egui::{Align2, Area, Color32, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use agentdeck_core::models::short_model;
-
 use super::menus::{closes_on_outside, keep_on_screen};
 use super::{clickable, dot, frame, galley_trunc, place, shadow, text_in, text_w, tip};
 use crate::deck::Deck;
@@ -35,8 +33,6 @@ pub struct Item {
     /// Identifica a aba entre quadros (ids de interação).
     pub uid: u64,
     pub label: String,
-    /// O modelo de LLM, em cinza depois do nome.
-    pub model: Option<String>,
     pub color: Color32,
     pub alive: bool,
     pub busy: bool,
@@ -49,20 +45,26 @@ pub struct Item {
     pub tip: String,
 }
 
-/// Como a faixa se comporta: o prefixo dos ids (abas de agente e de documento não se misturam) e se
-/// duplo clique renomeia e botão direito abre o menu da aba.
+/// Como a faixa se comporta: o prefixo dos ids (abas de agente e de documento não se misturam), se
+/// duplo clique renomeia e botão direito abre o menu da aba e se a pílula ativa leva a cor do agente
+/// (documento não tem cor: a ativa fica em `selected`).
 #[derive(Clone, Copy)]
 pub struct StripKind {
     pub scope: &'static str,
     pub tab_menu: bool,
+    pub colored: bool,
 }
 
-const TAB_FONT: f32 = 13.0;
+const TAB_FONT: f32 = 11.5;
 const LABEL_MAX: f32 = 140.0;
-/// Largura máxima do modelo, em cinza depois do nome (`Claude · Dev  sonnet`).
-const MODEL_MAX: f32 = 80.0;
-const MODEL_FONT: f32 = 11.5;
-const MODEL_GAP: f32 = 6.0;
+/// Pílula de uma aba: 22 px de altura, 8 px de padding, 3 px de espaço entre elas e 4 px de margem na faixa.
+const PILL_H: f32 = 22.0;
+const PILL_PAD: f32 = 8.0;
+const PILL_GAP: f32 = 3.0;
+const STRIP_PAD: f32 = 4.0;
+/// A caixa do ponto (7 px) e a do "✕" (16 px, o alvo do clique).
+const DOT_BOX: f32 = 7.0;
+const CLOSE_BOX: f32 = 16.0;
 /// Espaço do indicador vermelho pulsante quando a aba está gravando áudio.
 const REC_INDICATOR_W: f32 = 14.0;
 /// Seta de rolagem das abas escondidas: botão 20×20 (como os do cabeçalho) sobre fundo sólido,
@@ -77,6 +79,12 @@ const LIST_ITEM_H: f32 = 26.0;
 const LIST_MAX_ROWS: usize = 14;
 /// Folga ao decidir se uma aba está inteira à vista (evita seta por causa de fração de pixel).
 const EDGE_EPS: f32 = 0.5;
+
+/// Largura de uma pílula: padding, ponto, nome (`label_w`), o que vem depois dele (`extra_w`: estado do
+/// ditado), o "✕" e o padding. O espaço até a próxima não entra.
+fn pill_width(label_w: f32, extra_w: f32) -> f32 {
+    PILL_PAD + DOT_BOX + PILL_GAP + label_w + extra_w + PILL_GAP + CLOSE_BOX + PILL_PAD
+}
 
 /// Abas que não aparecem inteiras em cada lado da faixa (posição na lista da janela).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -142,7 +150,6 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
             Item {
                 uid: tab.uid,
                 label: tab.label.clone(),
-                model: tab.model.clone(),
                 color: tab.color,
                 alive: tab.alive,
                 busy: tab.busy,
@@ -154,7 +161,7 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
         })
         .collect();
     let at = tabs.iter().position(|&i| i == shown).unwrap_or(0);
-    let click = strip_items(ui, rect, &items, at, focused, scroll_id, StripKind { scope: "tab", tab_menu: true })?;
+    let click = strip_items(ui, rect, &items, at, focused, scroll_id, StripKind { scope: "tab", tab_menu: true, colored: true })?;
     Some(match click {
         StripClick::Activate(n) => StripClick::Activate(tabs[n]),
         StripClick::Close(n) => StripClick::Close(tabs[n]),
@@ -168,26 +175,25 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
 pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: bool, scroll_id: Id, kind: StripKind) -> Option<StripClick> {
     let ctx = ui.ctx().clone();
     let painter = ui.painter_at(rect);
-    let font = theme::ui(TAB_FONT);
-    let close_w = 12.0 + text_w(&painter, "×", font.clone());
+    let p = theme::pal();
     let widths: Vec<f32> = items
         .iter()
-        .map(|item| {
-            let lw = text_w(&painter, &item.label, font.clone()).min(LABEL_MAX);
-            let mw =
-                item.model.as_deref().map_or(0.0, |m| MODEL_GAP + text_w(&painter, short_model(m), theme::ui(MODEL_FONT)).min(MODEL_MAX));
+        .enumerate()
+        .map(|(n, item)| {
+            let font = if n == shown { theme::ui_semibold(TAB_FONT) } else { theme::ui(TAB_FONT) };
+            let lw = text_w(&painter, &item.label, font).min(LABEL_MAX);
             let sw = match item.mic {
                 ButtonVisual::Recording => REC_INDICATOR_W,
-                ButtonVisual::Opening => 6.0 + text_w(&painter, "Abrindo…", theme::ui(MODEL_FONT)),
-                ButtonVisual::Transcribing => 6.0 + text_w(&painter, "Transcrevendo…", theme::ui(MODEL_FONT)),
+                ButtonVisual::Opening => 6.0 + text_w(&painter, "Abrindo…", theme::ui(TAB_FONT)),
+                ButtonVisual::Transcribing => 6.0 + text_w(&painter, "Transcrevendo…", theme::ui(TAB_FONT)),
                 _ => 0.0,
             };
-            12.0 + 8.0 + 8.0 + lw + mw + sw + 6.0 + close_w + 6.0 + 1.0
+            pill_width(lw, sw) + PILL_GAP
         })
         .collect();
     let total: f32 = widths.iter().sum();
 
-    let overflow = total > rect.width();
+    let overflow = total + STRIP_PAD > rect.width();
     // Com a faixa rolando, o fim dela fica para o botão "▾"; as abas só aparecem em `view`.
     let view = if overflow { Rect::from_min_max(rect.min, Pos2::new(rect.max.x - LIST_W, rect.max.y)) } else { rect };
 
@@ -213,11 +219,11 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
     }
     ctx.data_mut(|d| d.insert_temp(scroll_id, scroll));
 
-    let mut x = rect.min.x - scroll;
+    let mut x = rect.min.x + STRIP_PAD - scroll;
     let mut click = None;
     for (n, item) in items.iter().enumerate() {
         let w = widths[n];
-        let r = Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(w - 1.0, rect.height()));
+        let r = Rect::from_center_size(Pos2::new(x + (w - PILL_GAP) / 2.0, rect.center().y), Vec2::new(w - PILL_GAP, PILL_H));
         x += w;
         if r.max.x < view.min.x || r.min.x > view.max.x {
             continue;
@@ -225,51 +231,69 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         let vis = r.intersect(view);
         let is_shown = n == shown;
         let resp = ui.interact(vis, Id::new((kind.scope, item.uid)), Sense::click());
-        let close_rect = Rect::from_min_size(Pos2::new(r.max.x - 6.0 - close_w, r.center().y - 10.5), Vec2::new(close_w, 21.0));
+        let close_rect = Rect::from_center_size(Pos2::new(r.max.x - PILL_PAD - CLOSE_BOX / 2.0, r.center().y), Vec2::splat(CLOSE_BOX));
         let close_resp = ui.interact(close_rect.intersect(view), Id::new((kind.scope, "close", item.uid)), Sense::click());
 
-        let bg = if is_shown {
-            Some(theme::well_solid())
+        // A pílula ativa leva a cor do agente (documento não tem cor: `selected`); com a janela sem o
+        // foco, a ativa fica neutra e só o ponto guarda a cor.
+        let solid = is_shown && focused && kind.colored;
+        let fill = if solid {
+            Some(item.color)
+        } else if is_shown {
+            Some(p.selected)
         } else if resp.hovered() || close_resp.hovered() {
-            Some(theme::pal().hover)
+            Some(p.hover)
         } else {
             None
         };
-        if let Some(bg) = bg {
-            painter.rect_filled(r, 0.0, bg);
+        if let Some(fill) = fill {
+            if solid {
+                shadow(&painter, r, 5, 2, 10, p.shadow);
+            }
+            painter.rect_filled(r, 5.0, fill);
         }
-        if is_shown {
-            // Linha superior na cor do agente (esmaecida se a janela não tem o foco).
-            let c = if focused { item.color } else { theme::with_opacity(item.color, 0.45) };
-            painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width(), 2.0)), 0.0, c);
-        }
-        painter.rect_filled(Rect::from_min_size(Pos2::new(r.max.x, r.min.y), Vec2::new(1.0, r.height())), 0.0, theme::pal().separator);
 
-        let color = if is_shown && focused { theme::pal().text } else { theme::pal().text_2 };
-        let dot_pos = Pos2::new(r.min.x + 12.0 + 4.0, r.center().y);
+        let color = if solid {
+            p.on_accent
+        } else if is_shown {
+            p.text_strong
+        } else if resp.hovered() {
+            p.text
+        } else {
+            p.text_2
+        };
+        // Sem processo, a aba fica a 40%.
+        let lead_color = if solid {
+            p.on_accent
+        } else if item.alive {
+            item.color
+        } else {
+            theme::with_opacity(item.color, 0.4)
+        };
+        let dot_pos = Pos2::new(r.min.x + PILL_PAD + DOT_BOX / 2.0, r.center().y);
         match item.lead {
             Lead::Glyph(g) => {
                 let cell = Rect::from_center_size(dot_pos, Vec2::splat(14.0));
-                text_in(&painter, cell, Align2::CENTER_CENTER, g, theme::mono_bold(11.0), item.color);
+                text_in(&painter, cell, Align2::CENTER_CENTER, g, theme::mono_bold(11.0), if solid { p.on_accent } else { color });
             }
             Lead::Dot if item.busy => {
                 ctx.request_repaint_after(std::time::Duration::from_millis(33));
                 let t = ctx.input(|inp| inp.time);
                 let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
-                let halo_r = 4.0 + 2.8 * wave;
-                let halo_alpha = 0.35 * (1.0 - wave);
-                painter.circle_filled(dot_pos, halo_r, theme::with_opacity(item.color, halo_alpha));
-                painter.circle_filled(dot_pos, 3.2 + 1.0 * wave, theme::with_opacity(item.color, 0.75 + 0.25 * wave));
+                painter.circle_filled(dot_pos, 3.5 + 3.5 * wave, theme::with_opacity(lead_color, 0.45 * (1.0 - wave)));
+                painter.circle_filled(dot_pos, 3.5, lead_color);
             }
+            // Terminou sem ser vista: o ponto vira um anel de 1,5 px.
             Lead::Dot if item.done => {
-                dot(&painter, dot_pos, item.color);
-                painter.circle_stroke(dot_pos, 6.2, Stroke::new(1.2, theme::brighten(item.color, 1.25)));
-                painter.circle_filled(dot_pos, 1.2, theme::with_opacity(theme::pal().text_strong, 0.75));
+                painter.circle_stroke(dot_pos, 3.25, Stroke::new(1.5, lead_color));
             }
-            Lead::Dot => dot(&painter, dot_pos, item.color),
+            Lead::Dot => {
+                painter.circle_filled(dot_pos, 3.5, lead_color);
+            }
         }
-        let label_x = r.min.x + 12.0 + 8.0 + 8.0;
-        let g = galley_trunc(&painter, &item.label, font.clone(), color, LABEL_MAX);
+        let label_x = dot_pos.x + DOT_BOX / 2.0 + PILL_GAP;
+        let font = if is_shown { theme::ui_semibold(TAB_FONT) } else { theme::ui(TAB_FONT) };
+        let g = galley_trunc(&painter, &item.label, font, color, LABEL_MAX);
         let lr = place(
             &painter,
             Rect::from_min_max(Pos2::new(label_x, r.min.y), Pos2::new(label_x + LABEL_MAX, r.max.y)),
@@ -280,33 +304,20 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         if !item.alive {
             painter.hline(lr.min.x..=lr.max.x, lr.center().y + 0.5, Stroke::new(1.0, color));
         }
-        let mut after_x = lr.max.x;
-        if let Some(model) = item.model.as_deref() {
-            let mcolor = theme::with_opacity(theme::pal().text_2, if item.alive { 0.75 } else { 0.45 });
-            let mg = galley_trunc(&painter, short_model(model), theme::ui(MODEL_FONT), mcolor, MODEL_MAX);
-            let x0 = after_x + MODEL_GAP;
-            let mr = place(
-                &painter,
-                Rect::from_min_max(Pos2::new(x0, r.min.y), Pos2::new(x0 + MODEL_MAX, r.max.y)),
-                Align2::LEFT_CENTER,
-                mg,
-                mcolor,
-            );
-            after_x = mr.max.x;
-        }
+        let after_x = lr.max.x;
         // Indicador de estado do ditado na aba (o botão fica no cabeçalho do painel).
         match item.mic {
             ButtonVisual::Recording => {
                 let alpha = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 let rec_pos = Pos2::new(after_x + 10.0, r.center().y);
-                painter.circle_filled(rec_pos, 5.5, theme::with_opacity(theme::pal().danger, alpha * 0.28));
-                painter.circle_filled(rec_pos, 3.6, theme::with_opacity(theme::pal().danger, alpha));
+                painter.circle_filled(rec_pos, 5.5, theme::with_opacity(p.danger, alpha * 0.28));
+                painter.circle_filled(rec_pos, 3.6, theme::with_opacity(p.danger, alpha));
             }
             ButtonVisual::Opening | ButtonVisual::Transcribing => {
                 let st = if item.mic == ButtonVisual::Opening { "Abrindo…" } else { "Transcrevendo…" };
-                let scolor = theme::pal().text_2;
-                let sg = galley_trunc(&painter, st, theme::ui(MODEL_FONT), scolor, (close_rect.min.x - after_x - 8.0).max(10.0));
+                let scolor = if solid { theme::with_opacity(p.on_accent, 0.75) } else { p.text_2 };
+                let sg = galley_trunc(&painter, st, theme::ui(TAB_FONT), scolor, (close_rect.min.x - after_x - 8.0).max(10.0));
                 let x0 = after_x + 6.0;
                 place(
                     &painter,
@@ -321,19 +332,22 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
 
         let close_hot = close_resp.hovered();
         if close_hot {
-            painter.rect_filled(close_rect, 4.0, theme::pal().separator);
+            painter.rect_filled(close_rect, 4.0, if solid { theme::with_alpha(p.on_accent, 0.15) } else { p.separator });
         }
         if close_hot || resp.hovered() {
             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        text_in(
-            &painter,
-            close_rect,
-            Align2::CENTER_CENTER,
-            "×",
-            font.clone(),
-            if close_hot { theme::pal().text } else { theme::pal().text_2 },
-        );
+        // O "✕" é desenhado (a Inter não o tem). Escuro sobre a cor do agente.
+        let x_color = match (solid, close_hot) {
+            (true, true) => p.on_accent,
+            (true, false) => theme::with_opacity(p.on_accent, 0.6),
+            (false, true) => p.text,
+            (false, false) => p.text_3,
+        };
+        let c = close_rect.center();
+        let h = 3.0;
+        painter.line_segment([c + Vec2::new(-h, -h), c + Vec2::new(h, h)], Stroke::new(1.3, x_color));
+        painter.line_segment([c + Vec2::new(-h, h), c + Vec2::new(h, -h)], Stroke::new(1.3, x_color));
 
         if tip(close_resp, "Fechar").clicked() {
             click = Some(StripClick::Close(n));
@@ -575,6 +589,14 @@ mod tests {
             }
             assert_eq!(scroll, 0.0);
         }
+    }
+
+    #[test]
+    fn a_pill_is_as_wide_as_its_parts() {
+        // padding 8 + ponto 7 + 6 + nome + 6 + ✕ 16 + padding 8.
+        assert_eq!(pill_width(50.0, 0.0), 8.0 + 7.0 + 3.0 + 50.0 + 3.0 + 16.0 + 8.0);
+        // O estado do ditado ("Transcrevendo…") alarga a pílula.
+        assert_eq!(pill_width(50.0, 20.0) - pill_width(50.0, 0.0), 20.0);
     }
 
     #[test]
