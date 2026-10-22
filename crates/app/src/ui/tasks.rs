@@ -40,7 +40,10 @@ enum Act {
     ToggleGroup(Group),
     ToggleSection(Section),
     Task(String, TaskAct),
+    /// "Ver diff completo" / "Ver o que foi mesclado": abre o diff no centro.
     OpenDiff(String),
+    /// "Abrir ao centro" no pedido (`false`) ou no relatório (`true`).
+    OpenText(String, bool),
     DismissNotice,
     ConfirmYes,
     ConfirmNo,
@@ -66,7 +69,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     match deck.tasks.view.clone() {
         TasksView::List => list_view(deck, ui, rect, now, &mut acts),
         TasksView::Detail(id) => match deck.tasks.task(&id).cloned() {
-            Some(task) if deck.tasks.diff.as_ref().is_some_and(|d| d.id == id) => diff_screen(deck, ui, rect, &task, &mut acts),
             Some(task) => detail_view(deck, ui, rect, &task, now, &mut acts),
             None => list_view(deck, ui, rect, now, &mut acts),
         },
@@ -97,7 +99,8 @@ fn apply(deck: &mut Deck, act: Act) {
             }
         }
         Act::Task(id, act) => deck.tasks_act(&id, act),
-        Act::OpenDiff(id) => deck.tasks_open_diff(&id),
+        Act::OpenDiff(id) => deck.docs_open_task_diff(&id),
+        Act::OpenText(id, report) => deck.docs_open_task_text(&id, report),
         Act::DismissNotice => deck.tasks.notice = None,
         Act::ConfirmYes => deck.tasks_confirm_accepted(),
         Act::ConfirmNo => deck.tasks.confirm = None,
@@ -688,6 +691,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 muted_line(ui, "Sem pedido além do título: o agente recebe só o título.");
             } else {
                 paragraph(ui, &clip_text(task.brief.trim(), TEXT_MAX), theme::ui(12.5), theme::TREE_TEXT);
+                open_center_button(ui, "brief", task, false, acts);
             }
         }
         // Relatório.
@@ -701,6 +705,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                         .show(ui, |ui| {
                             paragraph(ui, &clip_text(report.trim(), TEXT_MAX), theme::ui(12.5), theme::TREE_TEXT);
                         });
+                    open_center_button(ui, "report", task, true, acts);
                 }
                 None if task.status == TaskStatus::Running => muted_line(ui, "O agente ainda não entregou o relatório."),
                 None => muted_line(ui, "Sem relatório."),
@@ -728,6 +733,15 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         }
         ui.add_space(14.0);
     });
+}
+
+/// "Abrir ao centro" embaixo do pedido e do relatório: eles aparecem formatados no modo Documentos.
+fn open_center_button(ui: &mut Ui, id_salt: &str, task: &Task, report: bool, acts: &mut Vec<Act>) {
+    let tip = if report { "Abre o relatório formatado, com a largura toda do centro" } else { "Abre o pedido formatado, com a largura toda do centro" };
+    let b = [("Abrir ao centro".to_owned(), BtnKind::Secondary, true, tip)];
+    if button_flow(ui, &b, id_salt).is_some() {
+        acts.push(Act::OpenText(task.id.clone(), report));
+    }
 }
 
 fn separator(ui: &mut Ui) {
@@ -859,24 +873,6 @@ fn return_form(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &
         Some(_) => acts.push(Act::CancelReturn),
         None if ctrl_enter && ready => acts.push(Act::SendReturn(task.id.clone())),
         None => {}
-    }
-}
-
-/// O diff completo da tarefa, no mesmo desenho do diff da aba Git (só leitura).
-fn diff_screen(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, acts: &mut Vec<Act>) {
-    let head = head_bar(ui, rect, Some("Voltar à tarefa"), &tasks_ui::diff_title(task), 0.0, acts);
-    let area = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
-    match deck.tasks.diff.as_ref().and_then(|d| d.diff.as_ref()) {
-        None => {
-            text_in(&ui.painter_at(area), area.shrink(14.0), Align2::LEFT_TOP, "Carregando o diff…", theme::ui(12.5), theme::MUTED);
-        }
-        Some(Err(e)) => {
-            let g = ui.painter().layout(e.clone(), theme::ui(12.5), theme::RED_TEXT, area.width() - 28.0);
-            ui.painter_at(area).galley(area.min + Vec2::splat(14.0), g, theme::RED_TEXT);
-        }
-        Some(Ok(diff)) => {
-            super::git::diff_lines(ui, area, diff, None, &mut Vec::new());
-        }
     }
 }
 

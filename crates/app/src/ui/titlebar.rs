@@ -77,6 +77,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         theme::TEXT,
     );
 
+    // ---------- Chave Agentes | Documentos ----------
+    let switch = super::docs::switch(deck, ui, &painter, Pos2::new(title_r.max.x + 16.0, inner.min.y), inner.height());
+
     // ---------- Botões da janela ----------
     let close = Rect::from_min_max(Pos2::new(inner.max.x - WIN_BTN_W, inner.min.y), inner.max);
     let max_btn = close.translate(Vec2::new(-WIN_BTN_W, 0.0));
@@ -93,7 +96,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     }
 
     // ---------- Uso dos agentes (à esquerda dos botões da janela) ----------
-    let usage = Rect::from_min_max(Pos2::new(title_r.max.x + 12.0, inner.min.y), Pos2::new(min_btn.min.x - 10.0, inner.max.y));
+    let usage = Rect::from_min_max(Pos2::new(switch.max.x + 12.0, inner.min.y), Pos2::new(min_btn.min.x - 10.0, inner.max.y));
     if usage.width() > 0.0 {
         super::usage::draw(deck, ui, usage);
     }

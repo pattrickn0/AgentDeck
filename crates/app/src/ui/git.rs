@@ -22,6 +22,9 @@ const BANNER_H: f32 = 24.0;
 const MODE_H: f32 = 24.0;
 const ROW_H: f32 = 22.0;
 const DIFF_ROW_H: f32 = 17.0;
+/// O botão "Abrir ao centro" (largura aproximada do texto de 11,5 px com o recuo) que leva o diff ao modo Documentos.
+const OPEN_CENTER: &str = "Abrir ao centro";
+const OPEN_CENTER_W: f32 = 104.0;
 const DIFF_FONT: f32 = 12.0;
 const MSG_FONT: f32 = 13.0;
 const MSG_ROWS: f32 = 3.0;
@@ -42,6 +45,10 @@ pub(super) enum Act {
     UnstageAll,
     AskDiscard(GitEntry),
     OpenDiff(GitEntry, bool),
+    /// "Abrir ao centro": o diff do arquivo, só leitura, no modo Documentos.
+    OpenDiffCenter(GitEntry, bool),
+    /// "Abrir ao centro" no detalhe de um commit: hash, hash curto e assunto.
+    OpenCommitCenter(String, String, String),
     CloseDiff,
     OpenFile(String),
     Commit,
@@ -152,6 +159,8 @@ fn apply(deck: &mut Deck, ctx: &egui::Context, act: Act) {
         Act::UnstageAll => deck.git_unstage_all(),
         Act::AskDiscard(e) => deck.git.confirm = Some(ConfirmAction::DiscardFile(e)),
         Act::OpenDiff(e, staged) => deck.git_open_diff(e, staged),
+        Act::OpenDiffCenter(e, staged) => deck.docs_open_file_diff(&e, staged),
+        Act::OpenCommitCenter(hash, short, subject) => deck.docs_open_commit(&hash, &short, &subject),
         Act::CloseDiff => deck.git.diff = None,
         Act::OpenFile(p) => deck.git_open_file(&p),
         Act::Commit => deck.git_commit(),
@@ -631,6 +640,24 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
             acts.push(act);
         }
     }
+    // "Abrir ao centro": na mesma linha se sobra lugar para o caminho; senão, numa linha só dele.
+    let center_tip = "Abre este diff, só para ler, com a largura toda do centro (o preparo por trecho continua aqui)";
+    let mut extra_row = 0.0;
+    if right - (back.max.x + 8.0) - (OPEN_CENTER_W + 6.0) >= 150.0 {
+        let id = Id::new("git-diff-center");
+        if git_views::pill(ui, &mut right, head.min.y + 3.0, 22.0, OPEN_CENTER, center_tip, git_views::Look::Normal, true, id) {
+            acts.push(Act::OpenDiffCenter(entry.clone(), open.staged));
+        }
+    } else {
+        extra_row = 26.0;
+        let row = Rect::from_min_size(Pos2::new(body.min.x, head.max.y), Vec2::new(body.width(), extra_row));
+        painter.rect_filled(row, 0.0, theme::PANEL);
+        let mut r = row.max.x - 6.0;
+        let id = Id::new("git-diff-center");
+        if git_views::pill(ui, &mut r, row.min.y + 2.0, 22.0, OPEN_CENTER, center_tip, git_views::Look::Normal, true, id) {
+            acts.push(Act::OpenDiffCenter(entry.clone(), open.staged));
+        }
+    }
     let side = if open.staged { "preparado" } else { "não preparado" };
     let title = format!("{}  · {side}", entry.path);
     let g = galley_trunc(&painter, &title, theme::ui(12.0), theme::TEXT, right - back.max.x - 12.0);
@@ -650,7 +677,7 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
         acts.push(Act::OpenFile(entry.path.clone()));
     }
 
-    let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
+    let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y + extra_row), body.max);
     match &open.diff {
         None => {
             text_in(&ui.painter_at(area), area.shrink(14.0), Align2::LEFT_TOP, "Carregando o diff…", theme::ui(12.5), theme::MUTED);
@@ -676,6 +703,13 @@ pub(super) struct HunkCtx {
 }
 
 pub(super) fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<HunkCtx>, acts: &mut Vec<Act>) {
+    let id = ui.id().with(("git-diff", area.min.x as i32, area.min.y as i32));
+    diff_lines_at(ui, area, diff, hunks, acts, id, None);
+}
+
+/// O desenho do diff, com a identidade da rolagem escolhida por quem chama (cada documento do modo
+/// Documentos tem a sua) e, em `jump`, a linha do diff para onde rolar neste quadro.
+pub(super) fn diff_lines_at(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<HunkCtx>, acts: &mut Vec<Act>, id: Id, jump: Option<usize>) {
     let mut notes: Vec<&str> = Vec::new();
     if diff.binary {
         notes.push("Arquivo binário: o conteúdo não é mostrado.");
@@ -700,8 +734,11 @@ pub(super) fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<
     // Diff combinado (`@@@`, de um conflito) não vira patch de trecho.
     let hunks = hunks
         .filter(|_| !diff.binary && !diff.truncated && !diff.lines.iter().any(|l| l.kind == DiffKind::Hunk && l.text.starts_with("@@@")));
-    let id = ui.id().with(("git-diff", area.min.x as i32, area.min.y as i32));
-    egui::ScrollArea::both().id_salt(id).auto_shrink([false, false]).show_rows(&mut child, DIFF_ROW_H, n, |ui, range| {
+    let mut scroll = egui::ScrollArea::both().id_salt(id).auto_shrink([false, false]);
+    if let Some(line) = jump {
+        scroll = scroll.vertical_scroll_offset(line as f32 * DIFF_ROW_H);
+    }
+    scroll.show_rows(&mut child, DIFF_ROW_H, n, |ui, range| {
         let mut hunk_no = diff.lines[..range.start].iter().filter(|l| l.kind == DiffKind::Hunk).count();
         for line in &diff.lines[range] {
             let (r, _) = ui.allocate_exact_size(Vec2::new(content_w, DIFF_ROW_H), Sense::hover());

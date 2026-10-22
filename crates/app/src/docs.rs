@@ -207,6 +207,8 @@ pub struct Docs {
     next_uid: u64,
     /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=docs-demo`): os documentos são fictícios; nada é lido nem relido.
     pub debug_hold: bool,
+    /// SOMENTE DEPURAÇÃO (`docs-demo-badge`): o selo da chave, em vez do das abas de verdade.
+    pub debug_badge: Option<Badge>,
     /// O cache do markdown formatado (links e rolagem), compartilhado pelos documentos.
     pub md_cache: egui_commonmark::CommonMarkCache,
 }
@@ -447,6 +449,9 @@ impl Deck {
 
     /// O selo do lado "Agentes" da chave: as abas do projeto ativo que terminaram sem ser vistas ou estão trabalhando.
     pub fn agents_badge(&self) -> Badge {
+        if let Some(badge) = self.docs.debug_badge {
+            return badge;
+        }
         Badge::of(self.visible().into_iter().map(|i| (self.tabs[i].done, self.tabs[i].busy)))
     }
 

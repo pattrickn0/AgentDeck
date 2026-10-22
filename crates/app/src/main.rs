@@ -13,6 +13,7 @@ mod crash;
 mod deck;
 mod dictation;
 mod docs;
+mod docs_demo;
 mod git_ui;
 mod github_ui;
 mod icons;
