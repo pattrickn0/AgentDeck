@@ -6,7 +6,7 @@ use std::time::Duration;
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Align2, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use super::{button, button_width, galley, paint_splitter, place, section_label, separator, text_in, text_w, tip, ButtonKind};
+use super::{button, button_width, galley, galley_trunc, paint_splitter, place, section_label, separator, text_in, text_w, tip, ButtonKind};
 use crate::deck::{Deck, FeedItem, RightView};
 use crate::theme;
 use agentdeck_core::{DownloadProgress, DownloadState, FeedKind};
@@ -44,15 +44,33 @@ struct HeadTab<'a> {
     badge: u32,
 }
 
-/// Pinta uma aba em pílula (22 px de altura, cantos 5) no cabeçalho da barra direita. Devolve `(largura, clicou)`.
-fn head_tab(ui: &Ui, painter: &egui::Painter, at: Pos2, tab: HeadTab<'_>, active: bool) -> (f32, bool) {
+impl HeadTab<'_> {
+    fn font(active: bool) -> egui::FontId {
+        if active {
+            theme::ui_semibold(11.5)
+        } else {
+            theme::ui(11.5)
+        }
+    }
+
+    fn badge(&self, active: bool) -> Option<(String, egui::FontId)> {
+        let text = if self.badge > 99 { "99+".to_owned() } else { self.badge.to_string() };
+        (self.badge > 0).then(|| (text, if active { theme::ui_bold(10.0) } else { theme::meta(10.0) }))
+    }
+
+    /// Largura do selo e do espaço antes dele (0 sem selo).
+    fn badge_w(&self, painter: &egui::Painter, active: bool) -> f32 {
+        self.badge(active).map_or(0.0, |(t, font)| 5.0 + (text_w(painter, &t, font) + 10.0).max(14.0))
+    }
+}
+
+/// Pinta uma aba em pílula (22 px de altura, cantos 5) no cabeçalho da barra direita, com `pad` de espaço interno
+/// (somado dos dois lados) e o rótulo em até `label_max` px. Devolve `(largura, clicou)`.
+fn head_tab(ui: &Ui, painter: &egui::Painter, at: Pos2, tab: HeadTab<'_>, active: bool, pad: f32, label_max: f32) -> (f32, bool) {
     let p = theme::pal();
-    let font = if active { theme::ui_semibold(11.5) } else { theme::ui(11.5) };
-    let label_w = text_w(painter, tab.label, font.clone());
-    let badge_txt = (tab.badge > 0).then(|| if tab.badge > 99 { "99+".to_owned() } else { tab.badge.to_string() });
-    let badge_font = if active { theme::ui_bold(10.0) } else { theme::meta(10.0) };
-    let badge_w = badge_txt.as_deref().map(|t| (text_w(painter, t, badge_font.clone()) + 10.0).max(14.0)).unwrap_or(0.0);
-    let w = 16.0 + label_w + if badge_w > 0.0 { 5.0 + badge_w } else { 0.0 };
+    let font = HeadTab::font(active);
+    let badge_w = tab.badge_w(painter, active);
+    let w = pad + label_max + badge_w;
     let rect = Rect::from_min_size(at, Vec2::new(w, 22.0));
     let r = super::clickable(ui, rect, Id::new(("right-tab", tab.id)));
     let hovered = r.hovered();
@@ -68,15 +86,20 @@ fn head_tab(ui: &Ui, painter: &egui::Painter, at: Pos2, tab: HeadTab<'_>, active
     } else {
         p.text_2
     };
-    let text_rect = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, rect.min.y), Vec2::new(label_w, rect.height()));
-    text_in(painter, text_rect, Align2::LEFT_CENTER, tab.label, font, fg);
-    if let Some(t) = badge_txt.as_deref() {
-        let pill = Rect::from_min_size(Pos2::new(text_rect.max.x + 5.0, rect.center().y - 7.0), Vec2::new(badge_w, 14.0));
+    let text_rect = Rect::from_min_size(Pos2::new(rect.min.x + pad / 2.0, rect.min.y), Vec2::new(label_max, rect.height()));
+    place(painter, text_rect, Align2::LEFT_CENTER, galley_trunc(painter, tab.label, font, fg, label_max + 0.5), fg);
+    if let Some((t, badge_font)) = tab.badge(active) {
+        let pill = Rect::from_min_size(Pos2::new(text_rect.max.x + 5.0, rect.center().y - 7.0), Vec2::new(badge_w - 5.0, 14.0));
         let (pill_fill, pill_fg) = if active { (theme::accent(), p.on_accent) } else { (p.chip, p.text_2) };
         painter.rect_filled(pill, 7.0, pill_fill);
-        text_in(painter, pill, Align2::CENTER_CENTER, t, badge_font, pill_fg);
+        text_in(painter, pill, Align2::CENTER_CENTER, &t, badge_font, pill_fg);
     }
-    (w, tip(r, tab.tip).clicked())
+    let tip_text = if label_max + 0.5 < text_w(painter, tab.label, HeadTab::font(active)) {
+        format!("{}\n{}", tab.label, tab.tip)
+    } else {
+        tab.tip.to_owned()
+    };
+    (w, tip(r, tip_text).clicked())
 }
 
 fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
@@ -106,9 +129,14 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         (RightView::GitHub, HeadTab { id: "github", label: "GitHub", tip: &gh_tip, badge: gh_badge }),
     ];
     let y = rect.min.y + (rect.height() - 1.0 - 22.0) * 0.5;
+    // Na barra estreita as abas apertam o espaço interno e, se preciso, encurtam os rótulos (nunca o da ativa).
+    let texts: Vec<f32> = tabs.iter().map(|(t, tab)| text_w(&painter, tab.label, HeadTab::font(view == *t))).collect();
+    let fixed: Vec<f32> = tabs.iter().map(|(t, tab)| tab.badge_w(&painter, view == *t)).collect();
+    let keep = tabs.iter().position(|(t, _)| *t == view);
+    let (pad, label_max) = super::fit_pills(&texts, &fixed, rect.width() - 12.0, (10.0, 16.0), 2.0, keep);
     let mut x = rect.min.x + 6.0;
-    for (target, tab) in tabs {
-        let (w, clicked) = head_tab(ui, &painter, Pos2::new(x, y), tab, view == target);
+    for ((target, tab), label_max) in tabs.into_iter().zip(label_max) {
+        let (w, clicked) = head_tab(ui, &painter, Pos2::new(x, y), tab, view == target, pad, label_max);
         if clicked {
             deck.set_right_view(target);
         }

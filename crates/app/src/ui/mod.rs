@@ -472,9 +472,63 @@ pub fn button_width(painter: &Painter, label: &str, kind: ButtonKind) -> f32 {
     text_w(painter, label, font) + 20.0
 }
 
+/// Como uma fileira de abas em pílula cabe em `avail` px: o espaço interno de cada aba (somado dos dois lados) e a
+/// largura máxima de cada rótulo. `texts` são as larguras dos rótulos; `fixed`, o que cada aba tem além do rótulo e do
+/// espaço interno (o selo); `gap`, o espaço entre as abas. Primeiro o espaço interno encolhe de `pad_max` até `pad_min`;
+/// se ainda não couber, os rótulos mais longos são encurtados (com reticências) por igual, menos o da aba `keep`.
+pub fn fit_pills(texts: &[f32], fixed: &[f32], avail: f32, pad: (f32, f32), gap: f32, keep: Option<usize>) -> (f32, Vec<f32>) {
+    let n = texts.len() as f32;
+    let (pad_min, pad_max) = pad;
+    if texts.is_empty() {
+        return (pad_max, Vec::new());
+    }
+    let base = fixed.iter().sum::<f32>() + gap * (n - 1.0);
+    let text_sum: f32 = texts.iter().sum();
+    let pad = ((avail - base - text_sum) / n).clamp(pad_min, pad_max);
+    let room = avail - base - pad * n;
+    if text_sum <= room {
+        return (pad, texts.to_vec());
+    }
+    // Teto comum dos rótulos encurtáveis: o maior `c` com soma(min(t, c)) <= o que sobra para eles.
+    let kept = keep.map_or(0.0, |k| texts[k]);
+    let mut others: Vec<f32> = texts.iter().enumerate().filter(|(i, _)| Some(*i) != keep).map(|(_, &t)| t).collect();
+    others.sort_by(f32::total_cmp);
+    let mut left = (room - kept).max(0.0);
+    let mut cap = 0.0;
+    for (i, &t) in others.iter().enumerate() {
+        let share = left / (others.len() - i) as f32;
+        if t <= share {
+            left -= t;
+            cap = t;
+        } else {
+            cap = share;
+            break;
+        }
+    }
+    let widths = texts.iter().enumerate().map(|(i, &t)| if Some(i) == keep { t } else { t.min(cap) }).collect();
+    (pad, widths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pills_shrink_the_padding_and_then_the_longest_labels() {
+        // Cabe com folga: espaço interno máximo e rótulos inteiros.
+        assert_eq!(fit_pills(&[40.0, 50.0], &[0.0, 0.0], 300.0, (6.0, 16.0), 2.0, None), (16.0, vec![40.0, 50.0]));
+        // Aperta: o espaço interno encolhe primeiro.
+        let (pad, w) = fit_pills(&[40.0, 50.0], &[0.0, 0.0], 112.0, (6.0, 16.0), 2.0, None);
+        assert_eq!((pad, w), (10.0, vec![40.0, 50.0]));
+        // Não cabe nem com o mínimo: encurta o mais longo, nunca o da aba ativa.
+        let (pad, w) = fit_pills(&[40.0, 50.0, 60.0], &[10.0, 0.0, 0.0], 150.0, (6.0, 16.0), 2.0, Some(2));
+        assert_eq!(pad, 6.0);
+        assert_eq!(w[2], 60.0);
+        let total = w.iter().sum::<f32>() + 10.0 + 3.0 * 6.0 + 2.0 * 2.0;
+        assert!((total - 150.0).abs() < 0.01, "{total}");
+        assert!(w[0] <= 40.0 && w[1] <= 40.0 && w[0] == w[1]);
+        assert_eq!(fit_pills(&[], &[], 100.0, (6.0, 16.0), 2.0, None), (16.0, vec![]));
+    }
 
     #[test]
     fn the_right_panel_keeps_room_for_the_terminal() {

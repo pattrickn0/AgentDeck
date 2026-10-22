@@ -6,7 +6,7 @@ use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
 use agentdeck_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
 
 use super::git::{diff_lines, Act, BTN_H};
-use super::{clickable, frame, galley, galley_spaced, galley_trunc, place, text_in, tip};
+use super::{clickable, frame, galley, galley_spaced, galley_trunc, place, text_in, text_w, tip};
 use crate::deck::Deck;
 use crate::git_ui::{GitSubView, OpenCommit, OpenConflict, OpenStashDiff};
 use crate::theme;
@@ -714,15 +714,20 @@ pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &G
         (GitSubView::History, "Histórico".into()),
         (GitSubView::Stash, if st.stash_count > 0 { format!("Stash {}", st.stash_count) } else { "Stash".into() }),
     ];
+    // Conflitos é a aba urgente: vem primeiro, para nunca ser a cortada na barra estreita.
     if conflicts > 0 {
-        tabs.push((GitSubView::Conflicts, format!("Conflitos {conflicts}")));
+        tabs.insert(0, (GitSubView::Conflicts, format!("Conflitos {conflicts}")));
     }
     // Conflitos some quando não há mais nenhum; a visão volta para Alterações.
     if deck.git.subview == GitSubView::Conflicts && conflicts == 0 && st.state == RepoState::Normal {
         deck.git.subview = GitSubView::Changes;
     }
+    let font_of = |view: GitSubView| if deck.git.subview == view { theme::ui_semibold(12.0) } else { theme::ui(12.0) };
+    let texts: Vec<f32> = tabs.iter().map(|(v, l)| text_w(&p, l, font_of(*v))).collect();
+    let keep = tabs.iter().position(|(v, _)| *v == deck.git.subview);
+    let (pad, label_max) = super::fit_pills(&texts, &vec![0.0; tabs.len()], strip.width() - 12.0, (10.0, 16.0), 2.0, keep);
     let mut x = strip.min.x + 6.0;
-    for (view, label) in tabs {
+    for ((view, label), label_max) in tabs.into_iter().zip(label_max) {
         let active = deck.git.subview == view;
         let danger = view == GitSubView::Conflicts;
         let color = if danger {
@@ -732,15 +737,17 @@ pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &G
         } else {
             theme::pal().text_2
         };
-        let font = if active { theme::ui_semibold(12.0) } else { theme::ui(12.0) };
-        let w = galley(&p, &label, font.clone(), color).size().x + 16.0;
+        let font = font_of(view);
+        let w = label_max + pad;
         let r = Rect::from_min_size(Pos2::new(x, strip.min.y), Vec2::new(w, h - 1.0));
         x = r.max.x + 2.0;
         let resp = clickable(ui, r, Id::new(("git-subtab", label.split(' ').next().unwrap_or(""))));
         if resp.hovered() && !active {
             p.rect_filled(r.shrink2(Vec2::new(0.0, 3.0)), 5.0, theme::pal().hover);
         }
-        text_in(&p, r, Align2::CENTER_CENTER, &label, font, if resp.hovered() { theme::pal().text } else { color });
+        let fg = if resp.hovered() { theme::pal().text } else { color };
+        place(&p, r, Align2::CENTER_CENTER, galley_trunc(&p, &label, font, fg, label_max + 0.5), fg);
+        let resp = if label_max + 0.5 < text_w(&p, &label, font_of(view)) { tip(resp, label.clone()) } else { resp };
         if active {
             p.rect_filled(
                 Rect::from_min_size(Pos2::new(r.min.x + 6.0, strip.max.y - 2.0), Vec2::new(w - 12.0, 2.0)),
