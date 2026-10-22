@@ -27,6 +27,8 @@ O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
 
 - No início de cada tarefa: o texto dos globais e dos que casam com arquivos citados no pedido, mais o índice dos
   outros.
+- Na devolução e na reprovação de uma tarefa: os específicos dos arquivos que o feedback novo cita e que o agente ainda
+  não tinha visto.
 - Sob demanda: `ask-agent --learn [<arquivo>...]` imprime os que valem para esses arquivos; sem argumentos, mostra
   os globais por inteiro e o índice de todos os outros.
 

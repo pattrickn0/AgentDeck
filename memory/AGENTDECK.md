@@ -28,22 +28,30 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
 ## Rumo (ordem decidida pelo orquestrador)
 
 1. ~~Modelo de LLM por instância~~ (feito em 2026-10-17).
-2. ~~**Mesa de tarefas**~~ (fases A e B feitas em 2026-10-17; próximos passos em pendencias.md) no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
-   acompanhar, receber o relatório, revisar o diff e mesclar ou descartar com um botão. É o fluxo que hoje o
-   orquestrador faz à mão.
-3. **Memória em duas camadas, nossa.** **Fase 1 feita** (tarefa `t13`): `memory/aprendizados/*.md` com `touches`, entregues
-   no início de cada tarefa e por `ask-agent --learn`; seção "Situação atual" (outras tarefas e commits da base); histórico de
-   feedbacks nas devoluções. Como funciona: [ARCHITECTURE.md](ARCHITECTURE.md) ("Memória em duas camadas"). **Fase 2** (resumo
-   de API por arquivo, injeção nas abas que não são de tarefa, `ContextProvider` geral): [pendencias.md](pendencias.md), seção 2.
+2. ~~**Mesa de tarefas**~~ (fases A e B feitas em 2026-10-17; a etapa "aguardando validação" veio na `t10`; o que sobrou está em
+   [pendencias.md](pendencias.md), bloco "Próximo") no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
+   acompanhar, receber o relatório, revisar o diff, mesclar, validar (ou reprovar) ou descartar com um botão. É o fluxo que o
+   orquestrador fazia à mão.
+3. **Memória em duas camadas, nossa.** **Fase 1 feita** (tarefas `t13`, `t15` e `t16`): `memory/aprendizados/*.md` com `touches`, entregues
+   no início de cada tarefa e por `ask-agent --learn`; seção "Situação atual" (outras tarefas, os arquivos delas, inclusive os ainda sem commit, e os commits da base); histórico de
+   feedbacks e aprendizados dos arquivos citados nas devoluções e reprovações; `ask-agent --learn` com e sem arquivos. Como funciona: [ARCHITECTURE.md](ARCHITECTURE.md) ("Memória em duas camadas"). **Fase 2** (resumo
+   de API por arquivo, injeção nas abas que não são de tarefa, `ContextProvider` geral): [pendencias.md](pendencias.md), "Memória (fase 2)".
    O plano original, para referência: Longo prazo: "aprendizados" em markdown versionado no repositório, com
    frontmatter que diz que arquivos tocam (`touches`), entregues ao agente quando a tarefa dele mexe nesses arquivos;
    e um resumo da API de um arquivo (estilo `skeleton`) para o agente ler menos. Curto prazo: o pedido da tarefa, as
-   decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto" da seção 2 de
+   decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto", em "Memória (fase 2)" de
    [pendencias.md](pendencias.md)).
    - **Trail-Code avaliado em 2026-10-17 e não adotado como dependência.** O `skeleton` é bom (−87% de tokens), mas
      o `ask` é léxico e não ganhou do `grep`, o `callers` não resolve chamadas de método entre crates em Rust, o `init`
      escreve hooks no `~/.claude` global (afeta todos os repositórios) mesmo com `--no-global`, e toda saída dele
      manda o agente anunciar ao usuário os tokens economizados (texto de terceiro dirigindo o agente). Ficamos com as
      ideias: aprendizados versionados com `touches` e o resumo de API.
-4. **Renomear para AgentDeck** (executáveis, variáveis `COMMANDDECK_*`, pasta de dados, marcadores do `AGENTS.md`),
-   com migração, depois da mesa de tarefas.
+4. **Diff legível para o usuário validar** (combinado em 2026-10-21): hoje o diff mora espremido na barra direita. O centro
+   passa a ter "abas de documento" ao lado das abas de terminal, e o diff de uma tarefa (e depois o editor de arquivos e um
+   explorador mais útil) abre nelas, em largura de tela cheia. É o que falta para o humano validar sem sair do app.
+   Detalhes e subitens: [pendencias.md](pendencias.md), bloco "Próximo", item b).
+5. **Estabilizar e promover a `dev` para a `main`** (combinado em 2026-10-21): a `main` está 157 commits atrás da `dev`. Antes de
+   promover, rodar os testes de [testes.md](testes.md) das áreas novas (mesa, memória, janelas) e corrigir o que falhar; quem
+   aprova a promoção é o usuário.
+6. **Renomear para AgentDeck** (executáveis, variáveis `COMMANDDECK_*`, pasta de dados, marcadores do `AGENTS.md`),
+   com migração, depois do diff legível e da promoção para a `main`.

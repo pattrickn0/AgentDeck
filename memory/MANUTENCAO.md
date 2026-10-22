@@ -33,22 +33,26 @@ Cargo.toml                 workspace + versões das dependências compartilhadas
 crates/
 ├── core/   (commanddeck-core)   "backend": nada de interface gráfica
 │   ├── lib.rs        Core: a API que a interface usa (como os canais IPC)
-│   ├── agents.rs     lista de agentes, onde achar cada CLI, comando de cada aba
-│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /ask, /reply, /signal, /tasks)
+│   ├── events.rs     CoreEvent: o que o backend avisa à interface
+│   ├── agents.rs     lista de agentes, onde achar cada CLI, comando de cada aba, instruções da ponte
+│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /models, /team, /ask, /reply, /signal, /usage, /learn, /tasks)
 │   ├── exchange.rs   perguntas entre abas esperando resposta (ciclos, profundidade, resposta por número)
 │   ├── instances.rs  nomes das instâncias (modelo@cargo@nome) e resolução do destino
-│   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos
-│   ├── tasks.rs      mesa de tarefas: Task, ciclo de vida (criar/iniciar/relatório/devolver/mesclar/descartar), worktrees, armazenamento em dados/tarefas
+│   ├── team.rs       equipe: quem é chefe de quem (funções puras)
+│   ├── activity.rs   última atividade de cada aba (o que a entrega nas abas consulta)
+│   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos e o inventário do `ask-agent --models`
+│   ├── tasks.rs      mesa de tarefas: Task, ciclo de vida (criar/iniciar/relatório/devolver/mesclar/validar/reprovar/descartar), worktrees, mensagens ao agente, armazenamento em dados/tarefas
+│   ├── learnings.rs  memória de longo prazo: aprendizados de memory/aprendizados/ (frontmatter, globs, caminhos do brief, entrega com orçamento, `ask-agent --learn`)
+│   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas, arquivos delas e commits da base)
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
 │   ├── ollama.rs     agente Ollama: ferramentas, sandbox do workspace, loop de tool calling
-│   ├── whisper.rs    transcrição de voz (whisper.cpp)
-│   ├── attachments.rs, sessions.rs, workspace.rs, config.rs, paths.rs, process.rs, util.rs
-│   ├── context.rs    ponto de extensão para RAG (vazio hoje)
-│   ├── learnings.rs  memória de longo prazo: aprendizados de memory/aprendizados/ (frontmatter, globs, caminhos do brief, entrega com orçamento)
-│   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas e commits da base)
+│   ├── whisper.rs    transcrição de voz (whisper.cpp); download.rs baixa o motor e o modelo
+│   ├── usage.rs      uso dos planos (sessão e semana); usage/codex.rs e usage/antigravity.rs leem cada fonte
+│   ├── context.rs    ponto de extensão para RAG (ContextProvider; o Ollama e o headless o consultam)
 │   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
 │   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
+│   ├── attachments.rs, sessions.rs, workspace.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
 │   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
 │   ├── tests/tasks.rs    ciclo de vida das tarefas com o git real (pula se o git não estiver instalado)
@@ -58,18 +62,30 @@ crates/
 ├── app/    (commanddeck)        interface gráfica (o .exe principal)
 │   ├── main.rs / app.rs / window.rs   janela winit, OpenGL, loop de eventos
 │   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
-│   ├── terminal/     emulador de terminal (pty + alacritty_terminal + desenho + teclado)
+│   ├── icons.rs      ícones SVG rasterizados em tempo de execução
+│   ├── util.rs       funções puras compartilhadas pela interface
+│   ├── agents.rs     cores, nomes e menus dos agentes do lado da interface
+│   ├── terminal/     emulador de terminal: mod.rs (pty + alacritty_terminal), view.rs (desenho e mouse), input.rs (teclado), colors.rs (paleta)
 │   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
 │   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
 │   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
-│   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, descartar, reabrir a aba)
+│   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, validar, descartar, reabrir a aba)
 │   ├── dictation.rs  ditado por voz: estados do microfone e destino fixo na aba onde a gravação começou (funções puras, com testes)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
-│   ├── ui/           titlebar (barra de título + uso dos agentes em usage.rs), panes (janelas da tela dividida) + tabs (abas de cada janela), sidebar
-│   │                 (árvore), right_panel (barra direita: Tarefas/Conversa/Git/GitHub), git, github, tasks, compositor, menus
-│   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas)
-│   └── audio.rs      som de notificação e microfone (cpal)
+│   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas), anexos e arquivos soltos
+│   ├── audio.rs      som de notificação e microfone (cpal)
+│   ├── crash.rs      registro de quedas em dados/crash.log; smoke.rs, a captura de tela (COMMANDDECK_SMOKE)
+│   └── ui/           mod.rs (pintura, modais)
+│       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
+│       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾)
+│       ├── sidebar.rs (explorador e ORGANIZAÇÃO) + projects.rs (projetos e agentes em árvore)
+│       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
+│       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
+│       └── menus.rs (nova aba, configurações), shortcuts.rs (atalhos), overlay.rs (arrastar arquivos), empty_state.rs (nenhum agente aberto)
 └── cli/    (commanddeck-cli)    ask-agent e ollama-agent
+    ├── src/bin/ask-agent.rs     o comando dos agentes (`parse_task`, `learn_command`, `models_command`, com testes)
+    ├── src/bin/ollama-agent.rs  o agente local com ferramentas
+    └── tests/ask_agent.rs, tests/tasks.rs   o `ask-agent` de verdade contra uma ponte real
 ```
 
 **Regra de ouro:** a interface (`app`) só fala com o backend pelos métodos de `Core` (em `crates/core/src/lib.rs`). Os eventos voltam pelo `CoreEvent` (`events.rs`). Mudou algo no backend? Nenhuma tela precisa saber como foi feito.
@@ -108,6 +124,12 @@ formato da grade, retângulos, divisores, vizinho para os atalhos, ordem das jan
 ativada mais recentemente, `Tab::shown`); a pintura fica em `crates/app/src/ui/panes.rs` (janelas, divisores,
 arrasto) e `ui/tabs.rs` (faixa de abas). Para ver o arrasto sem mouse: `COMMANDDECK_DEBUG_UI=split-drag`.
 
+**Mexer no ditado e nos anexos.** Os botões de microfone e de anexo ficam no cabeçalho de cada janela (`ui/panes.rs`) e agem na
+aba visível dela; o estado do microfone e o destino fixo da transcrição são funções puras e testadas em `crates/app/src/dictation.rs`;
+o que acontece com o arquivo (copiar para `dados/anexos`, digitar `@caminho` ou o caminho, `input::paste_bytes` sem Enter) e a zona de soltar
+(`resolve_drop_zone`, `attach_dropped_files`) ficam em `deck.rs`, e o destaque ao arrastar, em `ui/overlay.rs`. O formulário "Nova
+tarefa" anexa pelo mesmo caminho (`util::append_brief_attachments` junta os caminhos ao pedido).
+
 **Mexer na aba Git.** As operações ficam em `crates/core/src/git.rs` (`impl Core`, com o ambiente seguro em
 `base_command`); o estado e as releituras, em `crates/app/src/git_ui.rs`; a pintura, em `crates/app/src/ui/git.rs`
 (o desenho só coleta as ações e aplica no fim). Comando novo do git: sempre `args([...])` com `--` antes de
@@ -141,7 +163,7 @@ puros (slug, branch, mensagens ao agente, `exclude`) têm testes no próprio `ta
 `crates/app/src/ui/tasks.rs` (a pintura só *coleta* o que foi clicado em `Act`; `apply` aplica no fim do quadro).
 Toda chamada de tarefa do core roda git, então vai para `Deck::spawn_bg` e volta como `UiMsg::Tasks(geração, TaskReply)`
 (a geração muda a cada troca de projeto e descarta respostas do anterior); a lista é relida ao abrir a aba, a cada
-`CoreEvent::TasksChanged` e depois de cada ação. O número do ícone da aba é `TasksUi::review_count`. Quais botões cada
+`CoreEvent::TasksChanged` e depois de cada ação. `tasks_flow_tests.rs` roda esse fluxo com o core e o git reais. O número do ícone da aba é `TasksUi::review_count`. Quais botões cada
 estado tem é `actions_for` (função pura, com testes); o agrupamento da lista, o resumo do diff (`parse_diff_stat`) e os
 textos de tempo também. O diff completo vem de `Core::task_diff` e é desenhado por `ui::git::diff_lines`, o mesmo
 desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
@@ -164,13 +186,9 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
-- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `COMMANDDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `COMMANDDECK_DEBUG_FEED=1`, `COMMANDDECK_DEBUG_FAKE_SHELL=1` e `COMMANDDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas
 
-A lista atualizada fica em [pendencias.md](pendencias.md). As principais:
-
-- **IME no terminal:** ligado e coberto por testes, mas ainda não exercitado com um IME real (teclado CJK, `Win+.`).
-- **Entrega nas abas:** só Claude e Codex têm hooks de turno; os outros agentes dependem da heurística da saída.
-- Emojis aparecem monocromáticos (limitação do egui).
+A lista fica em [pendencias.md](pendencias.md), por área; o que ainda não rodou no Windows está em [testes.md](testes.md).
