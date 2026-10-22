@@ -24,8 +24,6 @@ const HEAD_H: f32 = 34.0;
 const BANNER_H: f32 = 24.0;
 const MODE_H: f32 = 24.0;
 const ROW_H: f32 = 22.0;
-/// O botão que leva o diff ao modo Documentos.
-const OPEN_CENTER: &str = "Abrir em Documentos";
 const MSG_FONT: f32 = 13.0;
 const MSG_ROWS: f32 = 3.0;
 pub(super) const BTN_H: f32 = 28.0;
@@ -638,23 +636,11 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
             acts.push(act);
         }
     }
-    // "Abrir em Documentos": na mesma linha se sobra lugar para o caminho; senão, numa linha só dele.
+    // "Abrir em Documentos": com texto se sobra lugar para o caminho; senão, só o ícone (com a dica).
     let center_tip = "Abre este diff, só para ler, com a largura toda do centro (o preparo por trecho continua aqui)";
-    let mut extra_row = 0.0;
-    if right - (back.max.x + 8.0) - (git_views::pill_w(ui, OPEN_CENTER) + 6.0) >= 150.0 {
-        let id = Id::new("git-diff-center");
-        if git_views::pill(ui, &mut right, head.min.y + 3.0, 22.0, OPEN_CENTER, center_tip, git_views::Look::Normal, true, id) {
-            acts.push(Act::OpenDiffCenter(entry.clone(), open.staged));
-        }
-    } else {
-        extra_row = 26.0;
-        let row = Rect::from_min_size(Pos2::new(body.min.x, head.max.y), Vec2::new(body.width(), extra_row));
-        painter.rect_filled(row, 0.0, theme::pal().chip);
-        let mut r = row.max.x - 6.0;
-        let id = Id::new("git-diff-center");
-        if git_views::pill(ui, &mut r, row.min.y + 2.0, 22.0, OPEN_CENTER, center_tip, git_views::Look::Normal, true, id) {
-            acts.push(Act::OpenDiffCenter(entry.clone(), open.staged));
-        }
+    let compact = git_views::open_docs_compact(ui, right - (back.max.x + 8.0));
+    if git_views::open_docs(ui, &mut right, head.min.y + 3.0, compact, center_tip, Id::new("git-diff-center")) {
+        acts.push(Act::OpenDiffCenter(entry.clone(), open.staged));
     }
     let side = if open.staged { "preparado" } else { "não preparado" };
     let title = format!("{}  · {side}", entry.path);
@@ -675,7 +661,7 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
         acts.push(Act::OpenFile(entry.path.clone()));
     }
 
-    let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y + extra_row), body.max);
+    let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
     match &open.diff {
         None => {
             text_in(&ui.painter_at(area), area.shrink(14.0), Align2::LEFT_TOP, "Carregando o diff…", theme::ui(12.5), theme::pal().text_2);

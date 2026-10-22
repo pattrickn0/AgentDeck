@@ -61,8 +61,13 @@ fn docs_word(full_w: f32, seg_w: f32) -> &'static str {
     }
 }
 
+/// "Documentos n"; sem documento aberto, só "Documentos" (o zero é ruído).
 fn docs_label(n: usize) -> String {
-    format!("Documentos {n}")
+    if n == 0 {
+        "Documentos".to_owned()
+    } else {
+        format!("Documentos {n}")
+    }
 }
 
 /// Pinta a chave **Agentes | Documentos n** em `rect` (o trilho, `SWITCH_H` ou `SWITCH_COMPACT_H` de
@@ -126,9 +131,11 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
             }
         } else {
             // "Documentos" (ou "Docs", na barra lateral mais estreita) e a contagem, esta em `text_3`
-            // (apagada sobre o destaque).
-            let count_w = text_w(painter, &n_docs.to_string(), theme::ui(11.5));
-            let label = docs_word(text_w(painter, "Documentos", font.clone()) + 5.0 + count_w, seg.width());
+            // (apagada sobre o destaque); sem documento aberto, sem contagem.
+            let count = if n_docs > 0 { n_docs.to_string() } else { String::new() };
+            let count_gap = if n_docs > 0 { 5.0 } else { 0.0 };
+            let count_w = text_w(painter, &count, theme::ui(11.5));
+            let label = docs_word(text_w(painter, "Documentos", font.clone()) + count_gap + count_w, seg.width());
             let g = galley(painter, label, font, fg);
             let count_color = if active {
                 theme::with_opacity(p.on_accent, 0.7)
@@ -137,15 +144,15 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
             } else {
                 fg
             };
-            let cg = galley(painter, &n_docs.to_string(), theme::ui(11.5), count_color);
-            let total = g.size().x + 5.0 + cg.size().x;
+            let cg = galley(painter, &count, theme::ui(11.5), count_color);
+            let total = g.size().x + count_gap + cg.size().x;
             let x = seg.center().x - total / 2.0;
             let gw = g.size().x;
             place(painter, Rect::from_min_size(Pos2::new(x, seg.min.y), Vec2::new(gw, seg.height())), Align2::LEFT_CENTER, g, fg);
             let cw = cg.size().x;
             place(
                 painter,
-                Rect::from_min_size(Pos2::new(x + gw + 5.0, seg.min.y), Vec2::new(cw, seg.height())),
+                Rect::from_min_size(Pos2::new(x + gw + count_gap, seg.min.y), Vec2::new(cw, seg.height())),
                 Align2::LEFT_CENTER,
                 cg,
                 count_color,

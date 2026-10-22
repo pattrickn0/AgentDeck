@@ -1,7 +1,7 @@
 //! Visões da aba Git além da lista de alterações: Histórico, Stash e Conflitos. Como em `git.rs`,
 //! o desenho só *coleta* o que foi clicado ([`Act`]); quem aplica é `git::apply`.
 
-use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
+use egui::{Align2, Color32, Id, Key, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use agentdeck_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
 
@@ -70,6 +70,58 @@ pub(super) fn pill_w(ui: &Ui, label: &str) -> f32 {
 }
 
 /// Cabeçalho com "←", o título e o espaço livre à direita (`right`) para botões. Devolve (cabeçalho, voltar clicado, `right`).
+/// O botão que leva um diff ao modo Documentos.
+pub(super) const OPEN_DOCS: &str = "Abrir em Documentos";
+/// Espaço mínimo do título ao lado do botão com texto; com menos, o botão vira só o ícone.
+const OPEN_DOCS_MIN_TITLE: f32 = 150.0;
+/// O botão de ícone (24 px) e o espaço antes dele.
+const OPEN_DOCS_ICON_W: f32 = 26.0;
+
+/// Com `room` px para o título e o botão, o botão vai só como ícone?
+pub(super) fn open_docs_compact(ui: &Ui, room: f32) -> bool {
+    room - (pill_w(ui, OPEN_DOCS) + 6.0) < OPEN_DOCS_MIN_TITLE
+}
+
+/// Largura que o botão "Abrir em Documentos" ocupa à direita (com o espaço antes dele).
+pub(super) fn open_docs_w(ui: &Ui, compact: bool) -> f32 {
+    if compact {
+        OPEN_DOCS_ICON_W
+    } else {
+        pill_w(ui, OPEN_DOCS) + 6.0
+    }
+}
+
+/// "Abrir em Documentos" no cabeçalho de um diff, encostado em `right` (que anda para a esquerda): com texto, ou
+/// só o ícone com a dica (`compact`, barra estreita). Devolve se foi clicado.
+pub(super) fn open_docs(ui: &Ui, right: &mut f32, y: f32, compact: bool, tooltip: &str, id: Id) -> bool {
+    if !compact {
+        return pill(ui, right, y, 22.0, OPEN_DOCS, tooltip, Look::Normal, true, id);
+    }
+    let b = Rect::from_min_size(Pos2::new(*right - 24.0, y), Vec2::new(24.0, 22.0));
+    *right = b.min.x - 2.0;
+    let r = clickable(ui, b, id);
+    let p = theme::pal();
+    if r.hovered() {
+        ui.painter().rect_filled(b, 5.0, p.separator);
+    }
+    paint_open_docs(ui.painter(), b.center(), if r.hovered() { p.text_strong } else { p.text });
+    tip(r, format!("{OPEN_DOCS}\n{tooltip}")).clicked()
+}
+
+/// O ícone de "Abrir em Documentos": uma caixa aberta no canto e uma seta saindo dela.
+fn paint_open_docs(p: &Painter, c: Pos2, color: Color32) {
+    let s = Stroke::new(1.2, color);
+    let (x0, y0, x1, y1) = (c.x - 5.5, c.y - 4.5, c.x + 4.5, c.y + 5.5);
+    p.line_segment([Pos2::new(x0 + 4.0, y0), Pos2::new(x0, y0)], s);
+    p.line_segment([Pos2::new(x0, y0), Pos2::new(x0, y1)], s);
+    p.line_segment([Pos2::new(x0, y1), Pos2::new(x1, y1)], s);
+    p.line_segment([Pos2::new(x1, y1), Pos2::new(x1, y1 - 4.0)], s);
+    let tip_pt = Pos2::new(x1 + 1.0, y0 - 1.0);
+    p.line_segment([Pos2::new(c.x - 1.0, c.y + 1.0), tip_pt], s);
+    p.line_segment([tip_pt, Pos2::new(tip_pt.x - 4.5, tip_pt.y)], s);
+    p.line_segment([tip_pt, Pos2::new(tip_pt.x, tip_pt.y + 4.5)], s);
+}
+
 fn header(ui: &Ui, body: Rect, id: &str, title: &str, hint: &str, reserved_right: f32) -> (Rect, bool, f32) {
     let painter = ui.painter_at(body);
     let head = Rect::from_min_size(body.min, Vec2::new(body.width(), HEADER_H));
@@ -178,13 +230,14 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
 
 fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>) {
     let title = format!("{}  {}", open.short_hash, open.subject);
-    let center_w = pill_w(ui, "Abrir em Documentos") + 6.0;
-    let (head, back, mut right) = header(ui, body, "commit", &title, &open.subject, center_w);
+    // O título fica entre o "←" (6 + 26 + 8 px) e o botão.
+    let compact = open_docs_compact(ui, body.width() - 6.0 - 40.0);
+    let (head, back, mut right) = header(ui, body, "commit", &title, &open.subject, open_docs_w(ui, compact));
     if back {
         acts.push(Act::CloseCommit);
     }
     let tip_text = "Abre o diff deste commit, só para ler, com a largura toda do centro";
-    if pill(ui, &mut right, head.min.y + 3.0, 22.0, "Abrir em Documentos", tip_text, Look::Normal, true, Id::new("git-commit-center")) {
+    if open_docs(ui, &mut right, head.min.y + 3.0, compact, tip_text, Id::new("git-commit-center")) {
         acts.push(Act::OpenCommitCenter(open.hash.clone(), open.short_hash.clone(), open.subject.clone()));
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
