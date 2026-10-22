@@ -173,6 +173,10 @@ pub struct Task {
     pub diff_stat: Option<String>,
     /// A mensagem do erro, em `Failed`.
     pub error: Option<String>,
+    /// Hash completo do commit da última mesclagem na base (`git rev-parse HEAD` logo depois do `merge --no-ff`);
+    /// `None` se a tarefa nunca foi mesclada. Uma nova mesclagem (depois de reprovar) sobrescreve. Serve ao diff
+    /// "o que foi mesclado" em `Validating`/`Merged` e a `task_merge` reconhecer uma tarefa já mesclada antes.
+    pub merge_commit: Option<String>,
     /// Histórico curto (no máximo [`MAX_EVENTS`]).
     pub events: Vec<TaskEvent>,
     /// Os feedbacks já dados ao agente, do mais antigo ao mais novo (no máximo [`MAX_FEEDBACKS`]); voltam
@@ -979,16 +983,34 @@ impl Core {
     // ---------- Relatório ----------
 
     /// O agente terminou: guarda o relatório e o `git diff --stat base...branch` e põe a tarefa em
-    /// revisão. Exige `Running`. A ponte só deixa o próprio agente da tarefa chamar.
+    /// revisão. Exige `Running`, ou `Validating` com commits novos na branch (o usuário corrigiu algo na aba
+    /// enquanto esperava a validação e o agente entrega o que falta; sem commits novos, recusa). A ponte só
+    /// deixa o próprio agente da tarefa chamar.
     pub fn task_done(&self, project: &str, id: &str, report: &str) -> Result<Task, TaskError> {
         let _op = self.inner.tasks.op.lock();
         let task = self.task_or_404(project, id)?;
-        if task.status != TaskStatus::Running {
+        let after_merge = task.status == TaskStatus::Validating;
+        if task.status != TaskStatus::Running && !after_merge {
             return Err(TaskError::Conflict(format!(
                 "a tarefa {} está {}: só uma tarefa em andamento recebe o relatório",
                 task.id,
                 task.status.label()
             )));
+        }
+        if after_merge {
+            let repo = self.task_repo(project)?;
+            let has_new = valid_task_branch(&task.branch)
+                && crate::git::valid_branch_name(&task.base)
+                && branch_exists(&repo, &task.branch)
+                && git_out(&repo, &["rev-list", "--count", &format!("{}..{}", task.base, task.branch)])
+                    .map(|n| n.trim() != "0")
+                    .unwrap_or(false);
+            if !has_new {
+                return Err(TaskError::Conflict(format!(
+                    "a tarefa {} já foi mesclada e espera a validação do usuário; não há commits novos para entregar. Se algo ainda falta, quem decide é o usuário (Reprovar)",
+                    task.id
+                )));
+            }
         }
         let report = report.trim();
         if report.is_empty() {
@@ -1018,7 +1040,11 @@ impl Core {
             }
             t.status = TaskStatus::Review;
             t.finished_ms = Some(now_ms());
-            t.log("relatório recebido; em revisão");
+            t.log(if after_merge {
+                "o agente entregou mais trabalho depois da mesclagem; em revisão"
+            } else {
+                "relatório recebido; em revisão"
+            });
             t.clone()
         });
         let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
@@ -1029,19 +1055,36 @@ impl Core {
     // ---------- Diff ----------
 
     /// O diff completo da tarefa (`git diff base...branch`, só o que a branch trouxe), no mesmo formato
-    /// do diff da aba Git, para a interface mostrar. Só leitura: não toma a trava das operações. Falha
-    /// com `Conflict` se a branch já não existe (tarefa mesclada ou descartada).
+    /// do diff da aba Git, para a interface mostrar. Em `Validating` e `Merged` com `merge_commit`, é o que a
+    /// mesclagem trouxe (`git diff <hash>^1 <hash>`): depois do alinhamento a branch é a própria base e o
+    /// diff por intervalo ficaria vazio. Só leitura: não toma a trava das operações. Falha com `Conflict` se a
+    /// branch já não existe (tarefa descartada) ou se o commit da mesclagem sumiu (histórico reescrito).
     pub fn task_diff(&self, project: &str, id: &str) -> Result<crate::git::GitDiff, TaskError> {
         let task = self.task_or_404(project, id)?;
         let repo = self.task_repo(project)?;
         if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) {
             return Err(TaskError::Failed(format!("dados da tarefa {} fora do esperado; não li o diff", task.id)));
         }
-        if repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{}", task.branch)]).is_err() {
-            return Err(TaskError::Conflict(format!("a branch {} não existe mais: não há diff para mostrar", task.branch)));
-        }
-        let range = format!("{}...{}", task.base, task.branch);
-        let out = run(repo.cmd(&["diff", "--no-color", "--no-ext-diff", "-M", &range, "--"]), None, WRITE_TIMEOUT).map_err(git_error)?;
+        let merged = matches!(task.status, TaskStatus::Validating | TaskStatus::Merged);
+        let args: Vec<String> = if let Some(hash) = task.merge_commit.as_deref().filter(|_| merged) {
+            let well_formed = !hash.is_empty() && hash.len() <= 64 && hash.bytes().all(|b| b.is_ascii_hexdigit());
+            if !well_formed || repo.read(&["rev-parse", "--verify", "-q", &format!("{hash}^{{commit}}")]).is_err() {
+                return Err(TaskError::Conflict(format!(
+                    "o commit da mesclagem ({}) não existe mais no repositório (o histórico foi reescrito?): não há diff para mostrar",
+                    short_hash(hash)
+                )));
+            }
+            let first_parent = format!("{hash}^1");
+            ["diff", "--no-color", "--no-ext-diff", "-M", first_parent.as_str(), hash, "--"].map(str::to_owned).to_vec()
+        } else {
+            if !branch_exists(&repo, &task.branch) {
+                return Err(TaskError::Conflict(format!("a branch {} não existe mais: não há diff para mostrar", task.branch)));
+            }
+            let range = format!("{}...{}", task.base, task.branch);
+            ["diff", "--no-color", "--no-ext-diff", "-M", range.as_str(), "--"].map(str::to_owned).to_vec()
+        };
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = run(repo.cmd(&args), None, WRITE_TIMEOUT).map_err(git_error)?;
         let cut = out.stdout.len() > crate::git::DIFF_MAX_BYTES;
         let bytes = &out.stdout[..out.stdout.len().min(crate::git::DIFF_MAX_BYTES)];
         let mut diff = crate::git::parse_diff(&String::from_utf8_lossy(bytes), crate::git::DIFF_MAX_LINES);
@@ -1173,6 +1216,24 @@ impl Core {
         }
         let ahead = git_out(&repo, &["rev-list", "--count", &format!("{}..{}", task.base, task.branch)]).map_err(git_error)?;
         if ahead.trim() == "0" {
+            // Reprovada e entregue sem commit novo: o agente concluiu que não havia o que mudar. O que a
+            // última mesclagem trouxe já está na base; volta a esperar a validação, sem novo commit de mesclagem.
+            if let Some(last) = task.merge_commit.as_deref() {
+                let short = short_hash(last).to_owned();
+                let updated = self.update_task(project, &task.id, |t| {
+                    t.status = TaskStatus::Validating;
+                    t.finished_ms = Some(now_ms());
+                    t.error = None;
+                    t.log(format!("sem commits novos desde a última mesclagem ({short}); aguardando validação de novo"));
+                    t.clone()
+                });
+                let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+                self.feed(
+                    FeedEntry::system(format!("Tarefa {} sem commits novos, aguardando validação de novo: {}", task.id, task.title))
+                        .in_project(project),
+                );
+                return Ok(task);
+            }
             return Err(refuse(
                 &task,
                 format!(
@@ -1211,7 +1272,8 @@ impl Core {
             }
             return Err(self.fail_task(project, &task.id, format!("a mesclagem falhou: {e}")));
         }
-        let head = git_out(&repo, &["rev-parse", "--short", "HEAD"]).map(|s| s.trim().to_owned()).unwrap_or_default();
+        let full_head = git_out(&repo, &["rev-parse", "HEAD"]).map(|s| s.trim().to_owned()).unwrap_or_default();
+        let head = short_hash(&full_head).to_owned();
 
         // A branch da tarefa passa a ser a própria base: se for reprovada, o agente continua dali.
         let aligned = align_with_base(&repo, &task);
@@ -1219,6 +1281,7 @@ impl Core {
             t.status = TaskStatus::Validating;
             t.finished_ms = Some(now_ms());
             t.error = None;
+            t.merge_commit = Some(full_head.clone()).filter(|h| !h.is_empty());
             t.log(format!("mesclada em {} ({head}); aguardando validação", t.base));
             if let Err(e) = &aligned {
                 t.log(format!("aviso: não consegui alinhar a branch {} com {}: {e}", t.branch, t.base));
@@ -1266,19 +1329,24 @@ impl Core {
                 short_list(&d)
             )));
         }
+        let mut warnings = Vec::new();
         if branch_exists(&repo, &task.branch) {
-            let ahead = git_out(&repo, &["rev-list", "--count", &format!("{}..{}", task.base, task.branch)]).map_err(git_error)?;
-            if ahead.trim() != "0" {
-                return Err(refuse(format!(
-                    "a branch {} tem commits que ainda não foram mesclados em \"{}\": reprove a tarefa para o agente entregá-los, ou descarte-a",
-                    task.branch, task.base
-                )));
+            if branch_exists(&repo, &task.base) {
+                let ahead = git_out(&repo, &["rev-list", "--count", &format!("{}..{}", task.base, task.branch)]).map_err(git_error)?;
+                if ahead.trim() != "0" {
+                    return Err(refuse(format!(
+                        "a branch {} tem commits que ainda não foram mesclados em \"{}\": reprove a tarefa para o agente entregá-los, ou descarte-a",
+                        task.branch, task.base
+                    )));
+                }
+            } else {
+                warnings.push(format!("a base {} não existe mais; não conferi se a branch tinha commits fora dela", task.base));
             }
         }
 
         // Limpeza: aba, worktree, branch (o que ela trouxe já está na base).
         self.close_task_instance(project, &task);
-        let mut warnings = self.remove_task_worktree(&repo, &task);
+        warnings.extend(self.remove_task_worktree(&repo, &task));
         if task.worktree.exists() {
             // Algo ainda segura a pasta: concluir agora deixaria pasta e branch órfãs, sem como limpar depois.
             let why = warnings.join("; ");
@@ -1551,6 +1619,11 @@ fn union_files(committed: Vec<String>, dirty: Option<Vec<String>>) -> Vec<String
     files.sort();
     files.dedup();
     files
+}
+
+/// O hash curto (7 caracteres) de um hash completo, para mensagens e eventos.
+fn short_hash(hash: &str) -> &str {
+    hash.get(..7).unwrap_or(hash)
 }
 
 /// A branch existe neste repositório.
