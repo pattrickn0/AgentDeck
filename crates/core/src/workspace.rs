@@ -62,6 +62,48 @@ pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
     items
 }
 
+/// Limite do que `read_text` lê: acima disso o arquivo não vira texto na tela.
+pub const READ_TEXT_MAX: u64 = 1024 * 1024;
+
+/// O que `read_text` encontrou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextFile {
+    Text(String),
+    /// Maior que [`READ_TEXT_MAX`] (tamanho em bytes); o conteúdo não é lido.
+    TooLarge(u64),
+    /// Tem bytes nulos: não é texto.
+    Binary,
+}
+
+/// Lê um arquivo de texto do workspace para a visualização somente leitura. O caminho precisa ser
+/// relativo e seguro (`git::safe_rel`) e, depois de resolver links simbólicos, continuar dentro do
+/// workspace. Bytes que não são UTF-8 viram `�` (arquivos antigos em Latin-1 ainda se leem).
+pub fn read_text(workspace: &Path, rel: &str) -> Result<TextFile, String> {
+    if workspace.as_os_str().is_empty() {
+        return Err("nenhum projeto aberto".into());
+    }
+    if !crate::git::safe_rel(rel) {
+        return Err(format!("caminho inválido: {rel}"));
+    }
+    let root = std::fs::canonicalize(workspace).map_err(|e| format!("a pasta do projeto não abre: {e}"))?;
+    let full = std::fs::canonicalize(workspace.join(rel)).map_err(|e| format!("não consegui abrir {rel}: {e}"))?;
+    if !crate::util::path_within(&full, &root) {
+        return Err(format!("{rel} está fora da pasta do projeto"));
+    }
+    let meta = std::fs::metadata(&full).map_err(|e| format!("não consegui ler {rel}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("{rel} não é um arquivo"));
+    }
+    if meta.len() > READ_TEXT_MAX {
+        return Ok(TextFile::TooLarge(meta.len()));
+    }
+    let bytes = std::fs::read(&full).map_err(|e| format!("não consegui ler {rel}: {e}"))?;
+    if bytes.contains(&0) {
+        return Ok(TextFile::Binary);
+    }
+    Ok(TextFile::Text(String::from_utf8_lossy(&bytes).into_owned()))
+}
+
 // ---------- AGENTS.md ----------
 
 pub const MARKER_START: &str = "<!-- commanddeck:start -->";
@@ -361,6 +403,32 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_text_reads_text_and_refuses_big_binary_and_outside_files() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(ws.join("sub")).expect("mkdir");
+        std::fs::write(ws.join("sub").join("a.rs"), "fn main() {}\n").expect("write");
+        std::fs::write(ws.join("latin.txt"), b"caf\xe9").expect("write");
+        std::fs::write(ws.join("bin.dat"), b"MZ\0\0abc").expect("write");
+        std::fs::write(ws.join("big.txt"), vec![b'x'; READ_TEXT_MAX as usize + 1]).expect("write");
+        std::fs::write(ws.join("limit.txt"), vec![b'x'; READ_TEXT_MAX as usize]).expect("write");
+        std::fs::write(tmp.path().join("secret.txt"), "fora").expect("write");
+
+        assert_eq!(read_text(&ws, "sub/a.rs"), Ok(TextFile::Text("fn main() {}\n".into())));
+        assert_eq!(read_text(&ws, "latin.txt"), Ok(TextFile::Text("caf\u{fffd}".into())));
+        assert_eq!(read_text(&ws, "bin.dat"), Ok(TextFile::Binary));
+        assert_eq!(read_text(&ws, "big.txt"), Ok(TextFile::TooLarge(READ_TEXT_MAX + 1)));
+        assert!(matches!(read_text(&ws, "limit.txt"), Ok(TextFile::Text(t)) if t.len() as u64 == READ_TEXT_MAX));
+        // Fora do workspace, absoluto, pasta, inexistente e sem projeto.
+        assert!(read_text(&ws, "../secret.txt").is_err());
+        assert!(read_text(&ws, &tmp.path().join("secret.txt").to_string_lossy()).is_err());
+        assert!(read_text(&ws, "sub").is_err());
+        assert!(read_text(&ws, "nao-existe.txt").is_err());
+        assert!(read_text(&ws, "").is_err());
+        assert!(read_text(Path::new(""), "sub/a.rs").is_err());
+    }
 
     #[test]
     fn read_dir_orders_and_filters() {

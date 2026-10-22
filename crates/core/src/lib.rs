@@ -54,7 +54,7 @@ pub use instances::Ident;
 pub use tasks::{Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 pub use team::Team;
 pub use usage::{AgentUsage, UsageWindow};
-pub use workspace::DirEntry;
+pub use workspace::{DirEntry, TextFile};
 
 /// Função chamada sempre que um [`CoreEvent`] é emitido, para acordar o loop da UI
 /// (ex.: `EventLoopProxy::send_event`). Pode ser chamada de qualquer thread.
@@ -798,6 +798,12 @@ impl Core {
             return Vec::new();
         }
         workspace::read_dir(&ws, rel_dir)
+    }
+
+    /// Lê um arquivo de texto do workspace (até 1 MB) para a visualização do modo Documentos; sem
+    /// projeto ativo, erro. Ver [`workspace::read_text`].
+    pub fn read_text(&self, rel_path: &str) -> Result<workspace::TextFile, String> {
+        workspace::read_text(&self.workspace(), rel_path)
     }
 
     /// Abre um arquivo do workspace no app padrão do sistema. Aceita caminhos relativos ao
