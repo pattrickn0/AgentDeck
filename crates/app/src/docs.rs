@@ -69,6 +69,12 @@ impl DocKind {
     pub fn reloadable(&self) -> bool {
         !matches!(self, DocKind::Markdown(MdSource::TaskBrief(_) | MdSource::TaskReport(_)))
     }
+
+    /// A leitura usa o projeto **ativo** na hora em que a thread roda (arquivo, commit, arquivo alterado): se o usuário
+    /// trocou de projeto nesse meio-tempo, o resultado é de outro projeto. O diff da tarefa passa o projeto e não tem esse risco.
+    pub fn reads_active_project(&self) -> bool {
+        matches!(self, DocKind::CommitDiff(_) | DocKind::FileDiff { .. } | DocKind::File(_) | DocKind::Markdown(MdSource::File(_)))
+    }
 }
 
 /// Um arquivo dentro de um diff (a lista da esquerda).
@@ -248,10 +254,15 @@ pub struct Opened {
 }
 
 impl Docs {
-    /// Abre o documento, ou só foca se o projeto já o tem aberto, e muda o centro para Documentos.
+    /// Abre o documento, ou só foca se o projeto já o tem aberto, e muda o centro para Documentos. Um documento cujo
+    /// texto vem da tarefa (pedido, relatório) não é relido: ao abri-lo de novo, o estado e os títulos passam a ser os
+    /// de agora (o relatório mudou depois de uma devolução).
     pub fn open(&mut self, project: &str, kind: DocKind, title: String, subtitle: String, state: DocState) -> Opened {
         self.view = CenterView::Docs;
-        if let Some(t) = self.tabs.iter().find(|t| t.project == project && t.kind == kind) {
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.project == project && t.kind == kind) {
+            if !t.kind.reloadable() {
+                (t.title, t.subtitle, t.state) = (title, subtitle, state);
+            }
             let uid = t.uid;
             self.current.insert(project.to_owned(), uid);
             return Opened { uid, fresh: false };
@@ -335,9 +346,19 @@ impl Docs {
         self.current.insert(project.to_owned(), uids[next]);
     }
 
-    /// Os documentos de arquivo do projeto (uid e caminho): são relidos quando o watcher avisa.
-    pub fn file_docs(&self, project: &str) -> Vec<(u64, String)> {
-        self.of_project(project).filter_map(|t| t.kind.file_path().map(|p| (t.uid, p.to_owned()))).collect()
+    /// O que reler quando `project` está ativo: os arquivos (o watcher avisou, ou o projeto voltou à tela) e o que ficou
+    /// "Carregando…" porque a resposta chegou com outro projeto ativo e foi descartada (`accepts_load`).
+    pub fn to_reread(&self, project: &str) -> Vec<u64> {
+        self.of_project(project)
+            .filter(|t| t.kind.file_path().is_some() || (matches!(t.state, DocState::Loading) && t.kind.reads_active_project()))
+            .map(|t| t.uid)
+            .collect()
+    }
+
+    /// A resposta de leitura de `uid` vale? Não vale se o documento fechou, nem se ele lê o projeto ativo e o ativo
+    /// agora não é o dele (a thread leu o workspace de outro projeto).
+    pub fn accepts_load(&self, uid: u64, active_project: &str) -> bool {
+        self.get(uid).is_some_and(|t| !t.kind.reads_active_project() || t.project == active_project)
     }
 
     /// Um projeto removido leva os documentos dele.
@@ -571,7 +592,7 @@ impl Deck {
         if self.docs.debug_hold {
             return;
         }
-        for (uid, _) in self.docs.file_docs(&self.active_project) {
+        for uid in self.docs.to_reread(&self.active_project) {
             self.docs_load(uid);
         }
     }
@@ -600,10 +621,10 @@ impl Deck {
         }
     }
 
-    /// A leitura de um documento chegou. Um documento fechado nesse meio-tempo ignora a resposta, e um
-    /// arquivo que não mudou não é repintado.
+    /// A leitura de um documento chegou. Um documento fechado nesse meio-tempo, ou de um projeto que já não é o ativo
+    /// (a leitura foi feita na pasta do outro), ignora a resposta; um arquivo que não mudou não é repintado.
     pub fn on_doc_loaded(&mut self, uid: u64, loaded: Loaded) {
-        if self.docs.debug_hold {
+        if self.docs.debug_hold || !self.docs.accepts_load(uid, &self.active_project) {
             return;
         }
         if let Some(tab) = self.docs.get_mut(uid).filter(|t| !t.same_text(&loaded)) {
@@ -762,9 +783,60 @@ mod tests {
         open(&mut docs, P, DocKind::Markdown(MdSource::TaskBrief("t1".into())));
         open(&mut docs, P, DocKind::TaskDiff { id: "t1".into(), merged: false });
         open(&mut docs, "p2", DocKind::File("z.rs".into()));
-        assert_eq!(docs.file_docs(P), [(a, "a.rs".to_owned()), (m, "LEIA.md".to_owned())]);
+        assert_eq!(docs.to_reread(P), [a, m]);
         assert!(DocKind::File("a".into()).reloadable() && DocKind::CommitDiff("abc".into()).reloadable());
         assert!(!DocKind::Markdown(MdSource::TaskReport("t1".into())).reloadable());
+    }
+
+    #[test]
+    fn reopening_the_task_request_or_report_shows_the_current_text() {
+        let mut docs = Docs::default();
+        let kind = DocKind::Markdown(MdSource::TaskReport("t1".into()));
+        let text = |s: &str| DocState::Markdown(s.to_owned());
+        let first = docs.open(P, kind.clone(), "t1 · relatório".into(), "antigo".into(), text("relatório velho"));
+        assert!(first.fresh);
+        let again = docs.open(P, kind, "t1 · relatório".into(), "novo".into(), text("relatório novo"));
+        assert_eq!(again, Opened { uid: first.uid, fresh: false });
+        let tab = docs.get(first.uid).expect("aba");
+        assert!(matches!(&tab.state, DocState::Markdown(t) if t == "relatório novo"));
+        assert_eq!(tab.subtitle, "novo");
+        // O que vem do core não é trocado ao reabrir (só o "Recarregar" ou o watcher relê).
+        let file = DocKind::File("a.rs".into());
+        let f = docs.open(P, file.clone(), "a.rs".into(), String::new(), DocState::Loading);
+        docs.get_mut(f.uid).expect("aba").state = DocState::Failed("x".into());
+        docs.open(P, file, "a.rs".into(), String::new(), DocState::Loading);
+        assert!(matches!(docs.get(f.uid).map(|t| &t.state), Some(DocState::Failed(_))));
+    }
+
+    #[test]
+    fn a_read_that_arrives_after_switching_project_is_ignored() {
+        let mut docs = Docs::default();
+        let file = open(&mut docs, "p1", DocKind::File("a.rs".into())).uid;
+        let md = open(&mut docs, "p1", DocKind::Markdown(MdSource::File("a.md".into()))).uid;
+        let commit = open(&mut docs, "p1", DocKind::CommitDiff("abc".into())).uid;
+        let changed = open(&mut docs, "p1", DocKind::FileDiff { path: "a.rs".into(), orig: None, staged: false, untracked: false }).uid;
+        let task = open(&mut docs, "p1", DocKind::TaskDiff { id: "t1".into(), merged: false }).uid;
+        for uid in [file, md, commit, changed] {
+            assert!(docs.accepts_load(uid, "p1"));
+            assert!(!docs.accepts_load(uid, "p2"), "lido na pasta do outro projeto");
+        }
+        // O diff da tarefa passa o projeto na chamada: vale de qualquer lugar.
+        assert!(docs.accepts_load(task, "p2"));
+        // Documento fechado: ignora.
+        docs.close(file);
+        assert!(!docs.accepts_load(file, "p1"));
+    }
+
+    #[test]
+    fn what_was_discarded_while_loading_is_read_again_when_the_project_returns() {
+        let mut docs = Docs::default();
+        let file = open(&mut docs, "p1", DocKind::File("a.rs".into())).uid;
+        let commit = open(&mut docs, "p1", DocKind::CommitDiff("abc".into())).uid;
+        let done = open(&mut docs, "p1", DocKind::CommitDiff("def".into())).uid;
+        docs.get_mut(done).expect("aba").state = DocState::Failed("x".into());
+        open(&mut docs, "p1", DocKind::TaskDiff { id: "t1".into(), merged: false });
+        open(&mut docs, "p2", DocKind::CommitDiff("ghi".into()));
+        assert_eq!(docs.to_reread("p1"), [file, commit]);
     }
 
     #[test]
