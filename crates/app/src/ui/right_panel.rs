@@ -61,12 +61,12 @@ fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: 
     if tab.badge > 0 {
         // Pílula sobre o canto superior direito do ícone.
         let txt = if tab.badge > 99 { "99+".to_owned() } else { tab.badge.to_string() };
-        let g = galley(painter, &txt, theme::ui(10.0), theme::pal().text_strong);
+        let g = galley(painter, &txt, theme::ui(10.0), theme::pal().on_accent);
         let size = Vec2::new((g.size().x + 8.0).max(14.0), 14.0);
         let b = Rect::from_min_size(Pos2::new(center.x + 3.0, center.y - 13.0), size);
         painter.rect_filled(b.expand(1.5), 8.0, theme::pal().chip);
         painter.rect_filled(b, 7.0, theme::accent());
-        place(painter, b, Align2::CENTER_CENTER, g, theme::pal().text_strong);
+        place(painter, b, Align2::CENTER_CENTER, g, theme::pal().on_accent);
     }
     if active {
         // Sublinhado na cor do agente ativo.
@@ -78,7 +78,6 @@ fn head_tab(deck: &mut Deck, ui: &Ui, painter: &egui::Painter, rect: Rect, tab: 
 
 fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, theme::pal().chip);
     // Borda inferior alinhada à da topbar.
     painter.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::pal().separator);
     let view = deck.right_view;

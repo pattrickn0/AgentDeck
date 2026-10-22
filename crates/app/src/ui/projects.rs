@@ -631,7 +631,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
             };
             let g = galley(&gp, &hint, theme::ui(12.0), theme::pal().text);
             let r = Rect::from_min_size(ptr + Vec2::new(14.0, 10.0), g.size() + Vec2::new(16.0, 8.0));
-            frame(&gp, r, 6.0, theme::pal().hover, theme::pal().separator);
+            frame(&gp, r, 6.0, theme::pal().popup, theme::pal().glass_border);
             place(&gp, r, Align2::CENTER_CENTER, g, theme::pal().text);
         }
         let released = ctx.input(|i| i.pointer.any_released());
@@ -700,7 +700,7 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         let (rect, _) = ui.allocate_exact_size(menu_rect.size(), Sense::hover());
         let p = ui.painter();
         shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.55));
-        frame(p, rect, 6.0, theme::pal().hover, theme::pal().separator);
+        frame(p, rect, 6.0, theme::pal().popup, theme::pal().glass_border);
         let font = theme::ui(12.5);
 
         let mut item_y = rect.min.y + 4.0;
@@ -789,7 +789,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
         shadow(&p, r, 0, 8, 30, theme::with_alpha(theme::pal().shadow, 0.7));
-        frame(&p, r, 10.0, theme::pal().hover, theme::pal().separator);
+        frame(&p, r, 10.0, theme::pal().popup, theme::pal().glass_border);
 
         let mut y = r.min.y + 16.0;
         // Título
@@ -816,7 +816,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
 
         // Caixa de texto
         let input_r = Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 28.0));
-        p.rect_filled(input_r, 6.0, theme::pal().bg);
+        p.rect_filled(input_r, 6.0, theme::pal().recess);
         p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::pal().separator), egui::StrokeKind::Inside);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink2(Vec2::new(8.0, 4.0))));
         let input_id = Id::new("proj-rename-input");
@@ -859,7 +859,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         } else {
             p.rect_filled(save_r, 6.0, theme::accent());
         }
-        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::pal().text_strong);
+        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::pal().on_accent);
         if sr.clicked() {
             apply = true;
         }

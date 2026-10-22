@@ -212,7 +212,7 @@ fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: BtnKind, enabled: bool
         (theme::pal().hover, theme::pal().text_3)
     } else {
         match kind {
-            BtnKind::Primary => (if hot { theme::brighten(theme::accent(), 1.15) } else { theme::accent() }, theme::pal().text_strong),
+            BtnKind::Primary => (if hot { theme::brighten(theme::accent(), 1.15) } else { theme::accent() }, theme::pal().on_accent),
             BtnKind::Secondary => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().text),
             BtnKind::Danger => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().danger_text),
         }
@@ -816,7 +816,7 @@ fn stat_box(ui: &mut Ui, stat: &str) {
     let h = (shown + usize::from(extra > 0)) as f32 * row + 12.0;
     let (outer, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 6.0), Sense::hover());
     let r = Rect::from_min_size(Pos2::new(outer.min.x + PAD, outer.min.y + 2.0), Vec2::new(outer.width() - 2.0 * PAD, h));
-    frame(ui.painter(), r, 7.0, theme::pal().chip, theme::pal().separator);
+    frame(ui.painter(), r, 7.0, theme::pal().recess, theme::pal().glass_border);
     for (i, line) in lines.iter().take(shown).enumerate() {
         let y = r.min.y + 6.0 + i as f32 * row;
         let count = galley(ui.painter(), &line.changes, theme::mono(11.0), theme::pal().text_2);
@@ -956,7 +956,7 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
         let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + BTN_H + 14.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         shadow(ui.painter(), rect, 10, 10, 30, theme::with_alpha(theme::pal().shadow, 0.6));
-        frame(ui.painter(), rect, 10.0, theme::pal().hover, theme::pal().separator);
+        frame(ui.painter(), rect, 10.0, theme::pal().popup, theme::pal().glass_border);
         let mut y = rect.min.y + 14.0;
         ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g1.clone(), theme::pal().text);
         y += g1.size().y + 6.0;
@@ -969,7 +969,8 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
         let dr = clickable(ui, d, Id::new("tasks-confirm-yes"));
         let fill = if merge { theme::accent() } else { theme::pal().danger };
         ui.painter().rect_filled(d, 7.0, if dr.hovered() { theme::brighten(fill, 1.12) } else { fill });
-        text_in(ui.painter(), d, Align2::CENTER_CENTER, yes, theme::ui_semibold(12.0), theme::pal().text_strong);
+        let yes_fg = if merge { theme::pal().on_accent } else { theme::pal().text_strong };
+        text_in(ui.painter(), d, Align2::CENTER_CENTER, yes, theme::ui_semibold(12.0), yes_fg);
         let cr = clickable(ui, c, Id::new("tasks-confirm-no"));
         ui.painter().rect_filled(c, 7.0, if cr.hovered() { theme::pal().separator } else { theme::pal().chip });
         text_in(ui.painter(), c, Align2::CENTER_CENTER, "Cancelar", theme::ui_semibold(12.0), theme::pal().text);
@@ -1031,7 +1032,7 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
                 let cw = chip_width(&painter, &a.to_string_lossy()).min(avail);
                 let r = Rect::from_min_size(Pos2::new(cx, row.min.y + 2.0), Vec2::new(cw, CHIP_H));
                 cx = r.max.x + 6.0;
-                frame(ui.painter(), r, 11.0, theme::pal().hover, theme::pal().separator);
+                frame(ui.painter(), r, 11.0, theme::pal().recess, theme::pal().glass_border);
                 let xw = 8.0 + text_w(ui.painter(), "×", theme::ui(13.0));
                 let x_rect = Rect::from_min_size(Pos2::new(r.max.x - 5.0 - xw, r.min.y + 1.0), Vec2::new(xw, r.height() - 2.0));
                 let tr = Rect::from_min_max(Pos2::new(r.min.x + 10.0, r.min.y), Pos2::new(x_rect.min.x - 4.0, r.max.y));
@@ -1160,7 +1161,7 @@ fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem]
     Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.5));
-        frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
+        frame(ui.painter(), rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         let list = rect.shrink(4.0);
         let mut child = ui.new_child(UiBuilder::new().max_rect(list));
         child.set_clip_rect(list);
@@ -1422,7 +1423,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 egui::StrokeKind::Inside,
             );
             if start_now {
-                text_in(ui.painter(), cb, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::pal().text_strong);
+                text_in(ui.painter(), cb, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::pal().on_accent);
             }
             text_in(
                 ui.painter(),

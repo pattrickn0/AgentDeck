@@ -37,7 +37,7 @@ pub(super) fn pill(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, toolti
     let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
     let hot = enabled && resp.hovered();
     let (bg, fg) = match look {
-        Look::Primary => (if hot { theme::brighten(theme::accent(), 1.15) } else { theme::accent() }, theme::pal().text_strong),
+        Look::Primary => (if hot { theme::brighten(theme::accent(), 1.15) } else { theme::accent() }, theme::pal().on_accent),
         Look::Danger => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().danger_text),
         Look::Normal => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().text),
     };
@@ -259,7 +259,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     let x0 = body.min.x + 10.0;
     let x1 = body.max.x - 10.0;
     let input = Rect::from_min_size(Pos2::new(x0, body.min.y + 8.0), Vec2::new(x1 - x0, 28.0));
-    frame(&p, input, 7.0, theme::pal().chip, theme::pal().separator);
+    frame(&p, input, 7.0, theme::pal().recess, theme::pal().glass_border);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input.shrink(1.0)));
     let out = egui::TextEdit::singleline(&mut deck.git.stash_message)
         .id(Id::new("git-stash-msg"))
@@ -294,7 +294,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
         egui::StrokeKind::Inside,
     );
     if on {
-        text_in(&p, box_r, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::pal().text_strong);
+        text_in(&p, box_r, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::pal().on_accent);
     }
     text_in(
         &p,
@@ -612,7 +612,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
     let (r, _) = ui.allocate_exact_size(Vec2::new(w + 20.0, h), Sense::hover());
     let r = Rect::from_min_size(r.min + Vec2::new(10.0, 0.0), Vec2::new(w, h));
     let p = ui.painter().clone();
-    frame(&p, r, 8.0, theme::pal().chip, theme::pal().separator);
+    frame(&p, r, 8.0, theme::pal().recess, theme::pal().glass_border);
     text_in(
         &p,
         Rect::from_min_size(r.min + Vec2::new(10.0, 0.0), Vec2::new(w - 20.0, 24.0)),

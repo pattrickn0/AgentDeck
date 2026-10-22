@@ -13,7 +13,6 @@ const NEW_PROJECT: &str = "#novo-projeto";
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, theme::pal().bg);
 
     // Sem projeto não há onde abrir um agente: o cartão pede uma pasta.
     let no_project = deck.active_project.is_empty();
@@ -68,10 +67,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let mut y = rect.center().y - total_h / 2.0;
     let cx = rect.center().x;
 
-    // Ícone (58×58, painel, borda, raio 12)
+    // A marca do app (56 px) no lugar do antigo ícone de terminal
     let icon_box = Rect::from_min_size(Pos2::new(cx - 29.0, y), Vec2::splat(58.0));
-    frame(&painter, icon_box, 12.0, theme::pal().chip, theme::pal().separator);
-    deck.icons.paint(&painter, Icon::TerminalBox, icon_box.center(), 32.0, theme::pal().text_2, 0.0);
+    deck.icons.paint(&painter, Icon::AgentDeck, icon_box.center(), 56.0, theme::pal().text_strong, 0.0);
     y = icon_box.max.y + 12.0;
 
     let tr = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), title.size().y));

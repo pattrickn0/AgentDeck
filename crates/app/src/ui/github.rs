@@ -31,7 +31,6 @@ const ACT_H: f32 = 28.0;
 const LOG_LINE_H: f32 = 16.0;
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
-    ui.painter().rect_filled(rect, 0.0, theme::pal().bg);
     let view = deck.github.view.clone();
     match view {
         GithubView::Loading => draw_loading(ui, rect),
@@ -123,8 +122,11 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     if let Some((msg, is_err)) = deck.github.notice.clone() {
         let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), 24.0));
         let p = ui.painter_at(strip);
-        let (bg, fg) =
-            if is_err { (theme::with_alpha(theme::pal().danger, 0.14), theme::pal().danger_text) } else { (theme::pal().hover, theme::pal().text) };
+        let (bg, fg) = if is_err {
+            (theme::with_alpha(theme::pal().danger, 0.14), theme::pal().danger_text)
+        } else {
+            (theme::pal().hover, theme::pal().text)
+        };
         p.rect_filled(strip, 0.0, bg);
         p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
         let close_r = Rect::from_min_size(Pos2::new(strip.max.x - 22.0, strip.min.y + 2.0), Vec2::splat(20.0));
@@ -206,7 +208,7 @@ fn draw_subtabs(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         let active = deck.github.tab == *tab;
         let resp = clickable(ui, r, Id::new(("gh-subtab", i)));
         if active || resp.hovered() {
-            p.rect_filled(r.shrink2(Vec2::new(2.0, 3.0)), 4.0, if active { theme::pal().hover } else { theme::pal().bg });
+            p.rect_filled(r.shrink2(Vec2::new(2.0, 3.0)), 4.0, if active { theme::pal().selected } else { theme::pal().hover });
         }
         let fg = if active || resp.hovered() { theme::pal().text } else { theme::pal().text_2 };
         let font = if active { theme::ui_bold(11.5) } else { theme::ui(11.5) };
@@ -308,7 +310,7 @@ fn draw_pr_row(p: &egui::Painter, row: Rect, pr: &PullRequest, selected: bool) {
     let mut x = num_r.max.x + 6.0;
     if pr.draft {
         let pill = Rect::from_min_size(Pos2::new(x, top_y + 1.0), Vec2::new(60.0, 14.0));
-        frame(p, pill, 3.0, theme::pal().hover, theme::pal().separator);
+        frame(p, pill, 3.0, theme::pal().recess, theme::pal().glass_border);
         text_in(p, pill, Align2::CENTER_CENTER, "RASCUNHO", theme::ui_bold(9.0), theme::pal().text_2);
         x = pill.max.x + 5.0;
     }
@@ -724,7 +726,7 @@ fn draw_job_log_pane(
     job: Option<WorkflowJob>,
 ) {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, 0.0, theme::pal().bg);
+    p.rect_filled(rect, 0.0, theme::pal().recess);
     p.rect_filled(Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + 1.0)), 0.0, theme::pal().separator);
 
     let head = Rect::from_min_size(Pos2::new(rect.min.x, rect.min.y + 1.0), Vec2::new(rect.width(), 22.0));
@@ -866,7 +868,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
     Area::new(Id::new("gh-agent-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.5));
-        frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
+        frame(ui.painter(), rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         let p = ui.painter().clone();
         let mut y = rect.min.y + 8.0;
 
@@ -931,7 +933,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         let btn_w = 70.0;
         let input_r = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0 - btn_w - 6.0, 22.0));
         let send_r = Rect::from_min_size(Pos2::new(input_r.max.x + 6.0, y), Vec2::new(btn_w, 22.0));
-        frame(&p, input_r, 6.0, theme::pal().chip, theme::pal().separator);
+        frame(&p, input_r, 6.0, theme::pal().recess, theme::pal().glass_border);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink(1.0)));
         let out = TextEdit::singleline(&mut deck.github.new_role_name)
             .id(Id::new("gh-role-input"))
@@ -1039,7 +1041,11 @@ fn small_btn(
         _ => (theme::pal().hover, theme::pal().separator),
     };
     frame(p, rect, 4.0, bg, border);
-    let fg = if hot { theme::pal().text_strong } else { theme::pal().text };
+    let fg = match (hot, strong) {
+        (true, true) => theme::pal().on_accent,
+        (true, false) => theme::pal().text_strong,
+        _ => theme::pal().text,
+    };
     let font = if strong { theme::ui_bold(11.0) } else { theme::ui(11.0) };
     let g = galley_trunc(p, label, font, fg, rect.width() - 6.0);
     place(p, rect, Align2::CENTER_CENTER, g, fg);

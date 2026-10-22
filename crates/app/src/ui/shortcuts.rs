@@ -111,7 +111,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
         shadow(&p, r, 0, 8, 30, theme::with_alpha(theme::pal().shadow, 0.7));
-        frame(&p, r, 10.0, theme::pal().hover, theme::pal().separator);
+        frame(&p, r, 10.0, theme::pal().popup, theme::pal().glass_border);
 
         let mut y = r.min.y + 16.0;
 
@@ -167,7 +167,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
                 }
                 let kw = text_w(&p, key, theme::mono_bold(11.0)) + 12.0;
                 let badge_r = Rect::from_min_size(Pos2::new(kx, y + 1.0), Vec2::new(kw, 20.0));
-                p.rect_filled(badge_r, 4.0, theme::pal().bg);
+                p.rect_filled(badge_r, 4.0, theme::pal().recess);
                 p.rect_stroke(badge_r, 4.0, Stroke::new(1.0, theme::pal().separator), egui::StrokeKind::Inside);
                 text_in(&p, badge_r, Align2::CENTER_CENTER, key, theme::mono_bold(11.0), theme::pal().text);
                 kx += kw + 2.0;

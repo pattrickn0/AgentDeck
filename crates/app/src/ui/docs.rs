@@ -64,7 +64,7 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
     let docs_w = text_w(painter, &docs_label, font.clone()) + 2.0 * SEG_PAD;
 
     let outer = Rect::from_min_size(Pos2::new(origin.x, origin.y + (bar_h - SWITCH_H) / 2.0), Vec2::new(agents_w + docs_w + 4.0, SWITCH_H));
-    frame(painter, outer, 6.0, theme::pal().bg, theme::pal().separator);
+    frame(painter, outer, 6.0, theme::pal().recess, theme::pal().glass_border);
     let inner = outer.shrink(2.0);
     let agents_r = Rect::from_min_size(inner.min, Vec2::new(agents_w, inner.height()));
     let docs_r = Rect::from_min_size(Pos2::new(agents_r.max.x, inner.min.y), Vec2::new(docs_w, inner.height()));
@@ -101,7 +101,7 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
             if let Some(t) = &pill_text {
                 let pill = Rect::from_min_size(Pos2::new(x, r.center().y - 7.0), Vec2::new(pill_w, 14.0));
                 painter.rect_filled(pill, 7.0, theme::accent());
-                text_in(painter, pill, Align2::CENTER_CENTER, t, theme::ui(10.0), theme::pal().text_strong);
+                text_in(painter, pill, Align2::CENTER_CENTER, t, theme::ui(10.0), theme::pal().on_accent);
             } else if pulse {
                 let t = ui.ctx().input(|i| i.time);
                 let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
@@ -161,7 +161,6 @@ enum Act {
 /// Pinta os documentos do projeto ativo no lugar das janelas dos agentes.
 pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::pal().bg);
     let project = deck.active_project.clone();
     let accent = deck.accent();
     let items: Vec<Item> = deck

@@ -229,7 +229,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         let close_resp = ui.interact(close_rect.intersect(view), Id::new((kind.scope, "close", item.uid)), Sense::click());
 
         let bg = if is_shown {
-            Some(theme::pal().bg)
+            Some(theme::well_solid())
         } else if resp.hovered() || close_resp.hovered() {
             Some(theme::pal().hover)
         } else {
@@ -395,9 +395,9 @@ fn chevron(painter: &Painter, c: Pos2, dir: Dir, color: Color32) {
     painter.line_segment([c + b, c + d], s);
 }
 
-/// Degradê horizontal de `PANEL` opaco (em `solid_x`) a transparente (em `far_x`), entre `top` e `bottom`.
+/// Degradê horizontal da cor da faixa (`strip_solid`) (em `solid_x`) a transparente (em `far_x`), entre `top` e `bottom`.
 fn fade(painter: &Painter, top: f32, bottom: f32, solid_x: f32, far_x: f32) {
-    let (opaque, clear) = (theme::pal().chip, theme::with_opacity(theme::pal().chip, 0.0));
+    let (opaque, clear) = (theme::strip_solid(), theme::with_alpha(theme::strip_solid(), 0.0));
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(Pos2::new(solid_x, top), opaque);
     mesh.colored_vertex(Pos2::new(far_x, top), clear);
@@ -411,7 +411,7 @@ fn fade(painter: &Painter, top: f32, bottom: f32, solid_x: f32, far_x: f32) {
 /// Seta de uma borda da faixa (há abas escondidas desse lado): fundo sólido, degradê e botão.
 /// Devolve se foi clicada; `target` é o nome da aba escondida mais próxima, que a dica cita.
 fn edge_arrow(ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, target: &str, id: Id) -> bool {
-    painter.rect_filled(zone, 0.0, theme::pal().chip);
+    painter.rect_filled(zone, 0.0, theme::strip_solid());
     let (solid_x, far_x) = if dir == Dir::Left { (zone.max.x, zone.max.x + FADE_W) } else { (zone.min.x, zone.min.x - FADE_W) };
     fade(painter, zone.min.y, zone.max.y, solid_x, far_x);
     let btn = Rect::from_center_size(zone.center(), Vec2::splat(ARROW_BTN));
@@ -426,7 +426,7 @@ fn edge_arrow(ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, target: &str, id
 /// Botão "▾" no fim da faixa e o menu com todas as abas da janela. Devolve a aba escolhida.
 fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize, id: Id, scope: &'static str) -> Option<usize> {
     let ctx = ui.ctx();
-    painter.rect_filled(zone, 0.0, theme::pal().chip);
+    painter.rect_filled(zone, 0.0, theme::strip_solid());
     let btn = Rect::from_center_size(zone.center(), Vec2::splat(ARROW_BTN));
     let resp = clickable(ui, btn, id.with("btn"));
     let mut open = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
@@ -448,7 +448,7 @@ fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize
         Area::new(id.with("menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
             shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.55));
-            frame(ui.painter(), rect, 6.0, theme::pal().hover, theme::pal().separator);
+            frame(ui.painter(), rect, 6.0, theme::pal().popup, theme::pal().glass_border);
             let inner = rect.shrink(4.0);
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
                 egui::ScrollArea::vertical().max_height(inner.height()).auto_shrink([false, false]).show(ui, |ui| {

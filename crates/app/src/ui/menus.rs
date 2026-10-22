@@ -82,7 +82,7 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
         shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0x88 as f32 / 255.0));
-        frame(p, rect, 8.0, theme::pal().hover, theme::pal().separator);
+        frame(p, rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         let mut y = rect.min.y + 5.0;
         for (m, &arrow) in items.iter().zip(&with_arrow) {
             let r = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, y), Vec2::new(w - 10.0, item_h));
@@ -200,7 +200,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
     Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0x88 as f32 / 255.0));
-        frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
+        frame(ui.painter(), rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         // Cabeçalho: "‹ título" volta um passo.
         let head = Rect::from_min_size(Pos2::new(rect.min.x + 5.0, rect.min.y + 5.0), Vec2::new(w - 10.0, head_h));
         let resp = super::clickable(ui, head, Id::new((id, "back")));
@@ -391,7 +391,7 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         let p = ui.painter();
         shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0xaa as f32 / 255.0));
-        frame(p, rect, 8.0, theme::pal().hover, theme::pal().separator);
+        frame(p, rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         let inner = rect.shrink(9.0);
         // Título: 11px, 700, maiúsculas, letter-spacing .5px
         let title = Rect::from_min_size(Pos2::new(inner.min.x + 4.0, inner.min.y), Vec2::new(inner.width() - 8.0, title_h));
@@ -485,8 +485,8 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
 /// Checkbox nativo com `accent-color: var(--claude)`.
 fn checkbox(p: &egui::Painter, r: Rect, checked: bool) {
     if checked {
-        p.rect_filled(r, 3.0, theme::CLAUDE);
-        let s = Stroke::new(2.0, theme::pal().text_strong);
+        p.rect_filled(r, 3.0, theme::accent());
+        let s = Stroke::new(2.0, theme::pal().on_accent);
         let a = Pos2::new(r.min.x + 3.5, r.center().y + 0.5);
         let b = Pos2::new(r.min.x + 6.8, r.max.y - 4.0);
         let c = Pos2::new(r.max.x - 3.5, r.min.y + 4.0);
@@ -517,7 +517,7 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         let p = ui.painter();
         shadow(p, rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.55));
-        frame(p, rect, 6.0, theme::pal().hover, theme::pal().separator);
+        frame(p, rect, 6.0, theme::pal().popup, theme::pal().glass_border);
         let font = theme::ui(12.5);
 
         let mut top = rect.min.y + 4.0;
@@ -593,7 +593,7 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
         shadow(&p, r, 0, 8, 30, theme::with_alpha(theme::pal().shadow, 0.7));
-        frame(&p, r, 10.0, theme::pal().hover, theme::pal().separator);
+        frame(&p, r, 10.0, theme::pal().popup, theme::pal().glass_border);
 
         let mut y = r.min.y + 16.0;
         // Título
@@ -621,7 +621,7 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
 
         // Caixa de texto
         let input_r = Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 28.0));
-        p.rect_filled(input_r, 6.0, theme::pal().bg);
+        p.rect_filled(input_r, 6.0, theme::pal().recess);
         p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::pal().separator), egui::StrokeKind::Inside);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink2(Vec2::new(8.0, 4.0))));
         let input_id = Id::new("rename-tab-input");
@@ -680,7 +680,7 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         } else {
             p.rect_filled(save_r, 6.0, theme::accent());
         }
-        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::pal().text_strong);
+        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::pal().on_accent);
         if sr.clicked() {
             apply = true;
         }

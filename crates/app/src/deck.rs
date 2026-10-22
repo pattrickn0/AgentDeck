@@ -2308,18 +2308,6 @@ impl Deck {
     // Anexos, arrastar e soltar e ditado por voz
     // ------------------------------------------------------------------
 
-    /// `--send-color`: cor de destaque da aba ativa, se não for um shell.
-    pub fn send_color(&self) -> Color32 {
-        if let Some(t) = self.active_tab() {
-            if t.kind != "shell" {
-                if let Some(c) = self.agents.color(&t.kind) {
-                    return c;
-                }
-            }
-        }
-        theme::pal().info
-    }
-
     /// Abre o seletor de arquivos para anexar à aba `uid` (botão de anexo no cabeçalho do painel).
     pub fn pick_tab_attachments(&self, uid: u64) {
         self.pick_attachments_for(AttachTarget::Tab(uid));

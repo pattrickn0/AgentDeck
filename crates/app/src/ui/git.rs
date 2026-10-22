@@ -225,7 +225,7 @@ fn message(ui: &mut Ui, rect: Rect, title: &str, detail: Option<&str>, buttons: 
             Align2::CENTER_CENTER,
             label,
             theme::ui_semibold(12.0),
-            if primary { theme::pal().text_strong } else { theme::pal().text },
+            if primary { theme::pal().on_accent } else { theme::pal().text },
         );
         if resp.clicked() {
             acts.push(match act {
@@ -819,7 +819,7 @@ fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut
     // entre eles.
     let total: f32 = items.iter().map(|(l, ..)| galley(ui.painter(), l, theme::ui(11.0), theme::pal().text).size().x + 16.0).sum();
     let strip = Rect::from_min_max(Pos2::new(right - total - 6.0, row.min.y), Pos2::new(area.max.x, row.max.y));
-    ui.painter().rect_filled(strip, 0.0, theme::pal().bg);
+    ui.painter().rect_filled(strip, 0.0, theme::glass_solid());
     ui.painter().rect_filled(strip, 0.0, theme::with_alpha(theme::pal().info, 0.10));
     for (label, tooltip, danger) in items {
         let g = galley(ui.painter(), label, theme::ui(11.0), theme::pal().text);
@@ -839,7 +839,7 @@ fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut
 
 fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: usize, busy: bool, acts: &mut Vec<Act>) {
     let painter = ui.painter_at(footer);
-    painter.rect_filled(footer, 0.0, theme::pal().bg);
+    painter.rect_filled(footer, 0.0, theme::pal().recess);
     painter.rect_filled(Rect::from_min_size(footer.min, Vec2::new(footer.width(), 1.0)), 0.0, theme::pal().separator);
     let x0 = footer.min.x + 10.0;
     let x1 = footer.max.x - 10.0;
@@ -878,7 +878,7 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
         egui::StrokeKind::Inside,
     );
     if deck.git.amend {
-        text_in(&painter, box_r, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::pal().text_strong);
+        text_in(&painter, box_r, Align2::CENTER_CENTER, "✓", theme::ui_bold(11.0), theme::pal().on_accent);
     }
     text_in(
         &painter,
@@ -897,7 +897,7 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
     let b = Rect::from_min_size(Pos2::new(x1 - bw, by), Vec2::new(bw, BTN_H));
     let ready = !busy && !deck.git.message.trim().is_empty() && (staged > 0 || deck.git.amend);
     let r = if ready { clickable(ui, b, Id::new("git-commit")) } else { ui.interact(b, Id::new("git-commit"), Sense::hover()) };
-    let mut bg = if ready { deck.send_color() } else { theme::pal().hover };
+    let mut bg = if ready { deck.accent() } else { theme::pal().hover };
     if ready && r.hovered() {
         bg = theme::brighten(bg, 1.15);
     }
@@ -908,7 +908,7 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
         Align2::CENTER_CENTER,
         &label,
         theme::ui_semibold(12.0),
-        if ready { theme::pal().text_strong } else { theme::pal().text_3 },
+        if ready { theme::pal().on_accent } else { theme::pal().text_3 },
     );
     let why = if staged == 0 && !deck.git.amend {
         "Prepare (+) as alterações que vão no commit"
@@ -956,10 +956,10 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
     Area::new(Id::new("git-branch-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.5));
-        frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
+        frame(ui.painter(), rect, 8.0, theme::pal().popup, theme::pal().glass_border);
         // Filtro / nome da branch nova.
         let fr = Rect::from_min_size(rect.min + Vec2::new(8.0, 8.0), Vec2::new(w - 16.0, 26.0));
-        frame(ui.painter(), fr, 6.0, theme::pal().chip, theme::pal().separator);
+        frame(ui.painter(), fr, 6.0, theme::pal().recess, theme::pal().glass_border);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(fr.shrink(1.0)));
         let out = egui::TextEdit::singleline(&mut deck.git.branch_filter)
             .id(Id::new("git-branch-filter"))
@@ -1135,7 +1135,7 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect) {
         let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + BTN_H + 14.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         shadow(ui.painter(), rect, 10, 10, 30, theme::with_alpha(theme::pal().shadow, 0.6));
-        frame(ui.painter(), rect, 10.0, theme::pal().hover, theme::pal().separator);
+        frame(ui.painter(), rect, 10.0, theme::pal().popup, theme::pal().glass_border);
         let mut y = rect.min.y + 14.0;
         ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g1.clone(), theme::pal().text);
         y += g1.size().y + 6.0;

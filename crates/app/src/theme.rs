@@ -243,6 +243,21 @@ pub fn with_opacity(c: Color32, opacity: f32) -> Color32 {
     c.gamma_multiply(opacity.clamp(0.0, 1.0))
 }
 
+/// O vidro como se fosse opaco (sobre o fundo): para esconder algo atrás de um trecho de uma barra.
+pub fn glass_solid() -> Color32 {
+    over(pal().glass, pal().bg)
+}
+
+/// O poço central como se fosse opaco (sobre o fundo).
+pub fn well_solid() -> Color32 {
+    over(pal().well, pal().bg)
+}
+
+/// A faixa de abas como se fosse opaca (sobre o poço): o fim dos degradês de rolagem das abas.
+pub fn strip_solid() -> Color32 {
+    over(pal().strip, well_solid())
+}
+
 /// `top` desenhado sobre `bottom` (composição normal). O resultado é opaco se `bottom` for.
 pub fn over(top: Color32, bottom: Color32) -> Color32 {
     let a = top.a() as f32 / 255.0;
