@@ -6,7 +6,7 @@ use egui::{Align2, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
 
 use super::panes::HEAD_H;
 use super::tabs::{self, Item, Lead, StripClick, StripKind};
-use super::{clickable, frame, galley, galley_trunc, place, text_in, text_w, tip};
+use super::{clickable, galley, galley_trunc, place, text_in, text_w, tip};
 use crate::deck::Deck;
 use crate::docs::{file_name, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, TextDoc};
 use crate::theme;
@@ -35,81 +35,90 @@ pub enum Switched {
     Docs,
 }
 
-const SWITCH_H: f32 = 24.0;
-const SEG_PAD: f32 = 12.0;
+/// Altura do trilho da chave (segmentos de 24 px e 2 px de cada lado).
+pub const SWITCH_H: f32 = 28.0;
+/// A chave compacta da barra de título (barra lateral recolhida): segmentos de 20 px.
+pub const SWITCH_COMPACT_H: f32 = 24.0;
+/// O selo de "Agentes": um ponto de 6 px, 6 px depois do nome.
+const SELO: f32 = 6.0;
+const SELO_GAP: f32 = 6.0;
 
-/// Pinta a chave **Agentes | Documentos (n)** com o canto esquerdo em `origin` (`bar_h` é a altura da
-/// barra onde ela fica) e devolve o retângulo que ocupou. O selo de "Agentes" mostra o que acontece nas
-/// abas enquanto se lê: quantas terminaram um turno sem ser vistas e, lendo documentos, se alguma
-/// trabalha agora. Um clique troca o centro.
-pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: f32) -> Rect {
+/// Largura da chave compacta: dois segmentos iguais, do tamanho do maior rótulo.
+pub fn switch_compact_width(painter: &Painter, deck: &Deck) -> f32 {
+    let font = theme::ui_semibold(11.5);
+    let agents = text_w(painter, "Agentes", font.clone()) + SELO_GAP + SELO;
+    let docs = text_w(painter, &docs_label(deck.docs.count(&deck.active_project)), font);
+    2.0 * (agents.max(docs) + 20.0) + 4.0
+}
+
+fn docs_label(n: usize) -> String {
+    format!("Documentos {n}")
+}
+
+/// Pinta a chave **Agentes | Documentos n** em `rect` (o trilho, `SWITCH_H` ou `SWITCH_COMPACT_H` de
+/// altura): o segmento ativo na cor de destaque. O selo de "Agentes" mostra o que acontece nas abas
+/// enquanto se lê: um ponto se alguma terminou um turno sem ser vista (na cor do texto sobre o destaque
+/// se o lado está ativo, na cor do agente se não) e, lendo documentos, um que pulsa se alguma trabalha
+/// agora. Um clique troca o centro.
+pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
+    let painter = ui.painter();
+    let p = theme::pal();
     let n_docs = deck.docs.count(&deck.active_project);
     let badge = deck.agents_badge();
     let view = deck.docs.view;
-    let font = theme::ui_semibold(12.0);
-    let agents_label = "Agentes";
-    let docs_label = format!("Documentos ({n_docs})");
-    // O selo de "Agentes": um número sobre fundo de destaque; com agentes só trabalhando, um ponto que pulsa.
-    let pill_text = (badge.done > 0).then(|| if badge.done > 99 { "99+".to_owned() } else { badge.done.to_string() });
-    let pill_w = pill_text.as_ref().map_or(0.0, |t| (text_w(painter, t, theme::ui(10.0)) + 8.0).max(14.0));
-    let pulse = badge.done == 0 && badge.busy > 0 && view == CenterView::Docs;
-    let selo_w = if pill_text.is_some() {
-        pill_w + 6.0
-    } else if pulse {
-        14.0
-    } else {
-        0.0
-    };
-    let agents_w = text_w(painter, agents_label, font.clone()) + selo_w + 2.0 * SEG_PAD;
-    let docs_w = text_w(painter, &docs_label, font.clone()) + 2.0 * SEG_PAD;
-
-    let outer = Rect::from_min_size(Pos2::new(origin.x, origin.y + (bar_h - SWITCH_H) / 2.0), Vec2::new(agents_w + docs_w + 4.0, SWITCH_H));
-    frame(painter, outer, 6.0, theme::pal().recess, theme::pal().glass_border);
-    let inner = outer.shrink(2.0);
-    let agents_r = Rect::from_min_size(inner.min, Vec2::new(agents_w, inner.height()));
-    let docs_r = Rect::from_min_size(Pos2::new(agents_r.max.x, inner.min.y), Vec2::new(docs_w, inner.height()));
-
+    let accent = theme::accent();
     let docs_enabled = n_docs > 0;
+    let pulse = badge.done == 0 && badge.busy > 0 && view == CenterView::Docs;
+
+    painter.rect_filled(rect, 7.0, p.recess);
+    let inner = rect.shrink(2.0);
+    let w = inner.width() / 2.0;
     let mut picked = None;
-    let segments = [
-        (agents_r, Switched::Agents, view == CenterView::Agents, true, "center-agents"),
-        (docs_r, Switched::Docs, view == CenterView::Docs, docs_enabled, "center-docs"),
-    ];
-    for (r, which, active, enabled, id) in segments {
-        let resp = if enabled { clickable(ui, r, Id::new(id)) } else { ui.interact(r, Id::new(id), Sense::hover()) };
-        if active {
-            painter.rect_filled(r, 4.0, theme::pal().separator);
+    for (i, which) in [Switched::Agents, Switched::Docs].into_iter().enumerate() {
+        let seg = Rect::from_min_size(Pos2::new(inner.min.x + w * i as f32, inner.min.y), Vec2::new(w, inner.height()));
+        let enabled = which == Switched::Agents || docs_enabled;
+        let resp = if enabled { clickable(ui, seg, Id::new((id, i))) } else { ui.interact(seg, Id::new((id, i)), Sense::hover()) };
+        let active = (which == Switched::Agents) == (view == CenterView::Agents);
+        let (fill, fg, font) = if active {
+            (Some(accent), p.on_accent, theme::ui_semibold(11.5))
         } else if resp.hovered() && enabled {
-            painter.rect_filled(r, 4.0, theme::pal().hover);
-        }
-        let color = match (active, enabled, resp.hovered()) {
-            (true, ..) => theme::pal().text,
-            (false, true, true) => theme::pal().text,
-            (false, true, false) => theme::pal().text_2,
-            (false, false, _) => theme::with_opacity(theme::pal().text_2, 0.5),
-        };
-        let text_r = if which == Switched::Agents {
-            Rect::from_min_max(Pos2::new(r.min.x + SEG_PAD, r.min.y), Pos2::new(r.max.x - SEG_PAD - selo_w, r.max.y))
+            (Some(p.hover), p.text, theme::ui(11.5))
+        } else if enabled {
+            (None, p.text_2, theme::ui(11.5))
         } else {
-            r
+            (None, theme::with_opacity(p.text_2, 0.5), theme::ui(11.5))
         };
-        let (label, align) =
-            if which == Switched::Agents { (agents_label, Align2::LEFT_CENTER) } else { (docs_label.as_str(), Align2::CENTER_CENTER) };
-        text_in(painter, text_r, align, label, font.clone(), color);
+        if let Some(fill) = fill {
+            painter.rect_filled(seg, 5.0, fill);
+        }
         if which == Switched::Agents {
-            let x = r.max.x - SEG_PAD - selo_w + 6.0;
-            if let Some(t) = &pill_text {
-                let pill = Rect::from_min_size(Pos2::new(x, r.center().y - 7.0), Vec2::new(pill_w, 14.0));
-                painter.rect_filled(pill, 7.0, theme::accent());
-                text_in(painter, pill, Align2::CENTER_CENTER, t, theme::ui(10.0), theme::pal().on_accent);
+            let has_selo = badge.done > 0 || pulse;
+            let g = galley(&painter, "Agentes", font, fg);
+            let total = g.size().x + if has_selo { SELO_GAP + SELO } else { 0.0 };
+            let x = seg.center().x - total / 2.0;
+            let text = place(&painter, Rect::from_min_size(Pos2::new(x, seg.min.y), Vec2::new(g.size().x, seg.height())), Align2::LEFT_CENTER, g, fg);
+            let c = Pos2::new(text.max.x + SELO_GAP + SELO / 2.0, seg.center().y);
+            let selo = if active { p.on_accent } else { accent };
+            if badge.done > 0 {
+                painter.circle_filled(c, SELO / 2.0, selo);
             } else if pulse {
                 let t = ui.ctx().input(|i| i.time);
                 let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
-                let c = Pos2::new(x + 4.0, r.center().y);
-                painter.circle_filled(c, 4.0 + 2.8 * wave, theme::with_opacity(deck.accent(), 0.35 * (1.0 - wave)));
-                painter.circle_filled(c, 3.2 + wave, theme::with_opacity(deck.accent(), 0.75 + 0.25 * wave));
+                painter.circle_filled(c, SELO / 2.0 + 3.0 * wave, theme::with_opacity(selo, 0.35 * (1.0 - wave)));
+                painter.circle_filled(c, SELO / 2.0, selo);
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
             }
+        } else {
+            // "Documentos" e a contagem, esta em `text_3` (apagada sobre o destaque).
+            let g = galley(&painter, "Documentos", font, fg);
+            let count_color = if active { theme::with_opacity(p.on_accent, 0.7) } else if enabled { p.text_3 } else { fg };
+            let cg = galley(&painter, &n_docs.to_string(), theme::ui(11.5), count_color);
+            let total = g.size().x + 5.0 + cg.size().x;
+            let x = seg.center().x - total / 2.0;
+            let gw = g.size().x;
+            place(&painter, Rect::from_min_size(Pos2::new(x, seg.min.y), Vec2::new(gw, seg.height())), Align2::LEFT_CENTER, g, fg);
+            let cw = cg.size().x;
+            place(&painter, Rect::from_min_size(Pos2::new(x + gw + 5.0, seg.min.y), Vec2::new(cw, seg.height())), Align2::LEFT_CENTER, cg, count_color);
         }
         let tip_text = switch_tip(which, n_docs, badge.done, badge.busy);
         if tip(resp, tip_text).clicked() && enabled {
@@ -121,7 +130,6 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
         Some(Switched::Docs) => deck.docs.view = CenterView::Docs,
         None => {}
     }
-    outer
 }
 
 /// A dica de cada lado da chave (com o atalho).
@@ -169,7 +177,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
         .map(|t| Item {
             uid: t.uid,
             label: t.title.clone(),
-            model: None,
             color: accent,
             alive: true,
             busy: false,
@@ -191,7 +198,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
     let strip_rect = Rect::from_min_max(head.min, Pos2::new(head.max.x, head.max.y - 1.0));
     let mut acts = Vec::new();
-    match tabs::strip_items(ui, strip_rect, &items, current, true, Id::new("doc-tabs"), StripKind { scope: "doc-tab", tab_menu: false }) {
+    match tabs::strip_items(ui, strip_rect, &items, current, true, Id::new("doc-tabs"), StripKind { scope: "doc-tab", tab_menu: false, colored: false }) {
         Some(StripClick::Activate(n)) => acts.push(Act::Focus(uids[n])),
         Some(StripClick::Close(n)) => acts.push(Act::Close(uids[n])),
         _ => {}

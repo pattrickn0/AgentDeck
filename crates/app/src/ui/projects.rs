@@ -7,19 +7,29 @@ use agentdeck_core::models::short_model;
 
 use egui::{Align2, Color32, CursorIcon, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use super::{clickable, dot, frame, galley, galley_trunc, menus, place, shadow, text_in, text_w, tip};
-use crate::deck::{AgentBadge, Deck};
+use super::{clickable, dot, frame, galley, galley_trunc, menus, place, shadow, text_in, tip};
+use crate::deck::{AgentBadge, Deck, ProjectView};
 use crate::icons::Icon;
 use crate::theme;
 
+/// Altura da linha de um projeto e da "+ Novo agente".
 pub const ROW_H: f32 = 22.0;
+/// Altura da linha de um agente.
+const AGENT_ROW_H: f32 = 24.0;
 pub const SECTION_H: f32 = 24.0;
+/// Margem lateral das linhas: a seleção e o hover não encostam na borda da ilha.
+const SIDE_MARGIN: f32 = 4.0;
+/// O logo do modelo (12 px) mora numa caixa de 16 px.
 const LOGO_SIZE: f32 = 12.0;
-const LOGO_GAP: f32 = 4.0;
+const MARK_BOX: f32 = 16.0;
 /// Centro do logo de um agente da raiz (a partir da borda esquerda da linha).
-const AGENT_X: f32 = 28.0;
+const AGENT_X: f32 = 30.0;
 /// Recuo de cada nível da árvore de agentes.
-const INDENT: f32 = 14.0;
+const INDENT: f32 = 12.0;
+/// Espaço entre o logo e o nome, e entre o nome e o modelo.
+const GAP: f32 = 7.0;
+/// Largura máxima do modelo à direita do nome (o resto é do nome).
+const MODEL_MAX_W: f32 = 64.0;
 /// Níveis além deste não recuam mais (a barra é estreita).
 const MAX_DEPTH: usize = 5;
 
@@ -44,6 +54,31 @@ pub(super) fn agent_icon(kind: &str) -> Option<Icon> {
         "codex" => Some(Icon::CodexLogo),
         _ => None,
     }
+}
+
+/// O modelo de LLM como cabe numa linha da barra lateral: a família (`claude-sonnet-5-5` → `sonnet`,
+/// `gemini-4-argon-high` → `argon`, `opencode/deepseek-v4.1-flash-free` → `flash`). Sem família
+/// conhecida, o nome sem o provedor, sem o `claude-` e sem o `-free`.
+pub fn model_tag(model: &str) -> String {
+    const FAMILIES: [&str; 7] = ["opus", "sonnet", "haiku", "fable", "argon", "flash", "codex"];
+    let short = short_model(model).to_lowercase();
+    if let Some(family) = FAMILIES.iter().find(|f| short.split(['-', '.', '_', ' ', ':']).any(|t| t == **f)) {
+        return (*family).to_owned();
+    }
+    let short = short.strip_prefix("claude-").unwrap_or(&short);
+    short.strip_suffix("-free").unwrap_or(short).to_owned()
+}
+
+/// Altura do que a lista de projetos desenha: uma linha por projeto e, nos abertos, uma por agente e, no
+/// ativo, a "+ Novo agente".
+fn list_height(projects: &[ProjectView]) -> f32 {
+    projects
+        .iter()
+        .map(|p| {
+            let agents = if p.expanded { p.agents.len() as f32 * AGENT_ROW_H + if p.active { ROW_H } else { 0.0 } } else { 0.0 };
+            ROW_H + agents
+        })
+        .sum()
 }
 
 /// Abre uma pasta no explorador de arquivos do sistema operacional.
@@ -130,10 +165,10 @@ fn agent_x(row: Rect, depth: usize) -> f32 {
 
 /// Linhas-guia da árvore (como no explorador de arquivos). `gap` é o espaço entre as linhas.
 fn paint_guides(p: &Painter, row: Rect, gap: f32, node: &TreeRow) {
-    let stroke = Stroke::new(1.0, theme::pal().separator);
+    let stroke = Stroke::new(1.0, theme::pal().guide);
     let y = row.center().y;
     if node.has_kids {
-        p.vline(agent_x(row, node.depth), (y + LOGO_SIZE / 2.0 + 2.0)..=row.max.y, stroke);
+        p.vline(agent_x(row, node.depth), (y + MARK_BOX / 2.0 + 1.0)..=row.max.y, stroke);
     }
     if node.depth == 0 {
         return;
@@ -146,7 +181,7 @@ fn paint_guides(p: &Painter, row: Rect, gap: f32, node: &TreeRow) {
     let x = agent_x(row, node.depth - 1);
     let bottom = if node.last { y } else { row.max.y };
     p.vline(x, (row.min.y - gap)..=bottom, stroke);
-    p.hline(x..=(agent_x(row, node.depth) - LOGO_SIZE / 2.0 - 3.0), y, stroke);
+    p.hline(x..=(agent_x(row, node.depth) - MARK_BOX / 2.0 - 2.0), y, stroke);
 }
 
 /// Logo do modelo do agente (ponto, se não há logo), com o estado: halo pulsando trabalhando,
@@ -156,9 +191,10 @@ fn paint_agent_mark(deck: &mut Deck, ctx: &egui::Context, p: &Painter, center: P
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
         let t = ctx.input(|inp| inp.time);
         let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
-        p.circle_filled(center, 7.0 + 2.8 * wave, theme::with_opacity(ag.color, 0.30 * (1.0 - wave)));
+        p.circle_filled(center, 7.0 + 3.5 * wave, theme::with_opacity(ag.color, 0.30 * (1.0 - wave)));
     } else if ag.done && !is_active_tab {
-        p.circle_stroke(center, 8.5, Stroke::new(1.2, theme::brighten(ag.color, 1.25)));
+        // Anel de 1,5 px logo fora da caixa do logo (16 px).
+        p.circle_stroke(center, MARK_BOX / 2.0 + 0.75, Stroke::new(1.5, ag.color));
     }
     let color = if ag.alive { ag.color } else { theme::with_opacity(ag.color, 0.4) };
     match agent_icon(&ag.kind) {
@@ -219,8 +255,8 @@ struct DropTarget {
 /// Contorno do alvo de soltar (cor do projeto se vale, vermelho se criaria um ciclo).
 fn paint_drop_target(p: &Painter, r: Rect, ok: bool, color: Color32) {
     let c = if ok { color } else { theme::pal().danger };
-    p.rect_filled(r, 4.0, theme::with_opacity(c, 0.12));
-    p.rect_stroke(r.shrink(0.5), 4.0, Stroke::new(1.2, c), egui::StrokeKind::Inside);
+    p.rect_filled(r, 5.0, theme::with_opacity(c, 0.12));
+    p.rect_stroke(r.shrink(0.5), 5.0, Stroke::new(1.2, c), egui::StrokeKind::Inside);
 }
 
 /// Clique num agente da lista.
@@ -283,9 +319,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
 
     // ---------- Lista de projetos e agentes ----------
     // Só a altura do conteúdo, até 40 % da barra (aí a lista rola).
-    let rows = projects.len() + projects.iter().filter(|p| p.expanded).map(|p| p.agents.len() + usize::from(p.active)).sum::<usize>();
     let gap = ui.spacing().item_spacing.y;
-    let content_h = rows as f32 * (ROW_H + gap);
+    let content_h = list_height(&projects) + gap * projects.len() as f32;
     let max_list_h = content_h.min((rect.height() * 0.40).round());
     let list_top = *top_y + 2.0;
     let list_rect = Rect::from_min_max(Pos2::new(rect.min.x, list_top), Pos2::new(rect.max.x, list_top + max_list_h));
@@ -313,121 +348,52 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
 
             for proj in &projects {
                 let (row_r, resp) = ui.allocate_exact_size(Vec2::new(row_w, ROW_H), Sense::click());
+                let inner = row_r.shrink2(Vec2::new(SIDE_MARGIN, 0.0));
                 // A seta fica por cima da linha (criada depois, ganha o clique).
                 let can_expand = proj.active || !proj.agents.is_empty();
-                let chev_r = Rect::from_min_size(Pos2::new(row_r.min.x + 2.0, row_r.min.y), Vec2::new(16.0, ROW_H));
+                let chev_r = Rect::from_min_size(inner.min, Vec2::new(20.0, ROW_H));
                 let chev_resp = can_expand.then(|| ui.interact(chev_r, Id::new(("proj-chevron", &proj.id)), Sense::click()));
                 let chev_hov = chev_resp.as_ref().is_some_and(|r| r.hovered()) && !dragging;
                 let hovered = (resp.hovered() || chev_hov) && !dragging;
 
-                // Fundo: ativo = PANEL_2, hover = PANEL_2
-                if proj.active {
-                    p.rect_filled(row_r, 0.0, theme::pal().hover);
-                } else if hovered {
-                    p.rect_filled(row_r, 4.0, theme::pal().hover);
-                }
-
                 if hovered {
+                    p.rect_filled(inner, 5.0, theme::pal().hover);
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
-                }
-
-                // Indicador de projeto ativo: borda esquerda
-                if proj.active {
-                    let ind_bar = Rect::from_min_max(Pos2::new(row_r.min.x, row_r.min.y), Pos2::new(row_r.min.x + 2.5, row_r.max.y));
-                    p.rect_filled(ind_bar, 0.0, active_color);
                 }
                 // Soltar sobre o próprio projeto devolve o agente à raiz (responde ao usuário).
                 // Só o que está à vista na lista conta (as linhas roladas para fora ficam por baixo de outras seções).
                 let clip = ui.clip_rect();
                 let visible = |r: Rect| pointer.is_some_and(|ptr| r.contains(ptr) && clip.contains(ptr));
                 if agent_drag.as_ref().is_some_and(|(dp, ..)| *dp == proj.id) && visible(row_r) {
-                    paint_drop_target(&p, row_r, true, active_color);
+                    paint_drop_target(&p, inner, true, active_color);
                     drop_target = Some(DropTarget { boss: None, ok: true });
                 }
                 if can_expand {
-                    let c = if chev_hov {
-                        theme::pal().text
-                    } else if proj.active {
-                        active_color
-                    } else {
-                        theme::pal().text_2
-                    };
-                    paint_chevron(&p, Pos2::new(row_r.min.x + 10.0, row_r.center().y), proj.expanded, c);
+                    let c = if chev_hov { theme::pal().text_2 } else { theme::pal().text_3 };
+                    paint_chevron(&p, Pos2::new(inner.min.x + 10.5, row_r.center().y), proj.expanded, c);
                 }
 
-                // Lado direito: contagem e logos dos agentes
+                // Lado direito: o anel de um agente que terminou sem ser visto (projeto de fora) e a contagem.
+                let mut right = inner.max.x - 6.0;
+                let unseen = proj.agents.iter().find(|a| a.done && a.alive).filter(|_| !proj.active);
+                if let Some(ag) = unseen {
+                    p.circle_stroke(Pos2::new(right - 3.0, row_r.center().y), 3.75, Stroke::new(1.5, ag.color));
+                    right -= 6.0 + 6.0;
+                }
                 let count = proj.agents.len();
-                let count_font = theme::ui(11.0);
-                let count_str = if count > 0 { count.to_string() } else { String::new() };
-                let count_w = if count > 0 { text_w(&p, &count_str, count_font.clone()) } else { 0.0 };
-                let count_right_x = row_r.max.x - 10.0;
-
                 if count > 0 {
-                    text_in(
-                        &p,
-                        Rect::from_min_max(Pos2::new(count_right_x - count_w, row_r.min.y), Pos2::new(count_right_x, row_r.max.y)),
-                        Align2::RIGHT_CENTER,
-                        &count_str,
-                        count_font,
-                        theme::pal().text_2,
-                    );
+                    let count_str = count.to_string();
+                    let g = galley(&p, &count_str, theme::ui(10.5), theme::pal().text_3);
+                    let w = g.size().x;
+                    place(&p, Rect::from_min_max(Pos2::new(right - w, row_r.min.y), Pos2::new(right, row_r.max.y)), Align2::LEFT_CENTER, g, theme::pal().text_3);
+                    right -= w + 6.0;
                 }
 
-                // Logos dos modelos quando a lista está recolhida
-                let mut unique_models: Vec<(&str, Color32)> = Vec::new();
-                if !proj.expanded {
-                    for ag in &proj.agents {
-                        let model = ag.kind.split(':').next().unwrap_or(&ag.kind);
-                        if !unique_models.iter().any(|(m, _)| *m == model) {
-                            unique_models.push((model, ag.color));
-                        }
-                    }
-                }
-
-                let logos_total_w = if !unique_models.is_empty() {
-                    unique_models.len() as f32 * LOGO_SIZE + (unique_models.len().saturating_sub(1) as f32) * LOGO_GAP
-                } else {
-                    0.0
-                };
-
-                let logos_end_x = if count > 0 { count_right_x - count_w - 6.0 } else { count_right_x };
-                let logos_start_x = logos_end_x - logos_total_w;
-
-                if !unique_models.is_empty() {
-                    let mut cur_logo_x = logos_start_x;
-                    for (model, color) in &unique_models {
-                        let center = Pos2::new(cur_logo_x + LOGO_SIZE / 2.0, row_r.center().y);
-                        if let Some(icon) = agent_icon(model) {
-                            deck.icons.paint(&p, icon, center, LOGO_SIZE, *color, 0.0);
-                        } else {
-                            let ch = model.chars().next().unwrap_or('?').to_uppercase().to_string();
-                            p.text(center, Align2::CENTER_CENTER, ch, theme::ui_semibold(9.5), *color);
-                        }
-                        cur_logo_x += LOGO_SIZE + LOGO_GAP;
-                    }
-                }
-
-                // Nome do projeto (com truncamento para não sobrepor logos/contagem)
-                let name_x = row_r.min.x + 20.0;
-                let name_right_limit = if !unique_models.is_empty() {
-                    logos_start_x - 6.0
-                } else if count > 0 {
-                    count_right_x - count_w - 6.0
-                } else {
-                    row_r.max.x - 10.0
-                };
-                let max_name_w = (name_right_limit - name_x).max(1.0);
-                let name_font = if proj.active { theme::ui_semibold(12.5) } else { theme::ui(12.5) };
+                // Nome do projeto (com reticências para não encostar no que está à direita)
+                let name_x = inner.min.x + 6.0 + 9.0 + 6.0;
                 let name_color = if proj.active || hovered { theme::pal().text } else { theme::pal().text_2 };
-
-                let name_g = galley_trunc(&p, &proj.name, name_font, name_color, max_name_w);
-                place(
-                    &p,
-                    Rect::from_min_max(Pos2::new(name_x, row_r.min.y), Pos2::new(name_right_limit, row_r.max.y)),
-                    Align2::LEFT_CENTER,
-                    name_g,
-                    name_color,
-                );
+                let name_g = galley_trunc(&p, &proj.name, theme::ui_semibold(12.0), name_color, (right - name_x).max(1.0));
+                place(&p, Rect::from_min_max(Pos2::new(name_x, row_r.min.y), Pos2::new(right, row_r.max.y)), Align2::LEFT_CENTER, name_g, name_color);
 
                 // Tooltip com caminho completo
                 let resp = tip(resp, proj.path.display().to_string());
@@ -453,7 +419,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 // Agentes do projeto, em árvore (quem abriu quem)
                 for node in agent_tree(&proj.agents) {
                     let ag = &proj.agents[node.idx];
-                    let (tab_r, _) = ui.allocate_exact_size(Vec2::new(row_w, ROW_H), Sense::hover());
+                    let (tab_r, _) = ui.allocate_exact_size(Vec2::new(row_w, AGENT_ROW_H), Sense::hover());
+                    let sel_r = tab_r.shrink2(Vec2::new(SIDE_MARGIN, 0.0));
                     // Id fixo (projeto + instância): o arrasto continua na mesma linha entre os quadros.
                     let tab_resp = ui.interact(tab_r, Id::new(("agent-row", &proj.id, &ag.id)), Sense::click_and_drag());
                     let tab_hov = tab_resp.hovered() && !dragging;
@@ -464,20 +431,23 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let being_dragged = agent_drag.as_ref().is_some_and(|(dp, di, _)| *dp == proj.id && *di == ag.id);
 
                     if is_active_tab {
-                        p.rect_filled(tab_r, 4.0, theme::pal().separator);
+                        // Fundo na cor de destaque (18%) e filete de 2 px na borda esquerda.
+                        p.rect_filled(sel_r, 5.0, theme::accent_soft(active_color));
+                        let edge = egui::CornerRadius { nw: 5, sw: 5, ne: 0, se: 0 };
+                        p.rect_filled(Rect::from_min_size(sel_r.min, Vec2::new(2.0, sel_r.height())), edge, active_color);
                     } else if tab_hov {
-                        p.rect_filled(tab_r, 4.0, theme::pal().hover);
+                        p.rect_filled(sel_r, 5.0, theme::pal().hover);
                     }
                     // Alvo de soltar: vira o chefe do arrastado (no mesmo projeto, sem ciclo).
                     if let Some((_, dragged, _)) = agent_drag.as_ref().filter(|(dp, ..)| *dp == proj.id) {
                         if !being_dragged && visible(tab_r) {
                             let ok = !in_subtree(&proj.agents, &ag.id, dragged);
-                            paint_drop_target(&p, tab_r, ok, active_color);
+                            paint_drop_target(&p, sel_r, ok, active_color);
                             drop_target = Some(DropTarget { boss: Some(ag.id.clone()), ok });
                         }
                     }
                     if being_dragged {
-                        p.rect_filled(tab_r, 4.0, theme::with_opacity(theme::pal().hover, 0.6));
+                        p.rect_filled(sel_r, 5.0, theme::with_opacity(theme::pal().hover, 0.6));
                     }
 
                     if tab_hov {
@@ -488,46 +458,37 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let logo_x = agent_x(tab_r, node.depth);
                     paint_agent_mark(deck, &ctx, &p, Pos2::new(logo_x, tab_r.center().y), ag, is_active_tab);
 
-                    let tab_text_x = logo_x + LOGO_SIZE / 2.0 + 6.0;
-                    let max_tab_w = (tab_r.max.x - 10.0 - tab_text_x).max(1.0);
-                    let tab_font = if ag.done || is_active_tab { theme::ui_semibold(12.0) } else { theme::ui(12.0) };
-                    let tab_color = if !ag.alive {
-                        theme::with_opacity(theme::pal().text_2, 0.6)
-                    } else if is_active_tab || ag.done {
-                        theme::pal().text_strong
-                    } else if tab_hov {
-                        theme::pal().text
-                    } else {
-                        theme::pal().text_2
-                    };
+                    // O modelo à direita, numa linha só; o nome é quem encolhe (com reticências).
+                    let right = sel_r.max.x - 8.0;
+                    let model = ag.model.as_deref().map(model_tag).filter(|m| !m.is_empty());
+                    let mcolor = if is_active_tab { theme::pal().text } else { theme::pal().text_3 };
+                    let model_w = model.as_deref().map_or(0.0, |m| {
+                        let mg = galley_trunc(&p, m, theme::meta(10.0), mcolor, MODEL_MAX_W);
+                        let w = mg.size().x;
+                        place(&p, Rect::from_min_max(Pos2::new(right - w, tab_r.min.y), Pos2::new(right, tab_r.max.y)), Align2::LEFT_CENTER, mg, mcolor);
+                        w
+                    });
 
-                    let tab_g = galley_trunc(&p, &ag.label, tab_font, tab_color, max_tab_w);
+                    let name_x = logo_x + MARK_BOX / 2.0 + GAP;
+                    let name_right = if model_w > 0.0 { right - model_w - GAP } else { right };
+                    let tab_font = if is_active_tab { theme::ui_semibold(12.0) } else { theme::ui_medium(12.0) };
+                    let tab_color = if !ag.alive {
+                        theme::pal().text_3
+                    } else if is_active_tab {
+                        theme::pal().text_strong
+                    } else {
+                        theme::pal().text
+                    };
+                    let tab_g = galley_trunc(&p, &ag.label, tab_font, tab_color, (name_right - name_x).max(1.0));
                     let placed_r = place(
                         &p,
-                        Rect::from_min_max(Pos2::new(tab_text_x, tab_r.min.y), Pos2::new(tab_r.max.x - 10.0, tab_r.max.y)),
+                        Rect::from_min_max(Pos2::new(name_x, tab_r.min.y), Pos2::new(name_right, tab_r.max.y)),
                         Align2::LEFT_CENTER,
                         tab_g,
                         tab_color,
                     );
-
                     if !ag.alive && ag.tab.is_some() {
                         p.hline(placed_r.min.x..=placed_r.max.x, placed_r.center().y + 0.5, Stroke::new(1.0, tab_color));
-                    }
-                    // Modelo de LLM em cinza depois do nome, se ainda sobra espaço na linha.
-                    if let Some(model) = ag.model.as_deref() {
-                        let x0 = placed_r.max.x + 6.0;
-                        let room = tab_r.max.x - 10.0 - x0;
-                        if room >= 24.0 {
-                            let mcolor = theme::with_opacity(theme::pal().text_2, if ag.alive { 0.75 } else { 0.45 });
-                            let mg = galley_trunc(&p, short_model(model), theme::ui(11.0), mcolor, room);
-                            place(
-                                &p,
-                                Rect::from_min_max(Pos2::new(x0, tab_r.min.y), Pos2::new(tab_r.max.x - 10.0, tab_r.max.y)),
-                                Align2::LEFT_CENTER,
-                                mg,
-                                mcolor,
-                            );
-                        }
                     }
 
                     let mut tooltip = if ag.busy {
@@ -561,29 +522,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 let (add_r, add_resp) = ui.allocate_exact_size(Vec2::new(row_w, ROW_H), Sense::click());
                 let add_hov = (add_resp.hovered() || deck.new_tab_menu_open) && !dragging;
                 if add_hov {
-                    p.rect_filled(add_r, 4.0, theme::pal().hover);
+                    p.rect_filled(add_r.shrink2(Vec2::new(SIDE_MARGIN, 0.0)), 5.0, theme::pal().hover);
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
-                let add_color = if add_hov { theme::pal().text } else { theme::pal().text_2 };
-                text_in(
-                    &p,
-                    Rect::from_center_size(Pos2::new(add_r.min.x + AGENT_X, add_r.center().y), Vec2::splat(ROW_H)),
-                    Align2::CENTER_CENTER,
-                    "+",
-                    theme::ui(14.0),
-                    add_color,
-                );
-                text_in(
-                    &p,
-                    Rect::from_min_max(
-                        Pos2::new(add_r.min.x + AGENT_X + LOGO_SIZE / 2.0 + 6.0, add_r.min.y),
-                        Pos2::new(add_r.max.x - 10.0, add_r.max.y),
-                    ),
-                    Align2::LEFT_CENTER,
-                    "Novo agente",
-                    theme::ui(12.0),
-                    add_color,
-                );
+                let add_color = if add_hov { theme::pal().text_2 } else { theme::pal().text_3 };
+                let add_text = Rect::from_min_max(Pos2::new(add_r.min.x + AGENT_X - MARK_BOX / 2.0, add_r.min.y), Pos2::new(add_r.max.x - 10.0, add_r.max.y));
+                text_in(&p, add_text, Align2::LEFT_CENTER, "+ Novo agente", theme::ui(11.5), add_color);
                 if ui.is_rect_visible(add_r) {
                     new_agent_anchor = Some(add_r);
                 }
@@ -596,13 +540,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
 
     *top_y = list_top + scroll_output.inner_rect.height().min(max_list_h);
 
-    // Separador com margem de 8 px
+    // Separador da largura da ilha
     *top_y += 6.0;
-    painter.rect_filled(
-        Rect::from_min_max(Pos2::new(rect.min.x + 8.0, *top_y), Pos2::new(rect.max.x - 8.0, *top_y + 1.0)),
-        0.0,
-        theme::pal().separator,
-    );
+    super::separator(&painter, Pos2::new(rect.min.x, *top_y + 0.5), Pos2::new(rect.max.x, *top_y + 0.5));
     *top_y += 1.0;
 
     // Arrasto de agente: "fantasma" junto ao ponteiro; ao soltar, muda o chefe.
@@ -888,6 +828,49 @@ mod tests {
     /// (índice, profundidade) de cada linha.
     fn shape(rows: &[TreeRow]) -> Vec<(usize, usize)> {
         rows.iter().map(|r| (r.idx, r.depth)).collect()
+    }
+
+    #[test]
+    fn o_modelo_vira_a_familia() {
+        assert_eq!(model_tag("claude-sonnet-5-5"), "sonnet");
+        assert_eq!(model_tag("claude-opus-5-5"), "opus");
+        assert_eq!(model_tag("gemini-4-argon-high"), "argon");
+        assert_eq!(model_tag("opencode/deepseek-v4.1-flash-free"), "flash");
+        assert_eq!(model_tag("opencode-go/glm-5.3-flash"), "flash");
+        assert_eq!(model_tag("sonnet"), "sonnet");
+        assert_eq!(model_tag("Haiku"), "haiku");
+    }
+
+    #[test]
+    fn o_modelo_sem_familia_perde_so_o_enfeite() {
+        assert_eq!(model_tag("opencode/big-pickle-free"), "big-pickle");
+        assert_eq!(model_tag("claude-custom-1"), "custom-1");
+        assert_eq!(model_tag("llama3:8b"), "llama3:8b");
+        assert_eq!(model_tag(""), "");
+        // Só vale a palavra inteira.
+        assert_eq!(model_tag("flashlight-2"), "flashlight-2");
+    }
+
+    fn view(agents: usize, expanded: bool, active: bool) -> ProjectView {
+        ProjectView {
+            id: "p".into(),
+            name: "p".into(),
+            path: PathBuf::new(),
+            active,
+            expanded,
+            agents: (0..agents).map(|i| ag(&format!("a{i}"), None)).collect(),
+        }
+    }
+
+    #[test]
+    fn a_altura_da_lista_conta_agentes_e_o_novo_agente() {
+        // Fechado: só a linha do projeto.
+        assert_eq!(list_height(&[view(3, false, true)]), ROW_H);
+        // Aberto e ativo: projeto + 3 agentes + "+ Novo agente".
+        assert_eq!(list_height(&[view(3, true, true)]), ROW_H + 3.0 * AGENT_ROW_H + ROW_H);
+        // Aberto e inativo: sem o "+ Novo agente".
+        assert_eq!(list_height(&[view(2, true, false), view(0, false, false)]), ROW_H + 2.0 * AGENT_ROW_H + ROW_H);
+        assert_eq!(list_height(&[]), 0.0);
     }
 
     #[test]

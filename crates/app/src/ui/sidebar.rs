@@ -1,15 +1,23 @@
-//! `#sidebar`: explorador de arquivos estilo VS Code + divisor redimensionável.
+//! `#sidebar`: a chave Agentes | Documentos, os projetos e agentes, a organização das janelas e o
+//! explorador de arquivos estilo VS Code, mais o divisor redimensionável.
+
+use std::collections::HashMap;
 
 use egui::{Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use super::{clickable, galley_trunc, paint_splitter, place, text_in, tip};
+use super::{clickable, galley_trunc, paint_splitter, place, section_label, segmented, separator, text_in, tip};
 use crate::deck::{Deck, TreeRow};
 use crate::icons::Icon;
 use crate::theme;
+use agentdeck_core::git::{EntryKind, GitEntry};
 
-const ROW_H: f32 = 22.0;
-/// Altura do título de cada seção (ORGANIZAÇÃO, EXPLORADOR).
-const SECTION_H: f32 = 24.0;
+/// Altura de uma linha do explorador.
+const FILE_ROW_H: f32 = 20.0;
+/// Margem lateral das linhas (a seleção não encosta na borda da ilha) e recuo por nível de pasta.
+const SIDE_MARGIN: f32 = 4.0;
+const FILE_INDENT: f32 = 12.0;
+/// Altura do trilho da chave ORGANIZAÇÃO (segmentos de 20 px e 2 px de cada lado).
+const ORG_H: f32 = 24.0;
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
@@ -19,67 +27,38 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     deck.tree.expanded.insert(String::new());
 
     let dragging = ctx.dragged_id().is_some() || deck.pane_drag.is_some() || deck.drop_hover;
-    let mut top_y = rect.min.y;
+
+    // ---------- Chave Agentes | Documentos, com a largura da ilha (margem de 6 px) ----------
+    let switch = Rect::from_min_size(Pos2::new(rect.min.x + 6.0, rect.min.y + 6.0), Vec2::new(rect.width() - 12.0, super::docs::SWITCH_H));
+    super::docs::switch(deck, ui, switch, "side-center");
+    let mut top_y = switch.max.y + 6.0;
+    separator(&painter, Pos2::new(rect.min.x, top_y + 0.5), Pos2::new(rect.max.x, top_y + 0.5));
+    top_y += 1.0;
 
     // ---------- Seção PROJETOS ----------
     super::projects::draw(deck, ui, &mut top_y, rect, dragging);
 
     // ---------- Seção ORGANIZAÇÃO (como as janelas se arrumam) ----------
-    let org_head = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 6.0), Vec2::new(rect.width(), SECTION_H));
-    super::section_label(&painter, org_head, "ORGANIZAÇÃO");
-    let split_row = Rect::from_min_size(Pos2::new(rect.min.x, org_head.max.y), Vec2::new(rect.width(), ROW_H + 4.0));
-    let split_resp = ui.interact(split_row, Id::new("org-split"), Sense::click());
-    let split_hov = split_resp.hovered() && !dragging;
-    if split_hov {
-        painter.rect_filled(split_row, 0.0, theme::pal().hover);
-        ctx.set_cursor_icon(CursorIcon::PointingHand);
+    let org_head = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 4.0), Vec2::new(rect.width(), super::SECTION_LABEL_H));
+    section_label(&painter, org_head, "ORGANIZAÇÃO");
+    let org = Rect::from_min_size(Pos2::new(rect.min.x + 10.0, org_head.max.y), Vec2::new(rect.width() - 20.0, ORG_H));
+    let mode = usize::from(deck.split_enabled);
+    if let Some(picked) = segmented(ui, org, Id::new("org-mode"), &["Abas", "Dividida"], mode, false) {
+        if picked != mode {
+            deck.toggle_split();
+        }
     }
-    let on = deck.split_enabled;
-    let label_color = if split_hov { theme::pal().text_strong } else { theme::pal().text_2 };
-    deck.icons.paint(
-        &painter,
-        Icon::Split,
-        Pos2::new(split_row.min.x + 19.0, split_row.center().y),
-        14.0,
-        if on { deck.accent() } else { theme::pal().text_3 },
-        0.0,
-    );
-    let switch_r = Rect::from_center_size(Pos2::new(split_row.max.x - 12.0 - 13.0, split_row.center().y), Vec2::new(26.0, 14.0));
-    let label_g =
-        galley_trunc(&painter, "Tela dividida", theme::ui(13.0), label_color, (switch_r.min.x - 8.0 - (split_row.min.x + 32.0)).max(1.0));
-    place(
-        &painter,
-        Rect::from_min_max(Pos2::new(split_row.min.x + 32.0, split_row.min.y), Pos2::new(switch_r.min.x - 8.0, split_row.max.y)),
-        Align2::LEFT_CENTER,
-        label_g,
-        label_color,
-    );
-    let t = ctx.animate_bool_with_time(Id::new("org-split-anim"), on, 0.12);
-    paint_switch(&painter, switch_r, t, deck.accent());
-    let tip_text = if on {
-        "Tela dividida: ligada
-Cada tipo de agente numa janela · clique para ver uma aba por vez"
-    } else {
-        "Tela dividida: desligada
-Clique para abrir uma janela por tipo de agente"
-    };
-    if tip(split_resp, tip_text).clicked() {
-        deck.toggle_split();
-    }
-    top_y = split_row.max.y + 6.0;
-    painter.rect_filled(
-        Rect::from_min_max(Pos2::new(rect.min.x + 8.0, top_y), Pos2::new(rect.max.x - 8.0, top_y + 1.0)),
-        0.0,
-        theme::pal().separator,
-    );
+    top_y = org.max.y + 8.0;
+    separator(&painter, Pos2::new(rect.min.x, top_y + 0.5), Pos2::new(rect.max.x, top_y + 0.5));
+    top_y += 1.0;
 
-    // ---------- Seção EXPLORADOR com ações rápidas ----------
-    let head_rect = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 6.0), Vec2::new(rect.width(), SECTION_H));
+    // ---------- Seção ARQUIVOS com ações rápidas ----------
+    let head_rect = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 4.0), Vec2::new(rect.width(), super::SECTION_LABEL_H));
     top_y = head_rect.max.y;
-    super::section_label(&painter, head_rect, "EXPLORADOR");
+    section_label(&painter, head_rect, "ARQUIVOS");
 
     // Botão Atualizar (Icon::Refresh)
-    let refresh_r = Rect::from_min_size(Pos2::new(head_rect.max.x - 24.0, head_rect.min.y + 2.0), Vec2::new(20.0, 20.0));
+    let refresh_r = Rect::from_min_size(Pos2::new(head_rect.max.x - 24.0, head_rect.min.y + 1.0), Vec2::new(20.0, 20.0));
     let refresh_resp = clickable(ui, refresh_r, Id::new("tree-refresh-btn"));
     let r_hov = refresh_resp.hovered() && !dragging;
     if r_hov {
@@ -94,7 +73,7 @@ Clique para abrir uma janela por tipo de agente"
     }
 
     // Botão Recolher tudo (ícone VS Code no painter)
-    let collapse_r = Rect::from_min_size(Pos2::new(refresh_r.min.x - 22.0, head_rect.min.y + 2.0), Vec2::new(20.0, 20.0));
+    let collapse_r = Rect::from_min_size(Pos2::new(refresh_r.min.x - 22.0, head_rect.min.y + 1.0), Vec2::new(20.0, 20.0));
     let collapse_resp = clickable(ui, collapse_r, Id::new("tree-collapse-btn"));
     let c_hov = collapse_resp.hovered() && !dragging;
     if c_hov {
@@ -107,19 +86,12 @@ Clique para abrir uma janela por tipo de agente"
         deck.tree.expanded.retain(|p| p.is_empty());
         deck.tree.expanded.insert(String::new());
     }
-
-    // Separador sutil com margens laterais
-    let sep_y = top_y + 4.0;
-    painter.rect_filled(
-        Rect::from_min_max(Pos2::new(rect.min.x + 8.0, sep_y), Pos2::new(rect.max.x - 8.0, sep_y + 1.0)),
-        0.0,
-        theme::pal().separator,
-    );
-    let list_top = sep_y + 4.0;
+    let list_top = top_y + 2.0;
 
     // ---------- Lista de arquivos da árvore ----------
     let list_rect = Rect::from_min_max(Pos2::new(rect.min.x, list_top), rect.max);
     let rows = deck.tree_rows();
+    let marks = git_marks(deck);
     let mut ui_list = ui.new_child(egui::UiBuilder::new().max_rect(list_rect).layout(egui::Layout::top_down(egui::Align::Min)));
     ui_list.set_clip_rect(list_rect);
     let mut clicked_dir: Option<String> = None;
@@ -127,14 +99,14 @@ Clique para abrir uma janela por tipo de agente"
     let mut dbl_file: Option<String> = None;
     egui::ScrollArea::vertical().id_salt("file-tree").auto_shrink([false, false]).show_rows(
         &mut ui_list,
-        ROW_H,
+        FILE_ROW_H,
         rows.len(),
         |ui, range| {
             let width = ui.available_width();
             for i in range {
-                let (row_rect, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
+                let (row_rect, resp) = ui.allocate_exact_size(Vec2::new(width, FILE_ROW_H), Sense::click());
                 let row = &rows[i];
-                paint_row(deck, ui, row_rect, row, &resp);
+                paint_row(deck, ui, row_rect, row, &resp, &marks);
                 let resp = tip(resp, row.entry.rel_path.clone());
                 if row.entry.is_dir {
                     if resp.clicked() {
@@ -158,13 +130,24 @@ Clique para abrir uma janela por tipo de agente"
     }
 }
 
-/// Chave liga/desliga (`t` de 0 a 1, animado): trilho na cor do agente ativo quando ligada.
-fn paint_switch(painter: &egui::Painter, r: Rect, t: f32, on_color: Color32) {
-    let track = theme::pal().separator.lerp_to_gamma(on_color, t);
-    painter.rect_filled(r, r.height() / 2.0, track);
-    let knob_r = r.height() / 2.0 - 2.0;
-    let x = egui::lerp((r.min.x + 2.0 + knob_r)..=(r.max.x - 2.0 - knob_r), t);
-    painter.circle_filled(Pos2::new(x, r.center().y), knob_r, theme::pal().text_2.lerp_to_gamma(theme::pal().text_strong, t));
+/// A letra do Git de um arquivo alterado (`M`, `A`, `D`, `R`, `U`, `?`).
+fn git_mark(e: &GitEntry) -> char {
+    match e.kind {
+        EntryKind::Untracked => '?',
+        EntryKind::Unmerged => 'U',
+        EntryKind::Renamed | EntryKind::Copied => 'R',
+        EntryKind::Ordinary => [e.index, e.worktree].into_iter().find(|c| matches!(c, 'A' | 'D')).unwrap_or('M'),
+    }
+}
+
+/// A letra do Git de cada arquivo alterado do projeto, pelo caminho relativo ao workspace (o `status` vem
+/// com caminhos relativos à raiz do repositório, que pode ser uma pasta acima do workspace).
+fn git_marks(deck: &Deck) -> HashMap<String, char> {
+    let Some(st) = deck.git.status() else { return HashMap::new() };
+    st.entries
+        .iter()
+        .filter_map(|e| e.path.strip_prefix(st.prefix.as_str()).map(|rel| (rel.trim_end_matches('/').to_owned(), git_mark(e))))
+        .collect()
 }
 
 /// Desenha o ícone de "Recolher todas as pastas" do VS Code no painter: um quadrado com "−"
@@ -181,73 +164,83 @@ fn paint_collapse_all(painter: &egui::Painter, center: Pos2, color: Color32) {
     painter.line_segment([Pos2::new(x1, y1), Pos2::new(front.max.x, y1)], stroke);
 }
 
-fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::Response) {
+fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::Response, marks: &HashMap<String, char>) {
     let painter = ui.painter();
     let ctx = ui.ctx();
+    let p = theme::pal();
     let dragging = ctx.dragged_id().is_some() || deck.pane_drag.is_some() || deck.drop_hover;
     let hovered = resp.hovered() && !dragging;
     if hovered {
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
     let is_active = !row.entry.is_dir && deck.tree.active_file.as_deref() == Some(row.entry.rel_path.as_str());
+    let mark = marks.get(row.entry.rel_path.as_str()).copied();
     let (bg, fg) = if is_active {
-        (Some(theme::pal().separator), theme::pal().text_strong)
+        (Some(p.selected_soft), p.text_strong)
     } else if hovered {
-        (Some(theme::pal().hover), theme::pal().text_strong)
+        (Some(p.hover), p.text_strong)
+    } else if mark.is_some() {
+        (None, p.text)
     } else {
-        (None, theme::pal().text_2)
+        (None, p.text_2)
     };
+    let inner = rect.shrink2(Vec2::new(SIDE_MARGIN, 0.0));
     if let Some(bg) = bg {
-        painter.rect_filled(rect, 0.0, bg);
+        painter.rect_filled(inner, 4.0, bg);
     }
-    // Deslocamento horizontal: o primeiro nível da raiz tem depth 1 em TreeRow,
-    // que convertemos para depth 0 para poupar 12 px na barra lateral.
+    // O primeiro nível da raiz tem depth 1 em TreeRow: vira recuo 0.
     let depth = row.depth.saturating_sub(1);
-    let x0 = rect.min.x + 6.0 + depth as f32 * 12.0;
+    let x0 = inner.min.x + 8.0 + depth as f32 * FILE_INDENT;
     let cy = rect.center().y;
-    // Chevron (só pastas), caixa de 14px.
+    // Caixa de 14 px: a seta da pasta (gira ao abrir) ou o sinal do tipo do arquivo, sempre em cinza.
+    let box_c = Pos2::new(x0 + 7.0, cy);
     if row.entry.is_dir {
         let t = ctx.animate_bool_with_time(Id::new(("tree-chev", &row.entry.rel_path)), row.expanded, 0.12);
-        deck.icons.paint(painter, Icon::TreeChevron, Pos2::new(x0 + 7.0, cy), 10.0, theme::pal().text_3, t * std::f32::consts::FRAC_PI_2);
-    }
-    // Ícone (16px) após gap de 5px.
-    let icon_rect = Rect::from_center_size(Pos2::new(x0 + 14.0 + 5.0 + 8.0, cy), Vec2::splat(16.0));
-    if row.entry.is_dir {
-        let icon = if row.expanded { Icon::FolderOpen } else { Icon::FolderClosed };
-        deck.icons.paint(painter, icon, icon_rect.center(), 14.0, theme::pal().text_3, 0.0);
+        deck.icons.paint(painter, Icon::TreeChevron, box_c, 10.0, p.text_3, t * std::f32::consts::FRAC_PI_2);
     } else {
-        file_icon(deck, painter, icon_rect, &row.entry.name);
+        file_icon(deck, painter, Rect::from_center_size(box_c, Vec2::splat(14.0)), &row.entry.name);
+    }
+    // A letra do Git à direita (IBM Plex Mono 10 px).
+    let right = inner.max.x - 8.0;
+    let mut name_right = right;
+    if let Some(m) = mark {
+        let g = super::galley(painter, &m.to_string(), theme::meta(10.0), p.text_2);
+        let w = g.size().x;
+        place(painter, Rect::from_min_max(Pos2::new(right - w, rect.min.y), Pos2::new(right, rect.max.y)), Align2::LEFT_CENTER, g, p.text_2);
+        name_right = right - w - 6.0;
     }
     // Nome com reticências.
-    let name_x = icon_rect.max.x + 5.0;
-    let max_w = (rect.max.x - 8.0 - name_x).max(1.0);
-    let g = galley_trunc(painter, &row.entry.name, theme::ui(13.0), fg, max_w);
-    place(painter, Rect::from_min_max(Pos2::new(name_x, rect.min.y), Pos2::new(rect.max.x - 8.0, rect.max.y)), Align2::LEFT_CENTER, g, fg);
+    let name_x = x0 + 14.0 + 5.0;
+    let g = galley_trunc(painter, &row.entry.name, theme::ui(11.5), fg, (name_right - name_x).max(1.0));
+    place(painter, Rect::from_min_max(Pos2::new(name_x, rect.min.y), Pos2::new(name_right, rect.max.y)), Align2::LEFT_CENTER, g, fg);
 }
 
-/// Badges de extensão (`getFileIconHtml`).
+/// O sinal do tipo do arquivo na caixa de 14 px, em cinza (o usuário pediu menos cor).
 fn file_icon(deck: &mut Deck, painter: &egui::Painter, rect: Rect, name: &str) {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     let ext = if name.contains('.') { ext } else { String::new() };
-    let badge: Option<(&str, Color32, f32)> = match ext.as_str() {
-        "js" | "mjs" | "cjs" => Some(("JS", theme::BADGE_JS, 9.5)),
-        "json" => Some(("{ }", theme::BADGE_JSON, 9.5)),
-        "md" | "markdown" => Some(("M↓", theme::BADGE_MD, 9.0)),
-        "ts" => Some(("TS", theme::BADGE_TS, 9.0)),
-        "html" | "htm" => Some(("<>", theme::BADGE_HTML, 9.0)),
-        "css" => Some(("#", theme::BADGE_CSS, 9.0)),
-        "py" => Some(("Py", theme::BADGE_PY, 9.0)),
-        _ => None,
-    };
-    match badge {
-        Some((text, color, size)) => {
-            // font-weight: 800 → fonte mono em negrito (com reforço de meio pixel).
-            let font = theme::mono_bold(size);
-            text_in(painter, rect, Align2::CENTER_CENTER, text, font.clone(), color);
-            text_in(painter, rect.translate(Vec2::new(0.35, 0.0)), Align2::CENTER_CENTER, text, font, color);
+    match badge_text(&ext) {
+        Some(text) => {
+            text_in(painter, rect, Align2::CENTER_CENTER, text, theme::mono_bold(8.5), theme::pal().text_3);
         }
-        None => deck.icons.paint(painter, Icon::FileGeneric, rect.center(), 13.0, theme::pal().text_3, 0.0),
+        None => deck.icons.paint(painter, Icon::FileGeneric, rect.center(), 12.0, theme::pal().text_3, 0.0),
     }
+}
+
+/// O texto do sinal de uma extensão (`None`: ícone de arquivo genérico).
+fn badge_text(ext: &str) -> Option<&'static str> {
+    Some(match ext {
+        "js" | "mjs" | "cjs" => "JS",
+        "json" => "{ }",
+        "md" | "markdown" => "M↓",
+        "ts" | "tsx" => "TS",
+        "html" | "htm" => "<>",
+        "css" => "#",
+        "py" => "Py",
+        "rs" => "rs",
+        "toml" => "⚙",
+        _ => return None,
+    })
 }
 
 /// `#sidebar-splitter`: arrastar redimensiona entre 150 e 480 px.
@@ -275,4 +268,34 @@ pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect) {
     let painter = ui.painter_at(full);
     paint_splitter(&painter, line, hot, deck.accent());
     tip(r, "Arraste para redimensionar barra lateral");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(kind: EntryKind, index: char, worktree: char) -> GitEntry {
+        GitEntry { path: "x".into(), orig_path: None, index, worktree, kind }
+    }
+
+    #[test]
+    fn the_git_letter_is_the_most_telling_one() {
+        assert_eq!(git_mark(&entry(EntryKind::Untracked, '?', '?')), '?');
+        assert_eq!(git_mark(&entry(EntryKind::Unmerged, 'U', 'U')), 'U');
+        assert_eq!(git_mark(&entry(EntryKind::Renamed, 'R', '.')), 'R');
+        assert_eq!(git_mark(&entry(EntryKind::Ordinary, 'A', '.')), 'A');
+        assert_eq!(git_mark(&entry(EntryKind::Ordinary, '.', 'D')), 'D');
+        assert_eq!(git_mark(&entry(EntryKind::Ordinary, '.', 'M')), 'M');
+        // Adicionado e depois editado continua "A".
+        assert_eq!(git_mark(&entry(EntryKind::Ordinary, 'A', 'M')), 'A');
+    }
+
+    #[test]
+    fn the_badge_text_covers_the_usual_extensions() {
+        assert_eq!(badge_text("rs"), Some("rs"));
+        assert_eq!(badge_text("md"), Some("M↓"));
+        assert_eq!(badge_text("tsx"), Some("TS"));
+        assert_eq!(badge_text("zzz"), None);
+        assert_eq!(badge_text(""), None);
+    }
 }
