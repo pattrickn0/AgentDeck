@@ -319,7 +319,7 @@ pub fn clickable(ui: &Ui, rect: Rect, id: Id) -> Response {
 pub fn tip(resp: Response, text: impl Into<String>) -> Response {
     let text = text.into();
     resp.on_hover_ui(|ui| {
-        ui.label(egui::RichText::new(text).font(theme::ui(12.0)).color(theme::pal().text));
+        ui.label(egui::RichText::new(text).font(theme::ui(11.5)).color(theme::pal().text));
     })
 }
 
@@ -419,7 +419,6 @@ pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, a
 
 /// O jeito de um botão de texto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Para as partes 2 e 3.
 pub enum ButtonKind {
     /// Cor de destaque, texto `on_accent`, 600.
     Primary,
@@ -430,7 +429,6 @@ pub enum ButtonKind {
 }
 
 /// Botão de texto (cantos 5). Devolve a resposta; quem chama trata o clique.
-#[allow(dead_code)] // Para as partes 2 e 3.
 pub fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: ButtonKind) -> Response {
     let r = clickable(ui, rect, id);
     let painter = ui.painter();
@@ -457,8 +455,18 @@ pub fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: ButtonKind) -> Res
     r
 }
 
+/// Botão destrutivo (fundo `danger`, texto `on_accent`, cantos 5).
+pub fn button_danger(ui: &Ui, rect: Rect, id: Id, label: &str) -> Response {
+    let r = clickable(ui, rect, id);
+    let painter = ui.painter();
+    let p = theme::pal();
+    let fill = if r.hovered() { theme::brighten(p.danger, 1.1) } else { p.danger };
+    painter.rect_filled(rect, 5.0, fill);
+    text_in(painter, rect, Align2::CENTER_CENTER, label, theme::ui_semibold(11.5), p.on_accent);
+    r
+}
+
 /// Largura de um botão de texto com `label` (10 px de cada lado).
-#[allow(dead_code)] // Para as partes 2 e 3.
 pub fn button_width(painter: &Painter, label: &str, kind: ButtonKind) -> f32 {
     let font = if kind == ButtonKind::Primary { theme::ui_semibold(11.5) } else { theme::ui(11.5) };
     text_w(painter, label, font) + 20.0

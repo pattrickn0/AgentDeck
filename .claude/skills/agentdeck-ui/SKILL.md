@@ -72,8 +72,8 @@ Símbolos (▾ ▸ ✕) caem no fallback do sistema.
 - Ordem: `island_shadows` (sombra só nas frestas, o vidro é translúcido) → `island(ui, rect, kind)` (`Glass`/`Well`) →
   conteúdo → `island_edge(ui, rect)` (repinta os cantos com a cor do fundo, borda e filete). Cada janela da tela dividida é
   uma ilha `Well`. Divisores ficam na fresta (`paint_splitter` só aparece com o mouse).
-- Componentes comuns em `ui/mod.rs`: `segmented`, `button` (`ButtonKind::{Primary, Secondary, Ghost}`), `section_label`,
-  `chip`, `separator`, `galley_spaced`.
+- Componentes comuns em `ui/mod.rs`: `segmented`, `button` (`ButtonKind::{Primary, Secondary, Ghost}`), `button_danger`,
+  `section_label`, `chip`, `separator`, `galley_spaced`.
 - Logo: `Icon::AgentDeck` (`icons.rs`, `LOGO_CARDS`); o `.ico` sai de `scripts/gerar-icone.ps1`.
 
 ## Medidas
@@ -97,8 +97,13 @@ Símbolos (▾ ▸ ✕) caem no fallback do sistema.
   desenhado (a Inter não o tem). `StripKind::colored` escolhe entre agente e documento.
 - Botões de ícone: na barra de título 26×24, cantos 5; nos cabeçalhos 20×20, cantos 4; hover `hover`.
 - Linha da lista de arquivos de um diff: 20 px, selecionada `selected_soft`; letras e `+`/`−` em `meta(10)`.
-- Menus e modais: `frame(p, r, 6–10, popup, glass_border)` + `shadow(...)`; itens de 26 px; posição com
-  `menus::keep_on_screen` (não use `Area::constrain`, ele fecha o menu no clique — ver o comentário em `menus.rs`).
+- Barra direita: cabeçalho de 32 px (`TOPBAR_H`) com 4 abas-pílula com nome (`Tarefas`, `Conversa`, `Git`, `GitHub`,
+  22 px de altura, cantos 5, selo em pílula de 10 px); cartões de tarefa ativos com barra de 5 passos (3 px) e botões
+  embutidos, seguidos da seção `HISTÓRICO` (filtro e linhas compactas de 24 px) e rodapé fixo `+ Nova tarefa`.
+- Campos de texto: fundo `recess`, cantos 6, borda `separator` (ou `accent` quando focado).
+- Menus, dicas e modais: `frame(p, r, 6–10, popup, glass_border)` + `shadow(...)`; itens de menu de 26 px com hover
+  `hover`; títulos de modal `13 px 600`; posição de menu com `menus::keep_on_screen` (não use `Area::constrain`, ele
+  fecha o menu no clique — ver o comentário em `menus.rs`).
 - Barra de título: `TITLEBAR_H = 32`, sem fundo; botões da janela 40×32. Barra lateral: 150–480 px (padrão 220).
   Barra direita: 280–640 (padrão 330).
 

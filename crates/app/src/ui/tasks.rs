@@ -1,27 +1,33 @@
-//! Aba "Tarefas" da barra direita: a lista agrupada por estado, o detalhe de uma tarefa (pedido,
-//! relatório, alterações, histórico e os botões de cada estado) e o formulário de nova tarefa. O
-//! estado e as chamadas ao core ficam em `tasks_ui.rs`; aqui só se pinta e se *coleta* o que foi
-//! clicado ([`Act`]), aplicado no fim do quadro com o `Deck` inteiro de volta.
+//! Aba "Tarefas" da barra direita: a lista de tarefas em andamento e o histórico de encerradas, o
+//! detalhe de uma tarefa (pedido, relatório, alterações, histórico e os botões de cada estado) e o
+//! formulário de nova tarefa. O estado e as chamadas ao core ficam em `tasks_ui.rs`; aqui só se
+//! pinta e se *coleta* o que foi clicado ([`Act`]), aplicado no fim do quadro com o `Deck` inteiro.
 
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 use agentdeck_core::{models, Task, TaskStatus};
 
-use super::{clickable, frame, galley, galley_trunc, place, shadow, text_in, text_w, tip};
+use super::{
+    button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label,
+    separator as line_sep, shadow, text_in, text_w, tip, ButtonKind,
+};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::tasks_ui::{
-    self, actions_for, can_show_diff, clip_text, events_newest_first, group_tasks, parse_diff_stat, status_age, status_name, Confirm,
-    FormMenu, Group, Section, TaskAct, TasksView,
+    self, actions_for, active_tasks, can_show_diff, card_state_label, clip_text, events_newest_first, history_tasks, is_focused_card,
+    parse_diff_stat, status_age, status_name, task_age, task_date_ddmm, task_step, Confirm, FormMenu, HistoryFilter, Section, TaskAct,
+    TasksView,
 };
 use crate::theme;
 use crate::util;
 
-const HEAD_H: f32 = 34.0;
+const HEAD_H: f32 = theme::TOPBAR_H;
 const ROW_H: f32 = 22.0;
 const BTN_H: f32 = 28.0;
 const CHIP_H: f32 = 21.0;
 const PAD: f32 = 12.0;
+const LIST_PAD: f32 = 8.0;
+const FOOTER_H: f32 = 45.0;
 /// Quantos caracteres do pedido e do relatório vão para a tela.
 const TEXT_MAX: usize = 20_000;
 /// Altura máxima da área rolável do relatório.
@@ -33,11 +39,14 @@ const EVENTS_MAX: usize = 50;
 
 /// O que foi clicado neste quadro.
 enum Act {
-    Refresh,
     New,
     Back,
     Open(String),
-    ToggleGroup(Group),
+    /// Abre o detalhe da tarefa já com o campo de devolver/reprovar aberto.
+    ReturnFromCard(String),
+    ToggleHistoryMenu,
+    CloseHistoryMenu,
+    SetHistoryFilter(HistoryFilter),
     ToggleSection(Section),
     Task(String, TaskAct),
     /// "Ver diff completo" / "Ver o que foi mesclado": abre o diff no centro.
@@ -62,8 +71,6 @@ enum Act {
 }
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
-    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::pal().separator);
-    let rect = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.max.y - 1.0));
     let mut acts = Vec::new();
     let now = agentdeck_core::util::now_ms();
     match deck.tasks.view.clone() {
@@ -84,14 +91,18 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
 
 fn apply(deck: &mut Deck, act: Act) {
     match act {
-        Act::Refresh => deck.tasks_refresh(),
         Act::New => deck.tasks_open_new(),
         Act::Back => deck.tasks_back(),
         Act::Open(id) => deck.tasks_open_detail(&id),
-        Act::ToggleGroup(g) => {
-            if !deck.tasks.collapsed.remove(&g) {
-                deck.tasks.collapsed.insert(g);
-            }
+        Act::ReturnFromCard(id) => {
+            deck.tasks_open_detail(&id);
+            deck.tasks.return_open = true;
+        }
+        Act::ToggleHistoryMenu => deck.tasks.history_menu = !deck.tasks.history_menu,
+        Act::CloseHistoryMenu => deck.tasks.history_menu = false,
+        Act::SetHistoryFilter(f) => {
+            deck.tasks.history_filter = f;
+            deck.tasks.history_menu = false;
         }
         Act::ToggleSection(s) => {
             if !deck.tasks.closed_sections.remove(&s) {
@@ -139,16 +150,16 @@ fn apply(deck: &mut Deck, act: Act) {
 // Peças comuns
 // ---------------------------------------------------------------------------
 
-/// Cor do ponto de estado: o agente trabalhando (pulsa), o âmbar de "precisa de você" na revisão.
+/// Cor monocromática do estado no detalhe: `accent` quando pede ação do humano, cor do agente em
+/// execução, `danger` em falha, e `text_2` / `text_3` nos demais.
 fn status_color(deck: &Deck, task: &Task) -> Color32 {
+    let p = theme::pal();
     match task.status {
-        TaskStatus::Draft => theme::pal().text_2,
+        TaskStatus::Draft | TaskStatus::Merged => p.text_2,
         TaskStatus::Running => deck.agents.tab_color(&task.kind),
-        TaskStatus::Review => theme::OLLAMA,
-        TaskStatus::Validating => theme::pal().info,
-        TaskStatus::Merged => theme::BADGE_JSON,
-        TaskStatus::Discarded => theme::with_opacity(theme::pal().text_2, 0.6),
-        TaskStatus::Failed => theme::pal().danger,
+        TaskStatus::Review | TaskStatus::Validating => theme::accent(),
+        TaskStatus::Discarded => p.text_3,
+        TaskStatus::Failed => p.danger,
     }
 }
 
@@ -163,32 +174,32 @@ fn status_dot(ui: &Ui, center: Pos2, color: Color32, pulse: bool) {
     super::dot(p, center, color);
 }
 
-/// Faixa do topo: fundo, borda inferior, "←" (opcional) e o título. `right`: espaço reservado à direita.
+/// Faixa do topo (detalhe e formulário): borda inferior, "←" (opcional) e o título.
 fn head_bar(ui: &Ui, rect: Rect, back: Option<&str>, title: &str, right: f32, acts: &mut Vec<Act>) -> Rect {
     let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), HEAD_H));
     let p = ui.painter_at(head);
-    p.rect_filled(head, 0.0, theme::pal().chip);
-    p.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
+    let pal = theme::pal();
+    line_sep(&p, Pos2::new(head.min.x, head.max.y - 0.5), Pos2::new(head.max.x, head.max.y - 0.5));
     let mut x = head.min.x + PAD;
     if let Some(tooltip) = back {
-        let b = Rect::from_min_size(Pos2::new(head.min.x + 6.0, head.min.y + 5.0), Vec2::new(26.0, 22.0));
+        let b = Rect::from_min_size(Pos2::new(head.min.x + 6.0, head.center().y - 11.0), Vec2::new(24.0, 22.0));
         let r = clickable(ui, b, Id::new("tasks-back"));
         if r.hovered() {
-            p.rect_filled(b, 5.0, theme::pal().separator);
+            p.rect_filled(b, 5.0, pal.hover);
         }
-        text_in(&p, b, Align2::CENTER_CENTER, "←", theme::ui(15.0), theme::pal().text);
+        text_in(&p, b, Align2::CENTER_CENTER, "←", theme::ui(14.0), if r.hovered() { pal.text } else { pal.text_2 });
         if tip(r, tooltip).clicked() {
             acts.push(Act::Back);
         }
         x = b.max.x + 6.0;
     }
-    let g = galley_trunc(&p, title, theme::ui_semibold(13.0), theme::pal().text, (head.max.x - right - x).max(20.0));
+    let g = galley_trunc(&p, title, theme::ui_semibold(12.5), pal.text_strong, (head.max.x - right - x).max(20.0));
     place(
         &p,
         Rect::from_min_max(Pos2::new(x, head.min.y), Pos2::new(head.max.x - right, head.max.y - 1.0)),
         Align2::LEFT_CENTER,
         g,
-        theme::pal().text,
+        pal.text_strong,
     );
     head
 }
@@ -200,26 +211,43 @@ enum BtnKind {
     Danger,
 }
 
-fn btn_width(painter: &egui::Painter, label: &str) -> f32 {
-    galley(painter, label, theme::ui_semibold(12.0), theme::pal().text).size().x + 26.0
+fn btn_width(painter: &egui::Painter, label: &str, kind: BtnKind) -> f32 {
+    let font = if matches!(kind, BtnKind::Primary | BtnKind::Danger) { theme::ui_semibold(11.5) } else { theme::ui(11.5) };
+    galley(painter, label, font, theme::pal().text).size().x + 22.0
 }
 
-/// Botão com texto. Desligado, fica apagado e não reage. Devolve se foi clicado.
+/// Botão com texto (cantos 5). Desligado, fica apagado e não reage. Devolve se foi clicado.
 fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: BtnKind, enabled: bool, tooltip: &str) -> bool {
     let r = if enabled { clickable(ui, rect, id) } else { ui.interact(rect, id, Sense::hover()) };
     let hot = enabled && r.hovered();
-    let (bg, fg) = if !enabled {
-        (theme::pal().hover, theme::pal().text_3)
+    let p = theme::pal();
+    let painter = ui.painter();
+    if !enabled {
+        frame(painter, rect, 5.0, theme::with_alpha(p.text_strong, 0.02), p.separator);
+        let g = galley_trunc(painter, label, theme::ui(11.5), p.text_3, rect.width() - 12.0);
+        place(painter, rect, Align2::CENTER_CENTER, g, p.text_3);
     } else {
         match kind {
-            BtnKind::Primary => (if hot { theme::brighten(theme::accent(), 1.15) } else { theme::accent() }, theme::pal().on_accent),
-            BtnKind::Secondary => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().text),
-            BtnKind::Danger => (if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().danger_text),
+            BtnKind::Primary => {
+                let fill = if hot { theme::brighten(theme::accent(), 1.1) } else { theme::accent() };
+                painter.rect_filled(rect, 5.0, fill);
+                let g = galley_trunc(painter, label, theme::ui_semibold(11.5), p.on_accent, rect.width() - 12.0);
+                place(painter, rect, Align2::CENTER_CENTER, g, p.on_accent);
+            }
+            BtnKind::Secondary => {
+                let fill = theme::with_alpha(p.text_strong, if hot { 0.08 } else { 0.04 });
+                frame(painter, rect, 5.0, fill, theme::with_alpha(p.text_strong, 0.14));
+                let g = galley_trunc(painter, label, theme::ui(11.5), p.text, rect.width() - 12.0);
+                place(painter, rect, Align2::CENTER_CENTER, g, p.text);
+            }
+            BtnKind::Danger => {
+                let fill = theme::with_alpha(p.danger, if hot { 0.18 } else { 0.10 });
+                frame(painter, rect, 5.0, fill, theme::with_alpha(p.danger, 0.35));
+                let g = galley_trunc(painter, label, theme::ui_semibold(11.5), p.danger_text, rect.width() - 12.0);
+                place(painter, rect, Align2::CENTER_CENTER, g, p.danger_text);
+            }
         }
-    };
-    ui.painter().rect_filled(rect, 7.0, bg);
-    let g = galley_trunc(ui.painter(), label, theme::ui_semibold(12.0), fg, rect.width() - 14.0);
-    place(ui.painter(), rect, Align2::CENTER_CENTER, g, fg);
+    }
     let r = if tooltip.is_empty() { r } else { tip(r, tooltip) };
     enabled && r.clicked()
 }
@@ -228,7 +256,7 @@ fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: BtnKind, enabled: bool
 fn button_flow(ui: &mut Ui, buttons: &[(String, BtnKind, bool, &str)], id_salt: &str) -> Option<usize> {
     let avail = ui.available_width();
     let max_w = (avail - 2.0 * PAD).max(60.0);
-    let widths: Vec<f32> = buttons.iter().map(|(l, ..)| btn_width(ui.painter(), l).min(max_w)).collect();
+    let widths: Vec<f32> = buttons.iter().map(|(l, k, ..)| btn_width(ui.painter(), l, *k).min(max_w)).collect();
     let mut clicked = None;
     let mut i = 0;
     while i < buttons.len() {
@@ -303,13 +331,14 @@ fn error_box(ui: &mut Ui, text: &str, dismiss: bool) -> bool {
     closed
 }
 
-/// Campo de texto numa moldura de 1 px (a borda clareia com o foco); a moldura cresce com o texto.
+/// Campo de texto numa moldura de 1 px (fundo `recess`, borda `separator` e `accent` no foco); a moldura cresce com o texto.
 fn text_field(ui: &mut Ui, id: Id, text: &mut String, hint: &str, rows: Option<usize>) -> egui::Response {
     let focused = ui.ctx().memory(|m| m.has_focus(id));
+    let p = theme::pal();
     egui::Frame::new()
-        .fill(theme::pal().chip)
-        .stroke(Stroke::new(1.0, if focused { theme::pal().text_2 } else { theme::pal().separator }))
-        .corner_radius(8)
+        .fill(p.recess)
+        .stroke(Stroke::new(1.0, if focused { theme::accent() } else { p.separator }))
+        .corner_radius(6)
         .inner_margin(Margin { left: 9, right: 9, top: 6, bottom: 6 })
         .show(ui, |ui| {
             let te = match rows {
@@ -318,9 +347,9 @@ fn text_field(ui: &mut Ui, id: Id, text: &mut String, hint: &str, rows: Option<u
             };
             te.id(id)
                 .frame(egui::Frame::NONE)
-                .font(theme::ui(12.5))
-                .text_color(theme::pal().text)
-                .hint_text(egui::RichText::new(hint).font(theme::ui(12.5)).color(theme::pal().text_3))
+                .font(theme::ui(12.0))
+                .text_color(p.text)
+                .hint_text(egui::RichText::new(hint).font(theme::ui(12.0)).color(p.text_3))
                 .desired_width(ui.available_width())
                 .show(ui);
         })
@@ -339,7 +368,7 @@ fn padded<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
     out
 }
 
-/// Cabeçalho de seção recolhível: seta, título em maiúsculas e um detalhe à direita.
+/// Cabeçalho de seção recolhível: seta, título em IBM Plex Mono Medium 10 px MAIÚSCULAS e um detalhe à direita.
 fn section_header(
     deck: &mut Deck,
     ui: &mut Ui,
@@ -353,25 +382,20 @@ fn section_header(
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
+    let p = theme::pal();
     deck.icons.paint(
         ui.painter(),
         Icon::TreeChevron,
         Pos2::new(r.min.x + PAD, r.center().y),
         10.0,
-        theme::pal().text_3,
+        p.text_3,
         if open { std::f32::consts::FRAC_PI_2 } else { 0.0 },
     );
-    let t = text_in(
-        ui.painter(),
-        Rect::from_min_max(Pos2::new(r.min.x + 22.0, r.min.y), r.max),
-        Align2::LEFT_CENTER,
-        &title.to_uppercase(),
-        theme::ui_bold(11.0),
-        theme::pal().text_2,
-    );
+    let g = galley_spaced(ui.painter(), &title.to_uppercase(), theme::label(10.0), p.text_3, 10.0 * theme::LABEL_SPACING_EM);
+    let t = place(ui.painter(), Rect::from_min_max(Pos2::new(r.min.x + 22.0, r.min.y), r.max), Align2::LEFT_CENTER, g, p.text_3);
     if let Some((text, color)) = right {
         let left = t.max.x + 10.0;
-        let g = galley_trunc(ui.painter(), &text, theme::ui(11.5), color, (r.max.x - PAD - left).max(10.0));
+        let g = galley_trunc(ui.painter(), &text, theme::meta(10.5), color, (r.max.x - PAD - left).max(10.0));
         place(
             ui.painter(),
             Rect::from_min_max(Pos2::new(left, r.min.y), Pos2::new(r.max.x - PAD, r.max.y)),
@@ -387,64 +411,101 @@ fn section_header(
 }
 
 // ---------------------------------------------------------------------------
-// Lista
+// Lista ("Tarefas" em andamento + "HISTÓRICO" + rodapé "+ Nova tarefa")
 // ---------------------------------------------------------------------------
 
 fn list_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, now: u64, acts: &mut Vec<Act>) {
-    // Cabeçalho: título, atualizar e "+ Nova".
-    let nova_w = btn_width(ui.painter(), "+ Nova") - 4.0;
-    let head = head_bar(ui, rect, None, "Tarefas", nova_w + 8.0 + 28.0 + 8.0, acts);
-    let nova = Rect::from_min_size(Pos2::new(head.max.x - 8.0 - nova_w, head.min.y + 5.0), Vec2::new(nova_w, HEAD_H - 11.0));
-    if button(ui, nova, Id::new("tasks-new"), "+ Nova", BtnKind::Primary, true, "Criar uma tarefa para um agente") {
-        acts.push(Act::New);
-    }
-    let refresh = Rect::from_min_size(Pos2::new(nova.min.x - 4.0 - 24.0, head.min.y + 5.0), Vec2::splat(24.0));
-    let rr = clickable(ui, refresh, Id::new("tasks-refresh"));
-    if rr.hovered() {
-        ui.painter().rect_filled(refresh, 6.0, theme::pal().separator);
-    }
-    deck.icons.paint(
-        ui.painter(),
-        Icon::Refresh,
-        refresh.center(),
-        15.0,
-        if rr.hovered() { theme::pal().text } else { theme::pal().text_2 },
-        0.0,
-    );
-    if tip(rr, "Reler as tarefas").clicked() {
-        acts.push(Act::Refresh);
-    }
+    // Rodapé fixo embaixo: separator + botão primário "+ Nova tarefa" de largura total e 28 px de altura.
+    let footer = Rect::from_min_max(Pos2::new(rect.min.x, (rect.max.y - FOOTER_H).max(rect.min.y)), rect.max);
+    let body = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, footer.min.y));
 
-    let body = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
     if deck.tasks.tasks.is_empty() {
-        empty_state(ui, body, deck.tasks.loaded, acts);
+        empty_state(ui, body, deck.tasks.loaded);
+        draw_footer(ui, footer, acts);
         return;
     }
+
     let tasks = deck.tasks.tasks.clone();
-    let groups = group_tasks(&tasks);
-    let mut child = ui.new_child(UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
-    child.set_clip_rect(body);
-    egui::ScrollArea::vertical().id_salt("tasks-list").auto_shrink([false, false]).show(&mut child, |ui| {
+    let active = active_tasks(&tasks);
+    let has_any_history = tasks.iter().any(|t| matches!(t.status, TaskStatus::Merged | TaskStatus::Discarded));
+    let filter = deck.tasks.history_filter;
+    let history = history_tasks(&tasks, filter);
+
+    let (active_rect, hist_rect) = if has_any_history {
+        let rows = history.len().max(1) as f32;
+        let wanted_h = (33.0 + rows * 24.0 + 8.0).min(156.0).min((body.height() * 0.45).max(80.0));
+        let split_y = (body.max.y - wanted_h).max(body.min.y + 80.0);
+        (Rect::from_min_max(body.min, Pos2::new(body.max.x, split_y)), Some(Rect::from_min_max(Pos2::new(body.min.x, split_y), body.max)))
+    } else {
+        (body, None)
+    };
+
+    // 1. Tarefas em andamento (no topo).
+    let mut active_child = ui.new_child(UiBuilder::new().max_rect(active_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    active_child.set_clip_rect(active_rect);
+    egui::ScrollArea::vertical().id_salt("tasks-list").auto_shrink([false, false]).show(&mut active_child, |ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        ui.add_space(4.0);
-        for (group, list) in &groups {
-            let collapsed = deck.tasks.collapsed.contains(group);
-            group_header(deck, ui, *group, list.len(), collapsed, acts);
-            if collapsed {
-                continue;
-            }
-            for task in list {
-                card(deck, ui, task, now, acts);
+        ui.add_space(LIST_PAD);
+        if active.is_empty() {
+            muted_line(ui, "Nenhuma tarefa em andamento.");
+        } else {
+            for (i, task) in active.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(6.0);
+                }
+                task_card(deck, ui, task, now, acts);
             }
         }
-        ui.add_space(10.0);
+        ui.add_space(LIST_PAD);
     });
+
+    // 2. Seção HISTÓRICO (abaixo das em andamento, com rolagem própria).
+    let mut filter_anchor = None;
+    if let Some(hrect) = hist_rect {
+        filter_anchor = Some(draw_history_section(deck, ui, hrect, &history, filter, acts));
+    }
+
+    // 3. Rodapé "+ Nova tarefa".
+    draw_footer(ui, footer, acts);
+
+    // Menu suspenso do filtro do histórico.
+    if deck.tasks.history_menu {
+        if let Some(anchor) = filter_anchor {
+            let items: Vec<MenuItem> = HistoryFilter::ALL
+                .iter()
+                .map(|&f| MenuItem {
+                    label: f.label().to_owned(),
+                    dot: None,
+                    selected: f == filter,
+                    enabled: true,
+                    detail: None,
+                    submenu: false,
+                })
+                .collect();
+            let menu_w = 186.0_f32.max(anchor.width());
+            let menu_anchor = Rect::from_min_size(Pos2::new(anchor.max.x - menu_w, anchor.min.y), Vec2::new(menu_w, anchor.height()));
+            if let Some(i) = dropdown_menu(ui.ctx(), "tasks-history-filter-menu", menu_anchor, &items, acts, true) {
+                acts.push(Act::SetHistoryFilter(HistoryFilter::ALL[i]));
+            }
+        }
+    }
 }
 
-fn empty_state(ui: &mut Ui, body: Rect, loaded: bool, acts: &mut Vec<Act>) {
+fn draw_footer(ui: &Ui, footer: Rect, acts: &mut Vec<Act>) {
+    let painter = ui.painter_at(footer);
+    line_sep(&painter, Pos2::new(footer.min.x, footer.min.y + 0.5), Pos2::new(footer.max.x, footer.min.y + 0.5));
+    let btn_rect =
+        Rect::from_min_size(Pos2::new(footer.min.x + LIST_PAD, footer.min.y + 8.5), Vec2::new(footer.width() - 2.0 * LIST_PAD, BTN_H));
+    if tip(ui_button(ui, btn_rect, Id::new("tasks-new"), "+ Nova tarefa", ButtonKind::Primary), "Criar uma tarefa para um agente").clicked()
+    {
+        acts.push(Act::New);
+    }
+}
+
+fn empty_state(ui: &mut Ui, body: Rect, loaded: bool) {
     let painter = ui.painter_at(body);
     let w = (body.width() - 2.0 * PAD - 8.0).max(80.0);
-    let mut y = body.min.y + 28.0;
+    let mut y = body.min.y + 24.0;
     let x = body.min.x + PAD + 4.0;
     if !loaded {
         text_in(
@@ -452,124 +513,293 @@ fn empty_state(ui: &mut Ui, body: Rect, loaded: bool, acts: &mut Vec<Act>) {
             Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 20.0)),
             Align2::LEFT_CENTER,
             "Lendo as tarefas…",
-            theme::ui(12.5),
+            theme::ui(12.0),
             theme::pal().text_2,
         );
         return;
     }
-    let title = painter.layout("Nenhuma tarefa ainda".to_owned(), theme::ui_semibold(14.0), theme::pal().text, w);
-    painter.galley(Pos2::new(x, y), title.clone(), theme::pal().text);
-    y += title.size().y + 8.0;
+    let title = painter.layout("Nenhuma tarefa ainda".to_owned(), theme::ui_semibold(13.0), theme::pal().text_strong, w);
+    painter.galley(Pos2::new(x, y), title.clone(), theme::pal().text_strong);
+    y += title.size().y + 6.0;
     let text = "Uma tarefa é um pedido que um agente faz numa cópia isolada do projeto (uma branch com a própria pasta). \
 Quando ele termina, você revisa o relatório e o diff, mescla, testa e valida. Se algo falhar, devolve ou reprova com o motivo.";
-    let g = painter.layout(text.to_owned(), theme::ui(12.5), theme::pal().text_2, w);
-    painter.galley(Pos2::new(x, y), g.clone(), theme::pal().text_2);
-    y += g.size().y + 14.0;
-    let label = "+ Nova tarefa";
-    let bw = btn_width(&painter, label);
-    let b = Rect::from_min_size(Pos2::new(x, y), Vec2::new(bw, BTN_H));
-    if button(ui, b, Id::new("tasks-empty-new"), label, BtnKind::Primary, true, "Criar uma tarefa para um agente") {
-        acts.push(Act::New);
-    }
+    let g = painter.layout(text.to_owned(), theme::ui(12.0), theme::pal().text_2, w);
+    painter.galley(Pos2::new(x, y), g, theme::pal().text_2);
 }
 
-fn group_header(deck: &mut Deck, ui: &mut Ui, group: Group, count: usize, collapsed: bool, acts: &mut Vec<Act>) {
-    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H + 2.0), Sense::click());
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    deck.icons.paint(
-        ui.painter(),
-        Icon::TreeChevron,
-        Pos2::new(r.min.x + PAD, r.center().y),
-        10.0,
-        theme::pal().text_3,
-        if collapsed { 0.0 } else { std::f32::consts::FRAC_PI_2 },
-    );
-    text_in(
-        ui.painter(),
-        Rect::from_min_max(Pos2::new(r.min.x + 22.0, r.min.y), r.max),
-        Align2::LEFT_CENTER,
-        &format!("{}  {count}", group.title().to_uppercase()),
-        theme::ui_bold(11.0),
-        theme::pal().text_2,
-    );
-    if tip(resp, if collapsed { "Mostrar" } else { "Recolher" }).clicked() {
-        acts.push(Act::ToggleGroup(group));
-    }
-}
+/// Cartão de uma tarefa em andamento:
+/// - Linha 1: `id` (10,5 px mono, `text_3`), `state` (10,5 px 600, `text_2` ou `accent` no em foco), espaço, `when` (`age_text`, 10,5 px, `text_3`).
+/// - Linha 2: `title` (12,5 px 600, `text`, até 2 linhas).
+/// - Linha 3: ponto de 6 px na cor do agente + `agente · modelo` (11 px, `text_2`), espaço e barra de 5 segmentos (3 px × 70 px).
+/// - Linha 4 (só `Review` / `Validating`): ações de 24 px (`Primary`, `Secondary`, `Ghost`).
+fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec<Act>) {
+    let p = theme::pal();
+    let avail_w = ui.available_width();
+    let card_w = (avail_w - 2.0 * LIST_PAD).max(120.0);
+    let inner_w = (card_w - 20.0).max(80.0);
+    let focused = is_focused_card(task.status);
+    let has_actions = matches!(task.status, TaskStatus::Review | TaskStatus::Validating);
 
-/// Cartão de uma tarefa: ponto de estado, `tN` e título; agente, modelo e tempo; e, na revisão, o resumo do diff.
-fn card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec<Act>) {
-    let summary = (task.status == TaskStatus::Review).then(|| task.diff_stat.as_deref().and_then(parse_diff_stat)).flatten();
-    let h = 10.0 + 17.0 + 16.0 + if summary.is_some() { 16.0 } else { 0.0 } + 6.0;
-    let (outer, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click());
-    let r = outer.shrink2(Vec2::new(6.0, 1.0));
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        ui.painter().rect_filled(r, 6.0, theme::pal().hover);
-    }
+    // Prepara o título (até 2 linhas, 12,5 px 600).
+    let mut title_job = egui::text::LayoutJob {
+        wrap: egui::text::TextWrapping { max_width: inner_w, max_rows: 2, break_anywhere: false, overflow_character: Some('…') },
+        ..Default::default()
+    };
+    title_job.append(
+        &task.title,
+        0.0,
+        egui::TextFormat { font_id: theme::ui_semibold(12.5), color: p.text, line_height: Some(16.25), ..Default::default() },
+    );
+    let title_g = ui.painter().layout_job(title_job);
+    let title_h = title_g.size().y.max(16.0);
+
+    let l1_h = 15.0;
+    let l3_h = 15.0;
+    let actions_h = if has_actions { 6.0 + 24.0 } else { 0.0 };
+    let card_h = 8.0 + l1_h + 6.0 + title_h + 6.0 + l3_h + actions_h + 8.0;
+
+    let (outer, _) = ui.allocate_exact_size(Vec2::new(avail_w, card_h), Sense::hover());
+    let rect = Rect::from_min_size(Pos2::new(outer.min.x + LIST_PAD, outer.min.y), Vec2::new(card_w, card_h));
+    let card_resp = clickable(ui, rect, Id::new(("task-card", &task.id)));
+    let hot = card_resp.hovered();
+
+    let (fill, border) = if focused {
+        (theme::accent_wash(theme::accent()), theme::accent_edge(theme::accent()))
+    } else if hot {
+        (theme::with_alpha(p.text_strong, 0.05), theme::with_alpha(p.text_strong, 0.10))
+    } else {
+        (theme::with_alpha(p.text_strong, 0.03), theme::with_alpha(p.text_strong, 0.06))
+    };
+    frame(ui.painter(), rect, 8.0, fill, border);
+
     let painter = ui.painter().clone();
-    let x0 = r.min.x + 28.0;
-    let right = r.max.x - 8.0;
-    // Ponto de estado e primeira linha: `tN` apagado e o título.
-    let l1 = r.min.y + 9.0 + 8.5;
-    status_dot(ui, Pos2::new(r.min.x + 14.0, l1), status_color(deck, task), task.status == TaskStatus::Running);
-    let id_g = galley(&painter, &task.id, theme::mono(11.0), theme::pal().text_2);
+    let x0 = rect.min.x + 10.0;
+    let right = rect.max.x - 10.0;
+
+    // Linha 1: id + estado + tempo.
+    let y1 = rect.min.y + 8.0;
+    let r1 = Rect::from_min_size(Pos2::new(x0, y1), Vec2::new(inner_w, l1_h));
+    let id_g = galley(&painter, &task.id, theme::meta(10.5), p.text_3);
     let id_w = id_g.size().x;
-    place(&painter, Rect::from_min_size(Pos2::new(x0, l1 - 7.5), Vec2::new(id_w, 17.0)), Align2::LEFT_CENTER, id_g, theme::pal().text_2);
-    let title_g = galley_trunc(&painter, &task.title, theme::ui(12.5), theme::pal().text, (right - x0 - id_w - 6.0).max(20.0));
+    place(&painter, Rect::from_min_size(r1.min, Vec2::new(id_w, l1_h)), Align2::LEFT_CENTER, id_g, p.text_3);
+
+    let state_color = if focused {
+        theme::accent()
+    } else if task.status == TaskStatus::Failed {
+        p.danger_text
+    } else {
+        p.text_2
+    };
+    let state_g = galley(&painter, card_state_label(task.status), theme::ui_semibold(10.5), state_color);
     place(
         &painter,
-        Rect::from_min_max(Pos2::new(x0 + id_w + 6.0, l1 - 8.5), Pos2::new(right, l1 + 8.5)),
+        Rect::from_min_size(Pos2::new(x0 + id_w + 6.0, y1), Vec2::new(state_g.size().x, l1_h)),
+        Align2::LEFT_CENTER,
+        state_g,
+        state_color,
+    );
+
+    let when = task_age(task, now);
+    let when_g = galley(&painter, &when, theme::ui(10.5), p.text_3);
+    place(&painter, r1, Align2::RIGHT_CENTER, when_g, p.text_3);
+
+    // Linha 2: título (até 2 linhas).
+    let y2 = y1 + l1_h + 6.0;
+    painter.galley(Pos2::new(x0, y2), title_g, p.text);
+
+    // Linha 3: ponto de 6 px na cor do agente + agente · modelo + barra de 5 etapas (70 px × 3 px).
+    let y3 = y2 + title_h + 6.0;
+    let r3 = Rect::from_min_size(Pos2::new(x0, y3), Vec2::new(inner_w, l3_h));
+    let agent_color = deck.agents.tab_color(&task.kind);
+    painter.circle_filled(Pos2::new(x0 + 3.0, r3.center().y), 3.0, agent_color);
+
+    let mut who = deck.agents.name(&task.kind);
+    if let Some(m) = tasks_ui::model_text(task) {
+        who.push_str(" · ");
+        who.push_str(m);
+    }
+    let steps_w = 70.0;
+    let who_max_w = (right - steps_w - 8.0 - (x0 + 11.0)).max(20.0);
+    let who_g = galley_trunc(&painter, &who, theme::ui(11.0), p.text_2, who_max_w);
+    place(&painter, Rect::from_min_size(Pos2::new(x0 + 11.0, y3), Vec2::new(who_max_w, l3_h)), Align2::LEFT_CENTER, who_g, p.text_2);
+
+    // Barra de 5 segmentos de 3 px de altura em 70 px de largura (gap de 2 px).
+    let step = task_step(task.status);
+    let seg_gap = 2.0;
+    let seg_w = (steps_w - 4.0 * seg_gap) / 5.0;
+    let seg_y = r3.center().y - 1.5;
+    let seg_x0 = right - steps_w;
+    let active_seg_color = if focused {
+        theme::accent()
+    } else if task.status == TaskStatus::Failed {
+        p.danger
+    } else {
+        p.text_soft
+    };
+    for s in 0..5 {
+        let sx = seg_x0 + s as f32 * (seg_w + seg_gap);
+        let seg_rect = Rect::from_min_size(Pos2::new(sx, seg_y), Vec2::new(seg_w, 3.0));
+        let seg_color = if s < step { active_seg_color } else { p.separator };
+        painter.rect_filled(seg_rect, 1.5, seg_color);
+    }
+
+    // Linha 4: botões de 24 px para tarefas em revisão ou validação.
+    let mut action_clicked = false;
+    if has_actions {
+        let y4 = y3 + l3_h + 6.0;
+        let (prim_label, prim_act, prim_tip, sec_label, sec_tip) = if task.status == TaskStatus::Validating {
+            ("Validar", TaskAct::Validate, TaskAct::Validate.tip(), "Reprovar", TaskAct::Reject.tip())
+        } else {
+            ("Mesclar", TaskAct::Merge, TaskAct::Merge.tip(), "Devolver", TaskAct::Return.tip())
+        };
+        let mut bx = x0;
+        let pw = button_width(&painter, prim_label, ButtonKind::Primary);
+        let pr = Rect::from_min_size(Pos2::new(bx, y4), Vec2::new(pw, 24.0));
+        if tip(ui_button(ui, pr, Id::new(("card-prim", &task.id)), prim_label, ButtonKind::Primary), prim_tip).clicked() {
+            acts.push(Act::Task(task.id.clone(), prim_act));
+            action_clicked = true;
+        }
+        bx = pr.max.x + 6.0;
+
+        let sw = button_width(&painter, sec_label, ButtonKind::Secondary);
+        let sr = Rect::from_min_size(Pos2::new(bx, y4), Vec2::new(sw, 24.0));
+        if tip(ui_button(ui, sr, Id::new(("card-sec", &task.id)), sec_label, ButtonKind::Secondary), sec_tip).clicked() {
+            acts.push(Act::ReturnFromCard(task.id.clone()));
+            action_clicked = true;
+        }
+        bx = sr.max.x + 6.0;
+
+        if can_show_diff(task) {
+            let gw = button_width(&painter, "Ver diff", ButtonKind::Ghost);
+            if bx + gw <= right + 2.0 {
+                let gr = Rect::from_min_size(Pos2::new(bx, y4), Vec2::new(gw, 24.0));
+                if tip(ui_button(ui, gr, Id::new(("card-diff", &task.id)), "Ver diff", ButtonKind::Ghost), tasks_ui::diff_button_tip(task))
+                    .clicked()
+                {
+                    acts.push(Act::OpenDiff(task.id.clone()));
+                    action_clicked = true;
+                }
+            }
+        }
+    }
+
+    let tooltip = format!("{} · {}\n{} → {}", task.id, task.title, task.branch, task.base);
+    if !action_clicked && tip(card_resp, tooltip).clicked() {
+        acts.push(Act::Open(task.id.clone()));
+    }
+}
+
+/// Seção HISTÓRICO abaixo das tarefas em andamento. Devolve o retângulo do botão de filtro.
+fn draw_history_section(deck: &mut Deck, ui: &mut Ui, rect: Rect, history: &[&Task], filter: HistoryFilter, acts: &mut Vec<Act>) -> Rect {
+    let p = theme::pal();
+    let painter = ui.painter_at(rect);
+    line_sep(&painter, Pos2::new(rect.min.x, rect.min.y + 0.5), Pos2::new(rect.max.x, rect.min.y + 0.5));
+
+    // Cabeçalho: section_label("HISTÓRICO") à esquerda e filtro "Concluídas e descartadas ▾" à direita.
+    let head = Rect::from_min_size(Pos2::new(rect.min.x, rect.min.y + 6.0), Vec2::new(rect.width(), super::SECTION_LABEL_H));
+    section_label(&painter, head, "HISTÓRICO");
+
+    let filter_text = format!("{} ▾", filter.label());
+    let fg_measure = galley(&painter, &filter_text, theme::ui(11.0), p.text_2);
+    let fw = fg_measure.size().x + 12.0;
+    let filter_rect = Rect::from_min_size(Pos2::new(head.max.x - LIST_PAD - fw, head.center().y - 10.0), Vec2::new(fw, 20.0));
+    let f_resp = clickable(ui, filter_rect, Id::new("tasks-history-filter"));
+    let f_hot = f_resp.hovered() || deck.tasks.history_menu;
+    if f_hot {
+        painter.rect_filled(filter_rect, 4.0, p.hover);
+    }
+    text_in(&painter, filter_rect, Align2::CENTER_CENTER, &filter_text, theme::ui(11.0), if f_hot { p.text } else { p.text_2 });
+    if tip(f_resp, "Filtrar o histórico de tarefas encerradas").clicked() {
+        acts.push(Act::ToggleHistoryMenu);
+    }
+
+    // Lista rolável de linhas de 24 px.
+    let list_rect = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y + 2.0), Pos2::new(rect.max.x, rect.max.y - 4.0));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(list_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.set_clip_rect(list_rect);
+    egui::ScrollArea::vertical().id_salt("tasks-history").auto_shrink([false, false]).show(&mut child, |ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        if history.is_empty() {
+            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::hover());
+            text_in(
+                ui.painter(),
+                Rect::from_min_max(Pos2::new(r.min.x + 10.0, r.min.y), r.max),
+                Align2::LEFT_CENTER,
+                "Nenhuma tarefa neste filtro.",
+                theme::ui(11.5),
+                p.text_3,
+            );
+        } else {
+            for task in history {
+                history_row(deck, ui, task, acts);
+            }
+        }
+    });
+
+    filter_rect
+}
+
+/// Uma linha de 24 px no HISTÓRICO: ponto de 6 px na cor do agente, `id` (10,5 px mono, `text_3`),
+/// `title` truncado (11,5 px, `text`; se `Discarded`, riscado em `text_3`), `state` (10,5 px, `text_2`)
+/// e data `dd/mm` (10 px mono, `text_3`, alinhada à direita).
+fn history_row(deck: &mut Deck, ui: &mut Ui, task: &Task, acts: &mut Vec<Act>) {
+    let p = theme::pal();
+    let avail_w = ui.available_width();
+    let (outer, _) = ui.allocate_exact_size(Vec2::new(avail_w, 24.0), Sense::hover());
+    let row = outer.shrink2(Vec2::new(LIST_PAD, 0.0));
+    let resp = clickable(ui, row, Id::new(("task-hist", &task.id)));
+    if resp.hovered() {
+        ui.painter().rect_filled(row, 5.0, p.hover);
+    }
+    let painter = ui.painter().clone();
+    let cy = row.center().y;
+
+    // 1. Ponto de 6 px na cor do agente.
+    painter.circle_filled(Pos2::new(row.min.x + 6.0 + 3.0, cy), 3.0, deck.agents.tab_color(&task.kind));
+
+    // 2. id (10,5 px mono, text_3, 24 px de largura).
+    let id_rect = Rect::from_min_size(Pos2::new(row.min.x + 18.0, row.min.y), Vec2::new(24.0, 24.0));
+    text_in(&painter, id_rect, Align2::LEFT_CENTER, &task.id, theme::meta(10.5), p.text_3);
+
+    // 3. Data dd/mm à direita (34 px) e estado antes dela.
+    let date_rect = Rect::from_min_size(Pos2::new(row.max.x - 6.0 - 34.0, row.min.y), Vec2::new(34.0, 24.0));
+    text_in(&painter, date_rect, Align2::RIGHT_CENTER, &task_date_ddmm(task), theme::meta(10.0), p.text_3);
+
+    let state_txt = card_state_label(task.status);
+    let state_g = galley(&painter, state_txt, theme::ui(10.5), p.text_2);
+    let state_w = state_g.size().x;
+    let state_rect = Rect::from_min_size(Pos2::new(date_rect.min.x - 6.0 - state_w, row.min.y), Vec2::new(state_w, 24.0));
+    place(&painter, state_rect, Align2::RIGHT_CENTER, state_g, p.text_2);
+
+    // 4. Título truncado (riscado em text_3 quando Discarded).
+    let title_x0 = id_rect.max.x + 6.0;
+    let title_w = (state_rect.min.x - 6.0 - title_x0).max(20.0);
+    let discarded = task.status == TaskStatus::Discarded;
+    let title_color = if discarded { p.text_3 } else { p.text };
+    let mut job = egui::text::LayoutJob {
+        wrap: egui::text::TextWrapping { max_width: title_w, max_rows: 1, break_anywhere: true, overflow_character: Some('…') },
+        ..Default::default()
+    };
+    job.append(
+        &task.title,
+        0.0,
+        egui::TextFormat {
+            font_id: theme::ui(11.5),
+            color: title_color,
+            strikethrough: if discarded { Stroke::new(1.0, p.text_3) } else { Stroke::NONE },
+            ..Default::default()
+        },
+    );
+    let title_g = painter.layout_job(job);
+    place(
+        &painter,
+        Rect::from_min_size(Pos2::new(title_x0, row.min.y), Vec2::new(title_w, 24.0)),
         Align2::LEFT_CENTER,
         title_g,
-        theme::pal().text,
+        title_color,
     );
-    // Segunda linha: logo + agente · modelo · tempo.
-    let l2 = l1 + 8.5 + 4.0 + 8.0;
-    let mut tx = x0;
-    if let Some(icon) = super::projects::agent_icon(&task.kind) {
-        deck.icons.paint(&painter, icon, Pos2::new(x0 + 5.5, l2), 11.0, deck.agents.tab_color(&task.kind), 0.0);
-        tx += 17.0;
-    } else {
-        super::dot(&painter, Pos2::new(x0 + 5.5, l2), deck.agents.tab_color(&task.kind));
-        tx += 17.0;
-    }
-    let mut meta = deck.agents.name(&task.kind);
-    if let Some(m) = tasks_ui::model_text(task) {
-        meta.push_str(" · ");
-        meta.push_str(m);
-    }
-    meta.push_str(" · ");
-    meta.push_str(&status_age(task, now));
-    let g = galley_trunc(&painter, &meta, theme::ui(11.5), theme::pal().text_2, (right - tx).max(20.0));
-    place(&painter, Rect::from_min_max(Pos2::new(tx, l2 - 8.0), Pos2::new(right, l2 + 8.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
-    // Revisão: o resumo do diff (arquivos, linhas novas e removidas).
-    if let Some(sum) = summary {
-        let l3 = l2 + 16.0;
-        let mut job = egui::text::LayoutJob::default();
-        let fmt = |color| egui::TextFormat { font_id: theme::ui(11.5), color, ..Default::default() };
-        job.append(&sum.files_text(), 0.0, fmt(theme::pal().text_2));
-        if sum.insertions > 0 {
-            job.append(&format!("  +{}", sum.insertions), 0.0, fmt(theme::BADGE_JSON));
-        }
-        if sum.deletions > 0 {
-            job.append(&format!("  −{}", sum.deletions), 0.0, fmt(theme::pal().danger_text));
-        }
-        job.wrap.max_width = (right - x0).max(20.0);
-        job.wrap.max_rows = 1;
-        job.wrap.overflow_character = Some('…');
-        let g = painter.layout_job(job);
-        place(
-            &painter,
-            Rect::from_min_max(Pos2::new(x0, l3 - 8.0), Pos2::new(right, l3 + 8.0)),
-            Align2::LEFT_CENTER,
-            g,
-            theme::pal().text_2,
-        );
-    }
-    let tooltip = format!("{} · {}\n{} → {}", task.id, task.title, task.branch, task.base);
+
+    let tooltip = format!("{} · {}\n{}", task.id, task.title, status_name(task.status));
     if tip(resp, tooltip).clicked() {
         acts.push(Act::Open(task.id.clone()));
     }
@@ -599,47 +829,48 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
     child.set_clip_rect(body);
     let id_salt = format!("tasks-detail-{}", task.id);
     egui::ScrollArea::vertical().id_salt(id_salt).auto_shrink([false, false]).show(&mut child, |ui| {
+        let p = theme::pal();
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         ui.add_space(10.0);
         // Título.
         let w = ui.available_width() - 2.0 * PAD;
-        let g = ui.painter().layout(task.title.clone(), theme::ui_semibold(14.5), theme::pal().text, w);
+        let g = ui.painter().layout(task.title.clone(), theme::ui_semibold(14.0), p.text_strong, w);
         let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), g.size().y + 8.0), Sense::hover());
-        ui.painter().galley(Pos2::new(r.min.x + PAD, r.min.y), g, theme::pal().text);
+        ui.painter().galley(Pos2::new(r.min.x + PAD, r.min.y), g, p.text_strong);
 
         // Chip do estado e o tempo.
         let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
         let name = status_name(task.status);
-        let cw = galley(ui.painter(), name, theme::ui_semibold(11.5), color).size().x + 26.0;
+        let cw = galley(ui.painter(), name, theme::ui_semibold(11.0), color).size().x + 24.0;
         let chip = Rect::from_min_size(Pos2::new(r.min.x + PAD, r.min.y), Vec2::new(cw, 20.0));
-        ui.painter().rect_filled(chip, 10.0, theme::with_opacity(color, 0.16));
-        status_dot(ui, Pos2::new(chip.min.x + 11.0, chip.center().y), color, task.status == TaskStatus::Running);
+        ui.painter().rect_filled(chip, 5.0, p.chip);
+        status_dot(ui, Pos2::new(chip.min.x + 10.0, chip.center().y), color, task.status == TaskStatus::Running);
         text_in(
             ui.painter(),
-            Rect::from_min_max(Pos2::new(chip.min.x + 20.0, chip.min.y), chip.max),
+            Rect::from_min_max(Pos2::new(chip.min.x + 19.0, chip.min.y), chip.max),
             Align2::LEFT_CENTER,
             name,
-            theme::ui_semibold(11.5),
+            theme::ui_semibold(11.0),
             color,
         );
         let when = status_age(task, now);
-        let g = galley_trunc(ui.painter(), &when, theme::ui(11.5), theme::pal().text_2, (r.max.x - PAD - chip.max.x - 10.0).max(10.0));
+        let g = galley_trunc(ui.painter(), &when, theme::ui(11.5), p.text_2, (r.max.x - PAD - chip.max.x - 10.0).max(10.0));
         place(
             ui.painter(),
             Rect::from_min_max(Pos2::new(chip.max.x + 10.0, r.min.y), Pos2::new(r.max.x - PAD, r.max.y - 2.0)),
             Align2::LEFT_CENTER,
             g,
-            theme::pal().text_2,
+            p.text_2,
         );
         ui.add_space(8.0);
 
         // `branch → base` e o agente com o modelo.
         padded(ui, |ui| {
             let line = tasks_ui::branch_line(task);
-            let g = ui.painter().layout(line, theme::mono(11.5), theme::pal().text_2, ui.available_width() - 20.0);
+            let g = ui.painter().layout(line, theme::mono(11.0), p.text_2, ui.available_width() - 20.0);
             let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), g.size().y + 4.0), Sense::hover());
-            deck.icons.paint(ui.painter(), Icon::GitBranch, r.min + Vec2::new(6.0, 8.5), 12.0, theme::pal().text_2, 0.0);
-            ui.painter().galley(Pos2::new(r.min.x + 20.0, r.min.y + 1.0), g, theme::pal().text_2);
+            deck.icons.paint(ui.painter(), Icon::GitBranch, r.min + Vec2::new(6.0, 8.5), 12.0, p.text_2, 0.0);
+            ui.painter().galley(Pos2::new(r.min.x + 20.0, r.min.y + 1.0), g, p.text_2);
             tip(resp, "Branch da tarefa → branch em que ela será mesclada (e o commit da mesclagem, se já houve)");
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
             let mut x = r.min.x;
@@ -655,8 +886,8 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 who.push_str(" · ");
                 who.push_str(m);
             }
-            let g = galley_trunc(ui.painter(), &who, theme::ui(12.5), theme::pal().text, (r.max.x - x).max(10.0));
-            place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), r.max), Align2::LEFT_CENTER, g, theme::pal().text);
+            let g = galley_trunc(ui.painter(), &who, theme::ui(12.0), p.text, (r.max.x - x).max(10.0));
+            place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), r.max), Align2::LEFT_CENTER, g, p.text);
         });
         ui.add_space(6.0);
 
@@ -693,7 +924,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
             egui::Spinner::new()
                 .size(14.0)
-                .color(theme::pal().text_2)
+                .color(p.text_2)
                 .paint_at(ui, Rect::from_center_size(Pos2::new(r.min.x + PAD + 7.0, r.center().y), Vec2::splat(14.0)));
             text_in(
                 ui.painter(),
@@ -701,7 +932,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 Align2::LEFT_CENTER,
                 label,
                 theme::ui(12.0),
-                theme::pal().text_2,
+                p.text_2,
             );
         }
         if return_open {
@@ -715,7 +946,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
             if task.brief.trim().is_empty() {
                 muted_line(ui, "Sem pedido além do título: o agente recebe só o título.");
             } else {
-                paragraph(ui, &clip_text(task.brief.trim(), TEXT_MAX), theme::ui(12.5), theme::pal().text_2);
+                paragraph(ui, &clip_text(task.brief.trim(), TEXT_MAX), theme::ui(12.0), p.text_2);
                 open_center_button(ui, "brief", task, false, acts);
             }
         }
@@ -728,7 +959,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                         .max_height(REPORT_MAX_H)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            paragraph(ui, &clip_text(report.trim(), TEXT_MAX), theme::ui(12.5), theme::pal().text_2);
+                            paragraph(ui, &clip_text(report.trim(), TEXT_MAX), theme::ui(12.0), p.text_2);
                         });
                     open_center_button(ui, "report", task, true, acts);
                 }
@@ -738,7 +969,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         }
         // Alterações.
         let summary = task.diff_stat.as_deref().and_then(parse_diff_stat);
-        let right = summary.map(|s| (s.text(), theme::pal().text_2));
+        let right = summary.map(|s| (s.text(), p.text_3));
         if section_header(deck, ui, Section::Changes, "Alterações", right, acts) {
             match task.diff_stat.as_deref().filter(|s| !s.trim().is_empty()) {
                 Some(stat) => stat_box(ui, stat),
@@ -753,7 +984,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         }
         // Histórico.
         let events = events_newest_first(task);
-        if section_header(deck, ui, Section::History, "Histórico", Some((events.len().to_string(), theme::pal().text_2)), acts) {
+        if section_header(deck, ui, Section::History, "Histórico", Some((events.len().to_string(), p.text_3)), acts) {
             history(ui, &events);
         }
         ui.add_space(14.0);
@@ -775,11 +1006,7 @@ fn open_center_button(ui: &mut Ui, id_salt: &str, task: &Task, report: bool, act
 
 fn separator(ui: &mut Ui) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(
-        Rect::from_min_max(Pos2::new(r.min.x + PAD, r.min.y), Pos2::new(r.max.x - PAD, r.max.y)),
-        0.0,
-        theme::pal().separator,
-    );
+    line_sep(ui.painter(), Pos2::new(r.min.x + PAD, r.min.y + 0.5), Pos2::new(r.max.x - PAD, r.min.y + 0.5));
 }
 
 /// Corta o começo do texto (`…ui/tasks.rs`) para caber em `max_w`: num caminho, o fim é o que identifica.
@@ -810,31 +1037,32 @@ fn stat_box(ui: &mut Ui, stat: &str) {
     if lines.is_empty() {
         return;
     }
+    let p = theme::pal();
     let shown = lines.len().min(STAT_MAX_LINES);
     let extra = lines.len() - shown;
     let row = 16.0;
     let h = (shown + usize::from(extra > 0)) as f32 * row + 12.0;
     let (outer, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 6.0), Sense::hover());
     let r = Rect::from_min_size(Pos2::new(outer.min.x + PAD, outer.min.y + 2.0), Vec2::new(outer.width() - 2.0 * PAD, h));
-    frame(ui.painter(), r, 7.0, theme::pal().recess, theme::pal().glass_border);
+    frame(ui.painter(), r, 6.0, p.recess, p.separator);
     for (i, line) in lines.iter().take(shown).enumerate() {
         let y = r.min.y + 6.0 + i as f32 * row;
-        let count = galley(ui.painter(), &line.changes, theme::mono(11.0), theme::pal().text_2);
+        let count = galley(ui.painter(), &line.changes, theme::meta(10.5), p.text_2);
         let cw = count.size().x;
         place(
             ui.painter(),
             Rect::from_min_size(Pos2::new(r.max.x - 8.0 - cw, y), Vec2::new(cw, row)),
             Align2::LEFT_CENTER,
             count,
-            theme::pal().text_2,
+            p.text_2,
         );
-        let g = tail_galley(ui.painter(), &line.path, theme::mono(11.0), theme::pal().text_2, (r.width() - 16.0 - cw - 10.0).max(20.0));
+        let g = tail_galley(ui.painter(), &line.path, theme::mono(11.0), p.text_2, (r.width() - 16.0 - cw - 10.0).max(20.0));
         place(
             ui.painter(),
             Rect::from_min_size(Pos2::new(r.min.x + 8.0, y), Vec2::new(r.width() - 16.0 - cw, row)),
             Align2::LEFT_CENTER,
             g,
-            theme::pal().text_2,
+            p.text_2,
         );
     }
     if extra > 0 {
@@ -844,7 +1072,7 @@ fn stat_box(ui: &mut Ui, stat: &str) {
             Align2::LEFT_CENTER,
             &format!("… e mais {extra} arquivos"),
             theme::ui(11.0),
-            theme::pal().text_2,
+            p.text_2,
         );
     }
 }
@@ -855,18 +1083,19 @@ fn history(ui: &mut Ui, events: &[&agentdeck_core::TaskEvent]) {
         muted_line(ui, "Nada registrado ainda.");
         return;
     }
-    let time_w = galley(ui.painter(), "00/00 00:00", theme::mono(10.5), theme::pal().text_2).size().x;
+    let p = theme::pal();
+    let time_w = galley(ui.painter(), "00/00 00:00", theme::meta(10.5), p.text_3).size().x;
     for e in events.iter().take(EVENTS_MAX) {
         let text_w = (ui.available_width() - 2.0 * PAD - time_w - 8.0).max(40.0);
-        let g = ui.painter().layout(clip_text(&e.text, 1_000).into_owned(), theme::ui(12.0), theme::pal().text_2, text_w);
+        let g = ui.painter().layout(clip_text(&e.text, 1_000).into_owned(), theme::ui(12.0), p.text_2, text_w);
         let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), g.size().y + 5.0), Sense::hover());
-        let t = galley(ui.painter(), &tasks_ui::event_time(e.at_ms), theme::mono(10.5), theme::pal().text_2);
+        let t = galley(ui.painter(), &tasks_ui::event_time(e.at_ms), theme::meta(10.5), p.text_3);
         ui.painter().galley(
             Pos2::new(r.min.x + PAD, r.min.y + 2.0 + (g.rows.first().map_or(14.0, |row| row.height()) - t.size().y) / 2.0),
             t,
-            theme::pal().text_2,
+            p.text_3,
         );
-        ui.painter().galley(Pos2::new(r.min.x + PAD + time_w + 8.0, r.min.y + 2.0), g, theme::pal().text_2);
+        ui.painter().galley(Pos2::new(r.min.x + PAD + time_w + 8.0, r.min.y + 2.0), g, p.text_2);
     }
     if events.len() > EVENTS_MAX {
         muted_line(ui, &format!("… e mais {} eventos mais antigos.", events.len() - EVENTS_MAX));
@@ -951,29 +1180,28 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
     let w = (panel.width() - 24.0).clamp(220.0, 360.0);
     let pos = Pos2::new(panel.center().x - w / 2.0, panel.min.y + 70.0);
     Area::new(Id::new("tasks-confirm")).order(Order::Tooltip).fixed_pos(pos).constrain(false).show(ctx, |ui| {
-        let g1 = ui.painter().layout(title.clone(), theme::ui_semibold(13.0), theme::pal().text, w - 28.0);
-        let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), theme::pal().text_2, w - 28.0);
+        let p = theme::pal();
+        let g1 = ui.painter().layout(title.clone(), theme::ui_semibold(13.0), p.text_strong, w - 28.0);
+        let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), p.text_2, w - 28.0);
         let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + BTN_H + 14.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
-        shadow(ui.painter(), rect, 10, 10, 30, theme::with_alpha(theme::pal().shadow, 0.6));
-        frame(ui.painter(), rect, 10.0, theme::pal().popup, theme::pal().glass_border);
+        shadow(ui.painter(), rect, 10, 8, 24, p.shadow);
+        frame(ui.painter(), rect, 10.0, p.popup, p.glass_border);
         let mut y = rect.min.y + 14.0;
-        ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g1.clone(), theme::pal().text);
+        ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g1.clone(), p.text_strong);
         y += g1.size().y + 6.0;
-        ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g2.clone(), theme::pal().text_2);
+        ui.painter().galley(Pos2::new(rect.min.x + 14.0, y), g2, p.text_2);
         let by = rect.max.y - 14.0 - BTN_H;
-        let dw = btn_width(ui.painter(), yes);
+        let dw = button_width(ui.painter(), yes, ButtonKind::Primary);
         let d = Rect::from_min_size(Pos2::new(rect.max.x - 14.0 - dw, by), Vec2::new(dw, BTN_H));
-        let cw = btn_width(ui.painter(), "Cancelar");
+        let cw = button_width(ui.painter(), "Cancelar", ButtonKind::Secondary);
         let c = Rect::from_min_size(Pos2::new(d.min.x - 8.0 - cw, by), Vec2::new(cw, BTN_H));
-        let dr = clickable(ui, d, Id::new("tasks-confirm-yes"));
-        let fill = if merge { theme::accent() } else { theme::pal().danger };
-        ui.painter().rect_filled(d, 7.0, if dr.hovered() { theme::brighten(fill, 1.12) } else { fill });
-        let yes_fg = if merge { theme::pal().on_accent } else { theme::pal().text_strong };
-        text_in(ui.painter(), d, Align2::CENTER_CENTER, yes, theme::ui_semibold(12.0), yes_fg);
-        let cr = clickable(ui, c, Id::new("tasks-confirm-no"));
-        ui.painter().rect_filled(c, 7.0, if cr.hovered() { theme::pal().separator } else { theme::pal().chip });
-        text_in(ui.painter(), c, Align2::CENTER_CENTER, "Cancelar", theme::ui_semibold(12.0), theme::pal().text);
+        let dr = if merge {
+            ui_button(ui, d, Id::new("tasks-confirm-yes"), yes, ButtonKind::Primary)
+        } else {
+            button_danger(ui, d, Id::new("tasks-confirm-yes"), yes)
+        };
+        let cr = ui_button(ui, c, Id::new("tasks-confirm-no"), "Cancelar", ButtonKind::Secondary);
         if dr.clicked() {
             acts.push(Act::ConfirmYes);
         } else if cr.clicked() || ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -986,21 +1214,16 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
 // Nova tarefa
 // ---------------------------------------------------------------------------
 
-/// Rótulo pequeno de um campo do formulário.
+/// Rótulo de seção/campo do formulário (IBM Plex Mono Medium 10 px, MAIÚSCULAS, `text_3`, `0.1em`).
 fn field_label(ui: &mut Ui, text: &str) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
-    text_in(
-        ui.painter(),
-        Rect::from_min_max(Pos2::new(r.min.x, r.min.y + 4.0), r.max),
-        Align2::LEFT_CENTER,
-        &text.to_uppercase(),
-        theme::ui_bold(10.5),
-        theme::pal().text_2,
-    );
+    let color = theme::pal().text_3;
+    let g = galley_spaced(ui.painter(), &text.to_uppercase(), theme::label(10.0), color, 10.0 * theme::LABEL_SPACING_EM);
+    place(ui.painter(), Rect::from_min_max(Pos2::new(r.min.x, r.min.y + 4.0), r.max), Align2::LEFT_CENTER, g, color);
 }
 
 fn chip_width(painter: &egui::Painter, reference: &str) -> f32 {
-    let t = text_w(painter, &util::chip_label(reference), theme::ui(12.0)).min(220.0);
+    let t = text_w(painter, &util::chip_label(reference), theme::ui(11.5)).min(220.0);
     10.0 + t + 4.0 + (8.0 + text_w(painter, "×", theme::ui(13.0))) + 4.0 + 2.0
 }
 
@@ -1009,6 +1232,7 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
     let avail = ui.available_width();
     let attachments = &deck.tasks.form.attachments;
     let busy = deck.tasks.form.busy;
+    let p = theme::pal();
 
     if !attachments.is_empty() {
         ui.add_space(6.0);
@@ -1032,13 +1256,12 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
                 let cw = chip_width(&painter, &a.to_string_lossy()).min(avail);
                 let r = Rect::from_min_size(Pos2::new(cx, row.min.y + 2.0), Vec2::new(cw, CHIP_H));
                 cx = r.max.x + 6.0;
-                frame(ui.painter(), r, 11.0, theme::pal().recess, theme::pal().glass_border);
+                frame(ui.painter(), r, 5.0, p.recess, p.separator);
                 let xw = 8.0 + text_w(ui.painter(), "×", theme::ui(13.0));
                 let x_rect = Rect::from_min_size(Pos2::new(r.max.x - 5.0 - xw, r.min.y + 1.0), Vec2::new(xw, r.height() - 2.0));
                 let tr = Rect::from_min_max(Pos2::new(r.min.x + 10.0, r.min.y), Pos2::new(x_rect.min.x - 4.0, r.max.y));
-                let g =
-                    galley_trunc(ui.painter(), &util::chip_label(&a.to_string_lossy()), theme::ui(12.0), theme::pal().text_2, tr.width());
-                place(ui.painter(), tr, Align2::LEFT_CENTER, g, theme::pal().text_2);
+                let g = galley_trunc(ui.painter(), &util::chip_label(&a.to_string_lossy()), theme::ui(11.5), p.text_2, tr.width());
+                place(ui.painter(), tr, Align2::LEFT_CENTER, g, p.text_2);
                 let chip_resp = ui.interact(r, Id::new(("task-chip", idx)), Sense::hover());
                 tip(chip_resp, a.display().to_string());
                 let xr = if !busy {
@@ -1052,7 +1275,7 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
                     Align2::CENTER_CENTER,
                     "×",
                     theme::ui(13.0),
-                    if xr.hovered() && !busy { theme::pal().text } else { theme::pal().text_2 },
+                    if xr.hovered() && !busy { p.text } else { p.text_2 },
                 );
                 if tip(xr, "Remover anexo").clicked() && !busy {
                     acts.push(Act::RemoveAttachment(idx));
@@ -1064,22 +1287,22 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
 
     ui.add_space(6.0);
     let label = "Anexar arquivos";
-    let lw = text_w(ui.painter(), label, theme::ui(12.0));
+    let lw = text_w(ui.painter(), label, theme::ui(11.5));
     let bw = 10.0 + 14.0 + 6.0 + lw + 12.0;
     let (row, _) = ui.allocate_exact_size(Vec2::new(avail, 26.0), Sense::hover());
     let btn = Rect::from_min_size(row.min, Vec2::new(bw.min(avail), 26.0));
     let resp =
         if !busy { clickable(ui, btn, Id::new("tasks-new-attach")) } else { ui.interact(btn, Id::new("tasks-new-attach"), Sense::hover()) };
     let hot = !busy && resp.hovered();
-    frame(ui.painter(), btn, 6.0, if hot { theme::pal().separator } else { theme::pal().hover }, theme::pal().separator);
+    frame(ui.painter(), btn, 5.0, theme::with_alpha(p.text_strong, if hot { 0.08 } else { 0.04 }), theme::with_alpha(p.text_strong, 0.14));
     let fg = if !busy {
         if hot {
-            theme::pal().text
+            p.text
         } else {
-            theme::pal().text_2
+            p.text_2
         }
     } else {
-        theme::pal().text_3
+        p.text_3
     };
     deck.icons.paint(ui.painter(), Icon::Attach, Pos2::new(btn.min.x + 16.0, btn.center().y), 13.5, fg, 0.0);
     text_in(
@@ -1087,7 +1310,7 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
         Rect::from_min_max(Pos2::new(btn.min.x + 28.0, btn.min.y), Pos2::new(btn.max.x - 8.0, btn.max.y)),
         Align2::LEFT_CENTER,
         label,
-        theme::ui(12.0),
+        theme::ui(11.5),
         fg,
     );
     if tip(resp, "Anexar arquivos ou imagens ao pedido (também pode arrastar e soltar sobre o formulário)").clicked() && !busy {
@@ -1100,30 +1323,18 @@ fn dropdown_button(ui: &mut Ui, id: Id, label: &str, dot: Option<Color32>, enabl
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
     let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
     let p = ui.painter();
+    let pal = theme::pal();
     let hot = enabled && (resp.hovered() || open);
-    frame(
-        p,
-        r,
-        8.0,
-        if hot { theme::pal().hover } else { theme::pal().chip },
-        if open { theme::pal().text_2 } else { theme::pal().separator },
-    );
+    frame(p, r, 6.0, if hot { pal.hover } else { pal.recess }, if open { theme::accent() } else { pal.separator });
     let mut x = r.min.x + 10.0;
     if let Some(c) = dot {
         super::dot(p, Pos2::new(x + 4.0, r.center().y), c);
         x += 16.0;
     }
-    let color = if enabled { theme::pal().text } else { theme::pal().text_3 };
-    let g = galley_trunc(p, label, theme::ui(12.5), color, (r.max.x - 28.0 - x).max(10.0));
+    let color = if enabled { pal.text } else { pal.text_3 };
+    let g = galley_trunc(p, label, theme::ui(12.0), color, (r.max.x - 28.0 - x).max(10.0));
     place(p, Rect::from_min_max(Pos2::new(x, r.min.y), Pos2::new(r.max.x - 26.0, r.max.y)), Align2::LEFT_CENTER, g, color);
-    text_in(
-        p,
-        Rect::from_min_max(Pos2::new(r.max.x - 26.0, r.min.y), r.max),
-        Align2::CENTER_CENTER,
-        "▾",
-        theme::ui(12.0),
-        theme::pal().text_2,
-    );
+    text_in(p, Rect::from_min_max(Pos2::new(r.max.x - 26.0, r.min.y), r.max), Align2::CENTER_CENTER, "▾", theme::ui(11.5), pal.text_2);
     let clicked = tip(resp, tooltip).clicked() && enabled;
     (r, clicked)
 }
@@ -1137,7 +1348,7 @@ enum Detail {
     Count(usize),
 }
 
-/// Itens de um menu do formulário.
+/// Itens de um menu do formulário ou do filtro.
 #[derive(Clone)]
 struct MenuItem {
     label: String,
@@ -1150,18 +1361,27 @@ struct MenuItem {
     submenu: bool,
 }
 
-/// Menu sob `anchor`. Devolve o índice escolhido; fecha com clique fora ou Esc.
-fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem], acts: &mut Vec<Act>) -> Option<usize> {
+/// Menu sob `anchor` (fundo `popup` opaco, `glass_border`, cantos 8, itens de 26 px com `hover`).
+/// Devolve o índice escolhido; fecha com clique fora ou Esc.
+fn dropdown_menu(
+    ctx: &egui::Context,
+    id: &str,
+    anchor: Rect,
+    items: &[MenuItem],
+    acts: &mut Vec<Act>,
+    is_history_menu: bool,
+) -> Option<usize> {
     let row = 26.0;
     let h = (items.len() as f32 * row).min(260.0) + 8.0;
     let w = anchor.width();
     let pos = super::menus::keep_on_screen(ctx, Pos2::new(anchor.min.x, anchor.max.y + 2.0), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut chosen = None;
+    let p = theme::pal();
     Area::new(Id::new(id)).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
-        shadow(ui.painter(), rect, 8, 8, 24, theme::with_alpha(theme::pal().shadow, 0.5));
-        frame(ui.painter(), rect, 8.0, theme::pal().popup, theme::pal().glass_border);
+        shadow(ui.painter(), rect, 8, 8, 24, p.shadow);
+        frame(ui.painter(), rect, 8.0, p.popup, p.glass_border);
         let list = rect.shrink(4.0);
         let mut child = ui.new_child(UiBuilder::new().max_rect(list));
         child.set_clip_rect(list);
@@ -1171,7 +1391,7 @@ fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem]
                 let (r, _) = ui.allocate_exact_size(Vec2::new(list.width(), row), Sense::hover());
                 let resp = if item.enabled { clickable(ui, r, Id::new((id, i))) } else { ui.interact(r, Id::new((id, i)), Sense::hover()) };
                 if item.enabled && resp.hovered() {
-                    ui.painter().rect_filled(r, 6.0, theme::pal().separator);
+                    ui.painter().rect_filled(r, 5.0, p.hover);
                 }
                 let mut x = r.min.x + 10.0;
                 if let Some(c) = item.dot {
@@ -1179,22 +1399,22 @@ fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem]
                     x += 16.0;
                 }
                 let color = if !item.enabled {
-                    theme::pal().text_2
-                } else if item.selected {
-                    theme::pal().text
+                    p.text_3
+                } else if item.selected || resp.hovered() {
+                    p.text
                 } else {
-                    theme::pal().text_2
+                    p.text_2
                 };
                 let mut right = r.max.x - 10.0;
                 if item.submenu {
                     let ar = Rect::from_min_max(Pos2::new(right - 12.0, r.min.y), Pos2::new(right, r.max.y));
-                    text_in(ui.painter(), ar, Align2::CENTER_CENTER, "›", theme::ui(14.0), theme::pal().text_2);
+                    text_in(ui.painter(), ar, Align2::CENTER_CENTER, "›", theme::ui(13.0), p.text_2);
                     right -= 16.0;
                 }
                 if let Some(detail) = &item.detail {
                     let (text, dcolor) = match detail {
-                        Detail::Free => ("grátis".to_owned(), theme::BADGE_JSON),
-                        Detail::Count(n) => (format!("{n} modelo{}", if *n == 1 { "" } else { "s" }), theme::pal().text_2),
+                        Detail::Free => ("grátis".to_owned(), p.success),
+                        Detail::Count(n) => (format!("{n} modelo{}", if *n == 1 { "" } else { "s" }), p.text_2),
                     };
                     let g = galley(ui.painter(), &text, theme::ui(11.0), dcolor);
                     let w = g.size().x;
@@ -1208,7 +1428,7 @@ fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem]
                     right -= w + 8.0;
                 }
                 let label = if item.selected { format!("✓ {}", item.label) } else { item.label.clone() };
-                let g = galley_trunc(ui.painter(), &label, theme::ui(12.5), color, (right - x).max(10.0));
+                let g = galley_trunc(ui.painter(), &label, theme::ui(12.0), color, (right - x).max(10.0));
                 place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), Pos2::new(right, r.max.y)), Align2::LEFT_CENTER, g, color);
                 if item.enabled && resp.clicked() {
                     chosen = Some(i);
@@ -1217,7 +1437,7 @@ fn dropdown_menu(ctx: &egui::Context, id: &str, anchor: Rect, items: &[MenuItem]
         });
     });
     if chosen.is_none() && (ctx.input(|i| i.key_pressed(Key::Escape)) || super::menus::closes_on_outside(ctx, menu_rect, anchor)) {
-        acts.push(Act::CloseMenu);
+        acts.push(if is_history_menu { Act::CloseHistoryMenu } else { Act::CloseMenu });
     }
     chosen
 }
@@ -1418,8 +1638,8 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             ui.painter().rect(
                 cb,
                 3.0,
-                if start_now { theme::accent() } else { theme::pal().hover },
-                Stroke::new(1.0, theme::pal().text_2),
+                if start_now { theme::accent() } else { theme::pal().recess },
+                Stroke::new(1.0, if start_now { theme::accent() } else { theme::pal().separator }),
                 egui::StrokeKind::Inside,
             );
             if start_now {
@@ -1430,7 +1650,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 Rect::from_min_max(Pos2::new(cb.max.x + 8.0, r.min.y), r.max),
                 Align2::LEFT_CENTER,
                 "Iniciar agora",
-                theme::ui(12.5),
+                theme::ui(12.0),
                 if rr.hovered() { theme::pal().text } else { theme::pal().text_2 },
             );
             if tip(rr, "Já cria a worktree e abre o agente. Desligado, a tarefa fica em rascunho para iniciar depois").clicked() {
@@ -1464,12 +1684,12 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
 
     match (open_menu, anchors) {
         (Some(FormMenu::Agent), [Some(a), _]) => {
-            if let Some(i) = dropdown_menu(&ctx, "tasks-menu-agent", a, &agent_items, acts) {
+            if let Some(i) = dropdown_menu(&ctx, "tasks-menu-agent", a, &agent_items, acts, false) {
                 acts.push(Act::SetKind(choices[i].clone()));
             }
         }
         (Some(FormMenu::Model), [_, Some(a)]) => {
-            if let Some(i) = dropdown_menu(&ctx, "tasks-menu-model", a, &model_items, acts) {
+            if let Some(i) = dropdown_menu(&ctx, "tasks-menu-model", a, &model_items, acts, false) {
                 if let Some((_, act)) = rows.into_iter().nth(i) {
                     acts.push(act);
                 }
