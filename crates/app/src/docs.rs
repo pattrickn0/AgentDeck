@@ -116,9 +116,23 @@ pub struct TextDoc {
     pub max_chars: usize,
 }
 
+/// Uma linha com mais caracteres que isto é cortada na tela (como o diff faz com 1000): um arquivo de 1 MB numa linha só
+/// (JSON minificado) não deve travar a pintura.
+const TEXT_LINE_MAX: usize = 2000;
+
 impl TextDoc {
     pub fn new(text: &str) -> Self {
-        let lines: Vec<String> = text.lines().map(|l| l.replace('\t', "    ")).collect();
+        let lines: Vec<String> = text
+            .lines()
+            .map(|l| {
+                let l = l.replace('\t', "    ");
+                if l.chars().count() > TEXT_LINE_MAX {
+                    l.chars().take(TEXT_LINE_MAX).chain(['…']).collect()
+                } else {
+                    l
+                }
+            })
+            .collect();
         let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         Self { lines, max_chars }
     }
@@ -870,6 +884,15 @@ Binary files a/img.png and b/img.png differ
         let mut m = tab(DocKind::Markdown(MdSource::File("a.md".into())));
         m.apply(Loaded::Text(Ok(TextFile::Text("# Oi".into()))));
         assert!(matches!(&m.state, DocState::Markdown(t) if t == "# Oi"));
+    }
+
+    #[test]
+    fn a_huge_line_is_cut_for_the_screen() {
+        let doc = TextDoc::new(&format!("curta\n{}\n", "x".repeat(TEXT_LINE_MAX + 500)));
+        assert_eq!(doc.lines[0], "curta");
+        assert_eq!(doc.lines[1].chars().count(), TEXT_LINE_MAX + 1);
+        assert!(doc.lines[1].ends_with('…'));
+        assert_eq!(doc.max_chars, TEXT_LINE_MAX + 1);
     }
 
     #[test]
