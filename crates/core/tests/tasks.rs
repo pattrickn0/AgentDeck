@@ -893,3 +893,174 @@ fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
     assert_eq!(boot_line(&t, "x", std::path::Path::new("C:/Usuários/Ana/brief.md")), None);
     assert_eq!(boot_line(&t, "x", std::path::Path::new("C:/a\"b/brief.md")), None);
 }
+
+// ---------- Depois da mesclagem: merge_commit, diff, done e validar sem becos sem saída ----------
+
+fn diff_adds(diff: &commanddeck_core::git::GitDiff) -> Vec<String> {
+    use commanddeck_core::git::DiffKind;
+    diff.lines.iter().filter(|l| l.kind == DiffKind::Add).map(|l| l.text.clone()).collect()
+}
+
+#[test]
+fn merge_stores_the_full_merge_commit_and_a_new_merge_overwrites_it() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Guardar o commit", "feature.txt");
+    assert_eq!(core.task(&env.project, &t.id).and_then(|t| t.merge_commit), None, "antes de mesclar não há commit");
+    let merged = core.task_merge(&env.project, &t.id).expect("merge");
+    let head = git(&env.ws, &["rev-parse", "HEAD"]).trim().to_owned();
+    assert_eq!(head.len(), 40);
+    assert_eq!(merged.merge_commit.as_deref(), Some(head.as_str()), "hash completo do commit de mesclagem");
+    assert!(merged.events.iter().any(|e| e.text.contains(&format!("({})", &head[..7]))), "{:?}", merged.events);
+    // Reprovada e entregue com um commit novo: a nova mesclagem sobrescreve.
+    core.task_reject(&env.project, &t.id, "Falta um ajuste.").expect("reject");
+    commit_file(&t.worktree, "ajuste.txt", "ok\n", "fix: ajuste");
+    core.task_done(&env.project, &t.id, "Ajustado.").expect("done");
+    let again = core.task_merge(&env.project, &t.id).expect("merge 2");
+    let head2 = git(&env.ws, &["rev-parse", "HEAD"]).trim().to_owned();
+    assert_ne!(head2, head);
+    assert_eq!(again.merge_commit.as_deref(), Some(head2.as_str()));
+    // Persiste: o que se lê de novo é o mesmo.
+    assert_eq!(core.task(&env.project, &t.id).and_then(|t| t.merge_commit).as_deref(), Some(head2.as_str()));
+    core.shutdown();
+}
+
+#[test]
+fn a_task_saved_before_merge_commit_existed_still_loads() {
+    let old = r#"{"id":"t4","title":"Antiga","status":"validating","base":"main","branch":"tarefa/t4-antiga"}"#;
+    let t: commanddeck_core::Task = serde_json::from_str(old).expect("tarefa antiga");
+    assert_eq!((t.id.as_str(), t.status, t.merge_commit.as_deref()), ("t4", TaskStatus::Validating, None));
+    // E o campo vai e volta pelo JSON.
+    let t = commanddeck_core::Task { merge_commit: Some("abc".into()), ..t };
+    let back: commanddeck_core::Task = serde_json::from_str(&serde_json::to_string(&t).expect("json")).expect("volta");
+    assert_eq!(back.merge_commit.as_deref(), Some("abc"));
+}
+
+#[test]
+fn the_diff_of_a_task_awaiting_validation_is_what_the_merge_brought() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Ver o mesclado", "feature.txt");
+    let before = core.task_diff(&env.project, &t.id).expect("diff em revisão");
+    assert_eq!(diff_adds(&before), ["+conteúdo"]);
+    // A base anda antes da mesclagem: o commit de mesclagem não traz isso, então o diff também não.
+    commit_file(&env.ws, "da_base.txt", "só na base\n", "chore: base");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    // Depois do alinhamento, `base...branch` é vazio; o diff vem do commit de mesclagem.
+    let diff = core.task_diff(&env.project, &t.id).expect("diff em validação");
+    assert_eq!(diff_adds(&diff), ["+conteúdo"], "{:?}", diff.lines);
+    assert!(!diff.truncated && !diff.binary);
+    let text: String = diff.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+    assert!(text.contains("feature.txt") && !text.contains("da_base.txt"), "{text}");
+    // Concluída: branch e worktree somem, o diff do que foi mesclado continua.
+    core.task_validate(&env.project, &t.id).expect("validate");
+    let done = core.task_diff(&env.project, &t.id).expect("diff concluída");
+    assert_eq!(diff_adds(&done), ["+conteúdo"]);
+    // Descartada continua sem diff (a branch some e não há commit de mesclagem).
+    let other = core.task_create(&env.project, spec("Outra")).expect("create");
+    core.task_discard(&env.project, &other.id).expect("discard");
+    assert!(matches!(core.task_diff(&env.project, &other.id), Err(TaskError::Conflict(_))));
+    core.shutdown();
+}
+
+#[test]
+fn reject_then_done_without_commits_goes_back_to_validating_without_a_new_merge() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Nada a mudar", "feature.txt");
+    let merged = core.task_merge(&env.project, &t.id).expect("merge");
+    let commit = merged.merge_commit.clone().expect("commit");
+    core.task_reject(&env.project, &t.id, "Achei que quebrava, mas talvez não.").expect("reject");
+    let done = core.task_done(&env.project, &t.id, "Conferi: não há o que mudar.").expect("done");
+    assert_eq!(done.status, TaskStatus::Review);
+    let head = git(&env.ws, &["rev-parse", "HEAD"]);
+    // Sem commits novos, mas já mesclada antes: não recusa, não mescla de novo.
+    let again = core.task_merge(&env.project, &t.id).expect("merge sem commits novos");
+    assert_eq!(again.status, TaskStatus::Validating);
+    assert_eq!(again.merge_commit.as_deref(), Some(commit.as_str()), "o commit da mesclagem não muda");
+    assert_eq!(git(&env.ws, &["rev-parse", "HEAD"]), head, "nenhum commit de mesclagem novo");
+    assert!(
+        again.events.iter().any(|e| e.text.contains("sem commits novos desde a última mesclagem")
+            && e.text.contains(&commit[..7])
+            && e.text.contains("aguardando validação de novo")),
+        "{:?}",
+        again.events
+    );
+    assert!(again.finished_ms.is_some() && again.error.is_none());
+    // A worktree segue; o diff mostra o que a mesclagem trouxe; validar conclui.
+    assert!(t.worktree.is_dir());
+    assert_eq!(diff_adds(&core.task_diff(&env.project, &t.id).expect("diff")), ["+conteúdo"]);
+    assert_eq!(core.task_validate(&env.project, &t.id).expect("validate").status, TaskStatus::Merged);
+    core.shutdown();
+}
+
+#[test]
+fn done_while_awaiting_validation_needs_new_commits() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Entregar depois", "feature.txt");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    // Sem commits novos: 409 com a explicação, e nada muda.
+    match core.task_done(&env.project, &t.id, "Mais uma coisa.") {
+        Err(TaskError::Conflict(m)) => assert_eq!(
+            m,
+            format!(
+                "a tarefa {} já foi mesclada e espera a validação do usuário; não há commits novos para entregar. Se algo ainda falta, quem decide é o usuário (Reprovar)",
+                t.id
+            )
+        ),
+        other => panic!("{other:?}"),
+    }
+    let still = core.task(&env.project, &t.id).expect("task");
+    assert_eq!(still.status, TaskStatus::Validating);
+    assert!(still.report.as_deref().is_some_and(|r| r.starts_with("Feito.")), "o relatório antigo ficou");
+    // O usuário corrigiu algo na aba da tarefa: com commit novo o agente consegue entregar.
+    commit_file(&t.worktree, "correcao.txt", "ok\n", "fix: corrigido na aba");
+    let done = core.task_done(&env.project, &t.id, "Entreguei a correção feita na aba.").expect("done");
+    assert_eq!(done.status, TaskStatus::Review);
+    assert_eq!(done.report.as_deref(), Some("Entreguei a correção feita na aba."));
+    assert!(done.diff_stat.as_deref().is_some_and(|s| s.contains("correcao.txt") && !s.contains("feature.txt")), "{:?}", done.diff_stat);
+    assert!(
+        done.events.iter().any(|e| e.text.contains("o agente entregou mais trabalho depois da mesclagem; em revisão")),
+        "{:?}",
+        done.events
+    );
+    // Daí o ciclo normal: mesclar → aguardando validação → validar.
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge 2").status, TaskStatus::Validating);
+    assert_eq!(core.task_validate(&env.project, &t.id).expect("validate").status, TaskStatus::Merged);
+    assert!(env.ws.join("correcao.txt").is_file());
+    core.shutdown();
+}
+
+#[test]
+fn validate_completes_with_a_warning_when_the_base_branch_is_gone() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    git(&env.ws, &["branch", "estavel"]);
+    git(&env.ws, &["checkout", "-q", "estavel"]);
+    let t = core.task_create(&env.project, TaskSpec { base: Some("estavel".into()), ..spec("Base some") }).expect("create");
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    commit_file(&t.worktree, "feature.txt", "conteúdo\n", "feat: base some");
+    core.task_done(&env.project, &t.id, "Feito.").expect("done");
+    core.task_merge(&env.project, &t.id).expect("merge");
+    // A base é apagada à mão (o repositório volta para a main) enquanto a tarefa espera validação.
+    git(&env.ws, &["checkout", "-q", "main"]);
+    git(&env.ws, &["branch", "-D", "estavel"]);
+    let done = core.task_validate(&env.project, &t.id).expect("validate sem a base");
+    assert_eq!(done.status, TaskStatus::Merged);
+    assert!(
+        done.events
+            .iter()
+            .any(|e| e.text.contains("aviso: a base estavel não existe mais; não conferi se a branch tinha commits fora dela")),
+        "{:?}",
+        done.events
+    );
+    assert!(!t.worktree.exists());
+    assert!(!branches(&env.ws).contains(&t.branch), "a branch da tarefa foi removida");
+    core.shutdown();
+}

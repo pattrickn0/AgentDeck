@@ -205,7 +205,7 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
 
 - **Dados.** `Task { id (t1, t2…: contador por projeto, nunca reaproveitado), title, brief, status, base, branch
   (tarefa/<id>-<slug>), worktree, kind, model, instance (<modelo>@<id>, ex.: claude@t3), creator, created_ms, started_ms,
-  finished_ms, report, diff_stat, error, events (últimos 200) }`. Ficam em `dados/tarefas/<projeto>.json`
+  finished_ms, report, diff_stat, error, merge_commit, events (últimos 200) }`. `merge_commit` é o hash completo do commit da última mesclagem (`git rev-parse HEAD` logo depois do `merge --no-ff`; `None` se nunca foi mesclada; uma nova mesclagem, depois de reprovar, sobrescreve; `#[serde(default)]`: tarefas antigas carregam com `None`). Ficam em `dados/tarefas/<projeto>.json`
   (`{"version","next","tasks"}`), gravados por arquivo temporário + `rename`, uma gravação por vez, **fora do repositório do
   usuário**; um arquivo ilegível é copiado para `….json.ilegivel-<ms>` antes de recomeçar. Remover o projeto não apaga o arquivo.
 - **Worktrees.** Em `<raiz do repositório>/.agentdeck/worktrees/<id>` (dentro do repositório de propósito: agentes confinados
@@ -219,21 +219,27 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   worktree, commits pequenos, nada de merge nem push, o relatório em um arquivo com `ask-agent --task done <id> --file <arq>`, dúvidas ao chefe) vão
   para a aba por `CoreEvent::Deliver { request: 0 }`, o mesmo caminho das mensagens entre agentes (fila e regras de `delivery.rs`,
   sem esperar resposta). **Aba que precisa abrir** (nova, ou processo encerrado): digitar o texto num CLI que ainda sobe o perde (visto no Antigravity, que mostra um aviso na abertura). Então o texto completo (brief, devolução ou reprovação) vai para `dados/tarefas/<projeto>-<id>-brief.md` (ou `-feedback.md`) e `Delivery::boot` leva só uma linha curta em ASCII (`tasks::boot_line`: "Tarefa t11: … Leia o arquivo <caminho> e comece agora…"); a interface a guarda com `Core::set_boot_prompt` e `agents::spawn_spec_for` a põe na linha de comando, uma vez: Claude `claude "<linha>"` (posicional, **antes** das opções, porque `--add-dir`/`--allowedTools` aceitam vários valores), Antigravity `agy -i "<linha>"`, OpenCode `opencode --prompt "<linha>"` (`models::boot_prompt_flag`). Os demais CLIs, a aba já viva e o caminho com não-ASCII seguem digitando. Erro ao iniciar = `Failed` com a mensagem; `start` de novo tenta outra vez.
-- **Relatório** (`task_done`): só `Running`; guarda o relatório e `git diff --stat base...branch`, vai a `Review` e avisa se
-  a worktree tem trabalho sem commit. **Devolver** (`task_return`): `Review → Running`, entrega o feedback (a aba é reaberta
+- **Relatório** (`task_done`): `Running`, ou `Validating` **com commits novos** na branch (`base..branch` > 0: o usuário corrigiu algo na aba
+  enquanto a tarefa esperava validação e o agente entrega o que falta; evento "o agente entregou mais trabalho depois da mesclagem; em
+  revisão"). Em `Validating` sem commits novos dá 409 ("já foi mesclada e espera a validação do usuário… quem decide é o usuário (Reprovar)").
+  Guarda o relatório e `git diff --stat base...branch`, vai a `Review` e avisa se a worktree tem trabalho sem commit. **Devolver** (`task_return`): `Review → Running`, entrega o feedback (a aba é reaberta
   se foi fechada).
 - **Mesclar** (`task_merge`): só `Review` (ou `Failed` com relatório, para repetir). No repositório principal recusa, sem mudar
   nada e com a explicação, se ele não está na base, está no meio de outra operação, tem alterações sem commit em arquivos
   rastreados (o `AGENTS.md`, que o app reescreve, não conta; o git ainda protege o arquivo se a mesclagem o tocar), se a worktree da
-  tarefa tem trabalho sem commit ou se a branch não tem commits novos. Depois `git merge --no-ff -m "Merge tarefa <id>: <título>"`.
+  tarefa tem trabalho sem commit ou se a branch não tem commits novos. **Exceção:** sem commits novos mas com `merge_commit` (a tarefa já
+  foi mesclada, foi reprovada e o agente concluiu que não havia o que mudar) não recusa: vai direto a `Validating`, sem novo commit de
+  mesclagem, com o evento "sem commits novos desde a última mesclagem (<hash>); aguardando validação de novo" (as outras checagens
+  continuam valendo antes). Depois `git merge --no-ff -m "Merge tarefa <id>: <título>"`.
   Conflito: `git merge --abort`, a tarefa continua em `Review` e a mensagem lista os arquivos. Sucesso: **não** fecha a aba nem
-  remove worktree/branch; alinha a branch da tarefa com a base já mesclada (na worktree, `git merge --ff-only <base>`: a branch é
+  remove worktree/branch; guarda o hash completo em `merge_commit`; alinha a branch da tarefa com a base já mesclada (na worktree, `git merge --ff-only <base>`: a branch é
   ancestral do commit de mesclagem) e vai a `Validating` ("mesclada em <base> (<hash>); aguardando validação"). Se o alinhamento
   falhar, só registra um aviso (o merge já aconteceu); a reprovação tenta de novo. Erro inesperado do git = `Failed`.
 - **Validar** (`task_validate`): só `Validating`. Recusa, sem mudar nada, se a worktree tem trabalho sem commit ou se a branch tem
   commits que a base não tem (o agente seguiu trabalhando: reprove ou descarte). Senão fecha a aba (`CoreEvent::CloseInstance`),
   `git worktree remove --force` (com tentativas, porque no Windows o terminal ainda segura a pasta logo depois de a aba fechar),
-  `git branch -D` e vai a `Merged`. Se a pasta não sai, a tarefa continua em `Validating` com a explicação (dá para tentar de novo).
+  `git branch -D` e vai a `Merged`. Se a base (`refs/heads/<base>`) foi apagada, pula a checagem de commits fora dela, registra o aviso
+  "a base <base> não existe mais; não conferi se a branch tinha commits fora dela" e limpa normalmente. Se a pasta não sai, a tarefa continua em `Validating` com a explicação (dá para tentar de novo).
 - **Reprovar** (`task_reject(feedback)`): só `Validating`, com o motivo e as abas dos agentes ligadas. Recria a pasta da worktree se
   foi apagada à mão (a partir da branch, ou da base se a branch também sumiu), alinha a branch com a base, volta a `Running` na
   mesma worktree e entrega ao mesmo agente `tasks::reject_message` (o trabalho anterior já foi mesclado em <base>, o usuário testou e
@@ -249,7 +255,9 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
 - **Erros** (`TaskError` → HTTP): `Invalid` 400, `NotFound` 404, `Conflict` 409, `Failed` 500.
 - **Para a interface** (`Core`, tudo bloqueante: chame numa thread): `tasks(projeto)`, `task(projeto, id)`,
   `task_of_instance(projeto, instância)`, `task_create(projeto, TaskSpec)`, `task_start`, `task_done`, `task_return`,
-  `task_merge`, `task_validate`, `task_reject`, `task_discard`, e `task_diff(projeto, id)` (só leitura: o `git diff base...branch` no mesmo `GitDiff` da aba Git).
+  `task_merge`, `task_validate`, `task_reject`, `task_discard`, e `task_diff(projeto, id)` (só leitura, no mesmo `GitDiff` da aba Git: o `git diff base...branch`; em `Validating` e `Merged` com `merge_commit`, o
+  `git diff <hash>^1 <hash>`, o que a mesclagem trouxe, porque depois do alinhamento a branch é a própria base e o intervalo ficaria vazio;
+  `Conflict` se o commit não existe mais).
   Eventos: `CoreEvent::TasksChanged { project }` a cada gravação (também as vindas da ponte) e
   `CoreEvent::CloseInstance { project, id }` quando o core encerra a instância (a interface fecha a aba). Reabrir a aba de uma
   tarefa em andamento, em revisão ou aguardando validação é abrir a instância dela (`restore_instance` + aba): o terminal já abre na worktree.
@@ -257,7 +265,9 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   (`Deck::spawn_bg`) e volta como `UiMsg::Tasks`; a lista é relida a cada `TasksChanged` do projeto ativo. Grupos da lista: Em
   revisão, **Aguardando validação**, Em andamento, Rascunho, Falhou, Concluídas, Canceladas; o selo do ícone conta revisão + validação.
   Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
-  (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base.
+  (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base. O botão do diff (`can_show_diff`) vale também em `Validating`/`Merged` com
+  `merge_commit`, e aí diz **"Ver o que foi mesclado"** ("Ver diff completo" nos outros estados); o detalhe mostra o hash curto ao lado de
+  `branch → base`.
 
 **Memória em duas camadas** (fase 1 do passo 3 do roadmap; `learnings.rs`, `situation.rs` e `tasks.rs`). O app entrega ao
 agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agora, no `start_message`:

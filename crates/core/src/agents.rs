@@ -706,8 +706,16 @@ pub(crate) fn build_agent_env(
     agent_id: &str,
     depth: i64,
 ) -> BTreeMap<String, String> {
-    const REMOVE: &[&str] =
-        &["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SSE_PORT", "ELECTRON_RUN_AS_NODE"];
+    // `OPENCODE_CONFIG_CONTENT` é a configuração (modelo) da aba do OpenCode que abriu este processo; a de cada
+    // aba nova é inserida depois deste filtro (`spawn_spec_for`, via `models::opencode_tui`).
+    const REMOVE: &[&str] = &[
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_SSE_PORT",
+        "ELECTRON_RUN_AS_NODE",
+        "OPENCODE_CONFIG_CONTENT",
+    ];
     let mut env = BTreeMap::new();
     let mut old_path = String::new();
     for (k, v) in base {
@@ -916,6 +924,8 @@ mod tests {
             ("COMMANDDECK_DEBUG_UI".to_owned(), "1".to_owned()),
             // Configuração do usuário: continua valendo.
             ("COMMANDDECK_ASK_WAIT".to_owned(), "300".to_owned()),
+            // Modelo da aba do OpenCode que abriu este app: não passa para os agentes.
+            ("OPENCODE_CONFIG_CONTENT".to_owned(), r#"{"model":"herdado"}"#.to_owned()),
         ];
         let env = build_agent_env(base, Path::new("/app/bin"), 1234, "tok", "claude", 1);
         for k in ["COMMANDDECK_ROLE", "COMMANDDECK_HOME", "COMMANDDECK_DEBUG_UI"] {
@@ -925,6 +935,7 @@ mod tests {
         assert_eq!(env["COMMANDDECK_ASK_WAIT"], "300");
         assert!(!env.contains_key("CLAUDECODE"));
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
+        assert!(!env.contains_key("OPENCODE_CONFIG_CONTENT"), "a configuração da aba do OpenCode que abriu o app vazou");
         assert_eq!(env["HOME"], "/h");
         assert_eq!(env["PATH"], format!("/app/bin{PATH_SEP}/usr/bin"));
         assert_eq!(env["COMMANDDECK_PORT"], "1234");

@@ -10,7 +10,7 @@ use commanddeck_core::paths::AppPaths;
 use commanddeck_core::{Config, Core, StartOptions, Task, TaskStatus};
 
 use crate::deck::Deck;
-use crate::tasks_ui::{actions_for, parse_diff_stat, Confirm, TaskAct, TasksView};
+use crate::tasks_ui::{actions_for, can_show_diff, diff_button_label, parse_diff_stat, Confirm, TaskAct, TasksView};
 
 fn git_available() -> bool {
     Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
@@ -214,6 +214,16 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     assert!(env.tab_open("t1") && env.task("t1").worktree.is_dir(), "o agente continua vivo até validar");
     assert_eq!((env.deck.tasks.review_count(), env.deck.tasks.validating_count(), env.deck.tasks.attention_count()), (0, 1, 1));
     assert_eq!(actions_for(&env.task("t1"), true), [TaskAct::Validate, TaskAct::Reject, TaskAct::GoToTab, TaskAct::Discard]);
+
+    // Aguardando validação o botão do diff mostra o que a mesclagem trouxe (a branch já é a própria base).
+    let validating = env.task("t1");
+    assert!(can_show_diff(&validating) && validating.merge_commit.is_some());
+    assert_eq!(diff_button_label(&validating), "Ver o que foi mesclado");
+    env.deck.tasks_open_diff("t1");
+    env.pump("o diff da mesclagem", |d| d.tasks.diff.as_ref().is_some_and(|d| d.diff.is_some()));
+    let diff = env.deck.tasks.diff.as_ref().and_then(|d| d.diff.clone()).expect("diff").expect("sem erro");
+    assert!(diff.lines.iter().any(|l| l.text == "+dois"), "{:?}", diff.lines);
+    env.deck.tasks_back();
 
     // Reprovar: abre o mesmo formulário de feedback; enviar volta a tarefa ao agente, na mesma worktree.
     env.deck.tasks_act("t1", TaskAct::Reject);
