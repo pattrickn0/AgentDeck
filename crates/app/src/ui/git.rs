@@ -24,11 +24,9 @@ const HEAD_H: f32 = 34.0;
 const BANNER_H: f32 = 24.0;
 const MODE_H: f32 = 24.0;
 const ROW_H: f32 = 22.0;
-const DIFF_ROW_H: f32 = 17.0;
 /// O botão "Abrir ao centro" (largura aproximada do texto de 11,5 px com o recuo) que leva o diff ao modo Documentos.
 const OPEN_CENTER: &str = "Abrir ao centro";
 const OPEN_CENTER_W: f32 = 104.0;
-const DIFF_FONT: f32 = 12.0;
 const MSG_FONT: f32 = 13.0;
 const MSG_ROWS: f32 = 3.0;
 pub(super) const BTN_H: f32 = 28.0;
@@ -728,63 +726,19 @@ pub(super) fn diff_lines_at(
     if diff.truncated {
         notes.push("Diff grande: mostrando só o começo.");
     }
-    let font = theme::mono(DIFF_FONT);
-    let cell = ui.fonts_mut(|f| f.glyph_width(&font, 'M')).max(1.0);
-    let gutter = cell * 10.0 + 10.0;
-    let max_chars = diff.lines.iter().map(|l| l.text.chars().count()).max().unwrap_or(0);
-    let content_w = (gutter + max_chars as f32 * cell + 24.0).max(area.width());
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area);
     for note in &notes {
         let (r, _) = child.allocate_exact_size(Vec2::new(area.width(), 22.0), Sense::hover());
         text_in(child.painter(), r.shrink2(Vec2::new(12.0, 0.0)), Align2::LEFT_CENTER, note, theme::ui(12.0), theme::pal().warning);
     }
-    let n = diff.lines.len();
     // Diff combinado (`@@@`, de um conflito) não vira patch de trecho.
     let hunks = hunks
         .filter(|_| !diff.binary && !diff.truncated && !diff.lines.iter().any(|l| l.kind == DiffKind::Hunk && l.text.starts_with("@@@")));
-    let mut scroll = egui::ScrollArea::both().id_salt(id).auto_shrink([false, false]);
-    if let Some(line) = jump {
-        scroll = scroll.vertical_scroll_offset(line as f32 * DIFF_ROW_H);
-    }
-    scroll.show_rows(&mut child, DIFF_ROW_H, n, |ui, range| {
-        let mut hunk_no = diff.lines[..range.start].iter().filter(|l| l.kind == DiffKind::Hunk).count();
-        for line in &diff.lines[range] {
-            let (r, _) = ui.allocate_exact_size(Vec2::new(content_w, DIFF_ROW_H), Sense::hover());
-            let p = ui.painter();
-            let (bg, fg) = match line.kind {
-                DiffKind::Add => (Some(theme::with_alpha(theme::pal().success, 0.12)), theme::pal().text),
-                DiffKind::Del => (Some(theme::with_alpha(theme::pal().danger, 0.14)), theme::pal().text),
-                DiffKind::Hunk => (Some(theme::with_alpha(theme::pal().info, 0.10)), theme::pal().info),
-                DiffKind::Meta => (None, theme::pal().text_2),
-                DiffKind::Context => (None, theme::pal().text_2),
-            };
-            if let Some(bg) = bg {
-                p.rect_filled(r, 0.0, bg);
-            }
-            let num = |n: Option<u32>| n.map(|v| v.to_string()).unwrap_or_default();
-            let gx = r.min.x + 6.0;
-            p.text(
-                Pos2::new(gx + cell * 4.0, r.center().y),
-                Align2::RIGHT_CENTER,
-                num(line.old),
-                font.clone(),
-                theme::with_opacity(theme::pal().text_2, 0.7),
-            );
-            p.text(
-                Pos2::new(gx + cell * 9.0, r.center().y),
-                Align2::RIGHT_CENTER,
-                num(line.new),
-                font.clone(),
-                theme::with_opacity(theme::pal().text_2, 0.7),
-            );
-            p.text(Pos2::new(r.min.x + gutter, r.center().y), Align2::LEFT_CENTER, line.text.trim_end_matches('\r'), font.clone(), fg);
-            if line.kind == DiffKind::Hunk {
-                if let Some(h) = hunks {
-                    hunk_buttons(ui, area, r, hunk_no, h, acts);
-                }
-                hunk_no += 1;
-            }
+    let rest = Rect::from_min_max(Pos2::new(area.min.x, child.cursor().min.y), area.max);
+    super::diff_view::draw(&mut child, rest, diff, id, jump, |ui, row, n| {
+        if let Some(h) = hunks {
+            hunk_buttons(ui, area, row, n, h, acts);
         }
     });
 }

@@ -2,6 +2,7 @@
 //! O layout é calculado à mão para reproduzir as medidas do CSS ao pixel.
 
 mod background;
+mod diff_view;
 mod docs;
 mod empty_state;
 mod git;
