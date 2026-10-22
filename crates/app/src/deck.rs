@@ -156,6 +156,14 @@ pub struct Tab {
     spawned_at: Option<Instant>,
 }
 
+impl Tab {
+    /// Um redimensionamento do PTY espera o tamanho parar (ver `Deck::fit_tab`).
+    #[cfg(test)]
+    pub(crate) fn resize_pending(&self) -> bool {
+        self.pending_resize.is_some()
+    }
+}
+
 /// Uma janela da tela dividida, como ficou no último quadro.
 pub struct PaneSlot {
     /// Janela inteira (cabeçalho de abas + terminal).
@@ -1274,7 +1282,7 @@ impl Deck {
     }
 
     /// Hook do agente (`ask-agent --signal`): início ou fim de turno.
-    fn on_agent_signal(&mut self, project: &str, id: &str, busy: bool) {
+    pub(crate) fn on_agent_signal(&mut self, project: &str, id: &str, busy: bool) {
         let Some((idx, tab)) = self.tabs.iter_mut().enumerate().find(|(_, t)| t.project == project && t.ident.id() == id) else {
             return;
         };

@@ -633,7 +633,12 @@ fn apply_debug_ui(deck: &mut Deck) {
             | "tasks-new-model"
             | "tasks-new-provider"
             | "tasks-new-provider-models" => debug_tasks(deck, item),
-            "docs-demo" | "docs-demo-file" | "docs-demo-md" | "docs-demo-report" | "docs-demo-unreadable" | "docs-demo-many"
+            "docs-demo"
+            | "docs-demo-file"
+            | "docs-demo-md"
+            | "docs-demo-report"
+            | "docs-demo-unreadable"
+            | "docs-demo-many"
             | "docs-demo-badge" => crate::docs_demo::apply(deck, item),
             "usage-demo" => deck.debug_usage = Some(debug_usage()),
             "projects-demo" => deck.debug_projects = Some(debug_projects()),

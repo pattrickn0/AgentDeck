@@ -709,7 +709,15 @@ pub(super) fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<
 
 /// O desenho do diff, com a identidade da rolagem escolhida por quem chama (cada documento do modo
 /// Documentos tem a sua) e, em `jump`, a linha do diff para onde rolar neste quadro.
-pub(super) fn diff_lines_at(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<HunkCtx>, acts: &mut Vec<Act>, id: Id, jump: Option<usize>) {
+pub(super) fn diff_lines_at(
+    ui: &mut Ui,
+    area: Rect,
+    diff: &GitDiff,
+    hunks: Option<HunkCtx>,
+    acts: &mut Vec<Act>,
+    id: Id,
+    jump: Option<usize>,
+) {
     let mut notes: Vec<&str> = Vec::new();
     if diff.binary {
         notes.push("Arquivo binário: o conteúdo não é mostrado.");

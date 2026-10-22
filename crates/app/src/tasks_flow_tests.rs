@@ -540,7 +540,10 @@ fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_
     std::fs::write(env.ws.join("a.rs"), "fn a() {}\nfn c() {}\n").expect("w");
     env.deck.docs_reload_files();
     assert!(matches!(env.doc_state(rs), DocState::Text(_)), "a leitura antiga continua na tela até a nova chegar");
-    env.pump("o arquivo relido", |d| matches!(d.docs.get(rs).map(|t| &t.state), Some(DocState::Text(t)) if t.lines.len() == 2 && t.lines[1] == "fn c() {}"));
+    env.pump(
+        "o arquivo relido",
+        |d| matches!(d.docs.get(rs).map(|t| &t.state), Some(DocState::Text(t)) if t.lines.len() == 2 && t.lines[1] == "fn c() {}"),
+    );
     // O arquivo que sumiu aparece como erro; o que voltou, lido de novo.
     std::fs::write(env.ws.join("sumiu.txt"), "voltei\n").expect("w");
     env.deck.docs_reload_files();
@@ -610,4 +613,80 @@ fn the_task_request_and_report_open_as_markdown_from_the_loaded_task() {
     env.deck.docs_reload(report);
     assert!(matches!(env.doc_state(report), DocState::Markdown(_)));
     assert_eq!(env.deck.docs.view, CenterView::Docs);
+}
+
+#[test]
+fn reading_documents_keeps_the_terminals_running_unresized_and_marks_finished_turns_as_unseen() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    // A pintura usa as fontes do app (a família `ui-semibold`…).
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    let id = env.create_from_form("Agente que trabalha", true);
+    env.pump("a aba do agente", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+    let project = env.project();
+    let instance = env.task(&id).instance;
+    let frame = |env: &mut Env, w: f32, h: f32| {
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, h))), ..Default::default() };
+        let Env { deck, ctx, .. } = env;
+        let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+        out.textures_delta.clear();
+    };
+    let tab = |env: &Env| env.deck.tabs.iter().position(|t| t.project == project && t.ident.id() == instance).expect("aba");
+
+    // Com os agentes à vista, o terminal se ajusta ao centro e o PTY muda depois do tamanho parado.
+    frame(&mut env, 1280.0, 860.0);
+    let i = tab(&env);
+    assert!(env.deck.tabs[i].resize_pending(), "o terminal pede o tamanho do centro");
+    env.pump("o PTY mudar de tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+    let size = env.deck.tabs[i].session.size();
+
+    // Lendo documentos: a janela muda de tamanho e o PTY não é tocado (nem com o centro escondido, nem a zero).
+    env.deck.docs_open_file("a.txt");
+    env.deck.before_frame(&env.ctx);
+    assert_eq!(env.deck.docs.view, CenterView::Docs);
+    assert!(!env.deck.term_focus, "o terminal não recebe o teclado enquanto está escondido");
+    frame(&mut env, 900.0, 600.0);
+    frame(&mut env, 1100.0, 700.0);
+    let i = tab(&env);
+    assert!(!env.deck.tabs[i].resize_pending(), "nenhum redimensionamento pedido com o terminal escondido");
+    assert_eq!(env.deck.tabs[i].session.size(), size);
+
+    // O agente termina um turno enquanto se lê: conta como não visto, mesmo sendo a aba ativa.
+    assert_eq!(env.deck.agents_badge(), crate::docs::Badge::default());
+    env.deck.on_agent_signal(&project, &instance, true);
+    assert_eq!(env.deck.agents_badge(), crate::docs::Badge { done: 0, busy: 1 });
+    env.deck.on_agent_signal(&project, &instance, false);
+    assert!(env.deck.tabs[i].done);
+    assert_eq!(env.deck.agents_badge(), crate::docs::Badge { done: 1, busy: 0 });
+    // Ativar a aba sem sair dos documentos (ex.: um anexo) não a dá como vista.
+    env.deck.activate(i);
+    assert!(env.deck.tabs[i].done && !env.deck.term_focus);
+
+    // Voltar aos agentes (a chave, o atalho ou clicar num agente): a aba ativa é vista e o terminal recebe o teclado.
+    env.deck.show_agents();
+    env.deck.before_frame(&env.ctx);
+    assert!(!env.deck.tabs[i].done && env.deck.term_focus);
+    frame(&mut env, 1100.0, 700.0);
+    assert!(env.deck.tabs[tab(&env)].resize_pending(), "ao voltar, o terminal se ajusta ao tamanho novo");
+
+    // O atalho alterna (só com documentos abertos) e Ctrl+Tab passa pelos documentos no modo Documentos.
+    env.deck.push_action(crate::deck::Action::ToggleCenter);
+    env.deck.before_frame(&env.ctx);
+    assert_eq!(env.deck.docs.view, CenterView::Docs);
+    env.deck.docs_open_file("b.txt");
+    let second = env.deck.docs.current_uid(&project);
+    env.deck.push_action(crate::deck::Action::CycleTab { back: false });
+    env.deck.before_frame(&env.ctx);
+    assert_ne!(env.deck.docs.current_uid(&project), second);
+    env.deck.push_action(crate::deck::Action::ToggleCenter);
+    env.deck.before_frame(&env.ctx);
+    assert_eq!(env.deck.docs.view, CenterView::Agents);
 }

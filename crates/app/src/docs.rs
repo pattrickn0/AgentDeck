@@ -37,12 +37,20 @@ pub enum MdSource {
 pub enum DocKind {
     /// O diff da tarefa: o da branch (`merged` falso) ou, depois da mesclagem, o que ela trouxe. Os dois são
     /// documentos diferentes: a tarefa que muda de estado não volta ao diff antigo.
-    TaskDiff { id: String, merged: bool },
+    TaskDiff {
+        id: String,
+        merged: bool,
+    },
     /// O diff de um commit (hash completo).
     CommitDiff(String),
     /// O diff de um arquivo alterado (caminho a partir da raiz do repositório), no lado preparado ou no não
     /// preparado; `orig` é o nome antigo de um renomeado.
-    FileDiff { path: String, orig: Option<String>, staged: bool, untracked: bool },
+    FileDiff {
+        path: String,
+        orig: Option<String>,
+        staged: bool,
+        untracked: bool,
+    },
     /// Um arquivo de texto do projeto (caminho relativo).
     File(String),
     Markdown(MdSource),
@@ -165,10 +173,14 @@ impl DocTab {
                 }
                 DocState::Diff(doc)
             }
-            Loaded::Text(Ok(TextFile::TooLarge(bytes))) => {
-                DocState::Unreadable(format!("O arquivo tem {} e passa do limite de {}. Abra no programa padrão.", size_label(bytes), size_label(READ_TEXT_MAX)))
+            Loaded::Text(Ok(TextFile::TooLarge(bytes))) => DocState::Unreadable(format!(
+                "O arquivo tem {} e passa do limite de {}. Abra no programa padrão.",
+                size_label(bytes),
+                size_label(READ_TEXT_MAX)
+            )),
+            Loaded::Text(Ok(TextFile::Binary)) => {
+                DocState::Unreadable("O arquivo é binário: o conteúdo não aparece aqui. Abra no programa padrão.".into())
             }
-            Loaded::Text(Ok(TextFile::Binary)) => DocState::Unreadable("O arquivo é binário: o conteúdo não aparece aqui. Abra no programa padrão.".into()),
             Loaded::Text(Ok(TextFile::Text(text))) if matches!(self.kind, DocKind::Markdown(_)) => DocState::Markdown(text),
             Loaded::Text(Ok(TextFile::Text(text))) => DocState::Text(TextDoc::new(&text)),
         };
@@ -334,9 +346,11 @@ pub struct Badge {
 impl Badge {
     /// De `(done, busy)` de cada aba do projeto.
     pub fn of(tabs: impl IntoIterator<Item = (bool, bool)>) -> Self {
-        tabs.into_iter().fold(Self::default(), |b, (done, busy)| Self { done: b.done + usize::from(done), busy: b.busy + usize::from(busy) })
+        tabs.into_iter()
+            .fold(Self::default(), |b, (done, busy)| Self { done: b.done + usize::from(done), busy: b.busy + usize::from(busy) })
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.done == 0 && self.busy == 0
     }
@@ -350,7 +364,9 @@ pub fn diff_files(diff: &GitDiff) -> Vec<DiffFile> {
     for (i, line) in diff.lines.iter().enumerate() {
         if line.kind == DiffKind::Meta {
             let t = line.text.trim_end_matches('\r');
-            if let Some(rest) = t.strip_prefix("diff --git ").or_else(|| t.strip_prefix("diff --cc ")).or_else(|| t.strip_prefix("diff --combined ")) {
+            if let Some(rest) =
+                t.strip_prefix("diff --git ").or_else(|| t.strip_prefix("diff --cc ")).or_else(|| t.strip_prefix("diff --combined "))
+            {
                 in_header = true;
                 files.push(DiffFile { path: header_path(rest, t.starts_with("diff --git ")), status: 'M', added: 0, removed: 0, line: i });
                 continue;
@@ -497,7 +513,13 @@ impl Deck {
 
     /// O diff de um arquivo alterado da aba Git (só leitura; o preparo por trecho continua na barra direita).
     pub fn docs_open_file_diff(&mut self, entry: &GitEntry, staged: bool) {
-        let side = if staged { "preparado" } else if entry.kind == EntryKind::Untracked { "não rastreado" } else { "não preparado" };
+        let side = if staged {
+            "preparado"
+        } else if entry.kind == EntryKind::Untracked {
+            "não rastreado"
+        } else {
+            "não preparado"
+        };
         let title = format!("{} · diff", file_name(&entry.path));
         let subtitle = format!("{}  · {side}", entry.path);
         let kind = DocKind::FileDiff {

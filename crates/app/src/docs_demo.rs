@@ -195,7 +195,13 @@ pub fn apply(deck: &mut Deck, item: &str) {
         "memory/MANUTENCAO.md",
         DocState::Markdown(README.into()),
     );
-    open(deck, DocKind::File("crates/core/src/workspace.rs".into()), "workspace.rs", "crates/core/src/workspace.rs", DocState::Text(TextDoc::new(FILE)));
+    open(
+        deck,
+        DocKind::File("crates/core/src/workspace.rs".into()),
+        "workspace.rs",
+        "crates/core/src/workspace.rs",
+        DocState::Text(TextDoc::new(FILE)),
+    );
     open(
         deck,
         DocKind::TaskDiff { id: "t19".into(), merged: false },

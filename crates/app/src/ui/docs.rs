@@ -8,7 +8,7 @@ use super::panes::HEAD_H;
 use super::tabs::{self, Item, Lead, StripClick, StripKind};
 use super::{clickable, frame, galley, galley_trunc, place, text_in, text_w, tip};
 use crate::deck::Deck;
-use crate::docs::{file_name, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, MdSource, TextDoc};
+use crate::docs::{file_name, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, TextDoc};
 use crate::theme;
 
 /// Altura da linha com o título do documento e as ações dele.
@@ -53,7 +53,13 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
     let pill_text = (badge.done > 0).then(|| if badge.done > 99 { "99+".to_owned() } else { badge.done.to_string() });
     let pill_w = pill_text.as_ref().map_or(0.0, |t| (text_w(painter, t, theme::ui(10.0)) + 8.0).max(14.0));
     let pulse = badge.done == 0 && badge.busy > 0 && view == CenterView::Docs;
-    let selo_w = if pill_text.is_some() { pill_w + 6.0 } else if pulse { 14.0 } else { 0.0 };
+    let selo_w = if pill_text.is_some() {
+        pill_w + 6.0
+    } else if pulse {
+        14.0
+    } else {
+        0.0
+    };
     let agents_w = text_w(painter, agents_label, font.clone()) + selo_w + 2.0 * SEG_PAD;
     let docs_w = text_w(painter, &docs_label, font.clone()) + 2.0 * SEG_PAD;
 
@@ -87,7 +93,8 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
         } else {
             r
         };
-        let (label, align) = if which == Switched::Agents { (agents_label, Align2::LEFT_CENTER) } else { (docs_label.as_str(), Align2::CENTER_CENTER) };
+        let (label, align) =
+            if which == Switched::Agents { (agents_label, Align2::LEFT_CENTER) } else { (docs_label.as_str(), Align2::CENTER_CENTER) };
         text_in(painter, text_r, align, label, font.clone(), color);
         if which == Switched::Agents {
             let x = r.max.x - SEG_PAD - selo_w + 6.0;
@@ -239,13 +246,22 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
     let cy = sub.min.y + (SUBHEAD_H - 1.0) / 2.0;
     if let Some(path) = tab.kind.file_path() {
         let label = "Abrir no programa padrão";
-        if action_button(ui, &painter, &mut right, cy, label, "Abre o arquivo no programa que o Windows associou a ele", Id::new(("doc-open", tab.uid))) {
+        if action_button(
+            ui,
+            &painter,
+            &mut right,
+            cy,
+            label,
+            "Abre o arquivo no programa que o Windows associou a ele",
+            Id::new(("doc-open", tab.uid)),
+        ) {
             acts.push(Act::OpenExternal(path.to_owned()));
         }
     }
     if tab.kind.reloadable() {
         let loading = matches!(tab.state, DocState::Loading);
-        if action_button(ui, &painter, &mut right, cy, "Recarregar", "Lê o documento de novo", Id::new(("doc-reload", tab.uid))) && !loading {
+        if action_button(ui, &painter, &mut right, cy, "Recarregar", "Lê o documento de novo", Id::new(("doc-reload", tab.uid))) && !loading
+        {
             acts.push(Act::Reload(tab.uid));
         }
     }
