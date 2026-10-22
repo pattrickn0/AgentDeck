@@ -180,6 +180,27 @@ A aba **GitHub** mostra o repositório do remoto `origin` do projeto ativo (sem 
 - sem guardar token: usa o login do Git Credential Manager (o mesmo do `git push`) ou o `gh`, se estiver instalado;
   sem login só lê repositórios públicos (60 consultas por hora). Atualiza ao abrir a aba (cache de 60 s) e pelo botão.
 
+### A ponte HTTP em resumo
+
+O `ask-agent` é um cliente da ponte local; o contrato completo (corpos, códigos HTTP, permissões) está em
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
+| Rota | Para que serve | Comando |
+| :-- | :-- | :-- |
+| `GET /agents` | agentes instalados e instâncias abertas, com o modelo | `--list` |
+| `GET /models[?agent=]` | inventário dos modelos de cada agente | `--models` |
+| `GET /team` | o seu chefe e a sua equipe | `--team` |
+| `POST /ask` | pergunta a um agente (abre a aba se preciso) | `<agente> "msg"`, `--new`, `--model`, `--boss` |
+| `POST /reply` | responde a uma pergunta pendente | `--reply <n>` |
+| `POST /signal` | início e fim de turno (hooks) | `--signal` |
+| `POST /usage` | uso do plano (statusline do Claude) | `--usage` |
+| `POST /learn` | o que o projeto já aprendeu | `--learn` |
+| `GET /tasks`, `GET /tasks/<id>` | lista e detalhe das tarefas | `--task list`, `--task show` |
+| `POST /tasks` | cria uma tarefa (e a inicia, com `start`) | `--task new` |
+| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | inicia, mescla, valida e descarta | `--task start`, `merge`, `validate`, `discard` |
+| `POST /tasks/<id>/done` | o agente entrega o relatório | `--task done` |
+| `POST /tasks/<id>/return`, `/reject` | devolve (em revisão) ou reprova (aguardando validação) com feedback | `--task return`, `--task reject` |
+
 ### Limites e proteções
 
 | Regra | Valor |
@@ -268,8 +289,8 @@ Cada documento cuida de um assunto. Mudou o assunto? Atualize o documento **no m
 | `README.md` (raiz) | apresentação, como compilar e rodar, exemplos de `ask-agent` | fica na raiz porque o GitHub mostra na página do repositório |
 | `CONTRIBUTING.md` (raiz) | como contribuir e os **princípios do projeto** | rodar `cargo fmt`, `clippy -D warnings` e `cargo test` antes do PR; privacidade; UI nunca trava; textos em pt-BR. Fica na raiz porque o GitHub o mostra ao abrir PRs |
 | `AGENTS.md` (raiz) e `workspace/AGENTS.md` | instruções lidas pelos CLIs de agentes | **gerados pelo app**: o bloco entre `<!-- commanddeck:start -->` e `<!-- commanddeck:end -->` é reescrito a cada início; edite só fora dele. Ficam na raiz da pasta de trabalho porque é lá que os CLIs os procuram |
-| `workspace/README.md` | o que é a pasta de trabalho dos agentes | isolamento: os agentes trabalham ali, não nos arquivos do app |
-| `dados/README.md` | o que vai em `dados/` | privacidade: áudio apagado após transcrever, retenção só das últimas sessões, nada versionado |
+| `workspace/README.md` | o que é a pasta `workspace/` (o workspace antigo e o `AGENTS.md` do app) | isolamento: os agentes trabalham na pasta do projeto ou da tarefa, não nos arquivos do app |
+| `dados/README.md` | o que vai em `dados/` (anexos, prompts, tarefas, hooks, `crash.log`) | privacidade: áudio apagado após transcrever, retenção só das últimas sessões, nada versionado |
 | `whisper/README.md`, `whisper/models/README.md` | motor e modelos do ditado | ficam ao lado dos binários e modelos que descrevem |
 | `LICENSE` | licença MIT | não editar |
 
