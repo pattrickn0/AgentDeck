@@ -667,7 +667,7 @@ pub fn classify_error(stderr: &str) -> GitError {
     if low.contains("permission denied (publickey") || low.contains("sign_and_send_pubkey") || low.contains("no mutual signature algorithm")
     {
         return GitError::Auth(format!(
-            "{short}\nSe a sua chave SSH tem senha, o CommandDeck não consegue perguntá-la: carregue a chave no ssh-agent e tente de novo.\n• Windows (PowerShell; na primeira vez como administrador): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add"
+            "{short}\nSe a sua chave SSH tem senha, o AgentDeck não consegue perguntá-la: carregue a chave no ssh-agent e tente de novo.\n• Windows (PowerShell; na primeira vez como administrador): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add"
         ));
     }
     if low.contains("authentication failed")
@@ -682,7 +682,7 @@ pub fn classify_error(stderr: &str) -> GitError {
     // `commit.gpgsign` com a chave travada ou sem agente/pinentry que consiga perguntar a senha.
     if low.contains("gpg failed to sign") || low.contains("no pinentry") || low.contains("inappropriate ioctl for device") {
         return GitError::Failed(format!(
-            "O commit não foi feito: a assinatura GPG (commit.gpgsign) precisa da chave destravada, e o CommandDeck não consegue abrir o pedido de senha. Destrave a chave numa aba de terminal (echo teste | gpg --clearsign) e tente de novo em seguida; a senha fica no gpg-agent por alguns minutos. Se não quiser assinar neste repositório: git config commit.gpgsign false
+            "O commit não foi feito: a assinatura GPG (commit.gpgsign) precisa da chave destravada, e o AgentDeck não consegue abrir o pedido de senha. Destrave a chave numa aba de terminal (echo teste | gpg --clearsign) e tente de novo em seguida; a senha fica no gpg-agent por alguns minutos. Se não quiser assinar neste repositório: git config commit.gpgsign false
 {short}"
         ));
     }
@@ -870,7 +870,7 @@ impl Repo {
             cmd.args(["-u", &k]);
         }
         cmd.env("LC_ALL", "C").env("GPG_TTY", "not a tty").env("PINENTRY_USER_DATA", "USE_CURSES=0");
-        match run_captured_raw(cmd, Some(b"commanddeck".to_vec()), Duration::from_secs(5), None, None, 64 << 10) {
+        match run_captured_raw(cmd, Some(b"agentdeck".to_vec()), Duration::from_secs(5), None, None, 64 << 10) {
             Ok(out) if matches!(out.exit, Exit::Code(Some(0))) => Ok(()),
             Ok(out) if matches!(out.exit, Exit::TimedOut) => {
                 Err(classify_error("error: gpg failed to sign the data (no response from gpg-agent)"))
@@ -1535,7 +1535,7 @@ impl Core {
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("tmp");
-    let tmp = parent.join(format!(".{name}.commanddeck-tmp"));
+    let tmp = parent.join(format!(".{name}.agentdeck-tmp"));
     std::fs::write(&tmp, bytes)?;
     if let Err(e) = std::fs::rename(&tmp, path) {
         // No Windows, `rename` por cima de arquivo existente às vezes exige remover ou tentar de novo.

@@ -31,7 +31,7 @@ dados/prompts/*
 dados/sessions.json
 dados/hooks/
 dados/tarefas/
-dados/.commanddeck.lock
+dados/.agentdeck.lock
 !dados/README.md
 
 # Logs e variáveis de ambiente locais

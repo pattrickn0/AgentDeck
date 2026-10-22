@@ -1,6 +1,7 @@
 //! Ponte HTTP local agente → agente (equivalente a `startBridge`).
 //!
-//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-commanddeck-token` e valida o
+//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-agentdeck-token` (aceita também o
+//! nome antigo, `x-commanddeck-token`, de uma aba aberta pela versão anterior) e valida o
 //! cabeçalho `Host` contra DNS rebinding. Cada processo de agente recebe um token próprio, e é o
 //! token que diz quem está perguntando (o `from` do corpo só vale com o token mestre, usado em
 //! testes). Requisições para o mesmo par `de->para` são atendidas em ordem de chegada (fila FIFO
@@ -179,14 +180,20 @@ fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
     req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
 }
 
+/// Cabeçalho do token: `x-agentdeck-token` ou, na falta dele, o nome antigo `x-commanddeck-token`
+/// (uma aba aberta pela versão anterior; ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`).
+fn token_header(req: &Request) -> &str {
+    ["x-agentdeck-token", "x-commanddeck-token"].iter().filter_map(|name| header(req, name)).find(|v| !v.is_empty()).unwrap_or("")
+}
+
 /// Atende uma requisição. `port` é a porta da ponte (conhecida antes da primeira requisição: o
 /// `Host` é validado desde o início) e `slot` a vaga dela entre as [`MAX_ACTIVE`].
 fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodies: &Arc<AtomicU64>) {
     let Some(inner) = weak.upgrade() else {
-        return reply(req, 503, json!({ "error": "CommandDeck encerrando" }));
+        return reply(req, 503, json!({ "error": "AgentDeck encerrando" }));
     };
     let core = Core { inner };
-    let Some(auth) = core.authenticate(header(&req, "x-commanddeck-token").unwrap_or("")) else {
+    let Some(auth) = core.authenticate(token_header(&req)) else {
         return reply(req, 403, json!({ "error": "token inválido" }));
     };
     // Validação de Host contra DNS rebinding (sem Host também é recusado).
@@ -495,7 +502,7 @@ fn usage(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
 fn tab_prompt(from: &str, request: u64, message: &str) -> String {
     let message = terminal_text(message);
     format!(
-        "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\n\
+        "[Mensagem do agente \"{from}\" recebida pelo AgentDeck]\n\n{message}\n\n\
 Responda executando no shell: ask-agent --reply {request} \"sua resposta\"\n\
 (a resposta só chega a \"{from}\" por esse comando; texto escrito apenas aqui não é entregue. Em respostas longas ou com acentos, \
 escreva-as num arquivo e use: ask-agent --reply {request} --file <arquivo>). O usuário acompanha a conversa na Conversa integrada."
@@ -514,7 +521,7 @@ fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl 
             Ok(reply) => return Some(reply),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                 if core.inner.state.shutdown.load(Ordering::SeqCst) {
-                    return Some(Reply::Failed("CommandDeck encerrando".into()));
+                    return Some(Reply::Failed("AgentDeck encerrando".into()));
                 }
             }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return Some(Reply::Failed("pergunta cancelada".into())),
@@ -527,13 +534,13 @@ fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl 
 fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request: u64, outcome: Reply) {
     let prompt = match outcome {
         Reply::Answer(text) => format!(
-            "[Resposta do agente \"{target}\" à sua pergunta #{request}, recebida pelo CommandDeck]\n\n{}\n\n\
+            "[Resposta do agente \"{target}\" à sua pergunta #{request}, recebida pelo AgentDeck]\n\n{}\n\n\
 Continue a tarefa com base nesta resposta. O usuário acompanha a conversa na Conversa integrada.",
             terminal_text(&text)
         ),
         Reply::Failed(text) => {
             core.feed(FeedEntry::new(FeedKind::Error, Some(target), Some(&asker.id()), text.clone()).in_project(project));
-            format!("[CommandDeck] A pergunta #{request} para \"{target}\" ficou sem resposta: {}", terminal_text(&text))
+            format!("[AgentDeck] A pergunta #{request} para \"{target}\" ficou sem resposta: {}", terminal_text(&text))
         }
     };
     core.emit(CoreEvent::Deliver(Delivery {
@@ -837,7 +844,7 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
 
     caller.feed(core, FeedKind::Ask, from, &to, message.clone());
     let prompt = format!(
-        "[Mensagem do agente \"{from}\" recebida pelo CommandDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
+        "[Mensagem do agente \"{from}\" recebida pelo AgentDeck]\n\n{message}\n\nResponda diretamente ao agente \"{from}\". O usuário acompanha a conversa integrada em tempo real."
     );
     let session_key = format!("{}->{}", caller.key(from), caller.key(&to));
     let result = {
@@ -1070,7 +1077,7 @@ mod tests {
     #[test]
     fn the_tab_prompt_names_the_request() {
         let p = tab_prompt("claude@dev", 7, "faça\x1b[201~ x");
-        assert!(p.starts_with("[Mensagem do agente \"claude@dev\" recebida pelo CommandDeck]\n\nfaça[201~ x\n\n"), "{p}");
+        assert!(p.starts_with("[Mensagem do agente \"claude@dev\" recebida pelo AgentDeck]\n\nfaça[201~ x\n\n"), "{p}");
         assert!(p.contains("ask-agent --reply 7 \"sua resposta\""), "{p}");
         // O `ollama-agent` lê o número desta linha (`bridge_request`): mudou aqui, mude lá.
         assert!(p.contains("Responda executando no shell: ask-agent --reply 7 "), "{p}");

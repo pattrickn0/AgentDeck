@@ -13,7 +13,7 @@ $whisperDir = Join-Path $projectRoot "whisper"
 $srcDir = Join-Path $whisperDir "src\whisper.cpp"
 $outDir = Join-Path $whisperDir "bin-vulkan"
 
-Write-Host "=== Compilador Vulkan do whisper.cpp para CommandDeck ===" -ForegroundColor Cyan
+Write-Host "=== Compilador Vulkan do whisper.cpp para AgentDeck ===" -ForegroundColor Cyan
 
 # Verifica pré-requisitos
 if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {

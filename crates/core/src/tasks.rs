@@ -394,10 +394,10 @@ pub fn start_message(task: &Task, boss: Option<&str>, memory: &str) -> String {
         m => format!("{m}\n\n---\n"),
     };
     terminal_text(&format!(
-        "[CommandDeck · Tarefa {id}: {title}]\n\n{brief}\n\n---\n{memory}\
+        "[AgentDeck · Tarefa {id}: {title}]\n\n{brief}\n\n---\n{memory}\
 Regras da tarefa {id}:\n\
 - Trabalhe SOMENTE na pasta {wt}, na branch {branch} (criada a partir de {base}). Não mexa no repositório principal nem em outras pastas.\n\
-- Faça commits pequenos nessa branch. Não faça merge nem push: quem mescla é o CommandDeck, depois da revisão.\n\
+- Faça commits pequenos nessa branch. Não faça merge nem push: quem mescla é o AgentDeck, depois da revisão.\n\
 - Não peça a ninguém (outro agente ou o usuário) que mescle ou rode ask-agent --task merge: a decisão é de quem revisa. O seu trabalho termina no --task done.\n\
 - Antes de mexer num arquivo pela primeira vez, rode ask-agent --learn <arquivo> (mostra o que o projeto já aprendeu sobre ele).\n\
 - Se descobrir algo não óbvio que o próximo agente precisaria saber (armadilha, decisão, convenção), crie um arquivo em memory/aprendizados/ nesta branch (formato em memory/aprendizados/README.md) e cite-o no relatório: ele passa pela mesma revisão e mescla que o código.\n\
@@ -418,7 +418,7 @@ Comece agora, por conta própria: este brief é a sua ordem de trabalho. Não es
 /// A mensagem que devolve a tarefa ao agente com o feedback da revisão.
 pub fn return_message(task: &Task, feedback: &str, learnings: &str) -> String {
     terminal_text(&format!(
-        "[CommandDeck · Tarefa {id}: {title} — ajustes pedidos na revisão]\n\n{feedback}\n\n{history}{learned}---\n\
+        "[AgentDeck · Tarefa {id}: {title} — ajustes pedidos na revisão]\n\n{feedback}\n\n{history}{learned}---\n\
 Continue na mesma pasta ({wt}) e na branch {branch}, com commits pequenos. Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
 (entregar por arquivo preserva os acentos).",
         id = task.id,
@@ -443,7 +443,7 @@ pub fn reject_message(task: &Task, feedback: &str, aligned: bool, learnings: &st
         )
     };
     terminal_text(&format!(
-        "[CommandDeck · Tarefa {id}: {title} — reprovada na validação]\n\n\
+        "[AgentDeck · Tarefa {id}: {title} — reprovada na validação]\n\n\
 O seu trabalho anterior já foi mesclado em {base}, mas o usuário testou e reprovou pelo seguinte motivo:\n\n{feedback}\n\n{history}{learned}---\n\
 Corrija na mesma pasta ({wt}) e na mesma branch {branch}, com commits pequenos.{align} Ao terminar, escreva o relatório em um arquivo e rode de novo ask-agent --task done {id} --file <arquivo> \
 (entregar por arquivo preserva os acentos).",
@@ -1725,7 +1725,7 @@ mod tests {
     #[test]
     fn the_start_message_carries_the_brief_and_the_rules() {
         let m = start_message(&sample(), Some("claude"), "");
-        assert!(m.starts_with("[CommandDeck · Tarefa t3: Corrigir o login]\n\nFaça X.\n\nDepois Y."), "{m}");
+        assert!(m.starts_with("[AgentDeck · Tarefa t3: Corrigir o login]\n\nFaça X.\n\nDepois Y."), "{m}");
         assert!(m.contains("SOMENTE na pasta") && m.contains("tarefa/t3-corrigir-o-login") && m.contains("criada a partir de main"), "{m}");
         assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(m.contains("Não faça merge nem push"), "{m}");

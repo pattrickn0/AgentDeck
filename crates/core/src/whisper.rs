@@ -24,7 +24,7 @@ const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/ma
 /// SHA-256 do modelo: bate com o ETag LFS do Hugging Face.
 const MODEL_SHA256: &str = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69";
 /// Vocabulário que orienta o reconhecimento de nomes próprios.
-pub const WHISPER_PROMPT: &str = "CommandDeck Terminal, Claude, Antigravity, agy, Claude Code, Ollama, Codex, OpenCode, Aider, Goose, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.";
+pub const WHISPER_PROMPT: &str = "AgentDeck, Claude, Antigravity, agy, Claude Code, Ollama, Codex, OpenCode, Aider, Goose, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.";
 pub const UNAVAILABLE: &str = "indisponível";
 const NOT_READY: &str = "a transcrição local ainda não está pronta (veja a Conversa integrada)";
 const NO_SPEECH: &str = "nenhuma fala detectada";

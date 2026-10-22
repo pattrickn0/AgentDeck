@@ -5,7 +5,7 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
-use commanddeck_core::{models, Task, TaskStatus};
+use agentdeck_core::{models, Task, TaskStatus};
 
 use super::{clickable, frame, galley, galley_trunc, place, shadow, text_in, text_w, tip};
 use crate::deck::Deck;
@@ -65,7 +65,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     ui.painter().rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
     let rect = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.max.y - 1.0));
     let mut acts = Vec::new();
-    let now = commanddeck_core::util::now_ms();
+    let now = agentdeck_core::util::now_ms();
     match deck.tasks.view.clone() {
         TasksView::List => list_view(deck, ui, rect, now, &mut acts),
         TasksView::Detail(id) => match deck.tasks.task(&id).cloned() {
@@ -821,7 +821,7 @@ fn stat_box(ui: &mut Ui, stat: &str) {
 }
 
 /// Eventos (do mais novo): data e hora, e o texto ao lado.
-fn history(ui: &mut Ui, events: &[&commanddeck_core::TaskEvent]) {
+fn history(ui: &mut Ui, events: &[&agentdeck_core::TaskEvent]) {
     if events.is_empty() {
         muted_line(ui, "Nada registrado ainda.");
         return;

@@ -1,7 +1,7 @@
-//! CommandDeck Terminal — interface nativa (winit 0.30 + glutin/glow + egui).
+//! AgentDeck — interface nativa (winit 0.30 + glutin/glow + egui).
 //!
 //! Porta de `renderer/` + `preload.js` da versão Electron. O backend fica em
-//! `commanddeck_core::Core`; esta crate cuida da janela, dos terminais (PTY + emulação VT),
+//! `agentdeck_core::Core`; esta crate cuida da janela, dos terminais (PTY + emulação VT),
 //! da árvore de arquivos, da "Conversa integrada", do compositor e do áudio.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -28,8 +28,8 @@ mod ui;
 mod util;
 mod window;
 
-use commanddeck_core::paths::AppPaths;
-use commanddeck_core::Core;
+use agentdeck_core::paths::AppPaths;
+use agentdeck_core::Core;
 use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {

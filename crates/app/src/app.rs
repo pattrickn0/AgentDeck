@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use commanddeck_core::{Core, CoreEvent};
+use agentdeck_core::{Core, CoreEvent};
 use crossbeam_channel::Receiver;
 use glow::HasContext;
 use parking_lot::Mutex;
@@ -90,7 +90,7 @@ impl App {
                 // Sem console no Windows: sem a caixa, o app só fecharia sem explicação.
                 rfd::MessageDialog::new()
                     .set_level(rfd::MessageLevel::Error)
-                    .set_title("CommandDeck")
+                    .set_title("AgentDeck")
                     .set_description(format!("{e:#}"))
                     .set_buttons(rfd::MessageButtons::Ok)
                     .show();
@@ -100,7 +100,7 @@ impl App {
         };
         core.set_waker(Self::waker(&self.proxy));
         // SOMENTE DEPURAÇÃO: grava porta e token da ponte para testes ponta a ponta com `ask-agent`.
-        if let Some(file) = std::env::var_os("COMMANDDECK_DEBUG_BRIDGE") {
+        if let Some(file) = agentdeck_core::env_var_os("DEBUG_BRIDGE") {
             let _ = std::fs::write(file, format!("{}\n{}\n", core.bridge_port(), core.bridge_token()));
         }
         // Tamanho salvo da janela (a janela abre antes de a configuração ser lida).
@@ -112,7 +112,7 @@ impl App {
         }
         // SOMENTE DEPURAÇÃO: capturas e estados fictícios não gravam na configuração (um "empty" ou
         // "sidebar-collapsed" ficaria salvo e apagaria as abas de verdade).
-        if self.smoke.is_some() || std::env::var_os("COMMANDDECK_DEBUG_UI").is_some() {
+        if self.smoke.is_some() || agentdeck_core::env_var_os("DEBUG_UI").is_some() {
             core.disable_config_writes();
         }
         let mut deck = Deck::new(core.clone(), events, Self::waker(&self.proxy));
@@ -182,8 +182,8 @@ impl App {
         if self.frames == 1 {
             glw.window.set_visible(true);
         }
-        // Captura (COMMANDDECK_SMOKE) não baixa o whisper: cada pasta temporária começaria 1,6 GB.
-        if self.frames == self.core_frame && std::env::var_os("COMMANDDECK_SMOKE").is_none() {
+        // Captura (AGENTDECK_SMOKE) não baixa o whisper: cada pasta temporária começaria 1,6 GB.
+        if self.frames == self.core_frame && agentdeck_core::env_var_os("SMOKE").is_none() {
             // Modelos/binários do whisper em segundo plano, depois do primeiro quadro.
             if let Some(core) = &self.core {
                 core.ensure_whisper_async();
@@ -214,7 +214,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let (w, h) = (1280.0f64, 860.0f64);
         let attrs = WindowAttributes::default()
-            .with_title("CommandDeck")
+            .with_title("AgentDeck")
             // A barra de título é desenhada pela interface (`ui/titlebar.rs`).
             .with_decorations(false)
             .with_inner_size(winit::dpi::LogicalSize::new(w, h))
@@ -396,7 +396,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: projetos fictícios na barra lateral (`COMMANDDECK_DEBUG_UI=projects-demo`): um ativo com
+/// SOMENTE DEPURAÇÃO: projetos fictícios na barra lateral (`AGENTDECK_DEBUG_UI=projects-demo`): um ativo com
 /// três agentes (um ocupado), outro com um, outro vazio.
 fn debug_projects() -> Vec<crate::deck::ProjectView> {
     use crate::deck::{AgentBadge, ProjectView};
@@ -443,11 +443,11 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
     ]
 }
 
-/// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`COMMANDDECK_DEBUG_UI=usage-demo`): Claude no meio
+/// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`AGENTDECK_DEBUG_UI=usage-demo`): Claude no meio
 /// da sessão, Antigravity com a semana esgotada (anel vermelho), Ollama local e Codex sem dados.
-fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsage> {
-    use commanddeck_core::{AgentUsage, UsageWindow};
-    let now = commanddeck_core::util::now_ms();
+fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage> {
+    use agentdeck_core::{AgentUsage, UsageWindow};
+    let now = agentdeck_core::util::now_ms();
     let w = |used, hours: u64| Some(UsageWindow { used, resets_at_ms: Some(now + hours * 3_600_000) });
     std::collections::HashMap::from([
         ("claude".into(), AgentUsage { session: w(0.34, 2), weekly: w(0.12, 100), updated_ms: now - 60_000, local: false }),
@@ -456,10 +456,10 @@ fn debug_usage() -> std::collections::HashMap<String, commanddeck_core::AgentUsa
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
-    let Ok(v) = std::env::var("COMMANDDECK_DEBUG_UI") else { return };
+    let Some(v) = agentdeck_core::env_var("DEBUG_UI") else { return };
     for item in v.split(',').map(str::trim) {
         match item {
             "conversa" => deck.set_right_view(crate::deck::RightView::Conversa),
@@ -510,8 +510,8 @@ fn apply_debug_ui(deck: &mut Deck) {
                 deck.git.debug_hold = true;
                 let mut st = g::demo_conflicts_status();
                 if item == "git-rebase" {
-                    st.state = commanddeck_core::git::RepoState::Rebasing;
-                    st.entries.retain(|e| e.kind != commanddeck_core::git::EntryKind::Unmerged);
+                    st.state = agentdeck_core::git::RepoState::Rebasing;
+                    st.entries.retain(|e| e.kind != agentdeck_core::git::EntryKind::Unmerged);
                 }
                 if matches!(item, "git-history" | "git-commit" | "git-stash" | "git-stash-diff" | "git-hunks" | "git-branches-merge") {
                     st = g::demo_status();
@@ -603,13 +603,13 @@ fn apply_debug_ui(deck: &mut Deck) {
             "github-norepo" => {
                 deck.github.debug_hold = true;
                 deck.set_right_view(crate::deck::RightView::GitHub);
-                deck.github.view = crate::github_ui::GithubView::Error(commanddeck_core::github::GithubError::NoRemote);
+                deck.github.view = crate::github_ui::GithubView::Error(agentdeck_core::github::GithubError::NoRemote);
             }
             "github-error" => {
                 deck.github.debug_hold = true;
                 deck.set_right_view(crate::deck::RightView::GitHub);
-                deck.github.view = crate::github_ui::GithubView::Error(commanddeck_core::github::GithubError::NotFound {
-                    repo: "pattr/commanddeck".into(),
+                deck.github.view = crate::github_ui::GithubView::Error(agentdeck_core::github::GithubError::NotFound {
+                    repo: "pattr/agentdeck".into(),
                     authenticated: false,
                 });
             }
@@ -675,7 +675,7 @@ fn apply_debug_ui(deck: &mut Deck) {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: estados fictícios da aba Tarefas (`COMMANDDECK_DEBUG_UI=tasks-*`), sem git nem core.
+/// SOMENTE DEPURAÇÃO: estados fictícios da aba Tarefas (`AGENTDECK_DEBUG_UI=tasks-*`), sem git nem core.
 fn debug_tasks(deck: &mut Deck, item: &str) {
     use crate::tasks_ui::{self as t, Confirm, FormMenu, TasksView};
     deck.set_right_view(crate::deck::RightView::Tarefas);
@@ -751,9 +751,9 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
     }
 }
 
-/// Progresso fictício para capturas de tela da barra de download (`COMMANDDECK_DEBUG_UI`).
-fn debug_download(kind: &str) -> commanddeck_core::DownloadProgress {
-    use commanddeck_core::{DownloadProgress, DownloadState};
+/// Progresso fictício para capturas de tela da barra de download (`AGENTDECK_DEBUG_UI`).
+fn debug_download(kind: &str) -> agentdeck_core::DownloadProgress {
+    use agentdeck_core::{DownloadProgress, DownloadState};
     let mut p = DownloadProgress {
         label: "Modelo large-v3-turbo".into(),
         state: DownloadState::Downloading,

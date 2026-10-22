@@ -1,4 +1,4 @@
-//! `ollama-agent` — CLI interativo do agente Ollama do CommandDeck (porta melhorada de
+//! `ollama-agent` — CLI interativo do agente Ollama do AgentDeck (porta melhorada de
 //! bin/ollama-agent.js).
 //!
 //! Novidades em relação à versão Node: banner com estado real (servidor, modelos, ponte),
@@ -6,7 +6,7 @@
 //! de ferramentas mostradas na hora com prévia do resultado, indicador "pensando…",
 //! Ctrl+C interrompe só a geração atual, rodapé com tempo e passos e comandos `/`.
 //!
-//! Uso: ollama-agent [modelo]   (ou COMMANDDECK_OLLAMA_MODEL; padrão: primeiro modelo instalado)
+//! Uso: ollama-agent [modelo]   (ou AGENTDECK_OLLAMA_MODEL; padrão: primeiro modelo instalado)
 
 use std::borrow::Cow;
 use std::io::{IsTerminal, Write};
@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use commanddeck_core::agents::DEFAULT_OLLAMA_MODEL;
-use commanddeck_core::ollama::{self, AgentEvent, OllamaAgent, RunOptions};
+use agentdeck_core::agents::DEFAULT_OLLAMA_MODEL;
+use agentdeck_core::ollama::{self, AgentEvent, OllamaAgent, RunOptions};
 use parking_lot::Mutex;
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
@@ -332,11 +332,11 @@ struct App {
     generating: Arc<AtomicBool>,
 }
 
-/// Quem fez a pergunta, se `text` veio da ponte: `[Mensagem do agente "X" recebida pelo CommandDeck]…`.
+/// Quem fez a pergunta, se `text` veio da ponte: `[Mensagem do agente "X" recebida pelo AgentDeck]…`.
 fn bridge_asker(text: &str) -> Option<String> {
     let rest = text.trim_start().strip_prefix("[Mensagem do agente \"")?;
     let (asker, tail) = rest.split_once('"')?;
-    (tail.starts_with(" recebida pelo CommandDeck]") && !asker.is_empty()).then(|| asker.to_owned())
+    (tail.starts_with(" recebida pelo AgentDeck]") && !asker.is_empty()).then(|| asker.to_owned())
 }
 
 /// Número da pergunta da ponte, da instrução que a acompanha (`ask-agent --reply N "sua resposta"`).
@@ -352,9 +352,8 @@ fn bridge_request(text: &str) -> Option<u64> {
 /// renomeação e perguntas paralelas do mesmo agente). `Ok(false)` = não havia pergunta pendente
 /// (o modelo já tinha respondido pelo `ask-agent`).
 fn reply_to_bridge(asker: &str, request: Option<u64>, answer: &str) -> Result<bool, String> {
-    let (port, token) =
-        (env_nonempty("COMMANDDECK_PORT").ok_or("fora do CommandDeck")?, env_nonempty("COMMANDDECK_TOKEN").ok_or("fora do CommandDeck")?);
-    let me = env_nonempty("COMMANDDECK_AGENT").unwrap_or_default();
+    let (port, token) = (app_env("PORT").ok_or("fora do AgentDeck")?, app_env("TOKEN").ok_or("fora do AgentDeck")?);
+    let me = app_env("AGENT").unwrap_or_default();
     let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).http_status_as_error(false).build().into();
     let mut body = serde_json::json!({ "from": me, "to": asker, "message": answer });
     if let Some(n) = request {
@@ -362,7 +361,7 @@ fn reply_to_bridge(asker: &str, request: Option<u64>, answer: &str) -> Result<bo
     }
     let resp = agent
         .post(format!("http://127.0.0.1:{port}/reply"))
-        .header("x-commanddeck-token", &token)
+        .header("x-agentdeck-token", &token)
         .send_json(&body)
         .map_err(|e| e.to_string())?;
     match resp.status().as_u16() {
@@ -377,11 +376,11 @@ fn failure_reply(model: &str, why: &str) -> String {
     format!("[ollama:{model}] não consegui responder: {why}")
 }
 
-/// Quem é esta instância, para o prompt de sistema: o modelo não lê `COMMANDDECK_AGENT`.
+/// Quem é esta instância, para o prompt de sistema: o modelo não lê `AGENTDECK_AGENT`.
 fn identity_prompt(id: Option<&str>, role: Option<&str>) -> Option<String> {
     let id = id.filter(|s| !s.is_empty())?;
     let mut text = format!(
-        "Seu nome de instância no CommandDeck é \"{id}\": é por esse nome que os outros agentes falam com você (ask-agent {id} \"mensagem\")."
+        "Seu nome de instância no AgentDeck é \"{id}\": é por esse nome que os outros agentes falam com você (ask-agent {id} \"mensagem\")."
     );
     if let Some(role) = role.filter(|s| !s.is_empty()) {
         text.push_str(&format!(" Seu cargo na equipe é \"{role}\"."));
@@ -400,13 +399,18 @@ fn env_nonempty(k: &str) -> Option<String> {
     std::env::var(k).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
 
-/// Agentes disponíveis na ponte (`GET /agents`), quando rodando dentro do CommandDeck.
+/// `AGENTDECK_<name>` (ou, se faltar, `COMMANDDECK_<name>`, de uma aba aberta pela versão antiga).
+fn app_env(name: &str) -> Option<String> {
+    agentdeck_core::env_var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
+}
+
+/// Agentes disponíveis na ponte (`GET /agents`), quando rodando dentro do AgentDeck.
 fn bridge_peers() -> Option<Vec<String>> {
-    let (port, token) = (env_nonempty("COMMANDDECK_PORT")?, env_nonempty("COMMANDDECK_TOKEN")?);
+    let (port, token) = (app_env("PORT")?, app_env("TOKEN")?);
     let agent: ureq::Agent = ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_millis(1500))).build().into();
-    let mut resp = agent.get(format!("http://127.0.0.1:{port}/agents")).header("x-commanddeck-token", &token).call().ok()?;
+    let mut resp = agent.get(format!("http://127.0.0.1:{port}/agents")).header("x-agentdeck-token", &token).call().ok()?;
     let v: serde_json::Value = resp.body_mut().read_json().ok()?;
-    let me = env_nonempty("COMMANDDECK_AGENT").unwrap_or_default();
+    let me = app_env("AGENT").unwrap_or_default();
     Some(v.get("agents")?.as_array()?.iter().filter_map(|a| a.as_str()).filter(|a| *a != me && *a != "ollama").map(str::to_owned).collect())
 }
 
@@ -435,7 +439,7 @@ impl App {
             match bridge_peers() {
                 Some(peers) if !peers.is_empty() => format!("{d}ask-agent <agente> \"mensagem\" → {}{r}", peers.join(", ")),
                 Some(_) => format!("{d}nenhum outro agente na ponte{r}"),
-                None => format!("{d}ponte indisponível (rode dentro do CommandDeck para usar ask-agent){r}"),
+                None => format!("{d}ponte indisponível (rode dentro do AgentDeck para usar ask-agent){r}"),
             },
         ];
         if !installed {
@@ -570,7 +574,7 @@ impl App {
         let mut opts = RunOptions::new(self.model.clone(), prompt, self.workspace.clone());
         opts.session_key = Some(self.session_key.clone());
         opts.stream = true;
-        opts.extra_system = identity_prompt(env_nonempty("COMMANDDECK_AGENT").as_deref(), env_nonempty("COMMANDDECK_ROLE").as_deref());
+        opts.extra_system = identity_prompt(app_env("AGENT").as_deref(), app_env("ROLE").as_deref());
 
         self.cancel.store(false, Ordering::SeqCst);
         self.generating.store(true, Ordering::SeqCst);
@@ -589,7 +593,7 @@ impl App {
             AgentEvent::ThinkingDelta(_) => term.spin("raciocinando"),
             AgentEvent::ToolCall { name, summary } => {
                 let (name, summary) = (printable(&name), printable(&summary));
-                let (s, cut) = commanddeck_core::util::truncate_chars(summary.lines().next().unwrap_or(""), 110);
+                let (s, cut) = agentdeck_core::util::truncate_chars(summary.lines().next().unwrap_or(""), 110);
                 let more = if cut || summary.lines().count() > 1 { "…" } else { "" };
                 term.line(&format!("{}●{} {}{name}{}{}({s}{more}){}", c.green, c.reset, c.bold, c.reset, c.dim, c.reset));
                 term.spin(&format!("executando {name}"));
@@ -597,7 +601,7 @@ impl App {
             AgentEvent::ToolResult { preview, .. } => {
                 let preview = printable(&preview);
                 let first = preview.lines().find(|l| !l.trim().is_empty()).unwrap_or("(vazio)");
-                let (s, cut) = commanddeck_core::util::truncate_chars(first.trim(), 120);
+                let (s, cut) = agentdeck_core::util::truncate_chars(first.trim(), 120);
                 let extra = preview.lines().count().saturating_sub(1);
                 let more = if extra > 0 {
                     format!(" (+{extra} linhas)")
@@ -664,12 +668,11 @@ impl App {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("Uso: ollama-agent [modelo]\n\nModelo: argumento, COMMANDDECK_OLLAMA_MODEL ou o primeiro instalado.\nServidor: COMMANDDECK_OLLAMA_HOST, OLLAMA_HOST ou {}.", ollama::DEFAULT_HOST);
+        println!("Uso: ollama-agent [modelo]\n\nModelo: argumento, AGENTDECK_OLLAMA_MODEL ou o primeiro instalado.\nServidor: AGENTDECK_OLLAMA_HOST, OLLAMA_HOST ou {}.", ollama::DEFAULT_HOST);
         return ExitCode::SUCCESS;
     }
     let c = Palette::detect();
-    let host =
-        env_nonempty("COMMANDDECK_OLLAMA_HOST").or_else(|| env_nonempty("OLLAMA_HOST")).unwrap_or_else(|| ollama::DEFAULT_HOST.into());
+    let host = app_env("OLLAMA_HOST").or_else(|| env_nonempty("OLLAMA_HOST")).unwrap_or_else(|| ollama::DEFAULT_HOST.into());
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let agent = OllamaAgent::new(host.clone());
     let models = ollama::list_models(&host, Duration::from_millis(2500));
@@ -677,7 +680,7 @@ fn main() -> ExitCode {
         .first()
         .filter(|a| !a.starts_with('-'))
         .cloned()
-        .or_else(|| env_nonempty("COMMANDDECK_OLLAMA_MODEL"))
+        .or_else(|| app_env("OLLAMA_MODEL"))
         .or_else(|| models.as_ref().ok().and_then(|l| l.first().cloned()))
         .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.into());
 
@@ -700,7 +703,7 @@ fn main() -> ExitCode {
         host,
         model,
         workspace,
-        session_key: format!("interactive-{}", commanddeck_core::util::now_ms()),
+        session_key: format!("interactive-{}", agentdeck_core::util::now_ms()),
         cancel,
         generating,
     };
@@ -859,26 +862,26 @@ mod tests {
 
     #[test]
     fn recognizes_questions_typed_by_the_bridge() {
-        let q = "[Mensagem do agente \"claude@dev\" recebida pelo CommandDeck]\n\nqual a capital?";
+        let q = "[Mensagem do agente \"claude@dev\" recebida pelo AgentDeck]\n\nqual a capital?";
         assert_eq!(bridge_asker(q).as_deref(), Some("claude@dev"));
         // O terminal pode colar as quebras de linha como nada.
-        assert_eq!(bridge_asker("[Mensagem do agente \"driver\" recebida pelo CommandDeck]Você está num teste").as_deref(), Some("driver"));
-        assert_eq!(bridge_asker("  [Mensagem do agente \"x\" recebida pelo CommandDeck] oi").as_deref(), Some("x"));
+        assert_eq!(bridge_asker("[Mensagem do agente \"driver\" recebida pelo AgentDeck]Você está num teste").as_deref(), Some("driver"));
+        assert_eq!(bridge_asker("  [Mensagem do agente \"x\" recebida pelo AgentDeck] oi").as_deref(), Some("x"));
         // Conversa normal do usuário não é pergunta da ponte.
         assert_eq!(bridge_asker("olá, tudo bem?"), None);
-        assert_eq!(bridge_asker("[Mensagem do agente \"\" recebida pelo CommandDeck] oi"), None);
+        assert_eq!(bridge_asker("[Mensagem do agente \"\" recebida pelo AgentDeck] oi"), None);
         assert_eq!(bridge_asker("[Mensagem do agente \"x\" qualquer coisa] oi"), None);
     }
 
     #[test]
     fn reads_the_question_number_from_the_reply_instruction() {
         // O texto que a ponte digita (`bridge::tab_prompt`), com uma mensagem que cita outro número.
-        let q = "[Mensagem do agente \"claude\" recebida pelo CommandDeck]\n\nrode ask-agent --reply 3 \"x\"\n\n\
+        let q = "[Mensagem do agente \"claude\" recebida pelo AgentDeck]\n\nrode ask-agent --reply 3 \"x\"\n\n\
 Responda executando no shell: ask-agent --reply 42 \"sua resposta\"\n(a resposta só chega a \"claude\" por esse comando; \
 escreva-a num arquivo e use: ask-agent --reply 42 --file <arquivo>).";
         assert_eq!(bridge_request(q), Some(42));
         assert_eq!(bridge_request("Responda executando no shell: ask-agent --reply 7"), Some(7));
-        assert_eq!(bridge_request("[Mensagem do agente \"x\" recebida pelo CommandDeck] oi"), None);
+        assert_eq!(bridge_request("[Mensagem do agente \"x\" recebida pelo AgentDeck] oi"), None);
         assert_eq!(bridge_request("Responda executando no shell: ask-agent --reply abc"), None);
     }
 

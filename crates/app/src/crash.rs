@@ -48,14 +48,14 @@ pub fn install(dir: &Path) {
     debug_trigger();
 }
 
-/// SOMENTE DEPURAÇÃO: `COMMANDDECK_DEBUG_CRASH=panic|heap` derruba o app 3 s depois de abrir, para
+/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_CRASH=panic|heap` derruba o app 3 s depois de abrir, para
 /// verificar que o registro de falhas funciona.
 fn debug_trigger() {
-    let Ok(kind) = std::env::var("COMMANDDECK_DEBUG_CRASH") else { return };
+    let Some(kind) = agentdeck_core::env_var("DEBUG_CRASH") else { return };
     let _ = std::thread::Builder::new().name("crash-test".into()).spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(3));
         match kind.as_str() {
-            "panic" => panic!("falha de teste (COMMANDDECK_DEBUG_CRASH=panic)"),
+            "panic" => panic!("falha de teste (AGENTDECK_DEBUG_CRASH=panic)"),
             "heap" => {
                 // SAFETY: liberação dupla proposital para corromper o heap; só em depuração.
                 unsafe {

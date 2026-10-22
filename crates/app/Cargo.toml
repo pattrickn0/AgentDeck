@@ -1,6 +1,6 @@
 [package]
-name = "commanddeck"
-description = "CommandDeck Terminal — interface nativa (winit + egui) que conecta agentes de IA."
+name = "agentdeck"
+description = "AgentDeck — interface nativa (winit + egui) que conecta agentes de IA."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ default = ["audio"]
 audio = ["dep:cpal"]
 
 [dependencies]
-commanddeck-core.workspace = true
+agentdeck-core.workspace = true
 anyhow.workspace = true
 parking_lot.workspace = true
 crossbeam-channel.workspace = true

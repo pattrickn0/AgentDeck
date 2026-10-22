@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use commanddeck_core::models::short_model;
+use agentdeck_core::models::short_model;
 
 use egui::{Align2, Color32, CursorIcon, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 

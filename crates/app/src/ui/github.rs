@@ -8,7 +8,7 @@
 //! O estado e as chamadas ao core ficam em `github_ui.rs`; aqui o desenho só coleta as ações e as
 //! aplica no fim, fora das closures que seguram o `Deck`.
 
-use commanddeck_core::github::{
+use agentdeck_core::github::{
     format_failed_job_prompt, format_issue_prompt, format_pr_prompt, CheckStatus, GithubError, GithubOverview, Issue, JobLog, PullRequest,
     WorkflowJob, WorkflowRun,
 };
@@ -1056,7 +1056,7 @@ mod tests {
         assert!(is_error_line("error[E0308]: mismatched types"));
         assert!(is_error_line("##[error]Process completed with exit code 101."));
         assert!(is_error_line("thread 'main' panicked at src/lib.rs:1:1"));
-        assert!(!is_error_line("   Compiling commanddeck v0.3.0"));
+        assert!(!is_error_line("   Compiling agentdeck v0.3.0"));
     }
 
     #[test]

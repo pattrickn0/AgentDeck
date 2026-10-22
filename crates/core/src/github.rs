@@ -778,7 +778,7 @@ fn non_interactive_git(git: &Path, cwd: &Path, args: &[&str]) -> Command {
 fn http_agent(follow_redirects: bool) -> ureq::Agent {
     let mut cfg = ureq::Agent::config_builder()
         .http_status_as_error(false)
-        .user_agent("commanddeck")
+        .user_agent("agentdeck")
         .https_only(true)
         .timeout_global(Some(HTTP_TIMEOUT))
         .timeout_connect(Some(CONNECT_TIMEOUT));
@@ -1494,7 +1494,7 @@ mod tests {
 
     #[test]
     fn tails_and_cleans_job_logs() {
-        let raw = "\u{feff}2026-10-16T03:10:00.1234567Z Compiling commanddeck v0.3.0\r\n\
+        let raw = "\u{feff}2026-10-16T03:10:00.1234567Z Compiling agentdeck v0.3.0\r\n\
                    2026-10-16T03:10:01.0000000Z \x1b[31merror[E0308]\x1b[0m: mismatched types\r\n\
                    2026-10-16T03:10:02.0000000Z   --> crates/core/src/github.rs:10:5\r\n\
                    2026-10-16T03:10:03.0000000Z ##[error]Process completed with exit code 101.\r\n";
@@ -1505,7 +1505,7 @@ mod tests {
 
     #[test]
     fn formats_agent_prompts_cleanly() {
-        let repo = RepoSlug::new("dono", "commanddeck");
+        let repo = RepoSlug::new("dono", "agentdeck");
         let pr = PullRequest {
             number: 12,
             title: "Integração GitHub".into(),
@@ -1514,13 +1514,13 @@ mod tests {
             base_branch: "dev".into(),
             head_sha: "61621aa998877".into(),
             draft: false,
-            html_url: "https://github.com/dono/commanddeck/pull/12".into(),
+            html_url: "https://github.com/dono/agentdeck/pull/12".into(),
             updated_at: String::new(),
             checks: CheckStatus::Failure,
         };
         let p_prompt = format_pr_prompt(&repo, &pr);
         assert!(p_prompt.contains("Revise o PR #12"));
-        assert!(p_prompt.contains("dono/commanddeck"));
+        assert!(p_prompt.contains("dono/agentdeck"));
         assert!(p_prompt.contains("feat/github -> dev"));
 
         let job = WorkflowJob {
@@ -1529,7 +1529,7 @@ mod tests {
             name: "clippy (windows)".into(),
             status: CheckStatus::Failure,
             conclusion: Some("failure".into()),
-            html_url: "https://github.com/dono/commanddeck/actions/runs/1001/job/501".into(),
+            html_url: "https://github.com/dono/agentdeck/actions/runs/1001/job/501".into(),
             failed_steps: vec!["cargo clippy".into()],
         };
         let log = JobLog { lines: vec!["error: unused variable `x`".into()], truncated: false };

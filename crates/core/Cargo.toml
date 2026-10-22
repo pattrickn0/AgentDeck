@@ -1,6 +1,6 @@
 [package]
-name = "commanddeck-core"
-description = "Backend do CommandDeck Terminal: agentes, ponte HTTP, execução headless, agente Ollama, mesas, workspace e transcrição."
+name = "agentdeck-core"
+description = "Backend do AgentDeck: agentes, ponte HTTP, execução headless, agente Ollama, mesas, workspace e transcrição."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

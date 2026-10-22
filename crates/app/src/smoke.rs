@@ -1,5 +1,5 @@
-//! Modo de verificação (porta do `COMMANDDECK_SMOKE`): com `COMMANDDECK_SMOKE=<pasta>`, após
-//! `COMMANDDECK_SMOKE_DELAY` ms (padrão 4000) lê o framebuffer, salva `<pasta>/screen.png` e sai.
+//! Modo de verificação (porta do `AGENTDECK_SMOKE`): com `AGENTDECK_SMOKE=<pasta>`, após
+//! `AGENTDECK_SMOKE_DELAY` ms (padrão 4000) lê o framebuffer, salva `<pasta>/screen.png` e sai.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -14,8 +14,8 @@ pub struct Smoke {
 
 impl Smoke {
     pub fn from_env() -> Option<Self> {
-        let dir = std::env::var_os("COMMANDDECK_SMOKE").filter(|v| !v.is_empty())?;
-        let delay = std::env::var("COMMANDDECK_SMOKE_DELAY").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(4000);
+        let dir = agentdeck_core::env_var_os("SMOKE")?;
+        let delay = agentdeck_core::env_var("SMOKE_DELAY").and_then(|v| v.parse::<u64>().ok()).unwrap_or(4000);
         Some(Self { dir: PathBuf::from(dir), at: Instant::now() + Duration::from_millis(delay), armed: false })
     }
 }

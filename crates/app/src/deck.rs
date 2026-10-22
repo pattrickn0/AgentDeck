@@ -5,12 +5,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use alacritty_terminal::grid::Scroll;
-use alacritty_terminal::term::TermMode;
-use commanddeck_core::delivery::{self, Gate, Mailbox, TabState};
-use commanddeck_core::{
+use agentdeck_core::delivery::{self, Gate, Mailbox, TabState};
+use agentdeck_core::{
     AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec,
 };
+use alacritty_terminal::grid::Scroll;
+use alacritty_terminal::term::TermMode;
 use crossbeam_channel::{Receiver, Sender};
 use egui::Color32;
 use winit::event::{ElementState, KeyEvent};
@@ -297,15 +297,15 @@ pub struct Deck {
     pub panes: Vec<PaneSlot>,
     /// Janela sendo arrastada pela alça para trocar de lugar com outra.
     pub pane_drag: Option<usize>,
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=split-drag`): janela-alvo fictícia do arrasto.
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=split-drag`): janela-alvo fictícia do arrasto.
     pub debug_pane_drop: Option<usize>,
     show_seq: u64,
 
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
-    pub debug_usage: Option<HashMap<String, commanddeck_core::AgentUsage>>,
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
+    pub debug_usage: Option<HashMap<String, agentdeck_core::AgentUsage>>,
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
     pub debug_projects: Option<Vec<ProjectView>>,
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=project:<id>`): troca para este projeto logo depois de restaurar as abas.
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=project:<id>`): troca para este projeto logo depois de restaurar as abas.
     pub debug_switch_project: Option<String>,
     /// O botão de fechar da barra de título foi clicado (o `App` encerra depois do quadro).
     pub quit_requested: bool,
@@ -336,7 +336,7 @@ pub struct Deck {
     pub unseen: u32,
     /// Download em andamento (barra no cabeçalho) e, se for um erro, quando some.
     pub download: Option<(DownloadProgress, Option<Instant>)>,
-    /// SOMENTE DEPURAÇÃO: mantém o estado fictício de `COMMANDDECK_DEBUG_UI=download*`, ignorando o download real.
+    /// SOMENTE DEPURAÇÃO: mantém o estado fictício de `AGENTDECK_DEBUG_UI=download*`, ignorando o download real.
     pub debug_hold_download: bool,
     pub feed_scroll_to_bottom: bool,
     pub feed_near_bottom: bool,
@@ -375,9 +375,9 @@ pub struct Deck {
     pub toggle_shortcuts: bool,
     pub drop_hover: bool,
     pub last_drop_target: Option<AttachTarget>,
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=drop-pane:<n>`): destaca este painel no arrastar e soltar.
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=drop-pane:<n>`): destaca este painel no arrastar e soltar.
     pub debug_drop_slot: Option<usize>,
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=drop-task`): destaca o formulário "Nova tarefa" no arrastar e soltar.
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=drop-task`): destaca o formulário "Nova tarefa" no arrastar e soltar.
     pub debug_drop_task_form: bool,
     pub term_focus: bool,
     /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
@@ -568,13 +568,13 @@ impl Deck {
             terminal_rect: None,
             window_focused: true,
             debug_close_all: false,
-            debug_fake_shell: std::env::var("COMMANDDECK_DEBUG_FAKE_SHELL").is_ok_and(|v| v == "1"),
+            debug_fake_shell: agentdeck_core::env_var("DEBUG_FAKE_SHELL").is_some_and(|v| v == "1"),
         };
         deck.refresh_agents();
         deck.refresh_engine();
         // A ponte passa a digitar as perguntas dos agentes nas abas (em vez de rodar o agente à parte).
         deck.core.enable_tab_delivery();
-        if std::env::var("COMMANDDECK_DEBUG_FEED").is_ok_and(|v| v == "1") {
+        if agentdeck_core::env_var("DEBUG_FEED").is_some_and(|v| v == "1") {
             deck.debug_feed();
         }
         // O chip da branch na topbar aparece já ao abrir, e o número de tarefas em revisão no ícone da aba.
@@ -754,13 +754,12 @@ impl Deck {
                         let pairs: Vec<(u64, bool)> = self.tabs.iter().map(|t| (t.uid, t.alive)).collect();
                         match dictation::resolve_tab_delivery(&pairs, uid) {
                             TabDelivery::TypeInTab(idx) => {
-                                let refs: Vec<String> =
-                                    files.iter().map(|f| commanddeck_core::util::ref_path(&self.workspace, f)).collect();
+                                let refs: Vec<String> = files.iter().map(|f| agentdeck_core::util::ref_path(&self.workspace, f)).collect();
                                 let text = util::tab_file_refs_text(&self.tabs[idx].kind, &refs);
                                 if !text.is_empty() {
                                     let bracketed =
                                         self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                                    let safe = commanddeck_core::util::terminal_text(&text);
+                                    let safe = agentdeck_core::util::terminal_text(&text);
                                     self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                                     self.activate(idx);
                                 }
@@ -799,7 +798,7 @@ impl Deck {
                 match dictation::resolve_tab_delivery(&pairs, uid) {
                     TabDelivery::TypeInTab(idx) => {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                        let safe = commanddeck_core::util::terminal_text(&text);
+                        let safe = agentdeck_core::util::terminal_text(&text);
                         self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                     }
                     TabDelivery::TabDead => {
@@ -869,7 +868,7 @@ impl Deck {
                     let text = util::tab_file_refs_text(&self.tabs[idx].kind, &[rel]);
                     if !text.is_empty() {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                        let safe = commanddeck_core::util::terminal_text(&text);
+                        let safe = agentdeck_core::util::terminal_text(&text);
                         self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                         self.set_term_focus(true);
                     }
@@ -976,7 +975,7 @@ impl Deck {
             tab.session.print(&format!("\r\n\x1b[90m[processo encerrado (código {code}) — pressione Enter para reiniciar]\x1b[0m\r\n"));
         }
         // Mensagens de outros agentes: digitadas no terminal quando a aba fica livre (uma por vez;
-        // regra em `commanddeck_core::delivery`).
+        // regra em `agentdeck_core::delivery`).
         for i in 0..self.tabs.len() {
             let Some(since) = self.tabs[i].queue.front_since() else { continue };
             match delivery::gate(&self.tab_state(i), since, now) {
@@ -1246,8 +1245,8 @@ impl Deck {
     /// Mostra a aba do agente de uma tarefa. Se ela foi fechada e a tarefa ainda está em andamento, em
     /// revisão ou aguardando validação, registra a instância de novo e abre a aba: o terminal abre na worktree da tarefa
     /// (`spawn_spec_for`) com o modelo da tarefa. Devolve o motivo da recusa.
-    pub fn open_task_tab(&mut self, task: &commanddeck_core::Task) -> Result<(), String> {
-        use commanddeck_core::TaskStatus;
+    pub fn open_task_tab(&mut self, task: &agentdeck_core::Task) -> Result<(), String> {
+        use agentdeck_core::TaskStatus;
         let project = self.active_project.clone();
         self.show_agents();
         if let Some(i) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == task.instance) {
@@ -1365,7 +1364,7 @@ impl Deck {
         let spec = match self.core.spawn_spec_for(&self.tabs[idx].project, &ident) {
             Ok(spec) => Ok(spec),
             Err(e) if self.debug_fake_shell => {
-                log::warn!("COMMANDDECK_DEBUG_FAKE_SHELL: usando shell local no lugar de '{}' ({e})", self.tabs[idx].kind);
+                log::warn!("AGENTDECK_DEBUG_FAKE_SHELL: usando shell local no lugar de '{}' ({e})", self.tabs[idx].kind);
                 let cwd = self.core.project_path(&self.tabs[idx].project).unwrap_or_else(|| self.workspace.clone());
                 Ok(debug_fake_spec(&self.tabs[idx].kind, &cwd))
             }
@@ -1632,7 +1631,7 @@ impl Deck {
     }
 
     /// Uso dos planos por modelo (o fictício em depuração).
-    pub fn usage(&self) -> HashMap<String, commanddeck_core::AgentUsage> {
+    pub fn usage(&self) -> HashMap<String, agentdeck_core::AgentUsage> {
         match &self.debug_usage {
             Some(u) => u.clone(),
             None => self.core.usage_snapshot(),
@@ -2539,7 +2538,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         cwd,
         env: std::env::vars().collect(),
         label: kind.to_owned(),
-        color: commanddeck_core::agents::COLOR_SHELL.into(),
+        color: agentdeck_core::agents::COLOR_SHELL.into(),
         kind: kind.to_owned(),
         double_enter_on_mention: false,
         model: None,

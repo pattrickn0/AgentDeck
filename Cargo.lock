@@ -34,6 +34,84 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agentdeck"
+version = "0.3.0"
+dependencies = [
+ "agentdeck-core",
+ "alacritty_terminal",
+ "anyhow",
+ "arboard",
+ "chrono",
+ "cpal",
+ "crossbeam-channel",
+ "egui",
+ "egui-winit",
+ "egui_commonmark",
+ "egui_glow",
+ "env_logger",
+ "glow",
+ "glutin",
+ "glutin-winit",
+ "log",
+ "parking_lot",
+ "png",
+ "portable-pty",
+ "raw-window-handle",
+ "rfd",
+ "tempfile",
+ "windows-sys 0.61.2",
+ "winit",
+]
+
+[[package]]
+name = "agentdeck-cli"
+version = "0.3.0"
+dependencies = [
+ "agentdeck-core",
+ "anyhow",
+ "ctrlc",
+ "parking_lot",
+ "rustyline",
+ "serde_json",
+ "tempfile",
+ "terminal_size",
+ "ureq",
+ "which",
+]
+
+[[package]]
+name = "agentdeck-core"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "crossbeam-channel",
+ "dirs",
+ "flate2",
+ "getrandom 0.4.3",
+ "libc",
+ "log",
+ "notify",
+ "open",
+ "parking_lot",
+ "png",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tiny_http",
+ "unicode-normalization",
+ "ureq",
+ "uuid",
+ "which",
+ "windows-sys 0.61.2",
+ "zip",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -478,84 +556,6 @@ checksum = "cfc320937d09e6de266b31b9afb480f197d7a861be86be7cb2ea7e5d1bfffc5e"
 dependencies = [
  "bytes",
  "memchr",
-]
-
-[[package]]
-name = "commanddeck"
-version = "0.3.0"
-dependencies = [
- "alacritty_terminal",
- "anyhow",
- "arboard",
- "chrono",
- "commanddeck-core",
- "cpal",
- "crossbeam-channel",
- "egui",
- "egui-winit",
- "egui_commonmark",
- "egui_glow",
- "env_logger",
- "glow",
- "glutin",
- "glutin-winit",
- "log",
- "parking_lot",
- "png",
- "portable-pty",
- "raw-window-handle",
- "rfd",
- "tempfile",
- "windows-sys 0.61.2",
- "winit",
-]
-
-[[package]]
-name = "commanddeck-cli"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "commanddeck-core",
- "ctrlc",
- "parking_lot",
- "rustyline",
- "serde_json",
- "tempfile",
- "terminal_size",
- "ureq",
- "which",
-]
-
-[[package]]
-name = "commanddeck-core"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "crossbeam-channel",
- "dirs",
- "flate2",
- "getrandom 0.4.3",
- "libc",
- "log",
- "notify",
- "open",
- "parking_lot",
- "png",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "thiserror 2.0.21",
- "tiny_http",
- "unicode-normalization",
- "ureq",
- "uuid",
- "which",
- "windows-sys 0.61.2",
- "zip",
 ]
 
 [[package]]

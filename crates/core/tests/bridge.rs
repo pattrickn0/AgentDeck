@@ -6,10 +6,10 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::time::Duration;
 
-use commanddeck_core::paths::AppPaths;
+use agentdeck_core::paths::AppPaths;
 #[cfg(unix)]
-use commanddeck_core::FeedKind;
-use commanddeck_core::{Config, Core, CoreEvent, StartOptions};
+use agentdeck_core::FeedKind;
+use agentdeck_core::{Config, Core, CoreEvent, StartOptions};
 use crossbeam_channel::Receiver;
 use serde_json::{json, Value};
 
@@ -75,8 +75,8 @@ fn tab_token(env: &Env, id: &str) -> String {
 
 /// Token que a aba da instância `id` do projeto `project` recebe no ambiente.
 fn tab_token_in(env: &Env, project: &str, id: &str) -> String {
-    let ident = commanddeck_core::Ident::parse(id).expect("id");
-    env.core.spawn_spec_for(project, &ident).expect("spec").env["COMMANDDECK_TOKEN"].clone()
+    let ident = agentdeck_core::Ident::parse(id).expect("id");
+    env.core.spawn_spec_for(project, &ident).expect("spec").env["AGENTDECK_TOKEN"].clone()
 }
 
 #[cfg(unix)]
@@ -91,10 +91,15 @@ fn write_script(_path: &Path, _body: &str) {}
 
 /// Cliente HTTP mínimo (permite forjar o cabeçalho Host).
 fn http(port: u16, method: &str, path: &str, host: &str, token: &str, body: &str) -> (u16, Value) {
+    http_with_token_header(port, "x-agentdeck-token", method, path, host, token, body)
+}
+
+/// Como [`http`], com o nome do cabeçalho do token à escolha.
+fn http_with_token_header(port: u16, token_header: &str, method: &str, path: &str, host: &str, token: &str, body: &str) -> (u16, Value) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).expect("connect");
     s.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nx-commanddeck-token: {token}\r\ncontent-type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\n{token_header}: {token}\r\ncontent-type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     s.write_all(req.as_bytes()).expect("write");
@@ -114,6 +119,22 @@ fn ask_raw(port: u16, token: &str, body: Value) -> (u16, Value) {
 fn ask(env: &Env, body: Value) -> (u16, Value) {
     let port = env.core.bridge_port();
     http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), env.core.bridge_token(), &body.to_string())
+}
+
+/// Uma aba aberta pela versão antiga (CommandDeck) ainda manda `x-commanddeck-token`: a ponte aceita.
+#[test]
+fn the_old_token_header_is_still_accepted() {
+    let env = start(&[("claude", "cat >/dev/null; echo ok")]);
+    let port = env.core.bridge_port();
+    let token = env.core.bridge_token().to_owned();
+    let host = format!("127.0.0.1:{port}");
+
+    let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, &token, "");
+    assert_eq!(st, 200, "{b}");
+    let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, "errado", "");
+    assert_eq!((st, b), (403, json!({"error": "token inválido"})));
+    // O nome novo continua valendo.
+    assert_eq!(http(port, "GET", "/agents", &host, &token, "").0, 200);
 }
 
 #[test]
@@ -164,19 +185,19 @@ fn workspace_agents_md_and_spawn_specs() {
     let ws = env.core.workspace();
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md criado no workspace do app");
-    assert!(md.starts_with("<!-- commanddeck:start -->\nVocê está rodando dentro do CommandDeck Terminal"));
-    assert!(md.contains("Seu nome aqui está na variável de ambiente COMMANDDECK_AGENT"));
+    assert!(md.starts_with("<!-- agentdeck:start -->\nVocê está rodando dentro do AgentDeck"));
+    assert!(md.contains("Seu nome aqui está na variável de ambiente AGENTDECK_AGENT"));
 
     let shell = env.core.spawn_spec(&p, "shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
     assert_eq!(shell.cwd, ws);
-    assert_eq!(shell.env["COMMANDDECK_AGENT"], "shell");
-    assert_eq!(shell.env["COMMANDDECK_PORT"], env.core.bridge_port().to_string());
+    assert_eq!(shell.env["AGENTDECK_AGENT"], "shell");
+    assert_eq!(shell.env["AGENTDECK_PORT"], env.core.bridge_port().to_string());
     // Cada aba tem o próprio token (o mestre não vai para os agentes), estável enquanto ela existir.
-    let token = shell.env["COMMANDDECK_TOKEN"].clone();
+    let token = shell.env["AGENTDECK_TOKEN"].clone();
     assert_ne!(token, env.core.bridge_token());
     assert_eq!(token.len(), 32);
-    assert_eq!(env.core.spawn_spec(&p, "shell").expect("de novo").env["COMMANDDECK_TOKEN"], token);
+    assert_eq!(env.core.spawn_spec(&p, "shell").expect("de novo").env["AGENTDECK_TOKEN"], token);
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
@@ -192,8 +213,8 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(env.core.active_project_id(), p, "criar um projeto não troca o ativo");
     let spec = env.core.spawn_spec(&other.id, "shell").expect("shell");
     assert_eq!(spec.cwd, other_dir);
-    assert_ne!(spec.env["COMMANDDECK_TOKEN"], token, "o shell de cada projeto tem o próprio token");
-    assert!(std::fs::read_to_string(other_dir.join("AGENTS.md")).expect("AGENTS.md do outro projeto").contains("COMMANDDECK_AGENT"));
+    assert_ne!(spec.env["AGENTDECK_TOKEN"], token, "o shell de cada projeto tem o próprio token");
+    assert!(std::fs::read_to_string(other_dir.join("AGENTS.md")).expect("AGENTS.md do outro projeto").contains("AGENTDECK_AGENT"));
     assert_eq!(env.core.workspace(), ws);
 
     #[cfg(unix)]
@@ -230,7 +251,7 @@ fn workspace_agents_md_and_spawn_specs() {
 }
 
 #[cfg(unix)]
-const ECHO_AGENT: &str = r#"printf 'ARGS:'; for a in "$@"; do case "$a" in *CommandDeck*) printf ' [<sys>]';; *) printf ' [%s]' "$a";; esac; done; echo; echo "ENV: $COMMANDDECK_AGENT $COMMANDDECK_DEPTH"; cat"#;
+const ECHO_AGENT: &str = r#"printf 'ARGS:'; for a in "$@"; do case "$a" in *AgentDeck*) printf ' [<sys>]';; *) printf ' [%s]' "$a";; esac; done; echo; echo "ENV: $AGENTDECK_AGENT $AGENTDECK_DEPTH"; cat"#;
 
 #[cfg(unix)]
 #[test]
@@ -243,7 +264,7 @@ fn ask_runs_headless_with_sessions() {
     assert!(answer.contains("[--append-system-prompt] [<sys>] [--add-dir]"), "{answer}");
     assert!(answer.contains("ENV: claude 1"), "{answer}");
     assert!(answer.contains(
-        "[Mensagem do agente \"shell\" recebida pelo CommandDeck]\n\nQual a capital?\n\nResponda diretamente ao agente \"shell\". O usuário acompanha a conversa integrada em tempo real."
+        "[Mensagem do agente \"shell\" recebida pelo AgentDeck]\n\nQual a capital?\n\nResponda diretamente ao agente \"shell\". O usuário acompanha a conversa integrada em tempo real."
     ));
     let sid = answer.split("[--session-id] [").nth(1).and_then(|s| s.split(']').next()).expect("sid").to_owned();
 
@@ -327,15 +348,15 @@ fn attachments_and_config_persistence() {
 fn spawn_spec_for_an_instance_carries_its_identity() {
     let env = start(&[]);
     let p = env.core.active_project_id();
-    let ident = commanddeck_core::Ident::parse("shell@qa@ana").expect("id");
+    let ident = agentdeck_core::Ident::parse("shell@qa@ana").expect("id");
     let spec = env.core.spawn_spec_for(&p, &ident).expect("shell sempre existe");
     assert_eq!(spec.kind, "shell");
-    assert_eq!(spec.env["COMMANDDECK_AGENT"], "shell@qa@ana");
+    assert_eq!(spec.env["AGENTDECK_AGENT"], "shell@qa@ana");
     assert_eq!(spec.cwd, env.root.join("workspace"));
-    // `shell@main@ana` não tem cargo: sem COMMANDDECK_ROLE.
-    let main = env.core.spawn_spec_for(&p, &commanddeck_core::Ident::parse("shell@main@bia").expect("id")).expect("spec");
-    assert_eq!(main.env["COMMANDDECK_AGENT"], "shell@main@bia");
-    assert!(!main.env.contains_key("COMMANDDECK_ROLE"));
+    // `shell@main@ana` não tem cargo: sem AGENTDECK_ROLE.
+    let main = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("shell@main@bia").expect("id")).expect("spec");
+    assert_eq!(main.env["AGENTDECK_AGENT"], "shell@main@bia");
+    assert!(!main.env.contains_key("AGENTDECK_ROLE"));
     env.core.shutdown();
 }
 
@@ -507,7 +528,7 @@ fn removing_a_project_closes_its_instances() {
 }
 
 /// Próxima entrega pedida à interface (ignora os outros eventos).
-fn next_delivery(env: &Env) -> commanddeck_core::Delivery {
+fn next_delivery(env: &Env) -> agentdeck_core::Delivery {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
@@ -769,8 +790,8 @@ fn statusline_reports_usage_of_the_tab_model() {
     // O modelo vem do token (`claude@dev` → `claude`), não do corpo.
     let usage = env.core.usage_snapshot();
     let claude = &usage["claude"];
-    assert_eq!(claude.session, Some(commanddeck_core::UsageWindow { used: 0.34, resets_at_ms: Some(1_760_000_000_000) }));
-    assert_eq!(claude.weekly, Some(commanddeck_core::UsageWindow { used: 1.0, resets_at_ms: None }));
+    assert_eq!(claude.session, Some(agentdeck_core::UsageWindow { used: 0.34, resets_at_ms: Some(1_760_000_000_000) }));
+    assert_eq!(claude.weekly, Some(agentdeck_core::UsageWindow { used: 1.0, resets_at_ms: None }));
     assert!(claude.updated_ms > 0 && !claude.local);
     assert!(env.rx.try_iter().any(|e| matches!(e, CoreEvent::UsageChanged)));
     // O mesmo uso de novo não acorda a UI.
@@ -801,7 +822,7 @@ fn one_app_per_data_dir() {
 #[cfg(unix)]
 #[test]
 fn headless_runs_get_their_own_short_lived_token() {
-    let env = start(&[("claude", r#"cat >/dev/null; echo "$COMMANDDECK_TOKEN""#)]);
+    let env = start(&[("claude", r#"cat >/dev/null; echo "$AGENTDECK_TOKEN""#)]);
     let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
     assert_eq!(st, 200, "{b}");
     let token = b["answer"].as_str().expect("token").trim().to_owned();
@@ -974,14 +995,14 @@ fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
     assert!(env.core.set_boss(&p, "shell@qa", Some("shell@nada")).is_err());
 
     // Renomear leva a equipe junto; fechar passa a equipe ao avô; soltar na raiz tira o chefe.
-    let ana = commanddeck_core::Ident::parse("shell@dev@ana").expect("id");
+    let ana = agentdeck_core::Ident::parse("shell@dev@ana").expect("id");
     env.core.rename_instance(&p, "shell@dev", &ana).expect("renomeia");
     assert_eq!(env.core.team(&p, "shell@qa").boss.as_deref(), Some("shell@dev@ana"));
     env.core.close_instance(&p, "shell@dev@ana");
     assert_eq!(env.core.team(&p, "shell@qa").boss.as_deref(), Some("shell"));
     assert_eq!(env.core.team(&p, "shell").crew, ["shell@qa"]);
     env.core.set_boss(&p, "shell@qa", None).expect("raiz");
-    assert_eq!(env.core.team(&p, "shell"), commanddeck_core::Team::default());
+    assert_eq!(env.core.team(&p, "shell"), agentdeck_core::Team::default());
     assert!(env.core.projects()[0].tab_parents.is_empty(), "gravado na config do projeto");
     env.core.shutdown();
 }
@@ -1030,7 +1051,7 @@ fn renaming_both_tabs_mid_question_still_delivers_the_late_answer() {
     let q = next_delivery(&env);
     assert_eq!(asking.join().expect("thread").0, 202);
     // As duas abas mudam de nome enquanto a resposta não chega.
-    let ident = |s: &str| commanddeck_core::Ident::parse(s).expect("id");
+    let ident = |s: &str| agentdeck_core::Ident::parse(s).expect("id");
     env.core.rename_instance(&p, "claude", &ident("claude@lead")).expect("renomeia");
     env.core.rename_instance(&p, "claude@dev", &ident("claude@dev@ana")).expect("renomeia");
     // O token da aba segue a instância; a resposta vai pelo número e chega ao nome novo.
@@ -1226,7 +1247,7 @@ fn the_roster_and_the_team_show_the_models() {
     let host = format!("127.0.0.1:{port}");
     let second = env.core.register_instance_with_model(&p, "claude", Some("opus")).expect("registra");
     assert_eq!(second.id(), "claude@main@ana");
-    let dev = commanddeck_core::Ident::parse("claude@dev").expect("id");
+    let dev = agentdeck_core::Ident::parse("claude@dev").expect("id");
     env.core.restore_instance(&p, "claude@dev");
     env.core.assign_model(&p, &dev, Some("sonnet"));
     env.core.set_boss(&p, "claude@dev", Some("claude")).expect("equipe");
@@ -1281,7 +1302,7 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
         fake_cli(&env, cli);
     }
     let p = env.core.active_project_id();
-    let ident = |s: &str| commanddeck_core::Ident::parse(s).expect("id");
+    let ident = |s: &str| agentdeck_core::Ident::parse(s).expect("id");
     let saved = |env: &Env| env.core.projects()[0].tab_models.clone();
     let tail = |args: &[String], n: usize| args[args.len() - n..].to_vec();
     let data = env.root.join("dados").display().to_string();
@@ -1393,7 +1414,7 @@ fn headless_runs_get_the_requested_or_default_model() {
     env.core.shutdown();
 }
 
-/// Com os CLIs reais instalados: `cargo test -p commanddeck-core --test bridge -- --ignored --nocapture`.
+/// Com os CLIs reais instalados: `cargo test -p agentdeck-core --test bridge -- --ignored --nocapture`.
 #[test]
 #[ignore = "usa o agy e o opencode instalados na máquina"]
 fn the_models_inventory_of_this_machine() {
@@ -1410,11 +1431,11 @@ fn the_models_inventory_of_this_machine() {
     let (core, _rx) = Core::start_with(paths, opts).expect("start");
     let started = std::time::Instant::now();
     let items = core.models_inventory(None).expect("inventário");
-    println!("{}\n({:?})", commanddeck_core::models::format_inventory(&items), started.elapsed());
+    println!("{}\n({:?})", agentdeck_core::models::format_inventory(&items), started.elapsed());
     core.shutdown();
 }
 
-/// Com os CLIs reais instalados: `cargo test -p commanddeck-core --test bridge -- --ignored --nocapture`.
+/// Com os CLIs reais instalados: `cargo test -p agentdeck-core --test bridge -- --ignored --nocapture`.
 #[test]
 #[ignore = "usa o agy e o opencode instalados na máquina"]
 fn the_known_models_come_from_the_installed_clis() {

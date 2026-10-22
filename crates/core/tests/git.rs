@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use commanddeck_core::git::{extract_hunk_patch, ConflictChoice, EntryKind, GitError, RepoState};
-use commanddeck_core::paths::AppPaths;
-use commanddeck_core::{Config, Core, StartOptions};
+use agentdeck_core::git::{extract_hunk_patch, ConflictChoice, EntryKind, GitError, RepoState};
+use agentdeck_core::paths::AppPaths;
+use agentdeck_core::{Config, Core, StartOptions};
 
 /// Pasta da configuração global isolada (criada uma vez para o processo de teste).
 fn isolated_config() -> &'static Path {
@@ -80,7 +80,7 @@ macro_rules! need_git {
     };
 }
 
-fn paths(st: &commanddeck_core::git::GitStatus) -> Vec<(String, char, char, EntryKind)> {
+fn paths(st: &agentdeck_core::git::GitStatus) -> Vec<(String, char, char, EntryKind)> {
     st.entries.iter().map(|e| (e.path.clone(), e.index, e.worktree, e.kind)).collect()
 }
 
@@ -420,7 +420,7 @@ fn gpgsign_without_agent_fails_fast_with_explanation() {
     // Ativa `commit.gpgsign` apontando para um programa inexistente/sem agente: deve falhar rápido
     // (< 5 s, nunca esperar os 120 s de COMMIT_TIMEOUT) e orientar o usuário sem desligar a opção.
     assert!(git(ws, &["config", "commit.gpgsign", "true"]).status.success());
-    assert!(git(ws, &["config", "gpg.program", "gpg-inexistente-commanddeck"]).status.success());
+    assert!(git(ws, &["config", "gpg.program", "gpg-inexistente-agentdeck"]).status.success());
     let t0 = std::time::Instant::now();
     let err = core.git_commit("assinado", false).unwrap_err();
     assert!(t0.elapsed() < std::time::Duration::from_secs(10), "demorou {:?}", t0.elapsed());
@@ -482,8 +482,8 @@ fn conflict_variants_diff_cc_stash_pop_and_rebase_continue() {
 
     // O diff de um arquivo em conflito (`diff --cc`, `@@@`) tem números de linha e nada de crash.
     let d = core.git_diff(&st.entries[0], false).expect("diff --cc");
-    assert!(d.lines.iter().any(|l| l.kind == commanddeck_core::git::DiffKind::Hunk && l.text.starts_with("@@@")));
-    assert!(d.lines.iter().any(|l| l.kind == commanddeck_core::git::DiffKind::Add && l.text.contains("FEAT")));
+    assert!(d.lines.iter().any(|l| l.kind == agentdeck_core::git::DiffKind::Hunk && l.text.starts_with("@@@")));
+    assert!(d.lines.iter().any(|l| l.kind == agentdeck_core::git::DiffKind::Add && l.text.contains("FEAT")));
     assert!(extract_hunk_patch(&d, 0).is_none(), "diff combinado não vira patch de trecho");
 
     // a.txt: "ambos"; c.txt: "deles" (arquivo inteiro); b.txt (modify/delete): "deles" = apagar.

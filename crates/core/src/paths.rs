@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 pub struct AppPaths {
     /// Pasta base do app (onde ficam `dados/`, `workspace/`, `whisper/`).
     pub app_dir: PathBuf,
-    /// Pasta dos executáveis (`commanddeck`, `ask-agent`, `ollama-agent`). Vai no início do PATH dos agentes.
+    /// Pasta dos executáveis (`agentdeck`, `ask-agent`, `ollama-agent`). Vai no início do PATH dos agentes.
     pub bin_dir: PathBuf,
     /// `<app_dir>/dados`
     pub data_dir: PathBuf,
@@ -14,19 +14,19 @@ pub struct AppPaths {
     pub default_workspace: PathBuf,
     /// `<app_dir>/whisper`
     pub whisper_dir: PathBuf,
-    /// `<config_dir>/CommandDeck/config.json`
+    /// `<config_dir>/AgentDeck/config.json`
     pub config_file: PathBuf,
 }
 
 impl AppPaths {
-    /// Resolve a partir do executável atual. `COMMANDDECK_HOME` sobrescreve `app_dir` e isola o app
+    /// Resolve a partir do executável atual. `AGENTDECK_HOME` sobrescreve `app_dir` e isola o app
     /// por completo: a configuração também fica dentro dessa pasta (`cfg/config.json`), então testes
     /// e instâncias paralelas não tocam na configuração do usuário.
     /// Em desenvolvimento (`target/debug|release`), sobe até achar a raiz do repositório
     /// (pasta com `workspace/` e `dados/`), para reaproveitar as pastas da versão Electron.
     pub fn detect() -> Self {
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."));
-        match std::env::var_os("COMMANDDECK_HOME").filter(|v| !v.is_empty()).map(PathBuf::from) {
+        match crate::env::env_var_os("HOME").map(PathBuf::from) {
             Some(home) => Self::isolated(home, exe_dir),
             None => Self::with_dirs(find_app_dir(&exe_dir), exe_dir),
         }
@@ -39,7 +39,7 @@ impl AppPaths {
     }
 
     pub fn with_dirs(app_dir: PathBuf, bin_dir: PathBuf) -> Self {
-        let config_file = dirs::config_dir().unwrap_or_else(|| app_dir.clone()).join("CommandDeck").join("config.json");
+        let config_file = dirs::config_dir().unwrap_or_else(|| app_dir.clone()).join("AgentDeck").join("config.json");
         Self {
             data_dir: app_dir.join("dados"),
             default_workspace: app_dir.join("workspace"),
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn isolated_home_keeps_the_config_inside_it() {
-        let home = PathBuf::from("/tmp/commanddeck-home");
+        let home = PathBuf::from("/tmp/agentdeck-home");
         let p = AppPaths::isolated(home.clone(), PathBuf::from("/tmp/bin"));
         assert_eq!(p.config_file, home.join("cfg").join("config.json"));
         assert_eq!(p.data_dir, home.join("dados"));

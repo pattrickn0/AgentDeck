@@ -10,7 +10,7 @@ use super::{galley, paint_splitter, place, text_in, tip};
 use crate::deck::{Deck, FeedItem, RightView};
 use crate::icons::Icon;
 use crate::theme;
-use commanddeck_core::{DownloadProgress, DownloadState, FeedKind};
+use agentdeck_core::{DownloadProgress, DownloadState, FeedKind};
 
 /// Altura da faixa de download (abaixo do cabeçalho, só durante um download).
 const DOWNLOAD_H: f32 = 22.0;
