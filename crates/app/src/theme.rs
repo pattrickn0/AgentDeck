@@ -418,10 +418,10 @@ mod tests {
     fn constants_match_css_root() {
         assert_eq!(Some(BG), parse_hex_color("#0b0b0d"));
         assert_eq!(Some(PANEL_2), parse_hex_color("#1b1b21"));
-        assert_eq!(Some(CLAUDE), parse_hex_color(commanddeck_core::agents::COLOR_CLAUDE));
-        assert_eq!(Some(ANTIGRAVITY), parse_hex_color(commanddeck_core::agents::COLOR_ANTIGRAVITY));
-        assert_eq!(Some(OLLAMA), parse_hex_color(commanddeck_core::agents::COLOR_OLLAMA));
-        assert_eq!(Some(SHELL), parse_hex_color(commanddeck_core::agents::COLOR_SHELL));
+        assert_eq!(Some(CLAUDE), parse_hex_color(agentdeck_core::agents::COLOR_CLAUDE));
+        assert_eq!(Some(ANTIGRAVITY), parse_hex_color(agentdeck_core::agents::COLOR_ANTIGRAVITY));
+        assert_eq!(Some(OLLAMA), parse_hex_color(agentdeck_core::agents::COLOR_OLLAMA));
+        assert_eq!(Some(SHELL), parse_hex_color(agentdeck_core::agents::COLOR_SHELL));
     }
 
     #[test]

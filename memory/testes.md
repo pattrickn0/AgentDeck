@@ -19,7 +19,7 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 
 ## Preparação
 
-- [x] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\commanddeck.exe` (os três `.exe` na mesma pasta).
+- [x] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\agentdeck.exe` (os três `.exe` na mesma pasta).
 - [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
 - [x] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
 - [x] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
@@ -108,7 +108,7 @@ Conversa entre agentes ★
 - [ ] Ponte: depois de um 202, o destino roda `ask-agent <quem perguntou> "pergunta"`. Chega como pergunta nova, e a original continua esperando o `--reply N`.
 - [ ] Ponte: responder pela forma antiga com apelido (`ask-agent agy "..."` para uma pergunta do Antigravity) entrega a resposta, sem 409.
 - [ ] Ollama: duas perguntas para a mesma aba do Ollama (de agentes diferentes, ou com renomeação no meio) voltam cada uma a quem perguntou.
-- [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o commanddeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
+- [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o agentdeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
 
 Quando a mensagem é digitada na aba ★
 
@@ -131,17 +131,17 @@ Equipe e agentes em árvore ★
 - [ ] Soltar sobre a linha do projeto devolve o agente à raiz.
 - [ ] Na aba de um agente reorganizado, `ask-agent --team` mostra o chefe e a equipe certos; `ask-agent --boss "oi"` chega ao chefe; sem chefe, o `--boss` explica que ele responde ao usuário.
   - Conferido: no chefe, `--team` mostra a equipe e `--boss` explica que ele responde ao usuário. Falta conferir na aba do subordinado.
-- [ ] Depois de reorganizar, a próxima mensagem entregue ao agente termina com "[CommandDeck] Sua posição na equipe mudou…" (uma vez só; se ele rodou `--team` antes, não vem).
+- [ ] Depois de reorganizar, a próxima mensagem entregue ao agente termina com "[AgentDeck] Sua posição na equipe mudou…" (uma vez só; se ele rodou `--team` antes, não vem).
 - [ ] Fechar a aba de um chefe: a equipe dele sobe para o chefe dele (ou para a raiz). Renomear uma aba com equipe mantém a árvore.
 - [ ] Equipe: mudar o chefe de um agente e fechar a aba dele antes da próxima mensagem não gasta o aviso. Fechar um subordinado sem equipe avisa o chefe na próxima mensagem.
 
 Segurança, ambiente e agentes novos
 
-- [ ] Abrir **uma segunda janela** do CommandDeck: aparece a mensagem "outra janela já está usando a pasta de dados" e ela fecha.
-- [ ] Com `COMMANDDECK_HOME` apontando para outra pasta, a segunda janela abre (instância separada).
-- [ ] Abrir o CommandDeck **de dentro de uma aba** de outro CommandDeck: a aba de origem não cai.
-- [ ] Pasta de dados com `&` no caminho (`COMMANDDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.
-- [ ] crash.log: usar o app normalmente não acrescenta nada; `COMMANDDECK_DEBUG_CRASH=heap` ainda registra a queda; um crash.log acima de 256 KB vira crash.log.1 ao abrir.
+- [ ] Abrir **uma segunda janela** do AgentDeck: aparece a mensagem "outra janela já está usando a pasta de dados" e ela fecha.
+- [ ] Com `AGENTDECK_HOME` apontando para outra pasta, a segunda janela abre (instância separada).
+- [ ] Abrir o AgentDeck **de dentro de uma aba** de outro AgentDeck: a aba de origem não cai.
+- [ ] Pasta de dados com `&` no caminho (`AGENTDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.
+- [ ] crash.log: usar o app normalmente não acrescenta nada; `AGENTDECK_DEBUG_CRASH=heap` ainda registra a queda; um crash.log acima de 256 KB vira crash.log.1 ao abrir.
 - [ ] O **Gemini não aparece** mais no "+" nem no `ask-agent --list` (o Antigravity é o agente do Google).
 - [ ] **Codex**: abre pela aba "+"; ao terminar um turno, a fila de perguntas anda (aviso `notify`). Se ele pedir aprovação para rodar `ask-agent`, anotar.
 - [ ] **OpenCode**: abre pela aba "+" e responde a um `ask-agent opencode "oi"`.
@@ -186,7 +186,7 @@ Conversa
 
 Documentos no centro ★ (t19)
 
-- [ ] **A chave**: na barra de título, ao lado de "CommandDeck", aparecem **Agentes** e **Documentos (0)**; "Documentos" fica apagado e não clica sem documentos. Passar o mouse mostra a dica com o atalho.
+- [ ] **A chave**: na barra de título, ao lado de "AgentDeck", aparecem **Agentes** e **Documentos (0)**; "Documentos" fica apagado e não clica sem documentos. Passar o mouse mostra a dica com o atalho.
 - [ ] **Abrir o diff pela mesa**: numa tarefa em revisão, "Ver diff completo". O centro troca sozinho para Documentos, com uma aba `t1 · diff`; o contador vira "Documentos (1)"; os botões Mesclar, Devolver, Validar e Reprovar seguem na barra direita. Clicar de novo em "Ver diff completo" só foca a aba (não abre outra). Depois de mesclar, "Ver o que foi mesclado" abre outra aba (`t1 · mesclagem`).
 - [ ] **A lista de arquivos do diff**: cada arquivo com a letra (A/M/D/R), o nome e `+`/`−`; clicar num arquivo rola o diff até ele; a seleção fica marcada. Num diff de uma tarefa com vários arquivos, conferir se a lista bate com o "N arquivos" do detalhe.
 - [ ] **O selo e os agentes escondidos**: com os terminais rodando, mudar para Documentos. Os terminais não somem nem reiniciam: ao voltar para Agentes, o que o agente escreveu enquanto isso está lá. Quando um agente termina um turno com o centro em Documentos, "Agentes" ganha um número (até o agente da aba que estava ativa); se só trabalha, um ponto pulsa. Voltar para Agentes limpa o número da aba ativa.
@@ -247,7 +247,7 @@ Abas e atalhos
 
 Barra de título, uso dos agentes e barra lateral ★
 
-- [x] A janela não tem mais a barra do Windows: no topo, ☰, o botão de painel (recolhe/expande a barra lateral), "CommandDeck" (sem logo) e +; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
+- [x] A janela não tem mais a barra do Windows: no topo, ☰, o botão de painel (recolhe/expande a barra lateral), "AgentDeck" (sem logo) e +; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
 - [ ] Arrastar pela barra move a janela; duplo clique maximiza/restaura; arrastar até a borda da tela encaixa (snap); Win+setas funcionam.
 - [ ] Redimensionar pelas 4 bordas e pelos 4 cantos (o cursor muda); maximizada, as bordas não reagem e a janela não cobre a barra de tarefas. No Linux, conferir em X11 e em Wayland.
 - [ ] Fechar pelo × salva o tamanho da janela, como antes.
@@ -256,7 +256,7 @@ Barra de título, uso dos agentes e barra lateral ★
 - [ ] Antigravity aberto: em até ~3 min aparece o uso dele; sem login ou sem rede, anel tracejado e "uso indisponível".
   - Conferido: com login, o uso do Antigravity aparece. Falta o caso sem login/sem rede.
 - [ ] Ollama: anel cinza, "local, sem limite". Fechar a última aba de um modelo tira o item da barra.
-- [ ] Demonstração: `COMMANDDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
+- [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
 - [x] Seção **ORGANIZAÇÃO** na barra lateral: a chave "Tela dividida" liga/desliga a divisão (a chave anima e fica na cor do agente ativo).
 - [ ] Uso: passado o horário de renovação da sessão sem o agente rodar, o círculo mostra 0% esmaecido e "sessão renovada (sem dados novos)".
@@ -276,7 +276,7 @@ Projetos ★
 - [ ] Fechar e reabrir o app: só as abas do projeto ativo abrem; as dos outros abrem ao clicar no projeto (e nada se perde).
 - [ ] Clique direito → Renomear (o nome muda, a pasta não), Abrir pasta, Remover (confirma, fecha as abas do projeto; a pasta fica).
 - [ ] Remover o último projeto: o centro pede "Abrir pasta…".
-- [ ] Captura: `COMMANDDECK_DEBUG_UI=project:<id>` troca para o projeto `<id>` logo ao abrir.
+- [ ] Captura: `AGENTDECK_DEBUG_UI=project:<id>` troca para o projeto `<id>` logo ao abrir.
 - [ ] Seção `PROJETOS` colapsável no topo da árvore de arquivos, com ponto indicador no projeto ativo.
 - [ ] Botão `+`: seletor de pasta adiciona novo workspace à lista e ativa-o.
 - [ ] Botão `×` (aparece ao passar o mouse, com 2+ projetos): fica visível sob o ponteiro e o clique remove o projeto da lista; se for o ativo, migra automaticamente para o primeiro da lista.
@@ -339,6 +339,17 @@ GitHub:
 - [ ] "Enviar para agente ▾" num PR, issue ou job vermelho: escolher uma aba aberta digita a mensagem pronta quando ela fica livre (não no meio da sua digitação); escolher modelo + cargo (ex.: claude@review) abre a aba se não existir e entrega; a mensagem aparece na Conversa integrada.
 - [ ] Trocar de projeto com a aba aberta limpa a lista e lê o repositório do novo projeto.
 - [ ] Barra direita no mínimo (280 px): nada corta além das reticências; janela baixa não derruba o app.
+
+## Migração do nome (CommandDeck → AgentDeck) ★
+
+Com a pasta de dados e a configuração de quem usava o CommandDeck (`%APPDATA%\CommandDeck\config.json`), sem `AGENTDECK_HOME`:
+
+- [ ] Abrir o `agentdeck.exe`: a janela se chama AgentDeck, os projetos e as abas abertas da versão antiga aparecem, e
+  `%APPDATA%\AgentDeck\config.json` foi criado (o `CommandDeck\config.json` continua lá).
+- [ ] Com o `commanddeck.exe` antigo aberto na mesma pasta de dados, o `agentdeck.exe` recusa abrir ("Outra janela do AgentDeck já está usando a pasta de dados…").
+- [ ] As tarefas existentes (`dados/tarefas/`) e o histórico continuam na mesa.
+- [ ] Um projeto cujo `AGENTS.md` tem o bloco `<!-- commanddeck:start -->`: ao abrir o projeto, o bloco vira `<!-- agentdeck:start -->`, sem duplicar, e o resto do arquivo não muda.
+- [ ] Numa aba de agente nova, `ask-agent --list` funciona e `echo %AGENTDECK_PORT%` (ou `$env:AGENTDECK_PORT`) tem valor.
 
 ## Para fechar
 

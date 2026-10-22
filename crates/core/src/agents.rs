@@ -33,7 +33,7 @@ pub struct SpawnSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub cwd: PathBuf,
-    /// Ambiente COMPLETO a usar (já derivado do ambiente do processo, com PATH/COMMANDDECK_* injetados
+    /// Ambiente COMPLETO a usar (já derivado do ambiente do processo, com PATH/AGENTDECK_* injetados
     /// e CLAUDECODE & cia removidos). A UI deve limpar o ambiente herdado e aplicar este.
     pub env: BTreeMap<String, String>,
     /// Rótulo da aba (ex.: "Claude", "Ollama (qwen3.5:9b)").
@@ -545,9 +545,9 @@ impl Registry {
         }
         let first = match self_id {
             Some(id) => format!(
-                "Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui é \"{id}\"."
+                "Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA. Seu nome aqui é \"{id}\"."
             ),
-            None => "Você está rodando dentro do CommandDeck Terminal, um terminal que conecta vários agentes de IA. Seu nome aqui está na variável de ambiente COMMANDDECK_AGENT; nunca pergunte a si mesmo.".to_owned(),
+            None => "Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA. Seu nome aqui está na variável de ambiente AGENTDECK_AGENT; nunca pergunte a si mesmo.".to_owned(),
         };
         // `${others}` no JS converte o array com "," (sem espaço) — mantido igual.
         [
@@ -560,7 +560,7 @@ impl Registry {
             ),
             "Para saber que agentes e modelos este computador tem, rode ask-agent --models (ou ask-agent --models <agente>) antes de escolher --agent/--model.".to_owned(),
             "Antes de mexer em arquivos, rode ask-agent --learn <arquivo>... (ou ask-agent --learn) para ver o que o projeto já aprendeu sobre eles.".to_owned(),
-            "O histórico de cada par de agentes é mantido entre chamadas. O usuário tem acesso à \"Conversa integrada\" em tempo real no CommandDeck, portanto você NÃO precisa relatar nem resumir a conversa dos agentes para ele.".to_owned(),
+            "O histórico de cada par de agentes é mantido entre chamadas. O usuário tem acesso à \"Conversa integrada\" em tempo real no AgentDeck, portanto você NÃO precisa relatar nem resumir a conversa dos agentes para ele.".to_owned(),
             "Ao colaborar com outro agente (ex: Antigravity), mantenha o diálogo diretamente com ele (iterando, tirando dúvidas e alinhando) até concluir a tarefa, em vez de parar no meio para fazer perguntas ao usuário.".to_owned(),
             "Cada aba é uma instância com nome <modelo>[@<cargo>[@<nome>]] (ex.: claude, claude@dev, claude@dev@ana). Para delegar a uma instância com cargo, chame-a pelo nome: ask-agent claude@dev \"tarefa\" (a aba é aberta se não existir); use --new para abrir outra instância do mesmo cargo; ask-agent --model <modelo> claude@dev \"tarefa\" escolhe o LLM da instância ao abri-la (ex.: sonnet). Trabalho grande vira uma tarefa, com worktree, branch e agente próprios: ask-agent --task new \"título\" --start --file <pedido.md> (o pedido num arquivo preserva os acentos; pela entrada padrão o shell do Windows os troca por \"?\").".to_owned(),
             "Quando outro agente lhe mandar uma mensagem, responda executando o comando indicado nela (ask-agent --reply <número> \"sua resposta\"; em textos longos ou com acentos, escreva-os num arquivo e use --file <arquivo>): é só assim que a resposta chega a ele.".to_owned(),
@@ -728,18 +728,19 @@ pub(crate) fn build_agent_env(
             continue;
         }
         let removed = if cfg!(windows) { REMOVE.iter().any(|r| r.eq_ignore_ascii_case(&k)) } else { REMOVE.contains(&k.as_str()) }
-            // Nada do CommandDeck que abriu este app (ex.: o app rodando dentro de uma aba de
-            // outro CommandDeck) vaza para os agentes: cargo, pasta de dados, depuração…
-            || (k.get(..12).is_some_and(|p| p.eq_ignore_ascii_case("COMMANDDECK_")) && !k.eq_ignore_ascii_case("COMMANDDECK_ASK_WAIT"));
+            // Nada do AgentDeck que abriu este app (ex.: o app rodando dentro de uma aba de
+            // outro AgentDeck, ou da versão antiga, CommandDeck) vaza para os agentes: cargo,
+            // pasta de dados, depuração… Vale para os dois prefixos.
+            || (crate::env::is_app_var(&k) && !crate::env::is_app_var_named(&k, "ASK_WAIT"));
         if !removed {
             env.insert(k, v);
         }
     }
     env.insert("PATH".into(), format!("{}{PATH_SEP}{old_path}", bin_dir.display()));
-    env.insert("COMMANDDECK_PORT".into(), port.to_string());
-    env.insert("COMMANDDECK_TOKEN".into(), token.to_owned());
-    env.insert("COMMANDDECK_AGENT".into(), agent_id.to_owned());
-    env.insert("COMMANDDECK_DEPTH".into(), depth.to_string());
+    env.insert("AGENTDECK_PORT".into(), port.to_string());
+    env.insert("AGENTDECK_TOKEN".into(), token.to_owned());
+    env.insert("AGENTDECK_AGENT".into(), agent_id.to_owned());
+    env.insert("AGENTDECK_DEPTH".into(), depth.to_string());
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
     if cfg!(windows) {
@@ -783,8 +784,8 @@ pub(crate) fn spawn_spec(core: &Core, project: &str, kind: &str) -> Result<Spawn
     spawn_spec_for(core, project, &Ident::main(kind))
 }
 
-/// Como [`spawn_spec`], para uma instância: `COMMANDDECK_AGENT` leva o id dela e o cargo vai
-/// em `COMMANDDECK_ROLE` e no prompt de sistema. O terminal abre na pasta do projeto `project`
+/// Como [`spawn_spec`], para uma instância: `AGENTDECK_AGENT` leva o id dela e o cargo vai
+/// em `AGENTDECK_ROLE` e no prompt de sistema. O terminal abre na pasta do projeto `project`
 /// (na primeira aba de um projeto que não é o ativo, o AGENTS.md dele é escrito).
 pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
     let project_dir = core.project_path(project).ok_or_else(|| format!("Projeto desconhecido: {project}"))?;
@@ -803,7 +804,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     let data_dir = core.paths().data_dir.to_string_lossy().into_owned();
     let mut env = agent_env(core, &id, 0, &core.tab_token(project, &id));
     if let Some(role) = &ident.role {
-        env.insert("COMMANDDECK_ROLE".into(), role.clone());
+        env.insert("AGENTDECK_ROLE".into(), role.clone());
     }
 
     // Pedido > gravado > padrão do cargo; fica gravado para a interface e para reabrir o app.
@@ -811,10 +812,10 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     let (program, args, label) = if base == "ollama" {
         let resolved = reg.resolve_ollama(sub_model).ok_or_else(|| def.missing.to_owned())?;
         let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
-        env.insert("COMMANDDECK_OLLAMA_MODEL".into(), model.clone());
-        env.insert("COMMANDDECK_OLLAMA_HOST".into(), core.config().ollama_host);
+        env.insert("AGENTDECK_OLLAMA_MODEL".into(), model.clone());
+        env.insert("AGENTDECK_OLLAMA_HOST".into(), core.config().ollama_host);
         // O `ask-agent` do modelo roda como ferramenta e precisa da resposta no stdout: espera tudo.
-        env.insert("COMMANDDECK_ASK_WAIT".into(), "0".into());
+        env.insert("AGENTDECK_ASK_WAIT".into(), "0".into());
         (ollama_agent_exe(&core.paths().bin_dir), vec![model.clone()], format!("Ollama ({model})"))
     } else {
         let resolved = reg.resolve(base).ok_or_else(|| def.missing.to_owned())?;
@@ -917,31 +918,40 @@ mod tests {
             ("CLAUDE_CODE_ENTRYPOINT".to_owned(), "cli".to_owned()),
             ("HOME".to_owned(), "/h".to_owned()),
             ("PATH".to_owned(), "/usr/bin".to_owned()),
-            // Herdados de um CommandDeck que abriu este (app rodando dentro de uma aba).
+            // Herdados de um AgentDeck que abriu este (app rodando dentro de uma aba).
+            ("AGENTDECK_ROLE".to_owned(), "dev".to_owned()),
+            ("AGENTDECK_HOME".to_owned(), "/outro".to_owned()),
+            ("AGENTDECK_TOKEN".to_owned(), "velho".to_owned()),
+            ("AGENTDECK_DEBUG_UI".to_owned(), "1".to_owned()),
+            // ...ou da versão antiga (CommandDeck): o prefixo antigo também é filtrado.
             ("COMMANDDECK_ROLE".to_owned(), "dev".to_owned()),
             ("COMMANDDECK_HOME".to_owned(), "/outro".to_owned()),
             ("COMMANDDECK_TOKEN".to_owned(), "velho".to_owned()),
             ("COMMANDDECK_DEBUG_UI".to_owned(), "1".to_owned()),
-            // Configuração do usuário: continua valendo.
-            ("COMMANDDECK_ASK_WAIT".to_owned(), "300".to_owned()),
+            // Configuração do usuário: continua valendo, com os dois nomes.
+            ("AGENTDECK_ASK_WAIT".to_owned(), "300".to_owned()),
+            ("COMMANDDECK_ASK_WAIT".to_owned(), "200".to_owned()),
             // Modelo da aba do OpenCode que abriu este app: não passa para os agentes.
             ("OPENCODE_CONFIG_CONTENT".to_owned(), r#"{"model":"herdado"}"#.to_owned()),
         ];
         let env = build_agent_env(base, Path::new("/app/bin"), 1234, "tok", "claude", 1);
-        for k in ["COMMANDDECK_ROLE", "COMMANDDECK_HOME", "COMMANDDECK_DEBUG_UI"] {
+        for k in ["AGENTDECK_ROLE", "AGENTDECK_HOME", "AGENTDECK_DEBUG_UI", "COMMANDDECK_ROLE", "COMMANDDECK_HOME", "COMMANDDECK_DEBUG_UI"]
+        {
             assert!(!env.contains_key(k), "{k} herdado");
         }
-        assert_eq!(env["COMMANDDECK_TOKEN"], "tok");
-        assert_eq!(env["COMMANDDECK_ASK_WAIT"], "300");
+        assert_eq!(env["AGENTDECK_TOKEN"], "tok");
+        assert!(!env.contains_key("COMMANDDECK_TOKEN"), "o app escreve só os nomes novos");
+        assert_eq!(env["AGENTDECK_ASK_WAIT"], "300");
+        assert_eq!(env["COMMANDDECK_ASK_WAIT"], "200");
         assert!(!env.contains_key("CLAUDECODE"));
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
         assert!(!env.contains_key("OPENCODE_CONFIG_CONTENT"), "a configuração da aba do OpenCode que abriu o app vazou");
         assert_eq!(env["HOME"], "/h");
         assert_eq!(env["PATH"], format!("/app/bin{PATH_SEP}/usr/bin"));
-        assert_eq!(env["COMMANDDECK_PORT"], "1234");
-        assert_eq!(env["COMMANDDECK_TOKEN"], "tok");
-        assert_eq!(env["COMMANDDECK_AGENT"], "claude");
-        assert_eq!(env["COMMANDDECK_DEPTH"], "1");
+        assert_eq!(env["AGENTDECK_PORT"], "1234");
+        assert_eq!(env["AGENTDECK_TOKEN"], "tok");
+        assert_eq!(env["AGENTDECK_AGENT"], "claude");
+        assert_eq!(env["AGENTDECK_DEPTH"], "1");
         assert_eq!(env["TERM"], "xterm-256color");
         assert_eq!(env["COLORTERM"], "truecolor");
     }

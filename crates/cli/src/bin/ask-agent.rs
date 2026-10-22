@@ -1,4 +1,4 @@
-//! `ask-agent` — pergunta algo a outro agente pela ponte do CommandDeck (porta de bin/ask-agent.js).
+//! `ask-agent` — pergunta algo a outro agente pela ponte do AgentDeck (porta de bin/ask-agent.js).
 //!
 //! Uso: ask-agent <agente> "mensagem"     (ou "-" para ler a mensagem do stdin; "--file <arq>" de um arquivo)
 //!      ask-agent --new <agente> "mensagem"   (abre outra instância, mesmo se já houver uma)
@@ -23,11 +23,11 @@
 //! caminho recomendado para textos longos ou com acentos: no Windows PowerShell, canalizar pelo shell
 //! troca acentos e travessões por `?` (o `$OutputEncoding` é US-ASCII).
 //!
-//! Numa aba, o `ask-agent` espera a resposta por até `COMMANDDECK_ASK_WAIT` segundos (padrão 90,
+//! Numa aba, o `ask-agent` espera a resposta por até `AGENTDECK_ASK_WAIT` segundos (padrão 90,
 //! abaixo do timeout padrão do Bash do Claude Code; `0` = até o fim). Se o outro agente demorar
 //! mais, ele termina avisando, e a resposta é digitada depois no terminal de quem perguntou.
 //!
-//! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do CommandDeck.
+//! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do AgentDeck.
 //! `--signal` e `--usage` saem sempre com 0 (um hook que falha não pode atrapalhar o agente).
 
 use std::collections::BTreeMap;
@@ -36,9 +36,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
-use commanddeck_core::usage::{from_claude_statusline, usage_to_json};
-use commanddeck_core::util::decode_text;
-use commanddeck_core::AgentUsage;
+use agentdeck_core::usage::{from_claude_statusline, usage_to_json};
+use agentdeck_core::util::decode_text;
+use agentdeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
@@ -69,9 +69,16 @@ impl Bridge {
             ureq::Agent::config_builder().proxy(None).http_status_as_error(false).timeout_global(timeout).build().into();
         let url = format!("http://127.0.0.1:{}{route}", self.port);
         let resp = match (method, body) {
-            ("GET", _) => agent.get(&url).header("x-commanddeck-token", &self.token).header("content-type", "application/json").call(),
-            (_, Some(b)) => agent.post(&url).header("x-commanddeck-token", &self.token).send_json(b),
-            (_, None) => agent.post(&url).header("x-commanddeck-token", &self.token).send_empty(),
+            ("GET", _) => agent
+                .get(&url)
+                .header("x-agentdeck-token", &self.token)
+                .header("x-commanddeck-token", &self.token)
+                .header("content-type", "application/json")
+                .call(),
+            (_, Some(b)) => {
+                agent.post(&url).header("x-agentdeck-token", &self.token).header("x-commanddeck-token", &self.token).send_json(b)
+            }
+            (_, None) => agent.post(&url).header("x-agentdeck-token", &self.token).header("x-commanddeck-token", &self.token).send_empty(),
         };
         let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
@@ -87,20 +94,20 @@ fn fail(msg: impl std::fmt::Display, code: u8) -> ExitCode {
 }
 
 fn main() -> ExitCode {
-    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let env = |k: &str| agentdeck_core::env_var(k);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a == "--usage") {
-        let bridge = env("COMMANDDECK_PORT").zip(env("COMMANDDECK_TOKEN")).map(|(port, token)| Bridge { port, token });
+        let bridge = env("PORT").zip(env("TOKEN")).map(|(port, token)| Bridge { port, token });
         return statusline(bridge);
     }
-    let (Some(port), Some(token)) = (env("COMMANDDECK_PORT"), env("COMMANDDECK_TOKEN")) else {
+    let (Some(port), Some(token)) = (env("PORT"), env("TOKEN")) else {
         if args.first().is_some_and(|a| a == "--signal") {
             return ExitCode::SUCCESS;
         }
-        return fail("rode este comando de dentro de um terminal do CommandDeck.", 2);
+        return fail("rode este comando de dentro de um terminal do AgentDeck.", 2);
     };
-    let from = env("COMMANDDECK_AGENT").unwrap_or_else(|| "shell".into());
-    let depth: i64 = env("COMMANDDECK_DEPTH").and_then(|d| d.trim().parse::<f64>().ok()).map(|d| d as i64).unwrap_or(0);
+    let from = env("AGENT").unwrap_or_else(|| "shell".into());
+    let depth: i64 = env("DEPTH").and_then(|d| d.trim().parse::<f64>().ok()).map(|d| d as i64).unwrap_or(0);
     let bridge = Bridge { port, token };
 
     if args.first().is_some_and(|a| a == "--signal") {
@@ -213,7 +220,7 @@ fn main() -> ExitCode {
         return fail("mensagem vazia.", 2);
     }
 
-    let wait = env("COMMANDDECK_ASK_WAIT").and_then(|w| w.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_WAIT);
+    let wait = env("ASK_WAIT").and_then(|w| w.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_WAIT);
     let mut body = json!({ "from": from, "to": to, "message": message, "depth": depth, "new": force_new, "wait": wait });
     if let Some(n) = reply_to {
         body["reply_to"] = json!(n);
@@ -405,7 +412,7 @@ fn take_body_file(args: &mut Vec<String>) -> Result<Option<String>, String> {
 /// O id de tarefa (`t3`, `3`) como a ponte o espera.
 fn task_id(arg: Option<&String>) -> Result<String, String> {
     let arg = arg.ok_or("falta o id da tarefa (ex.: t3).")?;
-    commanddeck_core::tasks::parse_task_id(arg).ok_or_else(|| format!("id de tarefa inválido: \"{arg}\" (use t3 ou 3)."))
+    agentdeck_core::tasks::parse_task_id(arg).ok_or_else(|| format!("id de tarefa inválido: \"{arg}\" (use t3 ou 3)."))
 }
 
 /// Lê o que vem depois de `--task`.
@@ -684,7 +691,7 @@ fn statusline(bridge: Option<Bridge>) -> ExitCode {
 
 /// "sessão 34% · semana 12%", com quebra de linha (vazio sem dados).
 fn usage_line(u: &AgentUsage) -> String {
-    let pct = |w: Option<commanddeck_core::UsageWindow>| w.map(|w| format!("{:.0}%", w.used * 100.0));
+    let pct = |w: Option<agentdeck_core::UsageWindow>| w.map(|w| format!("{:.0}%", w.used * 100.0));
     let parts: Vec<String> =
         [("sessão", pct(u.session)), ("semana", pct(u.weekly))].into_iter().filter_map(|(k, v)| Some(format!("{k} {}", v?))).collect();
     if parts.is_empty() {
@@ -704,7 +711,7 @@ fn user_statusline(status: &Value) -> Option<String> {
     let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| commanddeck_core::util::home_dir().join(".claude"));
+        .unwrap_or_else(|| agentdeck_core::util::home_dir().join(".claude"));
     let mut files: Vec<PathBuf> = Vec::new();
     if let Some(p) = &project {
         files.push(p.join(".claude").join("settings.local.json"));

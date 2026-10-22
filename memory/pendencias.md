@@ -35,13 +35,17 @@ A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [his
 
 ### c) Identidade visual e temas
 
+É a tarefa logo depois do rename (o nome já é AgentDeck, ver [historico.md](historico.md), `t20`), e vem antes da promoção para a `main`: o visual novo e o nome chegam a quem usa a `main` numa vez só. Logo e ícone entram aqui.
+
 - [ ] **Identidade visual e temas** (pedido do usuário, 18/10). O app funciona, mas o visual é inconsistente: a barra lateral esquerda parece de outro tema que a barra direita, e algumas partes estão sem personalidade.
   - Primeiro, padronizar: revisar barra lateral, barra direita, barra de título, abas e modais com as mesmas cores, espaçamentos, cantos e estados (hover, seleção), tudo vindo dos tokens de `theme.rs`, sem cor fixa espalhada pelo código.
   - Depois, temas para o usuário escolher: trocar as constantes de `theme.rs` por uma paleta carregada em tempo de execução, escolhida nas configurações e gravada em `Config`. A paleta inclui o fundo e as 16 cores do terminal (`TERM_BG`/`TERM_FG`, `terminal/colors.rs`), então um tema muda o fundo de todas as abas de uma vez (CLIs com tema próprio, como o OpenCode, continuam usando o tema deles).
 
-### d) Renomear para AgentDeck
+### d) Estabilizar e promover a `dev` para a `main`
 
-- [ ] **Renomear** executáveis, variáveis `COMMANDDECK_*`, pasta de dados e marcadores do `AGENTS.md` (`commanddeck:start`/`end`), com migração de quem já usa. Só depois do diff legível e da estabilização para a `main` (ver [AGENTDECK.md](AGENTDECK.md)).
+- [ ] **Rodar os testes de [testes.md](testes.md) uma vez só**, sobre o app já renomeado e redesenhado (mesa, memória, janelas, Documentos e a migração do nome: abrir o app novo com a configuração e a pasta de dados de quem usava o CommandDeck), corrigir o que falhar e promover. Quem aprova a promoção é o usuário (ver [AGENTDECK.md](AGENTDECK.md)).
+- [ ] **Tirar os nomes antigos aceitos** na próxima versão depois da promoção: `COMMANDDECK_*`, `x-commanddeck-token`, marcadores `commanddeck:`, `.commanddeck.lock` e a config `CommandDeck/` (lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
+- [ ] **Renomear o repositório no GitHub e a pasta local `commanddeck-dev`** (ação do usuário; o GitHub redireciona a URL antiga). Depois, trocar as URLs que citam o nome antigo (`CONTRIBUTING.md`).
 
 ## Mesa de tarefas
 

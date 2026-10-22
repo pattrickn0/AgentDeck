@@ -1,4 +1,4 @@
-# Arquitetura do CommandDeck Terminal
+# Arquitetura do AgentDeck
 
 Visão geral e mapa dos documentos: [GERAL.md](GERAL.md).
 
@@ -22,12 +22,12 @@ Sem Node/Electron em runtime: `ask-agent` e `ollama-agent` viram binários Rust 
 
 ```
 (raiz)
-├── crates/core   commanddeck-core   backend sem GUI
-├── crates/app    commanddeck        UI winit+egui
-└── crates/cli    commanddeck-cli    bins ask-agent e ollama-agent
+├── crates/core   agentdeck-core   backend sem GUI
+├── crates/app    agentdeck        UI winit+egui
+└── crates/cli    agentdeck-cli    bins ask-agent e ollama-agent
 ```
 
-A UI fala com o backend apenas via `commanddeck_core::Core` (métodos ≈ canais IPC) e recebe
+A UI fala com o backend apenas via `agentdeck_core::Core` (métodos ≈ canais IPC) e recebe
 `CoreEvent` por um `crossbeam_channel::Receiver`, com um `Waker` que acorda o loop do winit
 (`EventLoopProxy`). Operações bloqueantes (listar agentes, transcrição) rodam em threads.
 
@@ -39,10 +39,10 @@ não exige alterar o resto do sistema.
 
 ## Protocolo entre agentes (`ask-agent`)
 
-Cada aba recebe no ambiente: `COMMANDDECK_PORT` (porta da ponte), `COMMANDDECK_TOKEN` (token de 128 bits **da
-própria aba**), `COMMANDDECK_AGENT` (nome do agente da aba), `COMMANDDECK_DEPTH` (profundidade de chamadas) e a
-pasta dos executáveis no início do `PATH`. Nenhuma outra `COMMANDDECK_*` do ambiente do app passa para os
-agentes (exceto `COMMANDDECK_ASK_WAIT`, configuração do usuário).
+Cada aba recebe no ambiente: `AGENTDECK_PORT` (porta da ponte), `AGENTDECK_TOKEN` (token de 128 bits **da
+própria aba**), `AGENTDECK_AGENT` (nome do agente da aba), `AGENTDECK_DEPTH` (profundidade de chamadas) e a
+pasta dos executáveis no início do `PATH`. Nenhuma outra `AGENTDECK_*` do ambiente do app passa para os
+agentes (exceto `AGENTDECK_ASK_WAIT`, configuração do usuário).
 
 **Identidade pelo token.** Cada processo de agente tem um token próprio: o da aba vale enquanto a instância
 existir (`Core::tab_token`); o de uma execução headless, só durante ela (`Core::headless_token`). A ponte
@@ -81,7 +81,7 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `POST /tasks/<id>/return` | `{"feedback"}` → `{"task"}`: devolve a tarefa em revisão ao agente, com o feedback |
 | `POST /tasks/<id>/reject` | `{"feedback"}` → `{"task"}`: reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, com o motivo (400 para motivo vazio; 409 fora de `Validating` ou com as abas dos agentes desligadas) |
 
-Toda requisição exige o cabeçalho `x-commanddeck-token` (comparado em tempo constante) e um `Host`
+Toda requisição exige o cabeçalho `x-agentdeck-token` (comparado em tempo constante; o nome antigo, `x-commanddeck-token`, também é aceito durante a migração) e um `Host`
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
 mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupando a vaga até a resposta chegar), e
 os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
@@ -90,15 +90,15 @@ processo no Ollama.
 
 **Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
-`ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do CommandDeck).
+`ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
 
-**Uma janela por pasta de dados.** O core trava `dados/.commanddeck.lock` ao iniciar; uma segunda janela
-na mesma pasta é recusada com uma mensagem (defina `COMMANDDECK_HOME` para abrir outra instância isolada).
+**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` e também `dados/.commanddeck.lock` (a trava da versão antiga, durante a migração) ao iniciar; uma segunda janela
+na mesma pasta, nova ou antiga, é recusada com uma mensagem (defina `AGENTDECK_HOME` para abrir outra instância isolada).
 
 ### Instâncias (abas) e perguntas entre elas
 
-Cada aba é uma **instância** com identidade própria, usada em `COMMANDDECK_AGENT` e como destino do
+Cada aba é uma **instância** com identidade própria, usada em `AGENTDECK_AGENT` e como destino do
 `ask-agent`: `<modelo>[@<cargo>[@<nome>]]`.
 
 | Id | Significado |
@@ -120,7 +120,7 @@ mudou de posição recebe o aviso anexado à **próxima** mensagem digitada na a
 `Core::take_team_notice` na hora de digitar, então uma entrega descartada não gasta o aviso; consultar o `--team`
 já dá o aviso por lido). O chefe de quem fecha também é avisado, mesmo que a equipe dela fosse vazia. `ask-agent --boss "msg"` pergunta ao chefe. A barra lateral desenha a árvore
 (`ui/projects.rs::agent_tree`). A equipe orienta, não restringe: qualquer agente continua podendo chamar qualquer outro.
-O cargo também vai em `COMMANDDECK_ROLE` e no prompt de sistema.
+O cargo também vai em `AGENTDECK_ROLE` e no prompt de sistema.
 
 **Modelo de LLM da instância** (`crates/core/src/models.rs`). O modelo (`sonnet`, `opencode/glm-5.3-flash-free`…) é uma
 propriedade da instância, **não** parte do id (que continua `modelo[@cargo[@nome]]`): fica em
@@ -175,12 +175,12 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
    então só pode ser resposta. Depois do 202 (item 4) quem perguntou está livre, e a forma antiga vira uma
    pergunta nova; a resposta vai pelo número. Quem perguntou e o destino são lidos pelo número na hora de usar,
    então renomear uma aba no meio da pergunta não perde a resposta. Nada de raspar a tela.
-4. **Resposta síncrona ou atrasada.** O `ask-agent` de quem perguntou espera até `COMMANDDECK_ASK_WAIT`
+4. **Resposta síncrona ou atrasada.** O `ask-agent` de quem perguntou espera até `AGENTDECK_ASK_WAIT`
    segundos (padrão 90, abaixo do timeout padrão do Bash do Claude Code). Se a resposta não chegou, ele
    termina com HTTP 202 e um aviso, e a resposta, quando chegar (até 10 minutos), é **digitada no terminal
    de quem perguntou** como uma mensagem nova (`Delivery { answer: true }`). Isso só vale para abas de
    agentes: num terminal comum (`shell`) o texto seria executado como comando, então ali o `ask-agent`
-   espera até o fim, assim como nas execuções headless e no `ollama-agent` (`COMMANDDECK_ASK_WAIT=0`).
+   espera até o fim, assim como nas execuções headless e no `ollama-agent` (`AGENTDECK_ASK_WAIT=0`).
 5. O `ollama-agent` devolve a resposta sozinho (`POST /reply` com o número lido da instrução, que só conclui
    perguntas pendentes e nunca cria uma nova), porque modelos pequenos esquecem de rodar o comando.
 6. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**

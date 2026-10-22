@@ -29,7 +29,7 @@ jobs:
       - name: Build
         run: cargo build --workspace --locked
       - name: Build sem áudio
-        run: cargo build -p commanddeck --no-default-features --locked
+        run: cargo build -p agentdeck --no-default-features --locked
       - name: Testes
         run: cargo test --workspace --locked
       - name: Clippy

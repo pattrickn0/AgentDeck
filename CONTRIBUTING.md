@@ -9,7 +9,7 @@
 ```powershell
 git clone https://github.com/pattrickn0/CommandDeck-Terminal.git
 cd CommandDeck-Terminal
-cargo run -p commanddeck          # roda o app (modo debug)
+cargo run -p agentdeck          # roda o app (modo debug)
 ```
 
 ## Antes de abrir um PR

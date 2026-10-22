@@ -2,7 +2,7 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
 
-use commanddeck_core::models;
+use agentdeck_core::models;
 
 use super::{dot, frame, place, shadow, text_in, text_w};
 use crate::deck::Deck;

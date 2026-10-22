@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use commanddeck_core::{models, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
+use agentdeck_core::{models, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 
 use crate::deck::{AttachTarget, Deck, UiMsg};
 
@@ -861,12 +861,12 @@ impl Deck {
 }
 
 // ---------------------------------------------------------------------------
-// Estados fictícios (capturas de tela, `COMMANDDECK_DEBUG_UI=tasks-*`)
+// Estados fictícios (capturas de tela, `AGENTDECK_DEBUG_UI=tasks-*`)
 // ---------------------------------------------------------------------------
 
 /// Uma tarefa de cada estado, com dados realistas.
 pub fn demo_tasks() -> Vec<Task> {
-    let now = commanddeck_core::util::now_ms();
+    let now = agentdeck_core::util::now_ms();
     let min = 60_000u64;
     let ev = |ago_min: u64, text: &str| TaskEvent { at_ms: now - ago_min * min, text: text.to_owned() };
     let base = |id: &str, title: &str, status: TaskStatus, kind: &str, model: Option<&str>| Task {
@@ -874,7 +874,7 @@ pub fn demo_tasks() -> Vec<Task> {
         title: title.to_owned(),
         status,
         base: "dev".into(),
-        branch: format!("tarefa/{id}-{}", commanddeck_core::tasks::slugify(title, 40)),
+        branch: format!("tarefa/{id}-{}", agentdeck_core::tasks::slugify(title, 40)),
         worktree: format!(r"C:\Users\voce\commanddeck-dev\.agentdeck\worktrees\{id}").into(),
         kind: kind.to_owned(),
         model: model.map(str::to_owned),

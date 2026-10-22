@@ -34,7 +34,7 @@ pub const DEFAULT_HOST: &str = "127.0.0.1:11434";
 
 const NOT_RUNNING: &str = "Ollama não está rodando. Inicie o Ollama antes de chamar este agente.";
 
-const ASK_AGENT_NOTE: &str = "\n\n[INSTRUÇÃO DO SISTEMA: O usuário já acompanha toda esta conversa em tempo real no painel \"Conversa integrada\" do CommandDeck. NÃO resuma nem relate esta resposta para o usuário e NÃO transfira dúvidas intermediárias a ele. Se a tarefa necessitar de mais discussão, esclarecimentos ou refinamento, CONTINUE conversando diretamente com o agente parceiro executando ask-agent novamente no run_command. Se já estiver alinhado, aplique as ferramentas necessárias no workspace (edit_file, write_file, run_command) até concluir a tarefa.]";
+const ASK_AGENT_NOTE: &str = "\n\n[INSTRUÇÃO DO SISTEMA: O usuário já acompanha toda esta conversa em tempo real no painel \"Conversa integrada\" do AgentDeck. NÃO resuma nem relate esta resposta para o usuário e NÃO transfira dúvidas intermediárias a ele. Se a tarefa necessitar de mais discussão, esclarecimentos ou refinamento, CONTINUE conversando diretamente com o agente parceiro executando ask-agent novamente no run_command. Se já estiver alinhado, aplique as ferramentas necessárias no workspace (edit_file, write_file, run_command) até concluir a tarefa.]";
 
 // ---------- Plataforma ----------
 
@@ -430,11 +430,11 @@ pub fn extract_base64_images(attachments: &[String], workspace: &Path) -> Vec<St
 pub fn system_prompt(workspace: &Path, host: &str, extra_system: Option<&str>, chunks: &[ContextChunk]) -> String {
     let shell = shell_name();
     let base_system = [
-        "Você é o Ollama Agent, um agente autônomo de inteligência artificial operando localmente dentro do CommandDeck Terminal.".to_owned(),
+        "Você é o Ollama Agent, um agente autônomo de inteligência artificial operando localmente dentro do AgentDeck.".to_owned(),
         "Você NÃO é um chatbot isolado e NÃO está em um CLI genérico ou sem contexto. Você tem ferramentas ativas e integração profunda com o sistema.".to_owned(),
         String::new(),
         "=== AMBIENTE E CONTEXTO OPERACIONAL ===".to_owned(),
-        "* Aplicação: CommandDeck Terminal (projeto \"commanddeck\") — terminal multi-agente desktop nativo, escrito em Rust.".to_owned(),
+        "* Aplicação: AgentDeck (projeto \"agentdeck\") — terminal multi-agente desktop nativo, escrito em Rust.".to_owned(),
         format!("* Execução: Modelo local rodando no servidor Ollama ({}). Você opera com total privacidade, segurança e sem custo de nuvem.", base_url(host).trim_start_matches("http://")),
         format!("* Workspace Atual: \"{}\". Você tem autorização completa do usuário para ler, criar, editar e testar qualquer arquivo nesta pasta.", workspace.display()),
         format!("* Sistema Operacional: {} (shell {shell}).", os_name()),
@@ -456,7 +456,7 @@ pub fn system_prompt(workspace: &Path, host: &str, extra_system: Option<&str>, c
         format!("* Para extrair metadados ou fazer OCR localmente, você pode executar scripts Python (Pillow/tesseract) ou comandos {shell} via run_command."),
         String::new(),
         "=== REDE DE AGENTES E COLABORAÇÃO (ask-agent) ===".to_owned(),
-        "Você faz parte de uma equipe de agentes de elite no CommandDeck. Você pode consultar e colaborar com outros agentes a qualquer momento:".to_owned(),
+        "Você faz parte de uma equipe de agentes de elite no AgentDeck. Você pode consultar e colaborar com outros agentes a qualquer momento:".to_owned(),
         "- antigravity: Google Antigravity CLI — parceiro de ponta para visão multimodal (imagens), planejamento arquitetural, auditoria e tarefas complexas.".to_owned(),
         "- claude: Claude Code CLI — parceiro de ponta para refatoração e implementação profunda.".to_owned(),
         "Como chamar outro agente:".to_owned(),
@@ -465,7 +465,7 @@ pub fn system_prompt(workspace: &Path, host: &str, extra_system: Option<&str>, c
         String::new(),
         "=== REGRAS OBRIGATÓRIAS DE COLABORAÇÃO COM OUTROS AGENTES (CRÍTICO) ===".to_owned(),
         "1. O USUÁRIO JÁ TEM ACESSO À CONVERSA INTEGRADA (NÃO PRECISA ME FALAR):".to_owned(),
-        "   O usuário acompanha em tempo real todas as mensagens trocadas entre os agentes na janela/painel \"Conversa integrada\" do CommandDeck.".to_owned(),
+        "   O usuário acompanha em tempo real todas as mensagens trocadas entre os agentes na janela/painel \"Conversa integrada\" do AgentDeck.".to_owned(),
         "   Por essa razão, você NUNCA deve relatar, retransmitir, resumir ou papagaiar para o usuário o que o outro agente (Antigravity, Claude, etc.) respondeu. O usuário já leu diretamente na interface!".to_owned(),
         "2. NÃO PARE PARA PERGUNTAR AO USUÁRIO — CONTINUE CONVERSANDO COM O AGENTE (ANTIGRAVITY):".to_owned(),
         "   Quando você estiver colaborando com o Antigravity (ou outro agente), NÃO pare a execução para ficar perguntando ao usuário coisas como: \"o que você acha?\", \"como você prefere fazer?\", \"devo aplicar o que ele falou?\", \"qual opção você escolhe?\".".to_owned(),

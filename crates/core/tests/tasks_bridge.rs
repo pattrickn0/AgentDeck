@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use commanddeck_core::TaskStatus;
+use agentdeck_core::TaskStatus;
 use serde_json::{json, Value};
 
 #[path = "support/tasks_env.rs"]

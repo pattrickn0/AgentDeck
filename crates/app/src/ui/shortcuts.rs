@@ -17,7 +17,7 @@ pub struct ShortcutItem {
     pub desc: &'static str,
 }
 
-/// Lista de atalhos do CommandDeck (conforme README).
+/// Lista de atalhos do AgentDeck (conforme README).
 pub const SHORTCUTS: &[ShortcutItem] = &[
     ShortcutItem { keys: &["Ctrl+T"], desc: "Nova aba do mesmo agente (barra recolhida: escolher)" },
     ShortcutItem { keys: &["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: "Alternar abas (ou documentos, no modo Documentos)" },
@@ -130,7 +130,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         y += 24.0;
 
         // Explicação
-        let hint_g = galley(&p, "Principais atalhos e ações do CommandDeck", theme::ui(11.5), theme::MUTED);
+        let hint_g = galley(&p, "Principais atalhos e ações do AgentDeck", theme::ui(11.5), theme::MUTED);
         place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)), Align2::LEFT_CENTER, hint_g, theme::MUTED);
         y += 22.0;
 

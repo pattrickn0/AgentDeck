@@ -7,9 +7,9 @@
 
 use std::collections::HashMap;
 
-use commanddeck_core::git::{DiffKind, EntryKind, GitDiff, GitEntry, GitError};
-use commanddeck_core::workspace::READ_TEXT_MAX;
-use commanddeck_core::TextFile;
+use agentdeck_core::git::{DiffKind, EntryKind, GitDiff, GitEntry, GitError};
+use agentdeck_core::workspace::READ_TEXT_MAX;
+use agentdeck_core::TextFile;
 
 use crate::deck::{Deck, UiMsg};
 
@@ -237,7 +237,7 @@ pub struct Docs {
     /// O documento em foco de cada projeto.
     current: HashMap<String, u64>,
     next_uid: u64,
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=docs-demo`): os documentos são fictícios; nada é lido nem relido.
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=docs-demo`): os documentos são fictícios; nada é lido nem relido.
     pub debug_hold: bool,
     /// SOMENTE DEPURAÇÃO (`docs-demo-badge`): o selo da chave, em vez do das abas de verdade.
     pub debug_badge: Option<Badge>,
@@ -636,7 +636,7 @@ impl Deck {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commanddeck_core::git::parse_diff;
+    use agentdeck_core::git::parse_diff;
 
     const P: &str = "proj";
 

@@ -3,7 +3,7 @@
 
 use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
 
-use commanddeck_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
+use agentdeck_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
 
 use super::git::{diff_lines, Act, BTN_H};
 use super::{clickable, frame, galley, galley_trunc, place, text_in, tip};

@@ -1,6 +1,6 @@
 # 🎙️ Subsistema de Transcrição de Voz Local (`whisper/`)
 
-O diretório `whisper/` gerencia todo o motor de inferência de voz para texto (Speech-to-Text) do **CommandDeck Terminal**, baseado no projeto de alto desempenho **`whisper.cpp`** da GGML.
+O diretório `whisper/` gerencia todo o motor de inferência de voz para texto (Speech-to-Text) do **AgentDeck**, baseado no projeto de alto desempenho **`whisper.cpp`** da GGML.
 
 ---
 
@@ -37,10 +37,10 @@ whisper/
 
 ## 🧠 Modelo Neural (`large-v3-turbo`)
 
-O CommandDeck utiliza o modelo oficial **`large-v3-turbo`** (~1,62 GB) da OpenAI convertido para o formato GGML:
+O AgentDeck utiliza o modelo oficial **`large-v3-turbo`** (~1,62 GB) da OpenAI convertido para o formato GGML:
 - **Precisão Excepcional:** Suporte nativo a dezenas de idiomas com foco especial em Português e Inglês técnico.
-- **Download Automático:** Na primeira inicialização, se o modelo não existir na pasta `whisper/models/`, o CommandDeck baixa-o automaticamente direto do Hugging Face com exibição do progresso no terminal da interface.
-- **Injeção de Contexto Fonético:** Cada inferência inclui um prompt contextual customizado (`--prompt "CommandDeck Terminal, Claude, Antigravity, agy, Vulkan..."`) para garantir grafia correta dos termos de desenvolvimento.
+- **Download Automático:** Na primeira inicialização, se o modelo não existir na pasta `whisper/models/`, o AgentDeck baixa-o automaticamente direto do Hugging Face com exibição do progresso no terminal da interface.
+- **Injeção de Contexto Fonético:** Cada inferência inclui um prompt contextual customizado (`--prompt "AgentDeck, Claude, Antigravity, agy, Vulkan..."`) para garantir grafia correta dos termos de desenvolvimento.
 
 ---
 

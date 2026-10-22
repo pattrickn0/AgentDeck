@@ -4,7 +4,7 @@
 
 use egui::{Align2, Area, Color32, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use commanddeck_core::models::short_model;
+use agentdeck_core::models::short_model;
 
 use super::menus::{closes_on_outside, keep_on_screen};
 use super::{clickable, dot, frame, galley_trunc, place, shadow, text_in, text_w, tip};

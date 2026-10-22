@@ -106,15 +106,44 @@ pub fn read_text(workspace: &Path, rel: &str) -> Result<TextFile, String> {
 
 // ---------- AGENTS.md ----------
 
-pub const MARKER_START: &str = "<!-- commanddeck:start -->";
-pub const MARKER_END: &str = "<!-- commanddeck:end -->";
+pub const MARKER_START: &str = "<!-- agentdeck:start -->";
+pub const MARKER_END: &str = "<!-- agentdeck:end -->";
 
 fn marker_re() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        regex::Regex::new(r"<!-- (?:orquestra|jwic|commanddeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|commanddeck):end -->")
-            .expect("regex válida")
+        // Reconhece também os marcadores dos nomes antigos (`commanddeck`, `jwic`, `orquestra`) e os troca
+        // pelo atual; ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`.
+        regex::Regex::new(
+            r"<!-- (?:orquestra|jwic|commanddeck|agentdeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|commanddeck|agentdeck):end -->",
+        )
+        .expect("regex válida")
     })
+}
+
+/// Troca o primeiro bloco marcado por `block` e apaga os demais (com as linhas em branco que os
+/// separavam do resto): um app de versão anterior que não reconhece o marcador novo acrescenta o
+/// seu próprio bloco no fim, e sem isso os dois ficariam para sempre.
+fn replace_marker_blocks(old: &str, block: &str) -> String {
+    let mut out = String::with_capacity(old.len());
+    let mut pos = 0;
+    for (i, m) in marker_re().find_iter(old).enumerate() {
+        out.push_str(&old[pos..m.start()]);
+        if i == 0 {
+            out.push_str(block);
+        } else {
+            for _ in 0..2 {
+                if out.ends_with("\r\n") {
+                    out.truncate(out.len() - 2);
+                } else if out.ends_with('\n') {
+                    out.pop();
+                }
+            }
+        }
+        pos = m.end();
+    }
+    out.push_str(&old[pos..]);
+    out
 }
 
 /// Resultado de [`ensure_agent_context`].
@@ -129,7 +158,7 @@ pub enum AgentContext {
     Written,
 }
 
-/// Mantém o bloco marcado do CommandDeck no AGENTS.md do workspace (o Antigravity CLI não
+/// Mantém o bloco marcado do AgentDeck no AGENTS.md do workspace (o Antigravity CLI não
 /// tem flag para anexar instruções ao prompt de sistema). Equivalente a `ensureAgentContext`.
 ///
 /// REGRA: nunca cria AGENTS.md na pasta do usuário; fora da pasta do app só atualiza um
@@ -151,7 +180,7 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
     let instructions = instructions.replace("\r\n", "\n").replace('\n', eol);
     let block = format!("{MARKER_START}{eol}{instructions}{eol}{MARKER_END}");
     let new = if marker_re().is_match(&old) {
-        marker_re().replace(&old, regex::NoExpand(&block)).into_owned()
+        replace_marker_blocks(&old, &block)
     } else if old.is_empty() {
         format!("{block}{eol}")
     } else {
@@ -519,7 +548,11 @@ mod tests {
         std::fs::create_dir_all(&ws).expect("mkdir");
         let file = ws.join("AGENTS.md");
         let only_crlf = |t: &str| t.matches('\n').count() == t.matches("\r\n").count();
-        for start in ["# Regras\r\n\r\nfim\r\n", "# Regras\r\n\r\n<!-- commanddeck:start -->\r\nvelho\r\n<!-- commanddeck:end -->\r\n"] {
+        for start in [
+            "# Regras\r\n\r\nfim\r\n",
+            "# Regras\r\n\r\n<!-- agentdeck:start -->\r\nvelho\r\n<!-- agentdeck:end -->\r\n",
+            "# Regras\r\n\r\n<!-- commanddeck:start -->\r\nvelho\r\n<!-- commanddeck:end -->\r\n",
+        ] {
             std::fs::write(&file, start).expect("write");
             assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
@@ -533,6 +566,61 @@ mod tests {
         let names: Vec<String> =
             std::fs::read_dir(&ws).expect("ls").flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["AGENTS.md"]);
+    }
+
+    /// Um AGENTS.md escrito pela versão antiga (marcadores `commanddeck`) tem o bloco trocado pelo
+    /// novo, sem duplicar e sem tocar no resto do arquivo.
+    #[test]
+    fn an_old_commanddeck_block_is_replaced_not_duplicated() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        let file = ws.join("AGENTS.md");
+        for eol in ["\n", "\r\n"] {
+            let before = format!("# Regras{eol}{eol}Use tabs.{eol}{eol}");
+            let after = format!("{eol}## Fim{eol}Obrigado.{eol}");
+            let old_block = format!("<!-- commanddeck:start -->{eol}texto velho{eol}<!-- commanddeck:end -->");
+            std::fs::write(&file, format!("{before}{old_block}{eol}{after}")).expect("write");
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
+            let text = std::fs::read_to_string(&file).expect("read");
+            let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
+            assert_eq!(text, format!("{before}{new_block}{eol}{after}"), "só o bloco muda");
+            assert_eq!(text.matches("<!-- agentdeck:start -->").count(), 1);
+            assert!(!text.contains("commanddeck"), "{text:?}");
+            // Com o bloco novo, nada mais muda.
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+        }
+    }
+
+    /// O app antigo não reconhece `agentdeck:` e acrescenta o seu bloco no fim: o app novo troca o
+    /// primeiro e apaga os demais, sem deixar linhas em branco acumuladas nem tocar no resto.
+    #[test]
+    fn extra_blocks_from_an_old_app_are_removed() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        let file = ws.join("AGENTS.md");
+        for eol in ["\n", "\r\n"] {
+            let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
+            let new_a = format!("<!-- agentdeck:start -->{eol}velho{eol}<!-- agentdeck:end -->");
+            let old_b = format!("<!-- commanddeck:start -->{eol}antigo{eol}<!-- commanddeck:end -->");
+            // No fim (caso do app antigo), no meio e colado ao primeiro.
+            let cases = [
+                (format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}"), format!("# Regras{eol}{eol}{new_block}{eol}")),
+                (
+                    format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}{eol}Fim.{eol}"),
+                    format!("# Regras{eol}{eol}{new_block}{eol}{eol}Fim.{eol}"),
+                ),
+                (format!("{new_a}{eol}{old_b}{eol}"), format!("{new_block}{eol}")),
+            ];
+            for (start, expected) in cases {
+                std::fs::write(&file, &start).expect("write");
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
+                assert_eq!(std::fs::read_to_string(&file).expect("read"), expected, "{start:?}");
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+                assert_eq!(std::fs::read_to_string(&file).expect("read"), expected);
+            }
+        }
     }
 
     #[test]

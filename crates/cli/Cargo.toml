@@ -1,6 +1,6 @@
 [package]
-name = "commanddeck-cli"
-description = "Utilitários de linha de comando do CommandDeck: ask-agent e ollama-agent."
+name = "agentdeck-cli"
+description = "Utilitários de linha de comando do AgentDeck: ask-agent e ollama-agent."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -15,7 +15,7 @@ name = "ollama-agent"
 path = "src/bin/ollama-agent.rs"
 
 [dependencies]
-commanddeck-core.workspace = true
+agentdeck-core.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true

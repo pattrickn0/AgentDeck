@@ -7,11 +7,11 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use commanddeck_core::git::{
+use agentdeck_core::git::{
     extract_hunk_patch, ConflictBlock, ConflictChoice, DiffKind, DiffLine, EntryKind, GitBranch, GitCommit, GitCommitDetail,
     GitConflictFile, GitDiff, GitEntry, GitError, GitStash, GitStatus, RepoState,
 };
-use commanddeck_core::Core;
+use agentdeck_core::Core;
 
 use crate::deck::{Deck, RightView, UiMsg};
 
@@ -808,12 +808,12 @@ impl Deck {
     }
 }
 
-/// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=git-demo`): status fictício para capturas de tela.
+/// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=git-demo`): status fictício para capturas de tela.
 pub fn demo_status() -> GitStatus {
     let e =
         |path: &str, index: char, worktree: char, kind: EntryKind| GitEntry { path: path.into(), orig_path: None, index, worktree, kind };
     GitStatus {
-        root: std::path::PathBuf::from("/projetos/commanddeck"),
+        root: std::path::PathBuf::from("/projetos/agentdeck"),
         prefix: String::new(),
         branch: Some("feat/barra-direita".into()),
         head: Some("b1457ef".into()),
@@ -854,7 +854,7 @@ pub fn demo_diff() -> GitDiff {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: diff com dois trechos (`COMMANDDECK_DEBUG_UI=git-hunks`).
+/// SOMENTE DEPURAÇÃO: diff com dois trechos (`AGENTDECK_DEBUG_UI=git-hunks`).
 pub fn demo_hunks_diff() -> GitDiff {
     let mut d = demo_diff();
     let l = |kind, old, new, text: &str| DiffLine { kind, old, new, text: text.into() };
@@ -879,7 +879,7 @@ pub fn demo_branches() -> Vec<GitBranch> {
     ]
 }
 
-/// SOMENTE DEPURAÇÃO: histórico fictício (`COMMANDDECK_DEBUG_UI=git-log`).
+/// SOMENTE DEPURAÇÃO: histórico fictício (`AGENTDECK_DEBUG_UI=git-log`).
 pub fn demo_log() -> Vec<GitCommit> {
     let c = |h: &str, author: &str, date: &str, subject: &str| GitCommit {
         hash: format!("{h}000000000000000000000000000000000"),
@@ -898,13 +898,13 @@ pub fn demo_log() -> Vec<GitCommit> {
     ]
 }
 
-/// SOMENTE DEPURAÇÃO: detalhe de um commit (`COMMANDDECK_DEBUG_UI=git-commit`).
+/// SOMENTE DEPURAÇÃO: detalhe de um commit (`AGENTDECK_DEBUG_UI=git-commit`).
 pub fn demo_commit_detail() -> GitCommitDetail {
     GitCommitDetail {
         hash: "61621aa000000000000000000000000000000000".into(),
         short_hash: "61621aa".into(),
         author: "Ana".into(),
-        email: "ana@commanddeck.dev".into(),
+        email: "ana@agentdeck.dev".into(),
         date: "há 12 min".into(),
         message: "fix(terminal): prazo da atualização sincronizada\n\nSolta a saída retida após 150 ms quando o fim do bloco se perde."
             .into(),
@@ -913,7 +913,7 @@ pub fn demo_commit_detail() -> GitCommitDetail {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: stashes fictícios (`COMMANDDECK_DEBUG_UI=git-stash`).
+/// SOMENTE DEPURAÇÃO: stashes fictícios (`AGENTDECK_DEBUG_UI=git-stash`).
 pub fn demo_stashes() -> Vec<GitStash> {
     vec![
         GitStash { index: 0, date: "há 25 min".into(), message: "On feat/git: rascunho do editor de conflitos".into() },
@@ -921,7 +921,7 @@ pub fn demo_stashes() -> Vec<GitStash> {
     ]
 }
 
-/// SOMENTE DEPURAÇÃO: status com conflito e merge em andamento (`COMMANDDECK_DEBUG_UI=git-conflicts`).
+/// SOMENTE DEPURAÇÃO: status com conflito e merge em andamento (`AGENTDECK_DEBUG_UI=git-conflicts`).
 pub fn demo_conflicts_status() -> GitStatus {
     let mut st = demo_status();
     st.state = RepoState::Merging;
@@ -934,7 +934,7 @@ pub fn demo_conflicts_status() -> GitStatus {
     st
 }
 
-/// SOMENTE DEPURAÇÃO: arquivo em conflito com blocos (`COMMANDDECK_DEBUG_UI=git-conflicts`).
+/// SOMENTE DEPURAÇÃO: arquivo em conflito com blocos (`AGENTDECK_DEBUG_UI=git-conflicts`).
 pub fn demo_conflict_file() -> GitConflictFile {
     GitConflictFile {
         path: "crates/core/src/git.rs".into(),

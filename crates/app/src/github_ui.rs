@@ -1,4 +1,4 @@
-//! Estado da aba "GitHub" na barra direita e ponte entre [`Deck`] e [`commanddeck_core::github`].
+//! Estado da aba "GitHub" na barra direita e ponte entre [`Deck`] e [`agentdeck_core::github`].
 //!
 //! Toda chamada ao GitHub (`git remote`, `git credential fill`, `gh auth token` e API REST) roda
 //! fora da thread da interface e volta por [`CoreEvent::Github`]; aqui só ficam o estado da tela e
@@ -7,11 +7,11 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use commanddeck_core::github::{
+use agentdeck_core::github::{
     CheckStatus, GithubError, GithubEvent, GithubOverview, GithubPayload, Issue, JobLog, PrChecksDetail, PullRequest, RateLimitInfo,
     RepoSlug, WorkflowJob, WorkflowRun,
 };
-use commanddeck_core::Ident;
+use agentdeck_core::Ident;
 use egui::Rect;
 
 use crate::deck::{Deck, RightView};
@@ -30,7 +30,7 @@ pub enum GithubTab {
 pub enum GithubView {
     #[default]
     Loading,
-    /// Nenhum projeto aberto no CommandDeck.
+    /// Nenhum projeto aberto no AgentDeck.
     NoProject,
     /// Falha sem dados anteriores na tela (sem remoto do GitHub, rede, login recusado, limite...).
     Error(GithubError),
@@ -89,7 +89,7 @@ pub struct GithubUi {
     /// Cargo digitado (ex.: `review`).
     pub new_role_name: String,
 
-    /// SOMENTE DEPURAÇÃO (`COMMANDDECK_DEBUG_UI=github*`): ignora eventos reais e leituras.
+    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=github*`): ignora eventos reais e leituras.
     pub debug_hold: bool,
 }
 
@@ -400,7 +400,7 @@ impl Deck {
 }
 
 // ---------------------------------------------------------------------------
-// Dados fictícios para capturas de tela (`COMMANDDECK_DEBUG_UI=github-demo`)
+// Dados fictícios para capturas de tela (`AGENTDECK_DEBUG_UI=github-demo`)
 // ---------------------------------------------------------------------------
 
 const DEMO_SHA_42: &str = "61621aa9c4f01b2e3d4a5f60718293a4b5c6d7e8";
@@ -414,7 +414,7 @@ pub fn demo_overview() -> GithubOverview {
         base_branch: "dev".into(),
         head_sha: sha.into(),
         draft,
-        html_url: format!("https://github.com/pattr/commanddeck/pull/{number}"),
+        html_url: format!("https://github.com/pattr/agentdeck/pull/{number}"),
         updated_at: "2026-10-16T03:30:00Z".into(),
         checks,
     };
@@ -424,7 +424,7 @@ pub fn demo_overview() -> GithubOverview {
         author: author.into(),
         labels: labels.iter().map(|l| (*l).to_owned()).collect(),
         comments,
-        html_url: format!("https://github.com/pattr/commanddeck/issues/{number}"),
+        html_url: format!("https://github.com/pattr/agentdeck/issues/{number}"),
         updated_at: "2026-10-15T21:10:00Z".into(),
         body_preview: body.into(),
     };
@@ -438,11 +438,11 @@ pub fn demo_overview() -> GithubOverview {
         status,
         raw_status: if conclusion.is_some() { "completed".into() } else { "in_progress".into() },
         conclusion: conclusion.map(str::to_owned),
-        html_url: format!("https://github.com/pattr/commanddeck/actions/runs/{id}"),
+        html_url: format!("https://github.com/pattr/agentdeck/actions/runs/{id}"),
         created_at: "2026-10-16T03:28:00Z".into(),
     };
     GithubOverview {
-        repo: RepoSlug::new("pattr", "commanddeck"),
+        repo: RepoSlug::new("pattr", "agentdeck"),
         authenticated: true,
         prs: vec![
             pr(42, "feat(github): integração com PRs, issues e Actions", "pattr", "feat/github", DEMO_SHA_42, false, CheckStatus::Failure),
@@ -521,7 +521,7 @@ pub fn demo_pr_detail() -> PrChecksDetail {
         name: name.into(),
         status,
         conclusion: Some(conclusion.into()),
-        html_url: format!("https://github.com/pattr/commanddeck/actions/runs/9001/job/{id}"),
+        html_url: format!("https://github.com/pattr/agentdeck/actions/runs/9001/job/{id}"),
         failed_steps: steps.iter().map(|s| (*s).to_owned()).collect(),
     };
     PrChecksDetail {
@@ -540,15 +540,15 @@ pub fn demo_pr_detail() -> PrChecksDetail {
 pub fn demo_job_log() -> JobLog {
     JobLog {
         lines: [
-            "Checking commanddeck-core v0.3.0 (D:\\a\\commanddeck\\crates\\core)",
-            "Checking commanddeck v0.3.0 (D:\\a\\commanddeck\\crates\\app)",
+            "Checking agentdeck-core v0.3.0 (D:\\a\\agentdeck\\crates\\core)",
+            "Checking agentdeck v0.3.0 (D:\\a\\agentdeck\\crates\\app)",
             "error: redundant closure",
             "  --> crates/core/src/github.rs:312:44",
             "   |",
             "312|     let slug = url.and_then(|u| parse_github_remote(&u));",
             "   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself",
             "   = note: `-D clippy::redundant-closure` implied by `-D warnings`",
-            "error: could not compile `commanddeck-core` (lib) due to 1 previous error",
+            "error: could not compile `agentdeck-core` (lib) due to 1 previous error",
             "##[error]Process completed with exit code 101.",
         ]
         .iter()
@@ -589,6 +589,6 @@ mod tests {
         assert!(detail.jobs.iter().any(|j| j.status == CheckStatus::Failure));
         let ui = GithubUi { view: GithubView::Ready(ov), ..Default::default() };
         assert_eq!(ui.open_prs_count(), 4);
-        assert!(ui.tab_tooltip().contains("pattr/commanddeck"));
+        assert!(ui.tab_tooltip().contains("pattr/agentdeck"));
     }
 }

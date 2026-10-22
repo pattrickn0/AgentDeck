@@ -1,9 +1,9 @@
 ---
-name: commanddeck-ui
-description: Regras visuais e de código da interface do CommandDeck (egui, crates/app/src/ui e theme.rs). Use antes de criar ou mudar qualquer coisa na interface do app — barra lateral, barra de título, tela dividida, barra direita, menus, modais, ícones, cores, espaçamentos — e para conferir o resultado com captura de tela.
+name: agentdeck-ui
+description: Regras visuais e de código da interface do AgentDeck (egui, crates/app/src/ui e theme.rs). Use antes de criar ou mudar qualquer coisa na interface do app — barra lateral, barra de título, tela dividida, barra direita, menus, modais, ícones, cores, espaçamentos — e para conferir o resultado com captura de tela.
 ---
 
-# Interface do CommandDeck
+# Interface do AgentDeck
 
 O app é egui puro, sem widgets prontos na maior parte: cada componente é **pintado à mão** com o `Painter` e
 recebe interação por `ui.interact`/`clickable`. Siga o que já existe antes de inventar.
@@ -86,11 +86,11 @@ Ajustes: `with_opacity(c, a)`, `brighten(c, f)`, `rgba(...)`. Fontes: `theme::ui
 Compile e rode numa pasta de dados separada (a do usuário está em uso), com os projetos fictícios:
 
 ```sh
-cargo build -p commanddeck
-COMMANDDECK_HOME=<scratch>/home COMMANDDECK_SMOKE=<scratch>/shot COMMANDDECK_DEBUG_UI=projects-demo \
-  ./target/debug/commanddeck.exe        # salva <scratch>/shot/screen.png e sai
+cargo build -p agentdeck
+AGENTDECK_HOME=<scratch>/home AGENTDECK_SMOKE=<scratch>/shot AGENTDECK_DEBUG_UI=projects-demo \
+  ./target/debug/agentdeck.exe        # salva <scratch>/shot/screen.png e sai
 ```
 
-Outros estados em `COMMANDDECK_DEBUG_UI` (lista em `apply_debug_ui`, `app.rs`): `settings`, `newtab`,
+Outros estados em `AGENTDECK_DEBUG_UI` (lista em `apply_debug_ui`, `app.rs`): `settings`, `newtab`,
 `usage-demo`, `git-demo`, `split-drag`... Abra a imagem e confira alinhamento, truncamento e contraste antes de
 dizer que terminou; interação (clique, arrasto) não aparece na captura — diga ao usuário o que falta testar à mão.

@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
-use commanddeck_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_OLLAMA, COLOR_SHELL};
-use commanddeck_core::{AgentInfo, Ident};
+use agentdeck_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_OLLAMA, COLOR_SHELL};
+use agentdeck_core::{AgentInfo, Ident};
 use egui::Color32;
 
 use crate::theme;

@@ -1,7 +1,7 @@
 //! Faixa de uso dos agentes na barra de título: logo + círculo (sessão) + anel (semana) + %.
 
-use commanddeck_core::usage::UsageWindow;
-use commanddeck_core::AgentUsage;
+use agentdeck_core::usage::UsageWindow;
+use agentdeck_core::AgentUsage;
 use egui::{Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui};
 
 use crate::deck::Deck;
@@ -243,7 +243,7 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     }
 
     let usage_map = deck.usage();
-    let now_ms = commanddeck_core::util::now_ms();
+    let now_ms = agentdeck_core::util::now_ms();
     let painter = ui.painter();
 
     struct ItemData {

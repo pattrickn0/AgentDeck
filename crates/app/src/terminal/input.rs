@@ -195,7 +195,7 @@ pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
 /// colchetes. ESC e demais caracteres de controle são removidos, para o texto não poder fechar a
 /// colagem (`ESC[201~`) e virar teclas no programa da aba.
 pub fn submit_paste(text: &str) -> Vec<u8> {
-    let safe = commanddeck_core::util::terminal_text(text);
+    let safe = agentdeck_core::util::terminal_text(text);
     format!("\x1b[200~{safe}\x1b[201~").into_bytes()
 }
 

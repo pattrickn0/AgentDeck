@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use commanddeck_core::paths::AppPaths;
-use commanddeck_core::{Config, Core, StartOptions, Task, TaskStatus};
+use agentdeck_core::paths::AppPaths;
+use agentdeck_core::{Config, Core, StartOptions, Task, TaskStatus};
 
 use crate::deck::Deck;
 use crate::docs::{CenterView, DiffDoc, DocState};
@@ -347,9 +347,9 @@ fn reopening_the_tab_of_a_running_task_registers_the_instance_again() {
     assert!(env.tab_open(&id), "a aba voltou");
     assert!(env.deck.tasks.notice.is_none());
     // O terminal abre na worktree da tarefa (o core resolve pela instância).
-    let ident = commanddeck_core::Ident::parse(&instance).expect("id");
+    let ident = agentdeck_core::Ident::parse(&instance).expect("id");
     let spec = env.core.spawn_spec_for(&env.project(), &ident).expect("spec");
-    assert!(commanddeck_core::util::same_path(&spec.cwd, &env.task(&id).worktree), "{}", spec.cwd.display());
+    assert!(agentdeck_core::util::same_path(&spec.cwd, &env.task(&id).worktree), "{}", spec.cwd.display());
     // Ir para a aba só a ativa; uma tarefa já resolvida não reabre a aba fechada.
     env.deck.tasks_act(&id, TaskAct::GoToTab);
     assert_eq!(env.deck.active.map(|i| env.deck.tabs[i].ident.id()), Some(instance.clone()));
@@ -387,7 +387,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     let tasks_dir = env._tmp.path().join("dados").join("tarefas");
     fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
         let spec =
-            commanddeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("usuário".into()), ..Default::default() };
+            agentdeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("usuário".into()), ..Default::default() };
         let t = env.core.task_create(project, spec).expect("criar");
         env.core.task_start(project, &t.id).expect("iniciar");
         t.id
@@ -453,7 +453,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     let tasks_dir = env._tmp.path().join("dados").join("tarefas");
     fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
         let spec =
-            commanddeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("usuário".into()), ..Default::default() };
+            agentdeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("usuário".into()), ..Default::default() };
         let t = env.core.task_create(project, spec).expect("criar");
         env.core.task_start(project, &t.id).expect("iniciar");
         t.id
@@ -564,12 +564,12 @@ fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_
     }
 
     std::fs::write(env.ws.join("a.rs"), "fn a() {}\nfn d() {}\n").expect("w");
-    let entry = commanddeck_core::git::GitEntry {
+    let entry = agentdeck_core::git::GitEntry {
         path: "a.rs".into(),
         orig_path: None,
         index: '.',
         worktree: 'M',
-        kind: commanddeck_core::git::EntryKind::Ordinary,
+        kind: agentdeck_core::git::EntryKind::Ordinary,
     };
     env.deck.docs_open_file_diff(&entry, false);
     let file_diff = env.deck.docs.current_uid(&project).expect("diff do arquivo");

@@ -177,9 +177,7 @@ impl Config {
     /// sobrescrevem os padrões (como `Object.assign`). O formato antigo (um workspace global) é
     /// migrado para projetos (ver [`Config::fix_workspace`]).
     pub fn load(paths: &AppPaths) -> Self {
-        let mut candidates = vec![paths.config_file.clone()];
-        candidates.extend(legacy_config_files());
-        Self::load_from(&candidates, paths, &crate::util::home_dir())
+        Self::load_from(&config_candidates(paths), paths, &crate::util::home_dir())
     }
 
     /// Como [`Config::load`], com a lista de arquivos candidatos e a pasta pessoal explícitas.
@@ -198,8 +196,10 @@ impl Config {
             }),
             None => Self::default_for(paths),
         };
-        // Da configuração legada não vêm as abas: a primeira abertura começa sem agentes.
-        if file.is_some_and(|f| *f != paths.config_file) {
+        let from_legacy = file.filter(|f| **f != paths.config_file);
+        // Da configuração do CommandDeck vem tudo (é o mesmo formato). Das mais antigas não vêm as
+        // abas: a primeira abertura começa sem agentes.
+        if from_legacy.is_some_and(|f| !is_commanddeck_config(f)) {
             cfg.open_tabs.clear();
             cfg.active_tab_index = -1;
             for p in &mut cfg.project_list {
@@ -208,6 +208,14 @@ impl Config {
             }
         }
         cfg.fix_workspace(paths, home);
+        // Migração do nome: copia a configuração do CommandDeck para o lugar novo (o antigo fica como
+        // está, para quem ainda abrir a versão anterior).
+        if let Some(f) = from_legacy.filter(|f| is_commanddeck_config(f)) {
+            match cfg.save(&paths.config_file) {
+                Ok(()) => log::info!("configuração copiada de {} para {}", f.display(), paths.config_file.display()),
+                Err(e) => log::warn!("não consegui copiar a configuração de {} para {}: {e}", f.display(), paths.config_file.display()),
+            }
+        }
         cfg
     }
 
@@ -328,10 +336,33 @@ impl Config {
     }
 }
 
-/// Configurações da versão Electron (userData = "CommandDeck Terminal") e do nome antigo "orquestra".
+/// Configurações de versões anteriores: `CommandDeck` (o nome antes de AgentDeck, no mesmo formato),
+/// a versão Electron (userData = "CommandDeck Terminal") e o nome antigo "orquestra". A primeira que
+/// existir é a origem quando `AgentDeck/config.json` ainda não existe.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
-    vec![base.join("CommandDeck Terminal").join("config.json"), base.join("orquestra").join("config.json")]
+    vec![
+        base.join("CommandDeck").join("config.json"),
+        base.join("CommandDeck Terminal").join("config.json"),
+        base.join("orquestra").join("config.json"),
+    ]
+}
+
+/// Arquivos a tentar, em ordem: o de `paths.config_file` e, depois, os das versões anteriores. Com
+/// `AGENTDECK_HOME` (a configuração fica dentro da pasta do app) o app é isolado e não lê as
+/// configurações do usuário.
+pub(crate) fn config_candidates(paths: &AppPaths) -> Vec<PathBuf> {
+    let mut candidates = vec![paths.config_file.clone()];
+    if !paths.config_file.starts_with(&paths.app_dir) {
+        candidates.extend(legacy_config_files());
+    }
+    candidates
+}
+
+/// `true` se `file` é a configuração do CommandDeck: o mesmo formato do AgentDeck, então abas e
+/// layout valem e o arquivo é copiado para o lugar novo.
+fn is_commanddeck_config(file: &Path) -> bool {
+    file.parent().and_then(Path::file_name).is_some_and(|d| d == "CommandDeck")
 }
 
 #[cfg(test)]
@@ -452,6 +483,66 @@ mod tests {
         assert_eq!(project.path, ws);
         assert!(project.open_tabs.is_empty(), "as abas da config legada não são abertas");
         assert_eq!(project.active_tab, -1);
+    }
+
+    /// Migração do nome: a configuração do CommandDeck vira a do AgentDeck, com projetos e abas, e o
+    /// arquivo antigo continua lá.
+    #[test]
+    fn the_commanddeck_config_is_copied_to_the_new_place() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let old = tmp.path().join("CommandDeck").join("config.json");
+        std::fs::create_dir_all(old.parent().expect("pai")).expect("mkdir");
+        let mut project = ProjectCfg::new(tmp.path().join("meu-projeto"), None, &[]);
+        project.open_tabs = vec!["claude".into(), "claude@dev".into()];
+        project.active_tab = 1;
+        let before = Config {
+            active_project: project.id.clone(),
+            project_list: vec![project.clone()],
+            whisper_lang: "es".into(),
+            ..Config::default()
+        };
+        before.save(&old).expect("grava a antiga");
+        let old_text = std::fs::read_to_string(&old).expect("read");
+        assert!(!p.config_file.exists());
+
+        let cfg = Config::load_from(&[p.config_file.clone(), old.clone()], &p, no_home());
+        assert_eq!(cfg.whisper_lang, "es");
+        assert_eq!(cfg.project_list, vec![project.clone()], "projetos e abas vêm junto");
+        // Gravou no lugar novo e deixou o antigo como estava.
+        assert!(p.config_file.is_file());
+        assert_eq!(std::fs::read_to_string(&old).expect("antigo"), old_text);
+        let again = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
+        assert_eq!(again.project_list, vec![project]);
+        assert_eq!(again.whisper_lang, "es");
+    }
+
+    /// Com a configuração nova já existente, a antiga não é lida nem sobrescreve nada.
+    #[test]
+    fn the_new_config_wins_over_the_commanddeck_one() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let old = tmp.path().join("CommandDeck").join("config.json");
+        std::fs::create_dir_all(old.parent().expect("pai")).expect("mkdir");
+        std::fs::write(&old, r#"{"whisperLang": "es"}"#).expect("write");
+        Config { whisper_lang: "en".into(), ..Config::default() }.save(&p.config_file).expect("grava a nova");
+        let cfg = Config::load_from(&[p.config_file.clone(), old.clone()], &p, no_home());
+        assert_eq!(cfg.whisper_lang, "en");
+        assert_eq!(std::fs::read_to_string(&old).expect("antigo"), r#"{"whisperLang": "es"}"#);
+    }
+
+    #[test]
+    fn candidates_start_with_the_new_file_then_commanddeck() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let normal = AppPaths { config_file: tmp.path().join("cfg-do-usuario").join("config.json"), ..paths(&tmp.path().join("app")) };
+        let c = config_candidates(&normal);
+        assert_eq!(c[0], normal.config_file);
+        if dirs::config_dir().is_some() {
+            assert_eq!(c[1].parent().and_then(Path::file_name).and_then(|n| n.to_str()), Some("CommandDeck"));
+            assert_eq!(legacy_config_files().len(), c.len() - 1);
+        }
+        // Isolado (`AGENTDECK_HOME`): não lê as configurações do usuário.
+        assert_eq!(config_candidates(&paths(tmp.path())), vec![paths(tmp.path()).config_file]);
     }
 
     #[test]

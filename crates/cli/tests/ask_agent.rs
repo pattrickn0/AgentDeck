@@ -4,8 +4,8 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
-use commanddeck_core::paths::AppPaths;
-use commanddeck_core::{Config, Core, StartOptions};
+use agentdeck_core::paths::AppPaths;
+use agentdeck_core::{Config, Core, StartOptions};
 
 fn start_core(root: &std::path::Path) -> Core {
     let paths = AppPaths {
@@ -22,7 +22,7 @@ fn start_core(root: &std::path::Path) -> Core {
     {
         use std::os::unix::fs::PermissionsExt;
         let script = fake_bin.join("claude");
-        std::fs::write(&script, "#!/bin/sh\necho \"claude respondeu (de $COMMANDDECK_AGENT)\"; cat >/dev/null\n").expect("write");
+        std::fs::write(&script, "#!/bin/sh\necho \"claude respondeu (de $AGENTDECK_AGENT)\"; cat >/dev/null\n").expect("write");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
     let opts = StartOptions {
@@ -36,21 +36,25 @@ fn start_core(root: &std::path::Path) -> Core {
     Core::start_with(paths, opts).expect("start").0
 }
 
+/// Tira do ambiente do teste as variáveis do app, dos dois nomes (o teste pode rodar dentro de uma aba).
+fn scrub_app_env(cmd: &mut Command) {
+    for name in ["PORT", "TOKEN", "AGENT", "DEPTH", "ASK_WAIT"] {
+        cmd.env_remove(format!("AGENTDECK_{name}")).env_remove(format!("COMMANDDECK_{name}"));
+    }
+}
+
 fn ask_agent(core: Option<&Core>, args: &[&str], stdin: Option<&str>) -> Output {
     ask_agent_bytes(core, args, stdin.unwrap_or("").as_bytes())
 }
 
 fn ask_agent_bytes(core: Option<&Core>, args: &[&str], stdin: &[u8]) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    cmd.args(args)
-        .env_remove("COMMANDDECK_PORT")
-        .env_remove("COMMANDDECK_TOKEN")
-        .env_remove("COMMANDDECK_AGENT")
-        .env_remove("COMMANDDECK_DEPTH");
+    cmd.args(args);
+    scrub_app_env(&mut cmd);
     if let Some(core) = core {
-        cmd.env("COMMANDDECK_PORT", core.bridge_port().to_string())
-            .env("COMMANDDECK_TOKEN", core.bridge_token())
-            .env("COMMANDDECK_AGENT", "shell");
+        cmd.env("AGENTDECK_PORT", core.bridge_port().to_string())
+            .env("AGENTDECK_TOKEN", core.bridge_token())
+            .env("AGENTDECK_AGENT", "shell");
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
@@ -65,10 +69,68 @@ fn text(b: &[u8]) -> String {
 }
 
 #[test]
-fn outside_commanddeck_exits_2() {
+fn outside_agentdeck_exits_2() {
     let out = ask_agent(None, &["--list"], None);
     assert_eq!(out.status.code(), Some(2));
-    assert_eq!(text(&out.stderr).trim(), "ask-agent: rode este comando de dentro de um terminal do CommandDeck.");
+    assert_eq!(text(&out.stderr).trim(), "ask-agent: rode este comando de dentro de um terminal do AgentDeck.");
+}
+
+/// Uma aba aberta pela versão antiga tem só `COMMANDDECK_*` no ambiente: o `ask-agent` continua
+/// falando com a ponte.
+#[test]
+fn old_commanddeck_variables_still_work() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let core = start_core(tmp.path());
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    scrub_app_env(&mut cmd);
+    cmd.arg("--list")
+        .env("COMMANDDECK_PORT", core.bridge_port().to_string())
+        .env("COMMANDDECK_TOKEN", core.bridge_token())
+        .env("COMMANDDECK_AGENT", "shell");
+    let out = cmd.output().expect("ask-agent");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    if cfg!(unix) {
+        assert_eq!(text(&out.stdout), "claude\n");
+    }
+
+    // A nova vence quando as duas existem: com a antiga errada, a nova ainda funciona.
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    scrub_app_env(&mut cmd);
+    cmd.arg("--list")
+        .env("COMMANDDECK_PORT", "1")
+        .env("COMMANDDECK_TOKEN", "velho")
+        .env("AGENTDECK_PORT", core.bridge_port().to_string())
+        .env("AGENTDECK_TOKEN", core.bridge_token());
+    assert_eq!(cmd.output().expect("ask-agent").status.code(), Some(0));
+}
+
+/// A ponte da versão antiga só lê `x-commanddeck-token`: o `ask-agent` novo, que cai na pasta
+/// compartilhada e é usado por abas antigas, manda os dois cabeçalhos para não levar 403.
+#[test]
+fn old_bridge_that_reads_only_the_old_header_accepts_the_request() {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let server = std::thread::spawn(move || {
+        let (mut sock, _) = listener.accept().expect("accept");
+        let mut buf = [0u8; 4096];
+        let n = sock.read(&mut buf).expect("read");
+        let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+        let ok = req.contains("\r\nx-commanddeck-token: segredo\r\n");
+        let (status, body) = if ok { ("200 OK", r#"{"agents":["claude"]}"#) } else { ("403 Forbidden", r#"{"error":"token"}"#) };
+        let resp = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        sock.write_all(resp.as_bytes()).expect("write");
+        ok
+    });
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    scrub_app_env(&mut cmd);
+    cmd.arg("--list").env("COMMANDDECK_PORT", port.to_string()).env("COMMANDDECK_TOKEN", "segredo").env("COMMANDDECK_AGENT", "shell");
+    let out = cmd.output().expect("ask-agent");
+    assert!(server.join().expect("servidor"), "a ponte antiga não recebeu x-commanddeck-token");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
 }
 
 #[test]
@@ -130,7 +192,7 @@ fn signal_never_fails_and_reply_needs_a_number() {
     // do turno): `--signal` sai com 0 mesmo recusado pela ponte (aqui, token mestre) ou fora dele.
     let out = ask_agent(Some(&core), &["--signal", "idle", "{\"type\":\"agent-turn-complete\"}"], None);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    assert_eq!(ask_agent(None, &["--signal", "busy"], None).status.code(), Some(0), "nem fora do CommandDeck");
+    assert_eq!(ask_agent(None, &["--signal", "busy"], None).status.code(), Some(0), "nem fora do AgentDeck");
 
     let out = ask_agent(Some(&core), &["--reply", "x", "oi"], None);
     assert_eq!(out.status.code(), Some(2));
@@ -144,9 +206,10 @@ fn signal_never_fails_and_reply_needs_a_number() {
 /// `ask-agent --usage` como o Claude Code o chama, com a pasta de configuração `config`.
 fn statusline(core: Option<&Core>, token: Option<&str>, config: &std::path::Path, stdin: &str) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    cmd.arg("--usage").env_remove("COMMANDDECK_PORT").env_remove("COMMANDDECK_TOKEN").env("CLAUDE_CONFIG_DIR", config).current_dir(config);
+    scrub_app_env(&mut cmd);
+    cmd.arg("--usage").env("CLAUDE_CONFIG_DIR", config).current_dir(config);
     if let (Some(core), Some(token)) = (core, token) {
-        cmd.env("COMMANDDECK_PORT", core.bridge_port().to_string()).env("COMMANDDECK_TOKEN", token);
+        cmd.env("AGENTDECK_PORT", core.bridge_port().to_string()).env("AGENTDECK_TOKEN", token);
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
@@ -169,7 +232,7 @@ fn usage_statusline_posts_and_prints() {
     })
     .to_string();
 
-    // Sem ponte (fora do CommandDeck), só imprime; com chave de API (sem limites), nada.
+    // Sem ponte (fora do AgentDeck), só imprime; com chave de API (sem limites), nada.
     let out = statusline(None, None, &config, &input);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert_eq!(text(&out.stdout), "sessão 34% · semana 12%\n");
@@ -183,8 +246,8 @@ fn usage_statusline_posts_and_prints() {
         std::fs::create_dir_all(&bin).expect("mkdir");
         std::fs::write(bin.join("claude.exe"), b"").expect("write");
     }
-    let ident = commanddeck_core::Ident::parse("claude@dev").expect("id");
-    let token = core.spawn_spec_for(&core.active_project_id(), &ident).expect("spec").env["COMMANDDECK_TOKEN"].clone();
+    let ident = agentdeck_core::Ident::parse("claude@dev").expect("id");
+    let token = core.spawn_spec_for(&core.active_project_id(), &ident).expect("spec").env["AGENTDECK_TOKEN"].clone();
     let out = statusline(Some(&core), Some(&token), &config, &input);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let usage = core.usage_snapshot();

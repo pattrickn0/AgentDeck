@@ -10,4 +10,4 @@ gravando ao lado e trocando, e mantém CRLF.
 **Por quê:** o arquivo muda sozinho e aparece como alteração no repositório principal, e `task_merge` recusa
 mesclar com alterações sem commit em arquivos rastreados.
 **Como aplicar:** `task_merge` tira `AGENTS.md` da checagem de "sujo" (o git ainda protege o arquivo se a mesclagem o
-tocar). Não edite o bloco do CommandDeck à mão nem o inclua no commit de uma tarefa.
+tocar). Não edite o bloco do AgentDeck à mão nem o inclua no commit de uma tarefa.

@@ -1,4 +1,4 @@
-//! SOMENTE DEPURAÇÃO: documentos fictícios do modo Documentos (`COMMANDDECK_DEBUG_UI=docs-demo…`), para
+//! SOMENTE DEPURAÇÃO: documentos fictícios do modo Documentos (`AGENTDECK_DEBUG_UI=docs-demo…`), para
 //! capturas de tela sem git, sem agentes e sem arquivos de verdade.
 //!
 //! - `docs-demo`: o diff de uma tarefa com quatro arquivos, em foco;
@@ -6,7 +6,7 @@
 //! - `docs-demo-many`: dez documentos (a faixa de abas rola);
 //! - `docs-demo-badge`: os agentes à vista, com o selo da chave (duas abas terminaram, uma trabalha).
 
-use commanddeck_core::git::parse_diff;
+use agentdeck_core::git::parse_diff;
 
 use crate::deck::Deck;
 use crate::docs::{Badge, CenterView, DiffDoc, DocKind, DocState, MdSource, TextDoc};
@@ -162,12 +162,12 @@ pub fn toggle(&mut self, project: &str) {
 
 const README: &str = "# Guia de manutenção
 
-Este guia é para quem vai manter o CommandDeck, sozinho ou junto com agentes de IA.
+Este guia é para quem vai manter o AgentDeck, sozinho ou junto com agentes de IA.
 
 ## Comandos do dia a dia
 
 ```bash
-cargo run -p commanddeck
+cargo run -p agentdeck
 cargo test --workspace
 ```
 

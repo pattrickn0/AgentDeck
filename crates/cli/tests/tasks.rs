@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
-use commanddeck_core::paths::AppPaths;
-use commanddeck_core::{Config, Core, Ident, StartOptions};
+use agentdeck_core::paths::AppPaths;
+use agentdeck_core::{Config, Core, Ident, StartOptions};
 
 fn git_exe() -> Option<PathBuf> {
     which::which("git").ok()
@@ -77,10 +77,13 @@ fn start_core(root: &Path) -> Core {
 /// `ask-agent` com o token mestre (usuário) ou o de uma aba (`agent = Some((id, token))`).
 fn run(core: &Core, agent: Option<(&str, &str)>, args: &[&str], stdin: &str) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    cmd.args(args).env_remove("COMMANDDECK_DEPTH").env("COMMANDDECK_PORT", core.bridge_port().to_string());
+    for name in ["PORT", "TOKEN", "AGENT", "DEPTH", "ASK_WAIT"] {
+        cmd.env_remove(format!("COMMANDDECK_{name}"));
+    }
+    cmd.args(args).env_remove("AGENTDECK_DEPTH").env("AGENTDECK_PORT", core.bridge_port().to_string());
     match agent {
-        Some((id, token)) => cmd.env("COMMANDDECK_TOKEN", token).env("COMMANDDECK_AGENT", id),
-        None => cmd.env("COMMANDDECK_TOKEN", core.bridge_token()).env("COMMANDDECK_AGENT", "shell"),
+        Some((id, token)) => cmd.env("AGENTDECK_TOKEN", token).env("AGENTDECK_AGENT", id),
+        None => cmd.env("AGENTDECK_TOKEN", core.bridge_token()).env("AGENTDECK_AGENT", "shell"),
     };
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
@@ -147,7 +150,7 @@ fn the_task_commands_drive_the_whole_lifecycle() {
     assert!(text(&out.stdout).contains("Worktree:") && text(&out.stdout).contains("Base: main"), "{}", text(&out.stdout));
 
     // O agente da tarefa entrega o relatório (token da aba dele); não pode mexer no resto.
-    let token = core.spawn_spec_for(&project, &Ident::parse("claude@t1").expect("id")).expect("spec").env["COMMANDDECK_TOKEN"].clone();
+    let token = core.spawn_spec_for(&project, &Ident::parse("claude@t1").expect("id")).expect("spec").env["AGENTDECK_TOKEN"].clone();
     let agent = Some(("claude@t1", token.as_str()));
     std::fs::write(t1.worktree.join("login.txt"), "ok\n").expect("w");
     git(&t1.worktree, &["add", "-A"]);

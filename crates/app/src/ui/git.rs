@@ -6,7 +6,7 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use commanddeck_core::git::{
+use agentdeck_core::git::{
     valid_branch_name, ConflictChoice, DiffKind, EntryKind, GitBranch, GitCommit, GitDiff, GitEntry, GitStash, GitStatus, RepoState,
 };
 

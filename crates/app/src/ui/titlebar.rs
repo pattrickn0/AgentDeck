@@ -72,7 +72,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         &painter,
         Rect::from_min_max(Pos2::new(toggle.max.x + 6.0, inner.min.y), inner.max),
         Align2::LEFT_CENTER,
-        "CommandDeck",
+        "AgentDeck",
         theme::ui_semibold(13.0),
         theme::TEXT,
     );

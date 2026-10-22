@@ -1,7 +1,7 @@
-# CommandDeck: visão geral
+# AgentDeck: visão geral
 
 Ponto de partida da documentação, para pessoas e para agentes de IA que trabalham no projeto. Ele explica
-**como o CommandDeck funciona por dentro** (a "ambientação" em que os agentes rodam), **o que dá para fazer**
+**como o AgentDeck funciona por dentro** (a "ambientação" em que os agentes rodam), **o que dá para fazer**
 com ele e **quais regras cada documento define**. Os detalhes ficam nos outros arquivos desta pasta.
 
 | Documento | Leia quando |
@@ -16,13 +16,13 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 
 ---
 
-## 1. Ambientação: como o CommandDeck funciona
+## 1. Ambientação: como o AgentDeck funciona
 
 ### O app
 
 Terminal desktop nativo em Rust (winit + egui). São três executáveis, que precisam ficar **na mesma pasta**:
 
-- `commanddeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (mesa de tarefas, Conversa
+- `agentdeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (mesa de tarefas, Conversa
   integrada, Git e GitHub);
 - `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si;
 - `ollama-agent` (crate `cli`): o agente local com ferramentas, que roda numa aba.
@@ -35,12 +35,12 @@ volta eventos `CoreEvent`.
 | Pasta | Conteúdo |
 | :-- | :-- |
 | `workspace/` | o workspace antigo, do tempo em que havia uma pasta global. Hoje cada **projeto** tem a sua pasta (o `cwd` das abas dele); `workspace/` só serve de destino na migração de uma config antiga (`Config::migrate_legacy`) |
-| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log` e a trava `.commanddeck.lock` |
+| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log` e as travas `.agentdeck.lock` e `.commanddeck.lock` (esta, só durante a migração do nome) |
 | `whisper/` | motor e modelos do ditado por voz (whisper.cpp) |
-| `%APPDATA%\CommandDeck\config.json` | configuração. Com `COMMANDDECK_HOME`, tudo isso fica dentro dessa pasta |
+| `%APPDATA%\AgentDeck\config.json` | configuração (na primeira abertura, copiada de `%APPDATA%\CommandDeck\config.json`, se existir). Com `AGENTDECK_HOME`, tudo isso fica dentro dessa pasta |
 
 **Uma janela por pasta de dados:** uma segunda janela usando o mesmo `dados/` é recusada. Para abrir outra
-instância isolada, use `COMMANDDECK_HOME`.
+instância isolada, use `AGENTDECK_HOME`.
 
 ### Abas são instâncias
 
@@ -61,15 +61,15 @@ O nome é o endereço usado pelo `ask-agent`. As abas voltam com o mesmo nome qu
 
 | Variável | O que é |
 | :-- | :-- |
-| `COMMANDDECK_AGENT` | o nome da instância (`claude@dev`) |
-| `COMMANDDECK_ROLE` | o cargo, quando há |
-| `COMMANDDECK_PORT` | porta da ponte HTTP local (só em `127.0.0.1`) |
-| `COMMANDDECK_TOKEN` | token **próprio da aba**: é por ele que a ponte sabe quem está perguntando |
-| `COMMANDDECK_DEPTH` | profundidade da conversa (usada no modo headless) |
-| `COMMANDDECK_ASK_WAIT` | quantos segundos o `ask-agent` espera a resposta (padrão 90; `0` = até o fim). O usuário pode definir |
+| `AGENTDECK_AGENT` | o nome da instância (`claude@dev`) |
+| `AGENTDECK_ROLE` | o cargo, quando há |
+| `AGENTDECK_PORT` | porta da ponte HTTP local (só em `127.0.0.1`) |
+| `AGENTDECK_TOKEN` | token **próprio da aba**: é por ele que a ponte sabe quem está perguntando |
+| `AGENTDECK_DEPTH` | profundidade da conversa (usada no modo headless) |
+| `AGENTDECK_ASK_WAIT` | quantos segundos o `ask-agent` espera a resposta (padrão 90; `0` = até o fim). O usuário pode definir |
 | `PATH` | a pasta dos executáveis vem primeiro, então o `ask-agent` sempre é encontrado |
 
-Nenhuma outra variável `COMMANDDECK_*` do ambiente do app passa para os agentes.
+Nenhuma outra variável `AGENTDECK_*` do ambiente do app passa para os agentes.
 
 As instruções da ponte chegam a cada agente por um canal diferente:
 
@@ -97,7 +97,7 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 
 | Área | O que tem |
 | :-- | :-- |
-| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "CommandDeck", "+" (nova aba); a **chave Agentes | Documentos** (ver abaixo); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
+| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); a **chave Agentes | Documentos** (ver abaixo); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | **PROJETOS** no topo (cada projeto com os seus agentes; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (chave da tela dividida) e o explorador (atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | duas visões, escolhidas pela **chave** da barra de título: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
@@ -321,7 +321,7 @@ Cada documento cuida de um assunto. Mudou o assunto? Atualize o documento **no m
 | `memory/testes.md` | roteiro de testes manuais (Windows, agentes reais), por área (as mesmas de `pendencias.md`) | marcar `[x]` o que passou; o que falhar vira item em `pendencias.md`; funcionalidade nova que só dá para validar à mão ganha um item na área dela; função removida leva os itens dela embora |
 | `README.md` (raiz) | apresentação, como compilar e rodar, exemplos de `ask-agent` | fica na raiz porque o GitHub mostra na página do repositório |
 | `CONTRIBUTING.md` (raiz) | como contribuir e os **princípios do projeto** | rodar `cargo fmt`, `clippy -D warnings` e `cargo test` antes do PR; privacidade; UI nunca trava; textos em pt-BR. Fica na raiz porque o GitHub o mostra ao abrir PRs |
-| `AGENTS.md` (raiz) e `workspace/AGENTS.md` | instruções lidas pelos CLIs de agentes | **gerados pelo app**: o bloco entre `<!-- commanddeck:start -->` e `<!-- commanddeck:end -->` é reescrito a cada início; edite só fora dele. Ficam na raiz da pasta de trabalho porque é lá que os CLIs os procuram |
+| `AGENTS.md` (raiz) e `workspace/AGENTS.md` | instruções lidas pelos CLIs de agentes | **gerados pelo app**: o bloco entre `<!-- agentdeck:start -->` e `<!-- agentdeck:end -->` é reescrito a cada início; edite só fora dele. Ficam na raiz da pasta de trabalho porque é lá que os CLIs os procuram |
 | `workspace/README.md` | o que é a pasta `workspace/` (o workspace antigo e o `AGENTS.md` do app) | isolamento: os agentes trabalham na pasta do projeto ou da tarefa, não nos arquivos do app |
 | `dados/README.md` | o que vai em `dados/` (anexos, prompts, tarefas, hooks, `crash.log`) | privacidade: áudio apagado após transcrever, retenção só das últimas sessões, nada versionado |
 | `whisper/README.md`, `whisper/models/README.md` | motor e modelos do ditado | ficam ao lado dos binários e modelos que descrevem |

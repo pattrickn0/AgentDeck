@@ -2,8 +2,8 @@
 //! relatório, devolver, mesclar, validar, reprovar, descartar e persistência. A ponte fica em `tasks_bridge.rs`.
 use std::process::Command;
 
-use commanddeck_core::util::same_path;
-use commanddeck_core::{CoreEvent, Ident, TaskError, TaskSpec, TaskStatus};
+use agentdeck_core::util::same_path;
+use agentdeck_core::{CoreEvent, Ident, TaskError, TaskSpec, TaskStatus};
 
 #[path = "support/tasks_env.rs"]
 mod env;
@@ -137,7 +137,7 @@ fn start_makes_the_worktree_the_instance_and_delivers_the_brief() {
     let spec_for = core.spawn_spec_for(&env.project, &ident).expect("spec");
     assert!(same_path(&spec_for.cwd, &t.worktree), "{}", spec_for.cwd.display());
     assert!(spec_for.args.windows(2).any(|w| w == ["--model", "opus"]), "{:?}", spec_for.args);
-    assert_eq!(spec_for.env["COMMANDDECK_AGENT"], "claude@t1");
+    assert_eq!(spec_for.env["AGENTDECK_AGENT"], "claude@t1");
     // Outras instâncias do projeto continuam na pasta do projeto.
     assert!(same_path(&core.spawn_spec_for(&env.project, &boss).expect("spec").cwd, &env.ws));
 
@@ -225,7 +225,7 @@ fn done_stores_the_report_and_the_diff_stat() {
 
 #[test]
 fn task_diff_shows_only_what_the_branch_brought() {
-    use commanddeck_core::git::DiffKind;
+    use agentdeck_core::git::DiffKind;
     need_git!();
     let env = start();
     let core = &env.core;
@@ -882,8 +882,8 @@ fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
 
 #[test]
 fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
-    use commanddeck_core::tasks::boot_line;
-    let t = commanddeck_core::Task { id: "t3".into(), ..commanddeck_core::Task::default() };
+    use agentdeck_core::tasks::boot_line;
+    let t = agentdeck_core::Task { id: "t3".into(), ..agentdeck_core::Task::default() };
     let ok = boot_line(&t, "o pedido esta no arquivo", std::path::Path::new("C:/dados/tarefas/p1-t3-brief.md")).expect("ascii");
     assert!(
         ok.starts_with("Tarefa t3: o pedido esta no arquivo. Leia o arquivo C:/dados") && ok.ends_with("sem esperar confirmacao."),
@@ -896,8 +896,8 @@ fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
 
 // ---------- Depois da mesclagem: merge_commit, diff, done e validar sem becos sem saída ----------
 
-fn diff_adds(diff: &commanddeck_core::git::GitDiff) -> Vec<String> {
-    use commanddeck_core::git::DiffKind;
+fn diff_adds(diff: &agentdeck_core::git::GitDiff) -> Vec<String> {
+    use agentdeck_core::git::DiffKind;
     diff.lines.iter().filter(|l| l.kind == DiffKind::Add).map(|l| l.text.clone()).collect()
 }
 
@@ -929,11 +929,11 @@ fn merge_stores_the_full_merge_commit_and_a_new_merge_overwrites_it() {
 #[test]
 fn a_task_saved_before_merge_commit_existed_still_loads() {
     let old = r#"{"id":"t4","title":"Antiga","status":"validating","base":"main","branch":"tarefa/t4-antiga"}"#;
-    let t: commanddeck_core::Task = serde_json::from_str(old).expect("tarefa antiga");
+    let t: agentdeck_core::Task = serde_json::from_str(old).expect("tarefa antiga");
     assert_eq!((t.id.as_str(), t.status, t.merge_commit.as_deref()), ("t4", TaskStatus::Validating, None));
     // E o campo vai e volta pelo JSON.
-    let t = commanddeck_core::Task { merge_commit: Some("abc".into()), ..t };
-    let back: commanddeck_core::Task = serde_json::from_str(&serde_json::to_string(&t).expect("json")).expect("volta");
+    let t = agentdeck_core::Task { merge_commit: Some("abc".into()), ..t };
+    let back: agentdeck_core::Task = serde_json::from_str(&serde_json::to_string(&t).expect("json")).expect("volta");
     assert_eq!(back.merge_commit.as_deref(), Some("abc"));
 }
 
