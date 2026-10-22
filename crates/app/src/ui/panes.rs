@@ -36,22 +36,30 @@ enum Click {
     Attach(u64),
 }
 
+/// As ilhas do centro: uma por janela (ou a área inteira, no estado vazio).
+pub fn island_rects(deck: &mut Deck, area: Rect) -> Vec<Rect> {
+    if deck.visible().is_empty() {
+        return vec![area];
+    }
+    deck.plan_panes(area).1.iter().map(|p| p.rect).collect()
+}
+
 pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     deck.terminal_rect = Some(pane_body(area));
     if deck.visible().is_empty() {
         deck.panes.clear();
+        super::island(ui, area, super::IslandKind::Well);
         if deck.initialized {
             deck.pane_drag = None;
             empty_state::draw(deck, ui, area);
         }
+        super::island_edge(ui, area);
         return;
     }
     let Some(metrics) = deck.metrics.clone() else { return };
     let (shape, plans) = deck.plan_panes(area);
     let multi = plans.len() > 1;
     let focused_pane = deck.active.and_then(|a| plans.iter().position(|p| p.tabs.contains(&a)));
-    // O fundo aparece só nas frestas entre as janelas (os divisores).
-    ui.painter().rect_filled(area, 0.0, theme::BORDER);
 
     let mut clicks = Vec::new();
     for (slot, plan) in plans.iter().enumerate() {
@@ -93,9 +101,10 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     let ctx = ui.ctx().clone();
     let head = Rect::from_min_size(plan.rect.min, Vec2::new(plan.rect.width(), HEAD_H));
     let body = pane_body(plan.rect);
+    super::island(ui, plan.rect, super::IslandKind::Well);
     let painter = ui.painter_at(plan.rect);
-    painter.rect_filled(head, 0.0, theme::PANEL);
-    painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::BORDER);
+    painter.rect_filled(head, 0.0, theme::pal().strip);
+    painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
     let group = plan.groups.first().cloned().unwrap_or_default();
 
     // ---------- Alça (arrastar sobre outra janela troca as duas de lugar) ----------
@@ -107,7 +116,7 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         if r.hovered() || dragging {
             ctx.set_cursor_icon(if dragging { CursorIcon::Grabbing } else { CursorIcon::Grab });
         }
-        let c = if r.hovered() || dragging { theme::TEXT } else { theme::MUTED };
+        let c = if r.hovered() || dragging { theme::pal().text } else { theme::pal().text_2 };
         for (dx, dy) in [(-2.5, -4.0), (2.5, -4.0), (-2.5, 0.0), (2.5, 0.0), (-2.5, 4.0), (2.5, 4.0)] {
             painter.circle_filled(grip.center() + Vec2::new(dx, dy), 1.2, c);
         }
@@ -161,19 +170,19 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     if visual == ButtonVisual::Recording {
         mic_opacity = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
         ctx.request_repaint_after(Duration::from_millis(50));
-        painter.rect_filled(mic, 4.0, theme::with_opacity(theme::RED, mic_opacity));
+        painter.rect_filled(mic, 4.0, theme::with_opacity(theme::pal().danger, mic_opacity));
     } else if mic_hot {
-        painter.rect_filled(mic, 4.0, theme::PANEL_2);
+        painter.rect_filled(mic, 4.0, theme::pal().hover);
     }
     if mic_busy || !audio::AVAILABLE || visual == ButtonVisual::Opening {
         mic_opacity = 0.45;
     }
     let mic_fg = if visual == ButtonVisual::Recording {
-        theme::WHITE
+        theme::pal().text_strong
     } else if mic_hot {
-        theme::TEXT
+        theme::pal().text
     } else {
-        theme::MUTED
+        theme::pal().text_2
     };
     deck.icons.paint(&painter, Icon::Mic, mic.center(), 14.0, theme::with_opacity(mic_fg, mic_opacity), 0.0);
     let mic_tip = if !shown_alive {
@@ -189,14 +198,14 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     let att_hot = att_resp.hovered() && shown_alive;
     if att_hot {
         ctx.set_cursor_icon(CursorIcon::PointingHand);
-        painter.rect_filled(attach, 4.0, theme::PANEL_2);
+        painter.rect_filled(attach, 4.0, theme::pal().hover);
     }
     let att_fg = if att_hot {
-        theme::TEXT
+        theme::pal().text
     } else if shown_alive {
-        theme::MUTED
+        theme::pal().text_2
     } else {
-        theme::with_opacity(theme::MUTED, 0.45)
+        theme::with_opacity(theme::pal().text_2, 0.45)
     };
     deck.icons.paint(&painter, Icon::Attach, attach.center(), 14.0, att_fg, 0.0);
     let att_tip =
@@ -207,10 +216,10 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
 
     let r = clickable(ui, plus, Id::new(("pane-plus", &group)));
     if r.hovered() {
-        painter.rect_filled(plus, 4.0, theme::PANEL_2);
+        painter.rect_filled(plus, 4.0, theme::pal().hover);
     }
-    let pg = galley(&painter, "+", theme::ui(16.0), theme::MUTED);
-    place(&painter, plus, Align2::CENTER_CENTER, pg, if r.hovered() { theme::TEXT } else { theme::MUTED });
+    let pg = galley(&painter, "+", theme::ui(16.0), theme::pal().text_2);
+    place(&painter, plus, Align2::CENTER_CENTER, pg, if r.hovered() { theme::pal().text } else { theme::pal().text_2 });
     if tip(r, format!("Nova aba de {}", deck.agents.name(&kind))).clicked() {
         clicks.push(Click::NewTab(kind));
     }
@@ -248,9 +257,15 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         ctx.request_repaint_after(Duration::from_millis(next));
     }
 
+    super::island_edge(ui, plan.rect);
     // Janela focada: contorno na cor do agente.
     if multi && focused {
-        painter.rect_stroke(plan.rect, 0.0, Stroke::new(1.0, theme::with_opacity(color, 0.85)), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            plan.rect,
+            theme::ISLAND_RADIUS as f32,
+            Stroke::new(1.0, theme::with_opacity(color, 0.85)),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 
@@ -267,15 +282,15 @@ fn drop_target(deck: &Deck, ui: &Ui, from: usize) -> Option<usize> {
 fn drag_overlay(deck: &Deck, ui: &Ui) {
     let Some(from) = deck.pane_drag else { return };
     let painter = ui.painter();
-    let accent = deck.active_color();
+    let accent = deck.accent();
     if let Some(src) = deck.panes.get(from) {
-        painter.rect_filled(src.rect, 0.0, theme::rgba(0, 0, 0, 0.35));
+        painter.rect_filled(src.rect, theme::ISLAND_RADIUS as f32, theme::with_opacity(theme::pal().scrim, 0.7));
     }
     if let Some(to) = drop_target(deck, ui, from) {
         let r = deck.panes[to].rect;
         painter.rect_filled(r, 0.0, theme::with_opacity(accent, 0.12));
         painter.rect_stroke(r.shrink(1.0), 0.0, Stroke::new(2.0, accent), egui::StrokeKind::Inside);
-        super::text_in(painter, r, Align2::CENTER_CENTER, "Soltar para trocar de lugar", theme::ui_semibold(13.0), theme::TEXT);
+        super::text_in(painter, r, Align2::CENTER_CENTER, "Soltar para trocar de lugar", theme::ui_semibold(13.0), theme::pal().text);
     }
 }
 
@@ -283,7 +298,7 @@ fn drag_overlay(deck: &Deck, ui: &Ui) {
 /// iguala.
 fn dividers(deck: &mut Deck, ui: &mut Ui, area: Rect, shape: &[usize], plans: &[PanePlan]) {
     let painter = ui.painter_at(area);
-    let color = deck.active_color();
+    let color = deck.accent();
     let rects: Vec<Rect> = plans.iter().map(|p| p.rect).collect();
     let mut rows: Vec<&[Rect]> = Vec::new();
     let mut first = 0;
@@ -300,7 +315,7 @@ fn dividers(deck: &mut Deck, ui: &mut Ui, area: Rect, shape: &[usize], plans: &[
     for (r, row) in rows.iter().enumerate().take(rows.len().saturating_sub(1)) {
         let Some(above) = row.first() else { continue };
         let line = Rect::from_min_size(Pos2::new(area.min.x, above.max.y), Vec2::new(area.width(), split::GAP));
-        let resp = ui.interact(line.expand2(Vec2::new(0.0, 3.0)), Id::new(("split-row", r)), Sense::click_and_drag());
+        let resp = ui.interact(line, Id::new(("split-row", r)), Sense::click_and_drag());
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
         }
@@ -324,7 +339,7 @@ fn dividers(deck: &mut Deck, ui: &mut Ui, area: Rect, shape: &[usize], plans: &[
         for c in 0..row.len().saturating_sub(1) {
             let left = row[c];
             let line = Rect::from_min_max(Pos2::new(left.max.x, left.min.y), Pos2::new(left.max.x + split::GAP, left.max.y));
-            let resp = ui.interact(line.expand2(Vec2::new(3.0, 0.0)), Id::new(("split-col", r, c)), Sense::click_and_drag());
+            let resp = ui.interact(line, Id::new(("split-col", r, c)), Sense::click_and_drag());
             if resp.hovered() || resp.dragged() {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             }

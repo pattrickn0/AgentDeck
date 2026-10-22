@@ -20,7 +20,7 @@ use crate::github_ui::{instance_spec, normalize_role, GithubTab, GithubView};
 use crate::icons::Icon;
 use crate::theme;
 
-/// Verde de "aprovado" e âmbar de "em andamento" (o vermelho é `theme::RED`).
+/// Verde de "aprovado" e âmbar de "em andamento" (o vermelho é `theme::pal().danger`).
 const OK: Color32 = Color32::from_rgb(0x4a, 0xde, 0x80);
 const WARN: Color32 = Color32::from_rgb(0xfa, 0xcc, 0x15);
 
@@ -33,7 +33,7 @@ const ACT_H: f32 = 28.0;
 const LOG_LINE_H: f32 = 16.0;
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
-    ui.painter().rect_filled(rect, 0.0, theme::BG);
+    ui.painter().rect_filled(rect, 0.0, theme::pal().bg);
     let view = deck.github.view.clone();
     match view {
         GithubView::Loading => draw_loading(ui, rect),
@@ -61,20 +61,20 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
 
 fn draw_loading(ui: &Ui, rect: Rect) {
     let p = ui.painter_at(rect);
-    text_in(&p, rect, Align2::CENTER_CENTER, "Consultando o GitHub…", theme::ui(12.0), theme::MUTED);
+    text_in(&p, rect, Align2::CENTER_CENTER, "Consultando o GitHub…", theme::ui(12.0), theme::pal().text_2);
 }
 
 /// Barra de título fixa + mensagem centralizada (sem projeto, sem remoto, erro sem dados antigos).
 fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detail: &str, can_retry: bool) {
     let p = ui.painter_at(rect);
     let top = Rect::from_min_size(rect.min, Vec2::new(rect.width(), REPO_BAR_H));
-    p.rect_filled(top, 0.0, theme::PANEL);
-    p.rect_filled(Rect::from_min_max(Pos2::new(top.min.x, top.max.y - 1.0), top.max), 0.0, theme::BORDER);
-    deck.icons.paint(&p, Icon::GitHub, Pos2::new(top.min.x + PAD + 7.0, top.center().y), 14.0, theme::MUTED, 0.0);
+    p.rect_filled(top, 0.0, theme::pal().chip);
+    p.rect_filled(Rect::from_min_max(Pos2::new(top.min.x, top.max.y - 1.0), top.max), 0.0, theme::pal().separator);
+    deck.icons.paint(&p, Icon::GitHub, Pos2::new(top.min.x + PAD + 7.0, top.center().y), 14.0, theme::pal().text_2, 0.0);
     let btn_w = if can_retry { 34.0 } else { 0.0 };
     let title_rect = Rect::from_min_max(Pos2::new(top.min.x + PAD + 22.0, top.min.y), Pos2::new(top.max.x - PAD - btn_w, top.max.y));
-    let g = galley_trunc(&p, title, theme::ui_bold(12.0), theme::TEXT, title_rect.width());
-    place(&p, title_rect, Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(&p, title, theme::ui_bold(12.0), theme::pal().text, title_rect.width());
+    place(&p, title_rect, Align2::LEFT_CENTER, g, theme::pal().text);
 
     if can_retry {
         let btn = Rect::from_min_size(Pos2::new(top.max.x - PAD - 24.0, top.center().y - 12.0), Vec2::splat(24.0));
@@ -84,11 +84,11 @@ fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detai
     }
 
     let body = Rect::from_min_max(Pos2::new(rect.min.x + 18.0, top.max.y + 28.0), Pos2::new(rect.max.x - 18.0, rect.max.y - 18.0));
-    let mut job = egui::text::LayoutJob::simple(detail.to_owned(), theme::ui(12.0), theme::MUTED, body.width().max(80.0));
+    let mut job = egui::text::LayoutJob::simple(detail.to_owned(), theme::ui(12.0), theme::pal().text_2, body.width().max(80.0));
     job.halign = egui::Align::Center;
     let g = p.layout_job(job);
     // Com `halign` centralizado, a âncora é o meio da linha.
-    p.galley(Pos2::new(body.center().x, body.min.y), g, theme::MUTED);
+    p.galley(Pos2::new(body.center().x, body.min.y), g, theme::pal().text_2);
 }
 
 fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
@@ -102,8 +102,8 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     if !ov.authenticated {
         let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), 22.0));
         let p = ui.painter_at(strip);
-        p.rect_filled(strip, 0.0, theme::PANEL_2);
-        p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::BORDER);
+        p.rect_filled(strip, 0.0, theme::pal().hover);
+        p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
         let txt = match ov.rate_limit {
             Some(rl) if rl.remaining.is_some() && rl.limit.is_some() => {
                 format!("Sem login ({} de {} por hora) · faça um push na aba Git", rl.remaining.unwrap_or(0), rl.limit.unwrap_or(0))
@@ -111,8 +111,8 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
             _ => "Sem login (60 por hora) · faça um push na aba Git".to_owned(),
         };
         let inner = strip.shrink2(Vec2::new(PAD, 0.0));
-        let g = galley_trunc(&p, &txt, theme::ui(10.5), theme::MUTED, inner.width());
-        place(&p, inner, Align2::LEFT_CENTER, g, theme::MUTED);
+        let g = galley_trunc(&p, &txt, theme::ui(10.5), theme::pal().text_2, inner.width());
+        place(&p, inner, Align2::LEFT_CENTER, g, theme::pal().text_2);
         let r = ui.interact(strip, Id::new("gh-anon-strip"), Sense::hover());
         tip(
             r,
@@ -125,15 +125,16 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     if let Some((msg, is_err)) = deck.github.notice.clone() {
         let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), 24.0));
         let p = ui.painter_at(strip);
-        let (bg, fg) = if is_err { (theme::rgba(0xe5, 0x48, 0x4d, 0.14), theme::RED_TEXT) } else { (theme::PANEL_2, theme::TEXT) };
+        let (bg, fg) =
+            if is_err { (theme::rgba(0xe5, 0x48, 0x4d, 0.14), theme::pal().danger_text) } else { (theme::pal().hover, theme::pal().text) };
         p.rect_filled(strip, 0.0, bg);
-        p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::BORDER);
+        p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
         let close_r = Rect::from_min_size(Pos2::new(strip.max.x - 22.0, strip.min.y + 2.0), Vec2::splat(20.0));
         let txt_r = Rect::from_min_max(Pos2::new(strip.min.x + PAD, strip.min.y), Pos2::new(close_r.min.x - 4.0, strip.max.y));
         let g = galley_trunc(&p, &msg, theme::ui(11.0), fg, txt_r.width());
         place(&p, txt_r, Align2::LEFT_CENTER, g, fg);
         let cr = clickable(ui, close_r, Id::new("gh-notice-close"));
-        deck.icons.paint(&p, Icon::Close, close_r.center(), 12.0, if cr.hovered() { theme::TEXT } else { theme::MUTED }, 0.0);
+        deck.icons.paint(&p, Icon::Close, close_r.center(), 12.0, if cr.hovered() { theme::pal().text } else { theme::pal().text_2 }, 0.0);
         // A mensagem inteira, quando não cabe na faixa.
         let hover = ui.interact(txt_r, Id::new("gh-notice-text"), Sense::hover());
         tip(hover, msg);
@@ -160,8 +161,8 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
 
 fn draw_repo_bar(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, 0.0, theme::PANEL);
-    p.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
+    p.rect_filled(rect, 0.0, theme::pal().chip);
+    p.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::pal().separator);
 
     let refresh_r = Rect::from_min_size(Pos2::new(rect.max.x - PAD - 24.0, rect.center().y - 12.0), Vec2::splat(24.0));
     let refresh_tip = match ov.rate_limit {
@@ -182,18 +183,18 @@ fn draw_repo_bar(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) 
 
     let slug_r = Rect::from_min_max(Pos2::new(rect.min.x + PAD, rect.min.y + 4.0), Pos2::new(open_r.min.x - 6.0, rect.max.y - 4.0));
     let sr = ui.interact(slug_r, Id::new("gh-repo-slug"), Sense::hover());
-    dot(&p, Pos2::new(slug_r.min.x + 4.0, slug_r.center().y), if ov.authenticated { OK } else { theme::MUTED });
+    dot(&p, Pos2::new(slug_r.min.x + 4.0, slug_r.center().y), if ov.authenticated { OK } else { theme::pal().text_2 });
     let txt_r = Rect::from_min_max(Pos2::new(slug_r.min.x + 14.0, slug_r.min.y), slug_r.max);
-    let g = galley_trunc(&p, &ov.repo.to_string(), theme::ui_bold(12.0), theme::TEXT, txt_r.width());
-    place(&p, txt_r, Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(&p, &ov.repo.to_string(), theme::ui_bold(12.0), theme::pal().text, txt_r.width());
+    place(&p, txt_r, Align2::LEFT_CENTER, g, theme::pal().text);
     let auth = if ov.authenticated { "com login (Git Credential Manager ou gh)" } else { "sem login: só repositórios públicos" };
     tip(sr, format!("{} · {auth}", ov.repo));
 }
 
 fn draw_subtabs(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, 0.0, theme::PANEL);
-    p.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::BORDER);
+    p.rect_filled(rect, 0.0, theme::pal().chip);
+    p.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::pal().separator);
 
     let items = [
         (GithubTab::Prs, format!("PRs ({})", ov.prs.len())),
@@ -201,15 +202,15 @@ fn draw_subtabs(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         (GithubTab::Actions, format!("Actions ({})", ov.runs.len())),
     ];
     let tab_w = (rect.width() - PAD * 2.0) / items.len() as f32;
-    let active_color = deck.active_color();
+    let active_color = deck.accent();
     for (i, (tab, label)) in items.iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(rect.min.x + PAD + i as f32 * tab_w, rect.min.y), Vec2::new(tab_w, rect.height() - 1.0));
         let active = deck.github.tab == *tab;
         let resp = clickable(ui, r, Id::new(("gh-subtab", i)));
         if active || resp.hovered() {
-            p.rect_filled(r.shrink2(Vec2::new(2.0, 3.0)), 4.0, if active { theme::PANEL_2 } else { theme::BG });
+            p.rect_filled(r.shrink2(Vec2::new(2.0, 3.0)), 4.0, if active { theme::pal().hover } else { theme::pal().bg });
         }
-        let fg = if active || resp.hovered() { theme::TEXT } else { theme::MUTED };
+        let fg = if active || resp.hovered() { theme::pal().text } else { theme::pal().text_2 };
         let font = if active { theme::ui_bold(11.5) } else { theme::ui(11.5) };
         text_in(&p, r, Align2::CENTER_CENTER, label, font, fg);
         if active {
@@ -246,7 +247,7 @@ fn child_ui(ui: &mut Ui, rect: Rect) -> Ui {
 
 fn empty_msg(ui: &Ui, rect: Rect, msg: &str) {
     let p = ui.painter_at(rect);
-    text_in(&p, rect.shrink(PAD), Align2::CENTER_CENTER, msg, theme::ui(12.0), theme::MUTED);
+    text_in(&p, rect.shrink(PAD), Align2::CENTER_CENTER, msg, theme::ui(12.0), theme::pal().text_2);
 }
 
 /// Linha de lista (fundo de seleção/hover e divisor). Devolve a resposta do clique.
@@ -257,9 +258,9 @@ fn list_row(ui: &mut Ui, width: f32, selected: bool) -> (Rect, egui::Response) {
     }
     let p = ui.painter_at(row);
     if selected || resp.hovered() {
-        p.rect_filled(row, 0.0, if selected { theme::PANEL_2 } else { theme::PANEL });
+        p.rect_filled(row, 0.0, if selected { theme::pal().hover } else { theme::pal().chip });
     }
-    p.rect_filled(Rect::from_min_max(Pos2::new(row.min.x, row.max.y - 1.0), row.max), 0.0, theme::BORDER);
+    p.rect_filled(Rect::from_min_max(Pos2::new(row.min.x, row.max.y - 1.0), row.max), 0.0, theme::pal().separator);
     (row, resp)
 }
 
@@ -304,31 +305,31 @@ fn draw_pr_row(p: &egui::Painter, row: Rect, pr: &PullRequest, selected: bool) {
     let num_font = theme::mono(11.0);
     let num_w = text_w(p, &num_txt, num_font.clone());
     let num_r = Rect::from_min_size(Pos2::new(row.min.x + PAD + 14.0, top_y), Vec2::new(num_w, 16.0));
-    text_in(p, num_r, Align2::LEFT_CENTER, &num_txt, num_font, theme::MUTED);
+    text_in(p, num_r, Align2::LEFT_CENTER, &num_txt, num_font, theme::pal().text_2);
 
     let mut x = num_r.max.x + 6.0;
     if pr.draft {
         let pill = Rect::from_min_size(Pos2::new(x, top_y + 1.0), Vec2::new(60.0, 14.0));
-        frame(p, pill, 3.0, theme::PANEL_2, theme::BORDER);
-        text_in(p, pill, Align2::CENTER_CENTER, "RASCUNHO", theme::ui_bold(9.0), theme::MUTED);
+        frame(p, pill, 3.0, theme::pal().hover, theme::pal().separator);
+        text_in(p, pill, Align2::CENTER_CENTER, "RASCUNHO", theme::ui_bold(9.0), theme::pal().text_2);
         x = pill.max.x + 5.0;
     }
     let title_r = Rect::from_min_max(Pos2::new(x, top_y), Pos2::new(row.max.x - PAD, top_y + 16.0));
     let font = if selected { theme::ui_bold(12.0) } else { theme::ui(12.0) };
-    let g = galley_trunc(p, &pr.title, font, theme::TEXT, title_r.width());
-    place(p, title_r, Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(p, &pr.title, font, theme::pal().text, title_r.width());
+    place(p, title_r, Align2::LEFT_CENTER, g, theme::pal().text);
 
     let author_txt = format!("@{}", pr.author);
     let author_font = theme::ui(10.5);
     let author_w = text_w(p, &author_txt, author_font.clone()).min(row.width() * 0.35);
     let author_r = Rect::from_min_size(Pos2::new(row.max.x - PAD - author_w, bot_y), Vec2::new(author_w, 15.0));
-    let ga = galley_trunc(p, &author_txt, author_font, theme::MUTED, author_w);
-    place(p, author_r, Align2::RIGHT_CENTER, ga, theme::MUTED);
+    let ga = galley_trunc(p, &author_txt, author_font, theme::pal().text_2, author_w);
+    place(p, author_r, Align2::RIGHT_CENTER, ga, theme::pal().text_2);
 
     let branch_txt = format!("{} → {}", pr.head_branch, pr.base_branch);
     let branch_r = Rect::from_min_max(Pos2::new(row.min.x + PAD + 14.0, bot_y), Pos2::new(author_r.min.x - 6.0, bot_y + 15.0));
-    let gb = galley_trunc(p, &branch_txt, theme::mono(10.5), theme::MUTED, branch_r.width());
-    place(p, branch_r, Align2::LEFT_CENTER, gb, theme::MUTED);
+    let gb = galley_trunc(p, &branch_txt, theme::mono(10.5), theme::pal().text_2, branch_r.width());
+    place(p, branch_r, Align2::LEFT_CENTER, gb, theme::pal().text_2);
 }
 
 fn draw_pr_detail(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview, pr: &PullRequest) {
@@ -397,16 +398,16 @@ fn draw_issue_row(p: &egui::Painter, row: Rect, issue: &Issue, selected: bool) {
     let num_font = theme::mono(11.0);
     let num_w = text_w(p, &num_txt, num_font.clone());
     let num_r = Rect::from_min_size(Pos2::new(row.min.x + PAD + 14.0, top_y), Vec2::new(num_w, 16.0));
-    text_in(p, num_r, Align2::LEFT_CENTER, &num_txt, num_font, theme::MUTED);
+    text_in(p, num_r, Align2::LEFT_CENTER, &num_txt, num_font, theme::pal().text_2);
 
     let title_r = Rect::from_min_max(Pos2::new(num_r.max.x + 6.0, top_y), Pos2::new(row.max.x - PAD, top_y + 16.0));
     let font = if selected { theme::ui_bold(12.0) } else { theme::ui(12.0) };
-    let g = galley_trunc(p, &issue.title, font, theme::TEXT, title_r.width());
-    place(p, title_r, Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(p, &issue.title, font, theme::pal().text, title_r.width());
+    place(p, title_r, Align2::LEFT_CENTER, g, theme::pal().text);
 
     let sub_r = Rect::from_min_max(Pos2::new(row.min.x + PAD + 14.0, bot_y), Pos2::new(row.max.x - PAD, bot_y + 15.0));
-    let gs = galley_trunc(p, &issue_meta(issue), theme::ui(10.5), theme::MUTED, sub_r.width());
-    place(p, sub_r, Align2::LEFT_CENTER, gs, theme::MUTED);
+    let gs = galley_trunc(p, &issue_meta(issue), theme::ui(10.5), theme::pal().text_2, sub_r.width());
+    place(p, sub_r, Align2::LEFT_CENTER, gs, theme::pal().text_2);
 }
 
 /// `@autor · rótulos · N coment.`
@@ -442,10 +443,10 @@ fn draw_issue_detail(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOvervi
     let mut child = child_ui(ui, body_r);
     ScrollArea::vertical().id_salt(("gh-issue-body", issue.number)).auto_shrink([false, false]).show(&mut child, |ui| {
         ui.set_width(body_r.width());
-        ui.label(egui::RichText::new(issue_meta(issue)).font(theme::ui(10.5)).color(theme::MUTED));
+        ui.label(egui::RichText::new(issue_meta(issue)).font(theme::ui(10.5)).color(theme::pal().text_2));
         ui.add_space(4.0);
         let desc = if issue.body_preview.trim().is_empty() { "Sem descrição." } else { issue.body_preview.trim() };
-        ui.label(egui::RichText::new(desc).font(theme::ui(11.5)).color(theme::TEXT));
+        ui.label(egui::RichText::new(desc).font(theme::ui(11.5)).color(theme::pal().text));
     });
 }
 
@@ -508,13 +509,13 @@ fn draw_run_row(p: &egui::Painter, row: Rect, run: &WorkflowRun, selected: bool)
 
     let title_r = Rect::from_min_max(Pos2::new(row.min.x + PAD + 14.0, top_y), Pos2::new(row.max.x - 2.0, top_y + 16.0));
     let font = if selected { theme::ui_bold(12.0) } else { theme::ui(12.0) };
-    let g = galley_trunc(p, &run.display_title, font, theme::TEXT, title_r.width());
-    place(p, title_r, Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(p, &run.display_title, font, theme::pal().text, title_r.width());
+    place(p, title_r, Align2::LEFT_CENTER, g, theme::pal().text);
 
     let sub = format!("{} · {} · {}", run.name, run.event, run.head_branch);
     let sub_r = Rect::from_min_max(Pos2::new(row.min.x + PAD + 14.0, bot_y), Pos2::new(row.max.x - 2.0, bot_y + 15.0));
-    let gs = galley_trunc(p, &sub, theme::mono(10.5), theme::MUTED, sub_r.width());
-    place(p, sub_r, Align2::LEFT_CENTER, gs, theme::MUTED);
+    let gs = galley_trunc(p, &sub, theme::mono(10.5), theme::pal().text_2, sub_r.width());
+    place(p, sub_r, Align2::LEFT_CENTER, gs, theme::pal().text_2);
 }
 
 // ---------------------------------------------------------------------------
@@ -533,16 +534,16 @@ fn detail_header(
     close: &dyn Fn(&mut Deck),
 ) -> Option<Rect> {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, 0.0, theme::PANEL);
-    p.rect_filled(Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + 1.0)), 0.0, theme::BORDER);
+    p.rect_filled(rect, 0.0, theme::pal().chip);
+    p.rect_filled(Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + 1.0)), 0.0, theme::pal().separator);
 
     let head = Rect::from_min_size(Pos2::new(rect.min.x, rect.min.y + 1.0), Vec2::new(rect.width(), HEAD_H));
-    p.rect_filled(head, 0.0, theme::PANEL_2);
-    p.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::BORDER);
+    p.rect_filled(head, 0.0, theme::pal().hover);
+    p.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
 
     let close_r = Rect::from_min_size(Pos2::new(head.max.x - PAD - 20.0, head.center().y - 10.0), Vec2::splat(20.0));
     let cr = clickable(ui, close_r, Id::new(close_id));
-    deck.icons.paint(&p, Icon::Close, close_r.center(), 13.0, if cr.hovered() { theme::TEXT } else { theme::MUTED }, 0.0);
+    deck.icons.paint(&p, Icon::Close, close_r.center(), 13.0, if cr.hovered() { theme::pal().text } else { theme::pal().text_2 }, 0.0);
     if tip(cr, "Fechar o detalhe").clicked() {
         close(deck);
         return None;
@@ -554,16 +555,16 @@ fn detail_header(
         x += 14.0;
     }
     let head_r = Rect::from_min_max(Pos2::new(x, head.min.y), Pos2::new(close_r.min.x - 4.0, head.max.y));
-    let g = galley_trunc(&p, title, theme::ui_bold(11.5), theme::TEXT, head_r.width());
-    place(&p, head_r, Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(&p, title, theme::ui_bold(11.5), theme::pal().text, head_r.width());
+    place(&p, head_r, Align2::LEFT_CENTER, g, theme::pal().text);
     Some(Rect::from_min_size(Pos2::new(rect.min.x, head.max.y), Vec2::new(rect.width(), ACT_H)))
 }
 
 /// Barra com "Abrir no navegador" e "Enviar para agente". Devolve `(abrir, âncora do menu)`.
 fn action_bar(ui: &mut Ui, bar: Rect, key: u64, agent_tip: &str) -> (bool, Option<Rect>) {
     let p = ui.painter_at(bar);
-    p.rect_filled(bar, 0.0, theme::PANEL);
-    p.rect_filled(Rect::from_min_max(Pos2::new(bar.min.x, bar.max.y - 1.0), bar.max), 0.0, theme::BORDER);
+    p.rect_filled(bar, 0.0, theme::pal().chip);
+    p.rect_filled(Rect::from_min_max(Pos2::new(bar.min.x, bar.max.y - 1.0), bar.max), 0.0, theme::pal().separator);
     let half_w = (bar.width() - PAD * 2.0 - 6.0) * 0.5;
     let btn_open = Rect::from_min_size(Pos2::new(bar.min.x + PAD, bar.center().y - 11.0), Vec2::new(half_w, 22.0));
     let btn_agent = Rect::from_min_size(Pos2::new(btn_open.max.x + 6.0, bar.center().y - 11.0), Vec2::new(half_w, 22.0));
@@ -611,7 +612,7 @@ fn draw_jobs_and_log(
             "Esta execução não tem jobs."
         };
         let p = ui.painter_at(jobs_rect);
-        text_in(&p, jobs_rect, Align2::CENTER_CENTER, msg, theme::ui(11.5), theme::MUTED);
+        text_in(&p, jobs_rect, Align2::CENTER_CENTER, msg, theme::ui(11.5), theme::pal().text_2);
     } else {
         let mut req_log: Option<(u64, String)> = None;
         let mut req_agent: Option<(Rect, WorkflowJob)> = None;
@@ -627,7 +628,7 @@ fn draw_jobs_and_log(
                     let row_h = if failed && !job.failed_steps.is_empty() { 40.0 } else { 26.0 };
                     let (row, _) = ui.allocate_exact_size(Vec2::new(jobs_rect.width(), row_h), Sense::hover());
                     let p = ui.painter_at(row);
-                    p.rect_filled(Rect::from_min_max(Pos2::new(row.min.x, row.max.y - 1.0), row.max), 0.0, theme::BORDER);
+                    p.rect_filled(Rect::from_min_max(Pos2::new(row.min.x, row.max.y - 1.0), row.max), 0.0, theme::pal().separator);
 
                     let top_y = row.min.y + 4.0;
                     paint_check_badge(&p, Pos2::new(row.min.x + PAD + 5.0, top_y + 9.0), job.status);
@@ -670,7 +671,7 @@ fn draw_jobs_and_log(
                     }
 
                     let name_r = Rect::from_min_max(Pos2::new(row.min.x + PAD + 14.0, top_y), Pos2::new(right_x, top_y + 18.0));
-                    let name_color = if failed { theme::RED_TEXT } else { theme::TEXT };
+                    let name_color = if failed { theme::pal().danger_text } else { theme::pal().text };
                     let gn = galley_trunc(&p, &job.name, theme::ui(11.5), name_color, name_r.width());
                     place(&p, name_r, Align2::LEFT_CENTER, gn, name_color);
 
@@ -680,8 +681,8 @@ fn draw_jobs_and_log(
                             Pos2::new(row.min.x + PAD + 14.0, top_y + 18.0),
                             Pos2::new(row.max.x - PAD, row.max.y - 2.0),
                         );
-                        let gs = galley_trunc(&p, &step_txt, theme::mono(10.0), theme::RED_TEXT, step_r.width());
-                        place(&p, step_r, Align2::LEFT_CENTER, gs, theme::RED_TEXT);
+                        let gs = galley_trunc(&p, &step_txt, theme::mono(10.0), theme::pal().danger_text, step_r.width());
+                        place(&p, step_r, Align2::LEFT_CENTER, gs, theme::pal().danger_text);
                     }
                 }
             },
@@ -725,16 +726,16 @@ fn draw_job_log_pane(
     job: Option<WorkflowJob>,
 ) {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, 0.0, theme::BG);
-    p.rect_filled(Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + 1.0)), 0.0, theme::BORDER);
+    p.rect_filled(rect, 0.0, theme::pal().bg);
+    p.rect_filled(Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + 1.0)), 0.0, theme::pal().separator);
 
     let head = Rect::from_min_size(Pos2::new(rect.min.x, rect.min.y + 1.0), Vec2::new(rect.width(), 22.0));
-    p.rect_filled(head, 0.0, theme::PANEL_2);
-    p.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::BORDER);
+    p.rect_filled(head, 0.0, theme::pal().hover);
+    p.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
 
     let close_r = Rect::from_min_size(Pos2::new(head.max.x - PAD - 18.0, head.center().y - 9.0), Vec2::splat(18.0));
     let cr = clickable(ui, close_r, Id::new("gh-log-close"));
-    deck.icons.paint(&p, Icon::Close, close_r.center(), 12.0, if cr.hovered() { theme::TEXT } else { theme::MUTED }, 0.0);
+    deck.icons.paint(&p, Icon::Close, close_r.center(), 12.0, if cr.hovered() { theme::pal().text } else { theme::pal().text_2 }, 0.0);
     if tip(cr, "Fechar o log").clicked() {
         deck.github.open_log = None;
         return;
@@ -761,14 +762,14 @@ fn draw_job_log_pane(
     }
 
     let title_r = Rect::from_min_max(Pos2::new(head.min.x + PAD, head.min.y), Pos2::new(send_r.min.x - 4.0, head.max.y));
-    let g = galley_trunc(&p, &format!("Log · {job_name}"), theme::mono(10.5), theme::RED_TEXT, title_r.width());
-    place(&p, title_r, Align2::LEFT_CENTER, g, theme::RED_TEXT);
+    let g = galley_trunc(&p, &format!("Log · {job_name}"), theme::mono(10.5), theme::pal().danger_text, title_r.width());
+    place(&p, title_r, Align2::LEFT_CENTER, g, theme::pal().danger_text);
 
     let body = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
     match log_state {
         None => {
             let msg = if deck.github.log_loading == Some(job_id) { "Baixando o fim do log…" } else { "Log indisponível." };
-            text_in(&p, body, Align2::CENTER_CENTER, msg, theme::ui(11.0), theme::MUTED);
+            text_in(&p, body, Align2::CENTER_CENTER, msg, theme::ui(11.0), theme::pal().text_2);
         }
         Some(Err(e)) => draw_wrapped(&p, body.shrink(PAD), &e.to_string()),
         Some(Ok(log)) => log_lines(ui, body, &log, job_id),
@@ -776,15 +777,15 @@ fn draw_job_log_pane(
 }
 
 fn draw_wrapped(p: &egui::Painter, area: Rect, text: &str) {
-    let job = egui::text::LayoutJob::simple(text.to_owned(), theme::ui(11.5), theme::MUTED, area.width().max(80.0));
+    let job = egui::text::LayoutJob::simple(text.to_owned(), theme::ui(11.5), theme::pal().text_2, area.width().max(80.0));
     let g = p.layout_job(job);
-    p.galley(area.min, g, theme::MUTED);
+    p.galley(area.min, g, theme::pal().text_2);
 }
 
 fn log_lines(ui: &mut Ui, body: Rect, log: &JobLog, job_id: u64) {
     if log.lines.is_empty() {
         let p = ui.painter_at(body);
-        text_in(&p, body, Align2::CENTER_CENTER, "O log deste job está vazio.", theme::ui(11.0), theme::MUTED);
+        text_in(&p, body, Align2::CENTER_CENTER, "O log deste job está vazio.", theme::ui(11.0), theme::pal().text_2);
         return;
     }
     let font = theme::mono(11.0);
@@ -808,11 +809,11 @@ fn log_lines(ui: &mut Ui, body: Rect, log: &JobLog, job_id: u64) {
                     p.rect_filled(r, 0.0, theme::rgba(0xe5, 0x48, 0x4d, 0.14));
                 }
                 let fg = if is_err {
-                    theme::RED_TEXT
+                    theme::pal().danger_text
                 } else if first_clipped {
-                    theme::MUTED
+                    theme::pal().text_2
                 } else {
-                    theme::TREE_TEXT
+                    theme::pal().text_2
                 };
                 p.text(Pos2::new(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, line, font.clone(), fg);
             }
@@ -867,19 +868,19 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
     Area::new(Id::new("gh-agent-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.5));
-        frame(ui.painter(), rect, 8.0, theme::PANEL_2, theme::BORDER);
+        frame(ui.painter(), rect, 8.0, theme::pal().hover, theme::pal().separator);
         let p = ui.painter().clone();
         let mut y = rect.min.y + 8.0;
 
         let head_r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, 18.0));
         let title = format!("ENVIAR {} PARA", target.title.to_uppercase());
-        let g = galley_trunc(&p, &title, theme::ui_bold(10.5), theme::MUTED, head_r.width());
-        place(&p, head_r, Align2::LEFT_CENTER, g, theme::MUTED);
+        let g = galley_trunc(&p, &title, theme::ui_bold(10.5), theme::pal().text_2, head_r.width());
+        place(&p, head_r, Align2::LEFT_CENTER, g, theme::pal().text_2);
         y += 18.0;
 
         if open_tabs.is_empty() {
             let r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, item_h));
-            text_in(&p, r, Align2::LEFT_CENTER, "Nenhum agente aberto neste projeto", theme::ui(12.0), theme::MUTED);
+            text_in(&p, r, Align2::LEFT_CENTER, "Nenhum agente aberto neste projeto", theme::ui(12.0), theme::pal().text_2);
             y += item_h;
         }
         for (id, label, color) in &open_tabs {
@@ -887,22 +888,22 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
             y += item_h;
             let resp = clickable(ui, r, Id::new(("gh-menu-tab", id)));
             if resp.hovered() {
-                p.rect_filled(r, 5.0, theme::BORDER);
+                p.rect_filled(r, 5.0, theme::pal().separator);
             }
             dot(&p, Pos2::new(r.min.x + 14.0, r.center().y), *color);
             let tr = Rect::from_min_max(Pos2::new(r.min.x + 26.0, r.min.y), Pos2::new(r.max.x - 8.0, r.max.y));
-            let g = galley_trunc(&p, label, theme::ui(12.5), theme::TEXT, tr.width());
-            place(&p, tr, Align2::LEFT_CENTER, g, theme::TEXT);
+            let g = galley_trunc(&p, label, theme::ui(12.5), theme::pal().text, tr.width());
+            place(&p, tr, Align2::LEFT_CENTER, g, theme::pal().text);
             if resp.clicked() {
                 chosen = Some(id.clone());
             }
         }
 
         y += 4.0;
-        p.rect_filled(Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0, 1.0)), 0.0, theme::BORDER);
+        p.rect_filled(Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0, 1.0)), 0.0, theme::pal().separator);
         y += 7.0;
         let sub_r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, 18.0));
-        text_in(&p, sub_r, Align2::LEFT_CENTER, "OU ABRIR / USAR UM CARGO", theme::ui_bold(10.5), theme::MUTED);
+        text_in(&p, sub_r, Align2::LEFT_CENTER, "OU ABRIR / USAR UM CARGO", theme::ui_bold(10.5), theme::pal().text_2);
         y += 18.0;
 
         for (kind, label, color) in &models {
@@ -911,15 +912,15 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
             let active = deck.github.new_role_kind == *kind;
             let resp = clickable(ui, r, Id::new(("gh-role-model", kind)));
             if resp.hovered() {
-                p.rect_filled(r, 5.0, theme::BORDER);
+                p.rect_filled(r, 5.0, theme::pal().separator);
             }
             let c = Pos2::new(r.min.x + 14.0, r.center().y);
-            p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, if active { *color } else { theme::MUTED }));
+            p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, if active { *color } else { theme::pal().text_2 }));
             if active {
                 p.circle_filled(c, 3.0, *color);
             }
             let tr = Rect::from_min_max(Pos2::new(r.min.x + 28.0, r.min.y), Pos2::new(r.max.x - 8.0, r.max.y));
-            let fg = if active { theme::TEXT } else { theme::SELECT_TEXT };
+            let fg = if active { theme::pal().text } else { theme::pal().text_2 };
             let g = galley_trunc(&p, label, theme::ui(12.0), fg, tr.width());
             place(&p, tr, Align2::LEFT_CENTER, g, fg);
             if resp.clicked() {
@@ -932,14 +933,14 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         let btn_w = 70.0;
         let input_r = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0 - btn_w - 6.0, 22.0));
         let send_r = Rect::from_min_size(Pos2::new(input_r.max.x + 6.0, y), Vec2::new(btn_w, 22.0));
-        frame(&p, input_r, 6.0, theme::PANEL, theme::BORDER);
+        frame(&p, input_r, 6.0, theme::pal().chip, theme::pal().separator);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink(1.0)));
         let out = TextEdit::singleline(&mut deck.github.new_role_name)
             .id(Id::new("gh-role-input"))
             .frame(egui::Frame::NONE)
             .margin(egui::Margin { left: 8, right: 8, top: 3, bottom: 3 })
             .font(theme::mono(11.5))
-            .hint_text(egui::RichText::new("cargo (ex.: review)").font(theme::ui(11.5)).color(theme::PLACEHOLDER))
+            .hint_text(egui::RichText::new("cargo (ex.: review)").font(theme::ui(11.5)).color(theme::pal().text_3))
             .vertical_align(egui::Align::Center)
             .desired_width(input_r.width() - 2.0)
             .show(&mut child);
@@ -959,8 +960,8 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
             let rr = Rect::from_min_size(Pos2::new(rect.min.x + 8.0 + i as f32 * (rw + 4.0), y), Vec2::new(rw, 20.0));
             let resp = clickable(ui, rr, Id::new(("gh-quick-role", role)));
             let active = normalize_role(&deck.github.new_role_name) == *role;
-            frame(&p, rr, 5.0, if active { theme::BORDER } else { theme::PANEL }, theme::BORDER);
-            let fg = if active || resp.hovered() { theme::TEXT } else { theme::MUTED };
+            frame(&p, rr, 5.0, if active { theme::pal().separator } else { theme::pal().chip }, theme::pal().separator);
+            let fg = if active || resp.hovered() { theme::pal().text } else { theme::pal().text_2 };
             text_in(&p, rr, Align2::CENTER_CENTER, &format!("@{role}"), theme::mono(10.5), fg);
             if resp.clicked() {
                 deck.github.new_role_name = (*role).to_owned();
@@ -986,10 +987,10 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
 fn paint_check_badge(p: &egui::Painter, center: Pos2, status: CheckStatus) {
     let color = match status {
         CheckStatus::Success => OK,
-        CheckStatus::Failure => theme::RED,
+        CheckStatus::Failure => theme::pal().danger,
         CheckStatus::Pending => WARN,
         CheckStatus::Neutral => {
-            p.circle_stroke(center, 3.5, egui::Stroke::new(1.0, theme::MUTED));
+            p.circle_stroke(center, 3.5, egui::Stroke::new(1.0, theme::pal().text_2));
             return;
         }
     };
@@ -1009,14 +1010,14 @@ fn icon_btn(
 ) -> bool {
     let r = if enabled { clickable(ui, rect, Id::new(id)) } else { ui.interact(rect, Id::new(id), Sense::hover()) };
     if enabled && r.hovered() {
-        p.rect_filled(rect, 4.0, theme::PANEL_2);
+        p.rect_filled(rect, 4.0, theme::pal().hover);
     }
     let color = if !enabled {
-        theme::with_opacity(theme::MUTED, 0.4)
+        theme::with_opacity(theme::pal().text_2, 0.4)
     } else if r.hovered() {
-        theme::TEXT
+        theme::pal().text
     } else {
-        theme::MUTED
+        theme::pal().text_2
     };
     deck.icons.paint(p, icon, rect.center(), 15.0, color, 0.0);
     tip(r, tooltip).clicked() && enabled
@@ -1035,12 +1036,12 @@ fn small_btn(
     let r = clickable(ui, rect, Id::new(id));
     let hot = r.hovered();
     let (bg, border) = match (strong, hot) {
-        (true, true) => (theme::ACCENT, theme::ACCENT),
-        (false, true) => (theme::BORDER, theme::BORDER),
-        _ => (theme::PANEL_2, theme::BORDER),
+        (true, true) => (theme::accent(), theme::accent()),
+        (false, true) => (theme::pal().separator, theme::pal().separator),
+        _ => (theme::pal().hover, theme::pal().separator),
     };
     frame(p, rect, 4.0, bg, border);
-    let fg = if hot { theme::WHITE } else { theme::TEXT };
+    let fg = if hot { theme::pal().text_strong } else { theme::pal().text };
     let font = if strong { theme::ui_bold(11.0) } else { theme::ui(11.0) };
     let g = galley_trunc(p, label, font, fg, rect.width() - 6.0);
     place(p, rect, Align2::CENTER_CENTER, g, fg);

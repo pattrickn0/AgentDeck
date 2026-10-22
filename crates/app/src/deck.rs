@@ -1638,9 +1638,15 @@ impl Deck {
         }
     }
 
-    /// `--active-agent-color` (sem aba, volta ao valor do `:root`, a cor do Claude).
-    pub fn active_color(&self) -> Color32 {
-        self.active_tab().map(|t| t.color).unwrap_or(theme::CLAUDE)
+    /// Cor de destaque: a da aba em foco; sem aba, um cinza claro neutro. É a única cor forte da
+    /// interface (seleção, ação primária, divisor ativo) e nunca é uma cor fixa de marca.
+    pub fn accent(&self) -> Color32 {
+        self.active_tab().map(|t| t.color).unwrap_or(theme::pal().accent_neutral)
+    }
+
+    /// A cor da aba em foco, se houver (alimenta `theme::set_accent`).
+    pub fn accent_opt(&self) -> Option<Color32> {
+        self.active_tab().map(|t| t.color)
     }
 
     fn persist_tabs(&mut self) {
@@ -2311,7 +2317,7 @@ impl Deck {
                 }
             }
         }
-        theme::SEND_DEFAULT
+        theme::pal().info
     }
 
     /// Abre o seletor de arquivos para anexar à aba `uid` (botão de anexo no cabeçalho do painel).

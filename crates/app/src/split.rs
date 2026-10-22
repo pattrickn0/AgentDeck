@@ -6,8 +6,8 @@ use egui::{Pos2, Rect};
 /// Tamanho mínimo de uma janela (cabeçalho de abas + algumas linhas de terminal).
 pub const MIN_W: f32 = 260.0;
 pub const MIN_H: f32 = 140.0;
-/// Espessura do divisor entre janelas.
-pub const GAP: f32 = 1.0;
+/// Fresta entre as janelas (ilhas): o divisor arrastável mora nela.
+pub const GAP: f32 = crate::theme::ISLAND_GAP;
 
 /// Grupo (janela) de uma aba: todos os modelos do Ollama ficam juntos; o resto é o próprio tipo
 /// (`claude@dev@ana` é `kind = "claude"`, então fica no grupo do Claude).

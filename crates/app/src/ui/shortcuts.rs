@@ -111,18 +111,24 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
         shadow(&p, r, 0, 8, 30, theme::rgba(0, 0, 0, 0.7));
-        frame(&p, r, 10.0, theme::PANEL_2, theme::BORDER);
+        frame(&p, r, 10.0, theme::pal().hover, theme::pal().separator);
 
         let mut y = r.min.y + 16.0;
 
         // Título
-        let title_g = galley(&p, "Atalhos de Teclado", theme::ui_semibold(15.0), theme::TEXT);
-        place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 70.0, 20.0)), Align2::LEFT_CENTER, title_g, theme::TEXT);
+        let title_g = galley(&p, "Atalhos de Teclado", theme::ui_semibold(15.0), theme::pal().text);
+        place(
+            &p,
+            Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 70.0, 20.0)),
+            Align2::LEFT_CENTER,
+            title_g,
+            theme::pal().text,
+        );
 
         // Botão fechar (✕)
         let close_x_r = Rect::from_min_size(Pos2::new(r.max.x - 36.0, y), Vec2::new(20.0, 20.0));
         let cr_x = clickable(ui, close_x_r, Id::new("shortcuts-close-x"));
-        let x_color = if cr_x.hovered() { theme::TEXT } else { theme::MUTED };
+        let x_color = if cr_x.hovered() { theme::pal().text } else { theme::pal().text_2 };
         text_in(&p, close_x_r, Align2::CENTER_CENTER, "✕", theme::ui(13.0), x_color);
         if cr_x.clicked() {
             close = true;
@@ -130,12 +136,18 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         y += 24.0;
 
         // Explicação
-        let hint_g = galley(&p, "Principais atalhos e ações do AgentDeck", theme::ui(11.5), theme::MUTED);
-        place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)), Align2::LEFT_CENTER, hint_g, theme::MUTED);
+        let hint_g = galley(&p, "Principais atalhos e ações do AgentDeck", theme::ui(11.5), theme::pal().text_2);
+        place(
+            &p,
+            Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)),
+            Align2::LEFT_CENTER,
+            hint_g,
+            theme::pal().text_2,
+        );
         y += 22.0;
 
         // Linha divisória
-        p.rect_filled(Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 1.0)), 0.0, theme::BORDER);
+        p.rect_filled(Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 1.0)), 0.0, theme::pal().separator);
         y += 8.0;
 
         // Lista de atalhos
@@ -143,44 +155,56 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
             let mut kx = r.min.x + 20.0;
             for (idx, key) in item.keys.iter().enumerate() {
                 if idx > 0 {
-                    let sep_g = galley(&p, "/", theme::ui(11.0), theme::MUTED);
-                    place(&p, Rect::from_min_size(Pos2::new(kx, y), Vec2::new(12.0, 22.0)), Align2::CENTER_CENTER, sep_g, theme::MUTED);
+                    let sep_g = galley(&p, "/", theme::ui(11.0), theme::pal().text_2);
+                    place(
+                        &p,
+                        Rect::from_min_size(Pos2::new(kx, y), Vec2::new(12.0, 22.0)),
+                        Align2::CENTER_CENTER,
+                        sep_g,
+                        theme::pal().text_2,
+                    );
                     kx += 12.0;
                 }
                 let kw = text_w(&p, key, theme::mono_bold(11.0)) + 12.0;
                 let badge_r = Rect::from_min_size(Pos2::new(kx, y + 1.0), Vec2::new(kw, 20.0));
-                p.rect_filled(badge_r, 4.0, theme::BG);
-                p.rect_stroke(badge_r, 4.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-                text_in(&p, badge_r, Align2::CENTER_CENTER, key, theme::mono_bold(11.0), theme::INPUT_TEXT);
+                p.rect_filled(badge_r, 4.0, theme::pal().bg);
+                p.rect_stroke(badge_r, 4.0, Stroke::new(1.0, theme::pal().separator), egui::StrokeKind::Inside);
+                text_in(&p, badge_r, Align2::CENTER_CENTER, key, theme::mono_bold(11.0), theme::pal().text);
                 kx += kw + 2.0;
             }
 
-            let desc_g = galley_trunc(&p, item.desc, theme::ui(12.5), theme::TEXT, w - 235.0);
+            let desc_g = galley_trunc(&p, item.desc, theme::ui(12.5), theme::pal().text, w - 235.0);
             place(
                 &p,
                 Rect::from_min_size(Pos2::new(r.min.x + 215.0, y), Vec2::new(w - 235.0, 22.0)),
                 Align2::LEFT_CENTER,
                 desc_g,
-                theme::TEXT,
+                theme::pal().text,
             );
             y += 26.0;
         }
 
-        let note_g = galley_trunc(&p, note, theme::ui(11.5), theme::MUTED, w - 40.0);
-        place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 18.0)), Align2::LEFT_CENTER, note_g, theme::MUTED);
+        let note_g = galley_trunc(&p, note, theme::ui(11.5), theme::pal().text_2, w - 40.0);
+        place(
+            &p,
+            Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 18.0)),
+            Align2::LEFT_CENTER,
+            note_g,
+            theme::pal().text_2,
+        );
         y += 22.0;
         // Linha divisória antes do rodapé
-        p.rect_filled(Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 1.0)), 0.0, theme::BORDER);
+        p.rect_filled(Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 1.0)), 0.0, theme::pal().separator);
         y += 10.0;
 
         // Rodapé
-        let footer_hint = galley(&p, "Pressione Esc ou clique fora para fechar", theme::ui(11.5), theme::MUTED);
+        let footer_hint = galley(&p, "Pressione Esc ou clique fora para fechar", theme::ui(11.5), theme::pal().text_2);
         place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(280.0, 26.0)),
             Align2::LEFT_CENTER,
             footer_hint,
-            theme::MUTED,
+            theme::pal().text_2,
         );
 
         let btn_w = 75.0;
@@ -188,11 +212,11 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         let close_btn_r = Rect::from_min_size(Pos2::new(r.max.x - 20.0 - btn_w, y), Vec2::new(btn_w, btn_h));
         let cr = clickable(ui, close_btn_r, Id::new("shortcuts-close-btn"));
         if cr.hovered() {
-            p.rect_filled(close_btn_r, 6.0, theme::BORDER);
+            p.rect_filled(close_btn_r, 6.0, theme::pal().separator);
         } else {
-            p.rect_filled(close_btn_r, 6.0, theme::PANEL);
+            p.rect_filled(close_btn_r, 6.0, theme::pal().chip);
         }
-        text_in(&p, close_btn_r, Align2::CENTER_CENTER, "Fechar", theme::ui(12.5), theme::MUTED);
+        text_in(&p, close_btn_r, Align2::CENTER_CENTER, "Fechar", theme::ui(12.5), theme::pal().text_2);
         if cr.clicked() {
             close = true;
         }

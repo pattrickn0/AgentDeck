@@ -67,13 +67,13 @@ fn open_project_folder(deck: &Deck, path: &Path) {
 
 /// Título de seção da barra lateral (MAIÚSCULAS, 11 px, MUTED).
 fn section_title(painter: &egui::Painter, head: Rect, title: &str) {
-    let g = galley_trunc(painter, title, theme::ui_semibold(11.0), theme::MUTED, head.width() - 60.0);
+    let g = galley_trunc(painter, title, theme::ui_semibold(11.0), theme::pal().text_2, head.width() - 60.0);
     place(
         painter,
         Rect::from_min_max(Pos2::new(head.min.x + 12.0, head.min.y), Pos2::new(head.max.x - 52.0, head.max.y)),
         Align2::LEFT_CENTER,
         g,
-        theme::MUTED,
+        theme::pal().text_2,
     );
 }
 
@@ -142,7 +142,7 @@ fn agent_x(row: Rect, depth: usize) -> f32 {
 
 /// Linhas-guia da árvore (como no explorador de arquivos). `gap` é o espaço entre as linhas.
 fn paint_guides(p: &Painter, row: Rect, gap: f32, node: &TreeRow) {
-    let stroke = Stroke::new(1.0, theme::BORDER);
+    let stroke = Stroke::new(1.0, theme::pal().separator);
     let y = row.center().y;
     if node.has_kids {
         p.vline(agent_x(row, node.depth), (y + LOGO_SIZE / 2.0 + 2.0)..=row.max.y, stroke);
@@ -230,7 +230,7 @@ struct DropTarget {
 
 /// Contorno do alvo de soltar (cor do projeto se vale, vermelho se criaria um ciclo).
 fn paint_drop_target(p: &Painter, r: Rect, ok: bool, color: Color32) {
-    let c = if ok { color } else { theme::RED };
+    let c = if ok { color } else { theme::pal().danger };
     p.rect_filled(r, 4.0, theme::with_opacity(c, 0.12));
     p.rect_stroke(r.shrink(0.5), 4.0, Stroke::new(1.2, c), egui::StrokeKind::Inside);
 }
@@ -269,10 +269,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     let plus_resp = clickable(ui, plus_r, Id::new("proj-plus-btn"));
     let plus_hov = plus_resp.hovered() && !dragging;
     if plus_hov {
-        painter.rect_filled(plus_r, 4.0, theme::PANEL_2);
+        painter.rect_filled(plus_r, 4.0, theme::pal().hover);
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
-    let plus_color = if plus_hov { theme::TEXT } else { theme::MUTED };
+    let plus_color = if plus_hov { theme::pal().text } else { theme::pal().text_2 };
     text_in(&painter, plus_r, Align2::CENTER_CENTER, "+", theme::ui_semibold(14.0), plus_color);
     if tip(plus_resp, "Novo projeto…").clicked() {
         deck.new_project_dialog();
@@ -284,10 +284,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     let all_resp = clickable(ui, all_r, Id::new("proj-all-btn"));
     let all_hov = all_resp.hovered() && !dragging;
     if all_hov {
-        painter.rect_filled(all_r, 4.0, theme::PANEL_2);
+        painter.rect_filled(all_r, 4.0, theme::pal().hover);
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
-    paint_double_chevron(&painter, all_r.center(), any_open, if all_hov { theme::TEXT } else { theme::MUTED });
+    paint_double_chevron(&painter, all_r.center(), any_open, if all_hov { theme::pal().text } else { theme::pal().text_2 });
     let all_tip = if any_open { "Recolher os agentes de todos os projetos" } else { "Mostrar os agentes de todos os projetos" };
     if tip(all_resp, all_tip).clicked() {
         deck.set_all_projects_expanded(!any_open);
@@ -311,7 +311,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     let mut open_ctx = None;
     let mut new_agent_click = false;
     let mut new_agent_anchor: Option<Rect> = None;
-    let active_color = deck.active_color();
+    let active_color = deck.accent();
     let deck_active = deck.active;
     let mut agent_drag: AgentDrag = ctx.data(|d| d.get_temp::<AgentDrag>(drag_key())).flatten();
     let pointer = ctx.input(|i| i.pointer.interact_pos());
@@ -334,9 +334,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
 
                 // Fundo: ativo = PANEL_2, hover = PANEL_2
                 if proj.active {
-                    p.rect_filled(row_r, 0.0, theme::PANEL_2);
+                    p.rect_filled(row_r, 0.0, theme::pal().hover);
                 } else if hovered {
-                    p.rect_filled(row_r, 4.0, theme::PANEL_2);
+                    p.rect_filled(row_r, 4.0, theme::pal().hover);
                 }
 
                 if hovered {
@@ -358,11 +358,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 }
                 if can_expand {
                     let c = if chev_hov {
-                        theme::TEXT
+                        theme::pal().text
                     } else if proj.active {
                         active_color
                     } else {
-                        theme::MUTED
+                        theme::pal().text_2
                     };
                     paint_chevron(&p, Pos2::new(row_r.min.x + 10.0, row_r.center().y), proj.expanded, c);
                 }
@@ -381,7 +381,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                         Align2::RIGHT_CENTER,
                         &count_str,
                         count_font,
-                        theme::MUTED,
+                        theme::pal().text_2,
                     );
                 }
 
@@ -430,7 +430,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 };
                 let max_name_w = (name_right_limit - name_x).max(1.0);
                 let name_font = if proj.active { theme::ui_semibold(12.5) } else { theme::ui(12.5) };
-                let name_color = if proj.active || hovered { theme::TEXT } else { theme::TREE_TEXT };
+                let name_color = if proj.active || hovered { theme::pal().text } else { theme::pal().text_2 };
 
                 let name_g = galley_trunc(&p, &proj.name, name_font, name_color, max_name_w);
                 place(
@@ -476,9 +476,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let being_dragged = agent_drag.as_ref().is_some_and(|(dp, di, _)| *dp == proj.id && *di == ag.id);
 
                     if is_active_tab {
-                        p.rect_filled(tab_r, 4.0, theme::BORDER);
+                        p.rect_filled(tab_r, 4.0, theme::pal().separator);
                     } else if tab_hov {
-                        p.rect_filled(tab_r, 4.0, theme::PANEL_2);
+                        p.rect_filled(tab_r, 4.0, theme::pal().hover);
                     }
                     // Alvo de soltar: vira o chefe do arrastado (no mesmo projeto, sem ciclo).
                     if let Some((_, dragged, _)) = agent_drag.as_ref().filter(|(dp, ..)| *dp == proj.id) {
@@ -489,7 +489,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                         }
                     }
                     if being_dragged {
-                        p.rect_filled(tab_r, 4.0, theme::with_opacity(theme::PANEL_2, 0.6));
+                        p.rect_filled(tab_r, 4.0, theme::with_opacity(theme::pal().hover, 0.6));
                     }
 
                     if tab_hov {
@@ -504,13 +504,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let max_tab_w = (tab_r.max.x - 10.0 - tab_text_x).max(1.0);
                     let tab_font = if ag.done || is_active_tab { theme::ui_semibold(12.0) } else { theme::ui(12.0) };
                     let tab_color = if !ag.alive {
-                        theme::with_opacity(theme::MUTED, 0.6)
+                        theme::with_opacity(theme::pal().text_2, 0.6)
                     } else if is_active_tab || ag.done {
-                        theme::WHITE
+                        theme::pal().text_strong
                     } else if tab_hov {
-                        theme::TEXT
+                        theme::pal().text
                     } else {
-                        theme::TREE_TEXT
+                        theme::pal().text_2
                     };
 
                     let tab_g = galley_trunc(&p, &ag.label, tab_font, tab_color, max_tab_w);
@@ -530,7 +530,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                         let x0 = placed_r.max.x + 6.0;
                         let room = tab_r.max.x - 10.0 - x0;
                         if room >= 24.0 {
-                            let mcolor = theme::with_opacity(theme::MUTED, if ag.alive { 0.75 } else { 0.45 });
+                            let mcolor = theme::with_opacity(theme::pal().text_2, if ag.alive { 0.75 } else { 0.45 });
                             let mg = galley_trunc(&p, short_model(model), theme::ui(11.0), mcolor, room);
                             place(
                                 &p,
@@ -573,10 +573,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 let (add_r, add_resp) = ui.allocate_exact_size(Vec2::new(row_w, ROW_H), Sense::click());
                 let add_hov = (add_resp.hovered() || deck.new_tab_menu_open) && !dragging;
                 if add_hov {
-                    p.rect_filled(add_r, 4.0, theme::PANEL_2);
+                    p.rect_filled(add_r, 4.0, theme::pal().hover);
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
-                let add_color = if add_hov { theme::TEXT } else { theme::MUTED };
+                let add_color = if add_hov { theme::pal().text } else { theme::pal().text_2 };
                 text_in(
                     &p,
                     Rect::from_center_size(Pos2::new(add_r.min.x + AGENT_X, add_r.center().y), Vec2::splat(ROW_H)),
@@ -613,7 +613,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     painter.rect_filled(
         Rect::from_min_max(Pos2::new(rect.min.x + 8.0, *top_y), Pos2::new(rect.max.x - 8.0, *top_y + 1.0)),
         0.0,
-        theme::BORDER,
+        theme::pal().separator,
     );
     *top_y += 1.0;
 
@@ -629,10 +629,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                 Some(DropTarget { boss: None, .. }) => format!("{label} → responde ao usuário"),
                 None => label.clone(),
             };
-            let g = galley(&gp, &hint, theme::ui(12.0), theme::TEXT);
+            let g = galley(&gp, &hint, theme::ui(12.0), theme::pal().text);
             let r = Rect::from_min_size(ptr + Vec2::new(14.0, 10.0), g.size() + Vec2::new(16.0, 8.0));
-            frame(&gp, r, 6.0, theme::PANEL_2, theme::BORDER);
-            place(&gp, r, Align2::CENTER_CENTER, g, theme::TEXT);
+            frame(&gp, r, 6.0, theme::pal().hover, theme::pal().separator);
+            place(&gp, r, Align2::CENTER_CENTER, g, theme::pal().text);
         }
         let released = ctx.input(|i| i.pointer.any_released());
         if released || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -700,7 +700,7 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         let (rect, _) = ui.allocate_exact_size(menu_rect.size(), Sense::hover());
         let p = ui.painter();
         shadow(p, rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.55));
-        frame(p, rect, 6.0, theme::PANEL_2, theme::BORDER);
+        frame(p, rect, 6.0, theme::pal().hover, theme::pal().separator);
         let font = theme::ui(12.5);
 
         let mut item_y = rect.min.y + 4.0;
@@ -710,9 +710,9 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         item_y += item_h;
         let resp_ren = clickable(ui, r_ren, Id::new("proj-ctx-ren"));
         if resp_ren.hovered() {
-            p.rect_filled(r_ren, 4.0, theme::BORDER);
+            p.rect_filled(r_ren, 4.0, theme::pal().separator);
         }
-        text_in(p, r_ren.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Renomear", font.clone(), theme::TEXT);
+        text_in(p, r_ren.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Renomear", font.clone(), theme::pal().text);
         if resp_ren.clicked() {
             action_rename = true;
         }
@@ -722,9 +722,9 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         item_y += item_h;
         let resp_open = clickable(ui, r_open, Id::new("proj-ctx-open"));
         if resp_open.hovered() {
-            p.rect_filled(r_open, 4.0, theme::BORDER);
+            p.rect_filled(r_open, 4.0, theme::pal().separator);
         }
-        text_in(p, r_open.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Abrir pasta no sistema", font.clone(), theme::TEXT);
+        text_in(p, r_open.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Abrir pasta no sistema", font.clone(), theme::pal().text);
         if resp_open.clicked() {
             action_open = true;
         }
@@ -737,14 +737,14 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
             ui.interact(r_rem, Id::new("proj-ctx-rem"), Sense::hover())
         };
         if resp_rem.hovered() && can_remove {
-            p.rect_filled(r_rem, 4.0, theme::BORDER);
+            p.rect_filled(r_rem, 4.0, theme::pal().separator);
         }
         let rem_color = if !can_remove {
-            theme::with_opacity(theme::MUTED, 0.5)
+            theme::with_opacity(theme::pal().text_2, 0.5)
         } else if resp_rem.hovered() {
-            theme::RED_TEXT
+            theme::pal().danger_text
         } else {
-            theme::TEXT
+            theme::pal().text
         };
         text_in(p, r_rem.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Remover", font, rem_color);
         if can_remove && resp_rem.clicked() {
@@ -789,30 +789,42 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         let p = ui.painter().clone();
         shadow(&p, r, 0, 8, 30, theme::rgba(0, 0, 0, 0.7));
-        frame(&p, r, 10.0, theme::PANEL_2, theme::BORDER);
+        frame(&p, r, 10.0, theme::pal().hover, theme::pal().separator);
 
         let mut y = r.min.y + 16.0;
         // Título
-        let title_g = galley(&p, "Renomear Projeto", theme::ui_semibold(15.0), theme::TEXT);
-        place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 20.0)), Align2::LEFT_CENTER, title_g, theme::TEXT);
+        let title_g = galley(&p, "Renomear Projeto", theme::ui_semibold(15.0), theme::pal().text);
+        place(
+            &p,
+            Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 20.0)),
+            Align2::LEFT_CENTER,
+            title_g,
+            theme::pal().text,
+        );
         y += 24.0;
 
         // Explicação
-        let hint_g = galley(&p, "Altera o nome do projeto exibido na barra lateral", theme::ui(11.5), theme::MUTED);
-        place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)), Align2::LEFT_CENTER, hint_g, theme::MUTED);
+        let hint_g = galley(&p, "Altera o nome do projeto exibido na barra lateral", theme::ui(11.5), theme::pal().text_2);
+        place(
+            &p,
+            Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)),
+            Align2::LEFT_CENTER,
+            hint_g,
+            theme::pal().text_2,
+        );
         y += 22.0;
 
         // Caixa de texto
         let input_r = Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 28.0));
-        p.rect_filled(input_r, 6.0, theme::BG);
-        p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        p.rect_filled(input_r, 6.0, theme::pal().bg);
+        p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::pal().separator), egui::StrokeKind::Inside);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink2(Vec2::new(8.0, 4.0))));
         let input_id = Id::new("proj-rename-input");
         let te = egui::TextEdit::singleline(&mut buffer)
             .id(input_id)
             .frame(egui::Frame::NONE)
             .font(theme::ui(13.0))
-            .text_color(theme::TEXT)
+            .text_color(theme::pal().text)
             .desired_width(input_r.width() - 16.0);
         let out = te.show(&mut child);
         out.response.request_focus();
@@ -832,22 +844,22 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
 
         let cr = clickable(ui, cancel_r, Id::new("proj-rename-cancel-btn"));
         if cr.hovered() {
-            p.rect_filled(cancel_r, 6.0, theme::BORDER);
+            p.rect_filled(cancel_r, 6.0, theme::pal().separator);
         } else {
-            p.rect_filled(cancel_r, 6.0, theme::PANEL);
+            p.rect_filled(cancel_r, 6.0, theme::pal().chip);
         }
-        text_in(&p, cancel_r, Align2::CENTER_CENTER, "Cancelar", theme::ui(12.5), theme::MUTED);
+        text_in(&p, cancel_r, Align2::CENTER_CENTER, "Cancelar", theme::ui(12.5), theme::pal().text_2);
         if cr.clicked() {
             close = true;
         }
 
         let sr = clickable(ui, save_r, Id::new("proj-rename-save-btn"));
         if sr.hovered() {
-            p.rect_filled(save_r, 6.0, theme::brighten(theme::ACCENT, 1.15));
+            p.rect_filled(save_r, 6.0, theme::brighten(theme::accent(), 1.15));
         } else {
-            p.rect_filled(save_r, 6.0, theme::ACCENT);
+            p.rect_filled(save_r, 6.0, theme::accent());
         }
-        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::WHITE);
+        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::pal().text_strong);
         if sr.clicked() {
             apply = true;
         }

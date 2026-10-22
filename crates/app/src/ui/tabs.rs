@@ -229,9 +229,9 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         let close_resp = ui.interact(close_rect.intersect(view), Id::new((kind.scope, "close", item.uid)), Sense::click());
 
         let bg = if is_shown {
-            Some(theme::BG)
+            Some(theme::pal().bg)
         } else if resp.hovered() || close_resp.hovered() {
-            Some(theme::PANEL_2)
+            Some(theme::pal().hover)
         } else {
             None
         };
@@ -243,9 +243,9 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
             let c = if focused { item.color } else { theme::with_opacity(item.color, 0.45) };
             painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width(), 2.0)), 0.0, c);
         }
-        painter.rect_filled(Rect::from_min_size(Pos2::new(r.max.x, r.min.y), Vec2::new(1.0, r.height())), 0.0, theme::BORDER);
+        painter.rect_filled(Rect::from_min_size(Pos2::new(r.max.x, r.min.y), Vec2::new(1.0, r.height())), 0.0, theme::pal().separator);
 
-        let color = if is_shown && focused { theme::TEXT } else { theme::MUTED };
+        let color = if is_shown && focused { theme::pal().text } else { theme::pal().text_2 };
         let dot_pos = Pos2::new(r.min.x + 12.0 + 4.0, r.center().y);
         match item.lead {
             Lead::Glyph(g) => {
@@ -282,7 +282,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         }
         let mut after_x = lr.max.x;
         if let Some(model) = item.model.as_deref() {
-            let mcolor = theme::with_opacity(theme::MUTED, if item.alive { 0.75 } else { 0.45 });
+            let mcolor = theme::with_opacity(theme::pal().text_2, if item.alive { 0.75 } else { 0.45 });
             let mg = galley_trunc(&painter, short_model(model), theme::ui(MODEL_FONT), mcolor, MODEL_MAX);
             let x0 = after_x + MODEL_GAP;
             let mr = place(
@@ -300,12 +300,12 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
                 let alpha = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 let rec_pos = Pos2::new(after_x + 10.0, r.center().y);
-                painter.circle_filled(rec_pos, 5.5, theme::with_opacity(theme::RED, alpha * 0.28));
-                painter.circle_filled(rec_pos, 3.6, theme::with_opacity(theme::RED, alpha));
+                painter.circle_filled(rec_pos, 5.5, theme::with_opacity(theme::pal().danger, alpha * 0.28));
+                painter.circle_filled(rec_pos, 3.6, theme::with_opacity(theme::pal().danger, alpha));
             }
             ButtonVisual::Opening | ButtonVisual::Transcribing => {
                 let st = if item.mic == ButtonVisual::Opening { "Abrindo…" } else { "Transcrevendo…" };
-                let scolor = theme::MUTED;
+                let scolor = theme::pal().text_2;
                 let sg = galley_trunc(&painter, st, theme::ui(MODEL_FONT), scolor, (close_rect.min.x - after_x - 8.0).max(10.0));
                 let x0 = after_x + 6.0;
                 place(
@@ -321,12 +321,19 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
 
         let close_hot = close_resp.hovered();
         if close_hot {
-            painter.rect_filled(close_rect, 4.0, theme::BORDER);
+            painter.rect_filled(close_rect, 4.0, theme::pal().separator);
         }
         if close_hot || resp.hovered() {
             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        text_in(&painter, close_rect, Align2::CENTER_CENTER, "×", font.clone(), if close_hot { theme::TEXT } else { theme::MUTED });
+        text_in(
+            &painter,
+            close_rect,
+            Align2::CENTER_CENTER,
+            "×",
+            font.clone(),
+            if close_hot { theme::pal().text } else { theme::pal().text_2 },
+        );
 
         if tip(close_resp, "Fechar").clicked() {
             click = Some(StripClick::Close(n));
@@ -390,7 +397,7 @@ fn chevron(painter: &Painter, c: Pos2, dir: Dir, color: Color32) {
 
 /// Degradê horizontal de `PANEL` opaco (em `solid_x`) a transparente (em `far_x`), entre `top` e `bottom`.
 fn fade(painter: &Painter, top: f32, bottom: f32, solid_x: f32, far_x: f32) {
-    let (opaque, clear) = (theme::PANEL, theme::with_opacity(theme::PANEL, 0.0));
+    let (opaque, clear) = (theme::pal().chip, theme::with_opacity(theme::pal().chip, 0.0));
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(Pos2::new(solid_x, top), opaque);
     mesh.colored_vertex(Pos2::new(far_x, top), clear);
@@ -404,30 +411,30 @@ fn fade(painter: &Painter, top: f32, bottom: f32, solid_x: f32, far_x: f32) {
 /// Seta de uma borda da faixa (há abas escondidas desse lado): fundo sólido, degradê e botão.
 /// Devolve se foi clicada; `target` é o nome da aba escondida mais próxima, que a dica cita.
 fn edge_arrow(ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, target: &str, id: Id) -> bool {
-    painter.rect_filled(zone, 0.0, theme::PANEL);
+    painter.rect_filled(zone, 0.0, theme::pal().chip);
     let (solid_x, far_x) = if dir == Dir::Left { (zone.max.x, zone.max.x + FADE_W) } else { (zone.min.x, zone.min.x - FADE_W) };
     fade(painter, zone.min.y, zone.max.y, solid_x, far_x);
     let btn = Rect::from_center_size(zone.center(), Vec2::splat(ARROW_BTN));
     let resp = clickable(ui, btn, id);
     if resp.hovered() {
-        painter.rect_filled(btn, 4.0, theme::PANEL_2);
+        painter.rect_filled(btn, 4.0, theme::pal().hover);
     }
-    chevron(painter, btn.center(), dir, if resp.hovered() { theme::TEXT } else { theme::MUTED });
+    chevron(painter, btn.center(), dir, if resp.hovered() { theme::pal().text } else { theme::pal().text_2 });
     tip(resp, format!("Mostrar «{target}»")).clicked()
 }
 
 /// Botão "▾" no fim da faixa e o menu com todas as abas da janela. Devolve a aba escolhida.
 fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize, id: Id, scope: &'static str) -> Option<usize> {
     let ctx = ui.ctx();
-    painter.rect_filled(zone, 0.0, theme::PANEL);
+    painter.rect_filled(zone, 0.0, theme::pal().chip);
     let btn = Rect::from_center_size(zone.center(), Vec2::splat(ARROW_BTN));
     let resp = clickable(ui, btn, id.with("btn"));
     let mut open = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
     let hot = resp.hovered() || open;
     if hot {
-        painter.rect_filled(btn, 4.0, theme::PANEL_2);
+        painter.rect_filled(btn, 4.0, theme::pal().hover);
     }
-    chevron(painter, btn.center(), Dir::Down, if hot { theme::TEXT } else { theme::MUTED });
+    chevron(painter, btn.center(), Dir::Down, if hot { theme::pal().text } else { theme::pal().text_2 });
     if tip(resp, if scope == "tab" { "Todas as abas" } else { "Todos os documentos" }).clicked() {
         open = !open;
     }
@@ -441,7 +448,7 @@ fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize
         Area::new(id.with("menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
             shadow(ui.painter(), rect, 8, 8, 24, theme::rgba(0, 0, 0, 0.55));
-            frame(ui.painter(), rect, 6.0, theme::PANEL_2, theme::BORDER);
+            frame(ui.painter(), rect, 6.0, theme::pal().hover, theme::pal().separator);
             let inner = rect.shrink(4.0);
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
                 egui::ScrollArea::vertical().max_height(inner.height()).auto_shrink([false, false]).show(ui, |ui| {
@@ -451,7 +458,7 @@ fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize
                         let resp = clickable(ui, r, id.with(("item", item.uid)));
                         let p = ui.painter();
                         if resp.hovered() || n == shown {
-                            p.rect_filled(r, 4.0, theme::BORDER);
+                            p.rect_filled(r, 4.0, theme::pal().separator);
                         }
                         let lead = Pos2::new(r.min.x + 14.0, r.center().y);
                         match item.lead {
@@ -461,7 +468,7 @@ fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize
                                 text_in(p, cell, Align2::CENTER_CENTER, g, theme::mono_bold(11.0), item.color);
                             }
                         }
-                        let color = if item.alive { theme::TEXT } else { theme::MUTED };
+                        let color = if item.alive { theme::pal().text } else { theme::pal().text_2 };
                         let text_x = r.min.x + 28.0;
                         let g = galley_trunc(p, &item.label, theme::ui(12.5), color, r.max.x - text_x - 8.0);
                         let area = Rect::from_min_max(Pos2::new(text_x, r.min.y), Pos2::new(r.max.x - 8.0, r.max.y));

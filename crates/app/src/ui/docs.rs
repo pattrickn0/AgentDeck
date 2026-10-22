@@ -64,7 +64,7 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
     let docs_w = text_w(painter, &docs_label, font.clone()) + 2.0 * SEG_PAD;
 
     let outer = Rect::from_min_size(Pos2::new(origin.x, origin.y + (bar_h - SWITCH_H) / 2.0), Vec2::new(agents_w + docs_w + 4.0, SWITCH_H));
-    frame(painter, outer, 6.0, theme::BG, theme::BORDER);
+    frame(painter, outer, 6.0, theme::pal().bg, theme::pal().separator);
     let inner = outer.shrink(2.0);
     let agents_r = Rect::from_min_size(inner.min, Vec2::new(agents_w, inner.height()));
     let docs_r = Rect::from_min_size(Pos2::new(agents_r.max.x, inner.min.y), Vec2::new(docs_w, inner.height()));
@@ -78,15 +78,15 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
     for (r, which, active, enabled, id) in segments {
         let resp = if enabled { clickable(ui, r, Id::new(id)) } else { ui.interact(r, Id::new(id), Sense::hover()) };
         if active {
-            painter.rect_filled(r, 4.0, theme::BORDER);
+            painter.rect_filled(r, 4.0, theme::pal().separator);
         } else if resp.hovered() && enabled {
-            painter.rect_filled(r, 4.0, theme::PANEL_2);
+            painter.rect_filled(r, 4.0, theme::pal().hover);
         }
         let color = match (active, enabled, resp.hovered()) {
-            (true, ..) => theme::TEXT,
-            (false, true, true) => theme::TEXT,
-            (false, true, false) => theme::MUTED,
-            (false, false, _) => theme::with_opacity(theme::MUTED, 0.5),
+            (true, ..) => theme::pal().text,
+            (false, true, true) => theme::pal().text,
+            (false, true, false) => theme::pal().text_2,
+            (false, false, _) => theme::with_opacity(theme::pal().text_2, 0.5),
         };
         let text_r = if which == Switched::Agents {
             Rect::from_min_max(Pos2::new(r.min.x + SEG_PAD, r.min.y), Pos2::new(r.max.x - SEG_PAD - selo_w, r.max.y))
@@ -100,14 +100,14 @@ pub fn switch(deck: &mut Deck, ui: &Ui, painter: &Painter, origin: Pos2, bar_h: 
             let x = r.max.x - SEG_PAD - selo_w + 6.0;
             if let Some(t) = &pill_text {
                 let pill = Rect::from_min_size(Pos2::new(x, r.center().y - 7.0), Vec2::new(pill_w, 14.0));
-                painter.rect_filled(pill, 7.0, theme::ACCENT);
-                text_in(painter, pill, Align2::CENTER_CENTER, t, theme::ui(10.0), theme::WHITE);
+                painter.rect_filled(pill, 7.0, theme::accent());
+                text_in(painter, pill, Align2::CENTER_CENTER, t, theme::ui(10.0), theme::pal().text_strong);
             } else if pulse {
                 let t = ui.ctx().input(|i| i.time);
                 let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
                 let c = Pos2::new(x + 4.0, r.center().y);
-                painter.circle_filled(c, 4.0 + 2.8 * wave, theme::with_opacity(deck.active_color(), 0.35 * (1.0 - wave)));
-                painter.circle_filled(c, 3.2 + wave, theme::with_opacity(deck.active_color(), 0.75 + 0.25 * wave));
+                painter.circle_filled(c, 4.0 + 2.8 * wave, theme::with_opacity(deck.accent(), 0.35 * (1.0 - wave)));
+                painter.circle_filled(c, 3.2 + wave, theme::with_opacity(deck.accent(), 0.75 + 0.25 * wave));
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
             }
         }
@@ -161,9 +161,9 @@ enum Act {
 /// Pinta os documentos do projeto ativo no lugar das janelas dos agentes.
 pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::BG);
+    painter.rect_filled(area, 0.0, theme::pal().bg);
     let project = deck.active_project.clone();
-    let accent = deck.active_color();
+    let accent = deck.accent();
     let items: Vec<Item> = deck
         .docs
         .of_project(&project)
@@ -182,14 +182,14 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
         .collect();
     let uids: Vec<u64> = items.iter().map(|i| i.uid).collect();
     let Some(current) = deck.docs.current_uid(&project).and_then(|c| uids.iter().position(|u| *u == c)) else {
-        text_in(&painter, area, Align2::CENTER_CENTER, "Nenhum documento aberto neste projeto.", theme::ui(13.0), theme::MUTED);
+        text_in(&painter, area, Align2::CENTER_CENTER, "Nenhum documento aberto neste projeto.", theme::ui(13.0), theme::pal().text_2);
         return;
     };
 
     // ---------- Faixa de abas ----------
     let head = Rect::from_min_size(area.min, Vec2::new(area.width(), HEAD_H));
-    painter.rect_filled(head, 0.0, theme::PANEL);
-    painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::BORDER);
+    painter.rect_filled(head, 0.0, theme::pal().chip);
+    painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
     let strip_rect = Rect::from_min_max(head.min, Pos2::new(head.max.x, head.max.y - 1.0));
     let mut acts = Vec::new();
     match tabs::strip_items(ui, strip_rect, &items, current, true, Id::new("doc-tabs"), StripKind { scope: "doc-tab", tab_menu: false }) {
@@ -239,7 +239,7 @@ fn glyph(kind: &DocKind) -> &'static str {
 fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonmark::CommonMarkCache, acts: &mut Vec<Act>) {
     let painter = ui.painter_at(area);
     let sub = Rect::from_min_size(area.min, Vec2::new(area.width(), SUBHEAD_H));
-    painter.rect_filled(Rect::from_min_max(Pos2::new(sub.min.x, sub.max.y - 1.0), sub.max), 0.0, theme::BORDER);
+    painter.rect_filled(Rect::from_min_max(Pos2::new(sub.min.x, sub.max.y - 1.0), sub.max), 0.0, theme::pal().separator);
 
     // Ações à direita, da última para a primeira.
     let mut right = sub.max.x - 8.0;
@@ -267,16 +267,16 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
     }
     let title_r = Rect::from_min_max(Pos2::new(sub.min.x + 14.0, sub.min.y), Pos2::new(right - 8.0, sub.max.y - 1.0));
     if title_r.width() > 20.0 {
-        let g = galley_trunc(&painter, &tab.subtitle, theme::ui(12.0), theme::TEXT, title_r.width());
-        place(&painter, title_r, Align2::LEFT_CENTER, g, theme::TEXT);
+        let g = galley_trunc(&painter, &tab.subtitle, theme::ui(12.0), theme::pal().text, title_r.width());
+        place(&painter, title_r, Align2::LEFT_CENTER, g, theme::pal().text);
     }
 
     let body = Rect::from_min_max(Pos2::new(area.min.x, sub.max.y), area.max);
     let uid = tab.uid;
     match &mut tab.state {
-        DocState::Loading => note(&painter, body, "Carregando…", theme::MUTED),
-        DocState::Failed(e) => note(&painter, body, e, theme::RED_TEXT),
-        DocState::Unreadable(why) => note(&painter, body, why, theme::MUTED),
+        DocState::Loading => note(&painter, body, "Carregando…", theme::pal().text_2),
+        DocState::Failed(e) => note(&painter, body, e, theme::pal().danger_text),
+        DocState::Unreadable(why) => note(&painter, body, why, theme::pal().text_2),
         DocState::Diff(doc) => diff_body(ui, body, uid, doc, acts),
         DocState::Text(doc) => text_body(ui, body, uid, doc),
         DocState::Markdown(text) => markdown_body(ui, body, uid, text, cache),
@@ -285,12 +285,12 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
 
 /// Um botão de texto no fim da linha de título; `right` anda para a esquerda. Devolve se foi clicado.
 fn action_button(ui: &Ui, painter: &Painter, right: &mut f32, cy: f32, label: &str, tooltip: &str, id: Id) -> bool {
-    let g = galley(painter, label, theme::ui(11.5), theme::TEXT);
+    let g = galley(painter, label, theme::ui(11.5), theme::pal().text);
     let r = Rect::from_min_size(Pos2::new(*right - g.size().x - 16.0, cy - 10.0), Vec2::new(g.size().x + 16.0, 20.0));
     *right = r.min.x - 6.0;
     let resp = clickable(ui, r, id);
-    painter.rect_filled(r, 4.0, if resp.hovered() { theme::BORDER } else { theme::PANEL_2 });
-    place(painter, r, Align2::CENTER_CENTER, g, theme::TEXT);
+    painter.rect_filled(r, 4.0, if resp.hovered() { theme::pal().separator } else { theme::pal().hover });
+    place(painter, r, Align2::CENTER_CENTER, g, theme::pal().text);
     tip(resp, tooltip).clicked()
 }
 
@@ -322,13 +322,13 @@ fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, acts: &mut Ve
         (list, Rect::from_min_max(Pos2::new(list.max.x + 1.0, body.min.y), body.max))
     };
     let painter = ui.painter_at(body);
-    painter.rect_filled(list, 0.0, theme::PANEL);
+    painter.rect_filled(list, 0.0, theme::pal().chip);
     let sep = if narrow {
         Rect::from_min_size(Pos2::new(list.min.x, list.max.y), Vec2::new(list.width(), 1.0))
     } else {
         Rect::from_min_size(Pos2::new(list.max.x, list.min.y), Vec2::new(1.0, list.height()))
     };
-    painter.rect_filled(sep, 0.0, theme::BORDER);
+    painter.rect_filled(sep, 0.0, theme::pal().separator);
     file_list(ui, list, uid, doc, acts);
     let jump = doc.jump.take();
     super::git::diff_lines_at(ui, view, &doc.diff, None, &mut Vec::new(), id, jump);
@@ -340,9 +340,9 @@ fn file_list(ui: &mut Ui, area: Rect, uid: u64, doc: &DiffDoc, acts: &mut Vec<Ac
     let (added, removed) = doc.files.iter().fold((0, 0), |(a, r), f| (a + f.added, r + f.removed));
     let title = format!("{} ARQUIVO(S)", doc.files.len());
     let head = Rect::from_min_size(area.min, Vec2::new(area.width(), FILE_HEAD_H));
-    text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::LEFT_CENTER, &title, theme::ui_bold(10.5), theme::MUTED);
+    text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::LEFT_CENTER, &title, theme::ui_bold(10.5), theme::pal().text_2);
     let totals = format!("+{added} −{removed}");
-    text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::RIGHT_CENTER, &totals, theme::mono(11.0), theme::MUTED);
+    text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::RIGHT_CENTER, &totals, theme::mono(11.0), theme::pal().text_2);
 
     let rows = Rect::from_min_max(Pos2::new(area.min.x, head.max.y), area.max);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rows).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -367,20 +367,20 @@ fn file_list(ui: &mut Ui, area: Rect, uid: u64, doc: &DiffDoc, acts: &mut Vec<Ac
 
 fn file_row(p: &Painter, r: Rect, file: &DiffFile, selected: bool, hovered: bool) {
     if selected {
-        p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::BORDER);
+        p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::pal().separator);
     } else if hovered {
-        p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::PANEL_2);
+        p.rect_filled(r.shrink2(Vec2::new(4.0, 1.0)), 4.0, theme::pal().hover);
     }
     let letter_color = match file.status {
         'A' => theme::BADGE_JSON,
-        'D' => theme::RED_TEXT,
-        'R' => theme::SEND_DEFAULT,
+        'D' => theme::pal().danger_text,
+        'R' => theme::pal().info,
         _ => theme::OLLAMA,
     };
     let letter = Rect::from_min_size(Pos2::new(r.min.x + 12.0, r.min.y), Vec2::new(12.0, r.height()));
     text_in(p, letter, Align2::CENTER_CENTER, &file.status.to_string(), theme::mono_bold(11.5), letter_color);
     let mut right = r.max.x - 12.0;
-    for (text, color) in [(format!("−{}", file.removed), theme::RED_TEXT), (format!("+{}", file.added), theme::BADGE_JSON)] {
+    for (text, color) in [(format!("−{}", file.removed), theme::pal().danger_text), (format!("+{}", file.added), theme::BADGE_JSON)] {
         if text.len() <= 2 && text.ends_with('0') {
             continue;
         }
@@ -392,8 +392,8 @@ fn file_row(p: &Painter, r: Rect, file: &DiffFile, selected: bool, hovered: bool
     let name_x = r.min.x + 32.0;
     let name = file_name(&file.path);
     let font = if selected { theme::ui_semibold(12.0) } else { theme::ui(12.0) };
-    let g = galley_trunc(p, name, font, theme::TEXT, (right - name_x - 6.0).max(20.0));
-    place(p, Rect::from_min_max(Pos2::new(name_x, r.min.y), Pos2::new(right, r.max.y)), Align2::LEFT_CENTER, g, theme::TEXT);
+    let g = galley_trunc(p, name, font, theme::pal().text, (right - name_x - 6.0).max(20.0));
+    place(p, Rect::from_min_max(Pos2::new(name_x, r.min.y), Pos2::new(right, r.max.y)), Align2::LEFT_CENTER, g, theme::pal().text);
 }
 
 // ---------------------------------------------------------------------------
@@ -408,7 +408,7 @@ fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc) {
     let gutter = cell * digits as f32 + 22.0;
     let content_w = (gutter + doc.max_chars as f32 * cell + 24.0).max(body.width());
     if doc.lines.is_empty() {
-        note(&ui.painter_at(body), body, "O arquivo está vazio.", theme::MUTED);
+        note(&ui.painter_at(body), body, "O arquivo está vazio.", theme::pal().text_2);
         return;
     }
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -426,9 +426,9 @@ fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc) {
                     Align2::RIGHT_CENTER,
                     (n + 1).to_string(),
                     font.clone(),
-                    theme::with_opacity(theme::MUTED, 0.7),
+                    theme::with_opacity(theme::pal().text_2, 0.7),
                 );
-                p.text(Pos2::new(r.min.x + gutter, r.center().y), Align2::LEFT_CENTER, &doc.lines[n], font.clone(), theme::TREE_TEXT);
+                p.text(Pos2::new(r.min.x + gutter, r.center().y), Align2::LEFT_CENTER, &doc.lines[n], font.clone(), theme::pal().text_2);
             }
         },
     );
@@ -467,9 +467,9 @@ fn markdown_style(ui: &mut Ui) {
     style.text_styles.insert(egui::TextStyle::Heading, theme::ui_semibold(21.0));
     style.text_styles.insert(egui::TextStyle::Monospace, theme::mono(12.5));
     style.text_styles.insert(egui::TextStyle::Small, theme::ui(11.5));
-    style.visuals.override_text_color = Some(theme::TEXT);
-    style.visuals.code_bg_color = theme::PANEL_2;
-    style.visuals.faint_bg_color = theme::PANEL;
-    style.visuals.extreme_bg_color = theme::PANEL_2;
-    style.visuals.hyperlink_color = theme::SEND_DEFAULT;
+    style.visuals.override_text_color = Some(theme::pal().text);
+    style.visuals.code_bg_color = theme::pal().hover;
+    style.visuals.faint_bg_color = theme::pal().chip;
+    style.visuals.extreme_bg_color = theme::pal().hover;
+    style.visuals.hyperlink_color = theme::pal().info;
 }

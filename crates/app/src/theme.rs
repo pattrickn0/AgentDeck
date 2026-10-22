@@ -1,46 +1,129 @@
-//! Tokens visuais (espelho do `:root` de `renderer/styles.css`), fontes e estilo do egui.
+//! Tokens visuais (paleta semântica), fontes e estilo do egui.
+//!
+//! As cores vêm de [`Palette`]: o app lê sempre `theme::pal()`, e um tema novo só troca a paleta
+//! devolvida ali. A cor de destaque não é da paleta: é a do agente ativo (ver [`accent`]).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId};
 
-// ---------- Cores (:root) ----------
+// ---------- Paleta ----------
 
-pub const BG: Color32 = rgb(0x0b0b0d);
-pub const PANEL: Color32 = rgb(0x131317);
-pub const PANEL_2: Color32 = rgb(0x1b1b21);
-pub const BORDER: Color32 = rgb(0x2a2a33);
-pub const ACCENT: Color32 = rgb(0xb3263a);
-pub const TEXT: Color32 = rgb(0xe6e6ea);
-pub const MUTED: Color32 = rgb(0x8b8b96);
+/// Cores semânticas da interface. Os nomes dizem o papel, não o valor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Palette {
+    /// Fundo da janela, por trás das ilhas.
+    pub bg: Color32,
+    /// Fundo das ilhas de vidro (barras esquerda e direita).
+    pub glass: Color32,
+    /// Borda de 1 px das ilhas.
+    pub glass_border: Color32,
+    /// Filete de 1 px no topo interno das ilhas.
+    pub glass_highlight: Color32,
+    /// Ilha central (o terminal, quase sólido).
+    pub well: Color32,
+    /// Faixa de abas do centro.
+    pub strip: Color32,
+    /// Linhas divisórias dentro das ilhas.
+    pub separator: Color32,
+    /// Linhas-guia da árvore.
+    pub guide: Color32,
+    pub hover: Color32,
+    /// Seleção neutra (segmento ativo sem destaque, aba "Tarefas").
+    pub selected: Color32,
+    /// Arquivo selecionado.
+    pub selected_soft: Color32,
+    /// Trilho dos controles segmentados e fundo de campos de texto.
+    pub recess: Color32,
+    /// Etiquetas (branch, contadores) e fundo de botões discretos.
+    pub chip: Color32,
+    /// Menus, modais e dicas: precisam ser opacos.
+    pub popup: Color32,
+    pub text: Color32,
+    /// Texto selecionado.
+    pub text_strong: Color32,
+    pub text_2: Color32,
+    /// Rótulos de seção e metadados.
+    pub text_3: Color32,
+    /// Entre `text` e `text_2`: valores e etiquetas (percentual de uso, nome da branch).
+    pub text_soft: Color32,
+    /// Separadores de texto ("/").
+    pub text_faint: Color32,
+    /// Texto sobre a cor de destaque.
+    pub on_accent: Color32,
+    /// Destaque quando não há aba em foco (cinza claro).
+    pub accent_neutral: Color32,
+    pub danger: Color32,
+    pub danger_text: Color32,
+    pub success: Color32,
+    pub warning: Color32,
+    /// Azul de informação (arquivo renomeado, hash de commit, link).
+    pub info: Color32,
+    /// Película escura atrás de um modal.
+    pub scrim: Color32,
+    /// Sombra das ilhas.
+    pub shadow: Color32,
+}
+
+const fn rgb(hex: u32) -> Color32 {
+    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+/// `rgba(r, g, b, a)` do CSS, com o alfa em 0..=255.
+const fn rgba8(r: u8, g: u8, b: u8, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied_const(r, g, b, a)
+}
+
+const fn white(a: u8) -> Color32 {
+    rgba8(255, 255, 255, a)
+}
+
+/// O tema escuro (a direção "C": cinza no estilo GitHub com vidro leve).
+pub const DARK: Palette = Palette {
+    bg: rgb(0x16181c),
+    glass: rgba8(44, 47, 54, 128),
+    glass_border: white(33),
+    glass_highlight: white(20),
+    well: rgba8(22, 24, 28, 235),
+    strip: rgba8(44, 47, 54, 140),
+    separator: white(26),
+    guide: white(20),
+    hover: white(18),
+    selected: white(31),
+    selected_soft: white(20),
+    recess: rgba8(0, 0, 0, 64),
+    chip: white(18),
+    popup: rgb(0x23262c),
+    text: rgb(0xe6e8eb),
+    text_strong: rgb(0xffffff),
+    text_2: rgb(0xaab1bb),
+    text_3: rgb(0x939aa4),
+    text_soft: rgb(0xc9cdd3),
+    text_faint: rgb(0x6b717c),
+    on_accent: rgb(0x16181c),
+    accent_neutral: rgb(0xc9cdd3),
+    danger: rgb(0xe5484d),
+    danger_text: rgb(0xff8b8f),
+    success: rgb(0x3fb97a),
+    warning: rgb(0xe5a23a),
+    info: rgb(0x7cc4fa),
+    scrim: rgba8(0, 0, 0, 128),
+    shadow: rgba8(0, 0, 0, 71),
+};
+
+/// A paleta em uso. Um tema novo troca só o que esta função devolve.
+pub fn pal() -> &'static Palette {
+    &DARK
+}
+
+// ---------- Cores dos agentes (não são da paleta: identificam o agente) ----------
+
 pub const CLAUDE: Color32 = rgb(0xd97757);
 pub const ANTIGRAVITY: Color32 = rgb(0x4f8cf7);
 pub const SHELL: Color32 = rgb(0x9aa0a6);
 pub const OLLAMA: Color32 = rgb(0xf59e0b);
-
-// ---------- Cores avulsas usadas no CSS ----------
-
-pub const WHITE: Color32 = Color32::WHITE;
-pub const RED: Color32 = rgb(0xe5484d);
-pub const RED_TEXT: Color32 = rgb(0xff8b8f);
-pub const TREE_TEXT: Color32 = rgb(0xcccccc);
-pub const TREE_ICON: Color32 = rgb(0x858585);
-pub const SELECT_TEXT: Color32 = rgb(0xa4a4af);
-pub const CHIP_TEXT: Color32 = rgb(0xb8b8c2);
-pub const INPUT_TEXT: Color32 = rgb(0xe2e2e8);
-/// Cor do placeholder de `<textarea>` com contraste >= 4.5:1 sobre PANEL.
-pub const PLACEHOLDER: Color32 = rgb(0x85858e);
-/// `--send-color` padrão (azul-claro) quando não há aba específica.
-pub const SEND_DEFAULT: Color32 = rgb(0x7cc4fa);
-/// Cor do texto do botão Enviar/Commit desabilitado (contraste >= 4.5:1 sobre PANEL e PANEL_2, mais apagado que MUTED).
-pub const SEND_IDLE_TEXT: Color32 = rgb(0x82828c);
-
-/// `whoColor()` para remetentes sem cor conhecida (ex.: "você").
-pub const WHO_DEFAULT: Color32 = rgb(0xc9c9d1);
-/// Cor própria para mensagens do usuário na Conversa integrada (verde esmeralda, distinta das IAs).
-pub const USER: Color32 = rgb(0x10b981);
-pub const DROP_BLUE: Color32 = rgb(0x4f8cf7);
 
 // Badges de extensão da árvore (estilo VS Code)
 pub const BADGE_JS: Color32 = rgb(0xf1e05a);
@@ -51,20 +134,63 @@ pub const BADGE_HTML: Color32 = rgb(0xe34f26);
 pub const BADGE_CSS: Color32 = rgb(0x42a5f5);
 pub const BADGE_PY: Color32 = rgb(0x3572a5);
 
+// ---------- Cor de destaque = cor do agente ativo ----------
+
+/// Bit que diz que há uma cor guardada (sem ele, vale o cinza neutro).
+const ACCENT_SET: u32 = 1 << 24;
+static ACCENT: AtomicU32 = AtomicU32::new(0);
+
+/// Cor de destaque do quadro: a do agente em foco, ou o cinza neutro sem aba. Quem desenha a janela
+/// (`ui::draw`) a atualiza no começo de cada quadro com [`set_accent`]. Nunca use uma cor fixa de
+/// marca para seleção ou ação primária.
+pub fn accent() -> Color32 {
+    let v = ACCENT.load(Ordering::Relaxed);
+    if v & ACCENT_SET == 0 {
+        return pal().accent_neutral;
+    }
+    Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// Guarda a cor de destaque do quadro (`None`: sem aba em foco).
+pub fn set_accent(c: Option<Color32>) {
+    let v = c.map_or(0, |c| ACCENT_SET | (c.r() as u32) << 16 | (c.g() as u32) << 8 | c.b() as u32);
+    ACCENT.store(v, Ordering::Relaxed);
+}
+
+/// Destaque a 18% de alfa: fundo da linha selecionada.
+pub fn accent_soft(a: Color32) -> Color32 {
+    with_alpha(a, 0.18)
+}
+
+/// Destaque a 10% de alfa: fundo de um cartão em foco.
+pub fn accent_wash(a: Color32) -> Color32 {
+    with_alpha(a, 0.10)
+}
+
+/// Destaque a 50% de alfa: borda de um cartão em foco.
+pub fn accent_edge(a: Color32) -> Color32 {
+    with_alpha(a, 0.50)
+}
+
 // ---------- Terminal (tema do xterm) ----------
 
-pub const TERM_BG: Color32 = rgb(0x0b0b0d);
-pub const TERM_FG: Color32 = rgb(0xe6e6ea);
-pub const TERM_CURSOR: Color32 = rgb(0xe6e6ea);
-pub const TERM_SELECTION: Color32 = rgb(0x3a3a48);
+pub const TERM_BG: Color32 = rgb(0x16181c);
+pub const TERM_FG: Color32 = rgb(0xe6e8eb);
+pub const TERM_CURSOR: Color32 = rgb(0xe6e8eb);
+pub const TERM_SELECTION: Color32 = rgb(0x2f3542);
 pub const TERM_FONT_SIZE: f32 = 14.0;
 
 // ---------- Métricas ----------
 
-pub const UI_FONT_SIZE: f32 = 13.0;
+/// Tamanho base do texto da interface.
+pub const UI_FONT_SIZE: f32 = 12.0;
 pub const LINE_HEIGHT: f32 = 1.45;
-/// Barra de título própria (a janela não tem decoração do sistema).
-pub const TITLEBAR_H: f32 = 36.0;
+/// Barra de título própria (a janela não tem decoração do sistema), sem fundo.
+pub const TITLEBAR_H: f32 = 32.0;
+/// Margem da janela e espaço entre as ilhas.
+pub const ISLAND_GAP: f32 = 6.0;
+/// Cantos arredondados das ilhas.
+pub const ISLAND_RADIUS: u8 = 10;
 /// Cabeçalho da barra direita (abas Tarefas/Conversa/Git/GitHub).
 pub const TOPBAR_H: f32 = 38.0;
 pub const SIDEBAR_DEFAULT_W: f32 = 220.0;
@@ -77,13 +203,15 @@ pub const RIGHT_MIN_W: f32 = 280.0;
 pub const RIGHT_OLD_DEFAULT_W: f32 = 380.0;
 pub const RIGHT_MAX_W: f32 = 640.0;
 
-const fn rgb(hex: u32) -> Color32 {
-    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
-}
-
 /// Cor CSS com alfa (`rgba(r, g, b, a)`).
 pub fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, (a.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// A mesma cor com outro alfa (0..=1), sem herdar o que já tinha.
+pub fn with_alpha(c: Color32, alpha: f32) -> Color32 {
+    let [r, g, b, _] = c.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, (alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
 /// Converte `#rgb`, `#rrggbb` ou `#rrggbbaa` em [`Color32`].
@@ -115,15 +243,47 @@ pub fn with_opacity(c: Color32, opacity: f32) -> Color32 {
     c.gamma_multiply(opacity.clamp(0.0, 1.0))
 }
 
+/// `top` desenhado sobre `bottom` (composição normal). O resultado é opaco se `bottom` for.
+pub fn over(top: Color32, bottom: Color32) -> Color32 {
+    let a = top.a() as f32 / 255.0;
+    let t = top.to_srgba_unmultiplied();
+    let b = bottom.to_srgba_unmultiplied();
+    let ba = b[3] as f32 / 255.0;
+    let out_a = a + ba * (1.0 - a);
+    if out_a <= 0.0 {
+        return Color32::TRANSPARENT;
+    }
+    let ch = |i: usize| ((t[i] as f32 * a + b[i] as f32 * ba * (1.0 - a)) / out_a).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_unmultiplied(ch(0), ch(1), ch(2), (out_a * 255.0).round() as u8)
+}
+
 // ---------- Fontes ----------
 
 /// Famílias nomeadas registradas além de Proportional/Monospace.
+pub const FAMILY_UI_MEDIUM: &str = "ui-medium";
 pub const FAMILY_UI_SEMIBOLD: &str = "ui-semibold";
 pub const FAMILY_UI_BOLD: &str = "ui-bold";
 pub const FAMILY_MONO_BOLD: &str = "mono-bold";
+/// IBM Plex Mono Medium: rótulos de seção em MAIÚSCULAS.
+pub const FAMILY_LABEL: &str = "label";
+/// IBM Plex Mono Regular: metadados e etiquetas.
+pub const FAMILY_META: &str = "meta";
 
+/// Inter (interface) e IBM Plex Mono (rótulos e metadados), ambas sob a licença OFL (ver
+/// `assets/fonts/OFL-*.txt`). Vão dentro do executável: o visual não depende do que há instalado.
+const INTER_REGULAR: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
+const INTER_MEDIUM: &[u8] = include_bytes!("../assets/fonts/Inter-Medium.ttf");
+const INTER_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/Inter-SemiBold.ttf");
+const INTER_BOLD: &[u8] = include_bytes!("../assets/fonts/Inter-Bold.ttf");
+const PLEX_MONO_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf");
+const PLEX_MONO_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Medium.ttf");
+
+/// Texto da interface (Inter Regular).
 pub fn ui(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
+}
+pub fn ui_medium(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(FAMILY_UI_MEDIUM.into()))
 }
 pub fn ui_semibold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_UI_SEMIBOLD.into()))
@@ -131,6 +291,15 @@ pub fn ui_semibold(size: f32) -> FontId {
 pub fn ui_bold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_UI_BOLD.into()))
 }
+/// Rótulos de seção em MAIÚSCULAS (IBM Plex Mono Medium). Use com [`LABEL_SPACING`].
+pub fn label(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(FAMILY_LABEL.into()))
+}
+/// Metadados e etiquetas (IBM Plex Mono Regular).
+pub fn meta(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(FAMILY_META.into()))
+}
+/// A fonte do terminal (a do sistema, que não muda).
 pub fn mono(size: f32) -> FontId {
     FontId::new(size, FontFamily::Monospace)
 }
@@ -138,14 +307,14 @@ pub fn mono_bold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_MONO_BOLD.into()))
 }
 
-/// Candidatos de arquivo de fonte por papel, na ordem de preferência do CSS
-/// (`"Segoe UI", Roboto, …, Arial` e `"Cascadia Mono", Consolas, …`).
+/// Espaçamento entre letras dos rótulos de seção: 0,1 em.
+pub const LABEL_SPACING_EM: f32 = 0.1;
+
+/// Candidatos de arquivo de fonte do sistema por papel: só o terminal e os símbolos (▾ ▸ ✕ …)
+/// que a Inter não tem. A interface usa as fontes embutidas.
 struct FontCandidates {
-    /// Fallback para símbolos ausentes na fonte da interface (▾ ▸ ▶ → ● …).
+    /// Fallback para símbolos ausentes na fonte da interface.
     symbols: &'static [&'static str],
-    ui: &'static [&'static str],
-    ui_semibold: &'static [&'static str],
-    ui_bold: &'static [&'static str],
     mono: &'static [&'static str],
     mono_bold: &'static [&'static str],
 }
@@ -153,9 +322,6 @@ struct FontCandidates {
 #[cfg(windows)]
 const CANDIDATES: FontCandidates = FontCandidates {
     symbols: &["seguisym.ttf"],
-    ui: &["segoeui.ttf", "arial.ttf"],
-    ui_semibold: &["seguisb.ttf", "segoeuib.ttf", "arialbd.ttf"],
-    ui_bold: &["segoeuib.ttf", "arialbd.ttf"],
     mono: &["CascadiaMono.ttf", "consola.ttf", "cour.ttf"],
     mono_bold: &["consolab.ttf", "courbd.ttf"],
 };
@@ -163,9 +329,6 @@ const CANDIDATES: FontCandidates = FontCandidates {
 #[cfg(target_os = "macos")]
 const CANDIDATES: FontCandidates = FontCandidates {
     symbols: &["/System/Library/Fonts/Apple Symbols.ttf"],
-    ui: &["/System/Library/Fonts/SFNS.ttf", "/Library/Fonts/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"],
-    ui_semibold: &["/System/Library/Fonts/Supplemental/Arial Bold.ttf"],
-    ui_bold: &["/System/Library/Fonts/Supplemental/Arial Bold.ttf"],
     mono: &["/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc"],
     mono_bold: &[],
 };
@@ -177,36 +340,6 @@ const CANDIDATES: FontCandidates = FontCandidates {
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-    ],
-    ui: &[
-        "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Regular.ttf",
-        "/usr/share/fonts/truetype/roboto/Roboto-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    ],
-    ui_semibold: &[
-        "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Medium.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-SemiBold.ttf",
-        "/usr/share/fonts/noto/NotoSans-SemiBold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-    ],
-    ui_bold: &[
-        "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-        "/usr/share/fonts/noto/NotoSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
     ],
     mono: &[
         "/usr/share/fonts/truetype/cascadia-code/CascadiaMono.ttf",
@@ -266,30 +399,35 @@ pub struct LoadedFonts {
     pub mono: Option<String>,
 }
 
-/// Carrega as fontes do sistema (quando existirem) mantendo as fontes padrão do egui como
-/// fallback — necessárias para emoji (📁 ⚙️ …) e símbolos.
+/// Registra as fontes embutidas (interface, rótulos e metadados) e as do sistema (terminal e
+/// símbolos), mantendo as fontes padrão do egui como fallback — necessárias para emoji (📁 ⚙️ …).
 pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
     let mut defs = FontDefinitions::default();
     let default_prop = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let default_mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
     let mut loaded = LoadedFonts::default();
 
-    let add = |defs: &mut FontDefinitions, key: &str, list: &[&str], tweak: Option<egui::FontTweak>| -> Option<String> {
+    // Fontes embutidas.
+    for (key, bytes) in [
+        ("inter", INTER_REGULAR),
+        ("inter-medium", INTER_MEDIUM),
+        ("inter-semibold", INTER_SEMIBOLD),
+        ("inter-bold", INTER_BOLD),
+        ("plex-mono", PLEX_MONO_REGULAR),
+        ("plex-mono-medium", PLEX_MONO_MEDIUM),
+    ] {
+        defs.font_data.insert(key.to_owned(), Arc::new(FontData::from_static(bytes)));
+    }
+
+    // Fontes do sistema.
+    let add = |defs: &mut FontDefinitions, key: &str, list: &[&str]| -> Option<String> {
         let (path, bytes) = load_first(list)?;
-        let mut data = FontData::from_owned(bytes);
-        if let Some(t) = tweak {
-            data = data.tweak(t);
-        }
-        defs.font_data.insert(key.to_owned(), Arc::new(data));
+        defs.font_data.insert(key.to_owned(), Arc::new(FontData::from_owned(bytes)));
         Some(path)
     };
-
-    let ui = add(&mut defs, "sys-ui", CANDIDATES.ui, None);
-    let ui_sb = add(&mut defs, "sys-ui-semibold", CANDIDATES.ui_semibold, None);
-    let ui_b = add(&mut defs, "sys-ui-bold", CANDIDATES.ui_bold, None);
-    let mono = add(&mut defs, "sys-mono", CANDIDATES.mono, None);
-    let mut mono_b = add(&mut defs, "sys-mono-bold", CANDIDATES.mono_bold, None);
-    let symbols = add(&mut defs, "sys-symbols", CANDIDATES.symbols, None);
+    let mono = add(&mut defs, "sys-mono", CANDIDATES.mono);
+    let mut mono_b = add(&mut defs, "sys-mono-bold", CANDIDATES.mono_bold);
+    let symbols = add(&mut defs, "sys-symbols", CANDIDATES.symbols);
 
     // Cascadia Mono é uma fonte variável: o negrito vem do eixo `wght`.
     if mono_b.is_none() {
@@ -319,40 +457,39 @@ pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
         v
     };
 
-    let ui_key = ui.as_ref().map(|_| "sys-ui");
     let mono_key = mono.as_ref().map(|_| "sys-mono");
-    defs.families.insert(FontFamily::Proportional, chain(&[ui_key], &default_prop));
+    defs.families.insert(FontFamily::Proportional, chain(&[Some("inter")], &default_prop));
     defs.families.insert(FontFamily::Monospace, chain(&[mono_key], &default_mono));
-    defs.families
-        .insert(FontFamily::Name(FAMILY_UI_SEMIBOLD.into()), chain(&[ui_sb.as_ref().map(|_| "sys-ui-semibold"), ui_key], &default_prop));
-    defs.families.insert(
-        FontFamily::Name(FAMILY_UI_BOLD.into()),
-        chain(&[ui_b.as_ref().map(|_| "sys-ui-bold"), ui_sb.as_ref().map(|_| "sys-ui-semibold"), ui_key], &default_prop),
-    );
+    defs.families.insert(FontFamily::Name(FAMILY_UI_MEDIUM.into()), chain(&[Some("inter-medium"), Some("inter")], &default_prop));
+    defs.families.insert(FontFamily::Name(FAMILY_UI_SEMIBOLD.into()), chain(&[Some("inter-semibold"), Some("inter")], &default_prop));
+    defs.families.insert(FontFamily::Name(FAMILY_UI_BOLD.into()), chain(&[Some("inter-bold"), Some("inter")], &default_prop));
+    defs.families.insert(FontFamily::Name(FAMILY_LABEL.into()), chain(&[Some("plex-mono-medium"), Some("inter")], &default_prop));
+    defs.families.insert(FontFamily::Name(FAMILY_META.into()), chain(&[Some("plex-mono"), Some("inter")], &default_prop));
     defs.families
         .insert(FontFamily::Name(FAMILY_MONO_BOLD.into()), chain(&[mono_b.as_ref().map(|_| "sys-mono-bold"), mono_key], &default_mono));
 
-    loaded.ui = ui;
+    loaded.ui = Some("Inter (embutida)".to_owned());
     loaded.mono = mono;
     ctx.set_fonts(defs);
     loaded
 }
 
-/// Estilo base do egui (tema escuro com as cores do CSS). Quase tudo é pintado à mão;
-/// isto cobre widgets nativos usados (TextEdit, ScrollArea, tooltips).
+/// Estilo base do egui (tema escuro com a paleta). Quase tudo é pintado à mão; isto cobre os
+/// widgets nativos usados (TextEdit, ScrollArea, tooltips).
 pub fn install_style(ctx: &egui::Context) {
+    let p = pal();
     ctx.set_theme(egui::Theme::Dark);
     ctx.all_styles_mut(|style| {
         style.text_styles.insert(egui::TextStyle::Body, ui(UI_FONT_SIZE));
         style.text_styles.insert(egui::TextStyle::Button, ui(UI_FONT_SIZE));
-        style.text_styles.insert(egui::TextStyle::Small, ui(11.0));
+        style.text_styles.insert(egui::TextStyle::Small, ui(10.5));
         style.text_styles.insert(egui::TextStyle::Monospace, mono(12.0));
         style.spacing.item_spacing = egui::vec2(0.0, 0.0);
         style.spacing.window_margin = egui::Margin::same(0);
         style.spacing.button_padding = egui::vec2(0.0, 0.0);
         style.spacing.tooltip_width = 420.0;
 
-        // Barras de rolagem como `::-webkit-scrollbar` (5px, polegar translúcido, sem trilho).
+        // Barras de rolagem finas (5px, polegar translúcido, sem trilho).
         let mut scroll = egui::style::ScrollStyle::solid();
         scroll.bar_width = 5.0;
         scroll.bar_inner_margin = 0.0;
@@ -363,23 +500,23 @@ pub fn install_style(ctx: &egui::Context) {
         let v = &mut style.visuals;
         v.dark_mode = true;
         v.override_text_color = None;
-        v.panel_fill = BG;
-        v.window_fill = PANEL_2;
-        v.window_stroke = egui::Stroke::new(1.0, BORDER);
+        v.panel_fill = p.bg;
+        v.window_fill = p.popup;
+        v.window_stroke = egui::Stroke::new(1.0, p.glass_border);
         v.window_corner_radius = egui::CornerRadius::same(6);
         v.window_shadow = egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: rgba(0, 0, 0, 0.5) };
         v.popup_shadow = v.window_shadow;
         v.extreme_bg_color = Color32::TRANSPARENT;
-        v.faint_bg_color = PANEL;
-        v.selection.bg_fill = rgba(79, 140, 247, 0.45);
-        v.selection.stroke = egui::Stroke::new(1.0, WHITE);
-        v.text_cursor.stroke = egui::Stroke::new(1.5, INPUT_TEXT);
-        v.hyperlink_color = ANTIGRAVITY;
+        v.faint_bg_color = p.chip;
+        v.selection.bg_fill = with_alpha(accent(), 0.35);
+        v.selection.stroke = egui::Stroke::new(1.0, p.text_strong);
+        v.text_cursor.stroke = egui::Stroke::new(1.5, p.text);
+        v.hyperlink_color = p.info;
 
-        let thumb = rgba(255, 255, 255, 0.12);
-        let thumb_hover = rgba(255, 255, 255, 0.25);
+        let thumb = white(31);
+        let thumb_hover = white(64);
         for (w, fill) in [
-            (&mut v.widgets.noninteractive, PANEL_2),
+            (&mut v.widgets.noninteractive, p.popup),
             (&mut v.widgets.inactive, thumb),
             (&mut v.widgets.hovered, thumb_hover),
             (&mut v.widgets.active, thumb_hover),
@@ -391,11 +528,11 @@ pub fn install_style(ctx: &egui::Context) {
             w.corner_radius = egui::CornerRadius::same(3);
             w.expansion = 0.0;
         }
-        v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT);
-        v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, TEXT);
-        v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, WHITE);
-        v.widgets.active.fg_stroke = egui::Stroke::new(1.0, WHITE);
-        v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER);
+        v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, p.text);
+        v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, p.text);
+        v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, p.text_strong);
+        v.widgets.active.fg_stroke = egui::Stroke::new(1.0, p.text_strong);
+        v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, p.glass_border);
     });
 }
 
@@ -415,9 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn constants_match_css_root() {
-        assert_eq!(Some(BG), parse_hex_color("#0b0b0d"));
-        assert_eq!(Some(PANEL_2), parse_hex_color("#1b1b21"));
+    fn agent_colors_match_the_core() {
         assert_eq!(Some(CLAUDE), parse_hex_color(agentdeck_core::agents::COLOR_CLAUDE));
         assert_eq!(Some(ANTIGRAVITY), parse_hex_color(agentdeck_core::agents::COLOR_ANTIGRAVITY));
         assert_eq!(Some(OLLAMA), parse_hex_color(agentdeck_core::agents::COLOR_OLLAMA));
@@ -425,44 +560,86 @@ mod tests {
     }
 
     #[test]
+    fn the_palette_follows_the_c_direction() {
+        let p = DARK;
+        assert_eq!(Some(p.bg), parse_hex_color("#16181c"));
+        assert_eq!(Some(TERM_BG), parse_hex_color("#16181c"));
+        assert_eq!(p.bg, TERM_BG);
+        assert_eq!(Some(p.text), parse_hex_color("#e6e8eb"));
+        assert_eq!(Some(p.text_3), parse_hex_color("#939aa4"));
+        // rgba(44,47,54,.50) e rgba(255,255,255,.13): o alfa é arredondado para 0..=255.
+        assert_eq!(p.glass.to_srgba_unmultiplied(), [44, 47, 54, 128]);
+        assert_eq!(p.glass_border.to_srgba_unmultiplied(), [255, 255, 255, 33]);
+        assert_eq!(p.well.to_srgba_unmultiplied(), [22, 24, 28, 235]);
+    }
+
+    #[test]
+    fn the_accent_is_the_active_agent_color_or_a_neutral_gray() {
+        set_accent(None);
+        assert_eq!(accent(), pal().accent_neutral);
+        set_accent(Some(CLAUDE));
+        assert_eq!(accent(), CLAUDE);
+        // Preto também é uma cor guardada.
+        set_accent(Some(Color32::BLACK));
+        assert_eq!(accent(), Color32::BLACK);
+        set_accent(None);
+        assert_eq!(accent(), pal().accent_neutral);
+        assert_eq!(accent_soft(CLAUDE).a(), 46);
+        assert_eq!(accent_wash(CLAUDE).a(), 26);
+        assert_eq!(accent_edge(CLAUDE).a(), 128);
+    }
+
+    #[test]
+    fn composes_colors_like_css() {
+        let c = over(white(128), Color32::from_rgb(0, 0, 0));
+        assert_eq!(c.to_srgba_unmultiplied(), [128, 128, 128, 255]);
+        assert_eq!(over(Color32::from_rgb(1, 2, 3), Color32::from_rgb(9, 9, 9)), Color32::from_rgb(1, 2, 3));
+    }
+
+    #[test]
     fn brightness_filter() {
         assert_eq!(brighten(Color32::from_rgb(100, 200, 250), 1.15), Color32::from_rgb(115, 230, 255));
     }
 
+    fn rel_lum(c: Color32) -> f32 {
+        let ch = |v: u8| {
+            let f = v as f32 / 255.0;
+            if f <= 0.04045 {
+                f / 12.92
+            } else {
+                ((f + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    }
+
+    fn contrast(c1: Color32, c2: Color32) -> f32 {
+        let (l1, l2) = (rel_lum(c1), rel_lum(c2));
+        let (lighter, darker) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
     #[test]
-    fn text_contrast_and_hierarchy() {
-        fn rel_lum(c: Color32) -> f32 {
-            let ch = |v: u8| {
-                let f = v as f32 / 255.0;
-                if f <= 0.04045 {
-                    f / 12.92
-                } else {
-                    ((f + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    fn text_keeps_its_contrast_on_the_islands() {
+        let p = pal();
+        // O vidro sobre o fundo e o fundo com o brilho mais forte (10% de laranja) que pode haver por trás.
+        let glow = over(with_alpha(CLAUDE, 0.10), p.bg);
+        for under in [p.bg, glow] {
+            let glass = over(p.glass, under);
+            let well = over(p.well, under);
+            for (name, c) in [("text", p.text), ("text_2", p.text_2), ("text_3", p.text_3)] {
+                assert!(contrast(c, glass) >= 4.5, "{name} sobre o vidro: {}", contrast(c, glass));
+                assert!(contrast(c, well) >= 4.5, "{name} sobre a ilha central: {}", contrast(c, well));
+            }
         }
-        fn contrast(c1: Color32, c2: Color32) -> f32 {
-            let l1 = rel_lum(c1);
-            let l2 = rel_lum(c2);
-            let (lighter, darker) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
-            (lighter + 0.05) / (darker + 0.05)
+        // A hierarquia do texto: mais forte → mais apagado.
+        assert!(rel_lum(p.text_strong) > rel_lum(p.text));
+        assert!(rel_lum(p.text) > rel_lum(p.text_2));
+        assert!(rel_lum(p.text_2) > rel_lum(p.text_3));
+        assert!(rel_lum(p.text_3) > rel_lum(p.text_faint));
+        // O texto sobre cada cor de agente (botão primário, segmento ativo).
+        for a in [CLAUDE, ANTIGRAVITY, OLLAMA, SHELL, p.accent_neutral] {
+            assert!(contrast(p.on_accent, a) >= 4.5, "on_accent sobre {a:?}: {}", contrast(p.on_accent, a));
         }
-
-        // Ambas >= 4.5:1 sobre PANEL
-        assert!(contrast(SEND_IDLE_TEXT, PANEL) >= 4.5, "SEND_IDLE_TEXT deve ter contraste >= 4.5:1 sobre PANEL");
-        assert!(contrast(PLACEHOLDER, PANEL) >= 4.5, "PLACEHOLDER deve ter contraste >= 4.5:1 sobre PANEL");
-
-        // Também >= 4.5:1 sobre PANEL_2 onde o botão Enviar/Commit desabilitado reside
-        assert!(contrast(SEND_IDLE_TEXT, PANEL_2) >= 4.5, "SEND_IDLE_TEXT deve ter contraste >= 4.5:1 sobre PANEL_2");
-
-        // Hierarquia visual preservada: desabilitado <= placeholder < muted < text
-        let lum_send = rel_lum(SEND_IDLE_TEXT);
-        let lum_ph = rel_lum(PLACEHOLDER);
-        let lum_muted = rel_lum(MUTED);
-        let lum_text = rel_lum(TEXT);
-        assert!(lum_send <= lum_ph, "SEND_IDLE_TEXT deve ser mais apagado ou igual ao placeholder");
-        assert!(lum_ph < lum_muted, "PLACEHOLDER deve ser mais apagado que MUTED");
-        assert!(lum_muted < lum_text, "MUTED deve ser mais apagado que TEXT");
     }
 }

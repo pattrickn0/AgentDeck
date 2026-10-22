@@ -128,10 +128,10 @@ impl Agents {
     /// `whoColor(name)`; uma instância (`claude@dev`) usa a cor do modelo.
     pub fn who_color(&self, name: Option<&str>) -> Color32 {
         if name == Some("você") {
-            return theme::USER;
+            return theme::pal().success;
         }
         name.and_then(|n| self.colors.get(n).copied().or_else(|| Ident::parse(n).and_then(|i| self.colors.get(&i.kind).copied())))
-            .unwrap_or(theme::WHO_DEFAULT)
+            .unwrap_or(theme::pal().text_2)
     }
 
     /// `whoName(name)`; uma instância vira `Claude · Dev · Ana`.
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(a.name("ollama"), "Ollama");
         assert_eq!(a.name("desconhecido"), "desconhecido");
         assert_eq!(a.fallback_kind(), "claude");
-        assert_eq!(a.who_color(Some("você")), theme::USER);
-        assert_eq!(a.who_color(Some("desconhecido")), theme::WHO_DEFAULT);
+        assert_eq!(a.who_color(Some("você")), theme::pal().success);
+        assert_eq!(a.who_color(Some("desconhecido")), theme::pal().text_2);
     }
 }

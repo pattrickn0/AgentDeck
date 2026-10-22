@@ -13,7 +13,6 @@ const SECTION_H: f32 = 24.0;
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, theme::BG);
     let ctx = ui.ctx().clone();
 
     // Mantém a raiz do workspace logicamente expandida para que `deck.tree_rows()` liste os arquivos.
@@ -32,17 +31,17 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let split_resp = ui.interact(split_row, Id::new("org-split"), Sense::click());
     let split_hov = split_resp.hovered() && !dragging;
     if split_hov {
-        painter.rect_filled(split_row, 0.0, theme::PANEL_2);
+        painter.rect_filled(split_row, 0.0, theme::pal().hover);
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
     let on = deck.split_enabled;
-    let label_color = if split_hov { theme::WHITE } else { theme::TREE_TEXT };
+    let label_color = if split_hov { theme::pal().text_strong } else { theme::pal().text_2 };
     deck.icons.paint(
         &painter,
         Icon::Split,
         Pos2::new(split_row.min.x + 19.0, split_row.center().y),
         14.0,
-        if on { deck.active_color() } else { theme::TREE_ICON },
+        if on { deck.accent() } else { theme::pal().text_3 },
         0.0,
     );
     let switch_r = Rect::from_center_size(Pos2::new(split_row.max.x - 12.0 - 13.0, split_row.center().y), Vec2::new(26.0, 14.0));
@@ -56,7 +55,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         label_color,
     );
     let t = ctx.animate_bool_with_time(Id::new("org-split-anim"), on, 0.12);
-    paint_switch(&painter, switch_r, t, deck.active_color());
+    paint_switch(&painter, switch_r, t, deck.accent());
     let tip_text = if on {
         "Tela dividida: ligada
 Cada tipo de agente numa janela · clique para ver uma aba por vez"
@@ -71,7 +70,7 @@ Clique para abrir uma janela por tipo de agente"
     painter.rect_filled(
         Rect::from_min_max(Pos2::new(rect.min.x + 8.0, top_y), Pos2::new(rect.max.x - 8.0, top_y + 1.0)),
         0.0,
-        theme::BORDER,
+        theme::pal().separator,
     );
 
     // ---------- Seção EXPLORADOR com ações rápidas ----------
@@ -84,10 +83,10 @@ Clique para abrir uma janela por tipo de agente"
     let refresh_resp = clickable(ui, refresh_r, Id::new("tree-refresh-btn"));
     let r_hov = refresh_resp.hovered() && !dragging;
     if r_hov {
-        painter.rect_filled(refresh_r, 4.0, theme::PANEL_2);
+        painter.rect_filled(refresh_r, 4.0, theme::pal().hover);
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
-    let r_color = if r_hov { theme::TEXT } else { theme::MUTED };
+    let r_color = if r_hov { theme::pal().text } else { theme::pal().text_2 };
     deck.icons.paint(&painter, Icon::Refresh, refresh_r.center(), 13.0, r_color, 0.0);
     if tip(refresh_resp, "Atualizar explorador").clicked() {
         deck.refresh_tree();
@@ -99,10 +98,10 @@ Clique para abrir uma janela por tipo de agente"
     let collapse_resp = clickable(ui, collapse_r, Id::new("tree-collapse-btn"));
     let c_hov = collapse_resp.hovered() && !dragging;
     if c_hov {
-        painter.rect_filled(collapse_r, 4.0, theme::PANEL_2);
+        painter.rect_filled(collapse_r, 4.0, theme::pal().hover);
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
-    let c_color = if c_hov { theme::TEXT } else { theme::MUTED };
+    let c_color = if c_hov { theme::pal().text } else { theme::pal().text_2 };
     paint_collapse_all(&painter, collapse_r.center(), c_color);
     if tip(collapse_resp, "Recolher todas as pastas").clicked() {
         deck.tree.expanded.retain(|p| p.is_empty());
@@ -114,7 +113,7 @@ Clique para abrir uma janela por tipo de agente"
     painter.rect_filled(
         Rect::from_min_max(Pos2::new(rect.min.x + 8.0, sep_y), Pos2::new(rect.max.x - 8.0, sep_y + 1.0)),
         0.0,
-        theme::BORDER,
+        theme::pal().separator,
     );
     let list_top = sep_y + 4.0;
 
@@ -161,23 +160,23 @@ Clique para abrir uma janela por tipo de agente"
 
 /// Título de seção da barra lateral (MAIÚSCULAS, 11 px, MUTED).
 fn section_title(painter: &egui::Painter, head: Rect, title: &str) {
-    let g = galley_trunc(painter, title, theme::ui_semibold(11.0), theme::MUTED, head.width() - 60.0);
+    let g = galley_trunc(painter, title, theme::ui_semibold(11.0), theme::pal().text_2, head.width() - 60.0);
     place(
         painter,
         Rect::from_min_max(Pos2::new(head.min.x + 12.0, head.min.y), Pos2::new(head.max.x - 52.0, head.max.y)),
         Align2::LEFT_CENTER,
         g,
-        theme::MUTED,
+        theme::pal().text_2,
     );
 }
 
 /// Chave liga/desliga (`t` de 0 a 1, animado): trilho na cor do agente ativo quando ligada.
 fn paint_switch(painter: &egui::Painter, r: Rect, t: f32, on_color: Color32) {
-    let track = theme::BORDER.lerp_to_gamma(on_color, t);
+    let track = theme::pal().separator.lerp_to_gamma(on_color, t);
     painter.rect_filled(r, r.height() / 2.0, track);
     let knob_r = r.height() / 2.0 - 2.0;
     let x = egui::lerp((r.min.x + 2.0 + knob_r)..=(r.max.x - 2.0 - knob_r), t);
-    painter.circle_filled(Pos2::new(x, r.center().y), knob_r, theme::MUTED.lerp_to_gamma(theme::WHITE, t));
+    painter.circle_filled(Pos2::new(x, r.center().y), knob_r, theme::pal().text_2.lerp_to_gamma(theme::pal().text_strong, t));
 }
 
 /// Desenha o ícone de "Recolher todas as pastas" do VS Code no painter: um quadrado com "−"
@@ -204,11 +203,11 @@ fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::R
     }
     let is_active = !row.entry.is_dir && deck.tree.active_file.as_deref() == Some(row.entry.rel_path.as_str());
     let (bg, fg) = if is_active {
-        (Some(theme::BORDER), theme::WHITE)
+        (Some(theme::pal().separator), theme::pal().text_strong)
     } else if hovered {
-        (Some(theme::PANEL_2), theme::WHITE)
+        (Some(theme::pal().hover), theme::pal().text_strong)
     } else {
-        (None, theme::TREE_TEXT)
+        (None, theme::pal().text_2)
     };
     if let Some(bg) = bg {
         painter.rect_filled(rect, 0.0, bg);
@@ -221,13 +220,13 @@ fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::R
     // Chevron (só pastas), caixa de 14px.
     if row.entry.is_dir {
         let t = ctx.animate_bool_with_time(Id::new(("tree-chev", &row.entry.rel_path)), row.expanded, 0.12);
-        deck.icons.paint(painter, Icon::TreeChevron, Pos2::new(x0 + 7.0, cy), 10.0, theme::TREE_ICON, t * std::f32::consts::FRAC_PI_2);
+        deck.icons.paint(painter, Icon::TreeChevron, Pos2::new(x0 + 7.0, cy), 10.0, theme::pal().text_3, t * std::f32::consts::FRAC_PI_2);
     }
     // Ícone (16px) após gap de 5px.
     let icon_rect = Rect::from_center_size(Pos2::new(x0 + 14.0 + 5.0 + 8.0, cy), Vec2::splat(16.0));
     if row.entry.is_dir {
         let icon = if row.expanded { Icon::FolderOpen } else { Icon::FolderClosed };
-        deck.icons.paint(painter, icon, icon_rect.center(), 14.0, theme::TREE_ICON, 0.0);
+        deck.icons.paint(painter, icon, icon_rect.center(), 14.0, theme::pal().text_3, 0.0);
     } else {
         file_icon(deck, painter, icon_rect, &row.entry.name);
     }
@@ -259,13 +258,13 @@ fn file_icon(deck: &mut Deck, painter: &egui::Painter, rect: Rect, name: &str) {
             text_in(painter, rect, Align2::CENTER_CENTER, text, font.clone(), color);
             text_in(painter, rect.translate(Vec2::new(0.35, 0.0)), Align2::CENTER_CENTER, text, font, color);
         }
-        None => deck.icons.paint(painter, Icon::FileGeneric, rect.center(), 13.0, theme::TREE_ICON, 0.0),
+        None => deck.icons.paint(painter, Icon::FileGeneric, rect.center(), 13.0, theme::pal().text_3, 0.0),
     }
 }
 
 /// `#sidebar-splitter`: arrastar redimensiona entre 150 e 480 px.
 pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect) {
-    let hit = line.expand2(Vec2::new(3.0, 0.0));
+    let hit = line;
     let r = ui.interact(hit, Id::new("sidebar-splitter"), Sense::drag());
     if r.hovered() || r.dragged() {
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -286,6 +285,6 @@ pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect) {
     }
     let hot = r.hovered() || deck.sidebar_dragging.is_some();
     let painter = ui.painter_at(full);
-    paint_splitter(&painter, line, hot, deck.active_color());
+    paint_splitter(&painter, line, hot, deck.accent());
     tip(r, "Arraste para redimensionar barra lateral");
 }
