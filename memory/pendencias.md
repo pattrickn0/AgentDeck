@@ -14,11 +14,7 @@ Combinado em 2026-10-21, nesta ordem.
 
 ### a) O que sobrou da mesa de tarefas
 
-- [ ] **Revisão do fluxo (t10, 2026-10-21): o que sobrou.** Achados que não são pequenos o bastante para corrigir de passagem:
-  - **Reprovada sem commits novos, a tarefa não chega a "concluída".** Reprovou, o agente conclui que não há o que mudar (ou o problema é do ambiente) e entrega `--task done` sem commit: `task_merge` recusa ("não tem commits novos", `crates/core/src/tasks.rs:1179`) e sobram Devolver ou Descartar (que marca "descartada", não "concluída"). Ideia: guardar quando a tarefa foi mesclada pela última vez (campo novo em `Task`) e, sem commits novos desde então, ir direto a `Validating`; ou deixar `task_done` valer também em `Validating`.
-  - **O agente que o usuário corrigiu direto na aba, em "aguardando validação", não consegue entregar.** `task_done` só aceita `Running` (`tasks.rs:986`), então um `--task done` do agente recebe 409. O caminho certo é "Reprovar", que o usuário pode não lembrar; a mensagem de erro poderia apontar para ele (ou `done` valer em `Validating`, voltando a tarefa a `Review`).
-  - **Sem diff em "aguardando validação".** Depois do `ff` a branch é a própria base, então `base...branch` é vazio e `can_show_diff` (`crates/app/src/tasks_ui.rs:295`) fica falso; o resumo guardado no relatório continua na tela, mas o que foi mesclado só se vê na aba Git (`git show <merge>`). Guardar o hash do merge na tarefa permitiria um "Ver o que foi mesclado" (`git diff <hash>^1 <hash>`). Casa com o diff legível do bloco b).
-  - **Base apagada durante a validação.** `task_validate` chama `git rev-list base..branch` (`tasks.rs:1270`): com a base sumida o erro vira 500 e só Descartar sai do impasse. Raro; tratar como "não dá para conferir" e deixar validar com aviso.
+- [ ] **Revisão do fluxo (t10, 2026-10-21): o que sobrou.** Os demais achados saíram na `t18` (ver [historico.md](historico.md)); ficam:
   - **Pasta da worktree que não sai ao validar.** Agora a tarefa fica em `Validating` e dá para tentar de novo, mas não há como ver qual processo segura a pasta; só a mensagem do git (`remove_task_worktree`, `tasks.rs:1439`). Visto em uso real na `t14` (2026-10-21): cinco tentativas de validar falharam com "a pasta ficou" antes de a pasta sair. Um teste desse caso não é possível sem simular o bloqueio do Windows.
   - **Mensagens ao agente não citam a validação.** `start_message` não conta ao agente que, depois de mesclada, a tarefa ainda pode voltar reprovada; hoje ele só descobre quando `reject_message` chega. Conferir no uso real se faz falta.
 - [ ] **Definir o esforço** (pedido do usuário, 2026-10-20). O formulário escolhe só o modelo. Ter um campo de esforço (baixo/médio/alto) que cada CLI traduz do seu jeito: no Claude, `--effort`; no Antigravity o esforço já vem no nome do modelo (`gemini-4-argon-low|medium|high`); no OpenCode é a variante (`modelo#variante`), que hoje só vale no headless: a aba interativa recebe só o modelo (`models::opencode_tui` descarta o `#`). Mostrar o esforço no cartão da tarefa.
@@ -55,7 +51,6 @@ O que sobrou da mesa está no bloco "Próximo", item a).
 ## Modelos
 
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
-- [ ] **Teste da ponte quebra dentro de uma aba OpenCode com modelo** (visto pelo `opencode@t3`, 2026-10-20). `the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_cli` falha quando o ambiente já tem `OPENCODE_CONFIG_CONTENT`: a variável do processo pai vaza pelo `agent_env` para o agente falso. Limpar a variável no ambiente dos filhos (ou no teste) para o resultado não depender de onde os testes rodam.
 - O esforço e o filtro de modelos com acesso estão no bloco "Próximo", item a).
 
 ## Memória (fase 2)

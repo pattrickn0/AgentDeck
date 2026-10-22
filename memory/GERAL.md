@@ -158,7 +158,7 @@ na validação devolve a tarefa ao mesmo agente:
   agente), base (a branch atual), anexos ("Anexar arquivos", ou arrastar arquivos sobre o formulário: os caminhos vão ao
   final do pedido) e "Iniciar agora". Ctrl+Enter cria; sem "Iniciar agora" a tarefa fica em rascunho;
 - **Detalhe** (clicar no cartão; "←" volta): estado, `branch → base`, agente, o pedido, o relatório, as alterações
-  (resumo por arquivo e **Ver diff completo**, no mesmo desenho do diff da aba Git, só leitura) e o histórico. Os
+  (resumo por arquivo e **Ver diff completo**, no mesmo desenho do diff da aba Git, só leitura; aguardando validação e concluída, com o hash curto da mesclagem ao lado de `branch → base`, o botão vira **Ver o que foi mesclado** e mostra o que a mesclagem trouxe) e o histórico. Os
   botões dependem do estado: rascunho **Iniciar** e **Descartar**; em andamento **Ir para a aba** (ou **Reabrir
   aba**, se você a fechou) e **Descartar**; em revisão **Mesclar em \<base>**, **Devolver** (escreve o que mudar e
   envia ao agente), a aba e **Descartar**; aguardando validação **Validar** (limpa a aba, a pasta e a branch),
@@ -263,7 +263,7 @@ ela dura.
 | `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
 | `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
 | `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e a deixa **aguardando validação** (o agente e a worktree continuam) / conclui a tarefa aguardando validação e limpa / descarta e limpa |
-| `ask-agent --task done <id> -\|"relatório"\|--file <arq>` | o agente da tarefa entrega o relatório (pela entrada padrão, como argumento ou de um arquivo) e a põe em revisão |
+| `ask-agent --task done <id> -\|"relatório"\|--file <arq>` | o agente da tarefa entrega o relatório (pela entrada padrão, como argumento ou de um arquivo) e a põe em revisão; também vale aguardando validação, se a branch tem commits novos (o usuário corrigiu algo na aba) |
 | `ask-agent --task return <id> "feedback"` | devolve a tarefa em revisão ao agente com ajustes a fazer (o feedback também vem de um arquivo: `--file <arq>`; o agente também recebe os aprendizados dos arquivos que o feedback cita) |
 | `ask-agent --task reject <id> "motivo"\|--file <arq>\|-` | reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, dizendo que o trabalho já foi mesclado e o que falhou no teste |
 | `ask-agent --signal busy\|idle` | uso interno dos hooks (sai sempre com 0) |
