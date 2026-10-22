@@ -842,8 +842,7 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
     egui::ScrollArea::vertical().id_salt("git-msg-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
         let te = egui::TextEdit::multiline(&mut deck.git.message)
             .id(id)
-            .frame(egui::Frame::NONE)
-            .margin(egui::Margin { left: 9, right: 9, top: 6, bottom: 6 })
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: 9, right: 9, top: 6, bottom: 6 }))
             .font(theme::ui(12.0))
             .text_color(p.text)
             .hint_text(egui::RichText::new("Mensagem do commit (Ctrl+Enter)").font(theme::ui(12.0)).color(p.text_3))
@@ -948,8 +947,7 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(fr.shrink(1.0)));
         let out = egui::TextEdit::singleline(&mut deck.git.branch_filter)
             .id(filter_id)
-            .frame(egui::Frame::NONE)
-            .margin(egui::Margin { left: 8, right: 8, top: 4, bottom: 4 })
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: 8, right: 8, top: 4, bottom: 4 }))
             .font(theme::ui(12.0))
             .text_color(p.text)
             .hint_text(egui::RichText::new(hint).font(theme::ui(12.0)).color(p.text_3))

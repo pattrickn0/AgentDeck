@@ -3,7 +3,7 @@
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Id, Pos2, Rect, Ui, Vec2};
 
-use super::{button, dot, galley, place, ButtonKind};
+use super::{button, galley, place, ButtonKind};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
@@ -18,9 +18,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let no_project = deck.active_project.is_empty();
     let title = if no_project { "Nenhum projeto aberto" } else { "Nenhum agente aberto" };
     let title = galley(&painter, title, theme::ui_semibold(16.0), theme::pal().text);
-    // <p> com o "+ Novo agente" em destaque, quebrando em até 420px.
+    // <p> com o "+ Novo agente" em destaque, quebrando em até 420px (menos na janela estreita).
     let mut job = LayoutJob::default();
-    job.wrap.max_width = 420.0;
+    job.wrap.max_width = 420.0f32.min(rect.width() - 48.0).max(120.0);
     job.halign = egui::Align::Center;
     let fmt = TextFormat { font_id: theme::ui(13.0), color: theme::pal().text_2, line_height: Some(13.0 * 1.5), ..Default::default() };
     if no_project {
@@ -42,9 +42,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     };
     let font = theme::ui(12.0);
     let btn_h = 12.0 * theme::LINE_HEIGHT + 14.0 + 2.0;
+    // Ícone à esquerda: o logo do modelo ou, sem logo, o ponto do agente; "Abrir pasta…" vai sem ícone.
+    let lead = |m: &crate::agents::MenuItem| if m.kind == NEW_PROJECT { 0.0 } else { 8.0 + 8.0 };
     let widths: Vec<f32> = items
         .iter()
-        .map(|m| 14.0 + 8.0 + 8.0 + 6.0 + galley(&painter, &m.label, font.clone(), theme::pal().text).size().x + 14.0 + 2.0)
+        .map(|m| 14.0 + lead(m) + 6.0 + galley(&painter, &m.label, font.clone(), theme::pal().text).size().x + 14.0 + 2.0)
         .collect();
     let max_row = 420.0f32.min(rect.width() - 48.0);
     let mut rows: Vec<Vec<usize>> = vec![Vec::new()];
@@ -90,11 +92,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             x += widths[i] + 10.0;
             // O botão secundário da base (borda, fundo e hover); o ponto do agente e o nome vão por cima.
             let resp = button(ui, r, Id::new(("empty-btn", &m.kind)), "", ButtonKind::Secondary);
-            dot(&painter, Pos2::new(r.min.x + 15.0 + 4.0, r.center().y), m.color);
+            if m.kind != NEW_PROJECT {
+                super::projects::paint_kind_mark(&mut deck.icons, &painter, Pos2::new(r.min.x + 15.0 + 4.0, r.center().y), &m.kind, m.color);
+            }
             let g = galley(&painter, &m.label, font.clone(), theme::pal().text);
             place(
                 &painter,
-                Rect::from_min_max(Pos2::new(r.min.x + 15.0 + 8.0 + 8.0 + 6.0, r.min.y), r.max),
+                Rect::from_min_max(Pos2::new(r.min.x + 15.0 + lead(m) + 6.0, r.min.y), r.max),
                 Align2::LEFT_CENTER,
                 g,
                 theme::pal().text,

@@ -88,13 +88,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     x += 1.0 + GAP;
     deck.icons.paint(&painter, Icon::AgentDeck, Pos2::new(x + 8.0, cy), 16.0, p.text_strong, 0.0);
     x += 16.0 + GAP;
-    // Com a barra lateral recolhida a chave Agentes | Documentos volta para cá, compacta (aberta, ela é a
-    // primeira coisa da barra lateral).
-    if deck.sidebar_collapsed {
-        let size = Vec2::new(super::docs::switch_compact_width(&painter, deck), super::docs::SWITCH_COMPACT_H);
-        super::docs::switch(deck, ui, Rect::from_min_size(Pos2::new(x, cy - size.y / 2.0), size), "title-center");
-        x += size.x + GAP;
-    }
     let name = galley_spaced(&painter, "AgentDeck", theme::ui_bold(13.0), p.text, -0.26);
     x = place(&painter, Rect::from_min_max(Pos2::new(x, rect.min.y), Pos2::new(rect.max.x, rect.max.y)), Align2::LEFT_CENTER, name, p.text)
         .max
@@ -109,6 +102,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         if let Some(branch) = branch_label(deck) {
             x = chip(&painter, Pos2::new(x, cy), &branch, 10.5, p.text_soft).max.x;
         }
+    }
+    // Com a barra lateral recolhida a chave Agentes | Documentos volta para cá, compacta e depois do nome do
+    // projeto (aberta, ela é a primeira coisa da barra lateral).
+    if deck.sidebar_collapsed {
+        let size = Vec2::new(super::docs::switch_compact_width(&painter, deck), super::docs::SWITCH_COMPACT_H);
+        super::docs::switch(deck, ui, Rect::from_min_size(Pos2::new(x + GAP, cy - size.y / 2.0), size), "title-center");
+        x += GAP + size.x + GAP;
     }
 
     // ---------- Botões da janela ----------

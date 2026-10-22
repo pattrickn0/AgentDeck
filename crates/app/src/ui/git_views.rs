@@ -276,8 +276,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input.shrink(1.0)));
     let out = egui::TextEdit::singleline(&mut deck.git.stash_message)
         .id(id)
-        .frame(egui::Frame::NONE)
-        .margin(egui::Margin { left: 9, right: 9, top: 5, bottom: 5 })
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: 9, right: 9, top: 5, bottom: 5 }))
         .font(theme::ui(12.5))
         .text_color(theme::pal().text)
         .hint_text(egui::RichText::new("Mensagem do stash (opcional)").font(theme::ui(12.5)).color(theme::pal().text_3))

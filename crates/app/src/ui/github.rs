@@ -936,8 +936,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input_r.shrink(1.0)));
         let out = TextEdit::singleline(&mut deck.github.new_role_name)
             .id(input_id)
-            .frame(egui::Frame::NONE)
-            .margin(egui::Margin { left: 8, right: 8, top: 3, bottom: 3 })
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: 8, right: 8, top: 3, bottom: 3 }))
             .font(theme::mono(11.5))
             .hint_text(egui::RichText::new("cargo (ex.: review)").font(theme::ui(11.5)).color(theme::pal().text_3))
             .vertical_align(egui::Align::Center)

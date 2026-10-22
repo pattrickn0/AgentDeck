@@ -4,9 +4,9 @@
 use std::time::Duration;
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{Align, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
+use egui::{Align, Align2, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use super::{button, button_width, galley, paint_splitter, place, section_label, separator, text_in, tip, ButtonKind};
+use super::{button, button_width, galley, paint_splitter, place, section_label, separator, text_in, text_w, tip, ButtonKind};
 use crate::deck::{Deck, FeedItem, RightView};
 use crate::theme;
 use agentdeck_core::{DownloadProgress, DownloadState, FeedKind};
@@ -48,12 +48,11 @@ struct HeadTab<'a> {
 fn head_tab(ui: &Ui, painter: &egui::Painter, at: Pos2, tab: HeadTab<'_>, active: bool) -> (f32, bool) {
     let p = theme::pal();
     let font = if active { theme::ui_semibold(11.5) } else { theme::ui(11.5) };
-    let text_g = galley(painter, tab.label, font.clone(), p.text_strong);
+    let label_w = text_w(painter, tab.label, font.clone());
     let badge_txt = (tab.badge > 0).then(|| if tab.badge > 99 { "99+".to_owned() } else { tab.badge.to_string() });
     let badge_font = if active { theme::ui_bold(10.0) } else { theme::meta(10.0) };
-    let badge_g = badge_txt.as_deref().map(|t| galley(painter, t, badge_font, p.text_strong));
-    let badge_w = badge_g.as_ref().map(|g| (g.size().x + 10.0).max(14.0)).unwrap_or(0.0);
-    let w = 16.0 + text_g.size().x + if badge_w > 0.0 { 5.0 + badge_w } else { 0.0 };
+    let badge_w = badge_txt.as_deref().map(|t| (text_w(painter, t, badge_font.clone()) + 10.0).max(14.0)).unwrap_or(0.0);
+    let w = 16.0 + label_w + if badge_w > 0.0 { 5.0 + badge_w } else { 0.0 };
     let rect = Rect::from_min_size(at, Vec2::new(w, 22.0));
     let r = super::clickable(ui, rect, Id::new(("right-tab", tab.id)));
     let hovered = r.hovered();
@@ -69,13 +68,13 @@ fn head_tab(ui: &Ui, painter: &egui::Painter, at: Pos2, tab: HeadTab<'_>, active
     } else {
         p.text_2
     };
-    let text_rect = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, rect.min.y), Vec2::new(text_g.size().x, rect.height()));
-    place(painter, text_rect, Align2::LEFT_CENTER, text_g, fg);
-    if let Some(bg) = badge_g {
+    let text_rect = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, rect.min.y), Vec2::new(label_w, rect.height()));
+    text_in(painter, text_rect, Align2::LEFT_CENTER, tab.label, font, fg);
+    if let Some(t) = badge_txt.as_deref() {
         let pill = Rect::from_min_size(Pos2::new(text_rect.max.x + 5.0, rect.center().y - 7.0), Vec2::new(badge_w, 14.0));
         let (pill_fill, pill_fg) = if active { (theme::accent(), p.on_accent) } else { (p.chip, p.text_2) };
         painter.rect_filled(pill, 7.0, pill_fill);
-        place(painter, pill, Align2::CENTER_CENTER, bg, pill_fg);
+        text_in(painter, pill, Align2::CENTER_CENTER, t, badge_font, pill_fg);
     }
     (w, tip(r, tab.tip).clicked())
 }
@@ -392,7 +391,6 @@ fn message(ui: &mut Ui, item: &FeedItem, w: f32, thinking_alpha: f32) -> Rect {
     place(&painter, head_rect, Align2::LEFT_CENTER, head_g, p.text_2);
     place(&painter, head_rect, Align2::RIGHT_CENTER, time_g, p.text_3);
     painter.galley(Pos2::new(x, y + head_h + 4.0), body_g, body_color);
-    let _: Color32 = body_color;
     r
 }
 

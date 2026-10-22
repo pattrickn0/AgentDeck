@@ -98,7 +98,7 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             if resp.hovered() || arrow_hot {
                 p.rect_filled(r, 5.0, pal.hover);
             }
-            dot(p, Pos2::new(r.min.x + 10.0 + 4.0, r.center().y), m.color);
+            super::projects::paint_kind_mark(&mut deck.icons, p, Pos2::new(r.min.x + 10.0 + 4.0, r.center().y), &m.kind, m.color);
             text_in(
                 p,
                 Rect::from_min_max(Pos2::new(r.min.x + 10.0 + 16.0, r.min.y), r.max),

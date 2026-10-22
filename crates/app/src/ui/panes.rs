@@ -6,7 +6,7 @@ use std::time::Duration;
 use egui::{Align2, CursorIcon, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use super::tabs::{self, StripClick};
-use super::{clickable, empty_state, galley, paint_splitter, place, tip};
+use super::{clickable, empty_state, paint_splitter, text_in, tip};
 use crate::audio;
 use crate::deck::{Deck, PanePlan};
 use crate::dictation::{self, ButtonVisual, MicTarget};
@@ -218,8 +218,7 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     if r.hovered() {
         painter.rect_filled(plus, 4.0, theme::pal().hover);
     }
-    let pg = galley(&painter, "+", theme::ui(16.0), theme::pal().text_2);
-    place(&painter, plus, Align2::CENTER_CENTER, pg, if r.hovered() { theme::pal().text } else { theme::pal().text_2 });
+    text_in(&painter, plus, Align2::CENTER_CENTER, "+", theme::ui(16.0), if r.hovered() { theme::pal().text } else { theme::pal().text_2 });
     if tip(r, format!("Nova aba de {}", deck.agents.name(&kind))).clicked() {
         clicks.push(Click::NewTab(kind));
     }

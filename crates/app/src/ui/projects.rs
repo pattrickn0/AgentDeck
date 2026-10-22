@@ -30,6 +30,8 @@ const INDENT: f32 = 12.0;
 const GAP: f32 = 7.0;
 /// Largura máxima do modelo à direita do nome (o resto é do nome).
 const MODEL_MAX_W: f32 = 64.0;
+/// Espaço mínimo do nome para o modelo aparecer ao lado dele.
+const NAME_MIN_W: f32 = 56.0;
 /// Níveis além deste não recuam mais (a barra é estreita).
 const MAX_DEPTH: usize = 5;
 
@@ -53,6 +55,15 @@ pub(super) fn agent_icon(kind: &str) -> Option<Icon> {
         "ollama" => Some(Icon::OllamaLogo),
         "codex" => Some(Icon::CodexLogo),
         _ => None,
+    }
+}
+
+/// O logo do modelo de um tipo de agente (12 px) ou, sem logo (terminal), o ponto: a marca do agente nos
+/// menus e botões de abrir agente.
+pub(super) fn paint_kind_mark(icons: &mut crate::icons::IconCache, p: &Painter, center: Pos2, kind: &str, color: Color32) {
+    match agent_icon(kind) {
+        Some(icon) => icons.paint(p, icon, center, LOGO_SIZE, color, 0.0),
+        None => dot(p, center, color),
     }
 }
 
@@ -472,7 +483,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
 
                     // O modelo à direita, numa linha só; o nome é quem encolhe (com reticências).
                     let right = sel_r.max.x - 8.0;
-                    let model = ag.model.as_deref().map(model_tag).filter(|m| !m.is_empty());
+                    let name_x = logo_x + MARK_BOX / 2.0 + GAP;
+                    // Na barra estreita o nome vale mais que o modelo: sem espaço para os dois, o modelo sai.
+                    let model = ag.model.as_deref().map(model_tag).filter(|m| !m.is_empty() && right - name_x >= NAME_MIN_W + MODEL_MAX_W);
                     let mcolor = if is_active_tab { theme::pal().text } else { theme::pal().text_3 };
                     let model_w = model.as_deref().map_or(0.0, |m| {
                         let mg = galley_trunc(&p, m, theme::meta(10.0), mcolor, MODEL_MAX_W);
@@ -487,7 +500,6 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                         w
                     });
 
-                    let name_x = logo_x + MARK_BOX / 2.0 + GAP;
                     let name_right = if model_w > 0.0 { right - model_w - GAP } else { right };
                     let tab_font = if is_active_tab { theme::ui_semibold(12.0) } else { theme::ui_medium(12.0) };
                     let tab_color = if !ag.alive {
