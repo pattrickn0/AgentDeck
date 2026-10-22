@@ -1734,7 +1734,7 @@ impl Deck {
             Ime::Preedit(text, _) => self.ime_preedit = text.clone(),
             Ime::Commit(text) => {
                 self.ime_preedit.clear();
-                if let (false, Some(idx)) = (text.is_empty(), self.active) {
+                if let (false, Some(idx), CenterView::Agents) = (text.is_empty(), self.active, self.docs.view) {
                     self.blink_epoch = Instant::now();
                     self.terminal_data(idx, text.as_bytes());
                 }
@@ -1746,8 +1746,10 @@ impl Deck {
 
     /// Trata uma tecla vinda do winit. Retorna `true` se consumiu (não repassar ao egui).
     pub fn handle_key(&mut self, ev: &KeyEvent, mods: ModifiersState, egui_has_focus: bool) -> bool {
-        let term_keys = !egui_has_focus && self.term_focus && self.active.is_some() && !self.modal_open;
-        debug_assert!(!term_keys || self.docs.view == CenterView::Agents, "o terminal só tem o teclado com os agentes à vista");
+        // Lendo documentos o terminal está escondido: não recebe tecla nenhuma, mesmo no quadro em que a chave trocou
+        // e `term_focus` ainda não foi desligado (ver `Deck::center_changed`).
+        let term_visible = self.docs.view == CenterView::Agents;
+        let term_keys = term_visible && !egui_has_focus && self.term_focus && self.active.is_some() && !self.modal_open;
         if ev.state != ElementState::Pressed {
             return term_keys;
         }
@@ -1809,7 +1811,7 @@ impl Deck {
                 return true;
             }
         }
-        if egui_has_focus || !self.term_focus {
+        if egui_has_focus || !self.term_focus || !term_visible {
             return false;
         }
         let Some(idx) = self.active else { return false };
