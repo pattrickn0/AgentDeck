@@ -149,12 +149,12 @@ ficam para a fase 2 (ver [pendencias.md](pendencias.md)).
 - **Diff**: lista de arquivos à esquerda (letra `A`/`M`/`D`/`R`, nome e `+`/`−`; clicar rola o diff até o arquivo) e o diff à direita,
   no mesmo desenho do diff da aba Git, sem as ações por trecho. Em janela estreita (centro < 560 px) a lista vai para cima do diff.
   Vem de: **Ver diff completo** / **Ver o que foi mesclado** do detalhe da tarefa (a barra direita não tem mais a tela do diff), o botão
-  **Abrir ao centro** do detalhe de um commit (Histórico da aba Git) e o do diff de um arquivo alterado (aba Git, que mantém o diff dela
+  **Abrir em Documentos** do detalhe de um commit (Histórico da aba Git) e o do diff de um arquivo alterado (aba Git, que mantém o diff dela
   para preparar por trecho).
 - **Arquivo**: duplo clique no explorador abre uma visualização monoespaçada, com número de linha e rolagem, que relê sozinha
   quando o arquivo muda no disco (o watcher da pasta). Acima de 1 MB ou binário, uma explicação no lugar do conteúdo. O clique simples
   continua inserindo `@arquivo` no terminal.
-- **Markdown**: os `.md` abertos pelo explorador e, no detalhe da tarefa, o **Pedido** e o **Relatório** (botão **Abrir ao centro** em
+- **Markdown**: os `.md` abertos pelo explorador e, no detalhe da tarefa, o **Pedido** e o **Relatório** (botão **Abrir em Documentos** em
   cada um) aparecem formatados: títulos, listas (com `- [ ]`), negrito e itálico, código, tabelas e citações.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
@@ -164,9 +164,9 @@ A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado
 - quatro visões: **Alterações**, **Histórico**, **Stash** e, só quando há conflito, **Conflitos**;
 - Alterações: seções (conflitos, preparadas, alterações, não rastreados) com preparar (+), tirar (−) e descartar (↶, com
   confirmação); clique abre o diff (rola dentro da barra), que tem **Preparar / Tirar / Descartar por trecho** (hunk);
-  duplo clique abre o arquivo; **Abrir ao centro** abre o diff, só para ler, em Documentos; caixa de commit (Ctrl+Enter) com a opção de corrigir o último commit;
+  duplo clique abre o arquivo; **Abrir em Documentos** abre o diff, só para ler, em Documentos; caixa de commit (Ctrl+Enter) com a opção de corrigir o último commit;
 - Histórico: commits da branch (hash, autor, data, assunto; "Carregar mais") e, ao clicar, o detalhe do commit (mensagem,
-  arquivos e diff, com **Abrir ao centro**);
+  arquivos e diff, com **Abrir em Documentos**);
 - Stash: guardar (com mensagem; opção de incluir não rastreados), ver o diff, aplicar, aplicar e apagar e apagar;
 - Conflitos: cada arquivo mostra os blocos com "o nosso", "o deles" ou "ambos" por bloco ou no arquivo inteiro, e "Marcar como resolvido";
 - commit com `commit.gpgsign` e chave travada falha na hora, explicando como destravar (o app não desliga a assinatura);

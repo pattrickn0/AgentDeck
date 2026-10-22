@@ -51,7 +51,7 @@ enum Act {
     Task(String, TaskAct),
     /// "Ver diff completo" / "Ver o que foi mesclado": abre o diff no centro.
     OpenDiff(String),
-    /// "Abrir ao centro" no pedido (`false`) ou no relatório (`true`).
+    /// "Abrir em Documentos" no pedido (`false`) ou no relatório (`true`).
     OpenText(String, bool),
     DismissNotice,
     ConfirmYes,
@@ -991,14 +991,14 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
     });
 }
 
-/// "Abrir ao centro" embaixo do pedido e do relatório: eles aparecem formatados no modo Documentos.
+/// "Abrir em Documentos" embaixo do pedido e do relatório: eles aparecem formatados no modo Documentos.
 fn open_center_button(ui: &mut Ui, id_salt: &str, task: &Task, report: bool, acts: &mut Vec<Act>) {
     let tip = if report {
         "Abre o relatório formatado, com a largura toda do centro"
     } else {
         "Abre o pedido formatado, com a largura toda do centro"
     };
-    let b = [("Abrir ao centro".to_owned(), BtnKind::Secondary, true, tip)];
+    let b = [("Abrir em Documentos".to_owned(), BtnKind::Secondary, true, tip)];
     if button_flow(ui, &b, id_salt).is_some() {
         acts.push(Act::OpenText(task.id.clone(), report));
     }

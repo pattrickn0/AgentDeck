@@ -24,9 +24,8 @@ const HEAD_H: f32 = 34.0;
 const BANNER_H: f32 = 24.0;
 const MODE_H: f32 = 24.0;
 const ROW_H: f32 = 22.0;
-/// O botão "Abrir ao centro" (largura aproximada do texto de 11,5 px com o recuo) que leva o diff ao modo Documentos.
-const OPEN_CENTER: &str = "Abrir ao centro";
-const OPEN_CENTER_W: f32 = 104.0;
+/// O botão que leva o diff ao modo Documentos.
+const OPEN_CENTER: &str = "Abrir em Documentos";
 const MSG_FONT: f32 = 13.0;
 const MSG_ROWS: f32 = 3.0;
 pub(super) const BTN_H: f32 = 28.0;
@@ -46,9 +45,9 @@ pub(super) enum Act {
     UnstageAll,
     AskDiscard(GitEntry),
     OpenDiff(GitEntry, bool),
-    /// "Abrir ao centro": o diff do arquivo, só leitura, no modo Documentos.
+    /// "Abrir em Documentos": o diff do arquivo, só leitura, no modo Documentos.
     OpenDiffCenter(GitEntry, bool),
-    /// "Abrir ao centro" no detalhe de um commit: hash, hash curto e assunto.
+    /// "Abrir em Documentos" no detalhe de um commit: hash, hash curto e assunto.
     OpenCommitCenter(String, String, String),
     CloseDiff,
     OpenFile(String),
@@ -639,10 +638,10 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
             acts.push(act);
         }
     }
-    // "Abrir ao centro": na mesma linha se sobra lugar para o caminho; senão, numa linha só dele.
+    // "Abrir em Documentos": na mesma linha se sobra lugar para o caminho; senão, numa linha só dele.
     let center_tip = "Abre este diff, só para ler, com a largura toda do centro (o preparo por trecho continua aqui)";
     let mut extra_row = 0.0;
-    if right - (back.max.x + 8.0) - (OPEN_CENTER_W + 6.0) >= 150.0 {
+    if right - (back.max.x + 8.0) - (git_views::pill_w(ui, OPEN_CENTER) + 6.0) >= 150.0 {
         let id = Id::new("git-diff-center");
         if git_views::pill(ui, &mut right, head.min.y + 3.0, 22.0, OPEN_CENTER, center_tip, git_views::Look::Normal, true, id) {
             acts.push(Act::OpenDiffCenter(entry.clone(), open.staged));

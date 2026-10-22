@@ -267,7 +267,7 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
   (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base. O botão do diff (`can_show_diff`) vale também em `Validating`/`Merged` com
   `merge_commit`, e aí diz **"Ver o que foi mesclado"** ("Ver diff completo" nos outros estados); o detalhe mostra o hash curto ao lado de
-  `branch → base`. O diff abre no centro, no modo Documentos (abaixo); o pedido e o relatório também (**Abrir ao centro**).
+  `branch → base`. O diff abre no centro, no modo Documentos (abaixo); o pedido e o relatório também (**Abrir em Documentos**).
 
 **Modo Documentos (centro).** `crates/app/src/docs.rs` (estado e lógica pura) e `ui/docs.rs` (pintura). O centro mostra os agentes
 (`panes::draw`) ou os documentos do projeto ativo (`docs::draw`), conforme `Deck::docs.view` (`CenterView`); a chave (`docs::switch`) fica no topo de `ui/sidebar.rs` e, com a barra lateral recolhida, em `ui/titlebar.rs`
