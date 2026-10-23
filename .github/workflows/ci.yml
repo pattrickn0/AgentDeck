@@ -23,7 +23,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Dependências de sistema (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libgtk-3-dev libxkbcommon-dev
+        # Sem GTK: os diálogos usam o xdg-desktop-portal (rfd com `xdg-portal`), não o GTK3.
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
       - name: Formatação
         run: cargo fmt --all -- --check
       - name: Build
@@ -34,3 +35,20 @@ jobs:
         run: cargo test --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  fedora:
+    name: fedora (container)
+    # O GitHub não tem runner de Fedora: um contêiner com as dependências do README. Só build e
+    # testes; formatação e clippy ficam no job acima para não duplicar o desvio de rustfmt da base.
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Dependências de sistema (Fedora)
+        run: dnf install -y gcc gcc-c++ git pkgconf-pkg-config alsa-lib-devel libxkbcommon-devel curl tar gzip
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --workspace --locked
+      - name: Testes
+        run: cargo test --workspace --locked
