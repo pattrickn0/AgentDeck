@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
+use agentdeck_core::{MergeBlock, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 
 use crate::deck::{AttachTarget, Deck, UiMsg};
 
@@ -591,8 +591,14 @@ pub struct TasksUi {
     pub return_open: bool,
     pub feedback: String,
     pub busy: Option<Busy>,
-    /// Erro da última ação (faixa vermelha no detalhe).
+    /// Erro da última ação (faixa vermelha no detalhe) ou, com `notice_info`, o aviso de uma ação que deu certo.
     pub notice: Option<String>,
+    /// O aviso é só informação (a mesclagem passou, mas há o que o usuário precisa saber): faixa neutra.
+    pub notice_info: bool,
+    /// O motivo estruturado da recusa da mesclagem, quando há saída para oferecer num botão.
+    pub notice_block: Option<MergeBlock>,
+    /// A lista completa de arquivos da recusa está aberta ("Ver o que está sem commit").
+    pub notice_files: bool,
     pub form: NewForm,
     /// Muda a cada troca de projeto: respostas de pedidos do projeto anterior são descartadas.
     pub generation: u64,
@@ -618,6 +624,9 @@ impl Default for TasksUi {
             feedback: String::new(),
             busy: None,
             notice: None,
+            notice_info: false,
+            notice_block: None,
+            notice_files: false,
             form: NewForm::default(),
             generation: 0,
             debug_hold: false,
@@ -649,6 +658,8 @@ impl TasksUi {
 pub enum TaskOp {
     Start,
     Merge,
+    /// "Guardar minhas alterações, mesclar e devolvê-las" (`Core::task_merge_assisted` com o stash ligado).
+    MergeStash,
     Validate,
     Discard,
     Return(String),
@@ -660,12 +671,20 @@ impl TaskOp {
         match self {
             TaskOp::Start => "Iniciando…",
             TaskOp::Merge => "Mesclando…",
+            TaskOp::MergeStash => "Guardando e mesclando…",
             TaskOp::Validate => "Validando…",
             TaskOp::Discard => "Descartando…",
             TaskOp::Return(_) => "Devolvendo…",
             TaskOp::Reject(_) => "Reprovando…",
         }
     }
+}
+
+/// O que a mesclagem devolve além da tarefa.
+#[derive(Debug, Default)]
+pub struct MergeExtra {
+    pub block: Option<MergeBlock>,
+    pub note: Option<String>,
 }
 
 /// Respostas das chamadas em segundo plano.
@@ -680,6 +699,8 @@ pub enum TaskReply {
         id: String,
         op: TaskOp,
         result: Box<Result<Task, TaskError>>,
+        /// Só na mesclagem: o motivo da recusa que tem saída, ou o aviso sobre as alterações guardadas.
+        merge: Box<MergeExtra>,
     },
 }
 
@@ -720,7 +741,21 @@ impl Deck {
     pub fn tasks_open_detail(&mut self, id: &str) {
         self.tasks.view = TasksView::Detail(id.to_owned());
         self.tasks_clear_detail_state();
+        self.tasks_clear_notice();
+    }
+
+    /// Tira o aviso da tela, com o motivo da recusa e a lista de arquivos que iam com ele.
+    pub fn tasks_clear_notice(&mut self) {
         self.tasks.notice = None;
+        self.tasks.notice_info = false;
+        self.tasks.notice_block = None;
+        self.tasks.notice_files = false;
+    }
+
+    /// Mostra um erro simples (faixa vermelha, sem botão de saída).
+    fn tasks_set_error(&mut self, msg: String) {
+        self.tasks_clear_notice();
+        self.tasks.notice = Some(msg);
     }
 
     fn tasks_clear_detail_state(&mut self) {
@@ -733,7 +768,7 @@ impl Deck {
     pub fn tasks_back(&mut self) {
         self.tasks.view = TasksView::List;
         self.tasks_clear_detail_state();
-        self.tasks.notice = None;
+        self.tasks_clear_notice();
         self.tasks.history_menu = false;
         self.tasks.form.menu = None;
         self.tasks.form.provider = None;
@@ -767,7 +802,7 @@ impl Deck {
         self.request_models(&kind);
         self.tasks.form.focus_title = true;
         self.tasks.view = TasksView::New;
-        self.tasks.notice = None;
+        self.tasks_clear_notice();
     }
 
     /// Escolheu outro agente no formulário: o modelo e o esforço voltam ao padrão.
@@ -834,19 +869,29 @@ impl Deck {
             return;
         }
         self.tasks.busy = Some(Busy { id: id.clone(), label: op.busy_label() });
-        self.tasks.notice = None;
+        self.tasks_clear_notice();
         self.tasks.confirm = None;
         let (generation, project) = (self.tasks.generation, self.active_project.clone());
         self.spawn_bg("task-op", move |core| {
+            let mut merge = Box::new(MergeExtra::default());
             let result = Box::new(match &op {
                 TaskOp::Start => core.task_start(&project, &id),
-                TaskOp::Merge => core.task_merge(&project, &id),
+                TaskOp::Merge | TaskOp::MergeStash => match core.task_merge_assisted(&project, &id, matches!(op, TaskOp::MergeStash)) {
+                    Ok(done) => {
+                        merge.note = done.note;
+                        Ok(done.task)
+                    }
+                    Err(refusal) => {
+                        merge.block = refusal.block;
+                        Err(refusal.error)
+                    }
+                },
                 TaskOp::Validate => core.task_validate(&project, &id),
                 TaskOp::Discard => core.task_discard(&project, &id),
                 TaskOp::Return(feedback) => core.task_return(&project, &id, feedback),
                 TaskOp::Reject(feedback) => core.task_reject(&project, &id, feedback),
             });
-            Some(UiMsg::Tasks(generation, TaskReply::Done { id, op, result }))
+            Some(UiMsg::Tasks(generation, TaskReply::Done { id, op, result, merge }))
         });
     }
 
@@ -869,10 +914,22 @@ impl Deck {
             }
             TaskAct::GoToTab | TaskAct::ReopenTab => {
                 if let Err(e) = self.open_task_tab(&task) {
-                    self.tasks.notice = Some(e);
+                    self.tasks_set_error(e);
                 }
             }
         }
+    }
+
+    /// "Guardar minhas alterações, mesclar e devolvê-las" no aviso da recusa: sem outra confirmação, o clique já é o pedido.
+    pub fn tasks_merge_stash(&mut self, id: &str) {
+        self.tasks_run(id.to_owned(), TaskOp::MergeStash);
+    }
+
+    /// "Pedir ao agente para fazer o commit" / "…resolver o conflito": devolve a tarefa com o pedido pronto do motivo da recusa.
+    pub fn tasks_ask_agent(&mut self, id: &str) {
+        let Some(task) = self.tasks.task(id) else { return };
+        let Some(feedback) = self.tasks.notice_block.as_ref().and_then(|b| b.return_feedback(task)) else { return };
+        self.tasks_run(id.to_owned(), TaskOp::Return(feedback));
     }
 
     /// O "sim" do painel de confirmação.
@@ -941,14 +998,22 @@ impl Deck {
                     }
                 }
             }
-            TaskReply::Done { id, op, result } => {
+            TaskReply::Done { id, op, result, merge } => {
                 if self.tasks.busy.as_ref().is_some_and(|b| b.id == id) {
                     self.tasks.busy = None;
                 }
                 match *result {
                     Ok(task) => {
                         upsert(&mut self.tasks.tasks, task);
-                        self.tasks.notice = None;
+                        self.tasks_clear_notice();
+                        // A mesclagem passou, mas há o que dizer sobre as alterações guardadas (voltaram, ou ficaram no stash).
+                        if let Some(note) = merge.note {
+                            if self.tasks.view != TasksView::Detail(id.clone()) {
+                                self.tasks_open_detail(&id);
+                            }
+                            self.tasks.notice = Some(note);
+                            self.tasks.notice_info = true;
+                        }
                         if matches!(op, TaskOp::Return(_) | TaskOp::Reject(_)) {
                             self.tasks.return_open = false;
                             self.tasks.feedback.clear();
@@ -962,6 +1027,7 @@ impl Deck {
                             self.tasks_open_detail(&id);
                         }
                         self.tasks.notice = Some(e.message().to_owned());
+                        self.tasks.notice_block = merge.block;
                     }
                 }
                 self.tasks_refresh();

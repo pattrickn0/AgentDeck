@@ -7,7 +7,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, StartOptions, Task, TaskStatus};
+use agentdeck_core::{Config, Core, MergeBlock, StartOptions, Task, TaskStatus};
 
 use crate::deck::Deck;
 use crate::docs::{CenterView, DiffDoc, DocState};
@@ -328,6 +328,66 @@ fn a_refused_merge_shows_the_core_message_and_discard_asks_first() {
     assert_eq!(t.status, TaskStatus::Discarded);
     assert!(!t.worktree.exists());
     assert!(env.deck.tasks.notice.is_none(), "o aviso antigo sumiu com a nova operação");
+}
+
+#[test]
+fn a_refused_merge_offers_the_way_out_in_the_notice() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes", |d| d.initialized);
+    let id = env.create_from_form("Saídas da recusa", true);
+    env.pump("a aba", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+    env.agent_commits(&id, "x.txt", "x\n");
+    env.core.task_done(&env.project(), &id, "Feito.").expect("done");
+    env.pump("revisão", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
+
+    // Alterações do usuário na pasta principal: o aviso traz o motivo e "Guardar minhas alterações e mesclar".
+    std::fs::write(env.ws.join("a.txt"), "mudou\n").expect("w");
+    env.deck.tasks_act(&id, TaskAct::Merge);
+    env.deck.tasks_confirm_accepted();
+    env.pump("a recusa", |d| d.tasks.busy.is_none());
+    assert_eq!(env.deck.tasks.notice_block, Some(MergeBlock::MainDirty(vec!["a.txt".into()])));
+    assert!(env.deck.tasks.notice.is_some() && !env.deck.tasks.notice_info);
+    // "Pedir ao agente" não vale para o que é do usuário.
+    env.deck.tasks_ask_agent(&id);
+    assert!(env.deck.tasks.busy.is_none() && env.task(&id).status == TaskStatus::Review);
+    // O clique guarda, mescla e devolve: o aviso passa a ser a nota (informação, sem motivo), a tarefa vai a validação.
+    env.deck.tasks_merge_stash(&id);
+    assert!(env.deck.tasks.busy.is_some() && env.deck.tasks.notice.is_none() && env.deck.tasks.notice_block.is_none());
+    env.pump("guardar e mesclar", |d| d.tasks.busy.is_none());
+    assert_eq!(env.task(&id).status, TaskStatus::Validating);
+    assert!(env.ws.join("x.txt").exists(), "a mesclagem trouxe o arquivo");
+    // (o git do usuário pode converter as quebras de linha ao devolver)
+    let back = std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt");
+    assert_eq!(back.replace("\r\n", "\n"), "mudou\n", "a alteração do usuário voltou");
+    let note = env.deck.tasks.notice.clone().expect("nota");
+    assert!(env.deck.tasks.notice_info && env.deck.tasks.notice_block.is_none() && note.contains("voltaram"), "{note}");
+
+    // Reprovada e entregue de novo, com trabalho esquecido na pasta da tarefa: "Pedir ao agente para fazer o commit".
+    git(&env.ws, &["checkout", "-q", "--", "a.txt"]);
+    env.deck.tasks_act(&id, TaskAct::Reject);
+    env.deck.tasks.feedback = "Ajuste.".into();
+    env.deck.tasks_send_return(&id);
+    env.pump("a reprovação", |d| d.tasks.busy.is_none());
+    env.agent_commits(&id, "y.txt", "y\n");
+    std::fs::write(env.task(&id).worktree.join("esqueci.txt"), "z\n").expect("w");
+    env.core.task_done(&env.project(), &id, "De novo.").expect("done");
+    env.pump("revisão 2", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
+    env.deck.tasks_act(&id, TaskAct::Merge);
+    env.deck.tasks_confirm_accepted();
+    env.pump("a recusa 2", |d| d.tasks.busy.is_none());
+    assert_eq!(env.deck.tasks.notice_block, Some(MergeBlock::TaskDirty(vec!["esqueci.txt".into()])));
+    assert!(!env.deck.tasks.notice_info);
+    env.deck.tasks_ask_agent(&id);
+    assert!(env.deck.tasks.busy.is_some() && env.deck.tasks.notice_block.is_none(), "limpa o aviso e devolve");
+    env.pump("devolver", |d| d.tasks.busy.is_none());
+    let back = env.task(&id);
+    assert_eq!(back.status, TaskStatus::Running);
+    assert!(back.events.iter().any(|e| e.text.contains("devolvida ao agente")), "{:?}", back.events);
+    assert!(env.deck.tasks.notice.is_none());
 }
 
 #[test]

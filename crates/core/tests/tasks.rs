@@ -895,7 +895,10 @@ fn stash_and_merge_refuses_before_touching_anything_when_a_new_file_of_the_user_
     std::fs::write(env.ws.join("feature.txt"), "meu\n").expect("w");
     std::fs::write(env.ws.join("a.txt"), "mudei\n").expect("w");
     let refusal = core.task_merge_assisted(&env.project, &t.id, true).expect_err("recusa");
-    assert!(matches!(&refusal.error, TaskError::Conflict(m) if m.contains("arquivos novos seus") && m.contains("feature.txt")), "{refusal:?}");
+    assert!(
+        matches!(&refusal.error, TaskError::Conflict(m) if m.contains("arquivos novos seus") && m.contains("feature.txt")),
+        "{refusal:?}"
+    );
     assert_eq!(refusal.block, None, "não há botão: o arquivo é do usuário e o stash não o leva");
     assert!(stash_list(&env.ws).is_empty(), "nada foi guardado");
     assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "mudei\n");

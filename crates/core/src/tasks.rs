@@ -1401,16 +1401,25 @@ impl Core {
         if stash_main && !dirty.is_empty() {
             match stash_push(&repo, &task) {
                 Ok(s) => stashed = s,
-                Err(e) => return Err(refuse(&task, format!("não consegui guardar as alterações do repositório principal ({e}); nada foi mudado"))),
+                Err(e) => {
+                    return Err(refuse(
+                        &task,
+                        format!("não consegui guardar as alterações do repositório principal ({e}); nada foi mudado"),
+                    ))
+                }
             }
             if stashed.is_some() {
-                self.update_task(project, &task.id, |t| t.log(format!("guardei {} arquivo(s) sem commit do repositório principal no stash", dirty.len())));
+                self.update_task(project, &task.id, |t| {
+                    t.log(format!("guardei {} arquivo(s) sem commit do repositório principal no stash", dirty.len()))
+                });
             }
         }
         let give_back = || -> Option<String> {
             let stash = stashed.as_ref()?;
             let (note, kept) = stash_pop(&repo, stash);
-            self.update_task(project, &task.id, |t| t.log(format!("alterações guardadas: {}", if kept { "continuam no stash" } else { "devolvidas" })));
+            self.update_task(project, &task.id, |t| {
+                t.log(format!("alterações guardadas: {}", if kept { "continuam no stash" } else { "devolvidas" }))
+            });
             Some(note)
         };
 
@@ -1481,7 +1490,11 @@ impl Core {
                             format!(
                                 "conflito ao mesclar e não consegui desfazer ({abort}): rode git merge --abort em {}{}",
                                 repo.root.display(),
-                                if stashed.is_some() { "; as suas alterações sem commit continuam guardadas (git stash list)" } else { "" }
+                                if stashed.is_some() {
+                                    "; as suas alterações sem commit continuam guardadas (git stash list)"
+                                } else {
+                                    ""
+                                }
                             ),
                         )
                         .into()),
@@ -1929,9 +1942,20 @@ fn stash_pop_conflicts(repo: &Repo, sha: &str) -> Option<Vec<String>> {
 /// e se o stash continua guardado.
 fn stash_pop(repo: &Repo, stash: &Stash) -> (String, bool) {
     let recover = "Para recuperá-las: abra um terminal na pasta do projeto, rode git stash list para achar a entrada e git stash pop para devolvê-la (resolvendo o que chocar).";
-    let kept = |why: String| (format!("Suas alterações sem commit continuam guardadas no stash do git (\"{}\"): {why} Nada se perdeu. {recover}", stash.message), true);
+    let kept = |why: String| {
+        (
+            format!(
+                "Suas alterações sem commit continuam guardadas no stash do git (\"{}\"): {why} Nada se perdeu. {recover}",
+                stash.message
+            ),
+            true,
+        )
+    };
     let Some(reference) = stash_ref(repo, &stash.sha) else {
-        return ("O stash com as suas alterações não está mais na lista do git (alguém o usou ou apagou?); confira com git stash list.".into(), true);
+        return (
+            "O stash com as suas alterações não está mais na lista do git (alguém o usou ou apagou?); confira com git stash list.".into(),
+            true,
+        );
     };
     match stash_pop_conflicts(repo, &stash.sha) {
         Some(files) if files.is_empty() => {}
