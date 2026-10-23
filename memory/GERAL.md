@@ -13,6 +13,7 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 | [pendencias.md](pendencias.md) | quiser saber o que falta desenvolver, na ordem em que será feito, por área, e o que está adiado |
 | [historico.md](historico.md) | quiser saber o que já foi feito (o destino de todo item concluído de pendencias.md) |
 | [testes.md](testes.md) | for testar à mão, no Windows, com os agentes reais (roteiro com caixas de marcar) |
+| [LINUX.md](LINUX.md) | for compilar, rodar ou testar no Linux (Ubuntu e Fedora) e quiser saber o que já foi verificado e o que falta |
 
 ---
 
@@ -327,6 +328,7 @@ Cada documento cuida de um assunto. Mudou o assunto? Atualize o documento **no m
 | `memory/pendencias.md` | o que falta desenvolver: o bloco "Próximo" no topo e depois por área, com os adiados no fim | item concluído sai de `pendencias.md` e vai para `historico.md` com uma linha do que foi feito; limitação nova vira item; só desenvolvimento (testes manuais ficam em `testes.md`); o arquivo não guarda `[x]` |
 | `memory/historico.md` | o que já foi feito, do mais recente para o mais antigo (inclui a auditoria de 15/10) | só recebe o que saiu de `pendencias.md`; o texto de cada entrada fica como foi escrito na época |
 | `memory/testes.md` | roteiro de testes manuais (Windows, agentes reais), por área (as mesmas de `pendencias.md`) | marcar `[x]` o que passou; o que falhar vira item em `pendencias.md`; funcionalidade nova que só dá para validar à mão ganha um item na área dela; função removida leva os itens dela embora |
+| `memory/LINUX.md` | dependências, o que foi verificado e o roteiro manual do Linux (Ubuntu e Fedora) | atualizar no mesmo commit em que mudar dependência de sistema, caminho de fonte/pasta de dados ou suporte a GPU; falha de Linux vira item em `pendencias.md` |
 | `README.md` (raiz) | apresentação, como compilar e rodar, exemplos de `ask-agent` | fica na raiz porque o GitHub mostra na página do repositório |
 | `CONTRIBUTING.md` (raiz) | como contribuir e os **princípios do projeto** | rodar `cargo fmt`, `clippy -D warnings` e `cargo test` antes do PR; privacidade; UI nunca trava; textos em pt-BR. Fica na raiz porque o GitHub o mostra ao abrir PRs |
 | `AGENTS.md` (raiz) e `workspace/AGENTS.md` | instruções lidas pelos CLIs de agentes | **gerados pelo app**: o bloco entre `<!-- agentdeck:start -->` e `<!-- agentdeck:end -->` é reescrito a cada início; edite só fora dele. Ficam na raiz da pasta de trabalho porque é lá que os CLIs os procuram |

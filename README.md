@@ -60,23 +60,35 @@ Pré-requisito: [Rust](https://rustup.rs) 1.89 ou mais novo e as bibliotecas de 
 
 ```bash
 # Ubuntu / Debian
-sudo apt install build-essential pkg-config libasound2-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 libgl1
+sudo apt install build-essential pkg-config libasound2-dev libxkbcommon-dev
 # Fedora
-sudo dnf install gcc pkgconf-pkg-config alsa-lib-devel gtk3-devel libxkbcommon-devel libxkbcommon-x11 mesa-libGL
+sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel libxkbcommon-devel
 
 cargo build --workspace --release
 ./target/release/agentdeck
 ```
 
+Não há pacote nem instalador: o app roda da pasta onde foi compilado (ou de uma pasta portátil para onde você copie
+o executável e as pastas dele).
+
 - Sem som nem microfone (dispensa a ALSA): `cargo build -p agentdeck --no-default-features --release`.
+- Para abrir pastas e links e escolher arquivos, o sistema precisa do `xdg-utils` (`xdg-open`), do `xdg-desktop-portal`
+  e de um backend (`xdg-desktop-portal-gtk` no GNOME/XFCE, `xdg-desktop-portal-kde` no KDE). Sem o portal, os
+  diálogos de arquivo não abrem.
 - Os três executáveis ficam juntos em `target/release/`; para usar o `ask-agent` fora do app, ponha essa pasta no
-  `PATH` (dentro das abas o app já resolve). As pastas `dados/`, `workspace/` e `whisper/` seguem a mesma regra do
-  Windows (ou `AGENTDECK_HOME`). Configuração em `~/.config/AgentDeck/config.json`.
-- Ditado: o motor de CPU e o modelo são baixados sozinhos; para usar a GPU, deixe no `PATH` um `whisper-cli`
-  compilado com CUDA ou Vulkan.
+  `PATH` (dentro das abas o app já resolve).
+- Os dados (`dados/`, `workspace/` e `whisper/`) ficam ao lado do executável, como no Windows, ou em
+  `AGENTDECK_HOME`. Se essa pasta não for gravável (app instalado em `/usr/local/bin`, por exemplo), vão para
+  `~/.local/share/AgentDeck`. Configuração em `~/.config/AgentDeck/config.json`.
+- Ditado: o motor de CPU e o modelo são baixados sozinhos (os binários do Linux pedem `libgomp` e `libstdc++`, que
+  já vêm nas instalações desktop). Para usar a GPU, deixe no `PATH` um `whisper-cli` compilado com CUDA ou Vulkan;
+  o app não baixa esses motores no Linux. `pciutils` (`lspci`) e `nvidia-smi` ajudam a detectar a GPU.
 - CLIs: os mesmos `npm install -g …` acima; Antigravity e Ollama têm instalador de Linux nos sites
   (https://antigravity.google, https://ollama.com/download).
-- Testado em X11 (Ubuntu). Wayland é suportado pela biblioteca de janelas, mas ainda não foi testado.
+- Testado em X11 (Ubuntu). Wayland é suportado pela biblioteca de janelas, mas ainda não foi validado a fundo; se a
+  janela não abrir, force o X11 com `WINIT_UNIX_BACKEND=x11 ./target/release/agentdeck`.
+- O Fedora é verificado na CI (build e testes num contêiner). O roteiro de verificação e as limitações conhecidas
+  estão em [`memory/LINUX.md`](memory/LINUX.md).
 
 ## Comunicação entre agentes
 
