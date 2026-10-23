@@ -103,7 +103,8 @@ pub fn start() -> Env {
 pub fn start_with(tab_delivery: bool, repo: bool) -> Env {
     isolated_config();
     let tmp = tempfile::tempdir().expect("tmp");
-    let root = tmp.path().to_path_buf();
+    // Nome longo: no runner Windows da CI o TEMP vem curto (`RUNNER~1`) e o git devolve o longo (`runneradmin`).
+    let root = agentdeck_core::util::strip_verbatim(&std::fs::canonicalize(tmp.path()).expect("canonicalize"));
     install_fake_agent(&root, "claude");
     install_fake_agent(&root, "aider");
     let config = Config::with_project(root.join("ws"));
