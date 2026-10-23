@@ -555,8 +555,94 @@ fn a_failed_merge_keeps_the_agent_terminal_in_the_worktree_after_a_restart() {
     assert_eq!((failed.status, failed.report.is_some()), (TaskStatus::Failed, true));
     let ident = Ident::parse("claude@t1").expect("id");
     assert!(same_path(&core.spawn_spec_for(&project, &ident).expect("spec").cwd, &t.worktree), "na worktree, não no repositório principal");
+    // Uma tarefa que ficou em Failed com relatório (versão anterior) não é beco: pode ser devolvida ao agente.
+    let back = core.task_return(&project, "t1", "Ajuste isto.").expect("return");
+    assert_eq!(back.status, TaskStatus::Running);
     core.shutdown();
     drop(_tmp);
+}
+
+#[test]
+fn a_merge_that_fails_for_an_external_reason_leaves_the_task_in_review() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Mesclagem externa", "feature.txt");
+    // Um arquivo sem rastreio na pasta principal que a branch também traz: o git recusa sobrescrevê-lo
+    // (falha que não é conflito).
+    std::fs::write(env.ws.join("feature.txt"), "meu\n").expect("w");
+    match core.task_merge(&env.project, &t.id) {
+        Err(TaskError::Failed(m)) => assert!(m.contains("a mesclagem falhou"), "{m}"),
+        other => panic!("esperava falha da mesclagem, veio {other:?}"),
+    }
+    let now = core.task(&env.project, &t.id).expect("task");
+    assert_eq!(now.status, TaskStatus::Review, "{now:?}");
+    assert!(now.events.iter().any(|e| e.text.contains("erro: a mesclagem falhou")), "{:?}", now.events);
+    assert!(now.worktree.is_dir() && branches(&env.ws).contains(&now.branch));
+    // Sai do beco pelos dois lados: devolver ao agente...
+    let back = core.task_return(&env.project, &t.id, "Tente outro nome de arquivo.").expect("return");
+    assert_eq!(back.status, TaskStatus::Running);
+    core.task_done(&env.project, &t.id, "Feito de novo.").expect("done");
+    // ...ou mesclar de novo, depois de tirar o obstáculo ("Tentar de novo").
+    std::fs::remove_file(env.ws.join("feature.txt")).expect("rm");
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
+    core.shutdown();
+}
+
+/// Insere uma linha dentro do bloco do app no AGENTS.md (o que o app faz quando as instruções mudam).
+fn rewrite_app_block(agents_md: &std::path::Path) -> String {
+    let text = std::fs::read_to_string(agents_md).expect("AGENTS.md");
+    assert!(text.contains(agentdeck_core::workspace::MARKER_START), "{text}");
+    let new = text.replacen(agentdeck_core::workspace::MARKER_START, &format!("{}\nlinha nova do app", agentdeck_core::workspace::MARKER_START), 1);
+    std::fs::write(agents_md, &new).expect("w");
+    new
+}
+
+#[test]
+fn merge_works_when_only_the_app_block_of_agents_md_changed_and_the_branch_touches_it() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = core.task_create(&env.project, spec("Mexe no AGENTS")).expect("create");
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    let theirs = std::fs::read_to_string(t.worktree.join("AGENTS.md")).expect("AGENTS.md da worktree");
+    commit_file(&t.worktree, "AGENTS.md", &format!("# Regra da tarefa\n\n{theirs}"), "docs: regra no AGENTS.md");
+    core.task_done(&env.project, &t.id, "Mexi no AGENTS.md.").expect("done");
+    // Enquanto isso o app reescreveu o bloco dele na pasta principal, sem commit.
+    let agents_md = env.ws.join("AGENTS.md");
+    rewrite_app_block(&agents_md);
+
+    let merged = core.task_merge(&env.project, &t.id).expect("merge");
+    assert_eq!(merged.status, TaskStatus::Validating);
+    let after = std::fs::read_to_string(&agents_md).expect("AGENTS.md");
+    assert!(after.starts_with("# Regra da tarefa"), "a mudança da branch entrou: {after}");
+    assert!(after.contains("linha nova do app"), "o bloco do app continua: {after}");
+    assert_eq!(after.matches(agentdeck_core::workspace::MARKER_START).count(), 1, "{after}");
+    core.shutdown();
+}
+
+#[test]
+fn merge_refuses_to_discard_user_edits_in_agents_md_that_the_branch_touches() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = core.task_create(&env.project, spec("Mexe no AGENTS")).expect("create");
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    let theirs = std::fs::read_to_string(t.worktree.join("AGENTS.md")).expect("AGENTS.md da worktree");
+    commit_file(&t.worktree, "AGENTS.md", &format!("# Regra da tarefa\n\n{theirs}"), "docs: regra no AGENTS.md");
+    core.task_done(&env.project, &t.id, "Mexi no AGENTS.md.").expect("done");
+    // O usuário editou o texto fora do bloco do app.
+    let agents_md = env.ws.join("AGENTS.md");
+    let mine = format!("# Minha regra\n\n{}", rewrite_app_block(&agents_md));
+    std::fs::write(&agents_md, &mine).expect("w");
+
+    match core.task_merge(&env.project, &t.id) {
+        Err(TaskError::Conflict(m)) => assert!(m.contains("AGENTS.md") && m.contains("sem commit"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(std::fs::read_to_string(&agents_md).expect("AGENTS.md"), mine, "nada foi descartado");
+    assert_eq!(core.task(&env.project, &t.id).expect("task").status, TaskStatus::Review);
+    core.shutdown();
 }
 
 #[test]

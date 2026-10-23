@@ -970,7 +970,10 @@ impl Deck {
             tab.busy = false;
             tab.done = false;
             for q in tab.queue.drain() {
-                if q.request != 0 {
+                if q.answer {
+                    log::warn!("resposta atrasada #{} para \"{}\" perdida: a aba encerrou antes de recebê-la", q.request, tab.ident.id());
+                    self.core.answer_lost(&tab.project, q.request, "a aba encerrou antes de recebê-la");
+                } else if q.request != 0 {
                     self.core.fail_delivery(q.request, "a aba encerrou antes de receber a mensagem");
                 }
             }
@@ -983,8 +986,12 @@ impl Deck {
             let Some(since) = self.tabs[i].queue.front_since() else { continue };
             match delivery::gate(&self.tab_state(i), since, now) {
                 Gate::Fail => {
-                    for q in self.tabs[i].queue.drain() {
-                        if q.request != 0 {
+                    let tab = &mut self.tabs[i];
+                    for q in tab.queue.drain() {
+                        if q.answer {
+                            log::warn!("resposta atrasada #{} perdida: a aba não está rodando", q.request);
+                            self.core.answer_lost(&tab.project, q.request, "a aba não estava rodando");
+                        } else if q.request != 0 {
                             self.core.fail_delivery(q.request, "a aba não está rodando");
                         }
                     }
@@ -1003,6 +1010,9 @@ impl Deck {
                                 prompt.push_str(&notice);
                             }
                             self.submit(i, &prompt);
+                            if q.answer {
+                                self.core.answer_typed(q.request);
+                            }
                             want(now + FIRST_ENTER);
                         }
                     }
@@ -1164,7 +1174,10 @@ impl Deck {
                 Some(i) if self.tabs[i].alive && self.tabs[i].kind != "shell" => {
                     self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: true })
                 }
-                _ => log::info!("resposta atrasada para \"{id}\" descartada: a aba não está aberta"),
+                _ => {
+                    log::warn!("resposta atrasada #{} para \"{id}\" descartada: a aba não está aberta", d.request);
+                    self.core.answer_lost(&d.project, d.request, "a aba não estava aberta");
+                }
             }
             return;
         }
@@ -1532,7 +1545,10 @@ impl Deck {
         let mut tab = self.tabs.remove(idx);
         tab.session.kill();
         for q in tab.queue.drain() {
-            if q.request != 0 {
+            if q.answer {
+                log::warn!("resposta atrasada #{} perdida: a aba foi fechada antes de recebê-la", q.request);
+                self.core.answer_lost(&tab.project, q.request, "a aba foi fechada antes de recebê-la");
+            } else if q.request != 0 {
                 self.core.fail_delivery(q.request, "a aba foi fechada antes de receber a mensagem");
             }
         }

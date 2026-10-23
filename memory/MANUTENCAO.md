@@ -77,7 +77,7 @@ crates/
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
 │   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas), anexos e arquivos soltos
 │   ├── audio.rs      som de notificação e microfone (cpal)
-│   ├── crash.rs      registro de quedas em dados/crash.log; smoke.rs, a captura de tela (AGENTDECK_SMOKE)
+│   ├── crash.rs      registro de quedas em dados/crash.log; logfile.rs, o log do app em dados/agentdeck.log; smoke.rs, a captura de tela (AGENTDECK_SMOKE)
 │   └── ui/           mod.rs (pintura, modais)
 │       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
 │       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾; pinta uma lista de `Item`, serve às abas dos agentes e às dos documentos)

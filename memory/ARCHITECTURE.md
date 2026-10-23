@@ -71,6 +71,7 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `GET /team` | `{"id","boss","crew","models"}`: a posição de quem chama na equipe (só token de aba); `models` traz o modelo de quem aparece na resposta |
 | `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido, profundidade `>= 2`, `model` fora de `[A-Za-z0-9:._/#@+-]{1,128}` ou agente que não escolhe modelo (`o agente X não aceita escolher modelo`); 404 para `reply_to` que não está pendente; 409 para ciclo de espera ou para `model` diferente do da instância já aberta (`claude@dev já está aberta com sonnet; use --new para abrir outra com opus`); 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
 | `POST /learn` | `{"paths": [...]}` (até 50 caminhos; vazio = sem arquivos) → `{"text"}`: o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos (`ask-agent --learn`); sem caminhos, os globais por inteiro e o índice dos demais; 400 se não acha o repositório do projeto (ver "Memória em duas camadas") |
+| `GET /inbox`, `GET /inbox?all=1` | `{"answers":[{"request","from","text","failed","ts","delivered"}]}`: as respostas que o chamador recebeu (só token de aba; 400 com o mestre). Sem `all`, as ainda não entregues; com `all`, as 20 últimas. Ler marca todas como entregues (`ask-agent --inbox`) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
 | `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
@@ -88,7 +89,7 @@ os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Ped
 mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e memória em
 processo no Ollama.
 
-**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
+**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
@@ -376,6 +377,8 @@ visível é redimensionada para a sua janela (`fit_tab`, com o debounce de 60 ms
 até aparecerem. O retrato das janelas do último quadro (`Deck::panes`) serve aos atalhos (Ctrl+Tab dentro da
 janela, Ctrl+Alt+setas) e ao tamanho inicial das abas novas. Ordem, proporções e liga/desliga ficam em
 `Config` (`paneOrder`, `splitRows`, `splitCols`, `splitEnabled`).
+
+**Caixa de entrada de respostas** (`core/src/inbox.rs`, `CoreInner::inbox`). Todo desfecho de uma pergunta a uma aba (resposta no prazo, atrasada ou falha) entra, ainda "não entregue", na caixa de quem perguntou (chave com o projeto, até 20, na memória). Quem entrega marca depois: a ponte, quando o 200 do `/ask` (que leva `"request"` no corpo) foi escrito sem erro (`reply_checked`), e a interface, quando digita a resposta atrasada (`Core::answer_typed`, no laço de entregas de `deck.rs`). Se a entrega no terminal falha (aba fechada, encerrada, parada, ou a conexão já abandonada), `Core::answer_lost` põe um aviso de erro na Conversa integrada e a resposta continua em `ask-agent --inbox`. O app também grava o log em `dados/agentdeck.log` (`app/src/logfile.rs`).
 
 **Perguntas com resposta atrasada.** Uma pergunta com resposta atrasada (`detached`: o `ask-agent` já voltou
 com 202) não entra na detecção de ciclos (quem perguntou não está bloqueado), mas continua contando na

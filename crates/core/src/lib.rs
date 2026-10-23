@@ -22,6 +22,7 @@ pub mod exchange;
 pub mod git;
 pub mod github;
 pub mod headless;
+pub mod inbox;
 pub mod instances;
 pub mod learnings;
 pub mod models;
@@ -120,6 +121,8 @@ pub(crate) struct CoreInner {
     pub instances: Mutex<HashMap<String, instances::Instances>>,
     /// Perguntas aguardando resposta entre abas (chaves com escopo: `instances::scoped`).
     pub exchange: exchange::Exchange,
+    /// Respostas recebidas por cada instância que perguntou (`ask-agent --inbox`).
+    pub inbox: inbox::Inbox,
     /// Última atividade de cada aba (chave com escopo); o prazo de uma pergunta conta a partir dela.
     pub activity: activity::Activity,
     /// Projetos fora do ativo cujo AGENTS.md já foi escrito nesta sessão (na primeira aba deles).
@@ -274,6 +277,7 @@ impl Core {
             headless_sessions: Mutex::new(HashMap::new()),
             instances: Mutex::new(HashMap::new()),
             exchange: exchange::Exchange::default(),
+            inbox: inbox::Inbox::default(),
             activity: activity::Activity::default(),
             context_written: Mutex::new(HashSet::new()),
             tab_delivery: std::sync::atomic::AtomicBool::new(false),
@@ -570,6 +574,20 @@ impl Core {
     /// A entrega não pôde ser feita (aba morreu, não subiu…): libera quem espera.
     pub fn fail_delivery(&self, request: u64, reason: &str) {
         self.inner.exchange.fail(request, reason);
+    }
+
+    /// A interface digitou no terminal de quem perguntou a resposta atrasada da pergunta `request`.
+    pub fn answer_typed(&self, request: u64) {
+        self.inner.inbox.mark_delivered(request);
+    }
+
+    /// A resposta da pergunta `request` não chegou a quem perguntou (`why`: a aba fechou, a conexão foi
+    /// abandonada…). Ela continua em `ask-agent --inbox`; a Conversa integrada do projeto avisa.
+    pub fn answer_lost(&self, project: &str, request: u64, why: &str) {
+        let Some((asker, entry)) = self.inner.inbox.find(request) else { return };
+        let asker = instances::unscoped(&asker).1;
+        let text = format!("A resposta #{request} para {asker} não foi digitada: {why}; ela fica em ask-agent --inbox.");
+        self.feed(FeedEntry::new(FeedKind::Error, Some(&entry.from), Some(asker), text).in_project(project));
     }
 
     /// Ids das instâncias abertas em todos os projetos, sem o projeto e sem repetição (o

@@ -98,7 +98,7 @@ pub struct Config {
     // --- Layout (novidade da versão Rust; a versão Electron guardava só em CSS) ---
     pub sidebar_width: f32,
     pub sidebar_collapsed: bool,
-    /// Largura da barra lateral direita (Conversa integrada + compositor); 0 = padrão. Ela não
+    /// Largura da barra lateral direita (Conversa integrada); 0 = padrão. Ela não
     /// recolhe. (Substitui `bottomHeight`/`feedCollapsed` do antigo painel de baixo, ignorados ao ler.)
     pub right_panel_width: f32,
     /// Tela dividida: uma janela por tipo de agente (desligada = uma aba por vez).
@@ -109,8 +109,8 @@ pub struct Config {
     pub ollama_host: String,
     /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
     pub auto_open_agent_tabs: bool,
-    /// Com o terminal focado, Ctrl+L e Ctrl+B são do app (focar a mensagem / barra lateral) em vez
-    /// de irem ao terminal (limpar a tela / prefixo do tmux). Ctrl+T é sempre do app.
+    /// Com o terminal focado, Ctrl+B é do app (barra lateral) em vez de ir ao terminal (prefixo
+    /// do tmux); desligado, vai ao terminal. Ctrl+T é sempre do app.
     pub app_shortcuts_first: bool,
     /// Modelo padrão das instâncias novas, por `modelo@cargo` (`claude@dev`) ou só por `modelo`
     /// (`opencode`); o `modelo@cargo` vale mais. Sem entrada, vale o padrão do próprio CLI.
