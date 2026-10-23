@@ -196,6 +196,10 @@ pub const TITLEBAR_H: f32 = 32.0;
 pub const ISLAND_GAP: f32 = 6.0;
 /// Cantos arredondados das ilhas.
 pub const ISLAND_RADIUS: u8 = 10;
+/// Janela do agente selecionado (Dividida e Destaque): halo de 3 px na cor do agente (a 18%)...
+pub const PANE_HALO_W: f32 = 3.0;
+/// ...e o conteúdo das outras janelas a 62% de opacidade (voltam a 100% com o mouse em cima).
+pub const PANE_DIM_OPACITY: f32 = 0.62;
 /// Cabeçalho da barra direita (abas Tarefas/Conversa/Git/GitHub).
 pub const TOPBAR_H: f32 = 32.0;
 pub const SIDEBAR_DEFAULT_W: f32 = 220.0;

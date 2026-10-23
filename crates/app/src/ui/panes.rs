@@ -14,6 +14,7 @@ use crate::icons::Icon;
 use crate::split;
 use crate::terminal::view::{self, Metrics};
 use crate::theme;
+use agentdeck_core::Organization;
 
 /// Altura do cabeçalho de abas de cada janela.
 pub const HEAD_H: f32 = 30.0;
@@ -59,13 +60,17 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     let Some(metrics) = deck.metrics.clone() else { return };
     let (shape, plans) = deck.plan_panes(area);
     let multi = plans.len() > 1;
+    // No Destaque a janela 0 é a grande; as outras são as pequenas, com o botão de trazer.
+    let highlight = multi && deck.organization == Organization::Highlight;
     let focused_pane = deck.active.and_then(|a| plans.iter().position(|p| p.tabs.contains(&a)));
 
     let mut clicks = Vec::new();
     for (slot, plan) in plans.iter().enumerate() {
-        draw_pane(deck, ui, plan, slot, focused_pane == Some(slot), multi, &metrics, &mut clicks);
+        draw_pane(deck, ui, plan, slot, focused_pane == Some(slot), Mode { multi, highlight }, &metrics, &mut clicks);
     }
-    if multi {
+    if highlight {
+        highlight_divider(deck, ui, area, &plans);
+    } else if multi {
         dividers(deck, ui, area, &shape, &plans);
         drag_overlay(deck, ui);
     }
@@ -96,8 +101,18 @@ fn focus(deck: &mut Deck, ui: &Ui, idx: usize) {
     deck.new_tab_menu_open = false;
 }
 
+/// Como as janelas deste quadro se arrumam.
+#[derive(Clone, Copy)]
+struct Mode {
+    /// Há mais de uma janela (o realce e a alça só existem então).
+    multi: bool,
+    /// Destaque: a janela 0 é a grande e as outras têm o botão "Trazer para o destaque".
+    highlight: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
-fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused: bool, multi: bool, m: &Metrics, clicks: &mut Vec<Click>) {
+fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused: bool, mode: Mode, m: &Metrics, clicks: &mut Vec<Click>) {
+    let Mode { multi, highlight } = mode;
     let ctx = ui.ctx().clone();
     let head = Rect::from_min_size(plan.rect.min, Vec2::new(plan.rect.width(), HEAD_H));
     let body = pane_body(plan.rect);
@@ -109,7 +124,7 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
 
     // ---------- Alça (arrastar sobre outra janela troca as duas de lugar) ----------
     let mut x0 = head.min.x;
-    if multi {
+    if multi && !highlight {
         let grip = Rect::from_min_size(head.min, Vec2::new(GRIP_W, HEAD_H - 1.0));
         let r = ui.interact(grip, Id::new(("pane-grip", &group)), Sense::drag());
         let dragging = deck.pane_drag == Some(slot);
@@ -138,9 +153,13 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     let plus = Rect::from_min_size(Pos2::new(head.max.x - 6.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
     let attach = Rect::from_min_size(Pos2::new(plus.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
     let mic = Rect::from_min_size(Pos2::new(attach.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
+    // Janela pequena do Destaque: "Trazer para o destaque" à esquerda dos outros botões.
+    let bring = (highlight && slot > 0)
+        .then(|| Rect::from_min_size(Pos2::new(mic.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN)));
 
     // ---------- Abas ----------
-    let strip_rect = Rect::from_min_max(Pos2::new(x0, head.min.y), Pos2::new((mic.min.x - 4.0).max(x0), head.max.y - 1.0));
+    let strip_end = bring.unwrap_or(mic).min.x - 4.0;
+    let strip_rect = Rect::from_min_max(Pos2::new(x0, head.min.y), Pos2::new(strip_end.max(x0), head.max.y - 1.0));
     // Clique no espaço vazio da faixa de abas foca a janela (as abas, por cima, têm a própria ação).
     if ui.interact(strip_rect, Id::new(("pane-head", &group)), Sense::click()).clicked() {
         clicks.push(Click::Focus(plan.shown));
@@ -151,6 +170,18 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         Some(StripClick::Rename(i)) => deck.start_rename_tab(i),
         Some(StripClick::ContextMenu(i, pos)) => deck.tab_context_menu = Some((i, pos)),
         None => {}
+    }
+
+    if let Some(bring) = bring {
+        let r = clickable(ui, bring, Id::new(("pane-bring", &group)));
+        if r.hovered() {
+            painter.rect_filled(bring, 4.0, theme::pal().hover);
+        }
+        let fg = if r.hovered() { theme::pal().text } else { theme::pal().text_2 };
+        deck.icons.paint(&painter, Icon::Expand, bring.center(), 12.0, fg, 0.0);
+        if tip(r, "Trazer para o destaque").clicked() {
+            clicks.push(Click::Focus(plan.shown));
+        }
     }
 
     // ---------- Microfone e anexo da aba visível (`plan.shown`) + "+" ----------
@@ -256,15 +287,24 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         ctx.request_repaint_after(Duration::from_millis(next));
     }
 
+    // Realce (Dividida e Destaque): as outras janelas ficam a 62% e voltam a 100% com o mouse em cima.
+    if multi {
+        let dim = !focused && !ui.rect_contains_pointer(plan.rect);
+        let fade = ctx.animate_bool_with_time(Id::new(("pane-dim", &group)), dim, 0.12);
+        if fade > 0.0 {
+            painter.rect_filled(
+                plan.rect,
+                theme::ISLAND_RADIUS as f32,
+                theme::with_opacity(theme::pal().bg, (1.0 - theme::PANE_DIM_OPACITY) * fade),
+            );
+        }
+    }
     super::island_edge(ui, plan.rect, super::IslandKind::Well);
-    // Janela focada: contorno na cor do agente.
+    // Janela do agente selecionado: borda de 1 px e halo de 3 px na cor dele.
     if multi && focused {
-        painter.rect_stroke(
-            plan.rect,
-            theme::ISLAND_RADIUS as f32,
-            Stroke::new(1.0, theme::with_opacity(color, 0.85)),
-            egui::StrokeKind::Inside,
-        );
+        let radius = theme::ISLAND_RADIUS as f32;
+        ui.painter().rect_stroke(plan.rect, radius, Stroke::new(theme::PANE_HALO_W, theme::accent_soft(color)), egui::StrokeKind::Outside);
+        painter.rect_stroke(plan.rect, radius, Stroke::new(1.0, color), egui::StrokeKind::Inside);
     }
 }
 
@@ -366,4 +406,27 @@ fn dividers(deck: &mut Deck, ui: &mut Ui, area: Rect, shape: &[usize], plans: &[
     if stopped {
         deck.persist_layout();
     }
+}
+
+/// Divisor entre a janela grande e a coluna do Destaque: arrastar muda a proporção, duplo clique
+/// volta aos 2/3.
+fn highlight_divider(deck: &mut Deck, ui: &mut Ui, area: Rect, plans: &[PanePlan]) {
+    let Some(big) = plans.first() else { return };
+    let line = Rect::from_min_max(Pos2::new(big.rect.max.x, area.min.y), Pos2::new(big.rect.max.x + split::GAP, area.max.y));
+    let resp = ui.interact(line, Id::new("split-highlight"), Sense::click_and_drag());
+    if resp.hovered() || resp.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+    }
+    if resp.dragged() {
+        split::drag_highlight(&mut deck.highlight_ratio, resp.drag_delta().x, area.width());
+        ui.ctx().request_repaint();
+    }
+    if resp.double_clicked() {
+        deck.highlight_ratio = split::HIGHLIGHT_RATIO;
+    }
+    if resp.drag_stopped() || resp.double_clicked() {
+        deck.persist_layout();
+    }
+    paint_splitter(&ui.painter_at(area), line, resp.hovered() || resp.dragged(), deck.accent());
+    tip(resp, "Arraste para redimensionar · duplo clique volta ao padrão");
 }

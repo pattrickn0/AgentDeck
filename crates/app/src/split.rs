@@ -1,5 +1,6 @@
 //! Tela dividida por tipo de agente: cada grupo (`claude`, `antigravity`, `ollama`…) ganha uma
-//! janela, e as janelas se organizam numa grade automática. Só cálculo (sem pintura), com testes.
+//! janela, e as janelas se organizam numa grade automática (Dividida) ou numa janela grande com as
+//! outras empilhadas ao lado (Destaque). Só cálculo (sem pintura), com testes.
 
 use egui::{Pos2, Rect};
 
@@ -33,6 +34,68 @@ pub fn grid_shape(n: usize, w: f32, h: f32) -> Vec<usize> {
     let cols = ideal.max(n.div_ceil(max_rows)).min(max_cols).max(1);
     let rows = n.div_ceil(cols);
     (0..rows).map(|r| if r + 1 < rows { cols } else { n - cols * (rows - 1) }).collect()
+}
+
+/// Fração da largura que a janela em destaque ocupa por padrão (2/3 do centro).
+pub const HIGHLIGHT_RATIO: f32 = 2.0 / 3.0;
+
+/// A proporção do Destaque que vale: a gravada (0 = nenhuma) se for uma fração de verdade.
+pub fn highlight_ratio(saved: f32) -> f32 {
+    if saved.is_finite() && saved > 0.0 && saved < 1.0 {
+        saved
+    } else {
+        HIGHLIGHT_RATIO
+    }
+}
+
+/// Quantas janelas o Destaque desenha para `n` grupos numa área `w`×`h`: a grande e as pequenas
+/// empilhadas ao lado, cada uma com a altura mínima. Se a área é estreita demais para duas colunas,
+/// é uma só; as pequenas que não cabem deixam os grupos que sobram como abas na última (`assign`).
+pub fn highlight_windows(n: usize, w: f32, h: f32) -> usize {
+    if n <= 1 || w < 2.0 * MIN_W + GAP {
+        return n.min(1);
+    }
+    let max_small = ((h + GAP) / (MIN_H + GAP)).floor().max(1.0) as usize;
+    1 + (n - 1).min(max_small)
+}
+
+/// Retângulos do Destaque para `windows` janelas: a grande à esquerda (`ratio` da largura) e as
+/// outras na coluna da direita, com a mesma altura e a fresta de sempre. Uma janela só ocupa a área.
+pub fn highlight_layout(area: Rect, windows: usize, ratio: f32) -> Vec<Rect> {
+    if windows <= 1 {
+        return vec![area; windows];
+    }
+    let avail = (area.width() - GAP).max(0.0);
+    let want = avail * highlight_ratio(ratio);
+    let big = if avail >= 2.0 * MIN_W { want.clamp(MIN_W, avail - MIN_W) } else { want };
+    let big_x1 = (area.min.x + big).round();
+    let mut out = vec![Rect::from_min_max(area.min, Pos2::new(big_x1, area.max.y))];
+    let x0 = big_x1 + GAP;
+    let small = windows - 1;
+    let heights = sizes(area.height(), &equal(small), MIN_H);
+    let mut y = area.min.y;
+    for (i, h) in heights.iter().enumerate() {
+        let y1 = if i + 1 == small { area.max.y } else { (y + h).round() };
+        out.push(Rect::from_min_max(Pos2::new(x0, y.round()), Pos2::new(area.max.x, y1)));
+        y = y1 + GAP;
+    }
+    out
+}
+
+/// Ordem dos grupos no Destaque: o do agente selecionado primeiro (a janela grande) e os outros na
+/// ordem das janelas, que não muda quando o destaque troca.
+pub fn highlight_order(order: &[String], featured: Option<&str>) -> Vec<String> {
+    let Some(f) = featured.and_then(|f| order.iter().find(|g| g.as_str() == f)) else { return order.to_vec() };
+    std::iter::once(f.clone()).chain(order.iter().filter(|g| *g != f).cloned()).collect()
+}
+
+/// Arrasta o divisor entre a janela grande e a coluna em `delta` pixels (de `total`, a largura do
+/// centro), mantendo as duas com a largura mínima.
+pub fn drag_highlight(ratio: &mut f32, delta: f32, total: f32) {
+    let first = highlight_ratio(*ratio);
+    let mut pair = [first, 1.0 - first];
+    drag(&mut pair, 0, delta, total - GAP, MIN_W);
+    *ratio = pair[0];
 }
 
 /// Proporções iguais para `n` partes.
@@ -263,6 +326,90 @@ mod tests {
         // (601 - 6) / 2 = 297,5 de cada linha, arredondado.
         assert_eq!(r[0].height(), 298.0);
         assert_eq!((r[2].min.y, r[2].max.y), (304.0, 601.0));
+    }
+
+    #[test]
+    fn the_highlight_stacks_the_other_windows_beside_the_big_one() {
+        let (w, h) = (1600.0, 900.0);
+        // 1, 2, 4 e 7 CLIs: a grande mais as pequenas que cabem na altura (900 → até 6 de 140 px).
+        let counts: Vec<usize> = [0, 1, 2, 4, 7].iter().map(|&n| highlight_windows(n, w, h)).collect();
+        assert_eq!(counts, [0, 1, 2, 4, 7]);
+        let a = area(w, h);
+        for windows in [1, 2, 4, 7] {
+            let r = highlight_layout(a, windows, HIGHLIGHT_RATIO);
+            assert_eq!(r.len(), windows);
+            if windows == 1 {
+                assert_eq!(r[0], a);
+                continue;
+            }
+            // A grande ocupa 2/3 da largura (menos a fresta) à esquerda, em toda a altura.
+            assert_eq!((r[0].min, r[0].height()), (Pos2::ZERO, a.height()));
+            assert!((r[0].width() - (w - GAP) * 2.0 / 3.0).abs() <= 1.0, "{:?}", r[0]);
+            // As pequenas empilham na coluna da direita com a fresta de sempre, alturas iguais.
+            assert_eq!((r[1].min.x, r[1].min.y), (r[0].max.x + GAP, 0.0));
+            assert_eq!(r.last().map(|s| (s.max.x, s.max.y)), Some((a.max.x, a.max.y)));
+            for pair in r[1..].windows(2) {
+                assert_eq!(pair[1].min.y, pair[0].max.y + GAP);
+                assert!((pair[0].height() - pair[1].height()).abs() <= 1.0);
+            }
+            for (i, x) in r.iter().enumerate() {
+                assert!(a.contains_rect(*x));
+                for y in &r[i + 1..] {
+                    assert!(x.intersect(*y).area() <= 0.0, "{x:?} × {y:?}");
+                }
+            }
+        }
+        // Em 600 px de altura cabem 4 pequenas: com 7 CLIs, os 3 últimos dividem a última como abas.
+        let windows = highlight_windows(7, w, 600.0);
+        assert_eq!(windows, 5);
+        assert_eq!(assign(&["a", "b", "c", "d", "e", "f", "g"], windows).last().map(Vec::len), Some(3));
+    }
+
+    #[test]
+    fn the_highlight_respects_the_minimum_window_size() {
+        // Só cabem duas pequenas em 300 px de altura (2 × 140 + 6 = 286): as outras viram abas.
+        assert_eq!(highlight_windows(7, 1200.0, 300.0), 3);
+        let r = highlight_layout(area(1200.0, 300.0), 3, HIGHLIGHT_RATIO);
+        assert!(r[1..].iter().all(|s| s.height() >= MIN_H));
+        // Nem altura para duas pequenas: uma só.
+        assert_eq!(highlight_windows(7, 1200.0, 200.0), 2);
+        // Área estreita (menos de duas colunas): a janela grande é a única.
+        assert_eq!(highlight_windows(4, 2.0 * MIN_W + GAP - 1.0, 900.0), 1);
+        assert_eq!(highlight_windows(4, 2.0 * MIN_W + GAP, 900.0), 4);
+        // No limite, a grande e a coluna ficam com a largura mínima, sem passar.
+        let r = highlight_layout(area(2.0 * MIN_W + GAP, 900.0), 2, HIGHLIGHT_RATIO);
+        assert_eq!((r[0].width(), r[1].width()), (MIN_W, MIN_W));
+        // Largura pequena com 2/3: a coluna não fica abaixo do mínimo.
+        let r = highlight_layout(area(700.0, 900.0), 3, HIGHLIGHT_RATIO);
+        assert!(r[1].width() >= MIN_W && r[0].width() >= MIN_W, "{r:?}");
+        assert_eq!(highlight_windows(0, 700.0, 900.0), 0);
+        assert!(highlight_layout(area(700.0, 900.0), 0, HIGHLIGHT_RATIO).is_empty());
+    }
+
+    #[test]
+    fn the_featured_group_goes_first_and_the_rest_keep_their_order() {
+        let order: Vec<String> = ["claude", "antigravity", "ollama", "codex"].map(String::from).to_vec();
+        assert_eq!(highlight_order(&order, Some("ollama")), ["ollama", "claude", "antigravity", "codex"]);
+        assert_eq!(highlight_order(&order, Some("claude")), order);
+        // Sem selecionado, ou grupo que não existe: a ordem das janelas.
+        assert_eq!(highlight_order(&order, None), order);
+        assert_eq!(highlight_order(&order, Some("shell")), order);
+    }
+
+    #[test]
+    fn the_highlight_divider_drags_within_the_limits() {
+        assert_eq!(highlight_ratio(0.0), HIGHLIGHT_RATIO);
+        assert_eq!(highlight_ratio(f32::NAN), HIGHLIGHT_RATIO);
+        assert_eq!(highlight_ratio(1.5), HIGHLIGHT_RATIO);
+        assert_eq!(highlight_ratio(0.5), 0.5);
+        let mut r = 0.0;
+        drag_highlight(&mut r, -100.0, 1006.0);
+        assert!((r - (HIGHLIGHT_RATIO - 0.1)).abs() < 1e-3, "{r}");
+        // Até o fim, cada lado mantém a largura mínima.
+        drag_highlight(&mut r, 5000.0, 1006.0);
+        assert!((r * 1000.0 - (1000.0 - MIN_W)).abs() < 1.0, "{r}");
+        drag_highlight(&mut r, -5000.0, 1006.0);
+        assert!((r * 1000.0 - MIN_W).abs() < 1.0, "{r}");
     }
 
     #[test]

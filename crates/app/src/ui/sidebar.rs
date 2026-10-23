@@ -10,6 +10,7 @@ use crate::deck::{Deck, TreeRow};
 use crate::icons::Icon;
 use crate::theme;
 use agentdeck_core::git::{EntryKind, GitEntry};
+use agentdeck_core::Organization;
 
 /// Altura de uma linha do explorador.
 const FILE_ROW_H: f32 = 20.0;
@@ -42,11 +43,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let org_head = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 4.0), Vec2::new(rect.width(), super::SECTION_LABEL_H));
     section_label(&painter, org_head, "ORGANIZAÇÃO");
     let org = Rect::from_min_size(Pos2::new(rect.min.x + 10.0, org_head.max.y), Vec2::new(rect.width() - 20.0, ORG_H));
-    let mode = usize::from(deck.split_enabled);
-    if let Some(picked) = segmented(ui, org, Id::new("org-mode"), &["Abas", "Dividida"], mode, false) {
-        if picked != mode {
-            deck.toggle_split();
-        }
+    let modes = [Organization::Tabs, Organization::Split, Organization::Highlight];
+    let mode = modes.iter().position(|m| *m == deck.organization).unwrap_or(0);
+    if let Some(picked) = segmented(ui, org, Id::new("org-mode"), &["Abas", "Dividida", "Destaque"], mode, false) {
+        deck.set_organization(modes[picked]);
     }
     top_y = org.max.y + 8.0;
     separator(&painter, Pos2::new(rect.min.x, top_y + 0.5), Pos2::new(rect.max.x, top_y + 0.5));

@@ -82,6 +82,35 @@ fn folder_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
 
+/// Como as janelas dos agentes se arrumam no centro.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Organization {
+    /// Uma janela só, com todas as abas.
+    Tabs,
+    /// Uma janela por CLI, numa grade.
+    #[default]
+    Split,
+    /// A janela do CLI selecionado grande e as outras empilhadas ao lado.
+    Highlight,
+}
+
+impl Organization {
+    /// Organização de quem só tem o `splitEnabled` gravado.
+    pub fn from_split_enabled(on: bool) -> Self {
+        if on {
+            Self::Split
+        } else {
+            Self::Tabs
+        }
+    }
+
+    /// O valor equivalente do `splitEnabled` (qualquer arrumação em janelas conta como ligada).
+    pub fn split_enabled(self) -> bool {
+        self != Self::Tabs
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
@@ -101,8 +130,14 @@ pub struct Config {
     /// Largura da barra lateral direita (Conversa integrada); 0 = padrão. Ela não
     /// recolhe. (Substitui `bottomHeight`/`feedCollapsed` do antigo painel de baixo, ignorados ao ler.)
     pub right_panel_width: f32,
-    /// Tela dividida: uma janela por tipo de agente (desligada = uma aba por vez).
+    /// Como as janelas dos agentes se arrumam. Ausente nos arquivos antigos: vale o `splitEnabled`
+    /// (ver `Config::organization`).
+    pub organization: Option<Organization>,
+    /// Formato antigo da organização (ligada = Dividida): lido para não perder a escolha de quem já
+    /// usa e ainda gravado, para uma versão anterior entender o arquivo.
     pub split_enabled: bool,
+    /// Destaque: fração da largura do centro que a janela grande ocupa (0 = padrão, 2/3).
+    pub highlight_ratio: f32,
     pub window_width: f32,
     pub window_height: f32,
     /// Host da API do Ollama (padrão `127.0.0.1:11434`, ou `OLLAMA_HOST`).
@@ -143,7 +178,9 @@ impl Default for Config {
             sidebar_width: 220.0,
             sidebar_collapsed: false,
             right_panel_width: 0.0,
+            organization: None,
             split_enabled: true,
+            highlight_ratio: 0.0,
             window_width: 1280.0,
             window_height: 860.0,
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
@@ -161,6 +198,17 @@ impl Default for Config {
 }
 
 impl Config {
+    /// A organização das janelas: a gravada ou, nos arquivos antigos, a que o `splitEnabled` dá.
+    pub fn organization(&self) -> Organization {
+        self.organization.unwrap_or_else(|| Organization::from_split_enabled(self.split_enabled))
+    }
+
+    /// Grava a organização nos dois campos (o antigo continua coerente).
+    pub fn set_organization(&mut self, org: Organization) {
+        self.organization = Some(org);
+        self.split_enabled = org.split_enabled();
+    }
+
     /// Configuração de uma instalação nova: nenhum projeto.
     pub fn default_for(_paths: &AppPaths) -> Self {
         Self::default()
@@ -382,6 +430,29 @@ mod tests {
 
     fn no_home() -> &'static Path {
         Path::new("/nonexistent-home")
+    }
+
+    #[test]
+    fn the_old_split_flag_still_picks_the_organization() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let read = |json: &str| Config::from_json_over_defaults(json, &p);
+        // Sem `organization` (arquivo antigo): vale o `splitEnabled`, ou o padrão (Dividida).
+        assert_eq!(read("{\"splitEnabled\": false}").organization(), Organization::Tabs);
+        assert_eq!(read("{\"splitEnabled\": true}").organization(), Organization::Split);
+        assert_eq!(read("{}").organization(), Organization::Split);
+        // A organização gravada manda, mesmo com o `splitEnabled` dizendo outra coisa.
+        assert_eq!(read("{\"organization\": \"highlight\", \"splitEnabled\": false}").organization(), Organization::Highlight);
+        assert_eq!(read("{\"organization\": \"tabs\"}").organization(), Organization::Tabs);
+        // Gravar mantém o campo antigo coerente e volta igual.
+        let mut cfg = Config::default();
+        cfg.set_organization(Organization::Highlight);
+        assert!(cfg.split_enabled);
+        let text = serde_json::to_string(&cfg).expect("json");
+        assert!(text.contains("\"organization\":\"highlight\""), "{text}");
+        assert_eq!(read(&text).organization(), Organization::Highlight);
+        cfg.set_organization(Organization::Tabs);
+        assert!(!cfg.split_enabled);
     }
 
     #[test]

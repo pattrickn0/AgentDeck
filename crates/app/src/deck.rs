@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use agentdeck_core::delivery::{self, Gate, Mailbox, TabState};
 use agentdeck_core::{
-    AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, SpawnSpec,
+    AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, Organization, SpawnSpec,
 };
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
@@ -289,7 +289,9 @@ pub struct Deck {
     pub right_panel_rect: Option<egui::Rect>,
 
     // Tela dividida (ver `split.rs`)
-    pub split_enabled: bool,
+    pub organization: Organization,
+    /// Destaque: fração da largura do centro que a janela grande ocupa (ver `split::highlight_ratio`).
+    pub highlight_ratio: f32,
     /// Ordem das janelas (grupos de `split::group_key`).
     pub group_order: Vec<String>,
     pub split_ratios: split::Ratios,
@@ -513,7 +515,8 @@ impl Deck {
             // A mesa de tarefas é a primeira aba e a que abre: o app não grava a aba escolhida.
             right_view: RightView::Tarefas,
             right_panel_rect: None,
-            split_enabled: cfg.split_enabled,
+            organization: cfg.organization(),
+            highlight_ratio: split::highlight_ratio(cfg.highlight_ratio),
             group_order: Vec::new(),
             split_ratios: cfg
                 .active()
@@ -1445,15 +1448,24 @@ impl Deck {
         split::sync_order(&mut self.group_order, kinds.iter().map(String::as_str));
     }
 
-    /// Janelas deste quadro na área `area`: a grade automática com um grupo por janela (ou uma
-    /// janela só, com a divisão desligada). Guarda o resultado em `panes` para os atalhos.
+    /// Janelas deste quadro na área `area`: a grade automática com um grupo por janela (Dividida), a
+    /// janela do CLI selecionado grande com as outras empilhadas ao lado (Destaque) ou uma janela só
+    /// (Abas). Guarda o resultado em `panes` para os atalhos. No Destaque, a janela 0 é a grande.
     pub fn plan_panes(&mut self, area: egui::Rect) -> (Vec<usize>, Vec<PanePlan>) {
-        let (shape, rects, groups) = if self.split_enabled && self.group_order.len() > 1 {
+        let many = self.group_order.len() > 1;
+        let (shape, rects, groups) = if self.organization == Organization::Split && many {
             let shape = split::grid_shape(self.group_order.len(), area.width(), area.height());
             // Só ajusta para desenhar: as proporções salvas mudam apenas quando o usuário arrasta.
             let rects = split::layout(area, &shape, &self.split_ratios.fitted(&shape));
             let groups = split::assign(&self.group_order, rects.len());
             (shape, rects, groups)
+        } else if self.organization == Organization::Highlight && many {
+            let featured = self.active_tab().map(|t| split::group_key(&t.kind).to_owned());
+            let order = split::highlight_order(&self.group_order, featured.as_deref());
+            let windows = split::highlight_windows(order.len(), area.width(), area.height());
+            let rects = split::highlight_layout(area, windows, self.highlight_ratio);
+            let groups = split::assign(&order, rects.len());
+            (vec![rects.len()], rects, groups)
         } else {
             (vec![1], vec![area], vec![self.group_order.clone()])
         };
@@ -1532,10 +1544,13 @@ impl Deck {
         }
     }
 
-    /// Liga/desliga a tela dividida.
-    pub fn toggle_split(&mut self) {
-        self.split_enabled = !self.split_enabled;
-        self.persist_layout();
+    /// Muda como as janelas se arrumam (Abas, Dividida ou Destaque).
+    pub fn set_organization(&mut self, org: Organization) {
+        if self.organization != org {
+            self.organization = org;
+            self.pane_drag = None;
+            self.persist_layout();
+        }
     }
 
     pub fn close_tab(&mut self, idx: usize) {
@@ -1690,12 +1705,13 @@ impl Deck {
     pub fn persist_layout_now(&mut self) {
         self.layout_persist_at = None;
         let (sw, sc, rw) = (self.sidebar_w, self.sidebar_collapsed, self.right_w);
-        let (split_on, ratios) = (self.split_enabled, self.split_ratios.clone());
+        let (org, highlight, ratios) = (self.organization, self.highlight_ratio, self.split_ratios.clone());
         self.core.update_config(|c| {
             c.sidebar_width = sw;
             c.sidebar_collapsed = sc;
             c.right_panel_width = rw;
-            c.split_enabled = split_on;
+            c.set_organization(org);
+            c.highlight_ratio = highlight;
         });
         // O projeto da tela (o do core pode já ter mudado, ex.: ao remover o ativo).
         if self.active_project.is_empty() {
