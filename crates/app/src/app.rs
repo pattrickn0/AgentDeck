@@ -778,10 +778,18 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
         }
         "tasks-running" => deck.tasks.view = detail("t6"),
         "tasks-failed" => deck.tasks.view = detail("t3"),
-        "tasks-new" | "tasks-new-attach" | "tasks-new-effort" | "tasks-new-opencode" | "tasks-new-agent" | "tasks-new-model" | "tasks-new-provider" | "tasks-new-provider-models" => {
+        "tasks-new"
+        | "tasks-new-attach"
+        | "tasks-new-effort"
+        | "tasks-new-opencode"
+        | "tasks-new-agent"
+        | "tasks-new-model"
+        | "tasks-new-provider"
+        | "tasks-new-provider-models" => {
             deck.tasks_open_new();
             let f = &mut deck.tasks.form;
-            f.kind = if item.starts_with("tasks-new-provider") || item == "tasks-new-opencode" { "opencode".into() } else { "claude".into() };
+            f.kind =
+                if item.starts_with("tasks-new-provider") || item == "tasks-new-opencode" { "opencode".into() } else { "claude".into() };
             if item == "tasks-new-effort" {
                 f.model = Some("sonnet".into());
                 f.effort = Some(agentdeck_core::models::Effort::High);

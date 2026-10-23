@@ -93,7 +93,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             // O botão secundário da base (borda, fundo e hover); o ponto do agente e o nome vão por cima.
             let resp = button(ui, r, Id::new(("empty-btn", &m.kind)), "", ButtonKind::Secondary);
             if m.kind != NEW_PROJECT {
-                super::projects::paint_kind_mark(&mut deck.icons, &painter, Pos2::new(r.min.x + 15.0 + 4.0, r.center().y), &m.kind, m.color);
+                super::projects::paint_kind_mark(
+                    &mut deck.icons,
+                    &painter,
+                    Pos2::new(r.min.x + 15.0 + 4.0, r.center().y),
+                    &m.kind,
+                    m.color,
+                );
             }
             let g = galley(&painter, &m.label, font.clone(), theme::pal().text);
             place(

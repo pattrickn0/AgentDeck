@@ -1313,10 +1313,7 @@ mod tests {
         );
         assert_eq!(actions_for(&t(TaskStatus::Failed, false), false), [TaskAct::Retry, TaskAct::Discard]);
         // Mesclagem que falhou antes (Failed com relatório): também se devolve ao agente.
-        assert_eq!(
-            actions_for(&t(TaskStatus::Failed, true), true),
-            [TaskAct::Retry, TaskAct::Return, TaskAct::GoToTab, TaskAct::Discard]
-        );
+        assert_eq!(actions_for(&t(TaskStatus::Failed, true), true), [TaskAct::Retry, TaskAct::Return, TaskAct::GoToTab, TaskAct::Discard]);
         assert!(actions_for(&t(TaskStatus::Merged, true), false).is_empty());
         assert!(actions_for(&t(TaskStatus::Discarded, false), false).is_empty());
         // Só a ação principal vem cheia; mesclar mostra a base.

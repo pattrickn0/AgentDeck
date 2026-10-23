@@ -1036,7 +1036,8 @@ fn task_spec(msg: &Value, creator: &str) -> Result<crate::tasks::TaskSpec, (u16,
         Some(e) => match crate::models::Effort::parse(&e) {
             Some(e) => Some(e),
             None => {
-                let error = format!("esforço inválido: \"{}\" (use low, medium ou high)", e.chars().take(20).collect::<String>().escape_debug());
+                let error =
+                    format!("esforço inválido: \"{}\" (use low, medium ou high)", e.chars().take(20).collect::<String>().escape_debug());
                 return Err((400, json!({ "error": error })));
             }
         },

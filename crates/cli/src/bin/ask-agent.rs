@@ -351,7 +351,8 @@ fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
 
 // ---------- Caixa de entrada (`--inbox`) ----------
 
-const INBOX_USAGE: &str = "Uso: ask-agent --inbox [--all]   (as respostas às suas perguntas que ainda não foram entregues; --all: as 20 últimas)";
+const INBOX_USAGE: &str =
+    "Uso: ask-agent --inbox [--all]   (as respostas às suas perguntas que ainda não foram entregues; --all: as 20 últimas)";
 
 /// Há quanto tempo foi `ts_ms` (epoch em ms), em texto curto.
 fn age_text(ts_ms: u64, now_ms: u64) -> String {
@@ -424,16 +425,33 @@ enum Body {
 /// Um subcomando de `--task`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TaskCmd {
-    New { title: String, brief: Body, agent: Option<String>, model: Option<String>, effort: Option<String>, base: Option<String>, start: bool },
+    New {
+        title: String,
+        brief: Body,
+        agent: Option<String>,
+        model: Option<String>,
+        effort: Option<String>,
+        base: Option<String>,
+        start: bool,
+    },
     List,
     Show(String),
     Start(String),
     Merge(String),
     Validate(String),
     Discard(String),
-    Done { id: String, report: Body },
-    Return { id: String, feedback: Body },
-    Reject { id: String, feedback: Body },
+    Done {
+        id: String,
+        report: Body,
+    },
+    Return {
+        id: String,
+        feedback: Body,
+    },
+    Reject {
+        id: String,
+        feedback: Body,
+    },
 }
 
 /// `-` sozinho = entrada padrão; `--file <caminho>` = arquivo; texto = linha de comando; nada = `Missing`.
@@ -877,11 +895,15 @@ mod tests {
     fn inbox_entries_read_as_a_message_with_age_and_state() {
         let entry = json!({"request": 4, "from": "antigravity", "text": "pronto", "failed": false, "ts": 1_000_000, "delivered": false});
         let text = inbox_entry_text(&entry, 1_000_000 + 5 * 60_000);
-        assert_eq!(text, "[Resposta do agente \"antigravity\" à sua pergunta #4, há 5 min, não entregue]
+        assert_eq!(
+            text,
+            "[Resposta do agente \"antigravity\" à sua pergunta #4, há 5 min, não entregue]
 
-pronto");
+pronto"
+        );
         let failed = json!({"request": 5, "from": "claude@dev", "text": "não respondeu", "failed": true, "ts": 0, "delivered": true});
-        assert!(inbox_entry_text(&failed, 3 * 3_600_000).starts_with("[Sem resposta do agente \"claude@dev\" à sua pergunta #5, há 3 h, já entregue no terminal]"));
+        assert!(inbox_entry_text(&failed, 3 * 3_600_000)
+            .starts_with("[Sem resposta do agente \"claude@dev\" à sua pergunta #5, há 3 h, já entregue no terminal]"));
         assert_eq!(age_text(10_000, 20_000), "agora há pouco");
     }
 

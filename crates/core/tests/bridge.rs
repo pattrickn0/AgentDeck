@@ -1108,7 +1108,10 @@ fn a_synchronous_answer_lands_in_the_inbox_as_delivered() {
     let claude = tab_token(&env, "claude");
     let asking = ask_in_thread(&env, claude.clone(), json!({"to": "claude@dev", "message": "tarefa"}));
     let q = next_delivery(&env);
-    assert_eq!(ask_raw(env.core.bridge_port(), &tab_token(&env, "claude@dev"), json!({"to": "", "message": "feito", "reply_to": q.request})).0, 200);
+    assert_eq!(
+        ask_raw(env.core.bridge_port(), &tab_token(&env, "claude@dev"), json!({"to": "", "message": "feito", "reply_to": q.request})).0,
+        200
+    );
     let (st, b) = asking.join().expect("thread");
     assert_eq!((st, b["answer"].as_str(), b["request"].as_u64()), (200, Some("feito"), Some(q.request)), "{b}");
     // O 200 foi escrito: a resposta está na caixa, já entregue (a marca vem logo depois da escrita).
@@ -1119,7 +1122,10 @@ fn a_synchronous_answer_lands_in_the_inbox_as_delivered() {
     }
     let all = inbox(&env, &claude, true);
     assert_eq!(all.len(), 1, "{all:?}");
-    assert_eq!((all[0]["request"].as_u64(), all[0]["from"].as_str(), all[0]["text"].as_str()), (Some(q.request), Some("claude@dev"), Some("feito")));
+    assert_eq!(
+        (all[0]["request"].as_u64(), all[0]["from"].as_str(), all[0]["text"].as_str()),
+        (Some(q.request), Some("claude@dev"), Some("feito"))
+    );
     assert_eq!(all[0]["failed"], false);
     assert!(inbox(&env, &claude, false).is_empty(), "entregue não aparece em --inbox");
     // Só o próprio agente lê a caixa dele: a de outro está vazia e o token mestre não tem caixa.

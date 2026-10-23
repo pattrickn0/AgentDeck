@@ -736,7 +736,10 @@ fn hunk_items(staged: bool) -> Vec<(&'static str, &'static str, bool)> {
     if staged {
         vec![("Tirar", "Tira só este trecho da preparação", false)]
     } else {
-        vec![("Preparar", "Prepara só este trecho (git apply --cached)", false), ("Descartar", "Descarta só este trecho da cópia de trabalho", true)]
+        vec![
+            ("Preparar", "Prepara só este trecho (git apply --cached)", false),
+            ("Descartar", "Descarta só este trecho da cópia de trabalho", true),
+        ]
     }
 }
 
@@ -753,7 +756,8 @@ fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut
     let items = hunk_items(h.staged);
     // Faixa opaca atrás dos botões (com a cor da linha do trecho): o texto do cabeçalho não aparece
     // entre eles.
-    let strip = Rect::from_min_max(Pos2::new(area.max.x - hunk_strip_w(ui.painter(), h.staged), row.min.y), Pos2::new(area.max.x, row.max.y));
+    let strip =
+        Rect::from_min_max(Pos2::new(area.max.x - hunk_strip_w(ui.painter(), h.staged), row.min.y), Pos2::new(area.max.x, row.max.y));
     ui.painter().rect_filled(strip, 0.0, theme::glass_solid());
     ui.painter().rect_filled(strip, 0.0, theme::with_alpha(theme::pal().info, 0.10));
     for (label, tooltip, danger) in items {

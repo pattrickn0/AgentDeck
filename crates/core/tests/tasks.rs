@@ -593,7 +593,11 @@ fn a_merge_that_fails_for_an_external_reason_leaves_the_task_in_review() {
 fn rewrite_app_block(agents_md: &std::path::Path) -> String {
     let text = std::fs::read_to_string(agents_md).expect("AGENTS.md");
     assert!(text.contains(agentdeck_core::workspace::MARKER_START), "{text}");
-    let new = text.replacen(agentdeck_core::workspace::MARKER_START, &format!("{}\nlinha nova do app", agentdeck_core::workspace::MARKER_START), 1);
+    let new = text.replacen(
+        agentdeck_core::workspace::MARKER_START,
+        &format!("{}\nlinha nova do app", agentdeck_core::workspace::MARKER_START),
+        1,
+    );
     std::fs::write(agents_md, &new).expect("w");
     new
 }
@@ -954,11 +958,7 @@ fn the_effort_of_a_task_is_validated_stored_and_reaches_the_claude_tab() {
 
     // Antigravity: o esforço troca o sufixo do modelo, que é o que fica gravado; sem modelo (ou com um
     // modelo sem versões por esforço) o pedido é recusado, em vez de ser gravado sem efeito.
-    let agy = |model: Option<&str>| TaskSpec {
-        kind: "antigravity".into(),
-        model: model.map(String::from),
-        ..effort(Effort::Low)
-    };
+    let agy = |model: Option<&str>| TaskSpec { kind: "antigravity".into(), model: model.map(String::from), ..effort(Effort::Low) };
     let t = core.task_create(&env.project, agy(Some("gemini-4-argon-high"))).expect("agy");
     assert_eq!((t.model.as_deref(), t.effort), (Some("gemini-4-argon-low"), Some(Effort::Low)));
     for bad in [agy(None), agy(Some("gemini-4-flash"))] {

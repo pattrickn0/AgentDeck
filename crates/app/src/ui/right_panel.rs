@@ -6,7 +6,9 @@ use std::time::Duration;
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Align2, CursorIcon, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use super::{button, button_width, galley, galley_trunc, paint_splitter, place, section_label, separator, text_in, text_w, tip, ButtonKind};
+use super::{
+    button, button_width, galley, galley_trunc, paint_splitter, place, section_label, separator, text_in, text_w, tip, ButtonKind,
+};
 use crate::deck::{Deck, FeedItem, RightView};
 use crate::theme;
 use agentdeck_core::{DownloadProgress, DownloadState, FeedKind};
