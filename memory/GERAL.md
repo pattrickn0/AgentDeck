@@ -98,7 +98,7 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | Área | O que tem |
 | :-- | :-- |
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); com a barra lateral recolhida, a **chave Agentes | Documentos** compacta logo depois do logo (ver abaixo); à direita, o **uso de cada agente com cota**, com ou sem janela aberta (logo + barra fina da sessão de 5 h em cima e barra grossa da semana embaixo, com as porcentagens; âmbar a partir de 80 %, vermelho em 100 %; passar o mouse abre o **painel de uso**, com todos os agentes, quanto usaram e quando renova cada janela) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
-| Barra esquerda | a **chave Agentes | Documentos** no topo, **PROJETOS** (cada projeto com os seus agentes, o modelo de cada um à direita; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (controle Abas | Dividida) e **ARQUIVOS**, o explorador (cinza, com a letra do Git; atualizar, recolher tudo); recolhe com Ctrl+B |
+| Barra esquerda | a **chave Agentes | Documentos** no topo, **PROJETOS** (cada projeto com os seus agentes, o modelo de cada um à direita; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (controle Abas | Dividida | Destaque) e **ARQUIVOS**, o explorador (cinza, com a letra do Git; atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | duas visões, escolhidas pela **chave** do topo da barra lateral: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
 
@@ -117,11 +117,17 @@ A **tela dividida** organiza as abas por tipo de agente:
 - cada janela tem o cabeçalho com as abas dela, a alça ⋮⋮ (arrastar sobre outra janela troca as duas de lugar) e,
   à direita, o **microfone** (ditado), o **anexo** (escolher arquivos) e o "+" que abre outra aba do mesmo tipo;
   o microfone e o anexo agem na **aba visível da janela** (`ui/panes.rs`; a aba só mostra o indicador de
-  gravação/transcrição). A janela focada tem o contorno na cor do agente e recebe o teclado e o IME;
+  gravação/transcrição). A janela da aba ativa tem a borda de 1 px e o halo de 3 px na cor do agente e recebe o teclado e o IME;
+  as outras janelas ficam a 62% de opacidade e voltam a 100% com o mouse em cima (só com mais de uma janela);
 - quando as abas de uma janela não cabem, o lado com aba escondida ganha um degradê e uma seta ‹ / › que rola a
   faixa até a aba escondida mais próxima, e um botão ▾ no fim abre o menu com todas as abas da janela (`ui/tabs.rs`);
 - os divisores entre janelas se arrastam (duplo clique iguala); tamanhos, ordem e o liga/desliga ficam salvos.
-  Desligada (botão na barra de título), volta a ser uma janela só com todas as abas;
+  Em **Abas** (chave ORGANIZAÇÃO), volta a ser uma janela só com todas as abas;
+- em **Destaque** (o terceiro segmento) o agrupamento é o mesmo, mas a janela do CLI da aba ativa fica grande (2/3 do
+  centro, à esquerda) e as janelas dos outros CLIs empilham à direita, com a mesma altura. Clicar numa janela pequena,
+  ativar outra aba (barra lateral ou atalho) ou o botão "Trazer para o destaque" do cabeçalho dela troca o destaque; o
+  divisor entre a grande e a coluna se arrasta (duplo clique volta aos 2/3). O que não cabe na altura mínima vira aba
+  da última janela pequena; com um CLI só, a janela ocupa o centro todo (sem realce);
 - uma aba aberta por outro agente (`ask-agent codex …`) entra na janela do tipo dela (ou cria a janela) sem tirar
   o foco de onde você está digitando;
 - atalhos: Ctrl+Tab / Ctrl+Shift+Tab trocam de aba dentro da janela focada; Ctrl+Alt+setas mudam o foco para a
@@ -263,8 +269,8 @@ ela dura.
   escondidas quando se troca de projeto.
 - Ver os agentes de todos os projetos **em árvore** na barra lateral e reorganizar a **equipe** arrastando um
   agente sobre outro.
-- Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente), com a chave na seção
-  ORGANIZAÇÃO da barra lateral.
+- Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente) ou em **destaque** (a janela
+  do agente selecionado grande e as outras ao lado), com a chave na seção ORGANIZAÇÃO da barra lateral.
 - Acompanhar o **uso** de cada agente com cota (sessão e semana) na barra de título, com o painel de uso ao passar o mouse.
 - Falar com um agente pelo terminal da aba dele, com **anexos** (botão no cabeçalho da janela, arrastar arquivos sobre ela
   ou colar imagem) e **ditado por voz** (microfone no cabeçalho da janela).

@@ -218,6 +218,12 @@ Tela dividida ★
 - [x] Janela mínima (~820 px) com 3 ou mais tipos: as janelas empilham; o que não cabe vira aba da última janela, sem sumir nada.
 - [ ] Com um diff do Git aberto, a barra **mantém a largura** (o conteúdo rola dentro dela) e as janelas **não mudam de tamanho**.
 - [x] Com 4–6 janelas e agentes respondendo ao mesmo tempo: o app continua fluido (anotar se travar).
+- [ ] **Destaque** (t28), com 3 CLIs abertos (Claude, Antigravity, Ollama): em ORGANIZAÇÃO, "Destaque" põe a janela do agente selecionado com 2/3 do centro, à esquerda, e as outras duas empilhadas à direita com a mesma altura e a fresta de 6 px.
+- [ ] **Destaque: trocar o destaque** (t28): clicar no terminal ou no cabeçalho de uma janela pequena, clicar noutro agente da barra lateral, Ctrl+Tab/atalho para outro CLI e o botão "Trazer para o destaque" (ícone de expandir, à esquerda do microfone) trazem o CLI dele para a janela grande. Dois agentes do mesmo CLI continuam em abas na mesma janela. Depois da troca o Claude Code não duplica a conversa (o PTY muda de tamanho uma vez, com o tamanho parado).
+- [ ] **Destaque: divisor** (t28): arrastar a fresta entre a janela grande e a coluna muda a largura (as duas mantêm ~260 px no mínimo); duplo clique volta aos 2/3; a proporção volta ao reabrir o app.
+- [ ] **Destaque: aperto** (t28): estreitar a janela do app até caber uma coluna só (<~526 px de centro): fica só a janela grande, com os outros CLIs como abas. Diminuir a altura até as pequenas não caberem (140 px cada): as que sobram viram abas da última pequena. Com um CLI só, a janela ocupa o centro todo, sem halo.
+- [ ] **Realce do selecionado** (t28), na Dividida e no Destaque: a janela da aba ativa tem borda de 1 px e halo de 3 px na cor do agente; as outras ficam mais apagadas (62%) e voltam a 100% ao passar o mouse (e continuam atualizando). Em Abas nada muda.
+- [ ] **Migração** (t28): quem tinha só `"splitEnabled": false` no config abre em Abas, e `true` em Dividida; a escolha nova é gravada em `organization`.
 - [ ] Tela dividida: arrastar um divisor, estreitar a janela até a grade mudar de formato e alargar de novo. As proporções arrastadas voltam, também depois de reabrir o app.
 - [ ] **Abas escondidas: degradê e setas** (t12): numa janela com mais abas do que cabem (estreite a janela ou abra várias abas do mesmo tipo), o lado com aba escondida ganha um degradê curto e uma seta ‹ ou ›. Clicar na seta rola a faixa até a aba escondida mais próxima daquele lado; a dica da seta cita o nome dela.
 - [ ] **Abas escondidas: sem aba escondida, nada aparece** (t12): com todas as abas à vista, nenhuma seta nem degradê; alargar a janela de volta os faz sumir.
@@ -260,7 +266,7 @@ Barra de título, uso dos agentes e barra lateral ★
 - [ ] Ollama: sem barra; aparece no rodapé do painel como "local, sem limite".
 - [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %/12 %, Antigravity com a semana em aviso, Codex com a sessão esgotada, Ollama local) e `usage-panel` (o mesmo com o painel aberto).
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
-- [x] Seção **ORGANIZAÇÃO** na barra lateral: o controle **Abas | Dividida** liga/desliga a divisão.
+- [x] Seção **ORGANIZAÇÃO** na barra lateral: o controle **Abas | Dividida | Destaque** escolhe como as janelas se arrumam (Abas = janela só).
 - [ ] Uso: passado o horário de renovação da sessão sem leitura nova, a barra da sessão mostra 0% esmaecido e o painel diz "renovou · aguardando leitura nova".
 - [ ] Antigravity com token vencido no Credential Manager e válido em `~\.gemini\oauth_creds.json`: a cota aparece. Sem login, o círculo reaparece em até 20 s depois do login.
 - [ ] Codex: abrir uma aba nova (rollout sem `rate_limits`): o uso da sessão anterior continua visível.

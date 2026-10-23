@@ -28,8 +28,8 @@ destas regras, valem estas.
 Decisões já tomadas pelo usuário (não reabrir sem ele pedir):
 - "+ Novo agente" fica **dentro** do projeto ativo, no fim da lista de agentes; o "+" do cabeçalho PROJETOS
   cria projeto. Nada de "+" solto na barra de título.
-- A seção ORGANIZAÇÃO continua sendo **seção** (vai ganhar outros modos, como a tela dividida com destaque),
-  não um ícone no rodapé. Rodapé com atalhos: por enquanto não.
+- A seção ORGANIZAÇÃO continua sendo **seção** (hoje `Abas | Dividida | Destaque`), não um ícone no rodapé. A janela
+  da aba ativa tem borda de 1 px e halo de 3 px na cor do agente e as outras ficam a 62% (`theme::PANE_*`). Rodapé com atalhos: por enquanto não.
 
 ## Tokens (`crates/app/src/theme.rs`)
 

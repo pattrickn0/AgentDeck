@@ -381,8 +381,16 @@ rola: o lado com aba escondida ganha um degradê e uma seta ‹ / › e o fim da
 `ui/tabs.rs`: `hidden_tabs`, `scroll_to_show`). Cada aba
 visível é redimensionada para a sua janela (`fit_tab`, com o debounce de 60 ms); as escondidas mantêm o tamanho
 até aparecerem. O retrato das janelas do último quadro (`Deck::panes`) serve aos atalhos (Ctrl+Tab dentro da
-janela, Ctrl+Alt+setas) e ao tamanho inicial das abas novas. Ordem, proporções e liga/desliga ficam em
-`Config` (`paneOrder`, `splitRows`, `splitCols`, `splitEnabled`).
+janela, Ctrl+Alt+setas) e ao tamanho inicial das abas novas. Ordem, proporções e organização ficam em
+`Config` (`paneOrder`, `splitRows`, `splitCols`, `organization`, `highlightRatio`; o `splitEnabled` antigo ainda é lido).
+
+**Organização** (`agentdeck_core::Organization`: `Tabs`, `Split`, `Highlight`; `Deck::organization`, `set_organization`). Em
+`Highlight`, `plan_panes` usa `split::highlight_order` (o grupo da aba ativa primeiro), `highlight_windows` (quantas janelas
+cabem: a grande mais as pequenas de altura mínima, ou uma só se a largura não comporta duas colunas), `highlight_layout` (a
+grande com `highlight_ratio` da largura e as pequenas empilhadas, alturas iguais) e `assign` (os grupos que sobram dividem a
+última pequena). O destaque é derivado da aba ativa, sem estado próprio (ver `aprendizados/destaque-e-derivado-do-selecionado.md`);
+`ui/panes.rs` pinta o botão "Trazer para o destaque" nas janelas pequenas e o divisor (`highlight_divider`), e, com mais de uma
+janela, o realce (borda + halo na janela da aba ativa, película `bg` a 38% nas outras, `theme::PANE_DIM_OPACITY`).
 
 **Caixa de entrada de respostas** (`core/src/inbox.rs`, `CoreInner::inbox`). Todo desfecho de uma pergunta a uma aba (resposta no prazo, atrasada ou falha) entra, ainda "não entregue", na caixa de quem perguntou (chave com o projeto, até 20, na memória). Quem entrega marca depois: a ponte, quando o 200 do `/ask` (que leva `"request"` no corpo) foi escrito sem erro (`reply_checked`), e a interface, quando digita a resposta atrasada (`Core::answer_typed`, no laço de entregas de `deck.rs`). Se a entrega no terminal falha (aba fechada, encerrada, parada, ou a conexão já abandonada), `Core::answer_lost` põe um aviso de erro na Conversa integrada e a resposta continua em `ask-agent --inbox`. O app também grava o log em `dados/agentdeck.log` (`app/src/logfile.rs`).
 
