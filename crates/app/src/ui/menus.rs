@@ -425,10 +425,7 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         if r.clicked() {
             toggle_keys = true;
         }
-        super::tip(
-            r,
-            "Ligado: Ctrl+B e Ctrl+L são do app mesmo com o terminal focado. Desligado: vão para o terminal (prefixo do tmux, limpar a tela).",
-        );
+        super::tip(r, "Ligado: Ctrl+B é do app mesmo com o terminal focado. Desligado: vai para o terminal (prefixo do tmux).");
 
         separator(p, Pos2::new(inner.min.x + 4.0, item3.max.y + 6.5), Pos2::new(inner.max.x - 4.0, item3.max.y + 6.5));
 

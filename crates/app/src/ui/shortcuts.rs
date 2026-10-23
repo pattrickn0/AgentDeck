@@ -217,7 +217,7 @@ mod tests {
         assert!(all_keys.contains("Ctrl+Shift+D"), "deve conter Ctrl+Shift+D");
         assert!(all_keys.contains("Duplo clique"), "deve conter Duplo clique");
         assert!(all_keys.contains("Ctrl+/"), "deve conter Ctrl+/");
-        assert!(!all_keys.contains("Ctrl+L"), "não deve conter Ctrl+L (compositor removido)");
+        assert!(!all_keys.contains("Ctrl+L"), "não deve conter Ctrl+L (não é atalho do app)");
         assert!(terminal_note(false).contains("terminal") && terminal_note(true).contains('*'));
     }
 

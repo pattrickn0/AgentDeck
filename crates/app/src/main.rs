@@ -2,7 +2,7 @@
 //!
 //! Porta de `renderer/` + `preload.js` da versão Electron. O backend fica em
 //! `agentdeck_core::Core`; esta crate cuida da janela, dos terminais (PTY + emulação VT),
-//! da árvore de arquivos, da "Conversa integrada", do compositor e do áudio.
+//! da árvore de arquivos, da "Conversa integrada" e do áudio.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

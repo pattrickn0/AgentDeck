@@ -52,7 +52,7 @@ A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [his
 
 O que sobrou da mesa está no bloco "Próximo", item a).
 
-- [ ] **Mesa de tarefas, depois:** a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`, em `tasks_ui.rs`) usam nomes de modelos antigos (`claude-opus-4-5`).
+- [ ] **Mesa de tarefas, depois:** a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho.
 
 ## Modelos
 
@@ -106,8 +106,6 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 - [ ] **Uso do Antigravity com o token vencido:** o app usa só o token que o CLI mantém (sem guardar client ID/secret de terceiros), então com o CLI fechado por mais de ~1 h a barra mostra "sem dados". Avaliar ler o client ID/secret do CLI instalado para renovar em memória.
 - [ ] **Uso do Antigravity depende de API interna** (`v1internal:retrieveUserQuotaSummary`): pode mudar sem aviso; hoje qualquer falha vira "sem dados". Avaliar um aviso discreto quando falhar por muito tempo.
 - [ ] **Uso do Codex só testado com arquivos de exemplo** (o Codex não estava instalado): conferir o formato real de `rate_limits` nos `rollout-*.jsonl`.
-- [ ] **A dica de "Atalhos do app acima do terminal" ainda cita o Ctrl+L** (`crates/app/src/ui/menus.rs:442`), que era da caixa de mensagem da barra direita, removida na `t11`: nenhum código trata mais o Ctrl+L (nem a lista de atalhos o traz). Tirar o Ctrl+L da dica. Os comentários de código dessa caixa também ficaram para trás (`crates/app/src/main.rs:5`, `theme.rs:73`, `terminal/input.rs:194`, `crates/core/src/config.rs:101`, `agents.rs:44`, `ui/shortcuts.rs:221`).
-- [ ] **Statusline do usuário perde o `padding`**: a nossa (`ask-agent --usage`) fixa 0 (`agents.rs`, `write_claude_hooks`) e repassa a dele.
 
 ## Git e GitHub
 

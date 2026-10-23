@@ -191,7 +191,7 @@ pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     }
 }
 
-/// Texto enviado pelo compositor (`pty:submit`) ou por outro agente: sempre como colagem entre
+/// Texto entregue a uma aba pela ponte (mensagem de outro agente): sempre como colagem entre
 /// colchetes. ESC e demais caracteres de controle são removidos, para o texto não poder fechar a
 /// colagem (`ESC[201~`) e virar teclas no programa da aba.
 pub fn submit_paste(text: &str) -> Vec<u8> {
