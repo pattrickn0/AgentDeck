@@ -24,8 +24,10 @@ fn git(dir: &Path, args: &[&str]) {
 
 /// Pasta do executável do git (para o PATH de busca do core).
 fn git_dir() -> PathBuf {
-    let probe = if cfg!(windows) { "where" } else { "which" };
-    let out = Command::new(probe).arg("git").output().expect("which git");
+    // `which` não vem no contêiner do Fedora da CI; `command -v` é do próprio shell.
+    let out =
+        if cfg!(windows) { Command::new("where").arg("git").output() } else { Command::new("sh").args(["-c", "command -v git"]).output() };
+    let out = out.expect("which git");
     let first = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_owned();
     Path::new(&first).parent().map(Path::to_path_buf).unwrap_or_default()
 }
