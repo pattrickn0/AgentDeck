@@ -39,7 +39,7 @@ whisper/
 
 O AgentDeck utiliza o modelo oficial **`large-v3-turbo`** (~1,62 GB) da OpenAI convertido para o formato GGML:
 - **Precisão Excepcional:** Suporte nativo a dezenas de idiomas com foco especial em Português e Inglês técnico.
-- **Download Automático:** Na primeira inicialização, se o modelo não existir na pasta `whisper/models/`, o AgentDeck baixa-o automaticamente direto do Hugging Face com exibição do progresso no terminal da interface.
+- **Download opcional:** O ditado por voz é opcional. Na primeira inicialização o AgentDeck pergunta se você quer usá-lo; só com o "sim" ele baixa o modelo (direto do Hugging Face, com o progresso na barra direita) e o motor de CPU. Quem disse "Agora não" pode baixar depois (ou remover o que foi baixado) em Configurações.
 - **Injeção de Contexto Fonético:** Cada inferência inclui um prompt contextual customizado (`--prompt "AgentDeck, Claude, Antigravity, agy, Vulkan..."`) para garantir grafia correta dos termos de desenvolvimento.
 
 ---

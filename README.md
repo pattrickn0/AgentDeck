@@ -25,7 +25,7 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
   falhou; um clique manda o PR ou a falha para um agente.
 - Explorador de arquivos do workspace: clique insere o caminho do arquivo na aba ativa, duplo clique abre o arquivo (texto ou markdown, só leitura) no modo **Documentos** do centro, onde também se leem, com a largura toda, o diff de uma tarefa, de um commit ou de um arquivo e o pedido e o relatório das tarefas.
 - Anexos por botão no cabeçalho de cada janela de agente (e no formulário "Nova tarefa"), arrastar e soltar sobre a janela/formulário ou colar imagem (Ctrl+V).
-- Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU) no cabeçalho de cada janela de agente (e `Ctrl+Shift+M`), preso à aba visível daquela janela (com indicador de gravação/transcrição na aba); o áudio é apagado logo após transcrever.
+- Ditado por voz **opcional**, com **whisper.cpp** local (CUDA / Vulkan / CPU) no cabeçalho de cada janela de agente (e `Ctrl+Shift+M`), preso à aba visível daquela janela (com indicador de gravação/transcrição na aba); o áudio é apagado logo após transcrever. Na primeira abertura o app **pergunta** se você quer o ditado e avisa do download (cerca de 1,6 GB); "Agora não" não baixa nada, e dá para baixar ou remover depois em Configurações (☰).
 - Som de notificação quando um agente termina.
 
 Atalhos: `Ctrl+T` nova aba · `Ctrl+Tab` / `Ctrl+Shift+Tab` alternar · `Ctrl+B` barra lateral ·
@@ -78,7 +78,7 @@ o executável e as pastas dele).
 - Os dados (`dados/`, `workspace/` e `whisper/`) ficam ao lado do executável, como no Windows, ou em
   `AGENTDECK_HOME`. Se essa pasta não for gravável (app instalado em `/usr/local/bin`, por exemplo), vão para
   `~/.local/share/AgentDeck`. Configuração em `~/.config/AgentDeck/config.json`.
-- Ditado: o motor de CPU e o modelo são baixados sozinhos (os binários do Linux pedem `libgomp` e `libstdc++`, que
+- Ditado (opcional, o app pergunta antes de baixar): o motor de CPU e o modelo são baixados quando você aceita (os binários do Linux pedem `libgomp` e `libstdc++`, que
   já vêm nas instalações desktop). Para usar a GPU, deixe no `PATH` um `whisper-cli` compilado com CUDA ou Vulkan;
   o app não baixa esses motores no Linux. `pciutils` (`lspci`) e `nvidia-smi` ajudam a detectar a GPU.
 - CLIs: os mesmos `npm install -g …` acima; o Antigravity tem instalador de Linux no site

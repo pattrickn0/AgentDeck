@@ -93,6 +93,9 @@ pub enum CoreEvent {
     GitChanged,
     /// Progresso de um download em segundo plano.
     Download(DownloadProgress),
+    /// O ditado por voz foi baixado, removido ou o download terminou (com ou sem erro): reler
+    /// `Core::dictation_installed`.
+    DictationChanged,
     /// Uma pergunta do `ask-agent` para uma instância (aba): a UI abre a aba se `create` e digita
     /// o `prompt` no terminal dela quando estiver pronta (ver [`Delivery`]).
     Deliver(Delivery),
