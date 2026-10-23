@@ -217,3 +217,22 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
     // Só POST.
     assert_eq!(http(core, "GET", "/learn", &boss, "").0, 404);
 }
+
+#[test]
+fn the_bridge_reads_the_effort_of_a_new_task() {
+    need_git!();
+    let env = start();
+    let token = tab_token(&env, "claude");
+    let post = |body: &str| http(&env.core, "POST", "/tasks", &token, body);
+    let (status, body) = post(r#"{"title":"Rápida","kind":"claude","effort":"Alto"}"#);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["task"]["effort"], "high");
+    let (status, body) = post(r#"{"title":"Padrão","kind":"claude"}"#);
+    assert_eq!((status, &body["task"]["effort"]), (200, &serde_json::Value::Null));
+    let (status, body) = post(r#"{"title":"Máximo","kind":"claude","effort":"max"}"#);
+    assert_eq!(status, 400);
+    assert!(body["error"].as_str().is_some_and(|e| e.contains("esforço inválido")), "{body}");
+    let (status, _) = post(r#"{"title":"Número","kind":"claude","effort":3}"#);
+    assert_eq!(status, 400);
+    env.core.shutdown();
+}

@@ -93,7 +93,7 @@ ask-agent --boss "Terminei a revisão"                   # reporta ao chefe
 cat relatorio.txt | ask-agent claude -
 
 # Tarefas (cada uma numa branch e pasta próprias; o pedido e o relatório vão num arquivo, que preserva os acentos)
-ask-agent --task new "Corrigir o login" --agent claude --model sonnet --start --file pedido.md
+ask-agent --task new "Corrigir o login" --agent claude --model sonnet --effort high --start --file pedido.md
 ask-agent --task list                                   # as tarefas do projeto, com estado e agente
 ask-agent --task done t3 --file relatorio.md            # (o agente da tarefa) entrega o relatório
 ask-agent --task merge t3                               # mescla e deixa aguardando validação

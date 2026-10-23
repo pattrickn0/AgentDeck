@@ -896,6 +896,10 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
                 args.extend(models::cli_args(base, m));
             }
         }
+        // Esforço da tarefa (o do Antigravity já está no nome do modelo; ver `Task::effort`).
+        if let Some(effort) = core.task_of_instance(project, &id).and_then(|t| t.effort) {
+            args.extend(models::effort_args(base, effort));
+        }
         if let Some((Some(flag), prompt)) = boot {
             args.push(flag.into());
             args.push(prompt);

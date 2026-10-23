@@ -5,10 +5,11 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
-use agentdeck_core::{models, Task, TaskStatus};
+use agentdeck_core::models::{self, Effort};
+use agentdeck_core::{Task, TaskStatus};
 
 use super::{
-    button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label,
+    button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label, segmented,
     separator as line_sep, shadow, text_in, text_w, tip, ButtonKind,
 };
 use crate::deck::Deck;
@@ -62,6 +63,7 @@ enum Act {
     CloseMenu,
     SetKind(String),
     SetModel(Option<String>),
+    SetEffort(Option<Effort>),
     /// Passo do menu de modelo: o provedor cujos modelos estão à mostra (`None` = lista de provedores).
     SetProvider(Option<String>),
     ToggleStartNow,
@@ -139,6 +141,7 @@ fn apply(deck: &mut Deck, act: Act) {
             deck.tasks.form.model = m;
             deck.tasks.form.menu = None;
         }
+        Act::SetEffort(e) => deck.tasks.form.effort = e,
         Act::ToggleStartNow => deck.tasks.form.start_now = !deck.tasks.form.start_now,
         Act::PickAttachments => deck.tasks_pick_attachments(),
         Act::RemoveAttachment(i) => deck.tasks_remove_attachment(i),
@@ -530,7 +533,7 @@ Quando ele termina, você revisa o relatório e o diff, mescla, testa e valida. 
 /// Cartão de uma tarefa em andamento:
 /// - Linha 1: `id` (10,5 px mono, `text_3`), `state` (10,5 px 600, `text_2` ou `accent` no em foco), espaço, `when` (`age_text`, 10,5 px, `text_3`).
 /// - Linha 2: `title` (12,5 px 600, `text`, até 2 linhas).
-/// - Linha 3: ponto de 6 px na cor do agente + `agente · modelo` (11 px, `text_2`), espaço e barra de 5 segmentos (3 px × 70 px).
+/// - Linha 3: ponto de 6 px na cor do agente + `agente · modelo · esforço` (11 px, `text_2`), espaço e barra de 5 segmentos (3 px × 70 px).
 /// - Linha 4 (só `Review` / `Validating`): ações de 24 px (`Primary`, `Secondary`, `Ghost`).
 fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec<Act>) {
     let p = theme::pal();
@@ -607,16 +610,16 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     let y2 = y1 + l1_h + 6.0;
     painter.galley(Pos2::new(x0, y2), title_g, p.text);
 
-    // Linha 3: ponto de 6 px na cor do agente + agente · modelo + barra de 5 etapas (70 px × 3 px).
+    // Linha 3: ponto de 6 px na cor do agente + agente · modelo · esforço + barra de 5 etapas (70 px × 3 px).
     let y3 = y2 + title_h + 6.0;
     let r3 = Rect::from_min_size(Pos2::new(x0, y3), Vec2::new(inner_w, l3_h));
     let agent_color = deck.agents.tab_color(&task.kind);
     painter.circle_filled(Pos2::new(x0 + 3.0, r3.center().y), 3.0, agent_color);
 
     let mut who = deck.agents.name(&task.kind);
-    if let Some(m) = tasks_ui::model_text(task) {
+    if let Some(m) = tasks_ui::model_effort_text(task) {
         who.push_str(" · ");
-        who.push_str(m);
+        who.push_str(&m);
     }
     let steps_w = 70.0;
     let who_max_w = (right - steps_w - 8.0 - (x0 + 11.0)).max(20.0);
@@ -882,9 +885,9 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 x += 20.0;
             }
             let mut who = agent_name.clone();
-            if let Some(m) = tasks_ui::model_text(task) {
+            if let Some(m) = tasks_ui::model_effort_text(task) {
                 who.push_str(" · ");
-                who.push_str(m);
+                who.push_str(&m);
             }
             let g = galley_trunc(ui.painter(), &who, theme::ui(12.0), p.text, (r.max.x - x).max(10.0));
             place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), r.max), Align2::LEFT_CENTER, g, p.text);
@@ -1215,6 +1218,19 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
 // ---------------------------------------------------------------------------
 
 /// Rótulo de seção/campo do formulário (IBM Plex Mono Medium 10 px, MAIÚSCULAS, `text_3`, `0.1em`).
+/// Os segmentos do seletor de esforço, na ordem de [`effort_of`].
+const EFFORT_LABELS: [&str; 4] = ["Padrão", "Baixo", "Médio", "Alto"];
+
+/// O segmento de um esforço (`None` = "Padrão").
+fn effort_index(effort: Option<Effort>) -> usize {
+    effort.map_or(0, |e| 1 + Effort::ALL.iter().position(|x| *x == e).unwrap_or(0))
+}
+
+/// O esforço de um segmento.
+fn effort_of(index: usize) -> Option<Effort> {
+    index.checked_sub(1).and_then(|i| Effort::ALL.get(i).copied())
+}
+
 fn field_label(ui: &mut Ui, text: &str) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
     let color = theme::pal().text_3;
@@ -1474,6 +1490,9 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     let sole = models::sole_provider(&groups).map(str::to_owned);
     let step = deck.tasks.form.provider.clone().filter(|p| groups.iter().any(|(name, _)| name == p)).or(sole.clone());
     let model_label = deck.tasks.form.model.clone().unwrap_or_else(|| "Padrão".to_owned());
+    // Esforço: o que o agente (e o modelo escolhido) permite; sem isso o seletor fica desligado, com a dica.
+    let effort_off = models::effort_unavailable(&kind, deck.tasks.form.model.as_deref());
+    let effort_at = if effort_off.is_some() { 0 } else { effort_index(deck.tasks.form.effort) };
     let rows: Vec<(MenuItem, Act)> = if let Some(provider) = &step {
         let mut rows = Vec::new();
         // Com um provedor só não há passo anterior: o menu abre direto nos modelos dele.
@@ -1626,6 +1645,28 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             anchors[1] = Some(r);
             if click {
                 acts.push(Act::ToggleMenu(FormMenu::Model));
+            }
+            ui.add_space(8.0);
+            field_label(ui, "Esforço");
+            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
+            let picked = ui
+                .scope(|ui| {
+                    if effort_off.is_some() {
+                        ui.set_opacity(0.4);
+                    }
+                    segmented(ui, r, Id::new("tasks-new-effort"), &EFFORT_LABELS, effort_at, true)
+                })
+                .inner;
+            match effort_off {
+                Some(why) => {
+                    // Cobre o seletor: sem clique nem destaque ao passar o mouse, só a dica.
+                    tip(ui.interact(r, Id::new("tasks-new-effort-off"), Sense::hover()), why);
+                }
+                None => {
+                    if let Some(i) = picked {
+                        acts.push(Act::SetEffort(effort_of(i)));
+                    }
+                }
             }
             ui.add_space(8.0);
             field_label(ui, "Base");
