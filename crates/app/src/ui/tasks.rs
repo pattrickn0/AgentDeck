@@ -9,8 +9,8 @@ use agentdeck_core::models::{self, Effort};
 use agentdeck_core::{Task, TaskStatus};
 
 use super::{
-    button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label, segmented,
-    separator as line_sep, shadow, text_in, text_w, tip, ButtonKind,
+    button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label,
+    segmented, separator as line_sep, shadow, text_in, text_w, tip, ButtonKind,
 };
 use crate::deck::Deck;
 use crate::icons::Icon;
@@ -423,7 +423,8 @@ fn list_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, now: u64, acts: &mut Vec<
     let body = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, footer.min.y));
 
     if deck.tasks.tasks.is_empty() {
-        empty_state(ui, body, deck.tasks.loaded);
+        // Sem projeto aberto ninguém lê a lista: não fica em "Lendo as tarefas…" para sempre.
+        empty_state(ui, body, deck.tasks.loaded || deck.active_project.is_empty());
         draw_footer(ui, footer, acts);
         return;
     }
