@@ -7,6 +7,7 @@
 pub mod colors;
 pub mod input;
 pub mod record;
+pub mod resize;
 pub mod view;
 
 use std::io::{Read, Write};
@@ -117,6 +118,15 @@ impl Emulator {
         self.parser.advance(&mut self.term, bytes);
     }
 
+    /// Muda o tamanho da grade (no Windows, como o ConPTY espera: ver [`resize`]).
+    pub fn resize(&mut self, size: GridSize) {
+        self.resize_as(size, cfg!(windows));
+    }
+
+    /// [`Emulator::resize`] com a escolha explícita (os testes reproduzem gravações do ConPTY em qualquer sistema).
+    pub fn resize_as(&mut self, size: GridSize, keep_top: bool) {
+        resize::resize(&mut self.term, size, keep_top);
+    }
     /// Atualização sincronizada (`ESC[?2026h`, usada pelo Claude Code): o parser retém a saída até o
     /// `ESC[?2026l`, mas o prazo de 150 ms fica a cargo de quem o usa (no Alacritty, o laço do PTY).
     /// Sem isto, um fim perdido (ex.: no redesenho do ConPTY ao redimensionar) congela a tela.
@@ -374,7 +384,7 @@ impl Session {
         if let Some(r) = self.shared.recorder.lock().as_mut() {
             r.resize(size);
         }
-        self.shared.emu.lock().term.resize(size);
+        self.shared.emu.lock().resize(size);
         if let Some(p) = &self.pty {
             let _ = p.master.resize(PtySize { rows: size.rows as u16, cols: size.cols as u16, pixel_width: 0, pixel_height: 0 });
         }

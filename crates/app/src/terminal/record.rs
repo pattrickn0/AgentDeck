@@ -126,6 +126,36 @@ pub mod replay {
         session
     }
 
+    /// Como [`run`], mas só com o emulador: `keep_top` escolhe a mudança de tamanho (ver `resize.rs`), em qualquer sistema.
+    pub fn run_with(bytes: &[u8], events: &str, keep_top: bool) -> Session {
+        let events = parse_events(events);
+        let first = events.first().map_or(GridSize { cols: 80, rows: 24 }, |e| e.1);
+        let session = Session::new(first);
+        let mut pos = 0;
+        for &(at, size) in events.iter().skip(1) {
+            let at = at.min(bytes.len());
+            session.shared.emu.lock().feed(&bytes[pos..at]);
+            pos = at;
+            session.shared.emu.lock().resize_as(size, keep_top);
+        }
+        session.shared.emu.lock().feed(&bytes[pos..]);
+        session
+    }
+
+    /// Números das linhas `L00001 ...` (o roteiro do PowerShell) na ordem do histórico + tela.
+    pub fn numbered(session: &Session) -> Vec<u32> {
+        use alacritty_terminal::grid::Dimensions;
+        use alacritty_terminal::index::{Column, Line};
+        let emu = session.shared.emu.lock();
+        let grid = emu.term.grid();
+        (-(grid.history_size() as i32)..emu.term.screen_lines() as i32)
+            .filter_map(|l| {
+                let text: String = (0..emu.term.columns()).take(6).map(|c| grid[Line(l)][Column(c)].c).collect();
+                text.strip_prefix('L')?.parse().ok()
+            })
+            .collect()
+    }
+
     /// Linhas da tela (sem o histórico), sem os espaços do fim.
     pub fn screen(session: &Session) -> Vec<String> {
         use alacritty_terminal::grid::Dimensions;
@@ -204,6 +234,37 @@ mod tests {
         }
     }
 
+    /// Gravações reais do ConPTY (Windows, `powershell -NoLogo`, `1..N | % { "L{0:D5} ..." }`) com a janela mudando de
+    /// tamanho: altura 58→30→58→40→58 (200 linhas) e largura 120→60→120 (400 linhas quebradas ao meio).
+    const PS_ALTURA: (&[u8], &str) =
+        (include_bytes!("testdata/conhost-powershell-altura.bin"), include_str!("testdata/conhost-powershell-altura.events.txt"));
+    const PS_LARGURA: (&[u8], &str) =
+        (include_bytes!("testdata/conhost-powershell-largura.bin"), include_str!("testdata/conhost-powershell-largura.events.txt"));
+
+    #[test]
+    fn growing_the_window_does_not_lose_the_lines_the_grid_pulled_from_the_history() {
+        // Defeito t37: o `alacritty_terminal` puxa o histórico para o topo ao ganhar linhas e o ConPTY repinta por cima.
+        let (bytes, events) = PS_ALTURA;
+        let lost = replay::numbered(&replay::run_with(bytes, events, false));
+        assert!(lost.len() < 200 && lost.windows(2).any(|w| w[1] != w[0] + 1), "sem a correção as linhas somem: {lost:?}");
+
+        let session = replay::run_with(bytes, events, true);
+        assert_eq!(replay::numbered(&session), (1..=200).collect::<Vec<u32>>(), "nenhuma linha some do histórico");
+        let screen = replay::screen(&session);
+        assert!(screen[0].starts_with("L00172"), "o topo da janela é o do ConPTY: {:?}", &screen[..3]);
+        assert!(screen[29].starts_with("PS C:"), "o prompt fica onde o ConPTY o pintou");
+        assert!(screen[30..].iter().all(|l| l.is_empty()), "as linhas novas ficam em branco embaixo, como no ConPTY");
+    }
+
+    #[test]
+    fn widening_a_wrapped_session_does_not_lose_the_lines_the_reflow_pulled_from_the_history() {
+        let (bytes, events) = PS_LARGURA;
+        let lost = replay::numbered(&replay::run_with(bytes, events, false));
+        assert!(lost.windows(2).any(|w| w[1] != w[0] + 1), "sem a correção uma linha some: {lost:?}");
+
+        let numbers = replay::numbered(&replay::run_with(bytes, events, true));
+        assert_eq!(numbers, (1..=400).collect::<Vec<u32>>(), "nenhuma linha some nem se repete");
+    }
     #[test]
     fn the_snapshot_has_the_state_header_the_history_tail_and_the_screen() {
         let session = Session::new(GridSize { cols: 20, rows: 3 });
