@@ -155,7 +155,7 @@ pub struct Task {
     pub branch: String,
     /// Pasta (absoluta) da worktree: `<raiz do repositório>/.agentdeck/worktrees/<id>`.
     pub worktree: PathBuf,
-    /// Agente (`claude`, `antigravity`, `opencode`, `ollama:qwen3.5:9b`…).
+    /// Agente (`claude`, `antigravity`, `opencode`, `codex`…).
     pub kind: String,
     /// Modelo de LLM (pelas regras de `models.rs`); `None` = o padrão do CLI.
     pub model: Option<String>,
@@ -285,6 +285,93 @@ impl std::fmt::Display for TaskError {
 }
 
 impl std::error::Error for TaskError {}
+
+/// Uma recusa da mesclagem que tem saída que a tela pode oferecer num botão (a mensagem do erro continua sendo o
+/// texto para a linha de comando e para os agentes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeBlock {
+    /// O repositório principal tem alterações suas sem commit (os arquivos): "guardar, mesclar e devolver".
+    MainDirty(Vec<String>),
+    /// A pasta da tarefa tem trabalho sem commit (os arquivos): "pedir ao agente para fazer o commit".
+    TaskDirty(Vec<String>),
+    /// A mesclagem deu conflito e foi desfeita (os arquivos): "pedir ao agente para resolver o conflito".
+    Conflict(Vec<String>),
+}
+
+impl MergeBlock {
+    /// Os arquivos, completos (a mensagem do erro corta em cinco).
+    pub fn files(&self) -> &[String] {
+        match self {
+            MergeBlock::MainDirty(f) | MergeBlock::TaskDirty(f) | MergeBlock::Conflict(f) => f,
+        }
+    }
+
+    /// A explicação para quem não é desenvolvedor, no aviso da tela.
+    pub fn explain(&self, task: &Task) -> String {
+        match self {
+            MergeBlock::MainDirty(f) => format!(
+                "Há alterações suas, ainda sem commit, na pasta principal do projeto ({}). O git não mescla por cima delas. \
+                 Você pode guardá-las por um instante: o AgentDeck mescla a tarefa e devolve cada alteração ao lugar.",
+                short_list(f)
+            ),
+            MergeBlock::TaskDirty(f) => format!(
+                "O agente deixou trabalho sem commit na pasta da tarefa ({}). Só o que foi commitado entra na mesclagem. \
+                 Peça a ele para fazer o commit e entregar de novo.",
+                short_list(f)
+            ),
+            MergeBlock::Conflict(f) => format!(
+                "A tarefa e a branch \"{}\" mudaram as mesmas linhas ({}). Nada foi mesclado e a tarefa continua em revisão. \
+                 Peça ao agente para juntar as duas versões e entregar de novo.",
+                task.base,
+                if f.is_empty() { "arquivos não identificados".to_owned() } else { short_list(f) }
+            ),
+        }
+    }
+
+    /// O pedido pronto para devolver a tarefa ao agente (`task_return`); `None` para o que o agente não resolve.
+    pub fn return_feedback(&self, task: &Task) -> Option<String> {
+        let list = |f: &[String]| f.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n");
+        match self {
+            MergeBlock::MainDirty(_) => None,
+            MergeBlock::TaskDirty(f) => Some(format!(
+                "Não consegui mesclar a sua tarefa: a sua pasta ({wt}) tem trabalho sem commit, e só o que está commitado entra na mesclagem. Arquivos:\n\n{files}\n\n\
+                 Faça o commit do que faz parte da tarefa (git add e git commit) e descarte o que não faz (git restore, ou apague o arquivo). \
+                 Não deixe nada pendente: confira com git status e entregue de novo.",
+                wt = task.worktree.display(),
+                files = list(f),
+            )),
+            MergeBlock::Conflict(f) => Some(format!(
+                "A mesclagem da sua branch ({branch}) em {base} deu conflito e foi desfeita. Arquivos em conflito:\n\n{files}\n\n\
+                 Na sua pasta ({wt}), rode git merge {base}, resolva os conflitos mantendo o que as duas versões trouxeram de útil, \
+                 rode os testes, faça o commit da mesclagem e entregue de novo.",
+                branch = task.branch,
+                base = task.base,
+                wt = task.worktree.display(),
+                files = if f.is_empty() { "- (o git não informou; veja com git merge)".to_owned() } else { list(f) },
+            )),
+        }
+    }
+}
+
+/// A mesclagem recusada: o erro de sempre e, quando há saída para o usuário, o motivo estruturado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeRefusal {
+    pub error: TaskError,
+    pub block: Option<MergeBlock>,
+}
+
+impl From<TaskError> for MergeRefusal {
+    fn from(error: TaskError) -> Self {
+        MergeRefusal { error, block: None }
+    }
+}
+
+/// A mesclagem feita; `note` é o aviso sobre as alterações guardadas durante ela (devolvidas, ou ainda no stash).
+#[derive(Debug, Clone)]
+pub struct MergeOutcome {
+    pub task: Task,
+    pub note: Option<String>,
+}
 
 fn git_error(e: GitError) -> TaskError {
     TaskError::Failed(e.to_string())
@@ -717,8 +804,7 @@ impl Core {
             )));
         }
         let kinds = self.inner.agents.peers();
-        let ollama = self.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
-        let kind = crate::bridge::resolve_target(&asked, &kinds, &ollama);
+        let kind = crate::agents::resolve_alias(&asked).to_owned();
         if !kinds.contains(&kind) || Ident::parse(&kind).is_none() {
             return Err(TaskError::Invalid(format!(
                 "agente desconhecido ou não instalado \"{}\". Disponíveis: {}",
@@ -1175,6 +1261,20 @@ impl Core {
     /// `Review`, com o erro no histórico e devolvido a quem chamou. Se o `AGENTS.md` da pasta principal só difere
     /// pelo bloco do app e a branch o altera, ele volta ao do HEAD durante a mesclagem e o bloco é regravado depois.
     pub fn task_merge(&self, project: &str, id: &str) -> Result<Task, TaskError> {
+        self.merge_task(project, id, false).map(|o| o.task).map_err(|r| r.error)
+    }
+
+    /// Como [`Core::task_merge`], para a interface: a recusa que tem saída vem com o motivo estruturado
+    /// ([`MergeRefusal::block`], para a tela oferecer o botão), e `stash_main` liga o "guardar minhas alterações,
+    /// mesclar e devolvê-las": as alterações sem commit do repositório principal vão para um `git stash`
+    /// (identificado pela tarefa) e voltam (`stash pop`) depois da mesclagem, qualquer que seja o desfecho. Se
+    /// não voltam limpas (conflito com o que a tarefa trouxe), ficam no stash, intactas, e o aviso diz como
+    /// recuperá-las. Só o clique do usuário liga isso: a linha de comando (`task_merge`) nunca guarda nada.
+    pub fn task_merge_assisted(&self, project: &str, id: &str, stash_main: bool) -> Result<MergeOutcome, MergeRefusal> {
+        self.merge_task(project, id, stash_main)
+    }
+
+    fn merge_task(&self, project: &str, id: &str, stash_main: bool) -> Result<MergeOutcome, MergeRefusal> {
         let _op = self.inner.tasks.op.lock();
         let task = self.task_or_404(project, id)?;
         let retry = task.status == TaskStatus::Failed && task.report.is_some();
@@ -1183,16 +1283,18 @@ impl Core {
                 "a tarefa {} está {}: só se mescla uma tarefa em revisão",
                 task.id,
                 task.status.label()
-            )));
+            ))
+            .into());
         }
         let repo = self.task_repo(project)?;
-        let refuse = |t: &Task, msg: String| -> TaskError {
+        let refuse_with = |t: &Task, msg: String, block: Option<MergeBlock>| -> MergeRefusal {
             self.update_task(project, &t.id, |t| t.log(format!("mesclagem recusada: {msg}")));
-            TaskError::Conflict(msg)
+            MergeRefusal { error: TaskError::Conflict(msg), block }
         };
+        let refuse = |t: &Task, msg: String| -> MergeRefusal { refuse_with(t, msg, None) };
         let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
         if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &expected) {
-            return Err(TaskError::Failed(format!("dados da tarefa {} fora do esperado; não mesclei nada", task.id)));
+            return Err(TaskError::Failed(format!("dados da tarefa {} fora do esperado; não mesclei nada", task.id)).into());
         }
         let _git = self.inner.git.op.lock();
 
@@ -1225,22 +1327,24 @@ impl Core {
         let status = git_out(&repo, &["status", "--porcelain=v1", "--untracked-files=no"]).map_err(git_error)?;
         // O app reescreve o bloco do AGENTS.md; o git protege o arquivo se a mesclagem o tocar.
         let dirty: Vec<String> = dirty_paths(&status).into_iter().filter(|p| p != "AGENTS.md").collect();
-        if !dirty.is_empty() {
-            return Err(refuse(
+        if !dirty.is_empty() && !stash_main {
+            return Err(refuse_with(
                 &task,
                 format!(
                     "o repositório principal tem alterações sem commit ({}): faça o commit ou guarde-as e tente de novo",
                     short_list(&dirty)
                 ),
+                Some(MergeBlock::MainDirty(dirty)),
             ));
         }
         if let Some(d) = worktree_dirty(&repo, &task.worktree).filter(|d| !d.is_empty()) {
-            return Err(refuse(
+            return Err(refuse_with(
                 &task,
                 format!(
                     "a worktree da tarefa tem trabalho sem commit ({}): devolva a tarefa pedindo o commit, ou descarte-a",
                     short_list(&d)
                 ),
+                Some(MergeBlock::TaskDirty(d)),
             ));
         }
         if repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{}", task.branch)]).is_err() {
@@ -1264,7 +1368,7 @@ impl Core {
                     FeedEntry::system(format!("Tarefa {} sem commits novos, aguardando validação de novo: {}", task.id, task.title))
                         .in_project(project),
                 );
-                return Ok(task);
+                return Ok(MergeOutcome { task, note: None });
             }
             return Err(refuse(
                 &task,
@@ -1277,6 +1381,46 @@ impl Core {
         if let Err(e) = repo.check_gpg_ready() {
             return Err(refuse(&task, e.to_string()));
         }
+        // Arquivo novo (não rastreado) do usuário que a branch também cria: o git recusaria no meio da mesclagem. Vale
+        // com ou sem "guardar": o stash não leva arquivos não rastreados, e aqui ainda não se guardou nada.
+        let clash = untracked_clash(&repo, &task.base, &task.branch);
+        if !clash.is_empty() {
+            return Err(refuse(
+                &task,
+                format!(
+                    "o repositório principal tem arquivos novos seus, sem commit, que a tarefa também cria ({}): mova-os para outra pasta (ou apague-os) e tente de novo",
+                    short_list(&clash)
+                ),
+            ));
+        }
+
+        // "Guardar minhas alterações": o que está sem commit vai para o stash (menos o AGENTS.md, que o app
+        // trata à parte, abaixo). Daqui em diante todo desfecho passa por `give_back`, que devolve o stash.
+        let mut stashed: Option<Stash> = None;
+        if stash_main && !dirty.is_empty() {
+            match stash_push(&repo, &task) {
+                Ok(s) => stashed = s,
+                Err(e) => {
+                    return Err(refuse(
+                        &task,
+                        format!("não consegui guardar as alterações do repositório principal ({e}); nada foi mudado"),
+                    ))
+                }
+            }
+            if stashed.is_some() {
+                self.update_task(project, &task.id, |t| {
+                    t.log(format!("guardei {} arquivo(s) sem commit do repositório principal no stash", dirty.len()))
+                });
+            }
+        }
+        let give_back = || -> Option<String> {
+            let stash = stashed.as_ref()?;
+            let (note, kept) = stash_pop(&repo, stash);
+            self.update_task(project, &task.id, |t| {
+                t.log(format!("alterações guardadas: {}", if kept { "continuam no stash" } else { "devolvidas" }))
+            });
+            Some(note)
+        };
 
         // O app reescreve o bloco do AGENTS.md da pasta principal, e o git recusa mesclar sobre um arquivo
         // alterado que a branch também mexe. Se a alteração é só o bloco do app, o arquivo volta ao do HEAD
@@ -1289,16 +1433,24 @@ impl Core {
             let current = std::fs::read_to_string(&file).unwrap_or_default();
             let committed = git_out(&repo, &["show", "HEAD:AGENTS.md"]).unwrap_or_default();
             if !crate::workspace::only_marker_blocks_differ(&committed, &current) {
+                let note = give_back();
                 return Err(refuse(
                     &task,
-                    format!(
-                        "o AGENTS.md do repositório principal tem alterações suas sem commit, e a branch {} também mexe nele: faça o commit ou guarde-as e tente de novo",
-                        task.branch
+                    with_note(
+                        format!(
+                            "o AGENTS.md do repositório principal tem alterações suas sem commit, e a branch {} também mexe nele: faça o commit ou guarde-as e tente de novo",
+                            task.branch
+                        ),
+                        note,
                     ),
                 ));
             }
             if let Err(e) = repo.write(&["checkout", "--", "AGENTS.md"], None) {
-                return Err(refuse(&task, format!("não consegui preparar o AGENTS.md do repositório principal para a mesclagem: {e}")));
+                let note = give_back();
+                return Err(refuse(
+                    &task,
+                    with_note(format!("não consegui preparar o AGENTS.md do repositório principal para a mesclagem: {e}"), note),
+                ));
             }
             app_block = Some(current);
         }
@@ -1319,6 +1471,7 @@ impl Core {
                 return match repo.write(&["merge", "--abort"], None) {
                     Ok(_) => {
                         restore_block();
+                        let note = give_back();
                         let msg = format!(
                             "conflito ao mesclar {} em \"{}\" (arquivos: {}); a mesclagem foi desfeita e a tarefa continua em revisão. Devolva-a ao agente pedindo para atualizar a branch com a base, ou resolva à mão",
                             task.branch,
@@ -1326,19 +1479,32 @@ impl Core {
                             if files.is_empty() { "não identificados".to_owned() } else { short_list(&files) }
                         );
                         self.update_task(project, &task.id, |t| t.log(format!("conflito na mesclagem ({}); desfeita", short_list(&files))));
-                        Err(TaskError::Conflict(msg))
+                        Err(MergeRefusal { error: TaskError::Conflict(with_note(msg, note)), block: Some(MergeBlock::Conflict(files)) })
                     }
-                    Err(abort) => Err(self.fail_merge(
-                        project,
-                        &task.id,
-                        format!("conflito ao mesclar e não consegui desfazer ({abort}): rode git merge --abort em {}", repo.root.display()),
-                    )),
+                    // Sem conseguir desfazer, a pasta está no meio da mesclagem: o stash não é devolvido por cima.
+                    Err(abort) => Err(self
+                        .fail_merge(
+                            project,
+                            &task.id,
+                            format!(
+                                "conflito ao mesclar e não consegui desfazer ({abort}): rode git merge --abort em {}{}",
+                                repo.root.display(),
+                                if stashed.is_some() {
+                                    "; as suas alterações sem commit continuam guardadas (git stash list)"
+                                } else {
+                                    ""
+                                }
+                            ),
+                        )
+                        .into()),
                 };
             }
             restore_block();
-            return Err(self.fail_merge(project, &task.id, format!("a mesclagem falhou: {e}")));
+            let note = give_back();
+            return Err(self.fail_merge(project, &task.id, with_note(format!("a mesclagem falhou: {e}"), note)).into());
         }
         restore_block();
+        let note = give_back();
         let full_head = git_out(&repo, &["rev-parse", "HEAD"]).map(|s| s.trim().to_owned()).unwrap_or_default();
         let head = short_hash(&full_head).to_owned();
 
@@ -1361,7 +1527,7 @@ impl Core {
             FeedEntry::system(format!("Tarefa {} mesclada em {}, aguardando validação: {}", task.id, task.base, task.title))
                 .in_project(project),
         );
-        Ok(task)
+        Ok(MergeOutcome { task, note })
     }
 
     // ---------- Validar ----------
@@ -1714,6 +1880,114 @@ fn delete_branch(repo: &Repo, branch: &str, force: bool) -> Result<(), String> {
         return Ok(());
     }
     repo.write(&["branch", if force { "-D" } else { "-d" }, branch], None).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// O stash que o app criou para guardar as alterações do repositório principal (o hash identifica a entrada:
+/// a pilha do stash é compartilhada com as outras worktrees, `stash@{0}` pode não ser a nossa na hora de devolver).
+struct Stash {
+    sha: String,
+    message: String,
+}
+
+/// O topo do stash (`refs/stash`), se há.
+fn stash_top(repo: &Repo) -> Option<String> {
+    repo.read(&["rev-parse", "-q", "--verify", "refs/stash"]).ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+}
+
+/// Guarda no stash as alterações sem commit dos arquivos rastreados do repositório principal, menos o `AGENTS.md`
+/// (o app trata dele à parte). Não leva arquivos não rastreados. `Ok(None)` = não havia o que guardar.
+fn stash_push(repo: &Repo, task: &Task) -> Result<Option<Stash>, String> {
+    let listed = git_out(repo, &["diff", "--name-only", "-z", "--no-renames", "HEAD", "--"]).map_err(|e| e.to_string())?;
+    let mut stdin = Vec::new();
+    for path in listed.split('\0').filter(|p| !p.is_empty() && *p != "AGENTS.md") {
+        stdin.extend_from_slice(path.as_bytes());
+        stdin.push(0);
+    }
+    if stdin.is_empty() {
+        return Ok(None);
+    }
+    let before = stash_top(repo);
+    let message = format!("agentdeck: guardado antes de mesclar a tarefa {}", task.id);
+    let args = ["stash", "push", "-m", message.as_str(), "--pathspec-from-file=-", "--pathspec-file-nul"];
+    run(repo.cmd(&args), Some(stdin), COMMIT_TIMEOUT).map_err(|e| e.to_string())?;
+    let after = stash_top(repo);
+    Ok(after.filter(|a| Some(a) != before.as_ref()).map(|sha| Stash { sha, message }))
+}
+
+/// A posição atual (`stash@{n}`) da entrada do stash, se ela ainda existe.
+fn stash_ref(repo: &Repo, sha: &str) -> Option<String> {
+    let list = git_out(repo, &["stash", "list", "--format=%H %gd"]).ok()?;
+    list.lines().find_map(|l| l.split_once(' ').filter(|(h, _)| *h == sha).map(|(_, r)| r.trim().to_owned()))
+}
+
+/// Os arquivos em que devolver o stash por cima de `HEAD` daria conflito, sem tocar na pasta
+/// (`git merge-tree --write-tree`, git 2.38+). `None` = não deu para conferir (git antigo, erro).
+fn stash_pop_conflicts(repo: &Repo, sha: &str) -> Option<Vec<String>> {
+    let base = format!("--merge-base={sha}^1");
+    let out = repo.cmd(&["merge-tree", "--write-tree", "--name-only", "--no-messages", &base, "HEAD", sha]).output().ok()?;
+    match out.status.code() {
+        Some(0) => Some(Vec::new()),
+        Some(1) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            // A primeira linha é o tree; os arquivos em conflito vêm depois, até uma linha vazia.
+            Some(text.lines().skip(1).take_while(|l| !l.is_empty()).map(str::to_owned).collect())
+        }
+        _ => None,
+    }
+}
+
+/// Devolve o stash à pasta principal depois da mesclagem. Só faz o `stash pop` quando a conferência diz que não há
+/// conflito; na dúvida, ou em conflito, deixa no stash (intacto) e o aviso explica como recuperar. Devolve o aviso
+/// e se o stash continua guardado.
+fn stash_pop(repo: &Repo, stash: &Stash) -> (String, bool) {
+    let recover = "Para recuperá-las: abra um terminal na pasta do projeto, rode git stash list para achar a entrada e git stash pop para devolvê-la (resolvendo o que chocar).";
+    let kept = |why: String| {
+        (
+            format!(
+                "Suas alterações sem commit continuam guardadas no stash do git (\"{}\"): {why} Nada se perdeu. {recover}",
+                stash.message
+            ),
+            true,
+        )
+    };
+    let Some(reference) = stash_ref(repo, &stash.sha) else {
+        return (
+            "O stash com as suas alterações não está mais na lista do git (alguém o usou ou apagou?); confira com git stash list.".into(),
+            true,
+        );
+    };
+    match stash_pop_conflicts(repo, &stash.sha) {
+        Some(files) if files.is_empty() => {}
+        Some(files) => return kept(format!("ao devolvê-las elas se chocariam com o que a tarefa trouxe em {}.", short_list(&files))),
+        None => return kept("não consegui conferir se elas se chocam com o que a tarefa trouxe.".into()),
+    }
+    match repo.write(&["stash", "pop", &reference], None) {
+        Ok(_) => ("Suas alterações sem commit foram guardadas durante a mesclagem e já voltaram para a pasta.".to_owned(), false),
+        Err(e) if stash_ref(repo, &stash.sha).is_some() => {
+            let unmerged = git_out(repo, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
+            let mess = if unmerged.trim().is_empty() { "" } else { " A pasta ficou com arquivos em conflito: confira com git status." };
+            kept(format!("o git não conseguiu devolvê-las ({e}).{mess}"))
+        }
+        // O pop falhou depois de já ter apagado a entrada: as alterações estão na pasta.
+        Err(_) => ("Suas alterações sem commit voltaram para a pasta.".into(), false),
+    }
+}
+
+/// Arquivos novos do usuário (não rastreados, no repositório principal) que a branch da tarefa também cria.
+fn untracked_clash(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
+    let range = format!("{base}...{branch}");
+    let added = git_out(repo, &["diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", &range, "--"]).unwrap_or_default();
+    let untracked = git_out(repo, &["ls-files", "--others", "--exclude-standard", "-z"]).unwrap_or_default();
+    let mine: std::collections::HashSet<&str> = untracked.split('\0').filter(|p| !p.is_empty()).collect();
+    added.split('\0').filter(|p| mine.contains(p)).map(str::to_owned).collect()
+}
+
+/// A mensagem seguida do aviso do stash, se houve.
+fn with_note(msg: String, note: Option<String>) -> String {
+    match note {
+        Some(n) => format!("{msg} {n}"),
+        None => msg,
+    }
 }
 
 #[cfg(test)]

@@ -28,7 +28,6 @@ fn start_core(root: &std::path::Path) -> Core {
     let opts = StartOptions {
         search_path: Some(fake_bin.into_os_string()),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,
@@ -36,10 +35,10 @@ fn start_core(root: &std::path::Path) -> Core {
     Core::start_with(paths, opts).expect("start").0
 }
 
-/// Tira do ambiente do teste as variáveis do app, dos dois nomes (o teste pode rodar dentro de uma aba).
+/// Tira do ambiente do teste as variáveis do app (o teste pode rodar dentro de uma aba).
 fn scrub_app_env(cmd: &mut Command) {
     for name in ["PORT", "TOKEN", "AGENT", "DEPTH", "ASK_WAIT"] {
-        cmd.env_remove(format!("AGENTDECK_{name}")).env_remove(format!("COMMANDDECK_{name}"));
+        cmd.env_remove(format!("AGENTDECK_{name}"));
     }
 }
 
@@ -75,10 +74,9 @@ fn outside_agentdeck_exits_2() {
     assert_eq!(text(&out.stderr).trim(), "ask-agent: rode este comando de dentro de um terminal do AgentDeck.");
 }
 
-/// Uma aba aberta pela versão antiga tem só `COMMANDDECK_*` no ambiente: o `ask-agent` continua
-/// falando com a ponte.
+/// O prefixo do nome antigo (`COMMANDDECK_*`) não vale mais: sem `AGENTDECK_*` o `ask-agent` não acha a ponte.
 #[test]
-fn old_commanddeck_variables_still_work() {
+fn old_commanddeck_variables_are_ignored() {
     let tmp = tempfile::tempdir().expect("tmp");
     let core = start_core(tmp.path());
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
@@ -88,49 +86,8 @@ fn old_commanddeck_variables_still_work() {
         .env("COMMANDDECK_TOKEN", core.bridge_token())
         .env("COMMANDDECK_AGENT", "shell");
     let out = cmd.output().expect("ask-agent");
-    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    if cfg!(unix) {
-        assert_eq!(text(&out.stdout), "claude\n");
-    }
-
-    // A nova vence quando as duas existem: com a antiga errada, a nova ainda funciona.
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    scrub_app_env(&mut cmd);
-    cmd.arg("--list")
-        .env("COMMANDDECK_PORT", "1")
-        .env("COMMANDDECK_TOKEN", "velho")
-        .env("AGENTDECK_PORT", core.bridge_port().to_string())
-        .env("AGENTDECK_TOKEN", core.bridge_token());
-    assert_eq!(cmd.output().expect("ask-agent").status.code(), Some(0));
-}
-
-/// A ponte da versão antiga só lê `x-commanddeck-token`: o `ask-agent` novo, que cai na pasta
-/// compartilhada e é usado por abas antigas, manda os dois cabeçalhos para não levar 403.
-#[test]
-fn old_bridge_that_reads_only_the_old_header_accepts_the_request() {
-    use std::io::Read;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
-    let server = std::thread::spawn(move || {
-        let (mut sock, _) = listener.accept().expect("accept");
-        let mut buf = [0u8; 4096];
-        let n = sock.read(&mut buf).expect("read");
-        let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
-        let ok = req.contains("\r\nx-commanddeck-token: segredo\r\n");
-        let (status, body) = if ok { ("200 OK", r#"{"agents":["claude"]}"#) } else { ("403 Forbidden", r#"{"error":"token"}"#) };
-        let resp = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        sock.write_all(resp.as_bytes()).expect("write");
-        ok
-    });
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    scrub_app_env(&mut cmd);
-    cmd.arg("--list").env("COMMANDDECK_PORT", port.to_string()).env("COMMANDDECK_TOKEN", "segredo").env("COMMANDDECK_AGENT", "shell");
-    let out = cmd.output().expect("ask-agent");
-    assert!(server.join().expect("servidor"), "a ponte antiga não recebeu x-commanddeck-token");
-    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stderr).trim(), "ask-agent: rode este comando de dentro de um terminal do AgentDeck.");
 }
 
 #[test]

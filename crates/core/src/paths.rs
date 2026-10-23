@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 pub struct AppPaths {
     /// Pasta base do app (onde ficam `dados/`, `workspace/`, `whisper/`).
     pub app_dir: PathBuf,
-    /// Pasta dos executáveis (`agentdeck`, `ask-agent`, `ollama-agent`). Vai no início do PATH dos agentes.
+    /// Pasta dos executáveis (`agentdeck`, `ask-agent`). Vai no início do PATH dos agentes.
     pub bin_dir: PathBuf,
     /// `<app_dir>/dados`
     pub data_dir: PathBuf,

@@ -59,7 +59,7 @@ fn main() -> anyhow::Result<()> {
     }
     let event_loop = event_loop_builder.build()?;
     let proxy = std::sync::Arc::new(parking_lot::Mutex::new(event_loop.create_proxy()));
-    // O backend pode levar alguns segundos para iniciar (descoberta de CLIs/Ollama):
+    // O backend pode levar alguns segundos para iniciar (descoberta de CLIs):
     // a janela abre já, e a interface aparece quando ele fica pronto.
     let (tx, rx) = crossbeam_channel::bounded(1);
     let wake = app::App::waker(&proxy);

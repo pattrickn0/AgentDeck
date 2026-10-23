@@ -575,8 +575,8 @@ mod tests {
     fn instance_specs_parse_as_idents() {
         assert_eq!(instance_spec("claude", ""), "claude");
         assert_eq!(instance_spec("claude", "Review"), "claude@review");
-        let id = Ident::parse(&instance_spec("ollama:qwen3.5:4b", "ci")).expect("id válido");
-        assert_eq!(id.kind, "ollama:qwen3.5:4b");
+        let id = Ident::parse(&instance_spec("opencode", "ci")).expect("id válido");
+        assert_eq!(id.kind, "opencode");
         assert_eq!(id.role.as_deref(), Some("ci"));
     }
 

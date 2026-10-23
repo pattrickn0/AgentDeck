@@ -1,6 +1,6 @@
 //! AgentDeck — núcleo (backend) sem dependências de interface gráfica.
 //!
-//! Este crate é o equivalente Rust de `main.js` + `ollamaAgent.js` da versão Electron.
+//! Este crate é o equivalente Rust de `main.js` da versão Electron.
 //! A interface (crate `agentdeck`) conversa com ele exclusivamente através de [`Core`]
 //! e dos eventos [`CoreEvent`] — o mesmo papel que o IPC/preload tinha no Electron.
 //!
@@ -26,7 +26,6 @@ pub mod inbox;
 pub mod instances;
 pub mod learnings;
 pub mod models;
-pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
 pub mod sessions;
@@ -54,7 +53,7 @@ pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
-pub use tasks::{Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
+pub use tasks::{MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 pub use team::Team;
 pub use usage::{AgentUsage, UsageGroup, UsageWindow};
 pub use workspace::{DirEntry, TextFile};
@@ -77,11 +76,9 @@ pub struct Transcription {
 pub struct StartOptions {
     /// PATH usado para localizar os CLIs dos agentes (`None` = PATH do processo).
     pub search_path: Option<OsString>,
-    /// Pasta pessoal usada na resolução de agentes, nos manifests do Ollama e na regra
-    /// "nunca escrever AGENTS.md na pasta do usuário" (`None` = a do sistema).
+    /// Pasta pessoal usada na resolução de agentes e na regra "nunca escrever AGENTS.md na
+    /// pasta do usuário" (`None` = a do sistema).
     pub home_dir: Option<PathBuf>,
-    /// Descobrir o Ollama (executável, `/api/tags` e manifests em disco).
-    pub ollama_discovery: bool,
     /// Observar o workspace e emitir [`CoreEvent::WorkspaceChanged`].
     pub watch_workspace: bool,
     /// Configuração a usar em vez de ler `paths.config_file` (não é gravada até `update_config`).
@@ -93,7 +90,7 @@ pub struct StartOptions {
 
 impl Default for StartOptions {
     fn default() -> Self {
-        Self { search_path: None, home_dir: None, ollama_discovery: true, watch_workspace: true, config: None, system_dirs: true }
+        Self { search_path: None, home_dir: None, watch_workspace: true, config: None, system_dirs: true }
     }
 }
 
@@ -112,7 +109,6 @@ pub(crate) struct CoreInner {
     pub home: PathBuf,
     pub watch_workspace: bool,
     pub agents: agents::Registry,
-    pub ollama: ollama::OllamaAgent,
     pub providers: context::Providers,
     pub processes: process::ProcessRegistry,
     /// Chave do par (com o escopo do projeto) → id da sessão/conversa headless.
@@ -151,7 +147,7 @@ pub(crate) struct CoreInner {
     /// Tarefas (mesa de tarefas) de cada projeto, em `dados/tarefas/<projeto>.json`.
     pub tasks: tasks::TaskStore,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
-    _data_lock: Vec<std::fs::File>,
+    _data_lock: std::fs::File,
 }
 
 /// Quem chamou a ponte, pelo token que recebeu no ambiente.
@@ -191,30 +187,23 @@ fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Travas da pasta de dados: `.agentdeck.lock` e, durante a migração do nome, também o arquivo da
-/// versão antiga (CommandDeck), para o app novo não abrir sobre a mesma pasta com o antigo ainda
-/// aberto (e vice-versa). Ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`.
-const LOCK_FILES: [&str; 2] = [".agentdeck.lock", ".commanddeck.lock"];
+/// Arquivo de trava da pasta de dados: uma instância do app por pasta.
+const LOCK_FILE: &str = ".agentdeck.lock";
 
-/// Trava `dados/.agentdeck.lock` e `dados/.commanddeck.lock`. Erro se outra instância do app, nova ou
-/// antiga, já usa a pasta.
-fn lock_data_dir(data_dir: &Path) -> anyhow::Result<Vec<std::fs::File>> {
+/// Trava `dados/.agentdeck.lock`. Erro se outra instância do app já usa a pasta.
+fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
     std::fs::create_dir_all(data_dir)?;
-    let mut locks = Vec::with_capacity(LOCK_FILES.len());
-    for name in LOCK_FILES {
-        let path = data_dir.join(name);
-        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
-        match file.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(
-                "Outra janela do AgentDeck já está usando a pasta de dados {}.\n\nFeche-a, ou defina AGENTDECK_HOME com outra pasta para abrir uma instância separada.",
-                data_dir.display()
-            ),
-            Err(std::fs::TryLockError::Error(e)) => log::warn!("não consegui travar {}: {e}", path.display()),
-        }
-        locks.push(file);
+    let path = data_dir.join(LOCK_FILE);
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(
+            "Outra janela do AgentDeck já está usando a pasta de dados {}.\n\nFeche-a, ou defina AGENTDECK_HOME com outra pasta para abrir uma instância separada.",
+            data_dir.display()
+        ),
+        Err(std::fs::TryLockError::Error(e)) => log::warn!("não consegui travar {}: {e}", path.display()),
     }
-    Ok(locks)
+    Ok(file)
 }
 
 pub(crate) mod state {
@@ -224,7 +213,7 @@ pub(crate) mod state {
         pub bridge_port: parking_lot::Mutex<u16>,
         pub bridge_token: String,
         pub session_id: String,
-        /// Sinal de encerramento (interrompe execuções do Ollama na ponte).
+        /// Sinal de encerramento (interrompe as execuções headless da ponte).
         pub shutdown: std::sync::atomic::AtomicBool,
     }
 }
@@ -259,7 +248,6 @@ impl Core {
         config.fix_workspace(&paths, &home);
         let providers = context::Providers::default();
         let inner = CoreInner {
-            ollama: ollama::OllamaAgent::with_providers(config.ollama_host.clone(), providers.clone()),
             config: RwLock::new(config),
             events_tx: tx,
             waker: RwLock::new(None),
@@ -267,7 +255,6 @@ impl Core {
             agents: agents::Registry::new(agents::Discovery {
                 search_path: opts.search_path,
                 home: home.clone(),
-                ollama: opts.ollama_discovery,
                 system_dirs: opts.system_dirs,
             }),
             home,
@@ -307,19 +294,6 @@ impl Core {
 
         usage::start_poller(&core);
 
-        // Atualiza os modelos Ollama em segundo plano (a lista inicial vem do disco).
-        if opts.ollama_discovery {
-            let weak = Arc::downgrade(&core.inner);
-            let _ = std::thread::Builder::new().name("cd-ollama-refresh".into()).spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                let Some(inner) = weak.upgrade() else { return };
-                let core = Core { inner };
-                if core.inner.agents.refresh_ollama_models(&core.config().ollama_host) {
-                    core.refresh_agent_context();
-                    core.emit(CoreEvent::AgentsChanged);
-                }
-            });
-        }
         Ok((core, rx))
     }
 
@@ -361,11 +335,6 @@ impl Core {
         self.inner.providers.write().push(provider);
     }
 
-    /// Motor do agente Ollama compartilhado (conversas da ponte).
-    pub fn ollama_agent(&self) -> &ollama::OllamaAgent {
-        &self.inner.ollama
-    }
-
     // ---------- Configuração (config:get / config:save) ----------
 
     pub fn config(&self) -> Config {
@@ -388,10 +357,8 @@ impl Core {
             cfg.clone()
         };
         if self.inner.config_read_only.load(Ordering::SeqCst) {
-            self.inner.ollama.set_host(snapshot.ollama_host.clone());
             return;
         }
-        self.inner.ollama.set_host(snapshot.ollama_host.clone());
         if let Err(e) = snapshot.save(&self.paths().config_file) {
             log::warn!("falha ao salvar a configuração em {}: {e}", self.paths().config_file.display());
         }
@@ -399,16 +366,14 @@ impl Core {
 
     // ---------- Agentes (agents:list / pty:spawn) ----------
 
-    /// Lista de agentes para menus (mesma semântica de `agents:list`, incluindo
-    /// expansão `ollama:<modelo>`). Pode bloquear até ~1,5 s (consulta /api/tags):
-    /// chame fora da thread da UI.
+    /// Lista de agentes para menus (mesma semântica de `agents:list`). Pode bloquear (procura os
+    /// CLIs no disco e consulta o `gh`): chame fora da thread da UI.
     pub fn list_agents(&self) -> Vec<AgentInfo> {
-        self.inner.agents.refresh_ollama_models(&self.config().ollama_host);
         self.inner.agents.list()
     }
 
     /// Monta o comando para abrir, na pasta do projeto `project`, um terminal interativo do agente
-    /// `kind` (`claude`, `antigravity`, `ollama`, `ollama:<modelo>`, `shell`, ...).
+    /// `kind` (`claude`, `antigravity`, `shell`, ...).
     /// Erro = mensagem amigável ("não instalado", projeto desconhecido) a ser escrita no terminal.
     pub fn spawn_spec(&self, project: &str, kind: &str) -> Result<SpawnSpec, String> {
         agents::spawn_spec(self, project, kind)
@@ -838,7 +803,7 @@ impl Core {
         if ws.as_os_str().is_empty() {
             anyhow::bail!("nenhum projeto aberto");
         }
-        let full = match ollama::resolve_workspace_path(rel_path, &ws) {
+        let full = match workspace::resolve_workspace_path(rel_path, &ws) {
             Ok(p) => p,
             Err(e) => {
                 let abs = util::normalize_lexical(&ws.join(rel_path));
@@ -946,12 +911,6 @@ pub fn ref_path(workspace: &Path, abs: &Path) -> String {
 mod tests {
     use super::*;
 
-    fn hold(dir: &Path, name: &str) -> std::fs::File {
-        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(name)).expect("open");
-        file.try_lock().expect("travar");
-        file
-    }
-
     #[test]
     fn the_data_dir_is_locked_by_one_instance() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -960,27 +919,5 @@ mod tests {
         assert!(err.starts_with("Outra janela do AgentDeck já está usando a pasta de dados"), "{err}");
         drop(first);
         lock_data_dir(tmp.path()).expect("livre de novo");
-    }
-
-    /// O app antigo (CommandDeck) trava `.commanddeck.lock`: o novo, na mesma pasta, recusa abrir.
-    #[test]
-    fn the_old_commanddeck_lock_in_use_blocks_opening() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let old_app = hold(tmp.path(), ".commanddeck.lock");
-        let err = lock_data_dir(tmp.path()).expect_err("recusa").to_string();
-        assert!(err.starts_with("Outra janela do AgentDeck já está usando a pasta de dados"), "{err}");
-        // Recusar não deixa o arquivo novo travado.
-        drop(old_app);
-        lock_data_dir(tmp.path()).expect("sem a trava antiga, abre");
-    }
-
-    /// O app novo também segura a trava antiga: abrir o app antigo depois também é recusado.
-    #[test]
-    fn the_new_instance_also_holds_the_old_lock() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let _new_app = lock_data_dir(tmp.path()).expect("abre");
-        let old =
-            std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(tmp.path().join(".commanddeck.lock")).expect("open");
-        assert!(matches!(old.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
     }
 }

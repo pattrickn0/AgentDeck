@@ -479,12 +479,12 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
     vec![
         project(
             "p1",
-            "commanddeck-dev",
+            "agentdeck-dev",
             true,
             vec![
                 agent("claude", None, "claude", "Claude", theme::CLAUDE, true),
                 agent("claude@dev", Some("claude"), "claude", "Claude · Dev", theme::CLAUDE, false),
-                agent("ollama:qwen3.5:9b", Some("claude@dev"), "ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", theme::OLLAMA, false),
+                agent("codex", Some("claude@dev"), "codex", "Codex", theme::SHELL, false),
                 agent("antigravity@sidebar", Some("claude"), "antigravity", "Antigravity · Sidebar", theme::ANTIGRAVITY, false),
                 agent("claude@review", None, "claude", "Claude · Review", theme::CLAUDE, false),
             ],
@@ -495,7 +495,7 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
 }
 
 /// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`AGENTDECK_DEBUG_UI=usage-demo` e `usage-panel`): Claude
-/// no meio da sessão, Antigravity com a semana em aviso (e os três grupos de modelos), Codex com a sessão esgotada e Ollama local.
+/// no meio da sessão, Antigravity com a semana em aviso (e os três grupos de modelos), Codex com a sessão esgotada.
 fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage> {
     use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
     let now = agentdeck_core::util::now_ms();
@@ -525,11 +525,10 @@ fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage
                 ..Default::default()
             },
         ),
-        ("ollama".into(), AgentUsage { local: true, updated_ms: now, ..Default::default() }),
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agente>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agente>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Some(v) = agentdeck_core::env_var("DEBUG_UI") else { return };
@@ -699,6 +698,11 @@ fn apply_debug_ui(deck: &mut Deck) {
             | "tasks-discard-validating"
             | "tasks-return"
             | "tasks-error"
+            | "tasks-refused-main"
+            | "tasks-refused-main-files"
+            | "tasks-refused-commit"
+            | "tasks-refused-conflict"
+            | "tasks-stash-kept"
             | "tasks-busy"
             | "tasks-new"
             | "tasks-new-attach"
@@ -776,7 +780,16 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                 _ => {}
             }
         }
-        "tasks-detail" | "tasks-confirm" | "tasks-return" | "tasks-error" | "tasks-busy" => {
+        "tasks-detail"
+        | "tasks-confirm"
+        | "tasks-return"
+        | "tasks-error"
+        | "tasks-refused-main"
+        | "tasks-refused-main-files"
+        | "tasks-refused-commit"
+        | "tasks-refused-conflict"
+        | "tasks-stash-kept"
+        | "tasks-busy" => {
             deck.tasks.view = detail("t4");
             match item {
                 "tasks-confirm" => deck.tasks.confirm = Some(Confirm::Merge("t4".into())),
@@ -789,6 +802,25 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                         "o repositório principal tem alterações sem commit (crates/app/src/deck.rs, crates/app/src/app.rs): faça o commit ou guarde-as e tente de novo"
                             .into(),
                     )
+                }
+                "tasks-refused-main" | "tasks-refused-main-files" => {
+                    let files = ["crates/app/src/deck.rs", "crates/app/src/app.rs", "memory/pendencias.md"].map(String::from).to_vec();
+                    deck.tasks.notice = Some("o repositório principal tem alterações sem commit".into());
+                    deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::MainDirty(files));
+                    deck.tasks.notice_files = item == "tasks-refused-main-files";
+                }
+                "tasks-refused-commit" => {
+                    let files = ["crates/core/src/tasks.rs", "memory/testes.md"].map(String::from).to_vec();
+                    deck.tasks.notice = Some("a worktree da tarefa tem trabalho sem commit".into());
+                    deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::TaskDirty(files));
+                }
+                "tasks-refused-conflict" => {
+                    deck.tasks.notice = Some("conflito ao mesclar".into());
+                    deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::Conflict(vec!["crates/app/src/app.rs".into()]));
+                }
+                "tasks-stash-kept" => {
+                    deck.tasks.notice_info = true;
+                    deck.tasks.notice = Some("Suas alterações sem commit continuam guardadas no stash do git (\"agentdeck: guardado antes de mesclar a tarefa t4\"): ao devolvê-las elas se chocariam com o que a tarefa trouxe em crates/app/src/app.rs. Nada se perdeu. Para recuperá-las: abra um terminal na pasta do projeto, rode git stash list para achar a entrada e git stash pop para devolvê-la (resolvendo o que chocar).".into());
                 }
                 "tasks-busy" => deck.tasks.busy = Some(t::Busy { id: "t4".into(), label: "Mesclando…" }),
                 _ => {}
@@ -821,8 +853,8 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             f.brief = "Explicar no memory/ARCHITECTURE.md cada rota, com o corpo de exemplo e os códigos de erro.\n\nConferir também o texto do ask-agent --task.".into();
             if item == "tasks-new-attach" {
                 f.attachments = vec![
-                    r"C:\Users\voce\commanddeck-dev\dados\anexos\1a2b3c-captura de tela.png".into(),
-                    r"C:\Users\voce\commanddeck-dev\dados\anexos\9f8e-relatorio.pdf".into(),
+                    r"C:\Users\voce\agentdeck-dev\dados\anexos\1a2b3c-captura de tela.png".into(),
+                    r"C:\Users\voce\agentdeck-dev\dados\anexos\9f8e-relatorio.pdf".into(),
                 ];
             }
             f.focus_title = false;

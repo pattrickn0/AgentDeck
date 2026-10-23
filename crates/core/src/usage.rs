@@ -4,7 +4,6 @@
 //! - **Claude**: a statusline do Claude Code (`ask-agent --usage`, rota `POST /usage` da ponte);
 //! - **Codex**: o último `rate_limits` dos arquivos `~/.codex/sessions/**/rollout-*.jsonl`;
 //! - **Antigravity**: a cota consultada pela API que o próprio CLI usa;
-//! - **Ollama**: local, sem limite.
 //!
 //! Codex e Antigravity são consultados quando há aba aberta deles **ou** o CLI está instalado, e o último uso de
 //! cada um fica em `dados/usage.json`: a barra mostra todos os agentes com cota, mesmo sem janela aberta (o do Claude
@@ -46,7 +45,7 @@ pub struct UsageWindow {
     pub resets_at_ms: Option<u64>,
 }
 
-/// Uso de um modelo de agente (`claude`, `codex`, `antigravity`, `ollama`…).
+/// Uso de um modelo de agente (`claude`, `codex`, `antigravity`…).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AgentUsage {
     /// Limite da sessão (o círculo que enche).
@@ -55,7 +54,7 @@ pub struct AgentUsage {
     pub weekly: Option<UsageWindow>,
     /// Quando o dado foi lido (ms desde a época Unix).
     pub updated_ms: u64,
-    /// Agente local, sem limite (Ollama).
+    /// Agente local, sem limite (sem cota para mostrar).
     pub local: bool,
     /// As cotas de cada grupo de modelos, quando a fonte as separa (o Antigravity: "Gemini Models",
     /// "Gemini 4 Argon"…); vazio nas outras. `session` e `weekly` são o resumo que a barra mostra.
@@ -308,11 +307,9 @@ pub(crate) fn start_poller(core: &Core) {
                 return;
             }
             let open: Vec<String> = core.instance_ids();
-            let has = |model: &str| {
-                open.iter().any(|id| id == model || id.starts_with(&format!("{model}@")) || id.starts_with(&format!("{model}:")))
-            };
+            let has = |model: &str| open.iter().any(|id| id == model || id.starts_with(&format!("{model}@")));
             if installed_at.is_none_or(|t| t.elapsed() >= INSTALLED_EVERY) {
-                for id in ["codex", "antigravity", "ollama"] {
+                for id in ["codex", "antigravity"] {
                     installed.insert(id, core.inner.agents.resolve(id).is_some());
                 }
                 installed_at = Some(Instant::now());
@@ -329,9 +326,6 @@ pub(crate) fn start_poller(core: &Core) {
                 };
                 last.insert(key, at);
             };
-            if wanted("ollama") && !core.inner.usage.map.lock().contains_key("ollama") {
-                core.set_usage("ollama", AgentUsage { local: true, updated_ms: util::now_ms(), ..Default::default() });
-            }
             if wanted("codex") && due(&last, "codex", CODEX_EVERY) {
                 let usage = codex::read(&core.inner.home);
                 mark(&mut last, "codex", CODEX_EVERY, usage.is_some() || !has("codex"));
@@ -392,7 +386,7 @@ mod tests {
         };
         assert!(store.set("claude", claude.clone()));
         // Local não vai para o disco (não tem cota).
-        assert!(store.set("ollama", AgentUsage { local: true, updated_ms: 1, ..Default::default() }));
+        assert!(store.set("local", AgentUsage { local: true, updated_ms: 1, ..Default::default() }));
         let again = UsageStore::load(file.clone());
         assert_eq!(again.snapshot(), HashMap::from([("claude".to_owned(), claude)]));
         // Arquivo corrompido: começa vazio; entrada inválida é pulada.
