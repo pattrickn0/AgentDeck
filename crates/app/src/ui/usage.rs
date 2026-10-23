@@ -115,9 +115,11 @@ pub fn current(usage: &AgentUsage, now_ms: u64) -> (AgentUsage, bool, bool) {
     (u, s, wk)
 }
 
-/// Próxima renovação ainda por vir (para redesenhar quando ela passar).
+/// Próxima renovação ainda por vir (para redesenhar quando ela passar), dos grupos também: a barra de título
+/// pode estar mostrando um grupo fixado que renova em outra hora.
 fn next_reset(usage: &AgentUsage, now_ms: u64) -> Option<u64> {
-    [usage.session, usage.weekly].into_iter().flatten().filter_map(|w| w.resets_at_ms).filter(|&r| r > now_ms).min()
+    let groups = usage.groups.iter().flat_map(|g| [g.session, g.weekly]);
+    [usage.session, usage.weekly].into_iter().chain(groups).flatten().filter_map(|w| w.resets_at_ms).filter(|&r| r > now_ms).min()
 }
 
 /// Tem cota para mostrar (não é local e a fonte informou ao menos uma janela).

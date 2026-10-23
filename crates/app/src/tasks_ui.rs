@@ -955,11 +955,11 @@ impl Deck {
                         }
                     }
                     Err(e) => {
-                        // O aviso só aparece no detalhe: uma ação recusada pelo botão do cartão (na lista)
-                        // abre o detalhe da tarefa, senão a recusa passa sem ninguém ver.
-                        if self.tasks.view == TasksView::List {
-                            self.tasks.view = TasksView::Detail(id.clone());
-                            self.tasks_clear_detail_state();
+                        // O aviso só aparece no detalhe da tarefa: uma ação recusada pelo botão do cartão (na
+                        // lista), ou enquanto se olhava outra tarefa ou o formulário, abre o detalhe dela, senão a
+                        // recusa passa sem ninguém ver (ou aparece na tarefa errada).
+                        if self.tasks.view != TasksView::Detail(id.clone()) {
+                            self.tasks_open_detail(&id);
                         }
                         self.tasks.notice = Some(e.message().to_owned());
                     }

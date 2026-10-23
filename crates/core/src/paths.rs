@@ -69,11 +69,15 @@ fn find_app_dir(exe_dir: &Path) -> PathBuf {
 /// desenvolvimento) continua tudo ao lado do executável, como no Windows.
 #[cfg(unix)]
 fn fallback_data_dir(app_dir: &Path) -> Option<PathBuf> {
-    if can_write(app_dir) {
+    // O que precisa ser gravável é `dados/`; só quando ela ainda não existe vale a pasta onde será criada
+    // (um instalador pode ter criado `dados/` do usuário numa pasta do sistema, e vice-versa).
+    let data = app_dir.join("dados");
+    let probe = if data.is_dir() { data.as_path() } else { app_dir };
+    if can_write(probe) {
         return None;
     }
     let dir = dirs::data_dir()?.join("AgentDeck");
-    log::warn!("{} não é gravável: os dados do app vão para {}", app_dir.display(), dir.display());
+    log::warn!("{} não é gravável: os dados do app vão para {}", probe.display(), dir.display());
     Some(dir)
 }
 
@@ -126,5 +130,27 @@ mod tests {
             assert_eq!(fallback_data_dir(&bin), dirs::data_dir().map(|d| d.join("AgentDeck")));
         }
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).expect("chmod de volta");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn what_counts_is_the_data_folder_when_it_exists() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tmp");
+        let app = tmp.path().join("app");
+        std::fs::create_dir_all(app.join("dados")).expect("mkdir");
+        // `dados/` gravável numa pasta que não é: os dados ficam onde estão.
+        std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o500)).expect("chmod");
+        if !can_write(&app) {
+            assert!(fallback_data_dir(&app).is_none(), "dados/ gravável não tem desvio");
+        }
+        // O contrário: pasta gravável e `dados/` não (criada por um sudo antes): desvia.
+        std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+        std::fs::set_permissions(app.join("dados"), std::fs::Permissions::from_mode(0o500)).expect("chmod");
+        if !can_write(&app.join("dados")) {
+            assert_eq!(fallback_data_dir(&app), dirs::data_dir().map(|d| d.join("AgentDeck")));
+        }
+        std::fs::set_permissions(app.join("dados"), std::fs::Permissions::from_mode(0o700)).expect("chmod de volta");
     }
 }

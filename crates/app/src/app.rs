@@ -49,6 +49,9 @@ pub struct App {
     /// Estado da janela entregue ao egui a cada quadro (`ViewportInfo::maximized` etc.): o `EguiGlow` não o preenche.
     viewport_info: egui::ViewportInfo,
     viewport_first: bool,
+    /// A janela mudou (tamanho, posição, foco, escala): relê o `viewport_info` no próximo quadro. Ler a cada quadro
+    /// custaria várias chamadas ao sistema de janelas, e o terminal pede muitos quadros.
+    viewport_stale: bool,
 }
 
 /// Menor tamanho gravado/restaurado: abaixo disso é janela minimizada (0x0 no Windows) ou lixo.
@@ -79,6 +82,7 @@ impl App {
             size_persist_at: None,
             viewport_info: egui::ViewportInfo::default(),
             viewport_first: true,
+            viewport_stale: true,
         }
     }
 
@@ -155,8 +159,11 @@ impl App {
         let (Some(glw), Some(gl), Some(egui)) = (self.gl_window.as_ref(), self.gl.as_ref(), self.egui.as_mut()) else { return };
         let mut deck = self.deck.as_mut();
         // Sem isto `viewport().maximized` é sempre `None` (o `EguiGlow` não chama `update_viewport_info`).
-        egui_winit::update_viewport_info(&mut self.viewport_info, &egui.egui_ctx, &glw.window, self.viewport_first);
-        self.viewport_first = false;
+        if self.viewport_stale {
+            egui_winit::update_viewport_info(&mut self.viewport_info, &egui.egui_ctx, &glw.window, self.viewport_first);
+            self.viewport_first = false;
+            self.viewport_stale = false;
+        }
         egui.egui_winit.egui_input_mut().viewports.insert(egui::ViewportId::ROOT, self.viewport_info.clone());
         egui.run(&glw.window, |ui| match deck.as_deref_mut() {
             Some(deck) => {
@@ -227,6 +234,10 @@ impl App {
 
 /// Grava o estado da janela: maximizada ou não, e o tamanho normal (só fora do maximizado).
 fn persist_window(core: &Core, w: &Window) {
+    // Minimizada, o winit no Windows perde o "maximizada": gravar agora faria a janela reabrir normal.
+    if w.is_minimized() == Some(true) {
+        return;
+    }
     let maximized = w.is_maximized();
     let size = w.inner_size().to_logical::<f32>(w.scale_factor());
     let size = size_to_persist(maximized, (size.width, size.height));
@@ -305,6 +316,17 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // Maximizar, restaurar e minimizar chegam como `Resized`.
+        if matches!(
+            event,
+            WindowEvent::Resized(_)
+                | WindowEvent::Moved(_)
+                | WindowEvent::Focused(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+                | WindowEvent::Occluded(_)
+        ) {
+            self.viewport_stale = true;
+        }
         if self.deck.is_none() {
             match event {
                 WindowEvent::CloseRequested => event_loop.exit(),

@@ -299,6 +299,7 @@ pub(crate) fn start_poller(core: &Core) {
         let mut installed: HashMap<&'static str, bool> = HashMap::new();
         let mut installed_at: Option<Instant> = None;
         let mut agy_version: Option<String> = None;
+        let mut agy_version_at: Option<Instant> = None;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             let Some(inner) = weak.upgrade() else { return };
@@ -314,8 +315,6 @@ pub(crate) fn start_poller(core: &Core) {
                 for id in ["codex", "antigravity", "ollama"] {
                     installed.insert(id, core.inner.agents.resolve(id).is_some());
                 }
-                // O CLI se atualiza sozinho: a versão vai no pedido da cota (ver `antigravity`).
-                agy_version = core.inner.agents.resolve("antigravity").and_then(|r| antigravity::installed_version(&r));
                 installed_at = Some(Instant::now());
             }
             let wanted = |model: &str| has(model) || installed.get(model).copied().unwrap_or(false);
@@ -341,6 +340,12 @@ pub(crate) fn start_poller(core: &Core) {
                 }
             }
             if wanted("antigravity") && due(&last, "antigravity", ANTIGRAVITY_EVERY) {
+                // O CLI se atualiza sozinho: a versão vai no pedido da cota (ver `antigravity`). Só se pergunta ao
+                // `agy` quando a cota vai ser lida (rodá-lo pode levar segundos e trava esta thread).
+                if agy_version_at.is_none_or(|t| t.elapsed() >= INSTALLED_EVERY) {
+                    agy_version = core.inner.agents.resolve("antigravity").and_then(|r| antigravity::installed_version(&r));
+                    agy_version_at = Some(Instant::now());
+                }
                 let usage = antigravity::fetch(&core.inner.home, agy_version.as_deref());
                 mark(&mut last, "antigravity", ANTIGRAVITY_EVERY, usage.is_some() || !has("antigravity"));
                 if let Some(u) = usage {
