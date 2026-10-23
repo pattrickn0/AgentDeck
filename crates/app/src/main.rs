@@ -28,6 +28,7 @@ mod theme;
 mod ui;
 mod util;
 mod window;
+mod wslg;
 
 use agentdeck_core::paths::AppPaths;
 use agentdeck_core::Core;
@@ -47,7 +48,16 @@ fn main() -> anyhow::Result<()> {
         .init();
     crash::install(&data_dir);
 
-    let event_loop = EventLoop::<app::UserEvent>::with_user_event().build()?;
+    let mut event_loop_builder = EventLoop::<app::UserEvent>::with_user_event();
+    // No WSLg o Wayland (Weston 9 + rdprail) quebra a janela e chega a derrubar o Weston: o XWayland
+    // ao lado é o caminho estável. Fora do WSLg, o backend continua sendo escolhido pelo winit, e um
+    // `WINIT_UNIX_BACKEND` explícito manda (útil para testar o Wayland de lá).
+    #[cfg(target_os = "linux")]
+    if wslg::on_wslg() && std::env::var_os("WINIT_UNIX_BACKEND").is_none_or(|v| v.is_empty()) {
+        log::info!("WSLg detectado: abrindo pelo X11 (o Wayland do WSLg quebra a janela)");
+        winit::platform::x11::EventLoopBuilderExtX11::with_x11(&mut event_loop_builder);
+    }
+    let event_loop = event_loop_builder.build()?;
     let proxy = std::sync::Arc::new(parking_lot::Mutex::new(event_loop.create_proxy()));
     // O backend pode levar alguns segundos para iniciar (descoberta de CLIs/Ollama):
     // a janela abre já, e a interface aparece quando ele fica pronto.
