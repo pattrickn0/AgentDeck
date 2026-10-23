@@ -219,7 +219,7 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     let mic_tip = if !shown_alive {
         "Ditado indisponível (processo encerrado)".to_owned()
     } else {
-        dictation::mic_tooltip(visual, audio::AVAILABLE, &deck.engine_label, Some("Ctrl+Shift+M"))
+        dictation::mic_tooltip(visual, audio::AVAILABLE, deck.dictation_setup(), &deck.engine_label, Some("Ctrl+Shift+M"))
     };
     if tip(mic_resp, mic_tip).clicked() && !mic_busy {
         clicks.push(Click::Mic(shown_uid));

@@ -111,6 +111,22 @@ impl Organization {
     }
 }
 
+/// A escolha da pessoa sobre o ditado por voz (Whisper local, download de ~1,6 GB).
+///
+/// Gravada no `dictation` do `config.json` (`"unasked"`, `"yes"` ou `"no"`): um instalador pode escrever
+/// o campo para responder a pergunta antes da primeira abertura do app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationChoice {
+    /// Ainda não perguntado: na primeira abertura o app pergunta (ou, se o Whisper já está baixado, conta como `Yes`).
+    #[default]
+    Unasked,
+    /// Quer o ditado: o app baixa o que faltar.
+    Yes,
+    /// Não quer: o app não baixa nada (a pessoa pode baixar depois, pelas configurações).
+    No,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
@@ -123,6 +139,8 @@ pub struct Config {
     #[serde(skip_serializing)]
     pub workspace: PathBuf,
     pub whisper_lang: String,
+    /// Ditado por voz: ver [`DictationChoice`].
+    pub dictation: DictationChoice,
     pub sound_enabled: bool,
     // --- Layout (novidade da versão Rust; a versão Electron guardava só em CSS) ---
     pub sidebar_width: f32,
@@ -180,6 +198,7 @@ impl Default for Config {
             active_project: String::new(),
             workspace: PathBuf::new(),
             whisper_lang: "pt".into(),
+            dictation: DictationChoice::default(),
             sound_enabled: true,
             sidebar_width: 220.0,
             sidebar_collapsed: false,
@@ -461,6 +480,17 @@ mod tests {
         assert_eq!(read(&text).organization(), Organization::Highlight);
         cfg.set_organization(Organization::Tabs);
         assert!(!cfg.split_enabled);
+    }
+
+    /// A escolha do ditado: arquivo antigo = "não perguntado"; um instalador pode gravar `"dictation": "yes"|"no"`.
+    #[test]
+    fn the_dictation_choice_defaults_to_unasked_and_is_writable_from_outside() {
+        let read = |json: &str| serde_json::from_str::<Config>(json).expect("config");
+        assert_eq!(read("{}").dictation, DictationChoice::Unasked);
+        assert_eq!(read("{\"dictation\": \"yes\"}").dictation, DictationChoice::Yes);
+        assert_eq!(read("{\"dictation\": \"no\"}").dictation, DictationChoice::No);
+        let text = serde_json::to_string(&Config { dictation: DictationChoice::No, ..Config::default() }).expect("json");
+        assert!(text.contains("\"dictation\":\"no\""), "{text}");
     }
 
     #[test]

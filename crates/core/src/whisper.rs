@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use crate::config::DictationChoice;
 use crate::download::{download_file, DownloadOpts};
 use crate::events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry};
 use crate::process::{run_captured, Exit};
@@ -210,6 +211,82 @@ pub fn whisper_cli(whisper_dir: &Path, engine: Engine) -> Option<PathBuf> {
 
 fn model_path(whisper_dir: &Path) -> PathBuf {
     whisper_dir.join("models").join(MODEL_FILE)
+}
+
+/// O modelo e algum motor estão no disco: o ditado funciona (o `whisper-cli` do PATH vale como CPU fora do Windows).
+pub fn is_installed(whisper_dir: &Path) -> bool {
+    model_path(whisper_dir).is_file() && [Engine::Cuda, Engine::Vulkan, Engine::Cpu].iter().any(|e| whisper_cli(whisper_dir, *e).is_some())
+}
+
+/// O que o app faz com o ditado ao abrir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Startup {
+    /// Garante o que faltar (modelo e motores) em segundo plano, como sempre foi.
+    Ensure,
+    /// Nunca foi perguntado e não há nada baixado: a interface pergunta antes de baixar.
+    Ask,
+    /// A pessoa não quer o ditado: não baixa nada.
+    Skip,
+}
+
+/// Decide o que fazer na abertura e qual escolha gravar. Quem já tem o Whisper baixado (os usuários
+/// de antes da pergunta) nunca é perguntado: conta como "sim".
+pub fn startup(choice: DictationChoice, installed: bool) -> (Startup, DictationChoice) {
+    match choice {
+        DictationChoice::Yes => (Startup::Ensure, choice),
+        DictationChoice::No => (Startup::Skip, choice),
+        DictationChoice::Unasked if installed => (Startup::Ensure, DictationChoice::Yes),
+        DictationChoice::Unasked => (Startup::Ask, choice),
+    }
+}
+
+pub(crate) fn is_downloading(core: &Core) -> bool {
+    core.inner.whisper.ensuring.load(Ordering::SeqCst)
+}
+
+/// O que `remove_downloaded` apaga dentro de `whisper_dir`: o modelo, o motor CUDA, os pacotes e
+/// downloads pela metade e, fora do Windows, os motores baixados. No Windows `bin-cpu/` e `bin-vulkan/` ficam:
+/// vêm versionados no repositório e são pequenos perto do modelo.
+fn removable(whisper_dir: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![model_path(whisper_dir), crate::download::part_path(&model_path(whisper_dir))];
+    for engine in [Engine::Cuda, Engine::Vulkan, Engine::Cpu] {
+        if engine == Engine::Cuda || !cfg!(windows) {
+            let dir = whisper_dir.join(engine.dir());
+            let mut staging = dir.as_os_str().to_os_string();
+            staging.push(".staging");
+            paths.push(dir);
+            paths.push(PathBuf::from(staging));
+        }
+        if let Some(a) = engine.archive() {
+            let file = whisper_dir.join(a.file);
+            paths.push(crate::download::part_path(&file));
+            paths.push(file);
+        }
+    }
+    paths.into_iter().filter(|p| p.exists()).collect()
+}
+
+fn size_of(path: &Path) -> u64 {
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_dir() => std::fs::read_dir(path).map(|d| d.flatten().map(|e| size_of(&e.path())).sum()).unwrap_or(0),
+        Ok(m) => m.len(),
+        Err(_) => 0,
+    }
+}
+
+/// Apaga o que o ditado baixou e devolve os bytes liberados. Recusa enquanto um download está em andamento.
+pub(crate) fn remove_downloaded(core: &Core) -> Result<u64, String> {
+    if is_downloading(core) {
+        return Err("espere o download do ditado terminar".to_owned());
+    }
+    let mut freed = 0;
+    for path in removable(&core.paths().whisper_dir) {
+        let size = size_of(&path);
+        let res = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        res.map_err(|e| format!("não foi possível apagar {}: {e}", path.display()))?;
+        freed += size;
+    }
+    Ok(freed)
 }
 
 /// Ordem de preferência dos motores disponíveis (vazio sem o modelo).
@@ -562,6 +639,7 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
             }
         }
         core.inner.whisper.ensuring.store(false, Ordering::SeqCst);
+        core.emit(CoreEvent::DictationChanged);
     });
     if spawned.is_err() {
         // Falha (raríssima) ao criar a thread: permite tentar de novo depois.
@@ -728,6 +806,55 @@ mod tests {
     fn nomes_do_wav_temporario_sao_unicos() {
         let names: std::collections::HashSet<String> = (0..1000).map(|_| unique_wav_name()).collect();
         assert_eq!(names.len(), 1000);
+    }
+
+    #[test]
+    fn startup_asks_only_who_was_never_asked_and_has_nothing_downloaded() {
+        use DictationChoice::{No, Unasked, Yes};
+        // Primeira abertura limpa: pergunta, sem baixar nem gravar nada.
+        assert_eq!(startup(Unasked, false), (Startup::Ask, Unasked));
+        // Usuário de antes da pergunta (já tem o Whisper): nada muda, conta como "sim".
+        assert_eq!(startup(Unasked, true), (Startup::Ensure, Yes));
+        // Respondeu "sim": segue baixando o que faltar (um download interrompido continua).
+        assert_eq!(startup(Yes, false), (Startup::Ensure, Yes));
+        assert_eq!(startup(Yes, true), (Startup::Ensure, Yes));
+        // Respondeu "agora não": nunca baixa nem pergunta de novo, mesmo que o modelo tenha aparecido.
+        assert_eq!(startup(No, false), (Startup::Skip, No));
+        assert_eq!(startup(No, true), (Startup::Skip, No));
+    }
+
+    #[test]
+    fn installed_needs_the_model_and_an_engine() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let dir = tmp.path();
+        assert!(!is_installed(dir));
+        let engine = dir.join(Engine::Vulkan.dir());
+        std::fs::create_dir_all(&engine).expect("mkdir");
+        std::fs::write(engine.join(exe_name()), "x").expect("write");
+        assert!(!is_installed(dir), "motor sem modelo");
+        std::fs::create_dir_all(dir.join("models")).expect("mkdir");
+        std::fs::write(model_path(dir), "m").expect("write");
+        assert!(is_installed(dir));
+        std::fs::remove_dir_all(&engine).expect("rm");
+        // Fora do Windows um whisper-cli do PATH também vale como motor de CPU.
+        assert_eq!(is_installed(dir), !cfg!(windows) && which::which("whisper-cli").is_ok());
+    }
+
+    #[test]
+    fn removal_lists_the_download_and_leaves_the_rest() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let dir = tmp.path();
+        assert!(removable(dir).is_empty());
+        std::fs::create_dir_all(dir.join("models")).expect("mkdir");
+        std::fs::write(model_path(dir), "modelo").expect("write");
+        std::fs::write(dir.join("models").join("README.md"), "leia").expect("write");
+        let cuda = dir.join(Engine::Cuda.dir());
+        std::fs::create_dir_all(&cuda).expect("mkdir");
+        std::fs::write(cuda.join("a.dll"), "dll").expect("write");
+        let list = removable(dir);
+        assert!(list.contains(&model_path(dir)) && list.contains(&cuda), "{list:?}");
+        assert!(!list.iter().any(|p| p.ends_with("README.md")));
+        assert_eq!(list.iter().map(|p| size_of(p)).sum::<u64>(), 6 + 3);
     }
 
     #[test]

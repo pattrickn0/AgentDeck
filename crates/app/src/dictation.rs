@@ -159,9 +159,36 @@ pub fn finish_transcribe(phase: &mut MicPhase) -> Option<MicTarget> {
     }
 }
 
+/// Se o Whisper (modelo e motor) está no disco. O ditado é opcional: sem ele o microfone leva à opção de baixar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Setup {
+    /// Pronto para gravar e transcrever.
+    Ready,
+    /// Baixando (a faixa de progresso está na barra direita).
+    Downloading,
+    /// Não instalado: o clique no microfone (ou `Ctrl+Shift+M`) oferece o download.
+    NotInstalled,
+}
+
+impl Setup {
+    /// Com o modelo e um motor no disco o ditado funciona, mesmo que um motor extra (CUDA) ainda esteja baixando.
+    pub fn of(installed: bool, downloading: bool) -> Self {
+        if installed {
+            Self::Ready
+        } else if downloading {
+            Self::Downloading
+        } else {
+            Self::NotInstalled
+        }
+    }
+}
+
+/// Texto do download oferecido (a pergunta da primeira abertura e a opção das configurações).
+pub const DOWNLOAD_SIZE: &str = "cerca de 1,6 GB";
+
 /// Dica (tooltip) do botão de microfone no cabeçalho do painel.
 /// `shortcut` aparece entre parênteses quando aplicável (ex.: `Some("Ctrl+Shift+M")`).
-pub fn mic_tooltip(visual: ButtonVisual, available: bool, engine_label: &str, shortcut: Option<&str>) -> String {
+pub fn mic_tooltip(visual: ButtonVisual, available: bool, setup: Setup, engine_label: &str, shortcut: Option<&str>) -> String {
     let sc = shortcut.map(|s| format!(" ({s})")).unwrap_or_default();
     match visual {
         ButtonVisual::Recording => format!("Parar gravação e transcrever{sc} (até {} min)", audio::MAX_RECORDING_SECS / 60),
@@ -169,6 +196,10 @@ pub fn mic_tooltip(visual: ButtonVisual, available: bool, engine_label: &str, sh
         ButtonVisual::Transcribing => "Transcrevendo áudio…".to_owned(),
         ButtonVisual::DisabledOther => "Microfone em uso em outra aba".to_owned(),
         ButtonVisual::Idle if !available => "Ditado por voz (indisponível: compilado sem o recurso de áudio)".to_owned(),
+        ButtonVisual::Idle if setup == Setup::NotInstalled => {
+            format!("Ditado por voz não instalado: clique para baixar ({DOWNLOAD_SIZE}){sc}")
+        }
+        ButtonVisual::Idle if setup == Setup::Downloading => "Baixando o ditado por voz… (veja a barra direita)".to_owned(),
         ButtonVisual::Idle => {
             let eng = if engine_label.is_empty() { "…" } else { engine_label };
             match shortcut {
@@ -244,11 +275,26 @@ mod tests {
 
     #[test]
     fn tooltips_cover_every_state() {
-        assert!(mic_tooltip(ButtonVisual::Idle, true, "GPU CUDA", Some("Ctrl+Shift+M")).contains("Ctrl+Shift+M"));
-        assert!(mic_tooltip(ButtonVisual::Idle, false, "", None).contains("indisponível"));
-        assert!(mic_tooltip(ButtonVisual::Opening, true, "", Some("Ctrl+Shift+M")).contains("Abrindo"));
-        assert!(mic_tooltip(ButtonVisual::Recording, true, "", Some("Ctrl+Shift+M")).contains("Parar gravação"));
-        assert!(mic_tooltip(ButtonVisual::Transcribing, true, "", None).contains("Transcrevendo"));
-        assert!(mic_tooltip(ButtonVisual::DisabledOther, true, "", None).contains("em uso"));
+        let ready = Setup::Ready;
+        assert!(mic_tooltip(ButtonVisual::Idle, true, ready, "GPU CUDA", Some("Ctrl+Shift+M")).contains("Ctrl+Shift+M"));
+        assert!(mic_tooltip(ButtonVisual::Idle, false, ready, "", None).contains("indisponível"));
+        assert!(mic_tooltip(ButtonVisual::Opening, true, ready, "", Some("Ctrl+Shift+M")).contains("Abrindo"));
+        assert!(mic_tooltip(ButtonVisual::Recording, true, ready, "", Some("Ctrl+Shift+M")).contains("Parar gravação"));
+        assert!(mic_tooltip(ButtonVisual::Transcribing, true, ready, "", None).contains("Transcrevendo"));
+        assert!(mic_tooltip(ButtonVisual::DisabledOther, true, ready, "", None).contains("em uso"));
+    }
+
+    #[test]
+    fn without_whisper_the_mic_explains_and_offers_the_download() {
+        assert_eq!(Setup::of(true, false), Setup::Ready);
+        assert_eq!(Setup::of(true, true), Setup::Ready, "o motor CUDA baixando não tira o ditado do ar");
+        assert_eq!(Setup::of(false, true), Setup::Downloading);
+        assert_eq!(Setup::of(false, false), Setup::NotInstalled);
+        let off = mic_tooltip(ButtonVisual::Idle, true, Setup::NotInstalled, "indisponível", Some("Ctrl+Shift+M"));
+        assert!(off.contains("não instalado") && off.contains("baixar") && off.contains("1,6 GB"), "{off}");
+        assert!(!off.contains("transcrição:"), "não mostra o motor de um ditado que não existe: {off}");
+        assert!(mic_tooltip(ButtonVisual::Idle, true, Setup::Downloading, "", None).contains("Baixando"));
+        // Gravando ou transcrevendo, a dica é a de sempre (o Whisper estava pronto ao começar).
+        assert!(mic_tooltip(ButtonVisual::Recording, true, Setup::NotInstalled, "", None).contains("Parar gravação"));
     }
 }

@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use agentdeck_core::delivery::{self, Gate, Mailbox, TabState};
 use agentdeck_core::{
-    AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, Organization, SpawnSpec,
+    AgentInfo, Core, CoreEvent, Delivery, DictationChoice, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident,
+    Organization, SpawnSpec,
 };
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
@@ -18,7 +19,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::agents::Agents;
 use crate::audio;
-use crate::dictation::{self, MicPhase, MicTarget, TabDelivery, ToggleOutcome};
+use crate::dictation::{self, MicPhase, MicTarget, Setup, TabDelivery, ToggleOutcome};
 use crate::docs::CenterView;
 use crate::icons::IconCache;
 use crate::split;
@@ -367,6 +368,12 @@ pub struct Deck {
     /// Agentes cuja lista de modelos está sendo buscada agora.
     models_loading: HashSet<String>,
     pub settings_open: bool,
+    /// A pergunta do ditado por voz (baixar o Whisper?) está aberta.
+    pub dictation_prompt: bool,
+    /// O modelo e um motor do whisper estão no disco (lido do disco na abertura e quando o core avisa).
+    dictation_installed: bool,
+    /// Configurações: o botão "Remover" já foi clicado uma vez e pede confirmação.
+    pub dictation_confirm_remove: bool,
     /// Aba sendo renomeada pelo usuário (índice, buffer de edição, erro opcional).
     pub rename_tab: Option<(usize, String, Option<String>)>,
     /// Menu de contexto aberto em uma aba (índice da aba, posição do clique).
@@ -483,6 +490,7 @@ const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
 impl Deck {
     pub fn new(core: Core, events: Receiver<CoreEvent>, wake: Wake) -> Self {
         let cfg = core.config();
+        let dictation_installed = core.dictation_installed();
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut deck = Self {
             workspace: core.workspace(),
@@ -559,6 +567,9 @@ impl Deck {
             model_lists: HashMap::new(),
             models_loading: HashSet::new(),
             settings_open: false,
+            dictation_prompt: false,
+            dictation_installed,
+            dictation_confirm_remove: false,
             rename_tab: None,
             tab_context_menu: None,
             sound_enabled: cfg.sound_enabled,
@@ -708,6 +719,10 @@ impl Deck {
             }
             CoreEvent::GitChanged => self.git_refresh_soon(),
             CoreEvent::AgentsChanged => self.refresh_agents(),
+            CoreEvent::DictationChanged => {
+                self.dictation_installed = self.core.dictation_installed();
+                self.refresh_engine();
+            }
             CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { project, id, busy } => self.on_agent_signal(&project, &id, busy),
@@ -2451,9 +2466,75 @@ impl Deck {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Ditado opcional (o Whisper só é baixado se a pessoa quiser)
+    // ------------------------------------------------------------------
+
+    /// Na abertura do app: baixa o que faltar (quem já usa o ditado) ou abre a pergunta (quem nunca foi perguntado).
+    pub fn dictation_startup(&mut self) {
+        match self.core.dictation_startup() {
+            agentdeck_core::whisper::Startup::Ensure => self.core.ensure_whisper_async(),
+            agentdeck_core::whisper::Startup::Ask => self.dictation_prompt = true,
+            agentdeck_core::whisper::Startup::Skip => {}
+        }
+    }
+
+    /// Estado do Whisper no disco, para o botão de microfone e as configurações.
+    pub fn dictation_setup(&self) -> Setup {
+        Setup::of(self.dictation_installed, self.core.dictation_downloading())
+    }
+
+    /// "Baixar": grava o "sim" e baixa em segundo plano (a faixa de progresso aparece na barra direita).
+    pub fn dictation_accept(&mut self) {
+        self.dictation_prompt = false;
+        self.core.set_dictation_choice(DictationChoice::Yes);
+        self.core.ensure_whisper_async();
+        self.refresh_engine();
+    }
+
+    /// "Agora não": grava o "não" (não pergunta de novo nem baixa) e fecha a pergunta.
+    pub fn dictation_decline(&mut self) {
+        self.dictation_prompt = false;
+        self.core.set_dictation_choice(DictationChoice::No);
+    }
+
+    /// Configurações: apaga o que o ditado baixou.
+    pub fn dictation_remove(&mut self) {
+        self.dictation_confirm_remove = false;
+        if self.mic_phase != MicPhase::Idle {
+            self.system("Termine a gravação do ditado antes de remover o Whisper.");
+            return;
+        }
+        match self.core.remove_dictation() {
+            Ok(_) => {
+                self.dictation_installed = self.core.dictation_installed();
+                self.system("Ditado por voz removido do disco. Dá para baixar de novo pelas configurações.");
+            }
+            Err(e) => self.system(format!("Não foi possível remover o ditado por voz: {e}.")),
+        }
+    }
+
+    /// Antes de gravar: com o Whisper pronto segue; sem ele, explica ou oferece o download em vez de falhar calado.
+    fn mic_ready(&mut self) -> bool {
+        match self.dictation_setup() {
+            Setup::Ready => true,
+            Setup::Downloading => {
+                self.system("O ditado por voz ainda está baixando (veja a barra direita). Tente de novo quando terminar.");
+                false
+            }
+            Setup::NotInstalled => {
+                self.dictation_prompt = true;
+                false
+            }
+        }
+    }
+
     /// Aciona o microfone para `target` (`Tab(uid)`). Abrir o dispositivo pode levar
     /// até 5 s: vai para uma thread, e um segundo clique enquanto isso desiste.
     fn toggle_mic_for(&mut self, target: MicTarget) {
+        if self.mic_phase == MicPhase::Idle && !self.mic_ready() {
+            return;
+        }
         match dictation::toggle(&mut self.mic_phase, target) {
             ToggleOutcome::StartOpening(_) => {
                 self.spawn_bg("mic-open", |_| Some(UiMsg::MicOpened(audio::Recorder::start())));
