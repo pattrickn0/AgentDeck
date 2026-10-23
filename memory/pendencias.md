@@ -101,6 +101,8 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 - [ ] **Uso do Antigravity depende de API interna** (`v1internal:retrieveUserQuotaSummary`): pode mudar sem aviso; hoje qualquer falha vira "sem dados". Avaliar um aviso discreto quando falhar por muito tempo.
 - [ ] **Uso do Codex só testado com arquivos de exemplo** (o Codex não estava instalado): conferir o formato real de `rate_limits` nos `rollout-*.jsonl`.
 
+- [ ] **`config.json` com BOM UTF-8 é ignorado em silêncio** (visto na `t28`): o app cai nos padrões sem aviso. Editar o arquivo pelo PowerShell 5.1 (`Out-File`/`Set-Content -Encoding utf8`) grava o BOM. Tirar o BOM ao ler (`config.rs`, `Config::load`) e avisar no log quando o arquivo não se lê.
+
 ## Git e GitHub
 
 - [ ] **Promover a `dev` para a `main`** (combinado em 2026-10-21): a `main` está 157 commits atrás. Antes: estabilizar (os testes de [testes.md](testes.md) das áreas novas, o que falhar vira item aqui). Quem aprova é o usuário.
