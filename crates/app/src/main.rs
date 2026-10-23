@@ -35,12 +35,14 @@ use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {
     // O `ureq-proto` despeja os cabeçalhos da requisição em TRACE, inclusive o `Authorization` com o
-    // token do GitHub: ele e o `ureq` ficam no máximo em DEBUG, mesmo com RUST_LOG=trace.
+    // token do GitHub, e o `ureq` registra em DEBUG cada pedido (cabeçalhos, IPs). Os dois ficam em WARN,
+    // mesmo com RUST_LOG=trace: o `filter_module` fixa o nível (não é um teto), e em DEBUG eles enchiam o log
+    // a cada consulta de uso.
     // O log vai também para `<dados>/agentdeck.log`: o app de janela não tem stderr.
     let data_dir = AppPaths::detect().data_dir;
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .filter_module("ureq_proto", log::LevelFilter::Debug)
-        .filter_module("ureq", log::LevelFilter::Debug)
+        .filter_module("ureq_proto", log::LevelFilter::Warn)
+        .filter_module("ureq", log::LevelFilter::Warn)
         .target(env_logger::Target::Pipe(Box::new(logfile::LogFile::open(&data_dir))))
         .init();
     crash::install(&data_dir);

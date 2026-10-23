@@ -44,7 +44,6 @@ Fica para **depois** da promoção para a `main` (decidido com o usuário em 202
 - [ ] **Tirar os nomes antigos aceitos** na próxima versão depois da promoção: `COMMANDDECK_*`, `x-commanddeck-token`, marcadores `commanddeck:`, `.commanddeck.lock` e a config `CommandDeck/` (lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
 - [ ] **Renomear a pasta local `commanddeck-dev`** (ação do usuário): o repositório no GitHub já se chama `AgentDeck` e as URLs antigas redirecionam; falta só a pasta.
 - [ ] **Formato (`cargo fmt`) antes da `main`** (visto na `t31`, 2026-10-22). O passo `cargo fmt --all -- --check` da CI falha hoje em 16 trechos de 11 arquivos (`app.rs`, `tasks_ui.rs`, `ui/empty_state.rs`, `ui/git.rs`, `ui/right_panel.rs`, `ui/usage.rs`, `ask-agent.rs`, `bridge.rs` e testes de `core`; a `t31` só formatou o que mexeu): a CI nasceria vermelha na `main`. Depois que a `t29`, a `t30` e o trabalho de uso/barra de título forem mesclados, rodar `cargo fmt --all` **uma vez**, num commit só (sem lógica), e conferir com `cargo fmt --all -- --check`. Ver `aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md`.
-- [ ] **Log do app com ruído do `ureq`** (visto na `t31`). Na primeira abertura, `agentdeck.log` recebe linhas `DEBUG ureq…` da consulta de uso (cabeçalhos, IPs). Subir o filtro dessa biblioteca para `warn` ao montar o logger (`logfile.rs`), fora dos arquivos de uso que outro trabalho está mexendo.
 
 ## Mesa de tarefas
 
