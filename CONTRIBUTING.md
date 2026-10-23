@@ -2,13 +2,16 @@
 
 ## Ambiente
 
-- Windows 10/11 64-bit (alvo principal). Linux funciona para desenvolvimento.
+- Windows 10/11 64-bit (alvo principal). Linux (Ubuntu e Fedora) funciona para desenvolvimento.
 - [Rust stable](https://rustup.rs), 1.89 ou mais novo: `rustup update` de vez em quando.
-- Linux: `sudo apt install libasound2-dev libgtk-3-dev libxkbcommon-dev`.
+- Linux: `sudo apt install build-essential pkg-config libasound2-dev libxkbcommon-dev` (Ubuntu/Debian) ou
+  `sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel libxkbcommon-devel` (Fedora). Para rodar com
+  janela e diálogos, veja também `xdg-utils` e `xdg-desktop-portal` no [README](README.md#compilar-e-rodar-linux).
+  Não precisa de GTK3.
 
-```powershell
-git clone https://github.com/pattrickn0/CommandDeck-Terminal.git
-cd CommandDeck-Terminal
+```bash
+git clone https://github.com/pattrickn0/AgentDeck.git
+cd AgentDeck
 cargo run -p agentdeck          # roda o app (modo debug)
 ```
 
@@ -20,8 +23,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-O CI (`.github/workflows/ci.yml`) roda isso no Windows e no Linux (a formatação com `cargo fmt --all -- --check`;
-o estilo está em `rustfmt.toml`).
+O CI (`.github/workflows/ci.yml`) roda isso no Windows e no Ubuntu; o Fedora roda build e testes num contêiner (a
+formatação com `cargo fmt --all -- --check` só no job principal; o estilo está em `rustfmt.toml`). O que já foi
+verificado no Linux, o que falta e como testar à mão estão em [`memory/LINUX.md`](memory/LINUX.md).
 
 ## Princípios do projeto
 

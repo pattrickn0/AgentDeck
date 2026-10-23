@@ -42,7 +42,7 @@ A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [his
 
 - [ ] **Rodar os testes de [testes.md](testes.md) uma vez só**, sobre o app já renomeado e redesenhado (mesa, memória, janelas, Documentos e a migração do nome: abrir o app novo com a configuração e a pasta de dados de quem usava o CommandDeck), corrigir o que falhar e promover. Quem aprova a promoção é o usuário (ver [AGENTDECK.md](AGENTDECK.md)).
 - [ ] **Tirar os nomes antigos aceitos** na próxima versão depois da promoção: `COMMANDDECK_*`, `x-commanddeck-token`, marcadores `commanddeck:`, `.commanddeck.lock` e a config `CommandDeck/` (lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
-- [ ] **Renomear o repositório no GitHub e a pasta local `commanddeck-dev`** (ação do usuário; o GitHub redireciona a URL antiga). Depois, trocar as URLs que citam o nome antigo (`CONTRIBUTING.md`).
+- [ ] **Renomear a pasta local `commanddeck-dev`** (ação do usuário): o repositório no GitHub já se chama `AgentDeck` e as URLs antigas redirecionam; falta só a pasta.
 
 ## Mesa de tarefas
 
@@ -112,8 +112,19 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 
 ## Testes automáticos
 
+- [ ] **A formatação bloqueia a CI desde 2026-10-22** (`run 47`, commit `146a486`): `cargo fmt --all -- --check` falha no Windows e no Ubuntu, então build, testes e clippy nem rodam — o Linux está sem validação automática. Pagar a dívida de rustfmt num commit próprio (sem misturar com código) e voltar a exigir a CI verde. Detalhe em [LINUX.md](LINUX.md).
 - [ ] Os testes de integração do fluxo entre abas (`a_question_is_typed_into_the_tab_and_answered_by_callback` e vizinhos, e `an_agent_becomes_the_boss_of_the_role_it_opens_and_the_new_one_is_told`) só rodam em Unix (`#[cfg(unix)]` em `crates/core/tests/bridge.rs`, agentes falsos em shell): criar agentes falsos para Windows (`.cmd`/`.exe` de teste) para a CI do Windows cobrir a ponte.
 - [ ] Testes de interface (egui) para a barra direita, a aba Git e a tela dividida (hoje só capturas de tela no Linux).
+
+## Linux
+
+Ver [LINUX.md](LINUX.md) para dependências, o que já foi verificado e o roteiro manual.
+
+- [ ] **Wayland e Fedora de verdade:** o app só foi aberto à mão no X11 do Ubuntu; o job do Fedora prova build e testes, não a janela. Rodar o roteiro do LINUX.md numa sessão Wayland (GNOME e KDE) e num Fedora Workstation; o que falhar vira item aqui.
+- [ ] **Empacotamento:** não há `.deb`, `.rpm`, Flatpak, AppImage, `.desktop` nem ícone instalado; hoje o app roda da pasta compilada (ou de uma pasta portátil).
+- [ ] **Ditado com GPU no Linux:** só o motor de CPU é baixado; para CUDA/Vulkan é preciso compilar o whisper.cpp e pôr o `whisper-cli` no `PATH`. Avaliar baixar/instalar um motor pronto ou pelo menos uma receita no README.
+- [ ] **Falhas silenciosas no Linux:** sem `xdg-desktop-portal` o diálogo de arquivo não abre e sem `xdg-utils` o "Abrir pasta" não faz nada — os dois sem aviso na interface. Mensagem clara quando o serviço/comando falta.
+- [ ] **Textos de Git/GitHub no Linux:** os erros citam Git Credential Manager e "faça um push para entrar"; no Linux o caminho é `gh auth login` ou `credential.helper=store`. Ajustar o texto por plataforma.
 
 ## Adiados
 
