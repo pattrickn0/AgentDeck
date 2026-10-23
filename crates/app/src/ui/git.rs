@@ -721,7 +721,9 @@ pub(super) fn diff_lines_at(
     let hunks = hunks
         .filter(|_| !diff.binary && !diff.truncated && !diff.lines.iter().any(|l| l.kind == DiffKind::Hunk && l.text.starts_with("@@@")));
     let rest = Rect::from_min_max(Pos2::new(area.min.x, child.cursor().min.y), area.max);
-    super::diff_view::draw(&mut child, rest, diff, id, jump, |ui, row, n| {
+    // O texto do cabeçalho de cada trecho quebra antes da faixa dos botões.
+    let reserve = hunks.map_or(0.0, |h| hunk_strip_w(child.painter(), h.staged) + 6.0);
+    super::diff_view::draw(&mut child, rest, diff, id, jump, reserve, |ui, row, n| {
         if let Some(h) = hunks {
             hunk_buttons(ui, area, row, n, h, acts);
         }
@@ -729,23 +731,29 @@ pub(super) fn diff_lines_at(
 }
 
 /// Botões do cabeçalho de um trecho, fixos na borda direita da área visível.
-fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut Vec<Act>) {
-    let (stage_label, stage_tip) = if h.staged {
-        ("Tirar", "Tira só este trecho da preparação")
+/// Os botões de um trecho: (rótulo, dica, perigoso).
+fn hunk_items(staged: bool) -> Vec<(&'static str, &'static str, bool)> {
+    if staged {
+        vec![("Tirar", "Tira só este trecho da preparação", false)]
     } else {
-        ("Preparar", "Prepara só este trecho (git apply --cached)")
-    };
+        vec![("Preparar", "Prepara só este trecho (git apply --cached)", false), ("Descartar", "Descarta só este trecho da cópia de trabalho", true)]
+    }
+}
+
+/// Largura da faixa dos botões de um trecho, da borda direita da área até o primeiro botão.
+fn hunk_strip_w(painter: &egui::Painter, staged: bool) -> f32 {
+    let total: f32 = hunk_items(staged).iter().map(|(l, ..)| galley(painter, l, theme::ui(11.0), theme::pal().text).size().x + 16.0).sum();
+    total + 6.0 + 6.0
+}
+
+fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut Vec<Act>) {
     let mut right = area.max.x - 6.0;
     let y = row.min.y + 1.0;
     let ht = row.height() - 2.0;
-    let mut items: Vec<(&str, &str, bool)> = vec![(stage_label, stage_tip, false)];
-    if !h.staged {
-        items.push(("Descartar", "Descarta só este trecho da cópia de trabalho", true));
-    }
+    let items = hunk_items(h.staged);
     // Faixa opaca atrás dos botões (com a cor da linha do trecho): o texto do cabeçalho não aparece
     // entre eles.
-    let total: f32 = items.iter().map(|(l, ..)| galley(ui.painter(), l, theme::ui(11.0), theme::pal().text).size().x + 16.0).sum();
-    let strip = Rect::from_min_max(Pos2::new(right - total - 6.0, row.min.y), Pos2::new(area.max.x, row.max.y));
+    let strip = Rect::from_min_max(Pos2::new(area.max.x - hunk_strip_w(ui.painter(), h.staged), row.min.y), Pos2::new(area.max.x, row.max.y));
     ui.painter().rect_filled(strip, 0.0, theme::glass_solid());
     ui.painter().rect_filled(strip, 0.0, theme::with_alpha(theme::pal().info, 0.10));
     for (label, tooltip, danger) in items {

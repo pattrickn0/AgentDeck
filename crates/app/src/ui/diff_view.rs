@@ -3,6 +3,7 @@
 //! rolagem horizontal. As linhas técnicas do git (`diff --git`, `index`, `---`, `+++`) somem; num diff de vários
 //! arquivos, cada um ganha um cabeçalho com o caminho.
 
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ const FILE_H: f32 = 26.0;
 const FILE_GAP: f32 = 10.0;
 /// Margem da direita do texto (a barra de rolagem fica ali).
 const RIGHT_PAD: f32 = 14.0;
-/// Tabulação vira espaços (o desenho conta colunas de largura fixa).
+/// Tabulação vira espaços.
 const TAB: &str = "    ";
 
 /// Como uma linha do diff aparece na tela.
@@ -31,8 +32,8 @@ enum Shape {
     Hidden,
     /// Início de um arquivo: o caminho (ou "antigo → novo").
     File(String),
-    /// Texto em `n` linhas da tela.
-    Rows(usize),
+    /// Texto em linhas da tela: os pedaços (intervalos de bytes do texto já sem tabulação, ver [`body_of`]).
+    Rows(Vec<Range<usize>>),
 }
 
 /// O que se mede uma vez por diff e largura: a forma e a altura acumulada de cada linha.
@@ -42,24 +43,43 @@ struct Layout {
     tops: Vec<f32>,
 }
 
-/// Divide `text` em pedaços de até `cols` caracteres (intervalos de bytes). Quebra depois do último espaço do
-/// pedaço, se houver, para a palavra ir inteira para a linha seguinte. Texto vazio = um pedaço.
-pub fn wrap_ranges(text: &str, cols: usize) -> Vec<Range<usize>> {
-    let cols = cols.max(1);
-    let starts: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
-    let n = starts.len();
-    let byte = |c: usize| if c < n { starts[c] } else { text.len() };
+/// As larguras disponíveis para o texto, em px: a linha comum (depois do marcador) e o cabeçalho do trecho (que
+/// divide a primeira linha com os botões).
+#[derive(Debug, Clone, Copy)]
+struct Widths {
+    body: f32,
+    hunk: f32,
+}
+
+/// Divide `text` em pedaços que cabem em `max_w` px, medindo cada caractere com `width` (a fonte do diff:
+/// emoji e CJK são mais largos). Quebra depois do último espaço do pedaço, se houver, para a palavra ir inteira
+/// para a linha seguinte. Devolve intervalos de bytes, sempre em fronteira de caractere; texto vazio = um pedaço.
+pub fn wrap_ranges(text: &str, max_w: f32, width: &mut impl FnMut(char) -> f32) -> Vec<Range<usize>> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut out = Vec::new();
     let mut start = 0;
-    while n - start > cols {
-        let mut end = start + cols;
-        if let Some(space) = (start + 1..end).rev().find(|&c| text[byte(c)..].starts_with(' ')) {
-            end = space + 1;
+    let mut used = 0.0;
+    let mut after_space: Option<usize> = None;
+    let mut k = 0;
+    while k < chars.len() {
+        let (at, c) = chars[k];
+        let w = width(c);
+        if used + w > max_w && at > start {
+            let end = after_space.filter(|&e| e > start).unwrap_or(at);
+            out.push(start..end);
+            start = end;
+            // O que já passou do corte volta a contar no pedaço novo; o caractere atual é medido de novo.
+            used = chars.iter().filter(|(b, _)| *b >= start && *b < at).map(|(_, c)| width(*c)).sum();
+            after_space = None;
+            continue;
         }
-        out.push(byte(start)..byte(end));
-        start = end;
+        used += w;
+        if c == ' ' {
+            after_space = Some(at + 1);
+        }
+        k += 1;
     }
-    out.push(byte(start)..text.len());
+    out.push(start..text.len());
     out
 }
 
@@ -92,9 +112,14 @@ fn split_marker(line: &DiffLine, marked: bool) -> (&str, &str) {
     }
 }
 
-/// A forma de cada linha para `cols` colunas de texto. As linhas `index`/`---`/`+++` somem; a `diff --git` vira
-/// o cabeçalho do arquivo com `headers` (diff de vários arquivos) e some sem ele (o caminho já está no título).
-fn shape(line: &DiffLine, cols: usize, marked: bool, headers: bool) -> Shape {
+/// O texto que se quebra e se pinta, sem o marcador e com a tabulação trocada por espaços.
+fn body_of(line: &DiffLine, marked: bool) -> String {
+    split_marker(line, marked).1.replace('\t', TAB)
+}
+
+/// A forma de cada linha. As linhas `index`/`---`/`+++` somem; a `diff --git` vira o cabeçalho do arquivo com
+/// `headers` (diff de vários arquivos) e some sem ele (o caminho já está no título).
+fn shape(line: &DiffLine, widths: Widths, marked: bool, headers: bool, width: &mut impl FnMut(char) -> f32) -> Shape {
     if line.kind == DiffKind::Meta {
         if let Some(title) = file_title(&line.text) {
             return if headers { Shape::File(title) } else { Shape::Hidden };
@@ -103,16 +128,12 @@ fn shape(line: &DiffLine, cols: usize, marked: bool, headers: bool) -> Shape {
             return Shape::Hidden;
         }
     }
-    if line.kind == DiffKind::Hunk {
-        return Shape::Rows(1);
-    }
-    let (marker, body) = split_marker(line, marked);
-    let body = body.replace('\t', TAB);
-    Shape::Rows(wrap_ranges(&body, cols.saturating_sub(marker.chars().count()).max(1)).len())
+    let max_w = if line.kind == DiffKind::Hunk { widths.hunk } else { widths.body };
+    Shape::Rows(wrap_ranges(&body_of(line, marked), max_w, width))
 }
 
-fn layout(diff: &GitDiff, cols: usize, marked: bool, headers: bool) -> Layout {
-    let shapes: Vec<Shape> = diff.lines.iter().map(|l| shape(l, cols, marked, headers)).collect();
+fn layout(diff: &GitDiff, widths: Widths, marked: bool, headers: bool, width: &mut impl FnMut(char) -> f32) -> Layout {
+    let shapes: Vec<Shape> = diff.lines.iter().map(|l| shape(l, widths, marked, headers, width)).collect();
     let mut tops = Vec::with_capacity(shapes.len() + 1);
     let mut y = 0.0;
     for (i, s) in shapes.iter().enumerate() {
@@ -121,7 +142,7 @@ fn layout(diff: &GitDiff, cols: usize, marked: bool, headers: bool) -> Layout {
             Shape::Hidden => 0.0,
             Shape::File(_) if i == 0 => FILE_H,
             Shape::File(_) => FILE_GAP + FILE_H,
-            Shape::Rows(n) => *n as f32 * ROW_H,
+            Shape::Rows(rows) => rows.len() as f32 * ROW_H,
         };
     }
     tops.push(y);
@@ -135,9 +156,28 @@ fn gutter_cols(diff: &GitDiff) -> (usize, bool, bool) {
     (digits, diff.lines.iter().any(|l| l.old.is_some()), diff.lines.iter().any(|l| l.new.is_some()))
 }
 
+/// Impressão digital do conteúdo do diff: a medida guardada só vale para este texto.
+fn content_hash(diff: &GitDiff) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for l in &diff.lines {
+        std::mem::discriminant(&l.kind).hash(&mut h);
+        l.text.hash(&mut h);
+    }
+    h.finish()
+}
+
 /// Desenha `diff` em `area`, rolando só na vertical. `id` identifica a rolagem; `jump`, a linha do diff para onde
-/// rolar neste quadro. `on_hunk(ui, linha, n)` desenha o que vai por cima do cabeçalho do trecho `n`.
-pub fn draw(ui: &mut Ui, area: Rect, diff: &GitDiff, id: Id, jump: Option<usize>, mut on_hunk: impl FnMut(&mut Ui, Rect, usize)) {
+/// rolar neste quadro. `hunk_reserve` é a largura que os botões ocupam à direita do cabeçalho de cada trecho
+/// (o texto dele quebra antes); `on_hunk(ui, linha, n)` os desenha por cima do cabeçalho do trecho `n`.
+pub fn draw(
+    ui: &mut Ui,
+    area: Rect,
+    diff: &GitDiff,
+    id: Id,
+    jump: Option<usize>,
+    hunk_reserve: f32,
+    mut on_hunk: impl FnMut(&mut Ui, Rect, usize),
+) {
     let font = theme::mono(FONT);
     let cell = ui.fonts_mut(|f| f.glyph_width(&font, 'M')).max(1.0);
     let (digits, has_old, has_new) = gutter_cols(diff);
@@ -146,20 +186,19 @@ pub fn draw(ui: &mut Ui, area: Rect, diff: &GitDiff, id: Id, jump: Option<usize>
     let gutter = 6.0 + num_cols as f32 * (num_w + 8.0) + 4.0;
     let marked = diff.lines.iter().any(|l| l.kind == DiffKind::Hunk);
     let headers = diff.lines.iter().filter(|l| l.kind == DiffKind::Meta && file_title(&l.text).is_some()).count() > 1;
-    // A barra de rolagem vertical fica por cima da margem da direita.
-    let cols = ((area.width() - gutter - RIGHT_PAD) / cell).floor().max(8.0) as usize;
+    // A barra de rolagem vertical fica por cima da margem da direita; o marcador ocupa uma célula.
+    let text_w = (area.width() - gutter - RIGHT_PAD).max(8.0 * cell);
+    let widths = Widths { body: text_w - if marked { cell } else { 0.0 }, hunk: (text_w - hunk_reserve).max(8.0 * cell) };
 
-    // A medida só muda com o diff ou com a largura: fica guardada entre os quadros. O endereço das linhas muda a
-    // cada diff carregado (um recarregado com os mesmos tamanhos não reaproveita a medida velha).
-    type Fingerprint = (usize, usize, usize, usize, bool, bool);
-    let fingerprint: Fingerprint =
-        (diff.lines.as_ptr() as usize, diff.lines.len(), diff.lines.iter().map(|l| l.text.len()).sum(), cols, marked, headers);
+    // A medida só muda com o conteúdo ou com a largura: fica guardada entre os quadros.
+    type Fingerprint = (u64, i32, i32, bool, bool);
+    let fingerprint: Fingerprint = (content_hash(diff), widths.body.round() as i32, widths.hunk.round() as i32, marked, headers);
     let key = id.with("diff-layout");
     let cached = ui.ctx().data(|d| d.get_temp::<(Fingerprint, Arc<Layout>)>(key));
     let lay = match cached {
         Some((f, lay)) if f == fingerprint => lay,
         _ => {
-            let lay = Arc::new(layout(diff, cols, marked, headers));
+            let lay = Arc::new(ui.fonts_mut(|f| layout(diff, widths, marked, headers, &mut |c| f.glyph_width(&font, c))));
             ui.ctx().data_mut(|d| d.insert_temp(key, (fingerprint, lay.clone())));
             lay
         }
@@ -198,7 +237,7 @@ pub fn draw(ui: &mut Ui, area: Rect, diff: &GitDiff, id: Id, jump: Option<usize>
                     let g = super::galley_trunc(&p, title, theme::ui_semibold(12.0), pal.text_strong, head.width() - 20.0);
                     super::place(&p, head.shrink2(Vec2::new(10.0, 0.0)), Align2::LEFT_CENTER, g, pal.text_strong);
                 }
-                Shape::Rows(_) => {
+                Shape::Rows(rows) => {
                     let (bg, fg) = match line.kind {
                         DiffKind::Add => (Some(theme::with_alpha(pal.success, 0.12)), pal.text),
                         DiffKind::Del => (Some(theme::with_alpha(pal.danger, 0.14)), pal.text),
@@ -218,22 +257,19 @@ pub fn draw(ui: &mut Ui, area: Rect, diff: &GitDiff, id: Id, jump: Option<usize>
                         }
                     }
                     let tx = r.min.x + gutter;
-                    if line.kind == DiffKind::Hunk {
-                        p.text(Pos2::new(tx, y0), Align2::LEFT_CENTER, line.text.trim_end_matches('\r'), font.clone(), fg);
-                        on_hunk(ui, Rect::from_min_size(r.min, Vec2::new(width, ROW_H)), hunk_no);
-                        hunk_no += 1;
-                        continue;
-                    }
-                    let (marker, body) = split_marker(line, marked);
-                    let mw = marker.chars().count() as f32 * cell;
+                    let (marker, _) = split_marker(line, marked);
+                    let mw = if marker.is_empty() { 0.0 } else { cell };
                     if !marker.is_empty() {
                         p.text(Pos2::new(tx, y0), Align2::LEFT_CENTER, marker, font.clone(), fg);
                     }
-                    let body = body.replace('\t', TAB);
-                    let body_cols = cols.saturating_sub(marker.chars().count()).max(1);
-                    for (k, range) in wrap_ranges(&body, body_cols).into_iter().enumerate() {
-                        let y = y0 + k as f32 * ROW_H;
-                        p.text(Pos2::new(tx + mw, y), Align2::LEFT_CENTER, &body[range], font.clone(), fg);
+                    let body = body_of(line, marked);
+                    for (k, range) in rows.iter().enumerate() {
+                        let piece = body.get(range.clone()).unwrap_or("");
+                        p.text(Pos2::new(tx + mw, y0 + k as f32 * ROW_H), Align2::LEFT_CENTER, piece, font.clone(), fg);
+                    }
+                    if line.kind == DiffKind::Hunk {
+                        on_hunk(ui, Rect::from_min_size(r.min, Vec2::new(width, ROW_H)), hunk_no);
+                        hunk_no += 1;
                     }
                 }
             }
@@ -249,17 +285,41 @@ mod tests {
         DiffLine { kind, old: None, new: None, text: text.into() }
     }
 
+    /// Fonte de teste: uma célula por caractere, duas para CJK e emoji.
+    fn cells(c: char) -> f32 {
+        if c as u32 >= 0x2E80 {
+            2.0
+        } else {
+            1.0
+        }
+    }
+
+    fn pieces(t: &str, max: f32) -> Vec<String> {
+        wrap_ranges(t, max, &mut cells).into_iter().map(|r| t[r].to_owned()).collect()
+    }
+
+    fn rows(s: Shape) -> usize {
+        match s {
+            Shape::Rows(r) => r.len(),
+            other => panic!("esperava linhas, veio {other:?}"),
+        }
+    }
+
+    const W: Widths = Widths { body: 40.0, hunk: 40.0 };
+
     #[test]
-    fn long_lines_wrap_at_a_space_or_at_the_column() {
-        let pieces = |t: &str, c| wrap_ranges(t, c).into_iter().map(|r| t[r].to_owned()).collect::<Vec<_>>();
-        assert_eq!(pieces("", 10), vec![""]);
-        assert_eq!(pieces("curto", 10), vec!["curto"]);
+    fn long_lines_wrap_at_a_space_or_at_the_width() {
+        assert_eq!(pieces("", 10.0), vec![""]);
+        assert_eq!(pieces("curto", 10.0), vec!["curto"]);
         // A palavra que não cabe vai inteira para a linha seguinte.
-        assert_eq!(pieces("uma frase com palavras", 10), vec!["uma frase ", "com ", "palavras"]);
-        // Sem espaço, corta na coluna.
-        assert_eq!(pieces("abcdefghijklmnop", 6), vec!["abcdef", "ghijkl", "mnop"]);
+        assert_eq!(pieces("uma frase com palavras", 10.0), vec!["uma frase ", "com ", "palavras"]);
+        // Sem espaço, corta na largura.
+        assert_eq!(pieces("abcdefghijklmnop", 6.0), vec!["abcdef", "ghijkl", "mnop"]);
         // Acentos contam como um caractere e não partem no meio.
-        assert_eq!(pieces("áéíóúçãõ", 3), vec!["áéí", "óúç", "ãõ"]);
+        assert_eq!(pieces("áéíóúçãõ", 3.0), vec!["áéí", "óúç", "ãõ"]);
+        // Caracteres largos (CJK, emoji) ocupam o que medem: nada passa da borda.
+        assert_eq!(pieces("ab中中cd", 4.0), vec!["ab中", "中cd"]);
+        assert_eq!(pieces("🙂🙂🙂", 3.0), vec!["🙂", "🙂", "🙂"]);
     }
 
     #[test]
@@ -273,25 +333,28 @@ mod tests {
     #[test]
     fn several_files_get_headers_and_lose_the_git_plumbing() {
         let meta = |t| line(DiffKind::Meta, t);
-        assert_eq!(shape(&meta("diff --git a/a b/a"), 40, true, true), Shape::File("a".into()));
-        assert_eq!(shape(&meta("index 1..2"), 40, true, true), Shape::Hidden);
-        assert_eq!(shape(&meta("+++ b/a"), 40, true, true), Shape::Hidden);
-        assert_eq!(shape(&meta("new file mode 100644"), 40, true, true), Shape::Rows(1));
+        let s = |l: &DiffLine, headers| shape(l, W, true, headers, &mut cells);
+        assert_eq!(s(&meta("diff --git a/a b/a"), true), Shape::File("a".into()));
+        assert_eq!(s(&meta("index 1..2"), true), Shape::Hidden);
+        assert_eq!(s(&meta("+++ b/a"), true), Shape::Hidden);
+        assert_eq!(rows(s(&meta("new file mode 100644"), true)), 1);
         // Um arquivo só: o caminho já está no título, sem cabeçalho.
-        assert_eq!(shape(&meta("diff --git a/a b/a"), 40, true, false), Shape::Hidden);
-        assert_eq!(shape(&meta("--- a/a"), 40, true, false), Shape::Hidden);
+        assert_eq!(s(&meta("diff --git a/a b/a"), false), Shape::Hidden);
+        assert_eq!(s(&meta("--- a/a"), false), Shape::Hidden);
     }
 
     #[test]
-    fn the_marker_stays_out_of_the_wrapped_text() {
+    fn the_marker_stays_out_of_the_wrapped_text_and_the_hunk_header_wraps_beside_the_buttons() {
         let add = line(DiffKind::Add, "+abcdefgh");
         assert_eq!(split_marker(&add, true), ("+", "abcdefgh"));
-        // 8 caracteres em 5 colunas, menos 1 do marcador: duas linhas.
-        assert_eq!(shape(&add, 5, true, false), Shape::Rows(2));
+        assert_eq!(body_of(&line(DiffKind::Add, "+\tx"), true), "    x");
+        // 8 caracteres em 4 de largura (o marcador já saiu da conta): duas linhas.
+        assert_eq!(rows(shape(&add, Widths { body: 4.0, hunk: 40.0 }, true, false, &mut cells)), 2);
         // Arquivo não rastreado: o texto é o arquivo, sem marcador.
         assert_eq!(split_marker(&line(DiffKind::Add, "+x"), false), ("", "+x"));
-        // O cabeçalho do trecho nunca quebra.
-        assert_eq!(shape(&line(DiffKind::Hunk, &"@".repeat(90)), 10, true, false), Shape::Rows(1));
+        // O cabeçalho do trecho quebra na largura que sobra ao lado dos botões.
+        let hunk = line(DiffKind::Hunk, &"@".repeat(30));
+        assert_eq!(rows(shape(&hunk, Widths { body: 40.0, hunk: 10.0 }, true, false, &mut cells)), 3);
     }
 
     #[test]
@@ -300,7 +363,16 @@ mod tests {
             lines: vec![line(DiffKind::Meta, "diff --git a/a b/a"), line(DiffKind::Meta, "index 1"), line(DiffKind::Add, "+uma linha")],
             ..Default::default()
         };
-        let lay = layout(&diff, 40, true, true);
+        let lay = layout(&diff, W, true, true, &mut cells);
         assert_eq!(lay.tops, vec![0.0, FILE_H, FILE_H, FILE_H + ROW_H]);
+    }
+
+    #[test]
+    fn the_fingerprint_follows_the_content() {
+        let a = GitDiff { lines: vec![line(DiffKind::Add, "+ab")], ..Default::default() };
+        let b = GitDiff { lines: vec![line(DiffKind::Add, "+ba")], ..Default::default() };
+        // Mesmo tamanho, conteúdo diferente: outra medida.
+        assert_ne!(content_hash(&a), content_hash(&b));
+        assert_eq!(content_hash(&a), content_hash(&a.clone()));
     }
 }
