@@ -373,6 +373,8 @@ pub fn actions_for(task: &Task, tab_open: bool) -> Vec<TaskAct> {
         TaskStatus::Running => vec![tab, TaskAct::Discard],
         TaskStatus::Review => vec![TaskAct::Merge, TaskAct::Return, tab, TaskAct::Discard],
         TaskStatus::Validating => vec![TaskAct::Validate, TaskAct::Reject, tab, TaskAct::Discard],
+        // Com relatório, a mesclagem falhou (de uma versão anterior): dá para devolver ao agente como em revisão.
+        TaskStatus::Failed if task.report.is_some() => vec![TaskAct::Retry, TaskAct::Return, tab, TaskAct::Discard],
         TaskStatus::Failed => vec![TaskAct::Retry, TaskAct::Discard],
         TaskStatus::Merged | TaskStatus::Discarded => Vec::new(),
     }
@@ -1260,6 +1262,11 @@ mod tests {
             [TaskAct::Validate, TaskAct::Reject, TaskAct::ReopenTab, TaskAct::Discard]
         );
         assert_eq!(actions_for(&t(TaskStatus::Failed, false), false), [TaskAct::Retry, TaskAct::Discard]);
+        // Mesclagem que falhou antes (Failed com relatório): também se devolve ao agente.
+        assert_eq!(
+            actions_for(&t(TaskStatus::Failed, true), true),
+            [TaskAct::Retry, TaskAct::Return, TaskAct::GoToTab, TaskAct::Discard]
+        );
         assert!(actions_for(&t(TaskStatus::Merged, true), false).is_empty());
         assert!(actions_for(&t(TaskStatus::Discarded, false), false).is_empty());
         // Só a ação principal vem cheia; mesclar mostra a base.

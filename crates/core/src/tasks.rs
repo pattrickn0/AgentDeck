@@ -665,6 +665,18 @@ impl Core {
         TaskError::Failed(message)
     }
 
+    /// A mesclagem falhou por motivo externo (não conflito): o erro vai para o histórico e para quem chamou, e a
+    /// tarefa fica (ou volta) em `Review`, onde ainda se pode mesclar de novo, devolver ou descartar. `Failed` aqui
+    /// seria um beco: a mesa recusava devolver e concluir.
+    fn fail_merge(&self, project: &str, id: &str, message: String) -> TaskError {
+        self.update_task(project, id, |t| {
+            t.status = TaskStatus::Review;
+            t.error = None;
+            t.log(format!("erro: {message}"));
+        });
+        TaskError::Failed(message)
+    }
+
     // ---------- Git ----------
 
     /// O repositório do projeto (a raiz dele, mesmo que o projeto seja uma subpasta).
@@ -1094,12 +1106,13 @@ impl Core {
 
     // ---------- Devolver ----------
 
-    /// Revisão pediu ajustes: `Review` volta a `Running` e o feedback é entregue ao agente (a aba é
-    /// reaberta se foi fechada).
+    /// Revisão pediu ajustes: `Review` (ou `Failed` com relatório, de uma mesclagem que falhou antes) volta a
+    /// `Running` e o feedback é entregue ao agente (a aba é reaberta se foi fechada).
     pub fn task_return(&self, project: &str, id: &str, feedback: &str) -> Result<Task, TaskError> {
         let _op = self.inner.tasks.op.lock();
         let task = self.task_or_404(project, id)?;
-        if task.status != TaskStatus::Review {
+        // `Failed` com relatório é uma mesclagem que falhou numa versão anterior (hoje fica em `Review`).
+        if task.status != TaskStatus::Review && !(task.status == TaskStatus::Failed && task.report.is_some()) {
             return Err(TaskError::Conflict(format!(
                 "a tarefa {} está {}: só se devolve uma tarefa em revisão",
                 task.id,
@@ -1119,6 +1132,7 @@ impl Core {
         let updated = self.update_task(project, &task.id, |t| {
             t.status = TaskStatus::Running;
             t.finished_ms = None;
+            t.error = None;
             t.log("devolvida ao agente com feedback");
             // `before` não tem o feedback novo: a mensagem mostra só os anteriores.
             let before = t.clone();
@@ -1141,7 +1155,9 @@ impl Core {
     /// para tentar de novo). Recusa, sem mudar nada, se o repositório principal não está na base ou tem alterações
     /// sem commit em arquivos rastreados (o `AGENTS.md`, que o app reescreve, não conta), ou se a worktree
     /// da tarefa tem trabalho sem commit. Em conflito, desfaz a mesclagem (`merge --abort`) e a tarefa continua em
-    /// `Review`, com os arquivos em conflito na mensagem.
+    /// `Review`, com os arquivos em conflito na mensagem. Se o git falha por outro motivo, a tarefa também fica em
+    /// `Review`, com o erro no histórico e devolvido a quem chamou. Se o `AGENTS.md` da pasta principal só difere
+    /// pelo bloco do app e a branch o altera, ele volta ao do HEAD durante a mesclagem e o bloco é regravado depois.
     pub fn task_merge(&self, project: &str, id: &str) -> Result<Task, TaskError> {
         let _op = self.inner.tasks.op.lock();
         let task = self.task_or_404(project, id)?;
@@ -1246,6 +1262,38 @@ impl Core {
             return Err(refuse(&task, e.to_string()));
         }
 
+        // O app reescreve o bloco do AGENTS.md da pasta principal, e o git recusa mesclar sobre um arquivo
+        // alterado que a branch também mexe. Se a alteração é só o bloco do app, o arquivo volta ao do HEAD
+        // para a mesclagem e o bloco é regravado depois (com sucesso, conflito desfeito ou falha). Se o usuário
+        // editou o texto fora do bloco, nada é descartado: recusa.
+        let mut app_block: Option<String> = None;
+        let agents_dirty = dirty_paths(&status).iter().any(|p| p == "AGENTS.md");
+        if agents_dirty && changed_files(&repo, &task.base, &task.branch).iter().any(|f| f == "AGENTS.md") {
+            let file = repo.root.join("AGENTS.md");
+            let current = std::fs::read_to_string(&file).unwrap_or_default();
+            let committed = git_out(&repo, &["show", "HEAD:AGENTS.md"]).unwrap_or_default();
+            if !crate::workspace::only_marker_blocks_differ(&committed, &current) {
+                return Err(refuse(
+                    &task,
+                    format!(
+                        "o AGENTS.md do repositório principal tem alterações suas sem commit, e a branch {} também mexe nele: faça o commit ou guarde-as e tente de novo",
+                        task.branch
+                    ),
+                ));
+            }
+            if let Err(e) = repo.write(&["checkout", "--", "AGENTS.md"], None) {
+                return Err(refuse(&task, format!("não consegui preparar o AGENTS.md do repositório principal para a mesclagem: {e}")));
+            }
+            app_block = Some(current);
+        }
+        let restore_block = || {
+            let Some(saved) = &app_block else { return };
+            if let Err(e) = crate::workspace::restore_marker_block(&repo.root.join("AGENTS.md"), saved) {
+                log::warn!("falha ao regravar o bloco do AGENTS.md depois da mesclagem: {e}");
+                self.update_task(project, &task.id, |t| t.log(format!("aviso: não consegui regravar o bloco do app no AGENTS.md: {e}")));
+            }
+        };
+
         // A mesclagem.
         let message = format!("Merge tarefa {}: {}", task.id, task.title);
         if let Err(e) = run(repo.cmd(&["merge", "--no-ff", "-m", &message, &task.branch]), None, COMMIT_TIMEOUT) {
@@ -1254,6 +1302,7 @@ impl Core {
                 let files: Vec<String> = files.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect();
                 return match repo.write(&["merge", "--abort"], None) {
                     Ok(_) => {
+                        restore_block();
                         let msg = format!(
                             "conflito ao mesclar {} em \"{}\" (arquivos: {}); a mesclagem foi desfeita e a tarefa continua em revisão. Devolva-a ao agente pedindo para atualizar a branch com a base, ou resolva à mão",
                             task.branch,
@@ -1263,15 +1312,17 @@ impl Core {
                         self.update_task(project, &task.id, |t| t.log(format!("conflito na mesclagem ({}); desfeita", short_list(&files))));
                         Err(TaskError::Conflict(msg))
                     }
-                    Err(abort) => Err(self.fail_task(
+                    Err(abort) => Err(self.fail_merge(
                         project,
                         &task.id,
                         format!("conflito ao mesclar e não consegui desfazer ({abort}): rode git merge --abort em {}", repo.root.display()),
                     )),
                 };
             }
-            return Err(self.fail_task(project, &task.id, format!("a mesclagem falhou: {e}")));
+            restore_block();
+            return Err(self.fail_merge(project, &task.id, format!("a mesclagem falhou: {e}")));
         }
+        restore_block();
         let full_head = git_out(&repo, &["rev-parse", "HEAD"]).map(|s| s.trim().to_owned()).unwrap_or_default();
         let head = short_hash(&full_head).to_owned();
 
