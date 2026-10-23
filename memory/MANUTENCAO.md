@@ -201,7 +201,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
-- O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows e no Linux, e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro.
+- O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows, no Ubuntu e no Fedora (este num contêiner, só build e testes), e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro. O que já foi verificado no Linux está em [LINUX.md](LINUX.md).
 - Para depurar visualmente sem abrir a janela: `AGENTDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `AGENTDECK_DEBUG_FEED=1`, `AGENTDECK_DEBUG_FAKE_SHELL=1` e `AGENTDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
@@ -228,5 +228,5 @@ Os executáveis são `agentdeck.exe`, `ask-agent` e `ollama-agent` (os dois últ
 (`env.rs`, `bridge::token_header`, `workspace::marker_re`, `LOCK_FILES` em `lib.rs`, `config::legacy_config_files`), junto com os
 testes que os cobrem. Por que não antes: [aprendizados/nomes-antigos-aceitos-na-migracao.md](aprendizados/nomes-antigos-aceitos-na-migracao.md).
 
-**Depois de atualizar:** o repositório do GitHub e a pasta local `commanddeck-dev` ainda têm o nome antigo; renomeá-los é
-ação do usuário (o GitHub redireciona a URL antiga).
+**Depois de atualizar:** o repositório do GitHub já se chama `AgentDeck`; falta renomear a pasta local `commanddeck-dev`
+(ação do usuário; o GitHub redireciona a URL antiga).

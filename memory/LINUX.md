@@ -1,0 +1,202 @@
+# Suporte a Linux (Ubuntu e Fedora)
+
+Verificação feita na tarefa `t29` (2026-10-22). Este documento diz **o que foi conferido, como**, o que foi corrigido,
+as dependências de cada distro e o que continua sem validação. O roteiro manual de Windows continua em
+[testes.md](testes.md); o de Linux está aqui no fim.
+
+> **Resumo:** o app compila e passa os testes no Ubuntu (CI) e agora também no Fedora (job em contêiner). A interface
+> foi validada à mão só no X11 do Ubuntu; Wayland e um desktop Fedora de verdade ainda não foram testados. Não há
+> pacote, instalador nem arquivo `.desktop`.
+
+## 1. Como esta verificação foi feita
+
+Não havia máquina Linux, WSL nem Docker nesta máquina, então a verificação foi:
+
+1. **CI do GitHub** (repositório `pattrickn0/AgentDeck`), lendo os logs dos jobs do Ubuntu e do Windows pelo endpoint
+   `/actions/jobs/<id>/logs`, mais a API de execuções.
+2. **Revisão do código** de tudo que tem caminho por plataforma: `process.rs`, `paths.rs`, `agents.rs`, `git.rs`,
+   `github.rs`, `workspace.rs`, `whisper.rs`, `download.rs`, `usage/*`, `theme.rs`, `terminal/*`, `ui/projects.rs`,
+   `main.rs`, `crash.rs` e os testes com `#[cfg(unix)]`.
+3. **Conferência dos artefatos baixados**: nomes e SHA-256 dos pacotes do whisper.cpp no release `b5454` batem com as
+   constantes de `whisper.rs` (Ubuntu x64 e arm64).
+4. **Revisão das dependências** em `Cargo.lock`: não há `gtk-sys`/`glib-sys` (o `rfd 0.17` usa
+   `xdg-portal` + `wayland`), e o `ureq` usa rustls (sem OpenSSL).
+
+`cargo check --target x86_64-unknown-linux-gnu` chegou a ser tentado, mas para no `ring` porque não há toolchain
+`x86_64-linux-gnu-gcc` nesta máquina — por isso o build de Linux é verificado só pela CI.
+
+## 2. O que estava quebrado e foi corrigido
+
+### 2.1 O teste que falhava só no Linux (desde 17/10)
+
+Os jobs do Ubuntu (`runs 42–46`) falhavam em `workspace::tests::read_dir_orders_and_filters`, sempre com
+`index out of bounds: the len is 0 but the index is 0` em `workspace.rs`. A linha era:
+
+```rust
+let sub_bs = read_dir(ws, "zeta\\");
+assert_eq!(sub_bs[0].rel_path, "zeta/in.json");   // panic no Linux
+```
+
+`read_dir` validava e juntava o caminho **antes** de trocar `\` por `/`. No Windows `zeta\` é o diretório `zeta`; no
+Unix a barra invertida faz parte do nome, então `ws.join("zeta\\")` procura um arquivo chamado `zeta\` e devolve
+vazio. Correção em `crates/core/src/workspace.rs`: normalizar o separador no começo de `read_dir`. O teste continua
+valendo (e passa) no Windows. Ver
+[aprendizados/caminho-com-barra-invertida-no-read-dir.md](aprendizados/caminho-com-barra-invertida-no-read-dir.md).
+
+### 2.2 A CI parou de validar o Linux (desde 22/10)
+
+A partir do `run 47` (commit `146a486`), o passo **Formatação** (`cargo fmt --all -- --check`) falha no Windows **e**
+no Ubuntu, e os passos de build, teste e clippy nem rodam. Ou seja: desde 22/10 nenhuma linha de Linux é testada na
+CI. Isso é dívida de formatação da base, não regressão de Linux; o item está em [pendencias.md](pendencias.md).
+
+### 2.3 Pasta de dados em instalação de sistema
+
+`AppPaths::detect()` usava sempre a pasta do executável para `dados/`, `workspace/` e `whisper/`. Copiar o binário
+para `/usr/local/bin` (pasta do root) fazia o app falhar ao abrir a trava (`dados/.agentdeck.lock` → permissão
+negada). Agora, no Unix, se a pasta não for gravável (`access(2)`), os dados vão para `~/.local/share/AgentDeck`
+(padrão XDG). Pasta portátil e repositório em desenvolvimento continuam como antes, e `AGENTDECK_HOME` continua
+mandando. Correção em `crates/core/src/paths.rs`, com teste em `#[cfg(unix)]`.
+
+### 2.4 Referência a um script que não existe
+
+A mensagem de erro do ditado mandava compilar o whisper.cpp com `scripts/build-whisper-linux.sh`, que não existe no
+repositório. A mensagem agora diz o que fazer de verdade (compilar com Vulkan/CUDA e pôr o `whisper-cli` no `PATH`, ou
+usar o motor de CPU).
+
+### 2.5 Fontes do terminal no Fedora
+
+Os caminhos de fonte do Linux só cobriam o layout do Debian/Ubuntu (`/usr/share/fonts/truetype/...`). O Fedora instala
+cada família na própria pasta (`/usr/share/fonts/dejavu-sans-mono-fonts/...`), então a lista não achava nada e o
+terminal caía na fonte embutida do egui. `theme.rs` ganhou os caminhos do Fedora (a interface já usa Inter/IBM Plex
+embutidas; isso vale para o terminal e para os símbolos).
+
+### 2.6 Documentação e CI
+
+- `README.md` e `CONTRIBUTING.md`: dependências corrigidas (sem GTK3, que não é usado), `xdg-utils`/portal, `libgomp`,
+  pasta de dados, URL do repositório novo (`AgentDeck`).
+- `.github/workflows/ci.yml`: saiu o `libgtk-3-dev`; entrou um job **`fedora`** (`container: fedora:latest`) que
+  instala as dependências do README e roda `cargo build --workspace` e `cargo test --workspace`.
+
+## 3. Dependências
+
+### 3.1 Para compilar
+
+| | Ubuntu 24.04+ | Fedora 41+ |
+| :-- | :-- | :-- |
+| Base | `build-essential pkg-config` | `gcc gcc-c++ make pkgconf-pkg-config` |
+| Áudio (padrão) | `libasound2-dev` | `alsa-lib-devel` |
+| Janela/teclado | `libxkbcommon-dev` | `libxkbcommon-devel` |
+| Rust | 1.89+ (`rustup`) | 1.89+ (`rustup`) |
+
+Sem áudio: `cargo build -p agentdeck --no-default-features` dispensa a ALSA (fica sem som e sem microfone).
+
+Não precisa de: GTK3/GTK4 (`rfd` usa o portal), OpenSSL (`ureq` com rustls), X11/Wayland de desenvolvimento (o winit
+carrega as bibliotecas em tempo de execução). O `libxkbcommon` não é exigido no link, mas é o que a CI instala e o que
+o teclado usa em Wayland.
+
+### 3.2 Para rodar
+
+| Recurso | Ubuntu | Fedora | Sem isso |
+| :-- | :-- | :-- | :-- |
+| Janela | X11 ou Wayland + driver GL (`mesa`) | idem (`mesa-libGL`) | não abre |
+| Abrir pasta / links | `xdg-utils` (`xdg-open`) | `xdg-utils` | falha silenciosa |
+| Diálogo de arquivo | `xdg-desktop-portal` + `xdg-desktop-portal-gtk` | idem | o diálogo não abre |
+| Fonte do terminal | `fonts-dejavu-core` (ou Liberation/Noto) | `dejavu-sans-mono-fonts` | cai na fonte embutida do egui |
+| Git / GitHub | `git` (e `gh` opcional) | `git` (`gh` opcional) | abas Git/GitHub sem função |
+| Ditado (CPU) | `libgomp`, `libstdc++` | `libgomp`, `libstdc++` | o `whisper-cli` baixado não roda |
+| Detectar GPU | `pciutils` (`lspci`), `nvidia-smi` | idem | cai no motor de CPU |
+
+CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; Antigravity e Ollama têm instalador próprio. O app
+procura no `PATH`, em `~/.local/bin`, em `~/.claude/local/claude` e em `~/.antigravity/bin/agy`.
+
+## 4. O que está coberto pelo código e pelos testes
+
+| Área | Como está no Linux |
+| :-- | :-- |
+| Processos | grupo próprio por filho (`process_group(0)`) e `kill(-pid)` na árvore; testes `cfg(unix)` em `process.rs` |
+| PTY/terminal | `portable-pty` + `alacritty_terminal`; `TERM=xterm-256color`, `COLORTERM=truecolor` |
+| Aba Terminal | `$SHELL` ou `/bin/bash`; sem shims `.cmd` (isso é só Windows) |
+| Ambiente das abas | `PATH` com a pasta de binários do app na frente; variáveis `AGENTDECK_*`; sem `PYTHONUTF8`/MSYS |
+| Instância única | trava de arquivo em `dados/.agentdeck.lock` (e a antiga `.commanddeck.lock`) |
+| Git | `git` do `PATH`, sem shell, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, SSH em `BatchMode` |
+| GitHub | token por `git credential fill` e, se houver, `gh auth token`; sem gravar em disco |
+| Agentes | resolução por `which`/pastas do usuário; sem `cmd.exe` |
+| Documentos/workspace | `workspace::read_dir` normaliza `/` e `\`; `read_text` recusa link que sai do projeto |
+| Whisper (CPU) | baixa `whisper-bin-ubuntu-x64.tar.gz` (ou arm64), `chmod 0o755`, `LD_LIBRARY_PATH` com a pasta do motor |
+| Uso/cotas | Antigravity lê `~/.gemini/oauth_creds.json`; Codex lê `~/.codex/sessions` |
+| Interface | fontes embutidas; `xdg-open` para pastas; `open` (crate) para URLs |
+
+A suíte tem 192 testes no app, 250 no core, 32 da ponte e 37 das tarefas, além dos de git/github; rodada localmente no
+Windows em 22/10, todos passam. No Linux, o único que falhava era o de `read_dir` (corrigido aqui); os demais rodaram
+verdes no Ubuntu até o `run 46`.
+
+## 5. O que continua sem verificação (ou sem suporte)
+
+1. **Wayland**: a winit suporta, e o `rfd` também, mas ninguém abriu o app numa sessão Wayland. Testar janela, arrastar
+   divisórias, colar, IME e diálogo de arquivo. Contorno: `WINIT_UNIX_BACKEND=x11`.
+2. **Desktop Fedora de verdade**: o job novo prova build e testes, não a janela. Falta abrir o app num Fedora
+   Workstation (GNOME/Wayland) e repetir o roteiro do fim deste documento.
+3. **Empacotamento**: não há `.deb`, `.rpm`, Flatpak, AppImage, `.desktop` nem ícone instalado. O app roda da pasta
+   compilada; para o menu de aplicativos, é trabalho futuro.
+4. **Ditado com GPU**: o app não baixa motores CUDA/Vulkan para Linux (só o de CPU). Quem tem GPU precisa compilar o
+   whisper.cpp e deixar o `whisper-cli` no `PATH`; a detecção usa `lspci`/`nvidia-smi`.
+5. **Diálogo de arquivo sem portal**: em ambiente mínimo (i3, container, SSH) sem `xdg-desktop-portal` o diálogo não
+   abre. Não há aviso na interface; avaliar uma mensagem.
+6. **Textos com “Git Credential Manager”**: as mensagens de erro de Git/GitHub foram escritas no Windows e citam GCM e
+   “faça um push para entrar”. No Linux o caminho normal é `gh auth login` ou `credential.helper=store`; o texto
+   deveria citar os dois.
+7. **“Abrir pasta” ignora falha**: `Command::new("xdg-open").spawn()` sem tratar o erro; sem `xdg-utils` o clique não
+   faz nada e não avisa.
+8. **Versão do runner**: o rótulo `ubuntu-latest` migra para Ubuntu 26 a partir de 19/10/2026; o job pode mudar de
+   base sem aviso. Se aparecer dependência nova, conferir o log do passo “Dependências de sistema”.
+9. **Formatação**: enquanto `cargo fmt --all -- --check` falhar, nenhum job chega a rodar os testes — inclusive o
+   Fedora. O item está em [pendencias.md](pendencias.md); não é para “resolver” reformatando arquivos de outras
+   tarefas (ver [aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md](aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md)).
+
+## 6. Roteiro manual (Ubuntu e Fedora)
+
+Rodar numa pasta de dados separada para não mexer na configuração real:
+`AGENTDECK_HOME=/tmp/agentdeck-teste ./target/release/agentdeck`.
+
+**Instalação e abertura**
+
+- [ ] `cargo build --workspace --release` termina sem erro (Ubuntu e Fedora).
+- [ ] O app abre em X11 e em Wayland (GNOME e KDE, se possível), com o tamanho de janela e o DPI corretos.
+- [ ] O terminal da aba “Terminal” abre o `$SHELL`, aceita acentos e cores, e redimensiona sem quebrar a linha.
+- [ ] Fechar o app e abrir de novo mantém projetos, abas e tamanhos; abrir uma segunda instância na mesma pasta avisa
+      que já está em uso; com `AGENTDECK_HOME` diferente, abre as duas.
+
+**Agentes e memória**
+
+- [ ] O menu “+ Novo agente” lista os CLIs instalados e o cartão de cada um abre a aba certa.
+- [ ] `ask-agent --list`, `--team`, `--models` funcionam no terminal de fora do app.
+- [ ] `ask-agent claude "..."` numa aba e a resposta digitada chegam; a Conversa integrada mostra o par.
+- [ ] Criar uma tarefa (`--task new ... --start`), ver a worktree, entregar com `--task done` e ler o relatório.
+- [ ] `ask-agent --learn` mostra os aprendizados; o `AGENTS.md` do projeto é atualizado só onde já existia.
+
+**Interface**
+
+- [ ] Barra lateral, barra direita, abas, menus e modais desenham sem texto cortado nem sobreposição.
+- [ ] Arrastar divisórias, trocar para ORGANIZAÇÃO/Destaque e alternar Documentos (Ctrl+Shift+D).
+- [ ] Abrir uma pasta pelo botão (precisa de `xdg-open`) e escolher um arquivo no diálogo (precisa do portal).
+- [ ] Copiar e colar (Ctrl+C/Ctrl+V) entre o app e outro programa; colar uma imagem como anexo.
+- [ ] Aba Git (status, diff, histórico, stash) e aba GitHub (PRs, issues, Actions) num repositório real.
+
+**Ditado**
+
+- [ ] Com microfone: segurar o atalho, falar e ver o texto na aba; o `.wav` temporário desaparece de `dados/`.
+- [ ] Sem microfone ou sem `libgomp`: o app explica o que falta em vez de travar.
+
+**Fim**
+
+- [ ] `dados/agentdeck.log` e `dados/crash.log` existem e não têm erro repetido.
+- [ ] Ao fechar o app, não sobra processo `whisper-cli` nem agente órfão (`ps -ef | grep -E "whisper|claude"`).
+
+## 7. Manutenção
+
+- Mudou dependência de sistema, caminho de fonte, pasta de dados ou suporte a GPU? Atualize este arquivo e o README no
+  mesmo commit.
+- O job `fedora` da CI é o mínimo: ele não abre janela. Uma falha só nele costuma ser dependência de build faltando no
+  `dnf install`.
+- Ao acrescentar um teste que usa caminho, rode a suíte nos dois sentidos: `cargo test --workspace` no Windows **e** no
+  Linux (CI). O caso do `read_dir` mostra que um teste pode passar anos só num sistema.
