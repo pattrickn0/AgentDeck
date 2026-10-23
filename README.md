@@ -87,6 +87,8 @@ o executável e as pastas dele).
   (https://antigravity.google, https://ollama.com/download).
 - Testado em X11 (Ubuntu). Wayland é suportado pela biblioteca de janelas, mas ainda não foi validado a fundo; se a
   janela não abrir, force o X11 com `WINIT_UNIX_BACKEND=x11 ./target/release/agentdeck`.
+- **WSL (WSLg)**: o app detecta o WSLg e abre pelo X11, porque o Wayland de lá quebra a janela; a escala do WSLg é
+  sempre 1 (a interface fica pequena em tela de alta densidade). Para quem está no Windows, o caminho é o app nativo.
 - O Fedora é verificado na CI (build e testes num contêiner). O roteiro de verificação e as limitações conhecidas
   estão em [`memory/LINUX.md`](memory/LINUX.md).
 
