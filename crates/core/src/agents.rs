@@ -41,7 +41,7 @@ pub struct SpawnSpec {
     pub color: String,
     /// `kind` original pedido.
     pub kind: String,
-    /// Se `true`, o envio via compositor deve mandar um `\r` extra após 600 ms quando o
+    /// Se `true`, a entrega de uma mensagem à aba deve mandar um `\r` extra após 600 ms quando o
     /// texto contém `@` (autocomplete de arquivo do Claude/Antigravity).
     pub double_enter_on_mention: bool,
     /// Modelo de LLM da instância (já resolvido e gravado em `tab_models`); `None` = o padrão do CLI.
@@ -757,21 +757,55 @@ pub(crate) fn build_agent_env(
 /// Grava `dados/hooks/claude-settings.json`: hooks que avisam a ponte quando o Claude começa
 /// (`UserPromptSubmit`) e termina (`Stop`) um turno, que se somam às configurações do usuário, e
 /// a statusline (`ask-agent --usage`), que manda o uso do plano à ponte. Esta substitui a do
-/// usuário, por isso o `ask-agent --usage` roda a dele e mostra a saída dela.
-fn write_claude_hooks(data_dir: &Path) -> std::io::Result<PathBuf> {
+/// usuário, por isso o `ask-agent --usage` roda a dele e mostra a saída dela; o `padding` dele,
+/// se houver, é mantido aqui (quem o aplica é o Claude Code, não a nossa linha).
+fn write_claude_hooks(data_dir: &Path, project_dir: &Path) -> std::io::Result<PathBuf> {
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::util::home_dir().join(".claude"));
+    write_claude_hooks_with(data_dir, project_dir, &config_dir)
+}
+
+/// Como [`write_claude_hooks`], com a pasta de configuração do Claude explícita (teste).
+fn write_claude_hooks_with(data_dir: &Path, project_dir: &Path, config_dir: &Path) -> std::io::Result<PathBuf> {
     let dir = data_dir.join("hooks");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("claude-settings.json");
     let hook = |state: &str| serde_json::json!([{ "hooks": [{ "type": "command", "command": format!("ask-agent --signal {state}") }] }]);
+    let padding = user_statusline_padding(project_dir, config_dir);
     let settings = serde_json::json!({
         "hooks": { "UserPromptSubmit": hook("busy"), "Stop": hook("idle") },
-        "statusLine": { "type": "command", "command": "ask-agent --usage", "padding": 0 },
+        "statusLine": { "type": "command", "command": "ask-agent --usage", "padding": padding },
     });
     let text = serde_json::to_string_pretty(&settings).unwrap_or_default();
     if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
         std::fs::write(&path, text)?;
     }
     Ok(path)
+}
+
+/// `padding` da statusline própria do usuário, na ordem de precedência do Claude Code (projeto
+/// local, projeto e usuário). Sem statusline dele, 0 (o padrão).
+fn user_statusline_padding(project_dir: &Path, config_dir: &Path) -> serde_json::Value {
+    let files = [
+        project_dir.join(".claude").join("settings.local.json"),
+        project_dir.join(".claude").join("settings.json"),
+        config_dir.join("settings.json"),
+    ];
+    files.iter().find_map(|f| user_statusline_in(f)).and_then(|sl| sl.get("padding").cloned()).unwrap_or_else(|| serde_json::Value::from(0))
+}
+
+/// `statusLine` de um arquivo de configuração do Claude Code, quando é um comando do usuário (a
+/// nossa própria `ask-agent --usage` não conta).
+fn user_statusline_in(file: &Path) -> Option<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()?;
+    let sl = v.get("statusLine")?;
+    if sl.get("type").and_then(serde_json::Value::as_str).is_some_and(|t| t != "command") {
+        return None;
+    }
+    let cmd = sl.get("command")?.as_str()?.trim();
+    (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| sl.clone())
 }
 
 /// Nome do binário `ollama-agent` na pasta dos executáveis.
@@ -833,7 +867,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
             args.push("--allowedTools".into());
             args.push("Bash(ask-agent:*)".into());
             // Hooks avisam o início e o fim de cada turno (ver `delivery.rs`).
-            match write_claude_hooks(&core.paths().data_dir) {
+            match write_claude_hooks(&core.paths().data_dir, &project_dir) {
                 Ok(path) => {
                     args.push("--settings".into());
                     args.push(path.to_string_lossy().into_owned());
@@ -1023,12 +1057,52 @@ mod tests {
     #[test]
     fn claude_hooks_signal_the_bridge() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let path = write_claude_hooks(tmp.path()).expect("hooks");
+        let path =
+            write_claude_hooks_with(&tmp.path().join("dados"), &tmp.path().join("projeto"), &tmp.path().join("claude")).expect("hooks");
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("ler")).expect("json");
         assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "ask-agent --signal idle");
         assert_eq!(v["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"], "ask-agent --signal busy");
         assert_eq!(v["statusLine"], serde_json::json!({ "type": "command", "command": "ask-agent --usage", "padding": 0 }));
-        assert_eq!(write_claude_hooks(tmp.path()).expect("de novo"), path);
+        assert_eq!(
+            write_claude_hooks_with(&tmp.path().join("dados"), &tmp.path().join("projeto"), &tmp.path().join("claude")).expect("de novo"),
+            path
+        );
+    }
+
+    #[test]
+    fn claude_hooks_keep_the_user_statusline_padding() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let data = tmp.path().join("dados");
+        let project = tmp.path().join("projeto");
+        let config = tmp.path().join("claude");
+        let statusline = |padding: serde_json::Value| serde_json::json!({ "statusLine": { "type": "command", "command": "minha-status", "padding": padding } });
+        let write = |file: &Path, json: &serde_json::Value| {
+            std::fs::create_dir_all(file.parent().expect("pai")).expect("mkdir");
+            std::fs::write(file, json.to_string()).expect("write");
+        };
+        let statusline_padding = || {
+            let path = write_claude_hooks_with(&data, &project, &config).expect("hooks");
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("ler")).expect("json");
+            v["statusLine"]["padding"].clone()
+        };
+
+        // Sem statusline do usuário: 0, como antes.
+        assert_eq!(statusline_padding(), serde_json::json!(0));
+
+        // O padding do usuário é o da nossa statusline (quem o aplica é o Claude Code).
+        write(&config.join("settings.json"), &statusline(serde_json::json!(2)));
+        assert_eq!(statusline_padding(), serde_json::json!(2));
+
+        // O projeto local vale mais que o do usuário.
+        write(&project.join(".claude").join("settings.local.json"), &statusline(serde_json::json!(1)));
+        assert_eq!(statusline_padding(), serde_json::json!(1));
+
+        // A nossa própria statusline (`ask-agent --usage`) não conta como a do usuário.
+        write(
+            &project.join(".claude").join("settings.local.json"),
+            &serde_json::json!({ "statusLine": { "type": "command", "command": "ask-agent --usage", "padding": 7 } }),
+        );
+        assert_eq!(statusline_padding(), serde_json::json!(2));
     }
 
     #[cfg(windows)]
