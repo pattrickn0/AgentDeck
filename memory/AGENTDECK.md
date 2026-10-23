@@ -50,9 +50,9 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
    passa a ter "abas de documento" ao lado das abas de terminal, e o diff de uma tarefa (e depois o editor de arquivos e um
    explorador mais útil) abre nelas, em largura de tela cheia. É o que falta para o humano validar sem sair do app.
    Detalhes e subitens: [pendencias.md](pendencias.md), bloco "Próximo", item b).
-5. **Renomear para AgentDeck e identidade visual** (combinado em 2026-10-22; vem antes da `main`, para quem usa a `main`
-   migrar uma vez só). **O nome foi feito** (tarefa `t20`, com migração dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md),
-   seção 6). **O visual é a tarefa seguinte**: cores, logo, ícone e temas ([pendencias.md](pendencias.md), bloco "Próximo").
-6. **Estabilizar e promover a `dev` para a `main`** (combinado em 2026-10-21): a `main` está 157 commits atrás da `dev`. Os testes
-   de [testes.md](testes.md) rodam uma vez só, já sobre o app renomeado e redesenhado: mesa, memória, janelas e Documentos.
-   Corrigir o que falhar; quem aprova a promoção é o usuário.
+5. **Renomear para AgentDeck e identidade visual** (combinado em 2026-10-22). **Feitos**: o nome (tarefa `t20`, com migração
+   dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md), seção 6) e o visual (`t21`–`t23`). Os **temas** ficam para depois
+   da `main` ([pendencias.md](pendencias.md), bloco "Próximo").
+6. **Substituir a `main` pela `dev`** (aprovado pelo usuário em 2026-10-22). A `main` é o piloto em TypeScript; a `dev` é a
+   reescrita em Rust, que o usuário usa todo dia. A `main` é trocada inteira pela `dev` (sem mesclagem), depois da `t29`
+   (Linux), de uma tarefa de validação e da correção da janela maximizada.

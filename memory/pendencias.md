@@ -32,15 +32,15 @@ A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [his
 - [ ] **Selecionar e copiar texto** da visualização de arquivo e do diff (hoje só rolam; o markdown segue o egui). Também: buscar dentro do documento.
 - [ ] **Explorador mais útil:** hoje só mostra a árvore. Ideias: marcar o que mudou (git), filtrar/buscar e abrir os arquivos de uma tarefa a partir do detalhe dela.
 
-### c) Temas
+### c) Temas (depois da `main`)
 
-É a tarefa logo depois do rename (o nome já é AgentDeck, ver [historico.md](historico.md), `t20`), e vem antes da promoção para a `main`: o visual novo e o nome chegam a quem usa a `main` numa vez só. Logo e ícone entram aqui.
+Fica para **depois** da promoção para a `main` (decidido com o usuário em 2026-10-22: tema é recurso novo, não estabilidade). O nome (`t20`) e a identidade visual (`t21`–`t23`) já estão feitos.
 
 - [ ] **Temas** (pedido do usuário, 18/10). A identidade visual (visual C) está feita nas três partes (`t21`, `t22`, `t23`, ver [historico.md](historico.md)), com os tokens de `theme.rs` e sem cor solta. Falta o resto do pedido, os temas para o usuário escolher: trocar as constantes de `theme.rs` por uma paleta carregada em tempo de execução, escolhida nas configurações e gravada em `Config`. A paleta inclui o fundo e as 16 cores do terminal (`TERM_BG`/`TERM_FG`, `terminal/colors.rs`), então um tema muda o fundo de todas as abas de uma vez (CLIs com tema próprio, como o OpenCode, continuam usando o tema deles).
 
 ### d) Estabilizar e promover a `dev` para a `main`
 
-- [ ] **Rodar os testes de [testes.md](testes.md) uma vez só**, sobre o app já renomeado e redesenhado (mesa, memória, janelas, Documentos e a migração do nome: abrir o app novo com a configuração e a pasta de dados de quem usava o CommandDeck), corrigir o que falhar e promover. Quem aprova a promoção é o usuário (ver [AGENTDECK.md](AGENTDECK.md)).
+- [ ] **Substituir a `main` pela `dev`** (aprovado pelo usuário em 2026-10-22). A `main` de hoje é o piloto em TypeScript: ela é **trocada inteira** pelo conteúdo da `dev`, sem mesclagem; a `main` antiga fica numa tag para consulta. O usuário usa a versão em Rust todo dia e considera a maior parte de [testes.md](testes.md) conferida no uso, mesmo sem marcar (os itens continuam lá). Antes da troca: a `t29` (suporte a Linux), a tarefa de validação para a `main` e a correção da janela maximizada.
 - [ ] **Tirar os nomes antigos aceitos** na próxima versão depois da promoção: `COMMANDDECK_*`, `x-commanddeck-token`, marcadores `commanddeck:`, `.commanddeck.lock` e a config `CommandDeck/` (lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
 - [ ] **Renomear o repositório no GitHub e a pasta local `commanddeck-dev`** (ação do usuário; o GitHub redireciona a URL antiga). Depois, trocar as URLs que citam o nome antigo (`CONTRIBUTING.md`).
 
@@ -105,7 +105,7 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 
 ## Git e GitHub
 
-- [ ] **Promover a `dev` para a `main`** (combinado em 2026-10-21): a `main` está 157 commits atrás. Antes: estabilizar (os testes de [testes.md](testes.md) das áreas novas, o que falhar vira item aqui). Quem aprova é o usuário.
+- A troca da `main` pela `dev` está no bloco "Próximo", item d).
 - [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). Continua aparecendo quando a lista de agentes muda (outra máquina, outros modelos do Ollama) e, em repositório sem `AGENTS.md`, como não rastreado. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
 - [ ] Com `commit.gpgsign` e pinentry gráfico, a chave travada é recusada na hora (com a explicação de como destravar numa aba) em vez de abrir o diálogo de senha. Avaliar deixar o diálogo abrir quando houver pinentry gráfico.
 - [ ] **GitHub, depois:** comentar e aprovar PRs, criar issue e reexecutar um job pelo app (hoje é só leitura + "Enviar para agente"); o caminho `gh auth token` não foi exercitado (o `gh` não está instalado aqui).
