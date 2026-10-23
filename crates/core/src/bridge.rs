@@ -1,7 +1,6 @@
 //! Ponte HTTP local agente → agente (equivalente a `startBridge`).
 //!
-//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-agentdeck-token` (aceita também o
-//! nome antigo, `x-commanddeck-token`, de uma aba aberta pela versão anterior) e valida o
+//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-agentdeck-token` e valida o
 //! cabeçalho `Host` contra DNS rebinding. Cada processo de agente recebe um token próprio, e é o
 //! token que diz quem está perguntando (o `from` do corpo só vale com o token mestre, usado em
 //! testes). Requisições para o mesmo par `de->para` são atendidas em ordem de chegada (fila FIFO
@@ -186,10 +185,9 @@ fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
     req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
 }
 
-/// Cabeçalho do token: `x-agentdeck-token` ou, na falta dele, o nome antigo `x-commanddeck-token`
-/// (uma aba aberta pela versão anterior; ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`).
+/// Cabeçalho do token (`x-agentdeck-token`); vazio se faltar.
 fn token_header(req: &Request) -> &str {
-    ["x-agentdeck-token", "x-commanddeck-token"].iter().filter_map(|name| header(req, name)).find(|v| !v.is_empty()).unwrap_or("")
+    header(req, "x-agentdeck-token").filter(|v| !v.is_empty()).unwrap_or("")
 }
 
 /// Atende uma requisição. `port` é a porta da ponte (conhecida antes da primeira requisição: o
@@ -396,42 +394,11 @@ fn js_depth(v: Option<&Value>) -> i64 {
     .max(0)
 }
 
-/// Resolve o destino pedido: apelidos, `ollama` → primeiro modelo, e nomes parciais de
-/// modelos Ollama (`qwen3.5` → `ollama:qwen3.5:9b`).
-pub(crate) fn resolve_target(asked: &str, available: &[String], ollama_models: &[String]) -> String {
-    let mut to = resolve_alias(asked).to_owned();
-    if available.contains(&to) || ollama_models.is_empty() {
-        return to;
-    }
-    if to == "ollama" {
-        let first = format!("ollama:{}", ollama_models[0]);
-        if available.contains(&first) {
-            to = first;
-        }
-    } else {
-        let found = ollama_models.iter().find(|m| {
-            let ml = m.to_lowercase();
-            let base = ml.strip_suffix(":latest").unwrap_or(&ml);
-            ml == asked || ml.contains(asked) || base == asked || asked.contains(base)
-        });
-        if let Some(m) = found {
-            let sub = format!("ollama:{m}");
-            if available.contains(&sub) {
-                to = sub;
-            } else if available.iter().any(|a| a == "ollama") {
-                to = "ollama".into();
-            }
-        }
-    }
-    to
-}
-
-/// O destino `asked` (`agy`, `qwen3.5`, `claude@dev`…) já resolvido num id de instância: o modelo
+/// O destino `asked` (`agy`, `claude@dev`…) já resolvido num id de instância: o modelo
 /// pelo apelido e a instância (sem criar nenhuma) no projeto. `None` se não há uma só que sirva.
 fn existing_instance(core: &Core, project: &str, asked: &str) -> Option<String> {
     let (base, suffix) = asked.split_at(asked.find('@').unwrap_or(asked.len()));
-    let models = core.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
-    let kind = resolve_target(base, &core.inner.agents.peers(), &models);
+    let kind = resolve_alias(base);
     let want = Ident::parse(&format!("{kind}{suffix}"))?;
     core.inner.instances.lock().get(project)?.find(&want).ok().flatten().map(|i| i.id())
 }
@@ -490,8 +457,7 @@ fn delivered(to: &str) -> Value {
 
 /// `POST /reply` `{"to","message"[,"reply_to"]}`: o chamador responde à pergunta que `to` fez (ou
 /// à pergunta número `reply_to`). Só conclui uma pergunta **pendente** (404 se não houver): nunca
-/// cria uma pergunta nova. É o que o `ollama-agent` usa para devolver sozinho a resposta, sem
-/// depender de o modelo rodar `ask-agent`.
+/// cria uma pergunta nova.
 fn reply_pending(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
     let from = caller.id.as_str();
     let message = js_string_or(msg.get("message"), "");
@@ -530,7 +496,7 @@ fn usage(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
     let Auth::Agent(Caller { id, tab: true, .. }) = auth else {
         return (400, json!({ "error": "só o processo de uma aba envia o uso" }));
     };
-    let Some(kind) = Ident::parse(id).map(|i| i.kind).filter(|k| k != "shell" && !k.starts_with("ollama")) else {
+    let Some(kind) = Ident::parse(id).map(|i| i.kind).filter(|k| k != "shell") else {
         return (400, json!({ "error": "esta aba não tem limite de uso" }));
     };
     match crate::usage::usage_from_json(msg) {
@@ -619,8 +585,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         None => (asked, ""),
     };
     let kinds = core.inner.agents.peers();
-    let models = core.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
-    let kind = resolve_target(base, &kinds, &models);
+    let kind = resolve_alias(base).to_owned();
     let Some(want) = kinds.contains(&kind).then(|| Ident::parse(&format!("{kind}{suffix}"))).flatten() else {
         return (
             400,
@@ -882,8 +847,7 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
     }
 
     let available = core.peers(project);
-    let models = core.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
-    let to = resolve_target(&asked, &available, &models);
+    let to = resolve_alias(&asked).to_owned();
     if !available.contains(&to) {
         return (
             400,
@@ -1133,27 +1097,10 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn target_resolution() {
-        let models = vec!["qwen3.5:9b".to_owned(), "llama3:latest".to_owned()];
-        let avail: Vec<String> =
-            ["claude", "antigravity", "ollama", "ollama:qwen3.5:9b", "ollama:llama3:latest"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(resolve_target("agy", &avail, &models), "antigravity");
-        assert_eq!(resolve_target("claude", &avail, &models), "claude");
-        assert_eq!(resolve_target("qwen3.5", &avail, &models), "ollama:qwen3.5:9b");
-        assert_eq!(resolve_target("llama3", &avail, &models), "ollama:llama3:latest");
-        assert_eq!(resolve_target("xyz", &avail, &models), "xyz");
-        // "ollama" já disponível fica "ollama"; senão vira o primeiro modelo.
-        assert_eq!(resolve_target("ollama", &avail, &models), "ollama");
-        let avail2: Vec<String> = vec!["ollama:qwen3.5:9b".into()];
-        assert_eq!(resolve_target("local", &avail2, &models), "ollama:qwen3.5:9b");
-    }
-
-    #[test]
     fn the_tab_prompt_names_the_request() {
         let p = tab_prompt("claude@dev", 7, "faça\x1b[201~ x");
         assert!(p.starts_with("[Mensagem do agente \"claude@dev\" recebida pelo AgentDeck]\n\nfaça[201~ x\n\n"), "{p}");
         assert!(p.contains("ask-agent --reply 7 \"sua resposta\""), "{p}");
-        // O `ollama-agent` lê o número desta linha (`bridge_request`): mudou aqui, mude lá.
         assert!(p.contains("Responda executando no shell: ask-agent --reply 7 "), "{p}");
         assert!(!p.contains('\x1b'));
     }

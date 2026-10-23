@@ -19,7 +19,7 @@ pub struct ProjectCfg {
     pub open_tabs: Vec<String>,
     /// Índice em `open_tabs` da aba ativa (-1 = nenhuma).
     pub active_tab: i32,
-    /// Ordem das janelas da tela dividida (grupos: `claude`, `antigravity`, `ollama`…).
+    /// Ordem das janelas da tela dividida (grupos: `claude`, `antigravity`, `codex`…).
     pub pane_order: Vec<String>,
     /// Proporções das linhas da grade e das colunas de cada linha (vazias = iguais). Só valem se
     /// o formato da grade ainda for o mesmo.
@@ -161,8 +161,6 @@ pub struct Config {
     pub window_height: f32,
     /// A janela estava maximizada ao fechar: reabre maximizada, mas com o tamanho normal guardado acima.
     pub window_maximized: bool,
-    /// Host da API do Ollama (padrão `127.0.0.1:11434`, ou `OLLAMA_HOST`).
-    pub ollama_host: String,
     /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
     pub auto_open_agent_tabs: bool,
     /// Com o terminal focado, Ctrl+B é do app (barra lateral) em vez de ir ao terminal (prefixo
@@ -209,7 +207,6 @@ impl Default for Config {
             window_width: 1280.0,
             window_height: 860.0,
             window_maximized: false,
-            ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
             auto_open_agent_tabs: true,
             app_shortcuts_first: false,
             role_models: BTreeMap::new(),
@@ -414,6 +411,11 @@ impl Config {
 /// Configurações de versões anteriores: `CommandDeck` (o nome antes de AgentDeck, no mesmo formato),
 /// a versão Electron (userData = "CommandDeck Terminal") e o nome antigo "orquestra". A primeira que
 /// existir é a origem quando `AgentDeck/config.json` ainda não existe.
+///
+/// ÚNICA reserva do nome CommandDeck que o app ainda carrega (as variáveis `COMMANDDECK_*`, o cabeçalho
+/// da ponte, o marcador do `AGENTS.md` e a trava saíram na t32): quem nunca abriu o AgentDeck perderia a
+/// lista de projetos. Sai (esta função, `is_commanddeck_config`, a cópia em `load_from` e os testes
+/// `*_commanddeck_*`) numa versão depois da promoção da `dev` para a `main`; ver `memory/pendencias.md`.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
     vec![
@@ -494,13 +496,26 @@ mod tests {
     }
 
     #[test]
+    fn a_config_saved_with_the_removed_ollama_agent_still_loads() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let text = r#"{ "ollamaHost": "127.0.0.1:11434", "whisperLang": "en",
+            "projectList": [{ "id": "p1", "path": "C:/x", "openTabs": ["claude", "ollama:qwen3.5:9b"] }] }"#;
+        let cfg = Config::from_json_over_defaults(text, &p);
+        assert_eq!(cfg.whisper_lang, "en");
+        assert_eq!(cfg.project_list[0].open_tabs, ["claude", "ollama:qwen3.5:9b"]);
+        let saved = serde_json::to_string(&cfg).expect("json");
+        assert!(!saved.contains("ollamaHost"), "{saved}");
+    }
+
+    #[test]
     fn roundtrip_and_merge() {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         let mut cfg = Config::default_for(&p);
         cfg.whisper_lang = "en".into();
         let mut project = ProjectCfg::new(tmp.path().join("proj"), None, &[]);
-        project.open_tabs = vec!["claude".into(), "ollama:qwen3.5:9b".into()];
+        project.open_tabs = vec!["claude".into(), "claude@dev".into()];
         project.split_rows = vec![0.4, 0.6];
         cfg.active_project = project.id.clone();
         cfg.project_list.push(project.clone());

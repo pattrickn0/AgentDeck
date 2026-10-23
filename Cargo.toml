@@ -19,7 +19,6 @@ windows-sys = "0.61"
 crossbeam-channel = "0.5"
 uuid = { version = "1", features = ["v4"] }
 regex = "1"
-base64 = "0.22"
 ureq = { version = "3", features = ["json"] }
 tiny_http = "0.12"
 notify = "8"

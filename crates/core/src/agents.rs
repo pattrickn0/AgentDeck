@@ -16,15 +16,13 @@ use crate::Core;
 /// Item de menu de agente (equivalente ao retorno de `agents:list`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentInfo {
-    /// `claude`, `antigravity`, `ollama`, `ollama:<modelo>`, `codex`, ..., `shell`.
+    /// `claude`, `antigravity`, `codex`, ..., `shell`.
     pub id: String,
     pub label: String,
     /// Cor `#rrggbb`.
     pub color: String,
     pub installed: bool,
     pub peer: bool,
-    /// Modelo Ollama, quando aplicável.
-    pub model: Option<String>,
 }
 
 /// Comando completo para abrir uma aba interativa num pseudo-terminal.
@@ -36,7 +34,7 @@ pub struct SpawnSpec {
     /// Ambiente COMPLETO a usar (já derivado do ambiente do processo, com PATH/AGENTDECK_* injetados
     /// e CLAUDECODE & cia removidos). A UI deve limpar o ambiente herdado e aplicar este.
     pub env: BTreeMap<String, String>,
-    /// Rótulo da aba (ex.: "Claude", "Ollama (qwen3.5:9b)").
+    /// Rótulo da aba (ex.: "Claude").
     pub label: String,
     pub color: String,
     /// `kind` original pedido.
@@ -51,11 +49,7 @@ pub struct SpawnSpec {
 /// Cores oficiais (usadas também pela UI como fallback).
 pub const COLOR_CLAUDE: &str = "#d97757";
 pub const COLOR_ANTIGRAVITY: &str = "#4f8cf7";
-pub const COLOR_OLLAMA: &str = "#f59e0b";
 pub const COLOR_SHELL: &str = "#9aa0a6";
-
-/// Modelo usado quando nenhum modelo Ollama é conhecido.
-pub const DEFAULT_OLLAMA_MODEL: &str = "qwen3.5:9b";
 
 /// Definição estática de um agente (equivalente a uma entrada de `AGENTS`).
 #[derive(Debug, Clone, Copy)]
@@ -86,13 +80,6 @@ pub const AGENTS: &[AgentDef] = &[
         missing: "Claude Code CLI (claude) não encontrado. Instale com:\r\n  npm install -g @anthropic-ai/claude-code",
     },
     AgentDef { id: "antigravity", label: "Antigravity", color: COLOR_ANTIGRAVITY, peer: true, missing: ANTIGRAVITY_MISSING },
-    AgentDef {
-        id: "ollama",
-        label: "Ollama",
-        color: COLOR_OLLAMA,
-        peer: true,
-        missing: "Ollama CLI não encontrado. Instale em: https://ollama.com/download",
-    },
     AgentDef {
         id: "codex",
         label: "Codex",
@@ -143,9 +130,6 @@ pub const AGENTS: &[AgentDef] = &[
 pub const ALIASES: &[(&str, &str)] = &[
     ("agy", "antigravity"),
     ("claudecode", "claude"),
-    ("qwen", "ollama"),
-    ("llama", "ollama"),
-    ("local", "ollama"),
     ("gh-copilot", "copilot"),
     ("amazon-q", "q"),
     ("openai", "codex"),
@@ -228,52 +212,27 @@ pub(crate) fn cmd_safe_arg(arg: &str) -> String {
     out
 }
 
-/// Resultado de `resolveOllama`.
-#[derive(Debug, Clone)]
-pub(crate) struct OllamaResolved {
-    pub model: String,
-    pub models: Vec<String>,
-}
-
 /// Opções de descoberta (substituíveis para testes/embutir).
 #[derive(Debug, Clone)]
 pub(crate) struct Discovery {
     pub search_path: Option<OsString>,
     pub home: PathBuf,
-    pub ollama: bool,
     /// Procurar CLIs nas pastas do sistema (`APPDATA`, `LOCALAPPDATA`, `ProgramFiles`). Desligado
     /// nos testes: essas pastas passam a ser procuradas dentro de `home`.
     pub system_dirs: bool,
 }
 
-#[derive(Default)]
-struct OllamaCache {
-    models: Vec<String>,
-    last_fetch: Option<Instant>,
-    /// `None` = ainda não procurado; `Some(None)` = não encontrado.
-    exe: Option<Option<PathBuf>>,
-}
-
-const OLLAMA_CACHE_TTL: Duration = Duration::from_secs(15);
 const COPILOT_CACHE_TTL: Duration = Duration::from_secs(30);
 
-/// Estado do registro: caches de modelos Ollama e da detecção do Copilot.
+/// Estado do registro: cache da detecção do Copilot.
 pub(crate) struct Registry {
     disc: Discovery,
-    ollama: Mutex<OllamaCache>,
     copilot: Mutex<Option<(Instant, Option<Resolved>)>>,
 }
 
 impl Registry {
     pub fn new(disc: Discovery) -> Self {
-        let reg = Self { disc, ollama: Mutex::new(OllamaCache::default()), copilot: Mutex::new(None) };
-        // Inicializa o cache a partir do disco (rápido e não bloqueia).
-        if reg.disc.ollama {
-            let mut c = reg.ollama.lock();
-            c.models = models_from_disk(&reg.ollama_model_dirs());
-            c.last_fetch = Some(Instant::now());
-        }
-        reg
+        Self { disc, copilot: Mutex::new(None) }
     }
 
     pub(crate) fn which(&self, name: &str) -> Option<PathBuf> {
@@ -300,10 +259,9 @@ impl Registry {
 
     // ---------- Resolução dos executáveis ----------
 
-    /// Resolve um agente base (sem `ollama:`); `ollama` usa o modelo padrão.
+    /// Resolve um agente base.
     pub fn resolve(&self, id: &str) -> Option<Resolved> {
         match id {
-            "ollama" => self.resolve_ollama(None).map(|_| Resolved::direct(self.ollama_exe().unwrap_or_else(|| "ollama".into()))),
             "copilot" => self.resolve_copilot(),
             "shell" => Some(shell_resolved()),
             _ if agent_def(id).is_some() => self.resolve_cli(id),
@@ -416,106 +374,11 @@ impl Registry {
         None
     }
 
-    // ---------- Ollama ----------
-
-    fn ollama_model_dirs(&self) -> Vec<PathBuf> {
-        let mut dirs = Vec::new();
-        if let Some(p) = std::env::var_os("OLLAMA_MODELS").filter(|p| !p.is_empty()) {
-            dirs.push(PathBuf::from(p));
-        }
-        dirs.push(self.home().join(".ollama").join("models"));
-        dirs
-    }
-
-    fn ollama_exe(&self) -> Option<PathBuf> {
-        if !self.disc.ollama {
-            return None;
-        }
-        let mut cache = self.ollama.lock();
-        if let Some(exe) = &cache.exe {
-            return exe.clone();
-        }
-        let candidates: Vec<Option<PathBuf>> = if cfg!(windows) {
-            let env = |k: &str, d: &str| self.system_dir(k).unwrap_or_else(|| PathBuf::from(d));
-            vec![
-                Some(env("LOCALAPPDATA", "").join("Programs").join("Ollama").join("ollama.exe")),
-                Some(env("ProgramFiles", "C:\\Program Files").join("Ollama").join("ollama.exe")),
-                Some(env("ProgramFiles(x86)", "C:\\Program Files (x86)").join("Ollama").join("ollama.exe")),
-                self.which("ollama.exe"),
-                self.which("ollama"),
-            ]
-        } else {
-            vec![
-                self.which("ollama"),
-                Some(PathBuf::from("/usr/local/bin/ollama")),
-                Some(PathBuf::from("/usr/bin/ollama")),
-                Some(PathBuf::from("/Applications/Ollama.app/Contents/Resources/ollama")),
-            ]
-        };
-        let exe = candidates.into_iter().flatten().find(|p| p.is_file());
-        cache.exe = Some(exe.clone());
-        exe
-    }
-
-    /// Modelos conhecidos (cache; se vazio, tenta o disco). Equivalente a `getOllamaModels`.
-    pub fn ollama_models(&self) -> Vec<String> {
-        if !self.disc.ollama {
-            return Vec::new();
-        }
-        let mut c = self.ollama.lock();
-        if c.models.is_empty() {
-            c.models = models_from_disk(&self.ollama_model_dirs());
-        }
-        c.models.clone()
-    }
-
-    /// Atualiza a lista de modelos via `/api/tags` (cache de 15 s; fallback para o disco).
-    /// Retorna `true` se a lista mudou. Equivalente a `refreshOllamaModelsAsync`.
-    pub fn refresh_ollama_models(&self, host: &str) -> bool {
-        if !self.disc.ollama {
-            return false;
-        }
-        {
-            let c = self.ollama.lock();
-            if !c.models.is_empty() && c.last_fetch.is_some_and(|t| t.elapsed() < OLLAMA_CACHE_TTL) {
-                return false;
-            }
-        }
-        let mut list = crate::ollama::list_models(host, Duration::from_millis(1500)).unwrap_or_default();
-        dedup_in_order(&mut list);
-        if list.is_empty() {
-            list = models_from_disk(&self.ollama_model_dirs());
-        }
-        let mut c = self.ollama.lock();
-        if list.is_empty() {
-            return false;
-        }
-        let changed = c.models != list;
-        c.models = list;
-        c.last_fetch = Some(Instant::now());
-        changed
-    }
-
-    /// `resolveOllama(model)`: disponível se houver executável ou modelos.
-    pub fn resolve_ollama(&self, specific: Option<&str>) -> Option<OllamaResolved> {
-        if !self.disc.ollama {
-            return None;
-        }
-        let exe = self.ollama_exe();
-        let models = self.ollama_models();
-        let model = specific.map(str::to_owned).or_else(|| models.first().cloned()).unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_owned());
-        (exe.is_some() || !models.is_empty()).then_some(OllamaResolved { model, models })
-    }
-
     // ---------- Pares e instruções ----------
 
-    /// Só os agentes instalados e habilitados como peer entram na ponte (+ `ollama:<modelo>`).
+    /// Só os agentes instalados e habilitados como peer entram na ponte.
     pub fn peers(&self) -> Vec<String> {
-        let mut out: Vec<String> = AGENTS.iter().filter(|a| a.peer && self.resolve(a.id).is_some()).map(|a| a.id.to_owned()).collect();
-        if let Some(o) = self.resolve_ollama(None) {
-            out.extend(o.models.iter().map(|m| format!("ollama:{m}")));
-        }
-        out
+        AGENTS.iter().filter(|a| a.peer && self.resolve(a.id).is_some()).map(|a| a.id.to_owned()).collect()
     }
 
     /// Texto injetado no prompt de sistema / AGENTS.md (equivalente a `bridgeInstructions`).
@@ -528,21 +391,7 @@ impl Registry {
     }
 
     pub fn bridge_instructions(&self, self_id: Option<&str>) -> String {
-        let ollama = self.resolve_ollama(None);
-        let mut others: Vec<String> = self
-            .peers()
-            .into_iter()
-            .filter(|p| Some(p.as_str()) != self_id && p != "ollama")
-            .map(|id| match id.strip_prefix("ollama:") {
-                Some(m) => format!("ollama ({m})"),
-                None => id,
-            })
-            .collect();
-        if others.is_empty() {
-            if let Some(o) = &ollama {
-                others.push(format!("ollama ({})", o.model));
-            }
-        }
+        let others: Vec<String> = self.peers().into_iter().filter(|p| Some(p.as_str()) != self_id).collect();
         let first = match self_id {
             Some(id) => format!(
                 "Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA. Seu nome aqui é \"{id}\"."
@@ -570,50 +419,18 @@ impl Registry {
         .join("\n")
     }
 
-    /// Lista para menus (mesma expansão de `agents:list`).
+    /// Lista para menus (equivalente a `agents:list`).
     pub fn list(&self) -> Vec<AgentInfo> {
-        let ollama = self.resolve_ollama(None);
-        let mut out = Vec::new();
-        for a in AGENTS {
-            if a.id == "ollama" {
-                match &ollama {
-                    Some(o) if o.models.len() == 1 => out.push(AgentInfo {
-                        id: "ollama".into(),
-                        label: format!("Ollama ({})", o.models[0]),
-                        color: a.color.into(),
-                        installed: true,
-                        peer: true,
-                        model: Some(o.models[0].clone()),
-                    }),
-                    Some(o) if !o.models.is_empty() => out.extend(o.models.iter().map(|m| AgentInfo {
-                        id: format!("ollama:{m}"),
-                        label: format!("Ollama ({m})"),
-                        color: a.color.into(),
-                        installed: true,
-                        peer: true,
-                        model: Some(m.clone()),
-                    })),
-                    _ => out.push(AgentInfo {
-                        id: "ollama".into(),
-                        label: a.label.into(),
-                        color: a.color.into(),
-                        installed: ollama.is_some(),
-                        peer: ollama.is_some(),
-                        model: None,
-                    }),
-                }
-                continue;
-            }
-            out.push(AgentInfo {
+        AGENTS
+            .iter()
+            .map(|a| AgentInfo {
                 id: a.id.into(),
                 label: a.label.into(),
                 color: a.color.into(),
                 installed: self.resolve(a.id).is_some(),
                 peer: a.peer,
-                model: None,
-            });
-        }
-        out
+            })
+            .collect()
     }
 }
 
@@ -636,52 +453,6 @@ fn shell_resolved() -> Resolved {
         let sh = std::env::var_os("SHELL").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| "/bin/bash".into());
         Resolved::direct(sh)
     }
-}
-
-fn dedup_in_order(list: &mut Vec<String>) {
-    let mut seen = std::collections::HashSet::new();
-    list.retain(|m| seen.insert(m.clone()));
-}
-
-/// Lê os manifests do Ollama em disco (`manifests[/-v2]/<registro>/library/<modelo>/<tag>`).
-/// Equivalente a `getOllamaModelsFromDisk`.
-pub fn models_from_disk(bases: &[PathBuf]) -> Vec<String> {
-    fn scan(dir: &Path, rel: &mut Vec<String>, found: &mut Vec<String>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
-        let mut entries: Vec<_> = rd.flatten().collect();
-        entries.sort_by_key(|e| e.file_name());
-        for ent in entries {
-            let name = ent.file_name().to_string_lossy().into_owned();
-            let Ok(ft) = ent.file_type() else { continue };
-            if ft.is_dir() {
-                rel.push(name);
-                scan(&ent.path(), rel, found);
-                rel.pop();
-            } else if ft.is_file() {
-                let model = match rel.iter().position(|p| p == "library") {
-                    Some(i) if i + 1 < rel.len() => Some(rel[i + 1..].join("/")),
-                    _ if rel.len() >= 2 => Some(rel[1..].join("/")),
-                    _ => None,
-                };
-                if let Some(m) = model {
-                    let full = format!("{m}:{name}");
-                    if !found.contains(&full) {
-                        found.push(full);
-                    }
-                }
-            }
-        }
-    }
-    let mut found = Vec::new();
-    for base in bases {
-        for sub in ["manifests", "manifests-v2"] {
-            let mdir = base.join(sub);
-            if mdir.is_dir() {
-                scan(&mdir, &mut Vec::new(), &mut found);
-            }
-        }
-    }
-    found
 }
 
 // ---------- Ambiente e comando interativo ----------
@@ -730,8 +501,7 @@ pub(crate) fn build_agent_env(
         }
         let removed = if cfg!(windows) { REMOVE.iter().any(|r| r.eq_ignore_ascii_case(&k)) } else { REMOVE.contains(&k.as_str()) }
             // Nada do AgentDeck que abriu este app (ex.: o app rodando dentro de uma aba de
-            // outro AgentDeck, ou da versão antiga, CommandDeck) vaza para os agentes: cargo,
-            // pasta de dados, depuração… Vale para os dois prefixos.
+            // outro AgentDeck) vaza para os agentes: cargo, pasta de dados, depuração…
             || (crate::env::is_app_var(&k) && !crate::env::is_app_var_named(&k, "ASK_WAIT"));
         if !removed {
             env.insert(k, v);
@@ -809,11 +579,6 @@ fn user_statusline_in(file: &Path) -> Option<serde_json::Value> {
     (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| sl.clone())
 }
 
-/// Nome do binário `ollama-agent` na pasta dos executáveis.
-pub fn ollama_agent_exe(bin_dir: &Path) -> PathBuf {
-    bin_dir.join(if cfg!(windows) { "ollama-agent.exe" } else { "ollama-agent" })
-}
-
 /// Monta o comando de uma aba interativa (equivalente a `pty:spawn`).
 pub(crate) fn spawn_spec(core: &Core, project: &str, kind: &str) -> Result<SpawnSpec, String> {
     spawn_spec_for(core, project, &Ident::main(kind))
@@ -833,9 +598,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         None => project_dir.clone(),
     };
     let reg = &core.inner.agents;
-    let sub_model = kind.strip_prefix("ollama:");
-    let base = if sub_model.is_some() { "ollama" } else { kind };
-    let def = agent_def(base).ok_or_else(|| format!("Agente desconhecido: {kind}"))?;
+    let def = agent_def(kind).ok_or_else(|| format!("Agente desconhecido: {kind}"))?;
     let data_dir = core.paths().data_dir.to_string_lossy().into_owned();
     let mut env = agent_env(core, &id, 0, &core.tab_token(project, &id));
     if let Some(role) = &ident.role {
@@ -844,81 +607,70 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
 
     // Pedido > gravado > padrão do cargo; fica gravado para a interface e para reabrir o app.
     let model = core.assign_model(project, ident, None);
-    let (program, args, label) = if base == "ollama" {
-        let resolved = reg.resolve_ollama(sub_model).ok_or_else(|| def.missing.to_owned())?;
-        let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
-        env.insert("AGENTDECK_OLLAMA_MODEL".into(), model.clone());
-        env.insert("AGENTDECK_OLLAMA_HOST".into(), core.config().ollama_host);
-        // O `ask-agent` do modelo roda como ferramenta e precisa da resposta no stdout: espera tudo.
-        env.insert("AGENTDECK_ASK_WAIT".into(), "0".into());
-        (ollama_agent_exe(&core.paths().bin_dir), vec![model.clone()], format!("Ollama ({model})"))
-    } else {
-        let resolved = reg.resolve(base).ok_or_else(|| def.missing.to_owned())?;
-        let mut args = Vec::new();
-        // Prompt inicial de uma tarefa recém-aberta (ver `Core::set_boot_prompt`). No Claude é posicional e vai
-        // primeiro: `--add-dir` e `--allowedTools` aceitam vários valores e engoliriam o texto.
-        let boot = models::boot_prompt_flag(base).and_then(|flag| core.take_boot_prompt(project, &id).map(|p| (flag, p)));
-        if let Some((None, prompt)) = &boot {
-            args.push(prompt.clone());
-        }
-        if base == "claude" {
-            args.push("--append-system-prompt".into());
-            args.push(reg.bridge_instructions_for(ident));
-            // Responder a outro agente é rodar `ask-agent`: libera só esse comando, sem perguntar.
-            args.push("--allowedTools".into());
-            args.push("Bash(ask-agent:*)".into());
-            // Hooks avisam o início e o fim de cada turno (ver `delivery.rs`).
-            match write_claude_hooks(&core.paths().data_dir, &project_dir) {
-                Ok(path) => {
-                    args.push("--settings".into());
-                    args.push(path.to_string_lossy().into_owned());
-                }
-                Err(e) => log::warn!("não consegui gravar os hooks do Claude: {e}"),
+    let resolved = reg.resolve(kind).ok_or_else(|| def.missing.to_owned())?;
+    let mut args = Vec::new();
+    // Prompt inicial de uma tarefa recém-aberta (ver `Core::set_boot_prompt`). No Claude é posicional e vai
+    // primeiro: `--add-dir` e `--allowedTools` aceitam vários valores e engoliriam o texto.
+    let boot = models::boot_prompt_flag(kind).and_then(|flag| core.take_boot_prompt(project, &id).map(|p| (flag, p)));
+    if let Some((None, prompt)) = &boot {
+        args.push(prompt.clone());
+    }
+    if kind == "claude" {
+        args.push("--append-system-prompt".into());
+        args.push(reg.bridge_instructions_for(ident));
+        // Responder a outro agente é rodar `ask-agent`: libera só esse comando, sem perguntar.
+        args.push("--allowedTools".into());
+        args.push("Bash(ask-agent:*)".into());
+        // Hooks avisam o início e o fim de cada turno (ver `delivery.rs`).
+        match write_claude_hooks(&core.paths().data_dir, &project_dir) {
+            Ok(path) => {
+                args.push("--settings".into());
+                args.push(path.to_string_lossy().into_owned());
             }
+            Err(e) => log::warn!("não consegui gravar os hooks do Claude: {e}"),
         }
-        if base == "codex" && resolved.shim.is_none() {
-            // Fim de turno do Codex → `ask-agent --signal idle <json>`. Pelo cmd.exe o valor TOML
-            // (com aspas) não sobrevive, então só com o executável direto.
-            args.push("-c".into());
-            args.push(r#"notify=["ask-agent","--signal","idle"]"#.into());
+    }
+    if kind == "codex" && resolved.shim.is_none() {
+        // Fim de turno do Codex → `ask-agent --signal idle <json>`. Pelo cmd.exe o valor TOML
+        // (com aspas) não sobrevive, então só com o executável direto.
+        args.push("-c".into());
+        args.push(r#"notify=["ask-agent","--signal","idle"]"#.into());
+    }
+    if kind == "claude" || kind == "antigravity" {
+        args.push("--add-dir".into());
+        args.push(data_dir);
+    }
+    if let Some(m) = &model {
+        if kind == "opencode" {
+            // O TUI não tem --model: servidor próprio + modelo na configuração (ver `models::opencode_tui`).
+            let (extra, (key, value)) = models::opencode_tui(m);
+            args.extend(extra);
+            env.insert(key, value);
+        } else {
+            args.extend(models::cli_args(kind, m));
         }
-        if base == "claude" || base == "antigravity" {
-            args.push("--add-dir".into());
-            args.push(data_dir);
-        }
-        if let Some(m) = &model {
-            if base == "opencode" {
-                // O TUI não tem --model: servidor próprio + modelo na configuração (ver `models::opencode_tui`).
-                let (extra, (key, value)) = models::opencode_tui(m);
-                args.extend(extra);
-                env.insert(key, value);
-            } else {
-                args.extend(models::cli_args(base, m));
-            }
-        }
-        // Esforço da tarefa (o do Antigravity já está no nome do modelo; ver `Task::effort`).
-        if let Some(effort) = core.task_of_instance(project, &id).and_then(|t| t.effort) {
-            args.extend(models::effort_args(base, effort));
-        }
-        if let Some((Some(flag), prompt)) = boot {
-            args.push(flag.into());
-            args.push(prompt);
-        }
-        if resolved.shim.is_some() {
-            args = args.iter().map(|a| cmd_safe_arg(a)).collect();
-        }
-        let mut full = resolved.pre;
-        full.extend(args);
-        (resolved.program, full, def.label.to_owned())
-    };
+    }
+    // Esforço da tarefa (o do Antigravity já está no nome do modelo; ver `Task::effort`).
+    if let Some(effort) = core.task_of_instance(project, &id).and_then(|t| t.effort) {
+        args.extend(models::effort_args(kind, effort));
+    }
+    if let Some((Some(flag), prompt)) = boot {
+        args.push(flag.into());
+        args.push(prompt);
+    }
+    if resolved.shim.is_some() {
+        args = args.iter().map(|a| cmd_safe_arg(a)).collect();
+    }
+    let mut full = resolved.pre;
+    full.extend(args);
 
     core.ensure_project_context(project, &project_dir);
     Ok(SpawnSpec {
-        program,
-        args,
+        program: resolved.program,
+        args: full,
         cwd,
         env,
-        label,
+        label: def.label.to_owned(),
         color: def.color.to_owned(),
         kind: kind.to_owned(),
         double_enter_on_mention: kind == "claude" || kind == "antigravity",
@@ -938,19 +690,6 @@ mod tests {
     }
 
     #[test]
-    fn disk_manifests() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let m = tmp.path().join("manifests").join("registry.ollama.ai");
-        std::fs::create_dir_all(m.join("library").join("qwen3.5")).expect("mkdir");
-        std::fs::create_dir_all(m.join("user").join("custom")).expect("mkdir");
-        std::fs::write(m.join("library").join("qwen3.5").join("9b"), "{}").expect("write");
-        std::fs::write(m.join("library").join("qwen3.5").join("4b"), "{}").expect("write");
-        std::fs::write(m.join("user").join("custom").join("latest"), "{}").expect("write");
-        let models = models_from_disk(&[tmp.path().to_path_buf()]);
-        assert_eq!(models, ["qwen3.5:4b", "qwen3.5:9b", "user/custom:latest"]);
-    }
-
-    #[test]
     fn env_is_sanitized() {
         let base = vec![
             ("CLAUDECODE".to_owned(), "1".to_owned()),
@@ -962,26 +701,17 @@ mod tests {
             ("AGENTDECK_HOME".to_owned(), "/outro".to_owned()),
             ("AGENTDECK_TOKEN".to_owned(), "velho".to_owned()),
             ("AGENTDECK_DEBUG_UI".to_owned(), "1".to_owned()),
-            // ...ou da versão antiga (CommandDeck): o prefixo antigo também é filtrado.
-            ("COMMANDDECK_ROLE".to_owned(), "dev".to_owned()),
-            ("COMMANDDECK_HOME".to_owned(), "/outro".to_owned()),
-            ("COMMANDDECK_TOKEN".to_owned(), "velho".to_owned()),
-            ("COMMANDDECK_DEBUG_UI".to_owned(), "1".to_owned()),
-            // Configuração do usuário: continua valendo, com os dois nomes.
+            // Configuração do usuário: continua valendo.
             ("AGENTDECK_ASK_WAIT".to_owned(), "300".to_owned()),
-            ("COMMANDDECK_ASK_WAIT".to_owned(), "200".to_owned()),
             // Modelo da aba do OpenCode que abriu este app: não passa para os agentes.
             ("OPENCODE_CONFIG_CONTENT".to_owned(), r#"{"model":"herdado"}"#.to_owned()),
         ];
         let env = build_agent_env(base, Path::new("/app/bin"), 1234, "tok", "claude", 1);
-        for k in ["AGENTDECK_ROLE", "AGENTDECK_HOME", "AGENTDECK_DEBUG_UI", "COMMANDDECK_ROLE", "COMMANDDECK_HOME", "COMMANDDECK_DEBUG_UI"]
-        {
+        for k in ["AGENTDECK_ROLE", "AGENTDECK_HOME", "AGENTDECK_DEBUG_UI"] {
             assert!(!env.contains_key(k), "{k} herdado");
         }
         assert_eq!(env["AGENTDECK_TOKEN"], "tok");
-        assert!(!env.contains_key("COMMANDDECK_TOKEN"), "o app escreve só os nomes novos");
         assert_eq!(env["AGENTDECK_ASK_WAIT"], "300");
-        assert_eq!(env["COMMANDDECK_ASK_WAIT"], "200");
         assert!(!env.contains_key("CLAUDECODE"));
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
         assert!(!env.contains_key("OPENCODE_CONFIG_CONTENT"), "a configuração da aba do OpenCode que abriu o app vazou");

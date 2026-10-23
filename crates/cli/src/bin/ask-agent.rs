@@ -70,16 +70,9 @@ impl Bridge {
             ureq::Agent::config_builder().proxy(None).http_status_as_error(false).timeout_global(timeout).build().into();
         let url = format!("http://127.0.0.1:{}{route}", self.port);
         let resp = match (method, body) {
-            ("GET", _) => agent
-                .get(&url)
-                .header("x-agentdeck-token", &self.token)
-                .header("x-commanddeck-token", &self.token)
-                .header("content-type", "application/json")
-                .call(),
-            (_, Some(b)) => {
-                agent.post(&url).header("x-agentdeck-token", &self.token).header("x-commanddeck-token", &self.token).send_json(b)
-            }
-            (_, None) => agent.post(&url).header("x-agentdeck-token", &self.token).header("x-commanddeck-token", &self.token).send_empty(),
+            ("GET", _) => agent.get(&url).header("x-agentdeck-token", &self.token).header("content-type", "application/json").call(),
+            (_, Some(b)) => agent.post(&url).header("x-agentdeck-token", &self.token).send_json(b),
+            (_, None) => agent.post(&url).header("x-agentdeck-token", &self.token).send_empty(),
         };
         let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
@@ -1068,8 +1061,8 @@ pronto"
         ] {
             assert!(d.contains(needle), "{needle}\n{d}");
         }
-        let draft = json!({ "id": "t4", "title": "T", "status": "draft", "instance": "ollama:qwen3.5:4b@t4" });
-        assert_eq!(task_line(&draft), "t4    rascunho   ollama:qwen3.5:4b@t4       T");
+        let draft = json!({ "id": "t4", "title": "T", "status": "draft", "instance": "opencode@t4" });
+        assert_eq!(task_line(&draft), "t4    rascunho   opencode@t4                T");
     }
 
     #[test]

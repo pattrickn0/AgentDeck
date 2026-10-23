@@ -1,6 +1,6 @@
 # AgentDeck: visão e rumo
 
-O **AgentDeck** (antes CommandDeck) é o ambiente de desenvolvimento dos agentes de IA. Desde 2026-10-17 o
+O **AgentDeck** é o ambiente de desenvolvimento dos agentes de IA. Desde 2026-10-17 o
 produto é conduzido pelo Claude (o orquestrador); o usuário acompanha como cliente e colaborador e é quem aprova o
 que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia é na `dev`).
 
