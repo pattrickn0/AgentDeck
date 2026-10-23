@@ -1,0 +1,13 @@
+[package]
+name = "pty-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Sonda: roda um CLI (o claude.exe) num PTY com o emulador do AgentDeck e mede a grade. Ver o README."
+
+[dependencies]
+alacritty_terminal = "0.26"
+portable-pty = "0.9"
+
+# Fora do workspace do app: não entra no build, no fmt nem no clippy do projeto.
+[workspace]

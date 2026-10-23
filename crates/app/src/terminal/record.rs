@@ -142,8 +142,8 @@ pub mod replay {
 mod tests {
     use super::super::Session;
     use super::replay;
-    use std::sync::atomic::Ordering;
     use super::*;
+    use std::sync::atomic::Ordering;
 
     /// Gravação real (portable-pty + o `claude.exe`, modo clássico, `--model haiku`): o Claude Code responde uma tabela de
     /// 40 linhas numa tela de 120×58 que encolhe para 50×12 durante a resposta (como uma janela que deixa de ser a

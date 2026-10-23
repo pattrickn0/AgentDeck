@@ -162,6 +162,7 @@ Segurança, ambiente e agentes novos
 - [ ] No vim/htop com mouse ligado, Ctrl+roda e Alt+roda chegam ao programa com o modificador. Shift+roda rola o histórico do terminal, com ou sem programa usando o mouse.
 - [ ] Arrastar devagar a borda da barra direita ou o divisor com o Claude aberto: durante o arrasto a aba não se redesenha; ao soltar, o Claude se redesenha uma vez na largura nova (no histórico fica no máximo uma cópia antiga por arrasto).
 - [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
+- [ ] **Metade de cima em branco (t37)**: abra o app com `AGENTDECK_DEBUG_PTY=1`, deixe uma aba do Claude responder algo mais alto que a janela (ex.: "uma tabela de 80 linhas") e troque o tamanho da janela/Destaque durante e depois. A tela nunca fica com 5+ linhas vazias no meio e o texto aparece de cima para baixo. Em `dados/pty/` há `<aba>-<data>.bin`, `.events.txt` e `.grid.txt` (a grade igual ao que se vê); sem a variável nada é gravado. Se o vão aparecer, guarde esses três arquivos e a captura (ver `memory/aprendizados/terminal-em-branco-grave-o-pty-antes-de-mexer.md`).
 
 ## Interface
 

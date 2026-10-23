@@ -290,13 +290,14 @@ impl Session {
         let writer = pair.master.take_writer()?;
         self.shared.attach_writer(writer, format!("pty-write-{}", spec.kind))?;
         *self.shared.exit.lock() = None;
-        *self.shared.recorder.lock() = self.record_to.as_ref().and_then(|(dir, name)| match record::Recorder::start(dir, name, self.size) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                log::warn!("AGENTDECK_DEBUG_PTY: não consegui abrir a gravação em {}: {e}", dir.display());
-                None
-            }
-        });
+        *self.shared.recorder.lock() =
+            self.record_to.as_ref().and_then(|(dir, name)| match record::Recorder::start(dir, name, self.size) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    log::warn!("AGENTDECK_DEBUG_PTY: não consegui abrir a gravação em {}: {e}", dir.display());
+                    None
+                }
+            });
 
         // Leitora: alimenta o emulador e acorda a UI.
         let shared = self.shared.clone();
