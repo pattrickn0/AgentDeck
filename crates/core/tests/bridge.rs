@@ -7,7 +7,6 @@ use std::path::Path;
 use std::time::Duration;
 
 use agentdeck_core::paths::AppPaths;
-#[cfg(unix)]
 use agentdeck_core::FeedKind;
 use agentdeck_core::{Config, Core, CoreEvent, StartOptions};
 use crossbeam_channel::Receiver;
@@ -1091,6 +1090,103 @@ fn the_old_reply_form_resolves_aliases() {
     assert_eq!((st, b["answer"].as_str()), (200, Some("Resposta entregue a \"claude\".")), "{b}");
     let (st, b) = asking.join().expect("thread");
     assert_eq!((st, b["answer"].as_str()), (200, Some("feito")));
+    env.core.shutdown();
+}
+
+/// `GET /inbox` (ou `/inbox?all=1`) com o token de uma aba: as respostas da caixa dela.
+fn inbox(env: &Env, token: &str, all: bool) -> Vec<Value> {
+    let port = env.core.bridge_port();
+    let route = if all { "/inbox?all=1" } else { "/inbox" };
+    let (st, b) = http(port, "GET", route, &format!("127.0.0.1:{port}"), token, "");
+    assert_eq!(st, 200, "{b}");
+    b["answers"].as_array().expect("answers").clone()
+}
+
+#[test]
+fn a_synchronous_answer_lands_in_the_inbox_as_delivered() {
+    let (env, _p) = start_with_claude_tab();
+    let claude = tab_token(&env, "claude");
+    let asking = ask_in_thread(&env, claude.clone(), json!({"to": "claude@dev", "message": "tarefa"}));
+    let q = next_delivery(&env);
+    assert_eq!(ask_raw(env.core.bridge_port(), &tab_token(&env, "claude@dev"), json!({"to": "", "message": "feito", "reply_to": q.request})).0, 200);
+    let (st, b) = asking.join().expect("thread");
+    assert_eq!((st, b["answer"].as_str(), b["request"].as_u64()), (200, Some("feito"), Some(q.request)), "{b}");
+    // O 200 foi escrito: a resposta está na caixa, já entregue (a marca vem logo depois da escrita).
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !inbox(&env, &claude, true).iter().all(|e| e["delivered"] == true) {
+        assert!(std::time::Instant::now() < deadline, "a resposta síncrona não foi marcada como entregue");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let all = inbox(&env, &claude, true);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!((all[0]["request"].as_u64(), all[0]["from"].as_str(), all[0]["text"].as_str()), (Some(q.request), Some("claude@dev"), Some("feito")));
+    assert_eq!(all[0]["failed"], false);
+    assert!(inbox(&env, &claude, false).is_empty(), "entregue não aparece em --inbox");
+    // Só o próprio agente lê a caixa dele: a de outro está vazia e o token mestre não tem caixa.
+    assert!(inbox(&env, &tab_token(&env, "claude@dev"), true).is_empty());
+    let port = env.core.bridge_port();
+    assert_eq!(http(port, "GET", "/inbox", &format!("127.0.0.1:{port}"), env.core.bridge_token(), "").0, 400);
+    env.core.shutdown();
+}
+
+#[test]
+fn a_failed_question_is_kept_in_the_inbox_with_its_reason() {
+    let (env, _p) = start_with_claude_tab();
+    let claude = tab_token(&env, "claude");
+    let asking = ask_in_thread(&env, claude.clone(), json!({"to": "claude@dev", "message": "tarefa"}));
+    let q = next_delivery(&env);
+    env.core.fail_delivery(q.request, "a aba morreu");
+    assert_eq!(asking.join().expect("thread").0, 500);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while inbox(&env, &claude, true).iter().all(|e| e["delivered"] != true) {
+        assert!(std::time::Instant::now() < deadline, "a falha não entrou na caixa");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let all = inbox(&env, &claude, true);
+    assert_eq!((all[0]["failed"].as_bool(), all[0]["text"].as_str()), (Some(true), Some("a aba morreu")), "{all:?}");
+    env.core.shutdown();
+}
+
+#[test]
+fn a_late_answer_stays_in_the_inbox_until_it_is_typed_or_read() {
+    let (env, p) = start_with_claude_tab();
+    let claude = tab_token(&env, "claude");
+    let asking = ask_in_thread(&env, claude.clone(), json!({"to": "claude@dev", "message": "tarefa", "wait": 1}));
+    let q = next_delivery(&env);
+    let (st, b) = asking.join().expect("thread");
+    assert_eq!(st, 202);
+    assert!(b["answer"].as_str().expect("aviso").contains("ask-agent --inbox"), "{b}");
+    assert!(inbox(&env, &claude, true).is_empty(), "ainda sem resposta");
+
+    let dev = tab_token(&env, "claude@dev");
+    assert_eq!(ask_raw(env.core.bridge_port(), &dev, json!({"to": "", "message": "pronto", "reply_to": q.request})).0, 200);
+    let late = next_delivery(&env);
+    assert!(late.answer);
+    // A interface ainda não digitou: a resposta está na caixa, não entregue.
+    let pending = inbox(&env, &claude, false);
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!((pending[0]["text"].as_str(), pending[0]["delivered"].as_bool()), (Some("pronto"), Some(false)));
+    // Lida em --inbox, não volta; continua em --inbox --all.
+    assert!(inbox(&env, &claude, false).is_empty());
+    assert_eq!(inbox(&env, &claude, true).len(), 1);
+
+    // A interface digita uma segunda resposta: entregue, fora da lista padrão. Se não pôde digitar, avisa na Conversa integrada.
+    let asking = ask_in_thread(&env, claude.clone(), json!({"to": "claude@dev", "message": "outra", "wait": 1}));
+    let q2 = next_delivery(&env);
+    assert_eq!(asking.join().expect("thread").0, 202);
+    assert_eq!(ask_raw(env.core.bridge_port(), &dev, json!({"to": "", "message": "segunda", "reply_to": q2.request})).0, 200);
+    assert!(next_delivery(&env).answer);
+    env.core.answer_typed(q2.request);
+    assert!(inbox(&env, &claude, false).is_empty(), "a digitada já foi entregue");
+    env.core.answer_lost(&p, q2.request, "a aba não estava aberta");
+    let warning = loop {
+        match env.rx.recv_timeout(Duration::from_secs(5)).expect("aviso na Conversa integrada") {
+            CoreEvent::Feed(e) if e.kind == FeedKind::Error && e.text.contains("--inbox") => break e,
+            _ => continue,
+        }
+    };
+    assert!(warning.text.contains(&format!("#{}", q2.request)) && warning.text.contains("a aba não estava aberta"), "{}", warning.text);
+    assert_eq!((warning.to.as_deref(), warning.project.as_deref()), (Some("claude"), Some(p.as_str())));
     env.core.shutdown();
 }
 

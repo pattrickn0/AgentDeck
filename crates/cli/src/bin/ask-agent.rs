@@ -11,6 +11,7 @@
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
 //!      ask-agent --learn [<arquivo>...]   (o que o projeto já aprendeu, no geral ou sobre esses arquivos)
+//!      ask-agent --inbox [--all]          (respostas às suas perguntas ainda não entregues; --all: as 20 últimas)
 //!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -|"pedido"|--file <arq>
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
 //!      ask-agent --task done <id> -|"relatório"|--file <arq>   (só o agente da própria tarefa)
@@ -42,7 +43,7 @@ use agentdeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -121,6 +122,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "--learn") {
         return learn_command(&bridge, &args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "--inbox") {
+        return inbox_command(&bridge, &args[1..]);
     }
     if args.first().is_some_and(|a| a == "--models") {
         return models_command(&bridge, args.get(1).map(String::as_str));
@@ -338,6 +342,61 @@ fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
     match bridge.request("POST", "/learn", Some(&json!({ "paths": paths })), Some(Duration::from_secs(15))) {
         Ok((200, json)) => {
             println!("{}", json.get("text").and_then(Value::as_str).unwrap_or(""));
+            ExitCode::SUCCESS
+        }
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Err(e) => fail(e, 1),
+    }
+}
+
+// ---------- Caixa de entrada (`--inbox`) ----------
+
+const INBOX_USAGE: &str = "Uso: ask-agent --inbox [--all]   (as respostas às suas perguntas que ainda não foram entregues; --all: as 20 últimas)";
+
+/// Há quanto tempo foi `ts_ms` (epoch em ms), em texto curto.
+fn age_text(ts_ms: u64, now_ms: u64) -> String {
+    let secs = now_ms.saturating_sub(ts_ms) / 1000;
+    match secs {
+        0..=59 => "agora há pouco".into(),
+        60..=3599 => format!("há {} min", secs / 60),
+        3600..=86_399 => format!("há {} h", secs / 3600),
+        _ => format!("há {} d", secs / 86_400),
+    }
+}
+
+/// Uma resposta da caixa de entrada, em texto.
+fn inbox_entry_text(entry: &Value, now_ms: u64) -> String {
+    let text = |k: &str| entry.get(k).and_then(Value::as_str).unwrap_or("");
+    let request = entry.get("request").and_then(Value::as_u64).unwrap_or(0);
+    let failed = entry.get("failed").and_then(Value::as_bool).unwrap_or(false);
+    let delivered = entry.get("delivered").and_then(Value::as_bool).unwrap_or(false);
+    let kind = if failed { "Sem resposta" } else { "Resposta" };
+    let age = age_text(entry.get("ts").and_then(Value::as_u64).unwrap_or(0), now_ms);
+    let state = if delivered { "já entregue no terminal" } else { "não entregue" };
+    format!("[{kind} do agente \"{}\" à sua pergunta #{request}, {age}, {state}]\n\n{}", text("from"), text("text"))
+}
+
+/// `ask-agent --inbox [--all]`: imprime as respostas às perguntas deste agente que ainda não chegaram a ele
+/// (ou as 20 últimas, com `--all`). As impressas passam a entregues.
+fn inbox_command(bridge: &Bridge, flags: &[String]) -> ExitCode {
+    if flags.iter().any(|f| f == "-h" || f == "--help") {
+        println!("{INBOX_USAGE}");
+        return ExitCode::SUCCESS;
+    }
+    if let Some(bad) = flags.iter().find(|f| *f != "--all") {
+        return fail(format!("opção desconhecida \"{bad}\".\n{INBOX_USAGE}"), 2);
+    }
+    let all = !flags.is_empty();
+    let route = if all { "/inbox?all=1" } else { "/inbox" };
+    match bridge.request("GET", route, None, Some(Duration::from_secs(15))) {
+        Ok((200, json)) => {
+            let answers = json.get("answers").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+            if answers.is_empty() {
+                println!("{}", if all { "A caixa de entrada está vazia." } else { "Nenhuma resposta pendente." });
+                return ExitCode::SUCCESS;
+            }
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+            println!("{}", answers.iter().map(|e| inbox_entry_text(e, now)).collect::<Vec<_>>().join("\n\n---\n\n"));
             ExitCode::SUCCESS
         }
         Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
@@ -804,6 +863,18 @@ fn cmd_shell(cmd: &str) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inbox_entries_read_as_a_message_with_age_and_state() {
+        let entry = json!({"request": 4, "from": "antigravity", "text": "pronto", "failed": false, "ts": 1_000_000, "delivered": false});
+        let text = inbox_entry_text(&entry, 1_000_000 + 5 * 60_000);
+        assert_eq!(text, "[Resposta do agente \"antigravity\" à sua pergunta #4, há 5 min, não entregue]
+
+pronto");
+        let failed = json!({"request": 5, "from": "claude@dev", "text": "não respondeu", "failed": true, "ts": 0, "delivered": true});
+        assert!(inbox_entry_text(&failed, 3 * 3_600_000).starts_with("[Sem resposta do agente \"claude@dev\" à sua pergunta #5, há 3 h, já entregue no terminal]"));
+        assert_eq!(age_text(10_000, 20_000), "agora há pouco");
+    }
 
     type Parsed = (Result<(bool, Option<String>), String>, Vec<String>);
 

@@ -27,4 +27,4 @@ Por motivos de privacidade e conformidade técnica, o conteúdo desta pasta é *
    - **Ficam fora do repositório do usuário** e não são apagados ao remover o projeto.
 
 6. **Hooks do Claude (`hooks/`), `crash.log` e `.commanddeck.lock`:**
-   - Gerados pelo app: a configuração dos hooks de início/fim de turno, o registro das quedas (`crash.log`, que gira acima de 256 KB) e a trava que impede uma segunda janela na mesma pasta.
+   - Gerados pelo app: a configuração dos hooks de início/fim de turno, o registro das quedas (`crash.log`, que gira acima de 256 KB), o log do app (`agentdeck.log`, que gira acima de 2 MB) e a trava que impede uma segunda janela na mesma pasta.

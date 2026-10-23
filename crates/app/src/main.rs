@@ -17,6 +17,7 @@ mod docs_demo;
 mod git_ui;
 mod github_ui;
 mod icons;
+mod logfile;
 mod smoke;
 mod split;
 #[cfg(test)]
@@ -35,11 +36,14 @@ use winit::event_loop::EventLoop;
 fn main() -> anyhow::Result<()> {
     // O `ureq-proto` despeja os cabeçalhos da requisição em TRACE, inclusive o `Authorization` com o
     // token do GitHub: ele e o `ureq` ficam no máximo em DEBUG, mesmo com RUST_LOG=trace.
+    // O log vai também para `<dados>/agentdeck.log`: o app de janela não tem stderr.
+    let data_dir = AppPaths::detect().data_dir;
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .filter_module("ureq_proto", log::LevelFilter::Debug)
         .filter_module("ureq", log::LevelFilter::Debug)
+        .target(env_logger::Target::Pipe(Box::new(logfile::LogFile::open(&data_dir))))
         .init();
-    crash::install(&AppPaths::detect().data_dir);
+    crash::install(&data_dir);
 
     let event_loop = EventLoop::<app::UserEvent>::with_user_event().build()?;
     let proxy = std::sync::Arc::new(parking_lot::Mutex::new(event_loop.create_proxy()));
