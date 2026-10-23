@@ -21,15 +21,11 @@ Combinado em 2026-10-21, nesta ordem.
 
 ### b) Modo Documentos, fase 2
 
-A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [historico.md](historico.md) (`t19`). O que falta:
+A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) e o editor com realce, busca e seleção (`t39`) estão em [historico.md](historico.md). O que falta:
 
-- [ ] **Editor de arquivos.** Editar os arquivos do workspace dentro do modo Documentos (hoje só se leem; "Abrir no programa padrão" é o caminho para editar).
-  - egui não tem editor de código pronto: avaliar `egui_extras::syntax_highlighting`/`syntect` para realce, ou um componente de editor de terceiros.
-  - Mínimo útil: editar e salvar (Ctrl+S), realce de sintaxe e aviso quando um agente alterar o arquivo aberto e ele tiver edição não salva (hoje a visualização só relê, sem aviso). A pré-visualização de Markdown já existe (só leitura).
-- [ ] **Realce de sintaxe** na visualização de arquivo e no diff (hoje monocromático).
 - [ ] **Diff lado a lado** (hoje só o unificado).
 - [ ] **Gravar as abas de documento** (hoje somem ao fechar o app) e **documento ao lado de um agente** (hoje a chave troca o centro inteiro; ver a razão em [GERAL.md](GERAL.md), "Documentos").
-- [ ] **Selecionar e copiar texto** da visualização de arquivo e do diff (hoje só rolam; o markdown segue o egui). Também: buscar dentro do documento.
+- [ ] **Editor, depois (`t39`, 2026-10-23):** o que ficou de fora de propósito. Recuo automático ao dar Enter; substituir (`Ctrl+H`); ir para a linha (`Ctrl+G`); menu de clique direito (Copiar, Selecionar tudo) no diff e no arquivo grande (hoje é só Ctrl+C); rolagem horizontal em vez de quebra de linha; arquivo com CRLF e LF misturados ou fora do UTF-8 (hoje só leitura, com a razão); busca no markdown formatado e no pedido/relatório (hoje `Ctrl+F` mostra o código do `.md` de arquivo, e o pedido e o relatório não buscam); busca no diff conta linhas, não ocorrências; realce do que está dentro de um bloco de código do markdown formatado; mais linguagens (Go, C/C++, HTML/CSS, SQL, Java, C#: `highlight.rs` é uma tabela por linguagem, ver `memory/aprendizados/editor-de-documentos.md` antes de trocar por `syntect`); remover um projeto com documento sujo descarta a edição sem perguntar (o × da aba e o fechar do app perguntam).
 - [ ] **Explorador mais útil:** hoje só mostra a árvore. Ideias: marcar o que mudou (git), filtrar/buscar e abrir os arquivos de uma tarefa a partir do detalhe dela.
 
 ### c) Temas (depois da `main`)

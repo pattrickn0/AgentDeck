@@ -258,10 +258,17 @@ pub fn apply(deck: &mut Deck, item: &str) {
             }
         }),
         "docs-demo-find" | "docs-demo-diff-find" => {
+            if item == "docs-demo-find" {
+                // Um arquivo comprido, com o achado no fim: a busca rola até ele.
+                source(deck, &mut |src| {
+                    src.text = format!("{}// fim do arquivo\n", FILE.repeat(6));
+                    src.disk = src.text.clone();
+                    src.touched();
+                });
+            }
             if let Some(tab) = uid.and_then(|u| deck.docs.get_mut(u)) {
                 tab.find.show();
-                tab.find.query = if item == "docs-demo-find" { "read_text".into() } else { "doc".into() };
-                tab.find.current = 1;
+                tab.find.query = if item == "docs-demo-find" { "fim do arquivo".into() } else { "doc".into() };
             }
         }
         "docs-demo-md-code" => source(deck, &mut |src| src.raw = true),

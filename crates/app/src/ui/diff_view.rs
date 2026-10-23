@@ -285,17 +285,10 @@ pub(super) fn piece_job(
     let pal = theme::pal();
     let mut job = LayoutJob::default();
     for p in highlight::pieces(text, &[local], &marks, None) {
-        let background = match p.mark {
-            Mark::None => egui::Color32::TRANSPARENT,
-            Mark::Found => theme::with_alpha(pal.warning, 0.30),
-            Mark::Current => theme::with_alpha(pal.warning, 0.65),
-        };
-        let background = if current && p.mark == Mark::Found { theme::with_alpha(pal.warning, 0.65) } else { background };
-        job.append(
-            &text[p.range],
-            0.0,
-            TextFormat { font_id: font.clone(), color: pal.syn(p.tok, plain), background, ..Default::default() },
-        );
+        // Na linha da ocorrência atual, todos os achados valem como o atual.
+        let mark = if current && p.mark == Mark::Found { Mark::Current } else { p.mark };
+        let (color, background) = pal.syn_mark(p.tok, mark, plain);
+        job.append(&text[p.range], 0.0, TextFormat { font_id: font.clone(), color, background, ..Default::default() });
     }
     job
 }

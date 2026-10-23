@@ -70,7 +70,8 @@ crates/
 │   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
 │   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
 │   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, validar, descartar, reabrir a aba)
-│   ├── docs.rs       modo Documentos do centro: `CenterView`, `DocKind`/`DocTab`/`DocState`, `Docs` (abrir, focar, fechar, duplicata, por projeto), a lista de arquivos de um diff (`diff_files`), o selo da chave (`Badge`) e, em `impl Deck`, abrir cada tipo de documento e ler fora da thread da interface (`UiMsg::Doc`); testes puros
+│   ├── highlight.rs  realce de sintaxe (tokenizador próprio por linguagem, `pieces` para juntar realce e busca, `Cache`)
+│   ├── docs.rs       modo Documentos do centro: `CenterView`, `DocKind`/`DocTab`/`DocState` (inclusive `Source`, o arquivo editável, e `Find`, a busca), `Docs` (abrir, focar, fechar, duplicata, por projeto), a lista de arquivos de um diff (`diff_files`), o selo da chave (`Badge`) e, em `impl Deck`, abrir cada tipo de documento e ler fora da thread da interface (`UiMsg::Doc`); testes puros
 │   ├── docs_demo.rs  documentos fictícios do `AGENTDECK_DEBUG_UI=docs-demo*`
 │   ├── dictation.rs  ditado por voz: estados do microfone e destino fixo na aba onde a gravação começou (funções puras, com testes)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
@@ -80,7 +81,8 @@ crates/
 │   └── ui/           mod.rs (pintura, modais)
 │       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
 │       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾; pinta uma lista de `Item`, serve às abas dos agentes e às dos documentos)
-│       ├── docs.rs (modo Documentos: a chave Agentes | Documentos (`switch`, desenhada pela barra lateral ou, recolhida, pela barra de título), a faixa de documentos, o diff com a lista de arquivos, o arquivo de texto e o markdown)
+│       ├── docs.rs (modo Documentos: a chave Agentes | Documentos (`switch`, desenhada pela barra lateral ou, recolhida, pela barra de título), a faixa de documentos, o diff com a lista de arquivos, o arquivo de texto, o aviso de edição, a busca e a pergunta de salvar, e o markdown)
+│       ├── code.rs (o arquivo como código: o editor sobre `TextEdit` e o arquivo grande pintado linha a linha), select.rs (seleção de texto das telas pintadas à mão)
 │       ├── sidebar.rs (a chave, ORGANIZAÇÃO e ARQUIVOS) + projects.rs (projetos e agentes em árvore; `model_tag` encurta o modelo)
 │       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
 │       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
@@ -184,7 +186,9 @@ a leitura em `Deck::docs_load` (numa thread, volta como `UiMsg::Doc`) e o corpo 
 Regras que não se quebram: com o centro em Documentos **nenhum `fit_tab`** roda (o PTY não muda de tamanho), o terminal não recebe teclado
 nem IME (`handle_key`, `handle_ime`) e o fim de turno marca `Tab.done` mesmo na aba ativa. O watcher (`CoreEvent::WorkspaceChanged`) relê
 os arquivos abertos (`docs_reload_files`). `tasks_flow_tests.rs` cobre o fluxo com o core e o git reais. Para ver sem nada disso:
-`AGENTDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`; `docs_demo.rs`).
+`AGENTDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`, `-edit`, `-find`, `-diff-find`,
+`-external`, `-confirm`, `-large`, `-md-code`; `docs_demo.rs`).
+O arquivo editável (`Source`), a gravação (`docs_save`, `write_text`) e a pergunta ao fechar estão em `ARCHITECTURE.md`, "Editor (t39)".
 
 **Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O executor headless já consulta os provedores registrados.
 

@@ -217,7 +217,7 @@ pub fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc, find: &mut Fi
     let content_w = (gutter + doc.max_chars as f32 * cell + 24.0).max(body.width());
     let total_h = doc.lines.len() as f32 * TEXT_ROW_H;
     if find.open {
-        find.refresh(0, |q| (Vec::new(), highlight::find_lines(doc.lines.iter().map(String::as_str), q)));
+        find.refresh(doc.lines.len() as u64, |q| (Vec::new(), highlight::find_lines(doc.lines.iter().map(String::as_str), q)));
     }
     let current = find.current_line();
     let sel_id = Id::new(("doc-text-sel", uid));

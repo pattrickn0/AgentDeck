@@ -157,6 +157,17 @@ impl Palette {
             Tok::Meta => self.syn_meta,
         }
     }
+
+    /// A cor do texto e a do fundo de um pedaço de código com a marca da busca: o achado leva um fundo âmbar, e o atual
+    /// um mais forte com o texto escuro (o comentário cinza não se lê sobre âmbar).
+    pub fn syn_mark(&self, tok: crate::highlight::Tok, mark: crate::highlight::Mark, plain: Color32) -> (Color32, Color32) {
+        use crate::highlight::Mark;
+        match mark {
+            Mark::None => (self.syn(tok, plain), Color32::TRANSPARENT),
+            Mark::Found => (self.syn(tok, plain), with_alpha(self.warning, 0.30)),
+            Mark::Current => (self.on_accent, with_alpha(self.warning, 0.80)),
+        }
+    }
 }
 
 // ---------- Cores dos agentes (não são da paleta: identificam o agente) ----------

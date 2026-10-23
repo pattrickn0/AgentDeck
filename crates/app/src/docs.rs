@@ -69,12 +69,8 @@ impl Shaped {
             ..Default::default()
         };
         for p in &pieces {
-            let background = match p.mark {
-                highlight::Mark::None => egui::Color32::TRANSPARENT,
-                highlight::Mark::Found => crate::theme::with_alpha(pal.warning, 0.30),
-                highlight::Mark::Current => crate::theme::with_alpha(pal.warning, 0.65),
-            };
-            job.append(&text[p.range.clone()], 0.0, format(pal.syn(p.tok, pal.text), background));
+            let (color, background) = pal.syn_mark(p.tok, p.mark, pal.text);
+            job.append(&text[p.range.clone()], 0.0, format(color, background));
         }
         if pieces.is_empty() {
             job.append("", 0.0, format(pal.text, egui::Color32::TRANSPARENT));
@@ -1104,9 +1100,12 @@ impl Deck {
             Ok(()) => src.mark_saved(&saved),
             Err(e) => {
                 src.saving = false;
-                src.save_error = Some(e);
+                src.save_error = Some(e.clone());
+                let name = tab.subtitle.clone();
                 self.docs.focus(uid);
                 self.docs.view = CenterView::Docs;
+                // O documento pode ser de um projeto que não está à vista: o aviso também vai para a Conversa.
+                self.system(format!("Não consegui gravar {name}: {e}"));
                 return;
             }
         }
