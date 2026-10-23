@@ -690,3 +690,71 @@ fn reading_documents_keeps_the_terminals_running_unresized_and_marks_finished_tu
     env.deck.before_frame(&env.ctx);
     assert_eq!(env.deck.docs.view, CenterView::Agents);
 }
+
+#[test]
+fn the_highlight_follows_the_active_tab_and_the_pty_resizes_once_per_switch() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    use agentdeck_core::Organization;
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    let frame = |env: &mut Env| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 860.0))),
+            ..Default::default()
+        };
+        let Env { deck, ctx, .. } = env;
+        let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+        out.textures_delta.clear();
+    };
+    let tab_of = |env: &Env, kind: &str| env.deck.tabs.iter().position(|t| t.kind == kind).expect("aba");
+    // Dois CLIs (dois grupos), o último aberto é o selecionado.
+    env.deck.open_tab("claude", false);
+    env.deck.open_tab("shell", false);
+    env.deck.set_organization(Organization::Highlight);
+    frame(&mut env);
+    let big_group = |env: &Env| env.deck.panes.first().and_then(|p| p.groups.first()).cloned();
+    assert_eq!(env.deck.panes.len(), 2);
+    assert_eq!(big_group(&env).as_deref(), Some("shell"));
+    let (big, small) = (env.deck.panes[0].rect, env.deck.panes[1].rect);
+    assert!(big.width() > small.width() * 1.8, "a janela do selecionado é a grande: {big:?} × {small:?}");
+    env.pump("o PTY de cada janela ter o tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()) && d.metrics.is_some());
+    frame(&mut env);
+    env.pump("o PTY se ajustar", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+
+    // Quadros parados não pedem redimensionamento.
+    for _ in 0..5 {
+        frame(&mut env);
+    }
+    assert!(!env.deck.tabs.iter().any(|t| t.resize_pending()), "um quadro sem mudança não mexe no PTY");
+
+    // Selecionar o outro CLI troca as janelas: a dele vira a grande e o PTY muda uma vez, com o tamanho parado.
+    let (claude, shell) = (tab_of(&env, "claude"), tab_of(&env, "shell"));
+    let (size_claude, size_shell) = (env.deck.tabs[claude].session.size(), env.deck.tabs[shell].session.size());
+    env.deck.activate(claude);
+    frame(&mut env);
+    assert_eq!(big_group(&env).as_deref(), Some("claude"));
+    assert_eq!(env.deck.panes[0].rect, big, "o destaque troca de CLI, a janela grande continua no mesmo lugar");
+    assert!(env.deck.tabs[claude].resize_pending() && env.deck.tabs[shell].resize_pending(), "as duas janelas mudaram de tamanho");
+    // Nada é redimensionado enquanto o tamanho está mudando (ainda dentro dos 150 ms): o tamanho do PTY é o de antes.
+    assert_eq!((env.deck.tabs[claude].session.size(), env.deck.tabs[shell].session.size()), (size_claude, size_shell));
+    env.pump("o PTY mudar de tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+    assert_ne!(env.deck.tabs[claude].session.size(), size_claude, "o Claude agora está na janela grande");
+    for _ in 0..5 {
+        frame(&mut env);
+    }
+    assert!(!env.deck.tabs.iter().any(|t| t.resize_pending()), "depois da troca, nenhum redimensionamento por quadro");
+
+    // Trocar a organização é gravado e o segmento certo volta ao reabrir (a escolha vai para a Config).
+    env.deck.persist_layout_now();
+    assert_eq!(env.core.config().organization(), Organization::Highlight);
+    env.deck.set_organization(Organization::Tabs);
+    frame(&mut env);
+    assert_eq!(env.deck.panes.len(), 1, "em Abas há uma janela só");
+}

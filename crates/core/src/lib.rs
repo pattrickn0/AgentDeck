@@ -48,7 +48,7 @@ use crossbeam_channel::{Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 
 pub use agents::{AgentInfo, SpawnSpec};
-pub use config::{Config, ProjectCfg};
+pub use config::{Config, Organization, ProjectCfg};
 pub use env::{env_var, env_var_os};
 pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind};
 pub use exchange::PendingInfo;
