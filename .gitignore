@@ -24,18 +24,12 @@ whisper/bin-cuda/
 whisper/src/
 
 # Dados de execução local e retenção do usuário (anexos efêmeros, prints, sessões)
+# (tudo em dados/ fica de fora, menos o README e a pasta anexos/ vazia)
+dados/*
+!dados/README.md
+!dados/anexos/
 dados/anexos/*
 !dados/anexos/.gitkeep
-dados/prompts/*
-!dados/prompts/.gitkeep
-dados/sessions.json
-dados/hooks/
-dados/tarefas/
-dados/.agentdeck.lock
-dados/.commanddeck.lock
-dados/usage.json
-dados/agentdeck.log.1
-!dados/README.md
 
 # Logs e variáveis de ambiente locais
 *.log
@@ -49,3 +43,6 @@ dados/agentdeck.log.1
 
 # Worktrees temporários de agentes (Claude Code)
 .claude/worktrees/
+
+# Worktrees e pastas das tarefas da mesa do AgentDeck
+/.agentdeck/

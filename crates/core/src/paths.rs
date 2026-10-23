@@ -28,7 +28,10 @@ impl AppPaths {
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."));
         match crate::env::env_var_os("HOME").map(PathBuf::from) {
             Some(home) => Self::isolated(home, exe_dir),
-            None => Self::with_dirs(find_app_dir(&exe_dir), exe_dir),
+            None => {
+                let found = find_app_dir(&exe_dir);
+                Self::with_dirs(fallback_data_dir(&found).unwrap_or(found), exe_dir)
+            }
         }
     }
 
@@ -60,6 +63,34 @@ fn find_app_dir(exe_dir: &Path) -> PathBuf {
     exe_dir.to_path_buf()
 }
 
+/// Linux/macOS: um app instalado em pasta do sistema (ex.: `/usr/local/bin`) não consegue criar
+/// `dados/` ao lado do executável. Nesse caso os dados vão para a pasta do usuário
+/// (`~/.local/share/AgentDeck`, o padrão XDG). Numa pasta portátil (ou no repositório em
+/// desenvolvimento) continua tudo ao lado do executável, como no Windows.
+#[cfg(unix)]
+fn fallback_data_dir(app_dir: &Path) -> Option<PathBuf> {
+    if can_write(app_dir) {
+        return None;
+    }
+    let dir = dirs::data_dir()?.join("AgentDeck");
+    log::warn!("{} não é gravável: os dados do app vão para {}", app_dir.display(), dir.display());
+    Some(dir)
+}
+
+#[cfg(not(unix))]
+fn fallback_data_dir(_app_dir: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// `access(2)` em vez de tentar criar um arquivo: não deixa lixo na pasta do executável.
+#[cfg(unix)]
+fn can_write(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else { return false };
+    // SAFETY: `path` é uma string C válida (sem NUL) e vive até o fim da chamada.
+    unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +104,27 @@ mod tests {
         // Sem o isolamento a configuração fica na pasta do usuário, fora do app.
         let normal = AppPaths::with_dirs(home.clone(), PathBuf::from("/tmp/bin"));
         assert!(!normal.config_file.starts_with(&home));
+    }
+
+    #[test]
+    fn a_writable_folder_keeps_the_data_next_to_the_executable() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        assert!(fallback_data_dir(tmp.path()).is_none(), "pasta gravável não tem desvio");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_the_user_cannot_write_falls_back_to_the_xdg_data_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tmp");
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir(&bin).expect("mkdir");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o500)).expect("chmod");
+        // Rodando como root, `access` ignora as permissões e o caso não dá para simular.
+        if !can_write(&bin) {
+            assert_eq!(fallback_data_dir(&bin), dirs::data_dir().map(|d| d.join("AgentDeck")));
+        }
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).expect("chmod de volta");
     }
 }

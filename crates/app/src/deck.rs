@@ -292,6 +292,8 @@ pub struct Deck {
     pub organization: Organization,
     /// Destaque: fração da largura do centro que a janela grande ocupa (ver `split::highlight_ratio`).
     pub highlight_ratio: f32,
+    /// O grupo de modelos fixado na barra de título, por agente (cópia de `Config::usage_pins`).
+    pub usage_pins: std::collections::BTreeMap<String, String>,
     /// Ordem das janelas (grupos de `split::group_key`).
     pub group_order: Vec<String>,
     pub split_ratios: split::Ratios,
@@ -305,8 +307,9 @@ pub struct Deck {
 
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
     pub debug_usage: Option<HashMap<String, agentdeck_core::AgentUsage>>,
-    /// SOMENTE DEPURAÇÃO: o painel de uso aberto sem o mouse (`AGENTDECK_DEBUG_UI=usage-panel`).
-    pub debug_usage_panel: bool,
+    /// SOMENTE DEPURAÇÃO: o painel de uso aberto sem o mouse, do agente dado ou, vazio, do primeiro
+    /// (`AGENTDECK_DEBUG_UI=usage-panel` ou `usage-panel:<agente>`).
+    pub debug_usage_panel: Option<String>,
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
     pub debug_projects: Option<Vec<ProjectView>>,
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=project:<id>`): troca para este projeto logo depois de restaurar as abas.
@@ -517,6 +520,7 @@ impl Deck {
             right_panel_rect: None,
             organization: cfg.organization(),
             highlight_ratio: split::highlight_ratio(cfg.highlight_ratio),
+            usage_pins: cfg.usage_pins.clone(),
             group_order: Vec::new(),
             split_ratios: cfg
                 .active()
@@ -527,7 +531,7 @@ impl Deck {
             debug_pane_drop: None,
             show_seq: 0,
             debug_usage: None,
-            debug_usage_panel: false,
+            debug_usage_panel: None,
             debug_projects: None,
             debug_switch_project: None,
             quit_requested: false,
@@ -1696,6 +1700,23 @@ impl Deck {
                 p.pane_order = order;
             });
         }
+    }
+
+    /// Fixa na barra de título o grupo `group` do agente `model` (`None` volta ao resumo) e grava.
+    pub fn set_usage_pin(&mut self, model: &str, group: Option<String>) {
+        match &group {
+            Some(g) => self.usage_pins.insert(model.to_owned(), g.clone()),
+            None => self.usage_pins.remove(model),
+        };
+        let model = model.to_owned();
+        self.core.update_config(|c| match group {
+            Some(g) => {
+                c.usage_pins.insert(model, g);
+            }
+            None => {
+                c.usage_pins.remove(&model);
+            }
+        });
     }
 
     pub fn persist_layout(&mut self) {

@@ -11,6 +11,12 @@
 //! - `POST /v1internal:fetchAvailableModels`: endpoint alternativo que lista os
 //!   modelos disponíveis e seus respectivos `quotaInfo.{remainingFraction, resetTime}`.
 //!
+//! O servidor escolhe o que devolve pelo `User-Agent`: só para `antigravity/cli/<versão>` de um CLI
+//! recente (1.4.5 sim, 1.0.0 não) vêm os grupos do Gemini ("Gemini Models", "Gemini 4 Argon"); para
+//! qualquer outro vem só "Claude and GPT models". Por isso o pedido imita o CLI, com a versão instalada.
+//! Dos grupos, valem os do Gemini (é para isso que o Antigravity é usado aqui), cada janela com o de
+//! maior uso.
+//!
 //! # Credenciais
 //! No Windows, o CLI armazena o token ativo no Gerenciador de Credenciais
 //! do Windows (`gemini:antigravity`). Em outros sistemas ou como fallback,
@@ -26,7 +32,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{epoch_ms, AgentUsage, UsageWindow};
+use super::{epoch_ms, AgentUsage, UsageGroup, UsageWindow};
 use crate::util;
 
 /// Endpoint de produção e diário da API Cloud Code.
@@ -35,6 +41,38 @@ const API_HOSTS: &[&str] = &["cloudcode-pa.googleapis.com", "daily-cloudcode-pa.
 /// Timeout para as requisições HTTP da cota.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Versão do CLI no `User-Agent` quando não dá para perguntar ao `agy` instalado (uma conferida que
+/// recebe os grupos do Gemini).
+const FALLBACK_CLI_VERSION: &str = "1.4.5";
+
+/// O `User-Agent` do CLI (`antigravity/cli/1.4.5 (aidev_client; os_type=windows; arch=amd64)`).
+fn user_agent(version: Option<&str>) -> String {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    let os = if cfg!(target_os = "macos") { "darwin" } else { std::env::consts::OS };
+    format!("antigravity/cli/{} (aidev_client; os_type={os}; arch={arch})", version.unwrap_or(FALLBACK_CLI_VERSION))
+}
+
+/// A versão na saída de `agy --version` ("1.4.5").
+fn parse_version(out: &str) -> Option<String> {
+    out.split_whitespace()
+        .map(|t| t.trim_start_matches('v'))
+        .find(|t| t.starts_with(|c: char| c.is_ascii_digit()) && t.contains('.') && t.chars().all(|c| c.is_ascii_digit() || c == '.'))
+        .map(str::to_owned)
+}
+
+/// A versão do `agy` instalado (`None` se não rodar ou não disser). Bloqueante (~0,2 s).
+pub(crate) fn installed_version(agy: &crate::agents::Resolved) -> Option<String> {
+    let (program, args) = agy.command();
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args).arg("--version");
+    let out = crate::process::run_captured(cmd, None, Duration::from_secs(10), None, None).ok()?;
+    parse_version(&out.stdout)
+}
 
 #[cfg(windows)]
 mod wincred {
@@ -182,16 +220,8 @@ fn merge_window(slot: &mut Option<UsageWindow>, candidate: UsageWindow) {
     }
 }
 
-/// Faz o parse da resposta de `v1internal:retrieveUserQuotaSummary`.
-pub(crate) fn parse_quota_summary(json: &Value, now_ms: u64) -> Option<AgentUsage> {
-    let groups = json.get("groups").and_then(Value::as_array)?;
-    // Procura o grupo dos modelos Gemini, ou o primeiro que tiver buckets.
-    let group = groups
-        .iter()
-        .find(|g| g.get("displayName").and_then(Value::as_str).is_some_and(|n| n.to_ascii_lowercase().contains("gemini")))
-        .or_else(|| groups.iter().find(|g| g.get("buckets").and_then(Value::as_array).is_some_and(|b| !b.is_empty())))?;
-
-    let buckets = group.get("buckets").and_then(Value::as_array)?;
+/// A sessão e a semana de um grupo (de cada tipo, o bucket de maior uso).
+fn group_windows(buckets: &[Value], now_ms: u64) -> (Option<UsageWindow>, Option<UsageWindow>) {
     let mut session = None;
     let mut weekly = None;
 
@@ -212,8 +242,32 @@ pub(crate) fn parse_quota_summary(json: &Value, now_ms: u64) -> Option<AgentUsag
             merge_window(&mut weekly, window);
         }
     }
+    (session, weekly)
+}
 
-    (session.is_some() || weekly.is_some()).then_some(AgentUsage { session, weekly, updated_ms: now_ms, local: false })
+/// Faz o parse da resposta de `v1internal:retrieveUserQuotaSummary`: cada grupo com as suas janelas (os do Gemini
+/// primeiro) e, como resumo, as dos grupos do Gemini (sem nenhum, as de todos), cada uma com o de maior uso.
+pub(crate) fn parse_quota_summary(json: &Value, now_ms: u64) -> Option<AgentUsage> {
+    let mut found: Vec<(bool, UsageGroup)> = Vec::new();
+    for g in json.get("groups").and_then(Value::as_array)? {
+        let Some(buckets) = g.get("buckets").and_then(Value::as_array) else { continue };
+        let (session, weekly) = group_windows(buckets, now_ms);
+        if session.is_none() && weekly.is_none() {
+            continue;
+        }
+        let name = g.get("displayName").and_then(Value::as_str).unwrap_or("Modelos").to_owned();
+        found.push((name.to_ascii_lowercase().contains("gemini"), UsageGroup { name, session, weekly }));
+    }
+    let any_gemini = found.iter().any(|(gemini, _)| *gemini);
+    let mut session = None;
+    let mut weekly = None;
+    for (_, g) in found.iter().filter(|(gemini, _)| *gemini || !any_gemini) {
+        g.session.into_iter().for_each(|w| merge_window(&mut session, w));
+        g.weekly.into_iter().for_each(|w| merge_window(&mut weekly, w));
+    }
+    found.sort_by_key(|(gemini, _)| !gemini);
+    let groups = found.into_iter().map(|(_, g)| g).collect();
+    (session.is_some() || weekly.is_some()).then_some(AgentUsage { session, weekly, updated_ms: now_ms, local: false, groups })
 }
 
 /// Fallback: faz o parse de `v1internal:fetchAvailableModels`.
@@ -232,6 +286,7 @@ pub(crate) fn parse_available_models(json: &Value, now_ms: u64) -> Option<AgentU
                         weekly: None,
                         updated_ms: now_ms,
                         local: false,
+                        groups: Vec::new(),
                     });
                 }
             }
@@ -249,10 +304,10 @@ pub(crate) fn parse_available_models(json: &Value, now_ms: u64) -> Option<AgentU
         merge_window(&mut best, make_window(used, resets_at_ms, now_ms));
     }
 
-    Some(AgentUsage { session: Some(best?), weekly: None, updated_ms: now_ms, local: false })
+    Some(AgentUsage { session: Some(best?), weekly: None, updated_ms: now_ms, local: false, groups: Vec::new() })
 }
 
-fn fetch_with_bases(bases: &[String], token: &str, now_ms: u64) -> Option<AgentUsage> {
+fn fetch_with_bases(bases: &[String], token: &str, ua: &str, now_ms: u64) -> Option<AgentUsage> {
     let agent = http_agent();
 
     // Tenta primeiro o endpoint de resumo por grupos (com janela semanal e de 5h).
@@ -263,7 +318,7 @@ fn fetch_with_bases(bases: &[String], token: &str, now_ms: u64) -> Option<AgentU
             .post(&url)
             .header("Authorization", format!("Bearer {token}"))
             .header("Content-Type", "application/json")
-            .header("User-Agent", "antigravity-cli")
+            .header("User-Agent", ua)
             .send_json(json!({}))
         {
             Ok(r) => r,
@@ -286,7 +341,7 @@ fn fetch_with_bases(bases: &[String], token: &str, now_ms: u64) -> Option<AgentU
             .post(&url)
             .header("Authorization", format!("Bearer {token}"))
             .header("Content-Type", "application/json")
-            .header("User-Agent", "antigravity-cli")
+            .header("User-Agent", ua)
             .send_json(json!({ "project": "aicode-consumers" }))
         {
             Ok(r) => r,
@@ -305,13 +360,13 @@ fn fetch_with_bases(bases: &[String], token: &str, now_ms: u64) -> Option<AgentU
     None
 }
 
-/// Consulta a cota do Antigravity (`None` em qualquer falha: sem login, rede, formato).
-/// Bloqueante; roda na thread `cd-usage`.
-pub(crate) fn fetch(home: &Path) -> Option<AgentUsage> {
+/// Consulta a cota do Antigravity (`None` em qualquer falha: sem login, rede, formato), como o CLI na versão
+/// `cli_version` (sem ela, [`FALLBACK_CLI_VERSION`]). Bloqueante; roda na thread `cd-usage`.
+pub(crate) fn fetch(home: &Path, cli_version: Option<&str>) -> Option<AgentUsage> {
     let now_ms = util::now_ms();
     let token = valid_access_token(home, now_ms)?;
     let bases: Vec<String> = API_HOSTS.iter().map(|h| format!("https://{h}")).collect();
-    fetch_with_bases(&bases, &token, now_ms)
+    fetch_with_bases(&bases, &token, &user_agent(cli_version), now_ms)
 }
 
 #[cfg(test)]
@@ -564,10 +619,54 @@ mod tests {
         });
 
         let bases = vec![format!("http://{addr1}"), format!("http://{addr2}")];
-        let usage = fetch_with_bases(&bases, "tok", NOW).expect("segundo host deve responder");
+        let usage = fetch_with_bases(&bases, "tok", &user_agent(None), NOW).expect("segundo host deve responder");
         assert_eq!(usage.session, Some(UsageWindow { used: 0.75, resets_at_ms: None }));
         let _ = t1.join();
         let _ = t2.join();
+    }
+
+    #[test]
+    fn gemini_groups_win_over_claude_and_each_window_keeps_the_most_used() {
+        // Como o servidor responde ao User-Agent do CLI (22/10): o grupo de Claude/GPT não conta.
+        let v = json!({
+            "groups": [
+                {"displayName": "Gemini Models", "buckets": [
+                    {"bucketId": "gemini-weekly", "window": "weekly", "resetTime": "2026-10-25T13:51:49Z", "remainingFraction": 1},
+                    {"bucketId": "gemini-5h", "window": "5h", "resetTime": "2026-10-23T06:54:25Z", "remainingFraction": 0.9}
+                ]},
+                {"displayName": "Claude and GPT models", "buckets": [
+                    {"bucketId": "3p-5h", "window": "5h", "resetTime": "2026-10-23T06:54:25Z", "remainingFraction": 0.1}
+                ]},
+                {"displayName": "Gemini 4 Argon", "buckets": [
+                    {"bucketId": "argon-weekly", "window": "weekly", "resetTime": "2026-10-24T12:30:35Z", "remainingFraction": 0.06}
+                ]}
+            ]
+        });
+        let usage = parse_quota_summary(&v, NOW).expect("usage");
+        let session = usage.session.expect("session");
+        assert!((session.used - 0.1).abs() < 1e-6, "a sessão é a do Gemini, não a do Claude");
+        let weekly = usage.weekly.expect("weekly");
+        assert!((weekly.used - 0.94).abs() < 1e-6, "a semana é a do Argon, a mais gasta");
+        assert_eq!(weekly.resets_at_ms, super::super::rfc3339_ms("2026-10-24T12:30:35Z"));
+        // Todos os grupos ficam para o painel, os do Gemini primeiro; o Argon só tem a semana.
+        let names: Vec<&str> = usage.groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["Gemini Models", "Gemini 4 Argon", "Claude and GPT models"]);
+        assert!(usage.groups[1].session.is_none() && usage.groups[1].weekly.is_some());
+        assert!((usage.groups[2].session.expect("3p").used - 0.9).abs() < 1e-6);
+        // Sem grupo do Gemini, vale o que vier.
+        let only_claude =
+            json!({"groups": [{"displayName": "Claude and GPT models", "buckets": [{"window": "5h", "remainingFraction": 0.5}]}]});
+        assert_eq!(parse_quota_summary(&only_claude, NOW).and_then(|u| u.session).map(|s| s.used), Some(0.5));
+    }
+
+    #[test]
+    fn the_request_looks_like_the_installed_cli() {
+        assert_eq!(parse_version("1.4.5\r\n").as_deref(), Some("1.4.5"));
+        assert_eq!(parse_version("agy v1.10.2 (abc)").as_deref(), Some("1.10.2"));
+        assert_eq!(parse_version("erro: não sei"), None);
+        let ua = user_agent(Some("1.5.0"));
+        assert!(ua.starts_with("antigravity/cli/1.5.0 (aidev_client; os_type="), "{ua}");
+        assert!(user_agent(None).starts_with(&format!("antigravity/cli/{FALLBACK_CLI_VERSION} ")));
     }
 
     #[test]
@@ -581,7 +680,8 @@ mod tests {
     #[ignore = "usa a rede"]
     fn fetch_real_quota() {
         let home = dirs::home_dir().expect("home");
-        let usage = fetch(&home).expect("usage");
+        let usage = fetch(&home, None).expect("usage");
+        eprintln!("{usage:?}");
         assert!(usage.session.is_some() || usage.weekly.is_some());
     }
 }

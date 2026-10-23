@@ -153,6 +153,9 @@ pub struct Config {
     /// Modelo padrão das instâncias novas, por `modelo@cargo` (`claude@dev`) ou só por `modelo`
     /// (`opencode`); o `modelo@cargo` vale mais. Sem entrada, vale o padrão do próprio CLI.
     pub role_models: BTreeMap<String, String>,
+    /// O grupo de modelos que a barra de título mostra, por agente (`antigravity` → `Gemini 4 Argon`). Sem
+    /// entrada (ou com um grupo que a fonte não devolve mais), vale o resumo.
+    pub usage_pins: BTreeMap<String, String>,
     // --- Formato antigo (antes dos projetos): lido só para a migração, nunca gravado. Agora
     // cada projeto guarda as próprias abas e o próprio layout (ver `ProjectCfg`). ---
     /// Pastas conhecidas (`projects`); os projetos agora ficam em `projectList`.
@@ -191,6 +194,7 @@ impl Default for Config {
             auto_open_agent_tabs: true,
             app_shortcuts_first: false,
             role_models: BTreeMap::new(),
+            usage_pins: BTreeMap::new(),
             projects: Vec::new(),
             open_tabs: Vec::new(),
             active_tab_index: -1,
@@ -508,12 +512,14 @@ mod tests {
         project.tab_models.insert("claude@dev".into(), "sonnet".into());
         let mut cfg = Config { active_project: project.id.clone(), project_list: vec![project.clone()], ..Config::default() };
         cfg.role_models.insert("opencode".into(), "opencode/glm-5.3-flash-free".into());
+        cfg.usage_pins.insert("antigravity".into(), "Gemini 4 Argon".into());
         cfg.save(&p.config_file).expect("save");
         let text = std::fs::read_to_string(&p.config_file).expect("read");
         assert!(text.contains("\"tabModels\"") && text.contains("\"roleModels\""), "{text}");
         let back = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         assert_eq!(back.project_list, vec![project]);
         assert_eq!(back.role_models, cfg.role_models);
+        assert_eq!(back.usage_pins, cfg.usage_pins);
         // Uma config antiga, sem os campos, continua valendo.
         let old = Config::from_json_over_defaults(r#"{"projectList":[{"id":"p1","name":"x","path":"/x"}]}"#, &p);
         assert!(old.project_list[0].tab_models.is_empty() && old.role_models.is_empty());

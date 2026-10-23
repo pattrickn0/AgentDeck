@@ -57,6 +57,17 @@ pub struct AgentUsage {
     pub updated_ms: u64,
     /// Agente local, sem limite (Ollama).
     pub local: bool,
+    /// As cotas de cada grupo de modelos, quando a fonte as separa (o Antigravity: "Gemini Models",
+    /// "Gemini 4 Argon"…); vazio nas outras. `session` e `weekly` são o resumo que a barra mostra.
+    pub groups: Vec<UsageGroup>,
+}
+
+/// A cota de um grupo de modelos dentro do plano.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageGroup {
+    pub name: String,
+    pub session: Option<UsageWindow>,
+    pub weekly: Option<UsageWindow>,
 }
 
 /// Último uso conhecido de cada modelo; com `file`, guardado em disco a cada mudança.
@@ -89,7 +100,9 @@ impl UsageStore {
             let mut map = self.map.lock();
             let old = map.get(model);
             // `updated_ms` sozinho não é mudança visível o bastante para acordar a UI.
-            let changed = old.is_none_or(|o| o.session != usage.session || o.weekly != usage.weekly || o.local != usage.local);
+            let changed = old.is_none_or(|o| {
+                o.session != usage.session || o.weekly != usage.weekly || o.local != usage.local || o.groups != usage.groups
+            });
             map.insert(model.to_owned(), usage);
             changed
         };
@@ -136,25 +149,44 @@ impl Core {
 
 // ---------- Formatos JSON ----------
 
-/// Corpo do `POST /usage`: `{"session":{"used":0.34,"resets_at_ms":…}|null,"weekly":…}`.
+/// Corpo do `POST /usage`: `{"session":{"used":0.34,"resets_at_ms":…}|null,"weekly":…}`, com
+/// `"groups":[{"name":…,"session":…,"weekly":…}]` quando há grupos.
 pub fn usage_to_json(u: &AgentUsage) -> Value {
     let w = |w: &Option<UsageWindow>| w.map_or(Value::Null, |w| json!({ "used": w.used, "resets_at_ms": w.resets_at_ms }));
-    json!({ "session": w(&u.session), "weekly": w(&u.weekly) })
+    let mut v = json!({ "session": w(&u.session), "weekly": w(&u.weekly) });
+    if !u.groups.is_empty() {
+        let groups: Vec<Value> =
+            u.groups.iter().map(|g| json!({ "name": g.name, "session": w(&g.session), "weekly": w(&g.weekly) })).collect();
+        v["groups"] = Value::Array(groups);
+    }
+    v
 }
 
-/// Lê o corpo do `POST /usage` (`updated_ms` fica 0). Recusa `used` fora de 0..=1.
-pub fn usage_from_json(v: &Value) -> Result<AgentUsage, String> {
-    let window = |key: &str| -> Result<Option<UsageWindow>, String> {
-        match v.get(key) {
-            None | Some(Value::Null) => Ok(None),
-            Some(w) => {
-                let used = w.get("used").and_then(Value::as_f64).filter(|u| (0.0..=1.0).contains(u));
-                let used = used.ok_or_else(|| format!("{key}.used deve ser um número de 0 a 1"))?;
-                Ok(Some(UsageWindow { used: used as f32, resets_at_ms: w.get("resets_at_ms").and_then(Value::as_u64) }))
-            }
+/// A janela `key` de `v` (`None` se ausente ou nula). Recusa `used` fora de 0..=1.
+fn window_from_json(v: &Value, key: &str) -> Result<Option<UsageWindow>, String> {
+    match v.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(w) => {
+            let used = w.get("used").and_then(Value::as_f64).filter(|u| (0.0..=1.0).contains(u));
+            let used = used.ok_or_else(|| format!("{key}.used deve ser um número de 0 a 1"))?;
+            Ok(Some(UsageWindow { used: used as f32, resets_at_ms: w.get("resets_at_ms").and_then(Value::as_u64) }))
         }
-    };
-    Ok(AgentUsage { session: window("session")?, weekly: window("weekly")?, ..Default::default() })
+    }
+}
+
+/// Lê o corpo do `POST /usage` (`updated_ms` fica 0). Recusa `used` fora de 0..=1; um grupo inválido é pulado.
+pub fn usage_from_json(v: &Value) -> Result<AgentUsage, String> {
+    let groups = v
+        .get("groups")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|g| {
+            let name = g.get("name").and_then(Value::as_str)?.to_owned();
+            Some(UsageGroup { name, session: window_from_json(g, "session").ok()?, weekly: window_from_json(g, "weekly").ok()? })
+        })
+        .collect();
+    Ok(AgentUsage { session: window_from_json(v, "session")?, weekly: window_from_json(v, "weekly")?, groups, ..Default::default() })
 }
 
 /// O retrato guardado em `usage.json`: `{"claude":{"session":…,"weekly":…,"updated_ms":…}}`. Os locais não vão
@@ -266,6 +298,7 @@ pub(crate) fn start_poller(core: &Core) {
         let mut last: HashMap<&'static str, Instant> = HashMap::new();
         let mut installed: HashMap<&'static str, bool> = HashMap::new();
         let mut installed_at: Option<Instant> = None;
+        let mut agy_version: Option<String> = None;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             let Some(inner) = weak.upgrade() else { return };
@@ -281,6 +314,8 @@ pub(crate) fn start_poller(core: &Core) {
                 for id in ["codex", "antigravity", "ollama"] {
                     installed.insert(id, core.inner.agents.resolve(id).is_some());
                 }
+                // O CLI se atualiza sozinho: a versão vai no pedido da cota (ver `antigravity`).
+                agy_version = core.inner.agents.resolve("antigravity").and_then(|r| antigravity::installed_version(&r));
                 installed_at = Some(Instant::now());
             }
             let wanted = |model: &str| has(model) || installed.get(model).copied().unwrap_or(false);
@@ -306,7 +341,7 @@ pub(crate) fn start_poller(core: &Core) {
                 }
             }
             if wanted("antigravity") && due(&last, "antigravity", ANTIGRAVITY_EVERY) {
-                let usage = antigravity::fetch(&core.inner.home);
+                let usage = antigravity::fetch(&core.inner.home, agy_version.as_deref());
                 mark(&mut last, "antigravity", ANTIGRAVITY_EVERY, usage.is_some() || !has("antigravity"));
                 if let Some(u) = usage {
                     core.set_usage("antigravity", u);
@@ -328,6 +363,10 @@ mod tests {
         assert!(!store.set("claude", u(0.3, 2)));
         assert!(store.set("claude", u(0.4, 3)));
         assert_eq!(store.snapshot()["claude"].updated_ms, 3);
+        // Uma cota de grupo que muda também conta.
+        let group =
+            UsageGroup { name: "Gemini 4 Argon".into(), session: None, weekly: Some(UsageWindow { used: 0.5, resets_at_ms: None }) };
+        assert!(store.set("claude", AgentUsage { groups: vec![group], ..u(0.4, 4) }));
     }
 
     #[test]
@@ -340,6 +379,11 @@ mod tests {
             weekly: Some(UsageWindow { used: 0.5, resets_at_ms: None }),
             updated_ms: 1_234,
             local: false,
+            groups: vec![UsageGroup {
+                name: "Gemini 4 Argon".into(),
+                session: None,
+                weekly: Some(UsageWindow { used: 0.9, resets_at_ms: Some(7) }),
+            }],
         };
         assert!(store.set("claude", claude.clone()));
         // Local não vai para o disco (não tem cota).
@@ -374,7 +418,19 @@ mod tests {
     #[test]
     fn bridge_body_round_trip_and_validation() {
         let u = AgentUsage { session: Some(UsageWindow { used: 0.5, resets_at_ms: Some(42) }), weekly: None, ..Default::default() };
-        assert_eq!(usage_from_json(&usage_to_json(&u)), Ok(u));
+        assert_eq!(usage_from_json(&usage_to_json(&u)), Ok(u.clone()));
+        let with_groups = AgentUsage {
+            groups: vec![UsageGroup {
+                name: "Gemini Models".into(),
+                session: Some(UsageWindow { used: 0.25, resets_at_ms: None }),
+                weekly: None,
+            }],
+            ..u
+        };
+        assert_eq!(usage_from_json(&usage_to_json(&with_groups)), Ok(with_groups));
+        // Grupo inválido é pulado; o resto vale.
+        let bad_group = json!({ "groups": [{ "name": "x", "session": { "used": 3 } }, { "session": null }] });
+        assert_eq!(usage_from_json(&bad_group).map(|u| u.groups.len()), Ok(0));
         assert!(usage_from_json(&json!({ "session": { "used": 1.5 } })).is_err());
         assert!(usage_from_json(&json!({ "weekly": { "used": "x" } })).is_err());
         assert_eq!(usage_from_json(&json!({})), Ok(AgentUsage::default()));

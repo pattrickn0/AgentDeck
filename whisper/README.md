@@ -52,3 +52,14 @@ Os binários em `bin-vulkan/` já vêm prontos para uso em sistemas Windows x64 
 # Pré-requisito: Vulkan SDK e CMake instalados
 powershell -ExecutionPolicy Bypass -File scripts/build-vulkan.ps1
 ```
+
+---
+
+## Licenças de terceiros
+
+Os binários versionados em in-cpu/ e in-vulkan/ não são código do AgentDeck (MIT):
+
+- whisper.cpp e ggml (whisper-cli.exe, whisper.dll, ggml*.dll): MIT, © os autores do projeto GGML (https://github.com/ggml-org/whisper.cpp).
+- SDL2.dll: zlib (https://libsdl.org).
+- msvcp140.dll, cruntime140*.dll, comp140.dll: runtime redistribuível do Visual C++ da Microsoft.
+- O modelo large-v3-turbo (baixado, nunca versionado): MIT, OpenAI.

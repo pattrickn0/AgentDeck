@@ -360,9 +360,13 @@ const CANDIDATES: FontCandidates = FontCandidates {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 const CANDIDATES: FontCandidates = FontCandidates {
+    // Debian/Ubuntu usam `/usr/share/fonts/truetype/<familia>/`; o Fedora instala cada
+    // subpacote na própria pasta (`dejavu-sans-mono-fonts/`). Faltar um caminho não quebra: o
+    // egui cai na fonte embutida.
     symbols: &[
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
     ],
@@ -370,6 +374,7 @@ const CANDIDATES: FontCandidates = FontCandidates {
         "/usr/share/fonts/truetype/cascadia-code/CascadiaMono.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
         "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
@@ -377,6 +382,7 @@ const CANDIDATES: FontCandidates = FontCandidates {
     mono_bold: &[
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
         "/usr/share/fonts/dejavu/DejaVuSansMono-Bold.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMono-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
         "/usr/share/fonts/liberation-mono/LiberationMono-Bold.ttf",

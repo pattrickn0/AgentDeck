@@ -56,7 +56,7 @@ pub use headless::HeadlessOptions;
 pub use instances::Ident;
 pub use tasks::{Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 pub use team::Team;
-pub use usage::{AgentUsage, UsageWindow};
+pub use usage::{AgentUsage, UsageGroup, UsageWindow};
 pub use workspace::{DirEntry, TextFile};
 
 /// Função chamada sempre que um [`CoreEvent`] é emitido, para acordar o loop da UI
