@@ -196,7 +196,9 @@ fn spec(lang: Lang) -> Spec {
                 "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct",
                 "super", "trait", "true", "type", "unsafe", "use", "where", "while",
             ],
-            types: &["bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64"],
+            types: &[
+                "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64",
+            ],
             upper_types: true,
             ..base
         },
@@ -205,11 +207,62 @@ fn spec(lang: Lang) -> Spec {
             block: Some(("/*", "*/", false)),
             quotes: b"\"'`",
             keywords: &[
-                "abstract", "as", "async", "await", "break", "case", "catch", "class", "const", "continue", "debugger", "declare",
-                "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "from", "function", "if",
-                "implements", "import", "in", "instanceof", "interface", "keyof", "let", "namespace", "new", "null", "of", "private",
-                "protected", "public", "readonly", "return", "static", "super", "switch", "this", "throw", "true", "try", "type",
-                "typeof", "undefined", "var", "void", "while", "with", "yield",
+                "abstract",
+                "as",
+                "async",
+                "await",
+                "break",
+                "case",
+                "catch",
+                "class",
+                "const",
+                "continue",
+                "debugger",
+                "declare",
+                "default",
+                "delete",
+                "do",
+                "else",
+                "enum",
+                "export",
+                "extends",
+                "false",
+                "finally",
+                "for",
+                "from",
+                "function",
+                "if",
+                "implements",
+                "import",
+                "in",
+                "instanceof",
+                "interface",
+                "keyof",
+                "let",
+                "namespace",
+                "new",
+                "null",
+                "of",
+                "private",
+                "protected",
+                "public",
+                "readonly",
+                "return",
+                "static",
+                "super",
+                "switch",
+                "this",
+                "throw",
+                "true",
+                "try",
+                "type",
+                "typeof",
+                "undefined",
+                "var",
+                "void",
+                "while",
+                "with",
+                "yield",
             ],
             types: &["string", "number", "boolean", "any", "unknown", "never", "object", "symbol", "bigint"],
             upper_types: true,
@@ -235,9 +288,41 @@ fn spec(lang: Lang) -> Spec {
             block: Some(("<#", "#>", false)),
             quotes: b"\"'",
             keywords: &[
-                "begin", "break", "catch", "class", "continue", "data", "do", "dynamicparam", "else", "elseif", "end", "exit", "filter",
-                "finally", "for", "foreach", "from", "function", "if", "in", "param", "process", "return", "switch", "throw", "trap",
-                "try", "until", "using", "var", "while", "workflow", "true", "false", "null",
+                "begin",
+                "break",
+                "catch",
+                "class",
+                "continue",
+                "data",
+                "do",
+                "dynamicparam",
+                "else",
+                "elseif",
+                "end",
+                "exit",
+                "filter",
+                "finally",
+                "for",
+                "foreach",
+                "from",
+                "function",
+                "if",
+                "in",
+                "param",
+                "process",
+                "return",
+                "switch",
+                "throw",
+                "trap",
+                "try",
+                "until",
+                "using",
+                "var",
+                "while",
+                "workflow",
+                "true",
+                "false",
+                "null",
             ],
             nocase: true,
             vars: true,
@@ -594,7 +679,8 @@ fn toml_line(line: &str, carry: &mut Carry, out: &mut Vec<Span>) {
         let q = t.as_bytes()[0];
         find_close(t.as_bytes(), 1, q, false, q == b'"').and_then(|e| t[e..].trim_start().starts_with('=').then_some(indent + e))
     } else {
-        t.find('=').filter(|&p| t[..p].bytes().all(|c| is_ident_byte(c) || c == b'-' || c == b'.' || c == b' ' || c == b'"' || c == b'\''))
+        t.find('=')
+            .filter(|&p| t[..p].bytes().all(|c| is_ident_byte(c) || c == b'-' || c == b'.' || c == b' ' || c == b'"' || c == b'\''))
             .map(|p| indent + t[..p].trim_end().len())
     };
     match key_end {
@@ -906,7 +992,9 @@ mod tests {
     #[test]
     fn block_comments_and_raw_strings_carry_over_lines() {
         let lines = highlight_lines(Lang::Rust, "a /* x\n  y /* z */ w\n*/ b\nlet s = r\"\nq\";\nc");
-        let words = |n: usize, text: &str| lines[n].iter().filter(|s| s.tok == Tok::Comment).map(|s| text[s.range.clone()].to_owned()).collect::<Vec<_>>();
+        let words = |n: usize, text: &str| {
+            lines[n].iter().filter(|s| s.tok == Tok::Comment).map(|s| text[s.range.clone()].to_owned()).collect::<Vec<_>>()
+        };
         assert_eq!(words(0, "a /* x"), ["/* x"]);
         assert_eq!(words(1, "  y /* z */ w"), ["  y /* z */ w"], "o comentário aninha");
         assert_eq!(words(2, "*/ b"), ["*/"]);
@@ -966,7 +1054,10 @@ mod tests {
         let t = toks(Lang::PowerShell, "Get-ChildItem -Recurse $env:PATH | Where-Object { $_ -ne 1 }");
         let has = |s: &str, tok| t.iter().any(|(w, k)| w == s && *k == tok);
         assert!(has("Get-ChildItem", Tok::Function) && has("-Recurse", Tok::Key) && has("Where-Object", Tok::Function));
-        assert!(toks(Lang::PowerShell, "FOREACH ($a in $b) {}").iter().any(|(w, k)| w == "FOREACH" && *k == Tok::Keyword), "sem diferença de caixa");
+        assert!(
+            toks(Lang::PowerShell, "FOREACH ($a in $b) {}").iter().any(|(w, k)| w == "FOREACH" && *k == Tok::Keyword),
+            "sem diferença de caixa"
+        );
         // `$#` não abre comentário.
         assert!(toks(Lang::Shell, "echo $#").iter().all(|(_, k)| *k != Tok::Comment));
     }
@@ -1008,15 +1099,17 @@ mod tests {
             "r\"ü",
             "br##\"é\"## 'a",
         ];
-        let langs = [
-            Lang::Rust, Lang::Markdown, Lang::Toml, Lang::Json, Lang::Yaml, Lang::JsTs, Lang::Python, Lang::PowerShell, Lang::Shell,
-        ];
+        let langs =
+            [Lang::Rust, Lang::Markdown, Lang::Toml, Lang::Json, Lang::Yaml, Lang::JsTs, Lang::Python, Lang::PowerShell, Lang::Shell];
         for lang in langs {
             let text = nasty.join("\n");
             for (line, spans) in text.split('\n').zip(highlight_lines(lang, &text)) {
                 let mut end = 0;
                 for s in &spans {
-                    assert!(s.range.start >= end && s.range.start < s.range.end && s.range.end <= line.len(), "{lang:?} {line:?} {spans:?}");
+                    assert!(
+                        s.range.start >= end && s.range.start < s.range.end && s.range.end <= line.len(),
+                        "{lang:?} {line:?} {spans:?}"
+                    );
                     assert!(line.is_char_boundary(s.range.start) && line.is_char_boundary(s.range.end), "{lang:?} {line:?} {spans:?}");
                     end = s.range.end;
                 }

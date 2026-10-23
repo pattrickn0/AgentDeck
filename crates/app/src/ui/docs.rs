@@ -6,10 +6,12 @@ use egui::{Align2, Id, Key, Painter, Pos2, Rect, Sense, Ui, Vec2};
 
 use super::panes::HEAD_H;
 use super::tabs::{self, Item, Lead, StripClick, StripKind};
-use super::{button, button_width, clickable, code, diff_view, frame, galley, galley_trunc, place, section_label, text_in, text_w, tip, ButtonKind};
+use super::{
+    button, button_width, clickable, code, diff_view, frame, galley, galley_trunc, place, section_label, text_in, text_w, tip, ButtonKind,
+};
 use crate::deck::Deck;
-use crate::highlight::Lang;
 use crate::docs::{file_name, After, Answer, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, Find, Unsaved};
+use crate::highlight::Lang;
 use crate::theme;
 
 /// Altura da linha com o título do documento e as ações dele.
@@ -330,7 +332,8 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
             }
             let ready = src.dirty() && src.external.is_none() && !src.saving;
             let label = if src.saving { "Gravando…" } else { "Salvar" };
-            let hint = if src.external.is_some() { "Resolva primeiro o aviso: o arquivo mudou no disco" } else { "Grava o arquivo (Ctrl+S)" };
+            let hint =
+                if src.external.is_some() { "Resolva primeiro o aviso: o arquivo mudou no disco" } else { "Grava o arquivo (Ctrl+S)" };
             if action(ui, &painter, &mut right, cy, (label, hint), Id::new(("doc-save", uid)), (ButtonKind::Primary, ready)) {
                 acts.push(Act::Save(uid));
             }
@@ -341,7 +344,11 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
             }
         }
         if is_md && !src.editing {
-            let (label, hint) = if src.raw { ("Ver formatado", "Mostra o markdown formatado") } else { ("Ver código", "Mostra o texto do markdown, com realce") };
+            let (label, hint) = if src.raw {
+                ("Ver formatado", "Mostra o markdown formatado")
+            } else {
+                ("Ver código", "Mostra o texto do markdown, com realce")
+            };
             if action(ui, &painter, &mut right, cy, (label, hint), Id::new(("doc-raw", uid)), (ButtonKind::Secondary, true)) {
                 src.raw = !src.raw;
             }
@@ -354,14 +361,26 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
             if src.lang != Lang::Plain {
                 let g = galley(&painter, src.lang.label(), theme::meta(10.5), theme::pal().text_3);
                 let w = g.size().x;
-                place(&painter, Rect::from_min_size(Pos2::new(title.max.x - w, title.min.y), Vec2::new(w, title.height())), Align2::LEFT_CENTER, g, theme::pal().text_3);
+                place(
+                    &painter,
+                    Rect::from_min_size(Pos2::new(title.max.x - w, title.min.y), Vec2::new(w, title.height())),
+                    Align2::LEFT_CENTER,
+                    g,
+                    theme::pal().text_3,
+                );
                 title.max.x -= w + 12.0;
             }
         }
         if dirty {
             let g = galley(&painter, "● Não salvo", theme::ui(11.5), theme::pal().warning);
             let w = g.size().x;
-            place(&painter, Rect::from_min_size(Pos2::new(title.max.x - w, title.min.y), Vec2::new(w, title.height())), Align2::LEFT_CENTER, g, theme::pal().warning);
+            place(
+                &painter,
+                Rect::from_min_size(Pos2::new(title.max.x - w, title.min.y), Vec2::new(w, title.height())),
+                Align2::LEFT_CENTER,
+                g,
+                theme::pal().warning,
+            );
             title.max.x -= w + 10.0;
         }
         let g = galley_trunc(&painter, &tab.subtitle, theme::ui(12.0), theme::pal().text, title.width().max(10.0));
@@ -390,7 +409,15 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
 
 /// Um botão de texto no fim da linha de título; `right` anda para a esquerda. Devolve se foi clicado (um botão
 /// desligado aparece apagado e não clica).
-fn action(ui: &Ui, painter: &Painter, right: &mut f32, cy: f32, (label, tooltip): (&str, &str), id: Id, (kind, enabled): (ButtonKind, bool)) -> bool {
+fn action(
+    ui: &Ui,
+    painter: &Painter,
+    right: &mut f32,
+    cy: f32,
+    (label, tooltip): (&str, &str),
+    id: Id,
+    (kind, enabled): (ButtonKind, bool),
+) -> bool {
     let w = button_width(painter, label, kind);
     let r = Rect::from_min_size(Pos2::new(*right - w, cy - 11.0), Vec2::new(w, 22.0));
     *right = r.min.x - 6.0;
@@ -464,13 +491,24 @@ fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
                     p.warning,
                     "O arquivo mudou no disco (um agente?) enquanto você editava.",
                     &[
-                        ("Manter a minha", "Fica com o que você digitou; a próxima gravação põe por cima do que está no disco", Fix::KeepMine),
+                        (
+                            "Manter a minha",
+                            "Fica com o que você digitou; a próxima gravação põe por cima do que está no disco",
+                            Fix::KeepMine,
+                        ),
                         ("Recarregar a do disco", "Joga fora o que você digitou e mostra o que está no disco", Fix::TakeDisk),
                     ],
                     key.with("external"),
                 )
             } else if src.gone {
-                notice(ui, body, p.warning, "O arquivo foi apagado ou não abre mais. O que você editou continua aqui; Ctrl+S o grava de novo.", &[], key.with("gone"))
+                notice(
+                    ui,
+                    body,
+                    p.warning,
+                    "O arquivo foi apagado ou não abre mais. O que você editou continua aqui; Ctrl+S o grava de novo.",
+                    &[],
+                    key.with("gone"),
+                )
             } else {
                 None
             };
@@ -480,7 +518,14 @@ fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
                 _ => {}
             }
             if let Some(e) = src.save_error.clone() {
-                if let Some(Fix::Dismiss) = notice(ui, body, p.danger, &format!("Não consegui gravar: {e}"), &[("Fechar", "Esconde o erro", Fix::Dismiss)], key.with("error")) {
+                if let Some(Fix::Dismiss) = notice(
+                    ui,
+                    body,
+                    p.danger,
+                    &format!("Não consegui gravar: {e}"),
+                    &[("Fechar", "Esconde o erro", Fix::Dismiss)],
+                    key.with("error"),
+                ) {
                     src.save_error = None;
                 }
             }
@@ -536,10 +581,19 @@ fn find_bar(ui: &mut Ui, body: &mut Rect, uid: u64, find: &mut Find) {
     let mut x = field.max.x + 10.0;
     if !counter.is_empty() {
         let w = text_w(&painter, &counter, theme::meta(10.5));
-        text_in(&painter, Rect::from_min_size(Pos2::new(x, r.min.y), Vec2::new(w, r.height() - 1.0)), Align2::LEFT_CENTER, &counter, theme::meta(10.5), p.text_2);
+        text_in(
+            &painter,
+            Rect::from_min_size(Pos2::new(x, r.min.y), Vec2::new(w, r.height() - 1.0)),
+            Align2::LEFT_CENTER,
+            &counter,
+            theme::meta(10.5),
+            p.text_2,
+        );
         x += w + 10.0;
     }
-    for (label, hint, act) in [("‹", "Ocorrência anterior (Shift+Enter)", 0), ("›", "Próxima ocorrência (Enter)", 1), ("Fechar", "Fecha a busca (Esc)", 2)] {
+    for (label, hint, act) in
+        [("‹", "Ocorrência anterior (Shift+Enter)", 0), ("›", "Próxima ocorrência (Enter)", 1), ("Fechar", "Fecha a busca (Esc)", 2)]
+    {
         let w = if act == 2 { button_width(&painter, label, ButtonKind::Ghost) } else { 24.0 };
         let b = Rect::from_min_size(Pos2::new(x, r.min.y + 5.0), Vec2::new(w, 24.0));
         x += w + 4.0;
@@ -591,32 +645,36 @@ pub fn unsaved_modal(deck: &mut Deck, ctx: &egui::Context) {
     let w = 420.0;
     let mut answer = None;
     let screen = ctx.content_rect();
-    egui::Area::new(Id::new("docs-unsaved")).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.center().x - w / 2.0, screen.min.y + 120.0)).constrain(false).show(ctx, |ui| {
-        let g1 = ui.painter().layout(title.clone(), theme::ui_semibold(13.0), p.text_strong, w - 28.0);
-        let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), p.text_2, w - 28.0);
-        let btn_h = 28.0;
-        let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + btn_h + 14.0;
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
-        super::shadow(ui.painter(), rect, 10, 8, 24, p.shadow);
-        frame(ui.painter(), rect, 10.0, p.popup, p.glass_border);
-        ui.painter().galley(Pos2::new(rect.min.x + 14.0, rect.min.y + 14.0), g1.clone(), p.text_strong);
-        ui.painter().galley(Pos2::new(rect.min.x + 14.0, rect.min.y + 14.0 + g1.size().y + 6.0), g2, p.text_2);
-        let mut right = rect.max.x - 14.0;
-        for (n, (label, which)) in buttons.iter().enumerate().rev() {
-            let kind = if *which == Answer::Save { ButtonKind::Primary } else { ButtonKind::Secondary };
-            let bw = button_width(ui.painter(), label, kind);
-            let b = Rect::from_min_size(Pos2::new(right - bw, rect.max.y - 14.0 - btn_h), Vec2::new(bw, btn_h));
-            right = b.min.x - 8.0;
-            let id = Id::new(("docs-unsaved-btn", n));
-            let resp = if *which == Answer::Discard { super::button_danger(ui, b, id, label) } else { button(ui, b, id, label, kind) };
-            if resp.clicked() {
-                answer = Some(*which);
+    egui::Area::new(Id::new("docs-unsaved"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(Pos2::new(screen.center().x - w / 2.0, screen.min.y + 120.0))
+        .constrain(false)
+        .show(ctx, |ui| {
+            let g1 = ui.painter().layout(title.clone(), theme::ui_semibold(13.0), p.text_strong, w - 28.0);
+            let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), p.text_2, w - 28.0);
+            let btn_h = 28.0;
+            let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + btn_h + 14.0;
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
+            super::shadow(ui.painter(), rect, 10, 8, 24, p.shadow);
+            frame(ui.painter(), rect, 10.0, p.popup, p.glass_border);
+            ui.painter().galley(Pos2::new(rect.min.x + 14.0, rect.min.y + 14.0), g1.clone(), p.text_strong);
+            ui.painter().galley(Pos2::new(rect.min.x + 14.0, rect.min.y + 14.0 + g1.size().y + 6.0), g2, p.text_2);
+            let mut right = rect.max.x - 14.0;
+            for (n, (label, which)) in buttons.iter().enumerate().rev() {
+                let kind = if *which == Answer::Save { ButtonKind::Primary } else { ButtonKind::Secondary };
+                let bw = button_width(ui.painter(), label, kind);
+                let b = Rect::from_min_size(Pos2::new(right - bw, rect.max.y - 14.0 - btn_h), Vec2::new(bw, btn_h));
+                right = b.min.x - 8.0;
+                let id = Id::new(("docs-unsaved-btn", n));
+                let resp = if *which == Answer::Discard { super::button_danger(ui, b, id, label) } else { button(ui, b, id, label, kind) };
+                if resp.clicked() {
+                    answer = Some(*which);
+                }
             }
-        }
-        if ui.input(|i| i.key_pressed(Key::Escape)) {
-            answer = Some(Answer::Cancel);
-        }
-    });
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                answer = Some(Answer::Cancel);
+            }
+        });
     if let Some(a) = answer {
         deck.docs_answer(a);
     }
@@ -638,9 +696,9 @@ fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, find: &mut Fi
         jump = current.or(jump);
     }
     let query = if find.open { find.query.as_str() } else { "" };
-    let opts = diff_view::View { path, query, found: &find.lines, current: current.filter(|_| find.open) };
+    let opts = diff_view::View { path, query, found: &find.lines, current: current.filter(|_| find.open), jump };
     if doc.files.is_empty() {
-        super::git::diff_lines_at(ui, body, &doc.diff, None, &mut Vec::new(), id, jump, opts);
+        super::git::diff_lines_at(ui, body, &doc.diff, None, &mut Vec::new(), id, opts);
         return;
     }
     let narrow = body.width() < NARROW_W;
@@ -661,7 +719,7 @@ fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, find: &mut Fi
     };
     painter.rect_filled(sep, 0.0, theme::pal().separator);
     file_list(ui, list, uid, doc, acts);
-    super::git::diff_lines_at(ui, view, &doc.diff, None, &mut Vec::new(), id, jump, opts);
+    super::git::diff_lines_at(ui, view, &doc.diff, None, &mut Vec::new(), id, opts);
 }
 
 /// A lista de arquivos do diff: letra do que mudou, nome e `+`/`−`. Clicar rola o diff até o arquivo.

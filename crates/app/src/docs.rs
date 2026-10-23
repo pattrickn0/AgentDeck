@@ -44,14 +44,7 @@ struct ShapeKey {
 impl Shaped {
     /// O galley de `text` (monoespaçado, realçado, quebrando em `wrap` px), refeito só se algo da chave mudou.
     /// `marks` são as ocorrências da busca, em bytes de `text`, e `current` a atual entre elas.
-    pub fn galley(
-        &mut self,
-        fonts: &egui::Context,
-        text: &str,
-        lang: Lang,
-        wrap: f32,
-        find: &Find,
-    ) -> Arc<egui::Galley> {
+    pub fn galley(&mut self, fonts: &egui::Context, text: &str, lang: Lang, wrap: f32, find: &Find) -> Arc<egui::Galley> {
         let hash = highlight::text_hash(text);
         let ppp = fonts.pixels_per_point();
         let marks = find.stamp().map(|(q, v)| (q.clone(), *v, find.current));
@@ -293,7 +286,9 @@ fn read_source(raw: &str) -> (String, bool, Eol, Option<String>) {
         None => (
             body.replace("\r\n", "\n"),
             Eol::Lf,
-            Some("Este arquivo mistura fins de linha (CRLF e LF): gravar de volta mudaria linhas que você não tocou. Só leitura.".to_owned()),
+            Some(
+                "Este arquivo mistura fins de linha (CRLF e LF): gravar de volta mudaria linhas que você não tocou. Só leitura.".to_owned(),
+            ),
         ),
     };
     if locked.is_none() && body.contains('\u{fffd}') {
@@ -1088,8 +1083,7 @@ impl Deck {
     /// Grava todas as edições (a pergunta de fechar o app) e sai quando a última terminar. Se alguma não pode ser gravada
     /// (o disco mudou e falta escolher), o app não sai: o documento é mostrado.
     pub fn docs_save_all_and_quit(&mut self) {
-        let blocked =
-            self.docs.unsaved().iter().find(|t| matches!(&t.state, DocState::Source(s) if s.external.is_some())).map(|t| t.uid);
+        let blocked = self.docs.unsaved().iter().find(|t| matches!(&t.state, DocState::Source(s) if s.external.is_some())).map(|t| t.uid);
         if let Some(uid) = blocked {
             self.docs.focus(uid);
             self.docs.view = CenterView::Docs;

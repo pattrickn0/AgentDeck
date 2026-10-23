@@ -38,6 +38,8 @@ pub struct View<'a> {
     pub query: &'a str,
     pub found: &'a [usize],
     pub current: Option<usize>,
+    /// A linha do diff para onde rolar neste quadro.
+    pub jump: Option<usize>,
 }
 
 /// Como uma linha do diff aparece na tela.
@@ -220,7 +222,8 @@ fn diff_spans(diff: &GitDiff, marked: bool, hint: Option<&str>) -> Vec<Vec<Span>
 
 /// Esta linha do diff se pinta como texto (e a busca olha)? Não, se é um cabeçalho técnico ou o título de um arquivo.
 fn is_text_line(line: &DiffLine) -> bool {
-    line.kind != DiffKind::Meta || (file_title(&line.text).is_none() && !["index ", "--- ", "+++ "].iter().any(|p| line.text.starts_with(p)))
+    line.kind != DiffKind::Meta
+        || (file_title(&line.text).is_none() && !["index ", "--- ", "+++ "].iter().any(|p| line.text.starts_with(p)))
 }
 
 /// As linhas do diff com `query` no texto que se vê (sem diferença de maiúsculas e minúsculas ASCII).
@@ -273,7 +276,11 @@ pub(super) fn piece_job(
 ) -> LayoutJob {
     let text = body.get(piece.clone()).unwrap_or("");
     let shift = |r: &Range<usize>| r.start.max(piece.start) - piece.start..r.end.min(piece.end).max(piece.start) - piece.start;
-    let local: Vec<Span> = spans.iter().filter(|s| s.range.end > piece.start && s.range.start < piece.end).map(|s| Span { range: shift(&s.range), tok: s.tok }).collect();
+    let local: Vec<Span> = spans
+        .iter()
+        .filter(|s| s.range.end > piece.start && s.range.start < piece.end)
+        .map(|s| Span { range: shift(&s.range), tok: s.tok })
+        .collect();
     let marks: Vec<Range<usize>> = found.iter().filter(|r| r.end > piece.start && r.start < piece.end).map(shift).collect();
     let pal = theme::pal();
     let mut job = LayoutJob::default();
@@ -284,20 +291,23 @@ pub(super) fn piece_job(
             Mark::Current => theme::with_alpha(pal.warning, 0.65),
         };
         let background = if current && p.mark == Mark::Found { theme::with_alpha(pal.warning, 0.65) } else { background };
-        job.append(&text[p.range], 0.0, TextFormat { font_id: font.clone(), color: pal.syn(p.tok, plain), background, ..Default::default() });
+        job.append(
+            &text[p.range],
+            0.0,
+            TextFormat { font_id: font.clone(), color: pal.syn(p.tok, plain), background, ..Default::default() },
+        );
     }
     job
 }
 
-/// Desenha `diff` em `area`, rolando só na vertical. `id` identifica a rolagem; `jump`, a linha do diff para onde
-/// rolar neste quadro. `hunk_reserve` é a largura que os botões ocupam à direita do cabeçalho de cada trecho
+/// Desenha `diff` em `area`, rolando só na vertical. `id` identifica a rolagem; `view_opts`, o que o diff sabe além das
+/// linhas (a linha para onde rolar neste quadro, a busca). `hunk_reserve` é a largura que os botões ocupam à direita do cabeçalho de cada trecho
 /// (o texto dele quebra antes); `on_hunk(ui, linha, n)` os desenha por cima do cabeçalho do trecho `n`.
 pub fn draw(
     ui: &mut Ui,
     area: Rect,
     diff: &GitDiff,
     id: Id,
-    jump: Option<usize>,
     hunk_reserve: f32,
     view_opts: View,
     mut on_hunk: impl FnMut(&mut Ui, Rect, usize),
@@ -345,7 +355,7 @@ pub fn draw(
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area);
     let mut scroll = egui::ScrollArea::vertical().id_salt(id).auto_shrink([false, false]);
-    if let Some(line) = jump {
+    if let Some(line) = view_opts.jump {
         scroll = scroll.vertical_scroll_offset(lay.tops[line.min(diff.lines.len())]);
     }
     let total = *lay.tops.last().unwrap_or(&0.0);
@@ -577,5 +587,100 @@ mod tests {
         // Mesmo tamanho, conteúdo diferente: outra medida.
         assert_ne!(content_hash(&a), content_hash(&b));
         assert_eq!(content_hash(&a), content_hash(&a.clone()));
+    }
+
+    fn diff_of(lines: &[(DiffKind, &str)]) -> GitDiff {
+        GitDiff { lines: lines.iter().map(|(k, t)| line(*k, t)).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn each_file_of_the_diff_is_highlighted_in_its_own_language() {
+        let diff = diff_of(&[
+            (DiffKind::Meta, "diff --git a/a.rs b/a.rs"),
+            (DiffKind::Hunk, "@@ -1 +1 @@"),
+            (DiffKind::Add, "+let x = 1; // fim"),
+            (DiffKind::Meta, "diff --git a/a.py b/a.py"),
+            (DiffKind::Hunk, "@@ -1 +1 @@"),
+            (DiffKind::Add, "+def f(): pass"),
+            (DiffKind::Meta, "diff --git a/nota.txt b/nota.txt"),
+            (DiffKind::Hunk, "@@ -1 +1 @@"),
+            (DiffKind::Add, "+let x = 1;"),
+        ]);
+        let spans = diff_spans(&diff, true, None);
+        let tok = |line: usize, n: usize| spans[line].get(n).map(|s| s.tok);
+        assert_eq!(tok(2, 0), Some(highlight::Tok::Keyword), "let em Rust");
+        assert_eq!(spans[2].last().map(|s| s.tok), Some(highlight::Tok::Comment));
+        assert_eq!(tok(5, 0), Some(highlight::Tok::Keyword), "def em Python");
+        assert!(spans[8].is_empty(), "texto puro não leva cor");
+        // Sem cabeçalho do git (arquivo não rastreado), a linguagem vem do caminho dado.
+        let untracked = diff_of(&[(DiffKind::Add, "+let x = 1;")]);
+        assert!(diff_spans(&untracked, false, None)[0].is_empty());
+        assert_eq!(diff_spans(&untracked, false, Some("src/a.rs"))[0].first().map(|s| s.tok), Some(highlight::Tok::Keyword));
+    }
+
+    #[test]
+    fn a_block_comment_carries_over_diff_lines_of_the_same_side_only() {
+        let diff = diff_of(&[
+            (DiffKind::Meta, "diff --git a/a.rs b/a.rs"),
+            (DiffKind::Hunk, "@@ -1,3 +1,3 @@"),
+            (DiffKind::Add, "+/* abre"),
+            (DiffKind::Del, "-let velho = 1;"),
+            (DiffKind::Add, "+ainda comentário */ let x = 1;"),
+        ]);
+        let spans = diff_spans(&diff, true, None);
+        assert_eq!(spans[2].first().map(|s| s.tok), Some(highlight::Tok::Comment));
+        // A linha removida é do outro lado: não herda o comentário aberto do lado novo.
+        assert_eq!(spans[3].first().map(|s| s.tok), Some(highlight::Tok::Keyword));
+        assert_eq!(spans[4].first().map(|s| (s.tok, s.range.clone())), Some((highlight::Tok::Comment, 0..20)));
+    }
+
+    #[test]
+    fn the_search_looks_only_at_the_text_that_shows() {
+        let diff = diff_of(&[
+            (DiffKind::Meta, "diff --git a/foo.rs b/foo.rs"),
+            (DiffKind::Meta, "index 1..2"),
+            (DiffKind::Meta, "--- a/foo.rs"),
+            (DiffKind::Meta, "+++ b/foo.rs"),
+            (DiffKind::Hunk, "@@ -1 +1 @@"),
+            (DiffKind::Add, "+fn FOO() {}"),
+            (DiffKind::Context, " nada"),
+            (DiffKind::Del, "-foo"),
+        ]);
+        assert_eq!(search(&diff, "foo"), [5, 7], "o caminho do cabeçalho não conta");
+        assert!(search(&diff, "").is_empty());
+    }
+
+    #[test]
+    fn copying_gives_the_code_without_markers_and_with_the_tabs_back() {
+        let diff = diff_of(&[
+            (DiffKind::Meta, "diff --git a/a.go b/a.go"),
+            (DiffKind::Hunk, "@@ -1,2 +1,2 @@"),
+            (DiffKind::Add, "+\tum"),
+            (DiffKind::Context, " \tdois"),
+            (DiffKind::Del, "-tres"),
+        ]);
+        let all = Selected { start: Pos { line: 0, col: 0 }, end: Pos { line: 4, col: 4 } };
+        assert_eq!(selection_text(&diff, true, all), "@@ -1,2 +1,2 @@\n\tum\n\tdois\ntres");
+        // Um pedaço de uma linha só (o corpo tem a tabulação como quatro espaços).
+        let part = Selected { start: Pos { line: 2, col: 4 }, end: Pos { line: 2, col: 6 } };
+        assert_eq!(selection_text(&diff, true, part), "um");
+        assert_eq!(unexpanded("\ta\tb", 0), 0);
+        assert_eq!(unexpanded("\ta\tb", 4), 1);
+        assert_eq!(unexpanded("\ta\tb", 6), 2, "no meio da segunda tabulação, o começo dela");
+        assert_eq!(unexpanded("\ta\tb", 99), 4);
+    }
+
+    #[test]
+    fn a_piece_of_a_line_keeps_the_colors_and_the_marks_inside_it() {
+        let body = "let x = 1; // fim";
+        let spans = highlight::highlight_lines(Lang::Rust, body).remove(0);
+        let font = theme::mono(FONT);
+        let marks = highlight::find_all(body, "x");
+        let job = piece_job(body, &(4..14), &spans, &marks, false, theme::pal().text, &font);
+        // O pedaço é só o que cabe na linha da tela, e a marca da busca fica dentro dele.
+        assert_eq!(job.text, "x = 1; // ");
+        assert_eq!(job.sections.first().map(|s| (usize::from(s.byte_range.start), usize::from(s.byte_range.end))), Some((0, 1)));
+        assert_ne!(job.sections[0].format.background, egui::Color32::TRANSPARENT);
+        assert_eq!(job.sections.last().map(|s| usize::from(s.byte_range.end)), Some(job.text.len()));
     }
 }

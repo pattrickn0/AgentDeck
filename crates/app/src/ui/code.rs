@@ -8,8 +8,8 @@
 //! a seleção própria de `select.rs`.
 
 use egui::text::CCursor;
-use egui::text_selection::CCursorRange;
 use egui::text_edit::TextEditState;
+use egui::text_selection::CCursorRange;
 use egui::{Align, Align2, Frame, Id, Key, Margin, Modifiers, Pos2, Rect, TextBuffer, Ui, Vec2};
 
 use super::diff_view;
@@ -91,7 +91,13 @@ pub fn source_body(ui: &mut Ui, area: Rect, uid: u64, src: &mut Source, find: &m
             if top + row.row.size.y < area.min.y || top > area.max.y {
                 continue;
             }
-            painter.text(Pos2::new(gutter_area.max.x - 12.0, top + row.row.size.y / 2.0), Align2::RIGHT_CENTER, number.to_string(), font.clone(), color);
+            painter.text(
+                Pos2::new(gutter_area.max.x - 12.0, top + row.row.size.y / 2.0),
+                Align2::RIGHT_CENTER,
+                number.to_string(),
+                font.clone(),
+                color,
+            );
         }
     }
 }
@@ -241,7 +247,13 @@ pub fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc, find: &mut Fi
         let num_color = theme::with_opacity(p.text_2, 0.7);
         for n in first..last {
             let row = Rect::from_min_size(origin + Vec2::new(0.0, n as f32 * TEXT_ROW_H), Vec2::new(content_w, TEXT_ROW_H));
-            painter.text(Pos2::new(row.min.x + gutter - 12.0, row.center().y), Align2::RIGHT_CENTER, (n + 1).to_string(), font.clone(), num_color);
+            painter.text(
+                Pos2::new(row.min.x + gutter - 12.0, row.center().y),
+                Align2::RIGHT_CENTER,
+                (n + 1).to_string(),
+                font.clone(),
+                num_color,
+            );
             let line = &doc.lines[n];
             let spans = doc.spans.get(n).map_or(&[][..], Vec::as_slice);
             let hits = if find.lines.binary_search(&n).is_ok() { highlight::find_all(line, &find.query) } else { Vec::new() };
@@ -249,8 +261,13 @@ pub fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc, find: &mut Fi
             let at = Pos2::new(row.min.x + gutter, row.min.y);
             if let Some(r) = sel.and_then(|s| s.on_line(n, line.len())).filter(|r| !r.is_empty()) {
                 let chars = |byte: usize| line.get(..byte).map_or(0, |t| t.chars().count());
-                let (xa, xz) = (galley.pos_from_cursor(CCursor::new(chars(r.start))).min.x, galley.pos_from_cursor(CCursor::new(chars(r.end))).min.x);
-                painter.rect_filled(Rect::from_min_max(Pos2::new(at.x + xa, at.y), Pos2::new(at.x + xz.max(xa + 2.0), at.y + TEXT_ROW_H)), 0.0, ui.visuals().selection.bg_fill);
+                let (xa, xz) =
+                    (galley.pos_from_cursor(CCursor::new(chars(r.start))).min.x, galley.pos_from_cursor(CCursor::new(chars(r.end))).min.x);
+                painter.rect_filled(
+                    Rect::from_min_max(Pos2::new(at.x + xa, at.y), Pos2::new(at.x + xz.max(xa + 2.0), at.y + TEXT_ROW_H)),
+                    0.0,
+                    ui.visuals().selection.bg_fill,
+                );
             }
             painter.galley(Pos2::new(at.x, at.y + (TEXT_ROW_H - galley.size().y) / 2.0), galley, p.text);
         }
