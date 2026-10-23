@@ -69,6 +69,15 @@ pub struct Palette {
     pub user: Color32,
     /// Sombra das ilhas.
     pub shadow: Color32,
+    /// Realce de sintaxe (arquivos e diff do modo Documentos; ver `highlight.rs`).
+    pub syn_keyword: Color32,
+    pub syn_type: Color32,
+    pub syn_function: Color32,
+    pub syn_string: Color32,
+    pub syn_number: Color32,
+    pub syn_comment: Color32,
+    pub syn_key: Color32,
+    pub syn_meta: Color32,
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -117,11 +126,37 @@ pub const DARK: Palette = Palette {
     glow: white(9),
     user: rgb(0x10b981),
     shadow: rgba8(0, 0, 0, 71),
+    syn_keyword: rgb(0xff7b72),
+    syn_type: rgb(0xffa657),
+    syn_function: rgb(0xd2a8ff),
+    syn_string: rgb(0xa5d6ff),
+    syn_number: rgb(0x79c0ff),
+    syn_comment: rgb(0x8b949e),
+    syn_key: rgb(0x7ee787),
+    syn_meta: rgb(0xe3b341),
 };
 
 /// A paleta em uso. Um tema novo troca só o que esta função devolve.
 pub fn pal() -> &'static Palette {
     &DARK
+}
+
+impl Palette {
+    /// A cor de um pedaço de código; o que não tem categoria fica com `plain`.
+    pub fn syn(&self, tok: crate::highlight::Tok, plain: Color32) -> Color32 {
+        use crate::highlight::Tok;
+        match tok {
+            Tok::Plain => plain,
+            Tok::Keyword => self.syn_keyword,
+            Tok::Type => self.syn_type,
+            Tok::Function => self.syn_function,
+            Tok::String => self.syn_string,
+            Tok::Number => self.syn_number,
+            Tok::Comment => self.syn_comment,
+            Tok::Key => self.syn_key,
+            Tok::Meta => self.syn_meta,
+        }
+    }
 }
 
 // ---------- Cores dos agentes (não são da paleta: identificam o agente) ----------
@@ -742,6 +777,11 @@ mod tests {
         // O texto sobre cada cor de agente (botão primário, segmento ativo).
         for a in [CLAUDE, ANTIGRAVITY, SHELL, p.accent_neutral] {
             assert!(contrast(p.on_accent, a) >= 4.5, "on_accent sobre {a:?}: {}", contrast(p.on_accent, a));
+        }
+        // O realce de sintaxe sobre o poço (o fundo dos arquivos) e sobre o trecho marcado da busca.
+        let well = over(p.well, p.bg);
+        for c in [p.syn_keyword, p.syn_type, p.syn_function, p.syn_string, p.syn_number, p.syn_comment, p.syn_key, p.syn_meta] {
+            assert!(contrast(c, well) >= 4.5, "realce {c:?} sobre o poço: {}", contrast(c, well));
         }
     }
 }

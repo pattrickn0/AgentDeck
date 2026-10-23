@@ -121,6 +121,74 @@ pub fn read_text(workspace: &Path, rel: &str) -> Result<TextFile, String> {
     Ok(TextFile::Text(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
+/// O fim de linha de um arquivo de texto (o editor trabalha com `\n` e grava de volta com o mesmo).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Eol {
+    #[default]
+    Lf,
+    Crlf,
+}
+
+impl Eol {
+    /// O texto com `\n` e o fim de linha que ele usava. `None` se mistura os dois (ou tem `\r` solto): trocar tudo
+    /// por um só alteraria linhas que o usuário não tocou.
+    pub fn normalize(text: &str) -> Option<(String, Eol)> {
+        let crlf = text.matches("\r\n").count();
+        let lf = text.matches('\n').count();
+        if text.replace("\r\n", "").contains('\r') {
+            return None;
+        }
+        match (crlf, lf) {
+            (0, _) => Some((text.to_owned(), Eol::Lf)),
+            (c, l) if c == l => Some((text.replace("\r\n", "\n"), Eol::Crlf)),
+            _ => None,
+        }
+    }
+
+    /// `text_lf` (só com `\n`) no fim de linha `self`.
+    pub fn apply(self, text_lf: &str) -> String {
+        match self {
+            Eol::Lf => text_lf.to_owned(),
+            Eol::Crlf => text_lf.replace('\n', "\r\n"),
+        }
+    }
+}
+
+/// Grava `text_lf` (com `\n`) em `rel`, no fim de linha `eol` e, se `bom`, com o BOM UTF-8 que o arquivo já tinha
+/// (nunca acrescenta um). Ao lado e trocando ([`write_atomic`]): um agente lendo o arquivo nunca o vê pela metade.
+/// O caminho precisa ser relativo e seguro e ficar dentro do workspace; o arquivo pode já não existir (apagado por
+/// um agente enquanto era editado), mas a pasta dele sim.
+pub fn write_text(workspace: &Path, rel: &str, text_lf: &str, eol: Eol, bom: bool) -> Result<(), String> {
+    if workspace.as_os_str().is_empty() {
+        return Err("nenhum projeto aberto".into());
+    }
+    if !crate::git::safe_rel(rel) {
+        return Err(format!("caminho inválido: {rel}"));
+    }
+    let root = std::fs::canonicalize(workspace).map_err(|e| format!("a pasta do projeto não abre: {e}"))?;
+    let joined = workspace.join(rel);
+    let target = match std::fs::canonicalize(&joined) {
+        Ok(full) => full,
+        Err(_) => {
+            let name = joined.file_name().ok_or_else(|| format!("caminho inválido: {rel}"))?.to_owned();
+            let parent = joined.parent().ok_or_else(|| format!("caminho inválido: {rel}"))?;
+            std::fs::canonicalize(parent).map_err(|e| format!("a pasta de {rel} não abre: {e}"))?.join(name)
+        }
+    };
+    if !crate::util::path_within(&target, &root) {
+        return Err(format!("{rel} está fora da pasta do projeto"));
+    }
+    if target.is_dir() {
+        return Err(format!("{rel} não é um arquivo"));
+    }
+    let mut bytes = Vec::with_capacity(text_lf.len() + 3);
+    if bom {
+        bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+    }
+    bytes.extend_from_slice(eol.apply(text_lf).as_bytes());
+    write_atomic(&target, &bytes).map_err(|e| format!("não consegui gravar {rel}: {e}"))
+}
+
 // ---------- AGENTS.md ----------
 
 pub const MARKER_START: &str = "<!-- agentdeck:start -->";
@@ -527,6 +595,47 @@ mod tests {
         assert!(read_text(&ws, "nao-existe.txt").is_err());
         assert!(read_text(&ws, "").is_err());
         assert!(read_text(Path::new(""), "sub/a.rs").is_err());
+    }
+
+    #[test]
+    fn line_endings_are_detected_and_restored() {
+        assert_eq!(Eol::normalize("a\nb\n"), Some(("a\nb\n".into(), Eol::Lf)));
+        assert_eq!(Eol::normalize("a\r\nb\r\n"), Some(("a\nb\n".into(), Eol::Crlf)));
+        assert_eq!(Eol::normalize("sem fim de linha"), Some(("sem fim de linha".into(), Eol::Lf)));
+        assert_eq!(Eol::normalize(""), Some((String::new(), Eol::Lf)));
+        // Misturado ou com \r solto: não dá para devolver igual.
+        assert_eq!(Eol::normalize("a\r\nb\n"), None);
+        assert_eq!(Eol::normalize("a\rb\n"), None);
+        assert_eq!(Eol::Crlf.apply("a\nb\n"), "a\r\nb\r\n");
+        assert_eq!(Eol::Lf.apply("a\nb\n"), "a\nb\n");
+        let (lf, eol) = Eol::normalize("x\r\ny\r\n").expect("crlf");
+        assert_eq!(eol.apply(&lf), "x\r\ny\r\n");
+    }
+
+    #[test]
+    fn write_text_keeps_the_line_ending_and_never_adds_a_bom() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(ws.join("sub")).expect("mkdir");
+        std::fs::write(tmp.path().join("fora.txt"), "fora").expect("write");
+        write_text(&ws, "sub/a.txt", "um\ndois\n", Eol::Crlf, false).expect("grava");
+        assert_eq!(std::fs::read(ws.join("sub/a.txt")).expect("read"), b"um\r\ndois\r\n");
+        write_text(&ws, "sub/a.txt", "x\n", Eol::Lf, false).expect("regrava");
+        assert_eq!(std::fs::read(ws.join("sub/a.txt")).expect("read"), b"x\n");
+        // O BOM só volta se o arquivo já tinha um.
+        write_text(&ws, "sub/b.txt", "x", Eol::Lf, true).expect("grava");
+        assert_eq!(std::fs::read(ws.join("sub/b.txt")).expect("read"), b"\xEF\xBB\xBFx");
+        // Nenhum temporário fica para trás.
+        let names: Vec<String> =
+            std::fs::read_dir(ws.join("sub")).expect("ls").flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        // Fora do projeto, absoluto, pasta, pasta inexistente e sem projeto.
+        assert!(write_text(&ws, "../fora.txt", "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, &tmp.path().join("fora.txt").to_string_lossy(), "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, "sub", "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, "nao/existe/a.txt", "x", Eol::Lf, false).is_err());
+        assert!(write_text(Path::new(""), "a.txt", "x", Eol::Lf, false).is_err());
+        assert_eq!(std::fs::read_to_string(tmp.path().join("fora.txt")).expect("read"), "fora");
     }
 
     #[test]
