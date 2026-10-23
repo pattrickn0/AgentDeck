@@ -524,7 +524,7 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
                     ));
                 }
                 None => core.feed(FeedEntry::system(format!(
-                    "Transcrição local: não há binário pré-compilado do whisper.cpp para {}/{}. Compile-o (scripts/build-whisper-linux.sh) ou instale o whisper-cli no PATH.",
+                    "Transcrição local: não há binário pré-compilado do whisper.cpp para {}/{}. Compile o whisper.cpp com Vulkan/CUDA e ponha o whisper-cli no PATH, ou use o motor de CPU.",
                     std::env::consts::OS,
                     std::env::consts::ARCH
                 ))),
