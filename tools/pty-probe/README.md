@@ -1,21 +1,28 @@
 # pty-probe
 
-Sonda usada na investigação da `t37` ("terminal: metade da tela fica em branco") e na do `claude-code-sem-esc3j-no-windows`.
-Roda um CLI de verdade num PTY, alimenta o mesmo emulador do app (`alacritty_terminal` 0.26) e mede a grade, sem janela.
+Sonda usada nas investigações do terminal (`claude-code-sem-esc3j-no-windows`, `t37`). Roda um programa de verdade num PTY (ConPTY no
+Windows), alimenta o mesmo emulador do app (`alacritty_terminal` 0.26 e a mesma mudança de tamanho, `crates/app/src/terminal/resize.rs`,
+incluída por `#[path]`) e mede a grade, sem janela.
 
 ```
 cd tools/pty-probe && cargo build --release
-PROBE_PROGRAM=C:/Users/<você>/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe \
-PROBE_CWD=<pasta já confiável no Claude> \
-RESIZE="3:30:100,6:58:120" \
-./target/release/pty-probe <linhas> <colunas> <saida.bin> "<prompt 1>" ["<prompt 2>" ...]
+PROBE_PROGRAM=C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe PROBE_ARGS=-NoLogo PROBE_BOOT=3 PROBE_CWD=C:/Users/<você> \
+RESIZE="12:30:120,15:58:120,18:58:60,21:58:120" \
+./target/release/pty-probe 58 120 <saida.bin> '1..400 | % { ("L{0:D5} " -f $_) + ("abcdefghij" * 8) }'
 ```
 
-- `RESIZE="seg:linhas:colunas,..."`: trocas de tamanho, em segundos depois do primeiro prompt (a grade e o PTY mudam juntos,
-  como `Session::resize`).
-- `PROBE_SETTINGS=<arquivo.json>`: vai em `--settings`. Com `{"tui":"default"}` o Claude Code 2.1.x volta ao modo clássico
-  (texto no histórico); sem isso ele usa a tela alternativa (sem histórico).
-- Imprime `VAO ...` (padrão de linhas vazias `.` e com texto `#`) quando aparece um vão, e no fim o padrão final, o tamanho do
-  histórico, as corridas de 6+ linhas vazias na tela e no histórico, e a grade.
-- O ambiente do CLI é o do app: `TERM=xterm-256color`, `COLORTERM=truecolor`, sem `CLAUDE_CODE_*`/`CLAUDECODE`.
-- A sonda custa tokens (uma resposta por prompt; use um modelo pequeno, a sonda passa `--model haiku`).
+- `pty-probe <linhas> <colunas> <saida> "<linha 1>" ["<linha 2>" ...]`: cada linha é digitada e enviada com Enter, a primeira depois de
+  `PROBE_BOOT` segundos (padrão 8) de silêncio, as outras quando a saída se aquieta.
+- `PROBE_PROGRAM` (obrigatório), `PROBE_ARGS` (separados por espaço), `PROBE_CWD`; para o Claude Code: `PROBE_ARGS="--model haiku"`, uma pasta
+  já confiável, e `PROBE_SETTINGS=<arquivo.json>` (vai em `--settings`; com `{"tui":"default"}` ele usa o modo clássico, com histórico; sem isso, a
+  tela alternativa).
+- `RESIZE="seg:linhas:colunas,..."`: trocas de tamanho, em segundos depois do primeiro envio (grade e PTY mudam juntos, como `Session::resize`).
+  Cada troca imprime, 0,9 s depois, o padrão da tela (`#` linha com texto, `.` vazia), o histórico e o relatório `SEQ`.
+- Relatório `SEQ`: lê as linhas `L00001 ...` na ordem histórico + tela e diz as que **pularam** (`puladas`), as que **repetem ou voltam**
+  (`repetidas/voltas`) e quantas linhas vazias ficaram entre duas consecutivas. Também avisa `VAO` (5+ linhas vazias seguidas com texto depois).
+- `PROBE_PULL=1`: desliga a correção do app (o `alacritty_terminal` puro), para comparar. `PROBE_WATCH=L00372,PS C`: mostra em que linha
+  cada texto está depois de cada troca.
+- Grava `<saida>` (bytes crus) e `<saida>.events.txt` (trocas de tamanho), o formato da gravação do app (`terminal/record.rs`), que os testes
+  reproduzem (`record::replay`).
+- O ambiente do programa é o do app: `TERM=xterm-256color`, `COLORTERM=truecolor`, sem `CLAUDE_CODE_*`/`CLAUDECODE`. Com o Claude Code a
+  sonda gasta tokens (uma resposta por linha enviada).

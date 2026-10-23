@@ -11,7 +11,7 @@ pub mod resize;
 pub mod view;
 
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -230,6 +230,38 @@ impl Session {
     /// Liga a gravação da saída crua dos próximos processos desta aba em `dir`, com `name` no nome dos arquivos.
     pub fn record_to(&mut self, dir: PathBuf, name: String) {
         self.record_to = Some((dir, name));
+    }
+
+    /// A gravação de diagnóstico desta aba está ligada (variável de ambiente ou item do menu da aba).
+    pub fn recording(&self) -> bool {
+        self.record_to.is_some()
+    }
+
+    /// Liga (`Some`) ou desliga (`None`) a gravação desta aba. Ligada com o processo rodando, começa agora: o `.bin` só tem
+    /// o que vier depois, e a grade de agora vai para o `.grid.txt` (não dá para reproduzir o que veio antes).
+    pub fn set_recording(&mut self, to: Option<(PathBuf, String)>) {
+        self.record_to = to;
+        let now = self
+            .record_to
+            .as_ref()
+            .filter(|_| self.pty.is_some())
+            .and_then(|(dir, name)| record::Recorder::start(dir, name, self.size).ok());
+        let text = now.as_ref().map(|_| record::grid_text(&self.shared.emu.lock()));
+        if let (Some(r), Some(text)) = (&now, text) {
+            r.snapshot(&text);
+        }
+        *self.shared.recorder.lock() = now;
+    }
+
+    /// Salva a grade (tela e fim do histórico) agora, em `dir`; devolve o arquivo. Com a gravação ligada reescreve o
+    /// `.grid.txt` dela.
+    pub fn save_snapshot(&self, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+        let text = record::grid_text(&self.shared.emu.lock());
+        if let Some(r) = self.shared.recorder.lock().as_ref() {
+            r.snapshot(&text);
+            return Ok(r.grid_path().to_owned());
+        }
+        record::write_snapshot(dir, name, &text)
     }
 
     /// Tira a foto da grade quando a saída parou há [`record::SNAPSHOT_IDLE`]; devolve quando voltar a olhar.

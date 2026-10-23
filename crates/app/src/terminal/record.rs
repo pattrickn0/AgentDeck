@@ -41,8 +41,8 @@ impl Recorder {
     /// Abre os três arquivos de `name` (nome da aba) em `dir`, já anotando o tamanho inicial.
     pub fn start(dir: &Path, name: &str, size: GridSize) -> std::io::Result<Self> {
         std::fs::create_dir_all(dir)?;
-        let safe: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-        let stem = format!("{safe}-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"));
+        let safe = safe_name(name);
+        let stem = format!("{safe}-{}", stamp());
         let mut r = Self {
             bytes: File::create(dir.join(format!("{stem}.bin")))?,
             events: File::create(dir.join(format!("{stem}.events.txt")))?,
@@ -65,9 +65,30 @@ impl Recorder {
         let _ = writeln!(self.events, "{} {} size {} {}", self.started.elapsed().as_millis(), self.offset, size.cols, size.rows);
     }
 
+    pub fn grid_path(&self) -> &Path {
+        &self.grid
+    }
+
     pub fn snapshot(&self, text: &str) {
         let _ = std::fs::write(&self.grid, text);
     }
+}
+
+/// Nome seguro para arquivo (letras, números e `-`).
+fn safe_name(name: &str) -> String {
+    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect()
+}
+
+fn stamp() -> String {
+    chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
+}
+
+/// Grava a foto da grade avulsa (sem gravação ligada): `<aba>-<data>-<hora>.grid.txt`.
+pub fn write_snapshot(dir: &Path, name: &str, text: &str) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(format!("{}-{}.grid.txt", safe_name(name), stamp()));
+    std::fs::write(&path, text)?;
+    Ok(path)
 }
 
 /// A grade do emulador em texto: cabeçalho com o estado, o fim do histórico (`h<linha>`) e a tela (`s<linha>`).
@@ -275,6 +296,34 @@ mod tests {
         assert_eq!(text.lines().filter(|l| l.starts_with('h')).count(), 8);
         assert_eq!(text.lines().filter(|l| l.starts_with('s')).count(), 3);
         assert!(text.contains("s    0| linha"));
+    }
+
+    #[test]
+    fn the_menu_toggle_starts_recording_now_and_a_snapshot_works_with_or_without_it() {
+        let dir = tempfile::tempdir().expect("pasta");
+        let pty = dir.path().join("pty");
+        let mut s = Session::new(GridSize { cols: 20, rows: 4 });
+        s.print("abc\r\n");
+        assert!(!s.recording());
+
+        // Sem gravar: foto avulsa, `<aba>-<data>-<hora>.grid.txt`.
+        let alone = s.save_snapshot(&pty, "claude@t1").expect("foto");
+        assert!(alone.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("claude_t1-") && n.ends_with(".grid.txt")));
+        assert!(std::fs::read_to_string(&alone).expect("lê").contains("s    0| abc"));
+
+        // Ligar sem processo só guarda o pedido (a gravação abre no `spawn`); desligar limpa.
+        s.set_recording(Some((pty.clone(), "claude@t1".into())));
+        assert!(s.recording());
+        assert!(s.shared.recorder.lock().is_none(), "sem processo ainda");
+        s.set_recording(None);
+        assert!(!s.recording());
+        assert!(!s.shared.recorder.lock().is_some());
+
+        // Gravando: a foto reescreve o `.grid.txt` da gravação.
+        *s.shared.recorder.lock() = Recorder::start(&pty, "claude@t1", s.size()).ok();
+        let grid = s.save_snapshot(&pty, "claude@t1").expect("foto");
+        assert!(grid.to_string_lossy().ends_with(".grid.txt"));
+        assert!(std::fs::read_to_string(&grid).expect("lê").starts_with("# colunas=20 linhas=4"));
     }
 
     #[test]

@@ -444,6 +444,16 @@ fn attachment_paths(core: &Core, refs: Vec<String>) -> Vec<PathBuf> {
     refs.iter().filter_map(|r| Path::new(r).file_name()).map(|name| dir.join(name)).collect()
 }
 
+/// Abre uma pasta no explorador de arquivos do sistema.
+fn open_in_file_manager(path: &Path) {
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+}
+
 /// O arquivo é uma cópia nossa em `dados/anexos` (só essas o "×" apaga).
 fn in_attachments_dir(data_dir: &Path, path: &Path) -> bool {
     path.parent().is_some_and(|p| p == data_dir.join("anexos"))
@@ -1606,6 +1616,42 @@ impl Deck {
             _ => {}
         }
         self.persist_tabs_now();
+    }
+
+    /// Pasta das gravações de diagnóstico do terminal (`dados/pty`).
+    pub fn pty_dir(&self) -> PathBuf {
+        self.core.paths().data_dir.join("pty")
+    }
+
+    /// Liga ou desliga a gravação de diagnóstico do terminal da aba `idx` (item do menu da aba) e avisa onde ficam os arquivos.
+    pub fn toggle_terminal_recording(&mut self, idx: usize) {
+        let dir = self.pty_dir();
+        let Some(tab) = self.tabs.get_mut(idx) else { return };
+        let id = tab.ident.id();
+        if tab.session.recording() {
+            tab.session.set_recording(None);
+            self.system(format!("Gravação do terminal de {id} desligada. Os arquivos ficam em {}.", dir.display()));
+        } else {
+            tab.session.set_recording(Some((dir.clone(), id.clone())));
+            self.system(format!(
+                "Gravando o terminal de {id} daqui em diante em {} (três arquivos por gravação: .bin, .events.txt e .grid.txt). Quando o defeito aparecer, use \"Salvar foto da grade agora\" no menu da aba (botão direito) e mande esses arquivos.",
+                dir.display()
+            ));
+        }
+    }
+
+    /// Salva a grade do terminal da aba `idx` agora e abre a pasta (item do menu da aba).
+    pub fn save_terminal_snapshot(&mut self, idx: usize) {
+        let dir = self.pty_dir();
+        let Some(tab) = self.tabs.get(idx) else { return };
+        let id = tab.ident.id();
+        match tab.session.save_snapshot(&dir, &id) {
+            Ok(path) => {
+                self.system(format!("Foto da grade do terminal de {id} salva em {}.", path.display()));
+                open_in_file_manager(&dir);
+            }
+            Err(e) => self.system(format!("Não consegui salvar a foto da grade do terminal de {id}: {e}")),
+        }
     }
 
     pub fn start_rename_tab(&mut self, idx: usize) {
