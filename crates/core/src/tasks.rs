@@ -159,6 +159,9 @@ pub struct Task {
     pub kind: String,
     /// Modelo de LLM (pelas regras de `models.rs`); `None` = o padrão do CLI.
     pub model: Option<String>,
+    /// Esforço pedido (`models::Effort`); `None` = o padrão do CLI. No Claude vai em `--effort` ao abrir a
+    /// aba; no Antigravity já está no sufixo de `model`.
+    pub effort: Option<models::Effort>,
     /// Id da instância (`claude@t3`).
     pub instance: String,
     /// Quem criou: o id de um agente (`claude`) ou `usuário`. É o chefe da instância quando é um agente aberto.
@@ -213,6 +216,7 @@ impl Task {
             "branch": self.branch,
             "kind": self.kind,
             "model": self.model,
+            "effort": self.effort,
             "instance": self.instance,
             "creator": self.creator,
             "created_ms": self.created_ms,
@@ -234,6 +238,8 @@ pub struct TaskSpec {
     pub kind: String,
     /// Modelo pedido; `None` = o padrão do cargo ou do CLI.
     pub model: Option<String>,
+    /// Esforço pedido; `None` = o padrão do CLI. Só vale onde [`models::effort_unavailable`] não objeta.
+    pub effort: Option<models::Effort>,
     /// Branch de partida e de mesclagem; `None` = a branch atual do repositório do projeto.
     pub base: Option<String>,
     /// Quem pediu (id de agente ou `usuário`).
@@ -719,6 +725,15 @@ impl Core {
             }
         }
         let model = models::resolve_model(&Ident::main(&kind), requested, None, &self.config().role_models);
+        // Esforço: só onde o CLI o aceita. No Antigravity ele troca o sufixo do modelo, então o modelo gravado
+        // já é o que vai abrir.
+        let (model, effort) = match spec.effort {
+            Some(e) => match models::effort_unavailable(&kind, model.as_deref()) {
+                Some(why) => return Err(TaskError::Invalid(format!("esforço não aplicável a {kind}: {why}"))),
+                None => (model.map(|m| models::effort_model(&kind, &m, e)), Some(e)),
+            },
+            None => (model, None),
+        };
 
         // Repositório e base.
         let repo = self.task_repo(project)?;
@@ -753,6 +768,7 @@ impl Core {
             base,
             kind,
             model,
+            effort,
             instance,
             creator: spec.creator.map(|c| c.trim().to_owned()).filter(|c| !c.is_empty()),
             created_ms: now_ms(),

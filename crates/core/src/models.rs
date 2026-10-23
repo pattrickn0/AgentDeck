@@ -113,6 +113,87 @@ pub fn opencode_tui(model: &str) -> (Vec<String>, (String, String)) {
     (vec!["--standalone".into()], ("OPENCODE_CONFIG_CONTENT".into(), serde_json::json!({ "model": base }).to_string()))
 }
 
+/// Esforço de raciocínio de uma tarefa. Cada CLI o traduz do seu jeito ([`effort_args`], [`effort_model`]);
+/// "Padrão" é a ausência (`Option<Effort>` = `None`): nada vai ao CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+}
+
+impl Effort {
+    pub const ALL: [Effort; 3] = [Effort::Low, Effort::Medium, Effort::High];
+
+    /// O valor de `--effort`, do JSON e do sufixo dos modelos do Antigravity.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Effort::Low => "low",
+            Effort::Medium => "medium",
+            Effort::High => "high",
+        }
+    }
+
+    /// O nome na interface.
+    pub fn label(self) -> &'static str {
+        match self {
+            Effort::Low => "baixo",
+            Effort::Medium => "médio",
+            Effort::High => "alto",
+        }
+    }
+
+    /// Lê `low|medium|high` (ou `baixo|médio|alto`), sem diferenciar maiúsculas.
+    pub fn parse(s: &str) -> Option<Effort> {
+        match s.trim().to_lowercase().as_str() {
+            "low" | "baixo" => Some(Effort::Low),
+            "medium" | "médio" | "medio" => Some(Effort::Medium),
+            "high" | "alto" => Some(Effort::High),
+            _ => None,
+        }
+    }
+}
+
+/// Os modelos do Antigravity trazem o esforço no nome: `…-low`, `…-medium` ou `…-high`.
+fn agy_effort_split(model: &str) -> Option<(&str, Effort)> {
+    Effort::ALL.into_iter().find_map(|e| model.strip_suffix(e.as_str())?.strip_suffix('-').map(|base| (base, e)))
+}
+
+/// Por que o esforço não vale para `kind` com `model` (a dica da interface e o erro do pedido); `None` = vale.
+/// Claude: `--effort`. Antigravity: troca o sufixo do nome do modelo, então precisa de um modelo com sufixo.
+/// OpenCode: a variante (`modelo#variante`) só existe no `run -m`; a aba interativa não a recebe.
+pub fn effort_unavailable(kind: &str, model: Option<&str>) -> Option<&'static str> {
+    match kind {
+        "claude" => None,
+        "antigravity" => match model {
+            None => Some("Escolha um modelo: no Antigravity o esforço é parte do nome dele"),
+            Some(m) if agy_effort_split(m).is_none() => Some("Este modelo do Antigravity não tem versões por esforço"),
+            Some(_) => None,
+        },
+        "opencode" => Some("O OpenCode só aceita esforço no modo headless; a aba não recebe"),
+        _ => Some("Este agente não tem esforço"),
+    }
+}
+
+/// Argumentos que passam o esforço ao CLI na linha de comando (só o Claude tem a opção; o Antigravity usa
+/// [`effort_model`]).
+pub fn effort_args(kind: &str, effort: Effort) -> Vec<String> {
+    match kind {
+        "claude" => vec!["--effort".into(), effort.as_str().into()],
+        _ => Vec::new(),
+    }
+}
+
+/// O modelo do Antigravity com o sufixo de esforço trocado (`gemini-4-argon-low` + alto →
+/// `gemini-4-argon-high`). Qualquer outro caso devolve o modelo como veio.
+pub fn effort_model(kind: &str, model: &str, effort: Effort) -> String {
+    match (kind, agy_effort_split(model)) {
+        ("antigravity", Some((base, _))) => format!("{base}-{}", effort.as_str()),
+        _ => model.to_owned(),
+    }
+}
+
 /// Forma curta para rótulos: sem o provedor (`opencode/glm-5.3` → `glm-5.3`).
 pub fn short_model(model: &str) -> &str {
     model.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or(model)
@@ -544,6 +625,49 @@ mod tests {
         );
         // A variante só existe no `run -m`.
         assert_eq!(opencode_tui("opencode/big-pickle#high").1 .1, r#"{"model":"opencode/big-pickle"}"#);
+    }
+
+    #[test]
+    fn effort_is_read_in_english_or_portuguese() {
+        assert_eq!(Effort::parse("low"), Some(Effort::Low));
+        assert_eq!(Effort::parse(" Médio "), Some(Effort::Medium));
+        assert_eq!(Effort::parse("ALTO"), Some(Effort::High));
+        for bad in ["", "xhigh", "max", "padrão"] {
+            assert_eq!(Effort::parse(bad), None, "{bad}");
+        }
+        for e in Effort::ALL {
+            assert_eq!(Effort::parse(e.as_str()), Some(e));
+        }
+        assert_eq!(serde_json::to_string(&Effort::Medium).expect("json"), r#""medium""#);
+    }
+
+    #[test]
+    fn effort_reaches_each_cli_its_own_way() {
+        // Claude: --effort.
+        assert_eq!(effort_args("claude", Effort::High), ["--effort", "high"]);
+        assert_eq!(effort_args("claude", Effort::Low), ["--effort", "low"]);
+        // Antigravity: o sufixo do nome do modelo; os outros modelos ficam como estão.
+        assert_eq!(effort_model("antigravity", "gemini-4-argon-low", Effort::High), "gemini-4-argon-high");
+        assert_eq!(effort_model("antigravity", "claude-sonnet-5-5-medium", Effort::Low), "claude-sonnet-5-5-low");
+        assert_eq!(effort_model("antigravity", "gemini-4-flash", Effort::High), "gemini-4-flash");
+        assert_eq!(effort_model("claude", "sonnet", Effort::High), "sonnet");
+        // Os demais não recebem nada na linha de comando.
+        for k in ["antigravity", "opencode", "codex", "ollama:qwen3.5:9b", "shell"] {
+            assert!(effort_args(k, Effort::High).is_empty(), "{k}");
+        }
+    }
+
+    #[test]
+    fn effort_explains_why_it_is_unavailable() {
+        assert_eq!(effort_unavailable("claude", None), None);
+        assert_eq!(effort_unavailable("claude", Some("sonnet")), None);
+        assert_eq!(effort_unavailable("antigravity", Some("gemini-4-argon-low")), None);
+        assert!(effort_unavailable("antigravity", None).is_some_and(|d| d.contains("modelo")));
+        assert!(effort_unavailable("antigravity", Some("gemini-4-flash")).is_some());
+        assert!(effort_unavailable("opencode", Some("opencode/big-pickle")).is_some_and(|d| d.contains("headless")));
+        for k in ["codex", "ollama:qwen3.5:9b", "shell"] {
+            assert!(effort_unavailable(k, None).is_some(), "{k}");
+        }
     }
 
     #[test]

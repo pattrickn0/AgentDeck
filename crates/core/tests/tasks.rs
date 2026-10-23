@@ -2,6 +2,7 @@
 //! relatório, devolver, mesclar, validar, reprovar, descartar e persistência. A ponte fica em `tasks_bridge.rs`.
 use std::process::Command;
 
+use agentdeck_core::models::Effort;
 use agentdeck_core::util::same_path;
 use agentdeck_core::{CoreEvent, Ident, TaskError, TaskSpec, TaskStatus};
 
@@ -832,6 +833,62 @@ fn a_cli_without_an_initial_prompt_keeps_the_typed_delivery() {
     assert!(prompt.contains("Faça: Com aider"));
     assert!(!env.root.join("dados").join("tarefas").join(format!("{}-t1-brief.md", env.project)).exists());
     env.core.shutdown();
+}
+
+#[test]
+fn the_effort_of_a_task_is_validated_stored_and_reaches_the_claude_tab() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    install_fake_agent(&env.root, "agy");
+    install_fake_agent(&env.root, "opencode");
+    let effort = |e| TaskSpec { effort: Some(e), ..spec("Com esforço") };
+
+    // Claude: grava o esforço e abre a aba com `--effort`; sem esforço, nada vai ao CLI.
+    let t = core.task_create(&env.project, TaskSpec { model: Some("sonnet".into()), ..effort(Effort::High) }).expect("create");
+    assert_eq!(t.effort, Some(Effort::High));
+    assert_eq!(core.task(&env.project, &t.id).expect("task").effort, Some(Effort::High));
+    let ident = Ident::parse(&t.instance).expect("id");
+    let draft = core.spawn_spec_for(&env.project, &ident).expect("spec");
+    assert!(!draft.args.iter().any(|a| a == "--effort"), "rascunho ainda não é a tarefa da aba: {:?}", draft.args);
+    core.task_start(&env.project, &t.id).expect("start");
+    let args = core.spawn_spec_for(&env.project, &ident).expect("spec").args;
+    assert!(args.windows(2).any(|w| w == ["--effort", "high"]), "{args:?}");
+    assert!(args.windows(2).any(|w| w == ["--model", "sonnet"]), "{args:?}");
+    let plain = core.task_create(&env.project, spec("Sem esforço")).expect("create");
+    assert_eq!(plain.effort, None);
+    core.task_start(&env.project, &plain.id).expect("start");
+    let args = core.spawn_spec_for(&env.project, &Ident::parse(&plain.instance).expect("id")).expect("spec").args;
+    assert!(!args.iter().any(|a| a == "--effort"), "{args:?}");
+
+    // O JSON da ponte leva o esforço; uma tarefa gravada antes dele continua carregando.
+    assert_eq!(t.summary_json()["effort"], "high");
+    let old: agentdeck_core::Task = serde_json::from_str(r#"{"id":"t9","title":"antiga"}"#).expect("tarefa antiga");
+    assert_eq!(old.effort, None);
+
+    // Antigravity: o esforço troca o sufixo do modelo, que é o que fica gravado; sem modelo (ou com um
+    // modelo sem versões por esforço) o pedido é recusado, em vez de ser gravado sem efeito.
+    let agy = |model: Option<&str>| TaskSpec {
+        kind: "antigravity".into(),
+        model: model.map(String::from),
+        ..effort(Effort::Low)
+    };
+    let t = core.task_create(&env.project, agy(Some("gemini-4-argon-high"))).expect("agy");
+    assert_eq!((t.model.as_deref(), t.effort), (Some("gemini-4-argon-low"), Some(Effort::Low)));
+    for bad in [agy(None), agy(Some("gemini-4-flash"))] {
+        let e = core.task_create(&env.project, bad).expect_err("sem versões por esforço");
+        assert!(matches!(&e, TaskError::Invalid(m) if m.contains("esforço não aplicável a antigravity")), "{e:?}");
+    }
+
+    // OpenCode: a aba não recebe esforço, então o pedido é recusado (com a dica).
+    let e = core
+        .task_create(&env.project, TaskSpec { kind: "opencode".into(), model: Some("opencode/big-pickle".into()), ..effort(Effort::High) })
+        .expect_err("opencode");
+    assert!(matches!(&e, TaskError::Invalid(m) if m.contains("headless")), "{e:?}");
+    // Quem não tem a opção também.
+    let e = core.task_create(&env.project, TaskSpec { kind: "aider".into(), ..effort(Effort::High) }).expect_err("aider");
+    assert!(matches!(&e, TaskError::Invalid(m) if m.contains("esforço não aplicável a aider")), "{e:?}");
+    core.shutdown();
 }
 
 #[test]

@@ -990,7 +990,18 @@ fn body_text(msg: &Value, key: &str) -> Result<Option<String>, (u16, Value)> {
 
 /// Os campos de `POST /tasks`.
 fn task_spec(msg: &Value, creator: &str) -> Result<crate::tasks::TaskSpec, (u16, Value)> {
+    let effort = match body_text(msg, "effort")? {
+        None => None,
+        Some(e) => match crate::models::Effort::parse(&e) {
+            Some(e) => Some(e),
+            None => {
+                let error = format!("esforço inválido: \"{}\" (use low, medium ou high)", e.chars().take(20).collect::<String>().escape_debug());
+                return Err((400, json!({ "error": error })));
+            }
+        },
+    };
     Ok(crate::tasks::TaskSpec {
+        effort,
         title: body_text(msg, "title")?.unwrap_or_default(),
         brief: body_text(msg, "brief")?.unwrap_or_default(),
         kind: body_text(msg, "kind")?.unwrap_or_default(),
