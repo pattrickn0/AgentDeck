@@ -1,14 +1,15 @@
 //! Modo Documentos do centro (ver `docs.rs`): a chave Agentes | Documentos da barra de título, a faixa de
 //! abas de documento (o mesmo desenho de `tabs.rs`) e o documento com a largura toda do centro.
-//! Diff, arquivo de texto e markdown; tudo só para leitura.
+//! Diff, arquivo de texto (que também se edita) e markdown.
 
-use egui::{Align2, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
+use egui::{Align2, Id, Key, Painter, Pos2, Rect, Sense, Ui, Vec2};
 
 use super::panes::HEAD_H;
 use super::tabs::{self, Item, Lead, StripClick, StripKind};
-use super::{button, button_width, clickable, galley, galley_trunc, place, section_label, text_in, text_w, tip, ButtonKind};
+use super::{button, button_width, clickable, code, diff_view, frame, galley, galley_trunc, place, section_label, text_in, text_w, tip, ButtonKind};
 use crate::deck::Deck;
-use crate::docs::{file_name, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, TextDoc};
+use crate::highlight::Lang;
+use crate::docs::{file_name, After, Answer, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, Find, Unsaved};
 use crate::theme;
 
 /// Altura da linha com o título do documento e as ações dele.
@@ -18,9 +19,6 @@ const FILE_ROW_H: f32 = 20.0;
 const FILE_HEAD_H: f32 = super::SECTION_LABEL_H;
 /// Abaixo desta largura a lista de arquivos do diff passa para cima do diff.
 const NARROW_W: f32 = 560.0;
-/// Altura de uma linha do arquivo de texto e o tamanho da fonte (os mesmos do diff).
-const TEXT_ROW_H: f32 = 17.0;
-const TEXT_FONT: f32 = 12.0;
 /// Largura máxima da coluna do markdown (acima disso o texto fica comprido demais para ler).
 const MD_MAX_W: f32 = 820.0;
 
@@ -202,6 +200,7 @@ enum Act {
     Reload(u64),
     OpenExternal(String),
     SelectFile(u64, usize),
+    Save(u64),
 }
 
 /// Pinta os documentos do projeto ativo no lugar das janelas dos agentes.
@@ -222,6 +221,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             mic: crate::dictation::ButtonVisual::Idle,
             lead: Lead::Glyph(glyph(&t.kind)),
             tip: t.subtitle.clone(),
+            dirty: t.dirty(),
         })
         .collect();
     let uids: Vec<u64> = items.iter().map(|i| i.uid).collect();
@@ -262,8 +262,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     for act in acts {
         match act {
             Act::Focus(uid) => deck.docs.focus(uid),
-            Act::Close(uid) => deck.docs_close(uid),
+            Act::Close(uid) => deck.docs_request_close(uid),
             Act::Reload(uid) => deck.docs_reload(uid),
+            Act::Save(uid) => deck.docs_save(uid, After::Nothing),
             Act::OpenExternal(rel) => {
                 if let Err(e) = deck.core.open_path(&rel) {
                     deck.system(format!("Não foi possível abrir {rel} no programa padrão: {e}"));
@@ -287,77 +288,359 @@ fn glyph(kind: &DocKind) -> &'static str {
     }
 }
 
-/// A linha de título do documento (com as ações) e o corpo dele.
+/// A linha de título do documento (com as ações), os avisos e a busca; depois, o corpo dele.
 fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonmark::CommonMarkCache, acts: &mut Vec<Act>) {
     let painter = ui.painter_at(area);
     let sub = Rect::from_min_size(area.min, Vec2::new(area.width(), SUBHEAD_H));
     painter.rect_filled(Rect::from_min_max(Pos2::new(sub.min.x, sub.max.y - 1.0), sub.max), 0.0, theme::pal().separator);
+    let uid = tab.uid;
 
     // Ações à direita, da última para a primeira.
     let mut right = sub.max.x - 8.0;
     let cy = sub.min.y + (SUBHEAD_H - 1.0) / 2.0;
     if let Some(path) = tab.kind.file_path() {
         let label = "Abrir no programa padrão";
-        if action_button(
+        if action(
             ui,
             &painter,
             &mut right,
             cy,
-            label,
-            "Abre o arquivo no programa que o Windows associou a ele",
-            Id::new(("doc-open", tab.uid)),
+            (label, "Abre o arquivo no programa que o Windows associou a ele"),
+            Id::new(("doc-open", uid)),
+            (ButtonKind::Secondary, true),
         ) {
             acts.push(Act::OpenExternal(path.to_owned()));
         }
     }
     if tab.kind.reloadable() {
         let loading = matches!(tab.state, DocState::Loading);
-        if action_button(ui, &painter, &mut right, cy, "Recarregar", "Lê o documento de novo", Id::new(("doc-reload", tab.uid))) && !loading
-        {
-            acts.push(Act::Reload(tab.uid));
+        let tooltip = "Lê o documento de novo (com edição não salva, pergunta antes)";
+        if action(ui, &painter, &mut right, cy, ("Recarregar", tooltip), Id::new(("doc-reload", uid)), (ButtonKind::Secondary, !loading)) {
+            acts.push(Act::Reload(uid));
+        }
+    }
+    let mut dirty = false;
+    if let DocState::Source(src) = &mut tab.state {
+        dirty = src.dirty();
+        let is_md = matches!(tab.kind, DocKind::Markdown(_));
+        if src.can_edit() && src.editing {
+            let hint = "Para de editar (o que você digitou continua na tela até gravar ou fechar)";
+            if action(ui, &painter, &mut right, cy, ("Só leitura", hint), Id::new(("doc-stop", uid)), (ButtonKind::Secondary, true)) {
+                src.editing = false;
+            }
+            let ready = src.dirty() && src.external.is_none() && !src.saving;
+            let label = if src.saving { "Gravando…" } else { "Salvar" };
+            let hint = if src.external.is_some() { "Resolva primeiro o aviso: o arquivo mudou no disco" } else { "Grava o arquivo (Ctrl+S)" };
+            if action(ui, &painter, &mut right, cy, (label, hint), Id::new(("doc-save", uid)), (ButtonKind::Primary, ready)) {
+                acts.push(Act::Save(uid));
+            }
+        } else if src.can_edit() {
+            let hint = "Edita o arquivo aqui mesmo (Ctrl+S grava)";
+            if action(ui, &painter, &mut right, cy, ("Editar", hint), Id::new(("doc-edit", uid)), (ButtonKind::Primary, true)) {
+                src.set_editing(true);
+            }
+        }
+        if is_md && !src.editing {
+            let (label, hint) = if src.raw { ("Ver formatado", "Mostra o markdown formatado") } else { ("Ver código", "Mostra o texto do markdown, com realce") };
+            if action(ui, &painter, &mut right, cy, (label, hint), Id::new(("doc-raw", uid)), (ButtonKind::Secondary, true)) {
+                src.raw = !src.raw;
+            }
         }
     }
     let title_r = Rect::from_min_max(Pos2::new(sub.min.x + 14.0, sub.min.y), Pos2::new(right - 8.0, sub.max.y - 1.0));
     if title_r.width() > 20.0 {
-        let g = galley_trunc(&painter, &tab.subtitle, theme::ui(12.0), theme::pal().text, title_r.width());
-        place(&painter, title_r, Align2::LEFT_CENTER, g, theme::pal().text);
+        let mut title = title_r;
+        if let DocState::Source(src) = &tab.state {
+            if src.lang != Lang::Plain {
+                let g = galley(&painter, src.lang.label(), theme::meta(10.5), theme::pal().text_3);
+                let w = g.size().x;
+                place(&painter, Rect::from_min_size(Pos2::new(title.max.x - w, title.min.y), Vec2::new(w, title.height())), Align2::LEFT_CENTER, g, theme::pal().text_3);
+                title.max.x -= w + 12.0;
+            }
+        }
+        if dirty {
+            let g = galley(&painter, "● Não salvo", theme::ui(11.5), theme::pal().warning);
+            let w = g.size().x;
+            place(&painter, Rect::from_min_size(Pos2::new(title.max.x - w, title.min.y), Vec2::new(w, title.height())), Align2::LEFT_CENTER, g, theme::pal().warning);
+            title.max.x -= w + 10.0;
+        }
+        let g = galley_trunc(&painter, &tab.subtitle, theme::ui(12.0), theme::pal().text, title.width().max(10.0));
+        place(&painter, title, Align2::LEFT_CENTER, g, theme::pal().text);
     }
 
-    let body = Rect::from_min_max(Pos2::new(area.min.x, sub.max.y), area.max);
-    let uid = tab.uid;
-    match &mut tab.state {
+    let mut body = Rect::from_min_max(Pos2::new(area.min.x, sub.max.y), area.max);
+    notices(ui, &mut body, tab);
+    if tab.find.open {
+        find_bar(ui, &mut body, uid, &mut tab.find);
+    }
+    let is_md = matches!(tab.kind, DocKind::Markdown(_));
+    let diff_path = tab.kind.diff_path().map(str::to_owned);
+    let DocTab { state, find, shaped, .. } = tab;
+    match state {
         DocState::Loading => note(&painter, body, "Carregando…", theme::pal().text_2),
         DocState::Failed(e) => note(&painter, body, e, theme::pal().danger_text),
         DocState::Unreadable(why) => note(&painter, body, why, theme::pal().text_2),
-        DocState::Diff(doc) => diff_body(ui, body, uid, doc, acts),
-        DocState::Text(doc) => text_body(ui, body, uid, doc),
+        DocState::Diff(doc) => diff_body(ui, body, uid, doc, find, acts, diff_path.as_deref()),
+        DocState::Text(doc) => code::text_body(ui, body, uid, doc, find),
+        DocState::Source(src) if is_md && !src.raw && !src.editing => markdown_body(ui, body, uid, &src.text, cache),
+        DocState::Source(src) => code::source_body(ui, body, uid, src, find, shaped),
         DocState::Markdown(text) => markdown_body(ui, body, uid, text, cache),
     }
 }
 
-/// Um botão de texto no fim da linha de título; `right` anda para a esquerda. Devolve se foi clicado.
-fn action_button(ui: &Ui, painter: &Painter, right: &mut f32, cy: f32, label: &str, tooltip: &str, id: Id) -> bool {
-    let w = button_width(painter, label, ButtonKind::Secondary);
+/// Um botão de texto no fim da linha de título; `right` anda para a esquerda. Devolve se foi clicado (um botão
+/// desligado aparece apagado e não clica).
+fn action(ui: &Ui, painter: &Painter, right: &mut f32, cy: f32, (label, tooltip): (&str, &str), id: Id, (kind, enabled): (ButtonKind, bool)) -> bool {
+    let w = button_width(painter, label, kind);
     let r = Rect::from_min_size(Pos2::new(*right - w, cy - 11.0), Vec2::new(w, 22.0));
     *right = r.min.x - 6.0;
-    tip(button(ui, r, id, label, ButtonKind::Secondary), tooltip).clicked()
+    if enabled {
+        return tip(button(ui, r, id, label, kind), tooltip).clicked();
+    }
+    // Desligado: o mesmo desenho a 45%, sem clique.
+    painter.rect_filled(r, 5.0, theme::with_alpha(theme::pal().text_strong, 0.03));
+    text_in(painter, r, Align2::CENTER_CENTER, label, theme::ui(11.5), theme::with_opacity(theme::pal().text_2, 0.55));
+    tip(ui.interact(r, id, Sense::hover()), tooltip);
+    false
 }
 
 /// Uma mensagem no alto do corpo (carregando, erro, arquivo que não vira texto), com quebra de linha.
-fn note(painter: &Painter, body: Rect, text: &str, color: egui::Color32) {
+pub(super) fn note(painter: &Painter, body: Rect, text: &str, color: egui::Color32) {
     let g = painter.layout(text.to_owned(), theme::ui(12.5), color, (body.width() - 28.0).max(40.0));
     painter.galley(body.min + Vec2::splat(14.0), g, color);
+}
+
+// ---------------------------------------------------------------------------
+// Avisos e busca
+// ---------------------------------------------------------------------------
+
+/// Altura de uma faixa de aviso e da barra de busca.
+const NOTICE_H: f32 = 30.0;
+const FIND_H: f32 = 34.0;
+
+/// O que um botão de aviso pede.
+#[derive(Clone, Copy)]
+enum Fix {
+    KeepMine,
+    TakeDisk,
+    Dismiss,
+}
+
+/// Uma faixa de aviso no alto de `body` (que encolhe): o texto, na cor do tom, e os botões à direita. Devolve o botão clicado.
+fn notice(ui: &Ui, body: &mut Rect, tone: egui::Color32, text: &str, buttons: &[(&str, &str, Fix)], key: Id) -> Option<Fix> {
+    let r = Rect::from_min_size(body.min, Vec2::new(body.width(), NOTICE_H));
+    body.min.y += NOTICE_H;
+    let painter = ui.painter_at(r);
+    painter.rect_filled(r, 0.0, theme::with_alpha(tone, 0.10));
+    painter.rect_filled(Rect::from_min_max(Pos2::new(r.min.x, r.max.y - 1.0), r.max), 0.0, theme::pal().separator);
+    let mut right = r.max.x - 8.0;
+    let mut clicked = None;
+    for (n, (label, hint, fix)) in buttons.iter().enumerate().rev() {
+        let w = button_width(&painter, label, ButtonKind::Secondary);
+        let b = Rect::from_min_size(Pos2::new(right - w, r.center().y - 11.0), Vec2::new(w, 22.0));
+        right = b.min.x - 6.0;
+        if tip(button(ui, b, key.with(n), label, ButtonKind::Secondary), *hint).clicked() {
+            clicked = Some(*fix);
+        }
+    }
+    let text_r = Rect::from_min_max(Pos2::new(r.min.x + 14.0, r.min.y), Pos2::new(right - 6.0, r.max.y - 1.0));
+    let g = galley_trunc(&painter, text, theme::ui(12.0), theme::pal().text, text_r.width().max(10.0));
+    let shown = place(&painter, text_r, Align2::LEFT_CENTER, g, theme::pal().text);
+    painter.circle_filled(Pos2::new(shown.min.x - 8.0, r.center().y - 0.5), 3.0, tone);
+    tip(ui.interact(text_r, key.with("text"), Sense::hover()), text.to_owned());
+    clicked
+}
+
+/// Os avisos do arquivo aberto como código (e do que só abriu em leitura), do mais importante ao menos.
+fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
+    let p = theme::pal();
+    let key = Id::new(("doc-notice", tab.uid));
+    match &mut tab.state {
+        DocState::Source(src) => {
+            let fix = if src.external.is_some() {
+                notice(
+                    ui,
+                    body,
+                    p.warning,
+                    "O arquivo mudou no disco (um agente?) enquanto você editava.",
+                    &[
+                        ("Manter a minha", "Fica com o que você digitou; a próxima gravação põe por cima do que está no disco", Fix::KeepMine),
+                        ("Recarregar a do disco", "Joga fora o que você digitou e mostra o que está no disco", Fix::TakeDisk),
+                    ],
+                    key.with("external"),
+                )
+            } else if src.gone {
+                notice(ui, body, p.warning, "O arquivo foi apagado ou não abre mais. O que você editou continua aqui; Ctrl+S o grava de novo.", &[], key.with("gone"))
+            } else {
+                None
+            };
+            match fix {
+                Some(Fix::KeepMine) => src.keep_mine(),
+                Some(Fix::TakeDisk) => src.take_disk(),
+                _ => {}
+            }
+            if let Some(e) = src.save_error.clone() {
+                if let Some(Fix::Dismiss) = notice(ui, body, p.danger, &format!("Não consegui gravar: {e}"), &[("Fechar", "Esconde o erro", Fix::Dismiss)], key.with("error")) {
+                    src.save_error = None;
+                }
+            }
+            if let Some(why) = &src.locked {
+                notice(ui, body, p.text_2, why, &[], key.with("locked"));
+            }
+        }
+        DocState::Text(_) => {
+            let why = "Aberto só para leitura: o arquivo é grande ou tem linha comprida demais para o editor.";
+            notice(ui, body, p.text_2, why, &[], key.with("large"));
+        }
+        _ => {}
+    }
+}
+
+/// A barra de busca (Ctrl+F): o campo, "n de m", anterior, próxima e fechar. Enter vai para a próxima (Shift+Enter, a anterior); Esc fecha.
+fn find_bar(ui: &mut Ui, body: &mut Rect, uid: u64, find: &mut Find) {
+    let r = Rect::from_min_size(body.min, Vec2::new(body.width(), FIND_H));
+    body.min.y += FIND_H;
+    let p = theme::pal();
+    let painter = ui.painter_at(r);
+    painter.rect_filled(Rect::from_min_max(Pos2::new(r.min.x, r.max.y - 1.0), r.max), 0.0, p.separator);
+    let field = Rect::from_min_size(Pos2::new(r.min.x + 12.0, r.min.y + 5.0), Vec2::new(240.0f32.min(r.width() - 24.0), 24.0));
+    let id = Id::new(("doc-find", uid));
+    let focused = ui.ctx().memory(|m| m.has_focus(id));
+    frame(&painter, field, 6.0, p.recess, if focused { theme::accent() } else { p.separator });
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field.shrink2(Vec2::new(8.0, 3.0))));
+    let out = egui::TextEdit::singleline(&mut find.query)
+        .id(id)
+        .frame(egui::Frame::NONE)
+        .font(theme::ui(12.0))
+        .hint_text("Buscar no documento")
+        .text_color(p.text)
+        .desired_width(field.width() - 16.0)
+        .show(&mut child);
+    if std::mem::take(&mut find.focus) {
+        out.response.response.request_focus();
+    }
+    let (enter, shift, esc) = ui.input(|i| (i.key_pressed(Key::Enter), i.modifiers.shift, i.key_pressed(Key::Escape)));
+    if out.response.response.lost_focus() && enter {
+        find.step(shift);
+        out.response.response.request_focus();
+    } else if focused && esc {
+        find.close();
+        return;
+    }
+    let n = find.count();
+    let counter = match (find.query.is_empty(), n) {
+        (true, _) => String::new(),
+        (false, 0) => "Nenhum resultado".to_owned(),
+        (false, n) => format!("{} de {n}", find.current.min(n - 1) + 1),
+    };
+    let mut x = field.max.x + 10.0;
+    if !counter.is_empty() {
+        let w = text_w(&painter, &counter, theme::meta(10.5));
+        text_in(&painter, Rect::from_min_size(Pos2::new(x, r.min.y), Vec2::new(w, r.height() - 1.0)), Align2::LEFT_CENTER, &counter, theme::meta(10.5), p.text_2);
+        x += w + 10.0;
+    }
+    for (label, hint, act) in [("‹", "Ocorrência anterior (Shift+Enter)", 0), ("›", "Próxima ocorrência (Enter)", 1), ("Fechar", "Fecha a busca (Esc)", 2)] {
+        let w = if act == 2 { button_width(&painter, label, ButtonKind::Ghost) } else { 24.0 };
+        let b = Rect::from_min_size(Pos2::new(x, r.min.y + 5.0), Vec2::new(w, 24.0));
+        x += w + 4.0;
+        if x > r.max.x {
+            break;
+        }
+        if tip(button(ui, b, Id::new(("doc-find-btn", uid, act)), label, ButtonKind::Ghost), hint).clicked() {
+            match act {
+                0 => find.step(true),
+                1 => find.step(false),
+                _ => find.close(),
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A pergunta sobre edição não salva
+// ---------------------------------------------------------------------------
+
+/// O modal de "Salvar as alterações?": ao fechar uma aba com edição, ao recarregar sobre ela ou ao fechar o app.
+pub fn unsaved_modal(deck: &mut Deck, ctx: &egui::Context) {
+    let Some(asked) = deck.docs.confirm else { return };
+    let name_of = |uid: u64| deck.docs.get(uid).map_or_else(|| "o arquivo".to_owned(), |t| t.subtitle.clone());
+    let (title, detail, buttons): (String, String, Vec<(&str, Answer)>) = match asked {
+        Unsaved::Tab(uid) => (
+            format!("Salvar as alterações de {}?", name_of(uid)),
+            "Se não salvar, o que você digitou se perde.".to_owned(),
+            vec![("Salvar", Answer::Save), ("Não salvar", Answer::Discard), ("Cancelar", Answer::Cancel)],
+        ),
+        Unsaved::Revert(uid) => (
+            format!("Descartar as alterações de {}?", name_of(uid)),
+            "O arquivo volta a ser lido do disco; o que você digitou se perde.".to_owned(),
+            vec![("Descartar", Answer::Discard), ("Cancelar", Answer::Cancel)],
+        ),
+        Unsaved::Quit => {
+            let files: Vec<String> = deck.docs.unsaved().iter().map(|t| t.subtitle.clone()).collect();
+            let shown = files.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
+            let more = if files.len() > 4 { format!(" e mais {}", files.len() - 4) } else { String::new() };
+            (
+                "Há alterações não salvas".to_owned(),
+                format!("{shown}{more}. Se sair sem salvar, o que você digitou se perde."),
+                vec![("Salvar tudo e sair", Answer::Save), ("Sair sem salvar", Answer::Discard), ("Cancelar", Answer::Cancel)],
+            )
+        }
+    };
+    super::modal_backdrop(deck, ctx, "docs-unsaved-backdrop");
+    let p = theme::pal();
+    let w = 420.0;
+    let mut answer = None;
+    let screen = ctx.content_rect();
+    egui::Area::new(Id::new("docs-unsaved")).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.center().x - w / 2.0, screen.min.y + 120.0)).constrain(false).show(ctx, |ui| {
+        let g1 = ui.painter().layout(title.clone(), theme::ui_semibold(13.0), p.text_strong, w - 28.0);
+        let g2 = ui.painter().layout(detail.clone(), theme::ui(12.0), p.text_2, w - 28.0);
+        let btn_h = 28.0;
+        let h = 14.0 + g1.size().y + 6.0 + g2.size().y + 14.0 + btn_h + 14.0;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
+        super::shadow(ui.painter(), rect, 10, 8, 24, p.shadow);
+        frame(ui.painter(), rect, 10.0, p.popup, p.glass_border);
+        ui.painter().galley(Pos2::new(rect.min.x + 14.0, rect.min.y + 14.0), g1.clone(), p.text_strong);
+        ui.painter().galley(Pos2::new(rect.min.x + 14.0, rect.min.y + 14.0 + g1.size().y + 6.0), g2, p.text_2);
+        let mut right = rect.max.x - 14.0;
+        for (n, (label, which)) in buttons.iter().enumerate().rev() {
+            let kind = if *which == Answer::Save { ButtonKind::Primary } else { ButtonKind::Secondary };
+            let bw = button_width(ui.painter(), label, kind);
+            let b = Rect::from_min_size(Pos2::new(right - bw, rect.max.y - 14.0 - btn_h), Vec2::new(bw, btn_h));
+            right = b.min.x - 8.0;
+            let id = Id::new(("docs-unsaved-btn", n));
+            let resp = if *which == Answer::Discard { super::button_danger(ui, b, id, label) } else { button(ui, b, id, label, kind) };
+            if resp.clicked() {
+                answer = Some(*which);
+            }
+        }
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            answer = Some(Answer::Cancel);
+        }
+    });
+    if let Some(a) = answer {
+        deck.docs_answer(a);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Diff
 // ---------------------------------------------------------------------------
 
-fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, acts: &mut Vec<Act>) {
+fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, find: &mut Find, acts: &mut Vec<Act>, path: Option<&str>) {
     let id = Id::new(("doc-diff", uid));
+    if find.open {
+        let version = doc.diff.lines.len() as u64;
+        find.refresh(version, |q| (Vec::new(), diff_view::search(&doc.diff, q)));
+    }
+    let current = find.current_line();
+    let mut jump = doc.jump.take();
+    if std::mem::take(&mut find.jump) {
+        jump = current.or(jump);
+    }
+    let query = if find.open { find.query.as_str() } else { "" };
+    let opts = diff_view::View { path, query, found: &find.lines, current: current.filter(|_| find.open) };
     if doc.files.is_empty() {
-        let jump = doc.jump.take();
-        super::git::diff_lines_at(ui, body, &doc.diff, None, &mut Vec::new(), id, jump);
+        super::git::diff_lines_at(ui, body, &doc.diff, None, &mut Vec::new(), id, jump, opts);
         return;
     }
     let narrow = body.width() < NARROW_W;
@@ -378,8 +661,7 @@ fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, acts: &mut Ve
     };
     painter.rect_filled(sep, 0.0, theme::pal().separator);
     file_list(ui, list, uid, doc, acts);
-    let jump = doc.jump.take();
-    super::git::diff_lines_at(ui, view, &doc.diff, None, &mut Vec::new(), id, jump);
+    super::git::diff_lines_at(ui, view, &doc.diff, None, &mut Vec::new(), id, jump, opts);
 }
 
 /// A lista de arquivos do diff: letra do que mudou, nome e `+`/`−`. Clicar rola o diff até o arquivo.
@@ -442,44 +724,6 @@ fn file_row(p: &Painter, r: Rect, file: &DiffFile, selected: bool, hovered: bool
     let color = if selected { pal.text_strong } else { pal.text };
     let g = galley_trunc(p, name, theme::ui(11.5), color, (right - name_x - 6.0).max(20.0));
     place(p, Rect::from_min_max(Pos2::new(name_x, r.min.y), Pos2::new(right, r.max.y)), Align2::LEFT_CENTER, g, color);
-}
-
-// ---------------------------------------------------------------------------
-// Arquivo de texto
-// ---------------------------------------------------------------------------
-
-/// O arquivo em monoespaçado, com número de linha, rolagem nos dois sentidos e só para leitura.
-fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc) {
-    let font = theme::mono(TEXT_FONT);
-    let cell = ui.fonts_mut(|f| f.glyph_width(&font, 'M')).max(1.0);
-    let digits = doc.lines.len().max(1).to_string().len().max(3);
-    let gutter = cell * digits as f32 + 22.0;
-    let content_w = (gutter + doc.max_chars as f32 * cell + 24.0).max(body.width());
-    if doc.lines.is_empty() {
-        note(&ui.painter_at(body), body, "O arquivo está vazio.", theme::pal().text_2);
-        return;
-    }
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
-    child.set_clip_rect(body);
-    egui::ScrollArea::both().id_salt(("doc-text", uid)).auto_shrink([false, false]).show_rows(
-        &mut child,
-        TEXT_ROW_H,
-        doc.lines.len(),
-        |ui, range| {
-            for n in range {
-                let (r, _) = ui.allocate_exact_size(Vec2::new(content_w, TEXT_ROW_H), Sense::hover());
-                let p = ui.painter();
-                p.text(
-                    Pos2::new(r.min.x + gutter - 12.0, r.center().y),
-                    Align2::RIGHT_CENTER,
-                    (n + 1).to_string(),
-                    font.clone(),
-                    theme::with_opacity(theme::pal().text_2, 0.7),
-                );
-                p.text(Pos2::new(r.min.x + gutter, r.center().y), Align2::LEFT_CENTER, &doc.lines[n], font.clone(), theme::pal().text_2);
-            }
-        },
-    );
 }
 
 // ---------------------------------------------------------------------------

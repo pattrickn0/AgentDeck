@@ -66,6 +66,8 @@ pub enum UiMsg {
     Tasks(u64, crate::tasks_ui::TaskReply),
     /// Um documento do modo Documentos terminou de carregar (uid do documento).
     Doc(u64, crate::docs::Loaded),
+    /// A gravação de um arquivo editado terminou: o documento, o texto gravado e o resultado.
+    DocSaved(u64, String, Result<(), String>),
 }
 
 /// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
@@ -86,6 +88,10 @@ pub enum Action {
     CopyText(String),
     /// Ctrl+Shift+D: alterna o centro entre Agentes e Documentos.
     ToggleCenter,
+    /// Ctrl+S no modo Documentos: grava o arquivo em edição.
+    SaveDoc,
+    /// Ctrl+F no modo Documentos: abre a busca do documento.
+    FindInDoc,
 }
 
 /// Mensagem de outro agente (ou da UI) esperando para ser digitada no terminal da aba.
@@ -675,6 +681,16 @@ impl Deck {
             }
             Action::ToggleSidebar => self.toggle_sidebar(),
             Action::ToggleCenter => self.docs.toggle(&self.active_project),
+            Action::SaveDoc => {
+                if let Some(uid) = self.docs.current_uid(&self.active_project) {
+                    self.docs_save(uid, crate::docs::After::Nothing);
+                }
+            }
+            Action::FindInDoc => {
+                if let Some(uid) = self.docs.current_uid(&self.active_project) {
+                    self.docs_find(uid);
+                }
+            }
             Action::CycleTab { back } if self.docs.view == CenterView::Docs => self.docs.cycle(&self.active_project, back),
             Action::CycleTab { back } => {
                 // Só entre as abas da janela focada.
@@ -827,6 +843,7 @@ impl Deck {
             UiMsg::Git(generation, reply) => self.on_git(generation, reply),
             UiMsg::Tasks(generation, reply) => self.on_tasks(generation, reply),
             UiMsg::Doc(uid, loaded) => self.on_doc_loaded(uid, loaded),
+            UiMsg::DocSaved(uid, saved, result) => self.on_doc_saved(uid, saved, result),
         }
     }
 
@@ -1835,6 +1852,13 @@ impl Deck {
             if mods.shift_key() && lower == "d" {
                 if !ev.repeat {
                     self.push_action(Action::ToggleCenter);
+                }
+                return true;
+            }
+            // Lendo documentos: Ctrl+S grava o que se edita e Ctrl+F abre a busca (o terminal está escondido).
+            if !mods.shift_key() && !term_visible && matches!(lower.as_str(), "s" | "f") {
+                if !ev.repeat {
+                    self.push_action(if lower == "s" { Action::SaveDoc } else { Action::FindInDoc });
                 }
                 return true;
             }

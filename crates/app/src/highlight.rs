@@ -817,6 +817,36 @@ pub fn pieces(text: &str, lines: &[Vec<Span>], matches: &[Range<usize>], current
     out
 }
 
+/// Impressão digital de um texto: a chave do que se guarda por versão dele (realce, galley).
+pub fn text_hash(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish()
+}
+
+/// O realce de um texto, guardado por impressão digital e linguagem: o editor pergunta a cada quadro, e o arquivo só é
+/// percorrido de novo quando o texto muda (digitar) e não a cada repintura.
+#[derive(Debug, Clone, Default)]
+pub struct Cache {
+    key: Option<(u64, Lang)>,
+    lines: Vec<Vec<Span>>,
+    /// Quantas vezes o texto foi percorrido (para o teste).
+    pub runs: usize,
+}
+
+impl Cache {
+    /// As faixas de cada linha de `text` (cuja impressão digital é `hash`).
+    pub fn lines(&mut self, lang: Lang, text: &str, hash: u64) -> &[Vec<Span>] {
+        if self.key != Some((hash, lang)) {
+            self.lines = highlight_lines(lang, text);
+            self.key = Some((hash, lang));
+            self.runs += 1;
+        }
+        &self.lines
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1021,5 +1051,22 @@ mod tests {
         // Sem busca nem realce, é um pedaço só.
         assert_eq!(pieces("abc", &[], &[], None).len(), 1);
         assert!(pieces("", &[], &[], None).is_empty());
+    }
+
+    #[test]
+    fn the_highlight_is_computed_once_per_version_of_the_text() {
+        let mut cache = Cache::default();
+        let text = "fn a() {}\n// fim";
+        let hash = text_hash(text);
+        let first = cache.lines(Lang::Rust, text, hash).to_vec();
+        assert_eq!(cache.lines(Lang::Rust, text, hash), first.as_slice());
+        assert_eq!(cache.runs, 1, "o mesmo texto não é percorrido de novo");
+        let edited = "fn b() {}\n// fim";
+        cache.lines(Lang::Rust, edited, text_hash(edited));
+        assert_eq!(cache.runs, 2);
+        // Outra linguagem para o mesmo texto também refaz.
+        cache.lines(Lang::Python, edited, text_hash(edited));
+        assert_eq!(cache.runs, 3);
+        assert_ne!(text_hash("a"), text_hash("b"));
     }
 }

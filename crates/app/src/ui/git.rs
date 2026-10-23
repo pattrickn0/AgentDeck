@@ -688,7 +688,7 @@ pub(super) struct HunkCtx {
 
 pub(super) fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<HunkCtx>, acts: &mut Vec<Act>) {
     let id = ui.id().with(("git-diff", area.min.x as i32, area.min.y as i32));
-    diff_lines_at(ui, area, diff, hunks, acts, id, None);
+    diff_lines_at(ui, area, diff, hunks, acts, id, None, super::diff_view::View::default());
 }
 
 /// O desenho do diff, com a identidade da rolagem escolhida por quem chama (cada documento do modo
@@ -701,6 +701,7 @@ pub(super) fn diff_lines_at(
     acts: &mut Vec<Act>,
     id: Id,
     jump: Option<usize>,
+    view: super::diff_view::View,
 ) {
     let mut notes: Vec<&str> = Vec::new();
     if diff.binary {
@@ -723,7 +724,7 @@ pub(super) fn diff_lines_at(
     let rest = Rect::from_min_max(Pos2::new(area.min.x, child.cursor().min.y), area.max);
     // O texto do cabeçalho de cada trecho quebra antes da faixa dos botões.
     let reserve = hunks.map_or(0.0, |h| hunk_strip_w(child.painter(), h.staged) + 6.0);
-    super::diff_view::draw(&mut child, rest, diff, id, jump, reserve, |ui, row, n| {
+    super::diff_view::draw(&mut child, rest, diff, id, jump, reserve, view, |ui, row, n| {
         if let Some(h) = hunks {
             hunk_buttons(ui, area, row, n, h, acts);
         }

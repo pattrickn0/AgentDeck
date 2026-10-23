@@ -7,10 +7,13 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::sync::Arc;
 
-use egui::{Align2, Id, Pos2, Rect, Ui, Vec2};
+use egui::text::{CCursor, LayoutJob};
+use egui::{Align2, Id, Pos2, Rect, TextFormat, Ui, Vec2};
 
 use agentdeck_core::git::{DiffKind, DiffLine, GitDiff};
 
+use super::select::{self, Pos, Selected};
+use crate::highlight::{self, Carry, Lang, Mark, Span};
 use crate::theme;
 
 /// Altura de uma linha de texto do diff.
@@ -24,6 +27,18 @@ const FILE_GAP: f32 = 10.0;
 const RIGHT_PAD: f32 = 14.0;
 /// Tabulação vira espaços.
 const TAB: &str = "    ";
+
+/// O que o diff sabe além das linhas: o arquivo (para o realce, num diff sem `diff --git`, como o de um arquivo não
+/// rastreado) e a busca do modo Documentos.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct View<'a> {
+    /// O caminho do arquivo do diff, se é um só.
+    pub path: Option<&'a str>,
+    /// O que se busca (vazio = nada), as linhas que o têm (em ordem) e a linha da ocorrência atual.
+    pub query: &'a str,
+    pub found: &'a [usize],
+    pub current: Option<usize>,
+}
 
 /// Como uma linha do diff aparece na tela.
 #[derive(Debug, Clone, PartialEq)]
@@ -166,6 +181,114 @@ fn content_hash(diff: &GitDiff) -> u64 {
     h.finish()
 }
 
+/// A linguagem de um diff de um arquivo só, pelo caminho do cabeçalho (`b/…`, ou o novo nome numa renomeação).
+fn lang_of_header(meta: &str) -> Option<Lang> {
+    let title = file_title(meta)?;
+    let path = title.rsplit_once(" → ").map_or(title.as_str(), |(_, new)| new);
+    Some(Lang::from_path(path))
+}
+
+/// O realce de cada linha do diff, sobre o texto que se pinta (`body_of`: sem o marcador, tabulação em espaços). Cada
+/// lado do diff (o antigo: contexto e `−`; o novo: contexto e `+`) leva o seu estado de uma linha para a seguinte
+/// (comentário de bloco, texto de várias linhas), zerado a cada trecho e a cada arquivo.
+fn diff_spans(diff: &GitDiff, marked: bool, hint: Option<&str>) -> Vec<Vec<Span>> {
+    let mut lang = hint.map_or(Lang::Plain, Lang::from_path);
+    let (mut old, mut new) = (Carry::default(), Carry::default());
+    diff.lines
+        .iter()
+        .map(|line| {
+            if let Some(found) = (line.kind == DiffKind::Meta).then(|| lang_of_header(&line.text)).flatten() {
+                (lang, old, new) = (found, Carry::default(), Carry::default());
+            }
+            match line.kind {
+                DiffKind::Hunk => {
+                    (old, new) = (Carry::default(), Carry::default());
+                    Vec::new()
+                }
+                DiffKind::Meta => Vec::new(),
+                DiffKind::Add => highlight::highlight_line(lang, &body_of(line, marked), &mut new),
+                DiffKind::Del => highlight::highlight_line(lang, &body_of(line, marked), &mut old),
+                DiffKind::Context => {
+                    let spans = highlight::highlight_line(lang, &body_of(line, marked), &mut new);
+                    old = new;
+                    spans
+                }
+            }
+        })
+        .collect()
+}
+
+/// Esta linha do diff se pinta como texto (e a busca olha)? Não, se é um cabeçalho técnico ou o título de um arquivo.
+fn is_text_line(line: &DiffLine) -> bool {
+    line.kind != DiffKind::Meta || (file_title(&line.text).is_none() && !["index ", "--- ", "+++ "].iter().any(|p| line.text.starts_with(p)))
+}
+
+/// As linhas do diff com `query` no texto que se vê (sem diferença de maiúsculas e minúsculas ASCII).
+pub fn search(diff: &GitDiff, query: &str) -> Vec<usize> {
+    let marked = diff.lines.iter().any(|l| l.kind == DiffKind::Hunk);
+    let bodies: Vec<String> = diff.lines.iter().map(|l| if is_text_line(l) { body_of(l, marked) } else { String::new() }).collect();
+    highlight::find_lines(bodies.iter().map(String::as_str), query)
+}
+
+/// O byte de `orig` (o texto da linha com tabulações) que corresponde ao byte `at` do texto já com elas trocadas por
+/// espaços; no meio de uma tabulação, o começo dela.
+fn unexpanded(orig: &str, at: usize) -> usize {
+    let mut seen = 0;
+    for (i, c) in orig.char_indices() {
+        let w = if c == '\t' { TAB.len() } else { c.len_utf8() };
+        if seen + w > at {
+            return i;
+        }
+        seen += w;
+    }
+    orig.len()
+}
+
+/// O texto de uma seleção, para copiar: só o código (sem número de linha nem `+`/`−`), com as tabulações de volta.
+fn selection_text(diff: &GitDiff, marked: bool, sel: Selected) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for n in sel.start.line..=sel.end.line.min(diff.lines.len().saturating_sub(1)) {
+        let line = &diff.lines[n];
+        if !is_text_line(line) {
+            continue;
+        }
+        let orig = split_marker(line, marked).1;
+        let len = body_of(line, marked).len();
+        let Some(r) = sel.on_line(n, len) else { continue };
+        out.push(orig[unexpanded(orig, r.start)..unexpanded(orig, r.end)].to_owned());
+    }
+    out.join("\n")
+}
+
+/// O trecho da linha de texto `body` que a peça `piece` mostra, com o realce de `spans` e as marcas da busca, numa só
+/// peça de texto.
+pub(super) fn piece_job(
+    body: &str,
+    piece: &Range<usize>,
+    spans: &[Span],
+    found: &[Range<usize>],
+    current: bool,
+    plain: egui::Color32,
+    font: &egui::FontId,
+) -> LayoutJob {
+    let text = body.get(piece.clone()).unwrap_or("");
+    let shift = |r: &Range<usize>| r.start.max(piece.start) - piece.start..r.end.min(piece.end).max(piece.start) - piece.start;
+    let local: Vec<Span> = spans.iter().filter(|s| s.range.end > piece.start && s.range.start < piece.end).map(|s| Span { range: shift(&s.range), tok: s.tok }).collect();
+    let marks: Vec<Range<usize>> = found.iter().filter(|r| r.end > piece.start && r.start < piece.end).map(shift).collect();
+    let pal = theme::pal();
+    let mut job = LayoutJob::default();
+    for p in highlight::pieces(text, &[local], &marks, None) {
+        let background = match p.mark {
+            Mark::None => egui::Color32::TRANSPARENT,
+            Mark::Found => theme::with_alpha(pal.warning, 0.30),
+            Mark::Current => theme::with_alpha(pal.warning, 0.65),
+        };
+        let background = if current && p.mark == Mark::Found { theme::with_alpha(pal.warning, 0.65) } else { background };
+        job.append(&text[p.range], 0.0, TextFormat { font_id: font.clone(), color: pal.syn(p.tok, plain), background, ..Default::default() });
+    }
+    job
+}
+
 /// Desenha `diff` em `area`, rolando só na vertical. `id` identifica a rolagem; `jump`, a linha do diff para onde
 /// rolar neste quadro. `hunk_reserve` é a largura que os botões ocupam à direita do cabeçalho de cada trecho
 /// (o texto dele quebra antes); `on_hunk(ui, linha, n)` os desenha por cima do cabeçalho do trecho `n`.
@@ -176,6 +299,7 @@ pub fn draw(
     id: Id,
     jump: Option<usize>,
     hunk_reserve: f32,
+    view_opts: View,
     mut on_hunk: impl FnMut(&mut Ui, Rect, usize),
 ) {
     let font = theme::mono(FONT);
@@ -204,6 +328,20 @@ pub fn draw(
         }
     };
 
+    // O realce só muda com o conteúdo (não com a largura): guardado à parte.
+    let spans_key = id.with("diff-spans");
+    let spans_print = (fingerprint.0, view_opts.path.map(str::to_owned));
+    let spans = match ui.ctx().data(|d| d.get_temp::<((u64, Option<String>), Arc<Vec<Vec<Span>>>)>(spans_key)) {
+        Some((f, spans)) if f == spans_print => spans,
+        _ => {
+            let spans = Arc::new(diff_spans(diff, marked, view_opts.path));
+            ui.ctx().data_mut(|d| d.insert_temp(spans_key, (spans_print, spans.clone())));
+            spans
+        }
+    };
+    let found = view_opts.found;
+    let sel_id = id.with("diff-sel");
+
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area);
     let mut scroll = egui::ScrollArea::vertical().id_salt(id).auto_shrink([false, false]);
@@ -215,9 +353,10 @@ pub fn draw(
         ui.set_min_height(total + 8.0);
         let origin = ui.max_rect().min;
         let width = ui.max_rect().width();
+        let pal = theme::pal();
+        let sel = select_text(ui, sel_id, area, origin, diff, &lay, marked, gutter, cell, &font);
         let first = lay.tops.partition_point(|&t| t <= view.min.y).saturating_sub(1);
         let mut hunk_no = diff.lines[..first].iter().filter(|l| l.kind == DiffKind::Hunk).count();
-        let pal = theme::pal();
         let num_color = theme::with_opacity(pal.text_2, 0.7);
         for i in first..diff.lines.len() {
             let top = lay.tops[i];
@@ -263,9 +402,23 @@ pub fn draw(
                         p.text(Pos2::new(tx, y0), Align2::LEFT_CENTER, marker, font.clone(), fg);
                     }
                     let body = body_of(line, marked);
+                    let line_spans = spans.get(i).map_or(&[][..], Vec::as_slice);
+                    let hits = if found.binary_search(&i).is_ok() { highlight::find_all(&body, view_opts.query) } else { Vec::new() };
+                    let on_current = view_opts.current == Some(i);
+                    let selected = sel.and_then(|s| s.on_line(i, body.len())).filter(|r| !r.is_empty());
                     for (k, range) in rows.iter().enumerate() {
-                        let piece = body.get(range.clone()).unwrap_or("");
-                        p.text(Pos2::new(tx + mw, y0 + k as f32 * ROW_H), Align2::LEFT_CENTER, piece, font.clone(), fg);
+                        let at = Pos2::new(tx + mw, r.min.y + k as f32 * ROW_H);
+                        let job = piece_job(&body, range, line_spans, &hits, on_current, fg, &font);
+                        let galley = p.layout_job(job);
+                        if let Some(sr) = selected.as_ref().filter(|sr| sr.end > range.start && sr.start < range.end) {
+                            let piece = body.get(range.clone()).unwrap_or("");
+                            let a = char_index(piece, sr.start.max(range.start) - range.start);
+                            let z = char_index(piece, sr.end.min(range.end) - range.start);
+                            let (xa, xz) = (galley.pos_from_cursor(CCursor::new(a)).min.x, galley.pos_from_cursor(CCursor::new(z)).min.x);
+                            let band = Rect::from_min_max(Pos2::new(at.x + xa, at.y), Pos2::new(at.x + xz.max(xa + 2.0), at.y + ROW_H));
+                            p.rect_filled(band, 0.0, ui.visuals().selection.bg_fill);
+                        }
+                        p.galley(Pos2::new(at.x, at.y + (ROW_H - galley.size().y) / 2.0), galley, fg);
                     }
                     if line.kind == DiffKind::Hunk {
                         on_hunk(ui, Rect::from_min_size(r.min, Vec2::new(width, ROW_H)), hunk_no);
@@ -275,6 +428,56 @@ pub fn draw(
             }
         }
     });
+}
+
+/// Quantos caracteres há antes do byte `byte` de `text` (o `CCursor` do egui conta caracteres).
+fn char_index(text: &str, byte: usize) -> usize {
+    text.get(..byte).map_or_else(|| text.chars().count(), |t| t.chars().count())
+}
+
+/// O byte do caractere de número `chars` de `text`.
+fn byte_index(text: &str, chars: usize) -> usize {
+    text.char_indices().nth(chars).map_or(text.len(), |(i, _)| i)
+}
+
+/// A seleção de texto do diff: arrastar, Ctrl+A e Ctrl+C (ver `select.rs`). Posição = linha do diff e byte do texto que se vê.
+#[allow(clippy::too_many_arguments)]
+fn select_text(
+    ui: &mut Ui,
+    id: Id,
+    area: Rect,
+    origin: Pos2,
+    diff: &GitDiff,
+    lay: &Layout,
+    marked: bool,
+    gutter: f32,
+    cell: f32,
+    font: &egui::FontId,
+) -> Option<Selected> {
+    let painter = ui.painter().clone();
+    let n = diff.lines.len();
+    let end = diff
+        .lines
+        .iter()
+        .rposition(is_text_line)
+        .map_or(Pos::default(), |line| Pos { line, col: body_of(&diff.lines[line], marked).len() });
+    let hit = |p: Pos2| -> Pos {
+        if n == 0 {
+            return Pos::default();
+        }
+        let y = p.y - origin.y;
+        let i = lay.tops.partition_point(|&t| t <= y).saturating_sub(1).min(n - 1);
+        let Shape::Rows(rows) = &lay.shapes[i] else { return Pos { line: i, col: 0 } };
+        let k = (((y - lay.tops[i]) / ROW_H).max(0.0) as usize).min(rows.len() - 1);
+        let line = &diff.lines[i];
+        let body = body_of(line, marked);
+        let piece = body.get(rows[k].clone()).unwrap_or("");
+        let mw = if split_marker(line, marked).0.is_empty() { 0.0 } else { cell };
+        let g = painter.layout_no_wrap(piece.to_owned(), font.clone(), egui::Color32::WHITE);
+        let c = g.cursor_from_pos(Vec2::new((p.x - (origin.x + gutter + mw)).max(0.0), 0.0)).index;
+        Pos { line: i, col: rows[k].start + byte_index(piece, c.into()) }
+    };
+    select::drive(ui, id, area, end, hit, |sel| selection_text(diff, marked, sel))
 }
 
 #[cfg(test)]
