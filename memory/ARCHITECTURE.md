@@ -44,6 +44,27 @@ própria aba**), `AGENTDECK_AGENT` (nome do agente da aba), `AGENTDECK_DEPTH` (p
 pasta dos executáveis no início do `PATH`. Nenhuma outra `AGENTDECK_*` do ambiente do app passa para os
 agentes (exceto `AGENTDECK_ASK_WAIT`, configuração do usuário).
 
+**Instruções do AgentDeck em toda aba.** O texto (`Registry::bridge_instructions`, `agents.rs`) é a "memória geral",
+igual para todos: como falar com outro agente, a regra de **não usar subagentes internos do CLI** (Task/Agent tool,
+sub-agents) a menos que o usuário peça, e a memória do projeto (`memory/aprendizados/`, o formato do arquivo e o
+`--learn`, para valer também num projeto que começa sem memória). Chega a cada CLI pelo canal dele, **sem depender do
+`AGENTS.md` do usuário** (`spawn_spec_for`, `instruction_args`):
+
+| CLI | canal |
+|---|---|
+| Claude | `--append-system-prompt` (texto com o nome e o cargo da instância) |
+| Codex | `-c developer_instructions=<TOML>` (num shim `.cmd` as aspas não sobrevivem: o texto vai cru, que o Codex aceita como texto) |
+| OpenCode | `instructions: ["dados/agentdeck-instructions.md"]` em `OPENCODE_CONFIG_CONTENT`, junto com o modelo; só o servidor próprio da aba (`--standalone`, agora sempre) lê a variável (`models::opencode_tui`) |
+| Aider | `--read dados/agentdeck-instructions.md` |
+| Open Interpreter | `--custom_instructions <texto>` |
+| Antigravity, Goose, Copilot | só leem o `AGENTS.md` da pasta: o app o **cria só com o bloco dele** se a pasta não tem um (`Core::ensure_agents_file`, `workspace::ensure_agent_context(.., create = true)`), avisa na Conversa e não o toca se já existe |
+| Amazon Q, Terminal | sem canal (o Q lê `.amazonq/rules`, que o app não escreve) |
+
+O arquivo `dados/agentdeck-instructions.md` e o bloco do `AGENTS.md` levam o texto genérico (`bridge_instructions(None)`):
+nome e cargo vêm de `AGENTDECK_AGENT`/`AGENTDECK_ROLE`, e a lista de agentes instalados fica de fora para o arquivo não
+mudar de máquina para máquina. Ver [aprendizados/instrucoes-por-cli.md](aprendizados/instrucoes-por-cli.md). A execução
+headless (`ask-agent <agente>` sem aba) só leva as instruções no Claude (como antes).
+
 **Identidade pelo token.** Cada processo de agente tem um token próprio: o da aba vale enquanto a instância
 existir (`Core::tab_token`); o de uma execução headless, só durante ela (`Core::headless_token`). A ponte
 descobre **quem** pergunta pelo token, e o campo `from` do corpo é ignorado. Assim uma aba não consegue se

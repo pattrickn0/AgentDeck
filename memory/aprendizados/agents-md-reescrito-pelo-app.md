@@ -4,8 +4,9 @@ resumo: O app mantém um bloco no AGENTS.md; a mesclagem o ignora na checagem de
 touches: [AGENTS.md, crates/core/src/workspace.rs, crates/core/src/tasks.rs]
 ---
 O app mantém um bloco marcado no `AGENTS.md` do workspace com as instruções da ponte (o Antigravity não tem flag
-para isso). Nunca cria o arquivo na pasta do usuário: só atualiza um que já exista (`workspace::ensure_agent_context`),
-gravando ao lado e trocando, e mantém CRLF.
+para isso). Só atualiza um arquivo que já exista (`workspace::ensure_agent_context`), gravando ao lado e trocando, e
+mantém CRLF. A única exceção é criar um só com o bloco para o CLI que não tem outro canal (`create = true`; ver
+`instrucoes-por-cli.md`); a pasta pessoal do usuário nunca recebe o arquivo.
 
 **Por quê:** o arquivo muda sozinho e aparece como alteração no repositório principal, e `git merge` recusa mesclar
 sobre um arquivo alterado que a branch também altera ("commit your changes or stash them").
