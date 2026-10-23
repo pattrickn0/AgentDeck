@@ -21,7 +21,6 @@ Combinado em 2026-10-21, nesta ordem.
 - [ ] **Revisão do fluxo (t10, 2026-10-21): o que sobrou.** Os demais achados saíram na `t18` (ver [historico.md](historico.md)); ficam:
   - **Pasta da worktree que não sai ao validar.** Agora a tarefa fica em `Validating` e dá para tentar de novo, mas não há como ver qual processo segura a pasta; só a mensagem do git (`remove_task_worktree`, `tasks.rs:1439`). Visto em uso real na `t14` (2026-10-21): cinco tentativas de validar falharam com "a pasta ficou" antes de a pasta sair. Um teste desse caso não é possível sem simular o bloqueio do Windows.
   - **Mensagens ao agente não citam a validação.** `start_message` não conta ao agente que, depois de mesclada, a tarefa ainda pode voltar reprovada; hoje ele só descobre quando `reject_message` chega. Conferir no uso real se faz falta.
-- [ ] **Definir o esforço** (pedido do usuário, 2026-10-20). O formulário escolhe só o modelo. Ter um campo de esforço (baixo/médio/alto) que cada CLI traduz do seu jeito: no Claude, `--effort`; no Antigravity o esforço já vem no nome do modelo (`gemini-4-argon-low|medium|high`); no OpenCode é a variante (`modelo#variante`), que hoje só vale no headless: a aba interativa recebe só o modelo (`models::opencode_tui` descarta o `#`). Mostrar o esforço no cartão da tarefa.
 - [ ] **Seletor de modelos só com os que o usuário pode usar** (filtro por acesso; t14, 2026-10-21). A lista vem do `agy models` / `opencode models`, que mostram o que o CLI conhece, não o que o plano permite: modelos de provedores sem plano ativo (ex.: `opencode-go/…`) aparecem iguais aos que o usuário realmente pode usar. `ask-agent --models` herda o problema: só marca "(grátis)" pelo sufixo `-free` e não confirma acesso. Quando o seletor da Mesa passar a filtrar por acesso, `models::AgentModels`/`Core::models_inventory` devem usar o mesmo filtro (um único ponto). O Codex não tem lista (aparece como "não lista os modelos") e os demais CLIs (aider, goose…) saem como "sem escolha de modelo".
 
 ### b) Modo Documentos, fase 2
@@ -60,7 +59,7 @@ O que sobrou da mesa está no bloco "Próximo", item a).
 ## Modelos
 
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
-- O esforço e o filtro de modelos com acesso estão no bloco "Próximo", item a).
+- O filtro de modelos com acesso está no bloco "Próximo", item a).
 
 ## Memória (fase 2)
 

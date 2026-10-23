@@ -388,7 +388,6 @@ pub fn section_label(painter: &Painter, rect: Rect, text: &str) -> Rect {
 /// Controle segmentado ("Abas | Dividida | Destaque"): trilho `recess` (cantos 7), segmentos de
 /// cantos 5. O ativo leva a cor de destaque com texto `on_accent` (`accent = true`) ou o fundo
 /// `selected` com texto `text_strong` (`accent = false`). Devolve o índice clicado, se houve.
-#[allow(dead_code)] // Para a parte 2 (barra lateral e centro).
 pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, accent: bool) -> Option<usize> {
     let painter = ui.painter();
     let p = theme::pal();

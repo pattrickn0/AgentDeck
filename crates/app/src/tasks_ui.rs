@@ -8,7 +8,8 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use agentdeck_core::{models, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
+use agentdeck_core::models::{self, Effort};
+use agentdeck_core::{Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 
 use crate::deck::{AttachTarget, Deck, UiMsg};
 
@@ -306,6 +307,20 @@ pub fn model_text(task: &Task) -> Option<&str> {
     task.model.as_deref().map(models::short_model).filter(|m| !m.is_empty())
 }
 
+/// Esforço para mostrar ao lado do modelo ("alto"); vazio no padrão. No Antigravity o esforço já aparece no
+/// nome do modelo (`…-high`), então não se repete.
+pub fn effort_text(task: &Task) -> Option<&'static str> {
+    let effort = task.effort?;
+    let in_name = task.model.as_deref().is_some_and(|m| m.ends_with(&format!("-{}", effort.as_str())));
+    (!in_name).then(|| effort.label())
+}
+
+/// "sonnet · alto", "alto", "sonnet" ou nada: o que acompanha o agente no cartão e no detalhe da tarefa.
+pub fn model_effort_text(task: &Task) -> Option<String> {
+    let parts: Vec<&str> = [model_text(task), effort_text(task)].into_iter().flatten().collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
 /// Botões do detalhe de uma tarefa. A ordem é a da tela (o primeiro botão é a ação principal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskAct {
@@ -521,6 +536,8 @@ pub struct NewForm {
     pub kind: String,
     /// `None` = "Padrão".
     pub model: Option<String>,
+    /// `None` = "Padrão" (nada vai ao CLI). Só vale onde `models::effort_unavailable` não objeta.
+    pub effort: Option<Effort>,
     /// Provedor do passo do menu de modelo (`opencode`): `None` = a lista de provedores aparece
     /// primeiro. Só vale enquanto o menu está aberto (o OpenCode mistura vários provedores).
     pub provider: Option<String>,
@@ -542,6 +559,7 @@ impl Default for NewForm {
             attachments: Vec::new(),
             kind: String::new(),
             model: None,
+            effort: None,
             provider: None,
             base: String::new(),
             start_now: true,
@@ -738,6 +756,7 @@ impl Deck {
                 choices.first().cloned().unwrap_or_else(|| "claude".into())
             };
             form.model = None;
+            form.effort = None;
         }
         if form.base.trim().is_empty() {
             form.base = self.git.status().and_then(|st| st.branch.clone()).unwrap_or_default();
@@ -749,10 +768,11 @@ impl Deck {
         self.tasks.notice = None;
     }
 
-    /// Escolheu outro agente no formulário: o modelo volta ao padrão.
+    /// Escolheu outro agente no formulário: o modelo e o esforço voltam ao padrão.
     pub fn tasks_form_set_kind(&mut self, kind: String) {
         if self.tasks.form.kind != kind {
             self.tasks.form.model = None;
+            self.tasks.form.effort = None;
             self.tasks.form.kind = kind.clone();
         }
         self.tasks.form.menu = None;
@@ -789,6 +809,8 @@ impl Deck {
             brief: crate::util::append_brief_attachments(&f.brief, &f.attachments),
             kind: f.kind.clone(),
             model: f.model.clone(),
+            // O esforço escolhido antes de trocar de modelo pode já não valer (Antigravity sem versões por esforço).
+            effort: f.effort.filter(|_| models::effort_unavailable(&f.kind, f.model.as_deref()).is_none()),
             base: Some(f.base.trim().to_owned()).filter(|b| !b.is_empty()),
             creator: None,
         };
@@ -988,6 +1010,7 @@ pub fn demo_tasks() -> Vec<Task> {
             ev(90, "brief entregue ao agente"),
             ev(6, "relatório recebido; em revisão"),
         ],
+        effort: Some(Effort::High),
         ..base("t4", "Aba Tarefas na barra direita", TaskStatus::Review, "claude", Some("claude-opus-4-5"))
     };
     let review2 = Task {
@@ -997,12 +1020,14 @@ pub fn demo_tasks() -> Vec<Task> {
         report: Some("Corrigi o vazamento de handle no PTY.".into()),
         diff_stat: Some(" crates/app/src/terminal/mod.rs | 6 +++---\n 1 file changed, 3 insertions(+), 3 deletions(-)\n".into()),
         events: vec![ev(150, "relatório recebido; em revisão")],
-        ..base("t5", "Corrigir vazamento de handle ao fechar a aba", TaskStatus::Review, "antigravity", Some("gemini-3-pro"))
+        effort: Some(Effort::Low),
+        ..base("t5", "Corrigir vazamento de handle ao fechar a aba", TaskStatus::Review, "antigravity", Some("gemini-4-argon-low"))
     };
     let running = Task {
         created_ms: now - 25 * min,
         started_ms: Some(now - 24 * min),
         events: vec![ev(25, "criada"), ev(24, "iniciada: worktree … na branch tarefa/t6")],
+        effort: Some(Effort::Medium),
         ..base("t6", "Documentar as rotas /tasks da ponte", TaskStatus::Running, "claude", Some("sonnet"))
     };
     let draft = Task {
@@ -1232,6 +1257,23 @@ mod tests {
         assert_eq!(status_age(&t, now), "mesclada há 5 min");
         t.status = TaskStatus::Merged;
         assert_eq!(status_age(&t, now), "concluída há 5 min");
+    }
+
+    #[test]
+    fn effort_is_shown_next_to_the_model_unless_the_model_name_has_it() {
+        let mut t = Task::default();
+        assert_eq!((effort_text(&t), model_effort_text(&t)), (None, None));
+        t.model = Some("opencode/glm-5.3".into());
+        assert_eq!(model_effort_text(&t).as_deref(), Some("glm-5.3"));
+        t.model = Some("sonnet".into());
+        t.effort = Some(Effort::High);
+        assert_eq!(model_effort_text(&t).as_deref(), Some("sonnet · alto"));
+        t.model = None;
+        assert_eq!(model_effort_text(&t).as_deref(), Some("alto"));
+        // Antigravity: o esforço já está no nome do modelo.
+        t.model = Some("gemini-4-argon-medium".into());
+        t.effort = Some(Effort::Medium);
+        assert_eq!((effort_text(&t), model_effort_text(&t).as_deref()), (None, Some("gemini-4-argon-medium")));
     }
 
     #[test]

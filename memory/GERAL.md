@@ -183,9 +183,9 @@ validação** (o agente, a aba e a pasta continuam, para você testar o que foi 
 na validação devolve a tarefa ao mesmo agente:
 - **Lista** agrupada por estado: *Em revisão*, *Aguardando validação*, *Em andamento*, *Rascunho*, *Falhou*, *Concluídas* e
   *Canceladas* (as concluídas e as descartadas, nessa ordem, recolhidas até você abrir). Cada cartão mostra o estado (o ponto), `tN`, o título, o agente com o
-  modelo e o tempo ("pronta há 3 min"); na revisão, também o resumo do diff ("3 arquivos, +120 −8");
+  modelo, o esforço quando há ("Claude · sonnet · alto") e o tempo ("pronta há 3 min"); na revisão, também o resumo do diff ("3 arquivos, +120 −8");
 - **+ Nova** abre o formulário: título, pedido, agente (os instalados), modelo ("Padrão" ou os conhecidos do
-  agente), base (a branch atual), anexos ("Anexar arquivos", ou arrastar arquivos sobre o formulário: os caminhos vão ao
+  agente), esforço ("Padrão", "Baixo", "Médio" ou "Alto": o Claude recebe `--effort`, o Antigravity troca o sufixo do modelo; desligado, com dica, para o OpenCode e os demais), base (a branch atual), anexos ("Anexar arquivos", ou arrastar arquivos sobre o formulário: os caminhos vão ao
   final do pedido) e "Iniciar agora". Ctrl+Enter cria; sem "Iniciar agora" a tarefa fica em rascunho;
 - **Detalhe** (clicar no cartão; "←" volta): estado, `branch → base`, agente, o pedido, o relatório, as alterações
   (resumo por arquivo e **Ver diff completo**, que abre o diff no centro, em Documentos; aguardando validação e concluída, com o hash curto da mesclagem ao lado de `branch → base`, o botão vira **Ver o que foi mesclado** e abre o que a mesclagem trouxe) e o histórico. Os
@@ -293,7 +293,7 @@ ela dura.
 | `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor; Ollama como `ollama:<modelo>`), ou só os de um agente; antes de escolher `--agent`/`--model` |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --learn [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; sem argumentos, os aprendizados globais por inteiro e o índice dos demais. O agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
-| `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
+| `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--effort low\|medium\|high] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
 | `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
 | `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e a deixa **aguardando validação** (o agente e a worktree continuam) / conclui a tarefa aguardando validação e limpa / descarta e limpa |
 | `ask-agent --task done <id> -\|"relatório"\|--file <arq>` | o agente da tarefa entrega o relatório (pela entrada padrão, como argumento ou de um arquivo) e a põe em revisão; também vale aguardando validação, se a branch tem commits novos (o usuário corrigiu algo na aba) |
