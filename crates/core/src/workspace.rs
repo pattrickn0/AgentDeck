@@ -193,6 +193,37 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
     Ok(AgentContext::Written)
 }
 
+/// `text` sem os blocos marcados do app e sem diferença de fim de linha: o que sobra é do usuário.
+fn without_marker_blocks(text: &str) -> String {
+    marker_re().replace_all(&text.replace("\r\n", "\n"), "").trim().to_owned()
+}
+
+/// `true` se `current` difere de `committed` só nos blocos marcados do app (fora deles o texto é igual).
+pub fn only_marker_blocks_differ(committed: &str, current: &str) -> bool {
+    without_marker_blocks(committed) == without_marker_blocks(current)
+}
+
+/// Põe em `file` o primeiro bloco marcado de `saved` (o que o app tinha gravado): troca o bloco que o arquivo
+/// tem agora ou, se não tiver, acrescenta ao final. Mantém o fim de linha do arquivo. Sem bloco em `saved`,
+/// não faz nada. Usada pela mesclagem de tarefas, que devolve o arquivo ao do HEAD para o git mesclar.
+pub fn restore_marker_block(file: &Path, saved: &str) -> std::io::Result<()> {
+    let Some(found) = marker_re().find(saved) else { return Ok(()) };
+    let old = std::fs::read_to_string(file).unwrap_or_default();
+    let eol = if old.contains("\r\n") { "\r\n" } else { "\n" };
+    let block = found.as_str().replace("\r\n", "\n").replace('\n', eol);
+    let new = if marker_re().is_match(&old) {
+        replace_marker_blocks(&old, &block)
+    } else if old.is_empty() {
+        format!("{block}{eol}")
+    } else {
+        format!("{}{eol}{eol}{block}{eol}", old.trim_end())
+    };
+    if new == old {
+        return Ok(());
+    }
+    write_atomic(file, new.as_bytes())
+}
+
 /// Grava ao lado e troca: um agente lendo o AGENTS.md ao mesmo tempo nunca o vê pela metade.
 /// Se a troca falhar (no Windows, arquivo aberto sem permissão de troca), grava direto.
 fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
