@@ -349,17 +349,23 @@ no Windows por `with_undecorated_shadow`); `ui/titlebar.rs` desenha a barra e ma
 (`ViewportCommand::StartDrag`, `Minimized`, `Maximized`, `BeginResize` nas faixas de 5 px das bordas), que o
 `EguiGlow::run` já executa. O "×" liga `Deck::quit_requested`, e o `App` encerra como no `CloseRequested`.
 
-**Uso dos planos** (`crates/core/src/usage.rs`, faixa em `ui/usage.rs`). `Core::usage_snapshot()` devolve o último
-uso de cada modelo (`AgentUsage`: sessão e semana em 0..=1, quando renovam); mudanças emitem `CoreEvent::UsageChanged`.
+**Uso dos planos** (`crates/core/src/usage.rs`, barra de título e painel em `ui/usage.rs`). `Core::usage_snapshot()`
+devolve o último uso de cada modelo (`AgentUsage`: sessão e semana em 0..=1, quando renovam); mudanças emitem
+`CoreEvent::UsageChanged`. O `UsageStore` grava o retrato em `dados/usage.json` (fora do cadeado que a UI lê; uma
+leitura que só renova o horário vai ao disco no máximo a cada 5 min) e o lê ao criar o `Core`: a barra mostra todos os
+agentes com cota, com ou sem aba aberta, na ordem do menu de agentes (`ordered_models`). Na barra, por agente, o logo,
+a sessão numa barra fina e a semana numa grossa; passar o mouse abre o painel de uso (todos os agentes, "lido há",
+quando renova cada janela, "bloqueado até").
 - **Claude**: os hooks gravam `statusLine: ask-agent --usage`. O Claude Code passa `rate_limits.five_hour/seven_day`
   no stdin; o `ask-agent` manda à ponte (`POST /usage`) e imprime "sessão 34% · semana 12%" (ou repassa o stdin à
   statusline do próprio usuário, se houver, e mostra a dela).
 - **Codex** (`usage/codex.rs`): a thread `cd-usage` relê a cada 60 s o fim do `rollout-*.jsonl` mais novo em
-  `~/.codex/sessions` (`rate_limits.primary/secondary`), só com aba do Codex aberta.
-- **Antigravity** (`usage/antigravity.rs`): a cada 3 min, com aba aberta, `v1internal:retrieveUserQuotaSummary`
+  `~/.codex/sessions` (`rate_limits.primary/secondary`), com aba do Codex aberta ou o CLI instalado (conferido a cada 10 min).
+- **Antigravity** (`usage/antigravity.rs`): a cada 3 min, com aba aberta ou o CLI instalado (sem aba, uma falha volta no
+  intervalo normal, não nos 20 s), `v1internal:retrieveUserQuotaSummary`
   (janelas `5h` e `weekly`; alternativa: `fetchAvailableModels`) com o token do CLI (Gerenciador de Credenciais do
   Windows `gemini:antigravity` ou `~/.gemini/oauth_creds.json`) enquanto ele vale; quem o renova é o próprio CLI. API interna: qualquer falha
-  vira "sem dados" (anel tracejado). O token nunca vai para log, Feed ou interface.
+  vira "sem dados" (o agente fica com o último valor lido, ou fora da barra se nunca houve leitura). O token nunca vai para log, Feed ou interface.
 - **Ollama**: local, sem limite.
 
 **Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só

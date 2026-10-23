@@ -64,7 +64,12 @@ pub struct AgentUsage {
 pub struct UsageStore {
     map: Mutex<HashMap<String, AgentUsage>>,
     file: Option<PathBuf>,
+    /// Uma gravação por vez, fora do cadeado do `map` (que a UI pega a cada quadro); guarda quando foi a última.
+    disk: Mutex<u64>,
 }
+
+/// Leitura nova sem mudança de porcentagem: o "lido há" vai para o disco no máximo a cada tanto.
+const SAVE_READ_EVERY_MS: u64 = 5 * 60 * 1000;
 
 impl UsageStore {
     /// Começa com o que `file` guardou (vazio se ele não existe ou não se lê).
@@ -74,27 +79,37 @@ impl UsageStore {
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .map(|v| store_from_json(&v))
             .unwrap_or_default();
-        Self { map: Mutex::new(map), file: Some(file) }
+        Self { map: Mutex::new(map), file: Some(file), disk: Mutex::new(0) }
     }
 
-    /// Grava e diz se mudou.
+    /// Grava e diz se mudou o que se vê. Uma leitura que só renova `updated_ms` também vai para o disco, mas no
+    /// máximo a cada [`SAVE_READ_EVERY_MS`] (senão, ao reabrir o app, o painel diria "lido há" errado).
     fn set(&self, model: &str, usage: AgentUsage) -> bool {
-        let mut map = self.map.lock();
-        let old = map.get(model);
-        // `updated_ms` sozinho não é mudança visível o bastante para acordar a UI.
-        let changed = old.is_none_or(|o| o.session != usage.session || o.weekly != usage.weekly || o.local != usage.local);
-        map.insert(model.to_owned(), usage);
-        if changed {
-            self.save(&map);
+        let changed = {
+            let mut map = self.map.lock();
+            let old = map.get(model);
+            // `updated_ms` sozinho não é mudança visível o bastante para acordar a UI.
+            let changed = old.is_none_or(|o| o.session != usage.session || o.weekly != usage.weekly || o.local != usage.local);
+            map.insert(model.to_owned(), usage);
+            changed
+        };
+        if self.file.is_some() {
+            let now = util::now_ms();
+            let mut last = self.disk.lock();
+            if changed || now.saturating_sub(*last) >= SAVE_READ_EVERY_MS {
+                // O retrato é tirado já com a vez de gravar: a última gravação é sempre a mais nova.
+                let text = store_to_json(&self.map.lock()).to_string();
+                self.save(&text);
+                *last = now;
+            }
         }
         changed
     }
 
     /// Grava ao lado e troca: uma queda no meio não deixa o arquivo pela metade.
-    fn save(&self, map: &HashMap<String, AgentUsage>) {
+    fn save(&self, text: &str) {
         let Some(file) = &self.file else { return };
         let tmp = file.with_extension("json.tmp");
-        let text = store_to_json(map).to_string();
         if let Err(e) = std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, file)) {
             log::warn!("não consegui guardar o uso em {}: {e}", file.display());
         }

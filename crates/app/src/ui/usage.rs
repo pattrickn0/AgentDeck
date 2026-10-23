@@ -271,16 +271,19 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     let panel_key = Id::new("usage-panel");
     // O painel aberto no quadro anterior: (agente em destaque, retângulo do painel).
     let open_before = ui.ctx().data(|d| d.get_temp::<(String, Rect)>(panel_key));
-    let mut hovered: Option<String> = None;
-    let mut x = start_x;
-    for row in &rows {
-        let item = Rect::from_min_size(Pos2::new(x, cy - ITEM_H / 2.0), Vec2::new(item_w, ITEM_H));
-        let resp = ui.interact(item, Id::new(("usage-item", &row.model)), Sense::hover());
-        let highlighted = resp.hovered() || open_before.as_ref().is_some_and(|(m, _)| *m == row.model);
-        if resp.hovered() {
-            hovered = Some(row.model.clone());
-        }
-        if highlighted {
+    let group = Rect::from_min_max(Pos2::new(start_x, cy - ITEM_H / 2.0), Pos2::new(rect.max.x, cy + ITEM_H / 2.0));
+    let item_at = |i: usize| Rect::from_min_size(Pos2::new(start_x + i as f32 * (item_w + ITEM_GAP), cy - ITEM_H / 2.0), Vec2::new(item_w, ITEM_H));
+    // O painel fica aberto enquanto o mouse está num item, no painel ou no vão entre os dois. O agente em destaque
+    // é o do item sob o mouse; no painel, o último que esteve sob ele. Decidido antes de pintar: um item só realça.
+    let pointer = ui.ctx().pointer_hover_pos();
+    let hovered = pointer.and_then(|ptr| (0..rows.len()).find(|&i| item_at(i).contains(ptr))).map(|i| rows[i].model.clone());
+    let keep = open_before.as_ref().is_some_and(|(_, panel)| pointer.is_some_and(|ptr| group.union(*panel).contains(ptr)));
+    let focus = hovered.or_else(|| open_before.filter(|_| keep).map(|(m, _)| m));
+    let focus = focus.or_else(|| deck.debug_usage_panel.then(|| rows[0].model.clone()));
+    for (i, row) in rows.iter().enumerate() {
+        let item = item_at(i);
+        ui.interact(item, Id::new(("usage-item", &row.model)), Sense::hover());
+        if focus.as_deref() == Some(row.model.as_str()) {
             painter.rect_filled(item, 5.0, p.hover);
         }
         let mut ix = item.min.x + ITEM_PAD;
@@ -293,18 +296,12 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
             let r = Rect::from_center_size(Pos2::new(ix + PCT_W / 2.0, y), Vec2::new(PCT_W, LINE_H));
             super::text_in(painter, r, Align2::RIGHT_CENTER, &pct_text(bar), theme::meta(8.0), pct_color(bar, p.text_soft));
         }
-        x += item_w + ITEM_GAP;
     }
-    let group = Rect::from_min_max(Pos2::new(start_x, cy - ITEM_H / 2.0), Pos2::new(rect.max.x, cy + ITEM_H / 2.0));
-
-    // O painel fica aberto enquanto o mouse está num item, no painel ou no vão entre os dois.
-    let pointer = ui.ctx().pointer_hover_pos();
-    let keep = open_before.as_ref().is_some_and(|(_, panel)| pointer.is_some_and(|ptr| group.union(*panel).contains(ptr)));
-    let focus = hovered.or_else(|| open_before.filter(|_| keep).map(|(m, _)| m));
-    let focus = focus.or_else(|| deck.debug_usage_panel.then(|| rows[0].model.clone()));
     match focus {
         Some(model) => {
             let panel = draw_panel(deck, ui.ctx(), group, &rows, &locals, &model, now_ms);
+            // "renova em" e "lido há" andam com o painel aberto, mesmo com o mouse parado.
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs(30));
             ui.ctx().data_mut(|d| d.insert_temp(panel_key, (model, panel)));
         }
         None => ui.ctx().data_mut(|d| d.remove::<(String, Rect)>(panel_key)),
