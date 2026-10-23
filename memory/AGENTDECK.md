@@ -25,6 +25,22 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
   app entrega o pedaço certo a cada agente na hora certa.
 - **Nada de mágica que trava.** Sem prompts escondidos, sem diálogo que congela, sem processo órfão; erro com explicação.
 
+## O que o AgentDeck é e não é (usuário, 2026-10-23)
+
+- **100% Rust**, sem outra tecnologia (nada de Electron, Tauri ou web). Sistemas: **Windows e Linux**; macOS não está no rumo.
+- **Gira em volta dos CLIs de agente** (Claude Code, Antigravity, Codex, OpenCode e os que existirem), de nuvem ou não: o
+  que estiver instalado é usado. **Não é um app de modelo local**: o agente Ollama próprio (`ollama-agent`) sai; um modelo
+  local continua possível através de um CLI que o suporte (ex.: o OpenCode).
+- **Agentes visíveis**: quando um agente precisa de outro, abre uma instância no AgentDeck (aba) pelo `ask-agent` ou pela
+  mesa de tarefas, **não um subagente interno do CLI**, a não ser que o usuário peça explicitamente.
+- **Três memórias**: a **geral** (como usar o AgentDeck, igual para todo mundo, entregue pelo app a todo CLI em qualquer
+  projeto); a **do projeto** (`memory/aprendizados/` do repositório do usuário, versionada nele); e a **local** (a do
+  usuário e dos CLIs, que nunca vai para o git).
+- Licença **MIT**. Hoje só o usuário desenvolve; contribuições de outras pessoas, talvez depois de publicado.
+- **Depois da `main`**, nesta ordem aproximada: mais revisão e estabilidade, o **instalador**, inglês na interface,
+  temas. **Bem mais para frente**, com o app bem estável: acompanhar e falar com os agentes **pelo celular**.
+- Não fazer por enquanto: comentários linha a linha no diff para devolver ao agente (o "devolver com texto" basta).
+
 ## Rumo (ordem decidida pelo orquestrador)
 
 1. ~~Modelo de LLM por instância~~ (feito em 2026-10-17).

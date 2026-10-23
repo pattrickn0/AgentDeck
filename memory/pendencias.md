@@ -118,9 +118,17 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 - [ ] Os testes de integração do fluxo entre abas (`a_question_is_typed_into_the_tab_and_answered_by_callback` e vizinhos, e `an_agent_becomes_the_boss_of_the_role_it_opens_and_the_new_one_is_told`) só rodam em Unix (`#[cfg(unix)]` em `crates/core/tests/bridge.rs`, agentes falsos em shell): criar agentes falsos para Windows (`.cmd`/`.exe` de teste) para a CI do Windows cobrir a ponte.
 - [ ] Testes de interface (egui) para a barra direita, a aba Git e a tela dividida (hoje só capturas de tela no Linux).
 
-## Linux
+## Sistemas
 
-Ver [LINUX.md](LINUX.md) para dependências, o que já foi verificado e o roteiro manual.
+Windows e Linux. Para o Linux, ver [LINUX.md](LINUX.md) (dependências, o que já foi verificado e o roteiro manual).
+
+- [ ] **Cota do Antigravity no Linux** (relato de um usuário, 2026-10-23): não aparece. No Windows o token vem do
+  Gerenciador de Credenciais; no Linux o app só procura `~/.gemini/oauth_creds.json`, e o CLI guarda o token no
+  chaveiro do sistema (Secret Service). `crates/core/src/usage/antigravity.rs`, `credential_sources`.
+- [ ] **Interface toda bugada no WSL** (relato de um usuário, 2026-10-23: janelas e interface quebradas no WSLg).
+  Investigar; se for limite do WSLg, dizer no README que o caminho no Windows é o app nativo.
+- [ ] **Celular** (bem mais para frente, com o app bem estável; usuário, 2026-10-23): acompanhar o que os agentes estão
+  fazendo e falar com eles longe do computador.
 
 - [ ] **Wayland e Fedora de verdade:** o app só foi aberto à mão no X11 do Ubuntu; o job do Fedora prova build e testes, não a janela. Rodar o roteiro do LINUX.md numa sessão Wayland (GNOME e KDE) e num Fedora Workstation; o que falhar vira item aqui.
 - [ ] **Empacotamento:** não há `.deb`, `.rpm`, Flatpak, AppImage, `.desktop` nem ícone instalado; hoje o app roda da pasta compilada (ou de uma pasta portátil).
@@ -132,27 +140,6 @@ Ver [LINUX.md](LINUX.md) para dependências, o que já foi verificado e o roteir
 
 Só depois de o projeto estar mais completo.
 
-### IA local como serviço interno
-
-Decisão: com Claude e Antigravity disponíveis, o Ollama deixa de ser "agente par" e vira **infraestrutura** do app.
-
-- [ ] **Embeddings locais para RAG.** Modelo de embeddings no Ollama (`nomic-embed-text` ou `bge-m3`, < 1 GB, cabe na RX 7600 8 GB).
-  - Indexar o workspace em pedaços (*chunks*) e manter o índice atualizado pelo watcher existente (`workspace.rs`).
-  - Expor a busca de duas formas: `ask-agent`/CLI `search` (sob demanda) e um `ContextProvider` com orçamento fixo de tokens (ex.: 1.500).
-  - Índice local (ex.: em `dados/`), sem enviar nada para fora.
-- [ ] **Compressor de contexto.** Modelo pequeno (`qwen3:8b`, 100% GPU) para resumir:
-  - respostas longas no `ask-agent` antes de entregar ao agente que perguntou (`bridge.rs`), mantendo o original na Conversa integrada.
-- [ ] **Medir tokens** (`prompt_eval_count` do Ollama, tamanho dos prompts enviados a Claude/Antigravity) para comparar antes/depois.
-- [ ] **Configuração** em `Config`: modelo de embeddings, modelo compressor, limiares (ex.: comprimir acima de N caracteres), ligar/desligar.
-- [ ] Aba Ollama-agente passa a ser opcional (os itens do agente local, abaixo, ficam como baixa prioridade).
-
-### Agente local (Ollama): contexto e comportamento
-
-Problema observado: o modelo local esquece que é um agente ("age como chatbot") e para no meio da colaboração com outros agentes (ex.: Antigravity) em vez de continuar a conversa sozinho.
-
-- [ ] **Configurar `num_ctx`**. O Ollama usa por padrão uma janela de contexto pequena (2–4k tokens). O prompt de sistema, as 6 ferramentas e o `AGENTS.md` ocupam boa parte dela, e o começo, onde está o "você é um agente", acaba cortado. Enviar `options.num_ctx` nas chamadas a `/api/chat` (ex.: 16k–32k), configurável em `Config`.
-  - Arquivo: `crates/core/src/ollama.rs` e `crates/core/src/config.rs`.
-- [ ] **Prompt de sistema mais curto para modelos pequenos (4B–9B).** O atual é longo e cheio de regras em caixa alta, que modelos pequenos seguem mal. Ter uma versão enxuta.
-- [ ] **Instrução de colaboração mais perto do fim do contexto.** O lembrete de "continue conversando com o agente parceiro" hoje vai no fim de uma saída grande do `ask-agent`. Avaliar reinjetar a instrução como mensagem curta de sistema/usuário logo após o resultado.
-- [ ] **Verificação antes de encerrar.** Hoje, quando o modelo responde em texto sem chamar ferramenta, o loop considera a tarefa concluída. Adicionar um passo de checagem ("a tarefa terminou ou falta chamar `ask-agent`/ferramentas?") antes de devolver a resposta.
-- [ ] Revisar o limite de 25 passos (`MAX_STEPS`) para conversas longas entre agentes.
+- O **agente Ollama próprio** (`ollama-agent`) e a ideia de "IA local como serviço interno" (embeddings, compressor de
+  contexto) saíram do rumo em 2026-10-23: o AgentDeck gira em volta dos CLIs de agente, e um modelo local entra por um
+  CLI que o suporte (ver [AGENTDECK.md](AGENTDECK.md), "O que o AgentDeck é e não é").
