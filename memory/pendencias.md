@@ -122,11 +122,12 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 
 Windows e Linux. Para o Linux, ver [LINUX.md](LINUX.md) (dependências, o que já foi verificado e o roteiro manual).
 
-- [ ] **Cota do Antigravity no Linux** (relato de um usuário, 2026-10-23): não aparece. No Windows o token vem do
-  Gerenciador de Credenciais; no Linux o app só procura `~/.gemini/oauth_creds.json`, e o CLI guarda o token no
-  chaveiro do sistema (Secret Service). `crates/core/src/usage/antigravity.rs`, `credential_sources`.
-- [ ] **Interface toda bugada no WSL** (relato de um usuário, 2026-10-23: janelas e interface quebradas no WSLg).
-  Investigar; se for limite do WSLg, dizer no README que o caminho no Windows é o app nativo.
+- [ ] **WSLg: conferir a janela no X11** (relato de um usuário, 2026-10-23: janelas e interface quebradas no WSLg).
+  O app agora detecta o WSLg e abre pelo X11, porque o Wayland de lá quebra a janela (`crates/app/src/wslg.rs`), mas
+  ninguém abriu o app num WSLg. Faltam: janela maximizada (relato de deslocamento de 32 px), escala (o WSLg informa
+  sempre 1, então a interface fica pequena em tela de alta densidade; o `winit` 0.30 não tem mais
+  `WINIT_X11_SCALE_FACTOR`), arrastar/redimensionar, cursor e a cota do Antigravity pelo chaveiro de lá. Detalhe em
+  [LINUX.md](LINUX.md), seção 2.8.
 - [ ] **Celular** (bem mais para frente, com o app bem estável; usuário, 2026-10-23): acompanhar o que os agentes estão
   fazendo e falar com eles longe do computador.
 

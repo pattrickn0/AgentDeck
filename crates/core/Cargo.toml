@@ -33,6 +33,11 @@ unicode-normalization = "0.1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Cota do Antigravity: no Linux o `agy` guarda o token no chaveiro do sistema (Secret Service, por D-Bus). A crate é
+# Rust puro (zbus), sem biblioteca C: não muda o que a CI e o README instalam. Ver `memory/LINUX.md`.
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = { version = "5", default-features = false, features = ["rt-async-io-crypto-rust"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
