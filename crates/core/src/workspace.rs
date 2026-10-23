@@ -31,9 +31,10 @@ fn is_ignored_entry(name: &str) -> bool {
 
 pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
     // Só subpastas do workspace (`""` = a raiz): nada de `..`, absoluto ou `C:` no Windows.
-    // A barra invertida é separador no Windows (é o que `rel_path` usava antes) e no Unix seria o
-    // nome de um arquivo: normaliza antes de validar e de juntar, senão `zeta\` não abre no Linux.
-    let rel_dir = rel_dir.replace('\\', "/");
+    // A barra invertida é separador no Windows (é o que `rel_path` usava antes): lá ela vira `/` antes de
+    // validar e de juntar. No Unix ela é um caractere válido de nome (`a\b` é uma pasta), e o `rel_path`
+    // que volta da árvore traz o nome intacto: trocá-la abriria outra pasta.
+    let rel_dir = if cfg!(windows) { rel_dir.replace('\\', "/") } else { rel_dir.to_owned() };
     if !rel_dir.is_empty() && !crate::git::safe_rel(&rel_dir) {
         return Vec::new();
     }
@@ -513,9 +514,26 @@ mod tests {
         assert!(items[0].is_dir && items[0].ext.is_empty());
         let sub = read_dir(ws, "zeta");
         assert_eq!(sub[0].rel_path, "zeta/in.json");
-        let sub_bs = read_dir(ws, "zeta\\");
-        assert_eq!(sub_bs[0].rel_path, "zeta/in.json");
+        // A barra invertida só é separador no Windows; no Unix ela faz parte do nome (ver o teste abaixo).
+        if cfg!(windows) {
+            let sub_bs = read_dir(ws, "zeta\\");
+            assert_eq!(sub_bs[0].rel_path, "zeta/in.json");
+        }
         assert!(read_dir(ws, "nao-existe").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_dir_opens_a_unix_folder_with_a_backslash_in_the_name() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path();
+        std::fs::create_dir_all(ws.join("a\\b")).expect("mkdir");
+        std::fs::write(ws.join("a\\b").join("in.txt"), "x").expect("write");
+        let root = read_dir(ws, "");
+        assert_eq!(root[0].rel_path, "a\\b");
+        let sub = read_dir(ws, &root[0].rel_path);
+        assert_eq!(sub.len(), 1);
+        assert_eq!(sub[0].name, "in.txt");
     }
 
     #[test]

@@ -58,6 +58,19 @@ impl Inbox {
         entry.map(|e| e.delivered = true).is_some()
     }
 
+    /// A instância `old` foi renomeada para `new` (chaves com escopo): a caixa vai junto, depois do que já
+    /// houver em `new`, para o `--inbox` da aba renomeada achar as respostas e outra aba aberta depois com o
+    /// nome antigo não ler as dela.
+    pub fn rename(&self, old: &str, new: &str) {
+        let mut boxes = self.boxes.lock();
+        let Some(moved) = boxes.remove(old) else { return };
+        let list = boxes.entry(new.to_owned()).or_default();
+        list.extend(moved);
+        while list.len() > INBOX_LIMIT {
+            list.pop_front();
+        }
+    }
+
     /// A resposta da pergunta `request` e a quem ela pertence (chave de `asker`).
     pub fn find(&self, request: u64) -> Option<(String, InboxEntry)> {
         let boxes = self.boxes.lock();
@@ -98,6 +111,19 @@ mod tests {
         assert_eq!(all.last().map(|e| e.request), Some(24));
         assert_eq!(inbox.read("p::opencode", true).len(), 1);
         assert!(inbox.read("p::ninguem", true).is_empty());
+    }
+
+    #[test]
+    fn renaming_moves_the_box_to_the_new_name() {
+        let inbox = Inbox::default();
+        inbox.push("p::claude", entry(1));
+        inbox.push("p::claude@dev", entry(2));
+        inbox.rename("p::claude", "p::claude@dev");
+        let got: Vec<u64> = inbox.read("p::claude@dev", false).iter().map(|e| e.request).collect();
+        assert_eq!(got, [2, 1]);
+        assert!(inbox.read("p::claude", true).is_empty(), "outra aba aberta com o nome antigo não lê as respostas");
+        inbox.rename("p::ninguem", "p::outro");
+        assert!(inbox.read("p::outro", true).is_empty());
     }
 
     #[test]

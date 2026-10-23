@@ -271,6 +271,24 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         let all = route.split_once('?').is_some_and(|(_, q)| q.split('&').any(|kv| kv == "all=1"));
         return reply(req, 200, json!({ "answers": core.inner.inbox.read(&c.key(&c.id), all) }));
     }
+    if *req.method() == Method::Post && route == "/inbox/delivered" {
+        let Auth::Agent(c) = &auth else {
+            return reply(req, 400, json!({ "error": "só um agente tem caixa de entrada" }));
+        };
+        let (msg, _budget) = match read_json(&mut req, bodies, false) {
+            Ok(v) => v,
+            Err((status, body)) => return reply(req, status, body),
+        };
+        let Some(request) = msg.get("request").and_then(Value::as_u64) else {
+            return reply(req, 400, json!({ "error": "falta o número da pergunta (request)" }));
+        };
+        // Só a caixa de quem perguntou: um agente não marca como recebida a resposta de outro.
+        let mine = core.inner.inbox.find(request).is_some_and(|(asker, _)| asker == c.key(&c.id));
+        if mine {
+            core.inner.inbox.mark_delivered(request);
+        }
+        return reply(req, if mine { 200 } else { 404 }, json!({ "ok": mine }));
+    }
     if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
     }
@@ -284,6 +302,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         Ok(c) => c,
         Err(e) => return reply(req, 400, json!({ "error": e })),
     };
+    let client_acks = msg.get("ack").and_then(Value::as_bool).unwrap_or(false);
     let (status, out) = match route.as_str() {
         "/reply" => reply_pending(&core, &caller, &msg),
         "/signal" => signal(&core, &auth, &msg),
@@ -291,10 +310,12 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         _ => ask(&core, &caller, &msg, slot),
     };
     // Uma resposta síncrona (200 ou erro de uma pergunta a uma aba) traz o número da pergunta: só vale
-    // como entregue se o corpo foi escrito sem erro; senão ela fica na caixa de entrada.
+    // como entregue se o corpo foi escrito sem erro; senão ela fica na caixa de entrada. Escrever sem erro
+    // não prova que chegou (o `tiny_http` ignora a conexão fechada, e o primeiro envio a quem já saiu dá
+    // certo): o `ask-agent` que manda `ack` confirma ele mesmo, em `/inbox/delivered`, depois de imprimir.
     let answered = (route == "/ask" && status != 202).then(|| out.get("request").and_then(Value::as_u64)).flatten();
     if reply_checked(req, status, out) {
-        if let Some(request) = answered {
+        if let Some(request) = answered.filter(|_| !client_acks) {
             core.inner.inbox.mark_delivered(request);
         }
     } else if let Some(request) = answered {

@@ -1136,6 +1136,36 @@ fn a_synchronous_answer_lands_in_the_inbox_as_delivered() {
 }
 
 #[test]
+fn with_ack_the_answer_waits_for_the_client_to_confirm_it() {
+    let (env, _p) = start_with_claude_tab();
+    let claude = tab_token(&env, "claude");
+    let dev = tab_token(&env, "claude@dev");
+    let answered = |message: &str| {
+        let asking = ask_in_thread(&env, claude.clone(), json!({"to": "claude@dev", "message": message, "ack": true}));
+        let q = next_delivery(&env);
+        assert_eq!(ask_raw(env.core.bridge_port(), &dev, json!({"to": "", "message": "feito", "reply_to": q.request})).0, 200);
+        let (st, b) = asking.join().expect("thread");
+        assert_eq!((st, b["request"].as_u64()), (200, Some(q.request)), "{b}");
+        q.request
+    };
+    // Escrever o 200 não prova que o `ask-agent` ainda estava lá: sem a confirmação, segue pendente (ler a
+    // caixa a marca como entregue, por isso cada pergunta só é lida uma vez).
+    let first = answered("primeira");
+    std::thread::sleep(Duration::from_millis(200));
+    let pending: Vec<u64> = inbox(&env, &claude, false).iter().filter_map(|e| e["request"].as_u64()).collect();
+    assert_eq!(pending, [first]);
+    // Confirmada pelo cliente, sai do `--inbox`; outro agente não confirma a resposta de quem perguntou.
+    let second = answered("segunda");
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let body = json!({ "request": second }).to_string();
+    assert_eq!(http(port, "POST", "/inbox/delivered", &host, &dev, &body).0, 404);
+    assert_eq!(http(port, "POST", "/inbox/delivered", &host, &claude, &body).0, 200);
+    assert!(inbox(&env, &claude, false).is_empty(), "confirmada não aparece em --inbox");
+    env.core.shutdown();
+}
+
+#[test]
 fn a_failed_question_is_kept_in_the_inbox_with_its_reason() {
     let (env, _p) = start_with_claude_tab();
     let claude = tab_token(&env, "claude");

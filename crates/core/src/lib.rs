@@ -548,6 +548,7 @@ impl Core {
             }
         }
         self.inner.exchange.rename(&instances::scoped(project, old_id), &instances::scoped(project, &new_id));
+        self.inner.inbox.rename(&instances::scoped(project, old_id), &instances::scoped(project, &new_id));
         self.inner.activity.forget(&instances::scoped(project, old_id));
         self.update_project(project, |p| {
             team::rename(&mut p.tab_parents, old_id, &new_id);

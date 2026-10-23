@@ -101,6 +101,8 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 - [ ] **Uso do Antigravity depende de API interna** (`v1internal:retrieveUserQuotaSummary`): pode mudar sem aviso; hoje qualquer falha vira "sem dados". Avaliar um aviso discreto quando falhar por muito tempo.
 - [ ] **Uso do Codex só testado com arquivos de exemplo** (o Codex não estava instalado): conferir o formato real de `rate_limits` nos `rollout-*.jsonl`.
 
+- [ ] **Diff: trabalho por quadro proporcional ao tamanho** (ultrareview, 2026-10-23). `ui/diff_view.rs`, `draw`: a chave do cache de layout (`content_hash`) percorre e faz o hash de todas as linhas do diff a cada quadro, e `gutter_cols`/`marked`/`headers` também varrem tudo. Com um diff de vários MB aberto (lockfile), cada quadro refaz esse trabalho. Calcular a chave uma vez, quando o diff carrega (guardar com o `GitDiff`, ou um contador de geração).
+
 - [ ] **`config.json` com BOM UTF-8 é ignorado em silêncio** (visto na `t28`): o app cai nos padrões sem aviso. Editar o arquivo pelo PowerShell 5.1 (`Out-File`/`Set-Content -Encoding utf8`) grava o BOM. Tirar o BOM ao ler (`config.rs`, `Config::load`) e avisar no log quando o arquivo não se lê.
 
 ## Git e GitHub

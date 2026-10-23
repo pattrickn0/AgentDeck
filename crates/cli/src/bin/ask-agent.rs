@@ -225,7 +225,8 @@ fn main() -> ExitCode {
     }
 
     let wait = env("ASK_WAIT").and_then(|w| w.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_WAIT);
-    let mut body = json!({ "from": from, "to": to, "message": message, "depth": depth, "new": force_new, "wait": wait });
+    // `ack`: a ponte só dá a resposta por entregue quando este processo confirma (ver `confirm_delivered`).
+    let mut body = json!({ "from": from, "to": to, "message": message, "depth": depth, "new": force_new, "wait": wait, "ack": true });
     if let Some(n) = reply_to {
         body["reply_to"] = json!(n);
     }
@@ -241,10 +242,24 @@ fn main() -> ExitCode {
                 None => "undefined".into(),
             };
             println!("{answer}");
+            confirm_delivered(&bridge, &json);
             ExitCode::SUCCESS
         }
-        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Ok((_, json)) => {
+            let code = fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1);
+            confirm_delivered(&bridge, &json);
+            code
+        }
         Err(e) => fail(e, 1),
+    }
+}
+
+/// Avisa a ponte que a resposta da pergunta (o `request` do corpo) foi impressa, para ela sair da caixa de
+/// entrada. Sem isso (este processo morreu antes), a resposta continua em `ask-agent --inbox`. Uma falha
+/// aqui só faz a resposta aparecer de novo no `--inbox`.
+fn confirm_delivered(bridge: &Bridge, json: &Value) {
+    if let Some(request) = json.get("request").and_then(Value::as_u64) {
+        let _ = bridge.request("POST", "/inbox/delivered", Some(&json!({ "request": request })), Some(std::time::Duration::from_secs(5)));
     }
 }
 
