@@ -1,21 +1,20 @@
 //! Uso das assinaturas na barra de título: para cada agente com cota, o logo do modelo e duas barras
-//! empilhadas (a sessão de 5 h, fina, em cima; a semana, grossa, embaixo) com as porcentagens. Passar o mouse
-//! abre o painel de uso, com todos os agentes em detalhe (quanto foi usado e quando renova). Locais (Ollama)
-//! não têm barra; aparecem só no rodapé do painel.
+//! empilhadas (a sessão de 5 h em cima, a semana embaixo) com as porcentagens. Passar o mouse num item abre o
+//! painel de uso daquele agente, em detalhe (quanto foi usado e quando renova; no Antigravity, por grupo de
+//! modelos, e o clique no nome de um grupo o fixa na barra). Locais (Ollama) não têm cota nem item.
 
 use std::collections::HashMap;
 
-use agentdeck_core::usage::UsageWindow;
+use agentdeck_core::usage::{UsageGroup, UsageWindow};
 use agentdeck_core::AgentUsage;
 use egui::{Align2, Color32, Id, Order, Painter, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::deck::Deck;
 use crate::theme;
 
-/// Largura das barras e a espessura de cada uma (a sessão fina, a semana grossa).
+/// Largura e espessura das barras.
 const BAR_W: f32 = 40.0;
-const SESSION_H: f32 = 2.0;
-const WEEKLY_H: f32 = 4.0;
+const BAR_H: f32 = 4.0;
 /// Linha de cada porcentagem (as duas empilhadas, 1 px entre elas).
 const LINE_H: f32 = 10.0;
 /// Coluna das porcentagens ("100%").
@@ -158,6 +157,12 @@ pub fn bars(usage: &AgentUsage, now_ms: u64) -> [Option<Bar>; 2] {
     [bar(fresh.session, session_gone), bar(fresh.weekly, weekly_gone)]
 }
 
+/// Os grupos de modelos de um agente (nome, sessão e semana), como valem agora.
+pub fn group_bars(usage: &AgentUsage, now_ms: u64) -> Vec<(String, [Option<Bar>; 2])> {
+    let as_usage = |g: &UsageGroup| AgentUsage { session: g.session, weekly: g.weekly, updated_ms: usage.updated_ms, ..Default::default() };
+    usage.groups.iter().map(|g| (g.name.clone(), bars(&as_usage(g), now_ms))).collect()
+}
+
 /// A linha de baixo de cada janela no painel: quando renova ("renova em 2h10 · às 16:40" para a sessão,
 /// "renova seg 14:00" para a semana) ou por que não há número.
 pub fn reset_text(bar: Option<Bar>, weekly: bool, now_ms: u64) -> String {
@@ -224,8 +229,22 @@ struct Row {
     model: String,
     name: String,
     color: Color32,
+    /// O que a barra de título mostra: o grupo fixado ou, sem ele, o resumo.
     bars: [Option<Bar>; 2],
+    /// Os grupos de modelos (só o Antigravity tem); com eles, o painel mostra cada um no lugar do resumo.
+    groups: Vec<(String, [Option<Bar>; 2])>,
+    /// O grupo fixado na barra, se ele ainda existe.
+    pinned: Option<String>,
     updated_ms: u64,
+}
+
+/// As barras da barra de título e o grupo fixado que vale: o grupo `pin`, se a fonte ainda o devolve; senão, o
+/// resumo (`summary`) e nenhum fixado.
+fn shown_bars(summary: [Option<Bar>; 2], groups: &[(String, [Option<Bar>; 2])], pin: Option<&str>) -> ([Option<Bar>; 2], Option<String>) {
+    match pin.and_then(|pin| groups.iter().find(|(name, _)| name == pin)) {
+        Some((name, bars)) => (*bars, Some(name.clone())),
+        None => (summary, None),
+    }
 }
 
 /// Desenha um item por agente com cota (dados de `Deck::usage`, com ou sem janela aberta), alinhados à direita até `rect.max.x` e
@@ -235,24 +254,23 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     let usage_map = deck.usage();
     let now_ms = agentdeck_core::util::now_ms();
     let mut rows = Vec::new();
-    let mut locals = Vec::new();
     let available: Vec<String> = deck.agents.available.iter().map(|a| a.id.clone()).collect();
     for model in ordered_models(&available, &usage_map) {
         let Some(raw) = usage_map.get(&model) else { continue };
-        if raw.local {
-            locals.push(deck.agents.name(&model));
-            continue;
-        }
         if !has_quota(raw) {
             continue;
         }
         if let Some(at) = next_reset(raw, now_ms) {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(at - now_ms + 50));
         }
+        let groups = group_bars(raw, now_ms);
+        let (shown, pinned) = shown_bars(bars(raw, now_ms), &groups, deck.usage_pins.get(&model).map(String::as_str));
         rows.push(Row {
             name: deck.agents.name(&model),
             color: deck.agents.tab_color(&model),
-            bars: bars(raw, now_ms),
+            bars: shown,
+            groups,
+            pinned,
             updated_ms: raw.updated_ms,
             model,
         });
@@ -272,14 +290,18 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     // O painel aberto no quadro anterior: (agente em destaque, retângulo do painel).
     let open_before = ui.ctx().data(|d| d.get_temp::<(String, Rect)>(panel_key));
     let group = Rect::from_min_max(Pos2::new(start_x, cy - ITEM_H / 2.0), Pos2::new(rect.max.x, cy + ITEM_H / 2.0));
-    let item_at = |i: usize| Rect::from_min_size(Pos2::new(start_x + i as f32 * (item_w + ITEM_GAP), cy - ITEM_H / 2.0), Vec2::new(item_w, ITEM_H));
-    // O painel fica aberto enquanto o mouse está num item, no painel ou no vão entre os dois. O agente em destaque
-    // é o do item sob o mouse; no painel, o último que esteve sob ele. Decidido antes de pintar: um item só realça.
+    let item_at =
+        |i: usize| Rect::from_min_size(Pos2::new(start_x + i as f32 * (item_w + ITEM_GAP), cy - ITEM_H / 2.0), Vec2::new(item_w, ITEM_H));
+    // O painel fica aberto enquanto o mouse está num item, no painel ou no vão entre os dois. Ele mostra o agente do
+    // item sob o mouse; no painel, o último que esteve sob ele. Decidido antes de pintar: um item só realça.
     let pointer = ui.ctx().pointer_hover_pos();
     let hovered = pointer.and_then(|ptr| (0..rows.len()).find(|&i| item_at(i).contains(ptr))).map(|i| rows[i].model.clone());
     let keep = open_before.as_ref().is_some_and(|(_, panel)| pointer.is_some_and(|ptr| group.union(*panel).contains(ptr)));
     let focus = hovered.or_else(|| open_before.filter(|_| keep).map(|(m, _)| m));
-    let focus = focus.or_else(|| deck.debug_usage_panel.then(|| rows[0].model.clone()));
+    let focus = focus.or_else(|| {
+        let wanted = deck.debug_usage_panel.as_deref()?;
+        Some(if wanted.is_empty() { rows[0].model.clone() } else { wanted.to_owned() })
+    });
     for (i, row) in rows.iter().enumerate() {
         let item = item_at(i);
         ui.interact(item, Id::new(("usage-item", &row.model)), Sense::hover());
@@ -289,17 +311,18 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
         let mut ix = item.min.x + ITEM_PAD;
         paint_mark(deck, painter, Pos2::new(ix + 6.0, cy), &row.model, row.color, 12.0);
         ix += 12.0 + 5.0;
-        paint_bar(painter, ix, row1, BAR_W, SESSION_H, row.bars[0], row.color);
-        paint_bar(painter, ix, row2, BAR_W, WEEKLY_H, row.bars[1], row.color);
+        paint_bar(painter, ix, row1, BAR_W, BAR_H, row.bars[0], row.color);
+        paint_bar(painter, ix, row2, BAR_W, BAR_H, row.bars[1], row.color);
         ix += BAR_W + 4.0;
         for (bar, y) in [(row.bars[0], row1), (row.bars[1], row2)] {
             let r = Rect::from_center_size(Pos2::new(ix + PCT_W / 2.0, y), Vec2::new(PCT_W, LINE_H));
             super::text_in(painter, r, Align2::RIGHT_CENTER, &pct_text(bar), theme::meta(8.0), pct_color(bar, p.text_soft));
         }
     }
-    match focus {
-        Some(model) => {
-            let panel = draw_panel(deck, ui.ctx(), group, &rows, &locals, &model, now_ms);
+    match focus.and_then(|m| rows.iter().position(|r| r.model == m)) {
+        Some(i) => {
+            let panel = draw_panel(deck, ui.ctx(), item_at(i), &rows[i], now_ms);
+            let model = rows[i].model.clone();
             // "renova em" e "lido há" andam com o painel aberto, mesmo com o mouse parado.
             ui.ctx().request_repaint_after(std::time::Duration::from_secs(30));
             ui.ctx().data_mut(|d| d.insert_temp(panel_key, (model, panel)));
@@ -309,57 +332,69 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     start_x.max(rect.min.x)
 }
 
-/// Altura de um bloco de agente no painel.
-const BLOCK_H: f32 = 10.0 + 18.0 + 9.0 + 42.0 + 9.0 + 42.0 + 12.0;
+/// Num bloco de agente do painel: o cabeçalho (com o espaço até a primeira janela), cada janela (com o espaço
+/// depois dela), o nome de um grupo e a sobra embaixo.
+const BLOCK_HEAD_H: f32 = 10.0 + 18.0 + 9.0;
+const WINDOW_H: f32 = 42.0 + 9.0;
+const GROUP_NAME_H: f32 = 16.0 + 2.0;
+/// Espaço a mais antes de um grupo que não é o primeiro (separa do "renova" do de cima).
+const GROUP_GAP: f32 = 4.0;
+const BLOCK_PAD_B: f32 = 3.0;
 
-/// O painel de uso, embaixo do grupo de itens: um bloco por agente com cota (`focus` em destaque) e os locais
-/// no rodapé. Devolve o retângulo dele.
-fn draw_panel(deck: &mut Deck, ctx: &egui::Context, group: Rect, rows: &[Row], locals: &[String], focus: &str, now_ms: u64) -> Rect {
+/// As janelas de um bloco, cada uma com o grupo a que pertence: sem grupos, a sessão e a semana do resumo (sempre
+/// as duas, "a fonte não informa" na que faltar); com grupos, só as que cada grupo tem.
+fn block_lines(row: &Row) -> Vec<(Option<&str>, usize, Option<Bar>)> {
+    if row.groups.is_empty() {
+        return (0..2).map(|i| (None, i, row.bars[i])).collect();
+    }
+    let mut out = Vec::new();
+    for (name, bars) in &row.groups {
+        out.extend((0..2).filter(|&i| bars[i].is_some()).map(|i| (Some(name.as_str()), i, bars[i])));
+    }
+    out
+}
+
+/// Altura do bloco de um agente no painel.
+fn block_h(row: &Row) -> f32 {
+    let groups = row.groups.len() as f32;
+    BLOCK_HEAD_H + groups * GROUP_NAME_H + (groups - 1.0).max(0.0) * GROUP_GAP + block_lines(row).len() as f32 * WINDOW_H + BLOCK_PAD_B
+}
+
+/// O painel de uso de um agente, embaixo do item dele (`item`), alinhado pela direita; um clique no nome de um grupo
+/// o fixa na barra (ou solta, se já estava). Devolve o retângulo dele.
+fn draw_panel(deck: &mut Deck, ctx: &egui::Context, item: Rect, row: &Row, now_ms: u64) -> Rect {
     let p = theme::pal();
-    let footer_h = if locals.is_empty() { 0.0 } else { 6.0 + 1.0 + 8.0 + 16.0 };
-    let h = 12.0 + super::SECTION_LABEL_H + 2.0 + rows.len() as f32 * (BLOCK_H + 2.0) + footer_h + 8.0;
+    let h = 12.0 + super::SECTION_LABEL_H + 2.0 + block_h(row) + 6.0;
     let size = Vec2::new(PANEL_W, h);
-    let pos = super::menus::keep_on_screen(ctx, Pos2::new(group.max.x - PANEL_W, group.max.y + 4.0), size);
+    let pos = super::menus::keep_on_screen(ctx, Pos2::new(item.max.x - PANEL_W, item.max.y + 4.0), size);
     let rect = Rect::from_min_size(pos, size);
-    egui::Area::new(Id::new("usage-panel-area")).order(Order::Foreground).fixed_pos(pos).constrain(false).interactable(false).show(
-        ctx,
-        |ui| {
-            let painter = ui.painter();
-            super::shadow(painter, rect, 10, 8, 24, p.shadow);
-            super::frame(painter, rect, 10.0, p.popup, p.glass_border);
-            let head = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, rect.min.y + 12.0), Vec2::new(PANEL_W - 4.0, super::SECTION_LABEL_H));
-            super::section_label(painter, head, "USO DAS ASSINATURAS");
-            if let Some(t) = local_time(now_ms) {
-                let when = t.format("%d/%m · %H:%M").to_string();
-                super::text_in(painter, head.shrink2(Vec2::new(14.0, 0.0)), Align2::RIGHT_CENTER, &when, theme::meta(10.0), p.text_3);
-            }
-            let mut y = head.max.y + 2.0;
-            for row in rows {
-                let block = Rect::from_min_size(Pos2::new(rect.min.x + 6.0, y), Vec2::new(PANEL_W - 12.0, BLOCK_H));
-                agent_block(deck, painter, block, row, row.model == focus, now_ms);
-                y += BLOCK_H + 2.0;
-            }
-            if !locals.is_empty() {
-                y += 6.0;
-                super::separator(painter, Pos2::new(rect.min.x + 14.0, y + 0.5), Pos2::new(rect.max.x - 14.0, y + 0.5));
-                y += 1.0 + 8.0;
-                let text = format!("{} · local, sem limite", locals.join(", "));
-                let line = Rect::from_min_size(Pos2::new(rect.min.x + 14.0, y), Vec2::new(PANEL_W - 28.0, 16.0));
-                let g = super::galley_trunc(painter, &text, theme::ui(12.0), p.text_3, line.width());
-                super::place(painter, line, Align2::LEFT_CENTER, g, p.text_3);
-            }
-        },
-    );
+    let mut pin_click = None;
+    egui::Area::new(Id::new("usage-panel-area")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
+        let painter = ui.painter();
+        super::shadow(painter, rect, 10, 8, 24, p.shadow);
+        super::frame(painter, rect, 10.0, p.popup, p.glass_border);
+        let head = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, rect.min.y + 12.0), Vec2::new(PANEL_W - 4.0, super::SECTION_LABEL_H));
+        super::section_label(painter, head, "USO DA ASSINATURA");
+        if let Some(t) = local_time(now_ms) {
+            let when = t.format("%d/%m · %H:%M").to_string();
+            super::text_in(painter, head.shrink2(Vec2::new(14.0, 0.0)), Align2::RIGHT_CENTER, &when, theme::meta(10.0), p.text_3);
+        }
+        let block = Rect::from_min_size(Pos2::new(rect.min.x + 6.0, head.max.y + 2.0), Vec2::new(PANEL_W - 12.0, block_h(row)));
+        pin_click = agent_block(deck, ui, block, row, now_ms);
+    });
+    if let Some(group) = pin_click {
+        deck.set_usage_pin(&row.model, (row.pinned.as_ref() != Some(&group)).then_some(group));
+    }
     rect
 }
 
-/// Um agente no painel: logo, nome, a etiqueta de bloqueado e "lido há"; a sessão e a semana, cada uma com a
-/// porcentagem, uma barra de 6 px e quando renova.
-fn agent_block(deck: &mut Deck, painter: &Painter, block: Rect, row: &Row, focus: bool, now_ms: u64) {
+/// Um agente no painel: logo, nome, a etiqueta de bloqueado e "lido há"; a sessão e a semana (de cada grupo de
+/// modelos, quando há grupos, sob o nome dele), cada uma com a porcentagem, uma barra de 6 px e quando renova. O nome
+/// do grupo fixado na barra leva a etiqueta "na barra". Devolve o grupo cujo nome foi clicado.
+fn agent_block(deck: &mut Deck, ui: &Ui, block: Rect, row: &Row, now_ms: u64) -> Option<String> {
     let p = theme::pal();
-    if focus {
-        painter.rect_filled(block, 8.0, p.selected_soft);
-    }
+    let painter = ui.painter();
+    let mut clicked = None;
     let (x0, x1) = (block.min.x + 14.0, block.max.x - 14.0);
     let mut y = block.min.y + 10.0;
     // Cabeçalho do agente.
@@ -380,9 +415,51 @@ fn agent_block(deck: &mut Deck, painter: &Painter, block: Rect, row: &Row, focus
         }
     }
     y += 18.0 + 9.0;
-    // Sessão e semana.
-    for (i, (label, span)) in [("Sessão", "5 h"), ("Semana", "7 dias")].into_iter().enumerate() {
-        let bar = row.bars[i];
+    // Sessão e semana (por grupo, se houver).
+    let mut group_before = None;
+    for (group, i, bar) in block_lines(row) {
+        if group.is_some() && group != group_before {
+            if group_before.is_some() {
+                y += GROUP_GAP;
+            }
+            let name = group.unwrap_or_default();
+            let name_r = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 16.0));
+            let resp = super::clickable(ui, name_r.expand2(Vec2::new(6.0, 1.0)), Id::new(("usage-pin", &row.model, name)));
+            let pinned = row.pinned.as_deref() == Some(name);
+            if resp.hovered() {
+                painter.rect_filled(resp.rect, 4.0, p.hover);
+            }
+            let tag = match (pinned, resp.hovered()) {
+                (true, true) => "soltar da barra",
+                (true, false) => "na barra",
+                (false, true) => "fixar na barra",
+                (false, false) => "",
+            };
+            let mut tag_w = 0.0;
+            if !tag.is_empty() {
+                let font = theme::meta(10.0);
+                tag_w = super::text_w(painter, tag, font.clone()) + 12.0;
+                let chip = Rect::from_center_size(Pos2::new(x1 - tag_w / 2.0, name_r.center().y), Vec2::new(tag_w, 16.0));
+                if pinned {
+                    painter.rect_filled(chip, 4.0, theme::with_alpha(row.color, 0.22));
+                }
+                super::text_in(painter, chip, Align2::CENTER_CENTER, tag, font, p.text_strong);
+            }
+            let g = super::galley_trunc(painter, name, theme::ui_semibold(11.5), p.text_2, name_r.width() - tag_w - 8.0);
+            super::place(painter, name_r, Align2::LEFT_CENTER, g, p.text_2);
+            if resp.clicked() {
+                clicked = Some(name.to_owned());
+            }
+            let tip = if pinned {
+                "A barra de título mostra este grupo. Clique para voltar ao resumo."
+            } else {
+                "Mostrar este grupo na barra de título"
+            };
+            super::tip(resp, tip);
+            y += GROUP_NAME_H;
+            group_before = group;
+        }
+        let (label, span) = if i == 0 { ("Sessão", "5 h") } else { ("Semana", "7 dias") };
         let line = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 16.0));
         let l = super::text_in(painter, line, Align2::LEFT_CENTER, label, theme::ui(12.0), p.text_soft);
         let span_r = Rect::from_min_max(Pos2::new(l.max.x + 6.0, y), Pos2::new(x1, y + 16.0));
@@ -391,8 +468,9 @@ fn agent_block(deck: &mut Deck, painter: &Painter, block: Rect, row: &Row, focus
         paint_bar(painter, x0, y + 16.0 + 4.0 + 3.0, x1 - x0, 6.0, bar, row.color);
         let note = Rect::from_min_max(Pos2::new(x0, y + 16.0 + 4.0 + 6.0 + 4.0), Pos2::new(x1, y + 42.0));
         super::text_in(painter, note, Align2::LEFT_CENTER, &reset_text(bar, i == 1, now_ms), theme::meta(10.0), p.text_3);
-        y += 42.0 + 9.0;
+        y += WINDOW_H;
     }
+    clicked
 }
 
 #[cfg(test)]
@@ -416,7 +494,7 @@ mod tests {
 
     #[test]
     fn each_window_gets_its_own_bar() {
-        let u = AgentUsage { session: w(0.28, Some(9_000)), weekly: w(1.7, None), updated_ms: 1, local: false };
+        let u = AgentUsage { session: w(0.28, Some(9_000)), weekly: w(1.7, None), updated_ms: 1, ..Default::default() };
         let [s, wk] = bars(&u, 100);
         assert_eq!(s, Some(Bar { used: 0.28, resets_at_ms: Some(9_000), faded: false }));
         // Valores fora da faixa ficam em 100%.
@@ -433,8 +511,50 @@ mod tests {
     }
 
     #[test]
+    fn with_groups_the_panel_lists_each_group_and_only_the_windows_it_has() {
+        let g = |name: &str, s: Option<UsageWindow>, wk: Option<UsageWindow>| UsageGroup { name: name.into(), session: s, weekly: wk };
+        let u = AgentUsage {
+            session: w(0.1, None),
+            weekly: w(0.94, None),
+            updated_ms: 1,
+            groups: vec![g("Gemini Models", w(0.1, None), w(0.0, None)), g("Gemini 4 Argon", None, w(0.94, None))],
+            ..Default::default()
+        };
+        let row = |groups| Row {
+            model: "antigravity".into(),
+            name: "Antigravity".into(),
+            color: theme::ANTIGRAVITY,
+            bars: bars(&u, 100),
+            groups,
+            pinned: None,
+            updated_ms: 1,
+        };
+        let with = row(group_bars(&u, 100));
+        let lines: Vec<(Option<&str>, usize)> = block_lines(&with).into_iter().map(|(g, i, _)| (g, i)).collect();
+        assert_eq!(lines, [(Some("Gemini Models"), 0), (Some("Gemini Models"), 1), (Some("Gemini 4 Argon"), 1)]);
+        assert_eq!(block_h(&with), BLOCK_HEAD_H + 2.0 * GROUP_NAME_H + GROUP_GAP + 3.0 * WINDOW_H + BLOCK_PAD_B);
+        // Sem grupos: as duas janelas do resumo, na altura de sempre.
+        let without = row(Vec::new());
+        assert_eq!(block_lines(&without).len(), 2);
+        assert_eq!(block_h(&without), 10.0 + 18.0 + 9.0 + 42.0 + 9.0 + 42.0 + 12.0);
+    }
+
+    #[test]
+    fn the_title_bar_shows_the_pinned_group_while_it_exists() {
+        let b = |used| Some(Bar { used, resets_at_ms: None, faded: false });
+        let summary = [b(0.1), b(0.94)];
+        let groups = vec![("Gemini Models".to_owned(), [b(0.1), b(0.2)]), ("Gemini 4 Argon".to_owned(), [None, b(0.94)])];
+        assert_eq!(shown_bars(summary, &groups, None), (summary, None));
+        assert_eq!(shown_bars(summary, &groups, Some("Gemini Models")), ([b(0.1), b(0.2)], Some("Gemini Models".to_owned())));
+        // O Argon não tem sessão: a barra diz "–" em vez de pegar a de outro grupo.
+        assert_eq!(shown_bars(summary, &groups, Some("Gemini 4 Argon")).0, [None, b(0.94)]);
+        // Grupo que a fonte não devolve mais: volta ao resumo.
+        assert_eq!(shown_bars(summary, &groups, Some("Gemini 3 Pro")), (summary, None));
+    }
+
+    #[test]
     fn a_window_past_its_reset_without_new_data_is_zeroed_and_faded() {
-        let usage = AgentUsage { session: w(0.9, Some(1_000)), weekly: w(0.4, Some(9_000)), updated_ms: 500, local: false };
+        let usage = AgentUsage { session: w(0.9, Some(1_000)), weekly: w(0.4, Some(9_000)), updated_ms: 500, ..Default::default() };
         // Antes da renovação: nada muda.
         assert_eq!(current(&usage, 900), (usage.clone(), false, false));
         // Depois: a sessão zera, perde a data e esmaece; a semana (que renova depois) fica.

@@ -445,28 +445,41 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
 }
 
 /// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`AGENTDECK_DEBUG_UI=usage-demo` e `usage-panel`): Claude
-/// no meio da sessão, Antigravity com a semana em aviso, Codex com a sessão esgotada e Ollama local.
+/// no meio da sessão, Antigravity com a semana em aviso (e os três grupos de modelos), Codex com a sessão esgotada e Ollama local.
 fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage> {
-    use agentdeck_core::{AgentUsage, UsageWindow};
+    use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
     let now = agentdeck_core::util::now_ms();
     let w = |used, hours: u64| Some(UsageWindow { used, resets_at_ms: Some(now + hours * 3_600_000) });
     std::collections::HashMap::from([
-        ("claude".into(), AgentUsage { session: w(0.34, 2), weekly: w(0.12, 100), updated_ms: now - 60_000, local: false }),
-        ("antigravity".into(), AgentUsage { session: w(0.45, 3), weekly: w(0.86, 30), updated_ms: now - 120_000, local: false }),
+        ("claude".into(), AgentUsage { session: w(0.34, 2), weekly: w(0.12, 100), updated_ms: now - 60_000, ..Default::default() }),
+        (
+            "antigravity".into(),
+            AgentUsage {
+                session: w(0.45, 3),
+                weekly: w(0.86, 30),
+                updated_ms: now - 120_000,
+                local: false,
+                groups: vec![
+                    UsageGroup { name: "Gemini Models".into(), session: w(0.45, 3), weekly: w(0.2, 60) },
+                    UsageGroup { name: "Gemini 4 Argon".into(), session: None, weekly: w(0.86, 30) },
+                    UsageGroup { name: "Claude and GPT models".into(), session: w(0.0, 5), weekly: w(0.1, 150) },
+                ],
+            },
+        ),
         (
             "codex".into(),
             AgentUsage {
                 session: Some(UsageWindow { used: 1.0, resets_at_ms: Some(now + 40 * 60_000) }),
                 weekly: w(0.4, 80),
                 updated_ms: now - 5 * 3_600_000,
-                local: false,
+                ..Default::default()
             },
         ),
         ("ollama".into(), AgentUsage { local: true, updated_ms: now, ..Default::default() }),
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agente>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Some(v) = agentdeck_core::env_var("DEBUG_UI") else { return };
@@ -653,9 +666,9 @@ fn apply_debug_ui(deck: &mut Deck) {
             | "docs-demo-many"
             | "docs-demo-badge" => crate::docs_demo::apply(deck, item),
             "usage-demo" => deck.debug_usage = Some(debug_usage()),
-            "usage-panel" => {
+            _ if item == "usage-panel" || item.starts_with("usage-panel:") => {
                 deck.debug_usage = Some(debug_usage());
-                deck.debug_usage_panel = true;
+                deck.debug_usage_panel = Some(item.strip_prefix("usage-panel:").unwrap_or_default().to_owned());
             }
             "projects-demo" => deck.debug_projects = Some(debug_projects()),
             "split-drag" => {
