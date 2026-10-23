@@ -149,16 +149,18 @@ pub fn draw(ui: &mut Ui, area: Rect, diff: &GitDiff, id: Id, jump: Option<usize>
     // A barra de rolagem vertical fica por cima da margem da direita.
     let cols = ((area.width() - gutter - RIGHT_PAD) / cell).floor().max(8.0) as usize;
 
-    // A medida só muda com o diff ou com a largura: fica guardada entre os quadros.
-    let fingerprint = (diff.lines.len(), diff.lines.iter().map(|l| l.text.len()).sum::<usize>(), cols, marked, headers);
+    // A medida só muda com o diff ou com a largura: fica guardada entre os quadros. O endereço das linhas muda a
+    // cada diff carregado (um recarregado com os mesmos tamanhos não reaproveita a medida velha).
+    type Fingerprint = (usize, usize, usize, usize, bool, bool);
+    let fingerprint: Fingerprint =
+        (diff.lines.as_ptr() as usize, diff.lines.len(), diff.lines.iter().map(|l| l.text.len()).sum(), cols, marked, headers);
     let key = id.with("diff-layout");
-    let cached = ui.ctx().data(|d| d.get_temp::<(usize, usize, usize, bool, bool, Arc<Layout>)>(key));
+    let cached = ui.ctx().data(|d| d.get_temp::<(Fingerprint, Arc<Layout>)>(key));
     let lay = match cached {
-        Some((a, b, c, m, h, lay)) if (a, b, c, m, h) == fingerprint => lay,
+        Some((f, lay)) if f == fingerprint => lay,
         _ => {
             let lay = Arc::new(layout(diff, cols, marked, headers));
-            let (a, b, c, m, h) = fingerprint;
-            ui.ctx().data_mut(|d| d.insert_temp(key, (a, b, c, m, h, lay.clone())));
+            ui.ctx().data_mut(|d| d.insert_temp(key, (fingerprint, lay.clone())));
             lay
         }
     };
