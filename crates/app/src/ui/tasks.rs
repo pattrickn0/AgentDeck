@@ -1562,7 +1562,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             submenu: false,
         })
         .collect();
-    // O OpenCode lista todos os provedores conectados (`opencode`, `opencode-go`, `ollama`…): o menu
+    // O OpenCode lista todos os provedores conectados (`opencode`, `opencode-go`…): o menu
     // pede o provedor antes e mostra só os modelos dele. Os outros agentes têm uma lista só.
     let groups = models::by_provider(&known);
     let sole = models::sole_provider(&groups).map(str::to_owned);

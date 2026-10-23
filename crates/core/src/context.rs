@@ -1,7 +1,7 @@
 //! Ponto de extensão para contexto adicional de prompts (futuro RAG local/remoto).
 //!
 //! Hoje nenhum provedor é registrado: injeção de prompt e RAG ficam para uma etapa
-//! futura. O motor Ollama e o executor headless chamam [`ContextProvider::augment`]
+//! futura. O executor headless chama [`ContextProvider::augment`]
 //! antes de enviar a mensagem, então plugar um RAG não exige mexer neles.
 
 /// Pedido de contexto para uma mensagem prestes a ser enviada a um agente.

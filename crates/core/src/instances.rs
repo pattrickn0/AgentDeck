@@ -7,7 +7,7 @@
 //! - `claude@dev@ana` — quando já existe outra do mesmo modelo **e** cargo, a nova ganha um nome.
 //!
 //! `claude@main@bia` é a segunda instância principal (sem cargo) do Claude. O modelo pode conter
-//! `:` e `/` (`ollama:qwen3.5:4b`, `ollama:user/custom:latest`), por isso o separador é `@`.
+//! `:` e `/` (`agente:modelo`, `agente:user/modelo:tag`), por isso o separador é `@`.
 //!
 //! Este módulo é só lógica de nomes e de resolução de destino; quem cria abas é a interface.
 
@@ -38,7 +38,7 @@ const NAMES: &[&str] =
 /// Identidade de uma instância.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Ident {
-    /// Modelo/agente (`claude`, `antigravity`, `ollama:qwen3.5:4b`…).
+    /// Modelo/agente (`claude`, `antigravity`…).
     pub kind: String,
     /// Cargo (`dev`, `design`…); `None` = instância principal.
     pub role: Option<String>,
@@ -51,7 +51,7 @@ fn valid_word(s: &str) -> bool {
     !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-/// Modelo: letras, números e `:._/+-` (`claude`, `ollama:qwen3.5:9b`, `ollama:user/custom:latest`).
+/// Modelo: letras, números e `:._/+-` (`claude`, `antigravity`…).
 /// O id vai para prompts e variáveis de ambiente: nada de espaços, aspas ou caracteres de controle.
 fn valid_kind(s: &str) -> bool {
     !s.is_empty() && s.len() <= 128 && s.chars().all(|c| c.is_ascii_alphanumeric() || ":._/+-".contains(c))
@@ -234,9 +234,9 @@ mod tests {
 
     #[test]
     fn scoped_keys_round_trip() {
-        let key = scoped("p0011aabb", "ollama:user/custom:latest@qa@ana");
-        assert_eq!(key, "p0011aabb#ollama:user/custom:latest@qa@ana");
-        assert_eq!(unscoped(&key), ("p0011aabb", "ollama:user/custom:latest@qa@ana"));
+        let key = scoped("p0011aabb", "outro:user/custom:latest@qa@ana");
+        assert_eq!(key, "p0011aabb#outro:user/custom:latest@qa@ana");
+        assert_eq!(unscoped(&key), ("p0011aabb", "outro:user/custom:latest@qa@ana"));
         assert_eq!(unscoped("claude"), ("", "claude"));
         assert!(Ident::parse(&key).is_none(), "`#` nunca aparece num id");
     }
@@ -248,9 +248,9 @@ mod tests {
             "claude@dev",
             "claude@dev@ana",
             "claude@main@bia",
-            "ollama:qwen3.5:4b",
-            "ollama:qwen3.5:4b@dev",
-            "ollama:user/custom:latest@qa",
+            "outro:qwen3.5:4b",
+            "outro:qwen3.5:4b@dev",
+            "outro:user/custom:latest@qa",
         ] {
             assert_eq!(id(s).id(), s, "{s}");
         }
@@ -284,8 +284,8 @@ mod tests {
         for s in ["cla ude", "claude\"", "claude\x1b[201~", "claude\n", "a&b", "x<y", "usuário"] {
             assert!(Ident::parse(s).is_none(), "{s:?}");
         }
-        assert!(Ident::parse("ollama:user/custom:latest").is_some());
-        assert!(Ident::parse("ollama:qwen3.5:9b@dev").is_some());
+        assert!(Ident::parse("outro:user/custom:latest").is_some());
+        assert!(Ident::parse("outro:qwen3.5:9b@dev").is_some());
     }
 
     #[test]
@@ -390,9 +390,9 @@ mod tests {
     #[test]
     fn models_with_colons_work() {
         let mut r = Instances::default();
-        let (a, c) = r.resolve_or_create(&id("ollama:qwen3.5:4b@qa"), false).unwrap();
-        assert_eq!((a.id().as_str(), c), ("ollama:qwen3.5:4b@qa", true));
-        assert_eq!(a.kind, "ollama:qwen3.5:4b");
+        let (a, c) = r.resolve_or_create(&id("outro:qwen3.5:4b@qa"), false).unwrap();
+        assert_eq!((a.id().as_str(), c), ("outro:qwen3.5:4b@qa", true));
+        assert_eq!(a.kind, "outro:qwen3.5:4b");
     }
 
     #[test]

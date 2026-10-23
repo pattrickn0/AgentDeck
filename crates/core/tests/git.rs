@@ -56,7 +56,6 @@ fn start(with_git: bool) -> Env {
     let opts = StartOptions {
         search_path: Some(search.into_os_string()),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,

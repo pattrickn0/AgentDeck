@@ -78,6 +78,20 @@ pub enum TextFile {
     Binary,
 }
 
+/// Garante que o caminho acessado esteja estritamente dentro do workspace (normalização
+/// lexical: funciona com caminhos inexistentes; case-insensitive no Windows).
+pub fn resolve_workspace_path(rel_or_abs: &str, workspace: &Path) -> Result<PathBuf, String> {
+    if workspace.as_os_str().is_empty() {
+        return Err("Workspace não configurado.".into());
+    }
+    let ws = crate::util::absolutize(workspace);
+    let target = crate::util::normalize_lexical(&ws.join(rel_or_abs));
+    if !crate::util::path_within(&target, &ws) {
+        return Err(format!("Acesso negado: o caminho \"{rel_or_abs}\" está fora do workspace configurado (\"{}\").", workspace.display()));
+    }
+    Ok(target)
+}
+
 /// Lê um arquivo de texto do workspace para a visualização somente leitura. O caminho precisa ser
 /// relativo e seguro (`git::safe_rel`) e, depois de resolver links simbólicos, continuar dentro do
 /// workspace. Bytes que não são UTF-8 viram `�` (arquivos antigos em Latin-1 ainda se leem).
@@ -115,12 +129,9 @@ pub const MARKER_END: &str = "<!-- agentdeck:end -->";
 fn marker_re() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        // Reconhece também os marcadores dos nomes antigos (`commanddeck`, `jwic`, `orquestra`) e os troca
-        // pelo atual; ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`.
-        regex::Regex::new(
-            r"<!-- (?:orquestra|jwic|commanddeck|agentdeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|commanddeck|agentdeck):end -->",
-        )
-        .expect("regex válida")
+        // Reconhece também os marcadores de nomes mais antigos (`jwic`, `orquestra`) e os troca pelo atual.
+        regex::Regex::new(r"<!-- (?:orquestra|jwic|agentdeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|agentdeck):end -->")
+            .expect("regex válida")
     })
 }
 
@@ -468,6 +479,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sandbox_resolution() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        assert_eq!(resolve_workspace_path("a/b.txt", &ws).expect("ok"), ws.join("a").join("b.txt"));
+        assert_eq!(resolve_workspace_path("novo/inexistente/../x.txt", &ws).expect("ok"), ws.join("novo").join("x.txt"));
+        assert_eq!(resolve_workspace_path(".", &ws).expect("ok"), ws);
+        assert_eq!(resolve_workspace_path(&ws.join("in.txt").to_string_lossy(), &ws).expect("ok"), ws.join("in.txt"));
+        for bad in ["../fora.txt", "a/../../fora", "../ws-irmao/x", "../../../../../../etc/passwd"] {
+            let err = resolve_workspace_path(bad, &ws).expect_err(bad);
+            assert!(err.starts_with("Acesso negado: o caminho"), "{err}");
+        }
+        let outside = tmp.path().join("fora.txt");
+        assert!(resolve_workspace_path(&outside.to_string_lossy(), &ws).is_err());
+        #[cfg(unix)]
+        assert!(resolve_workspace_path("/etc/passwd", &ws).is_err());
+        #[cfg(windows)]
+        {
+            let upper = ws.to_string_lossy().to_uppercase();
+            assert!(resolve_workspace_path(&format!("{upper}\\x.txt"), &ws).is_ok());
+            assert!(resolve_workspace_path("C:\\Windows\\win.ini", &ws).is_err());
+        }
+    }
+
+    #[test]
     fn read_text_reads_text_and_refuses_big_binary_and_outside_files() {
         let tmp = tempfile::tempdir().expect("tmp");
         let ws = tmp.path().join("ws");
@@ -602,7 +638,7 @@ mod tests {
         for start in [
             "# Regras\r\n\r\nfim\r\n",
             "# Regras\r\n\r\n<!-- agentdeck:start -->\r\nvelho\r\n<!-- agentdeck:end -->\r\n",
-            "# Regras\r\n\r\n<!-- commanddeck:start -->\r\nvelho\r\n<!-- commanddeck:end -->\r\n",
+            "# Regras\r\n\r\n<!-- jwic:start -->\r\nvelho\r\n<!-- jwic:end -->\r\n",
         ] {
             std::fs::write(&file, start).expect("write");
             assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Written);
@@ -619,10 +655,10 @@ mod tests {
         assert_eq!(names, ["AGENTS.md"]);
     }
 
-    /// Um AGENTS.md escrito pela versão antiga (marcadores `commanddeck`) tem o bloco trocado pelo
+    /// Um AGENTS.md escrito por uma versão antiga (marcadores `jwic`) tem o bloco trocado pelo
     /// novo, sem duplicar e sem tocar no resto do arquivo.
     #[test]
-    fn an_old_commanddeck_block_is_replaced_not_duplicated() {
+    fn an_old_name_block_is_replaced_not_duplicated() {
         let tmp = tempfile::tempdir().expect("tmp");
         let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
         std::fs::create_dir_all(&ws).expect("mkdir");
@@ -630,14 +666,14 @@ mod tests {
         for eol in ["\n", "\r\n"] {
             let before = format!("# Regras{eol}{eol}Use tabs.{eol}{eol}");
             let after = format!("{eol}## Fim{eol}Obrigado.{eol}");
-            let old_block = format!("<!-- commanddeck:start -->{eol}texto velho{eol}<!-- commanddeck:end -->");
+            let old_block = format!("<!-- jwic:start -->{eol}texto velho{eol}<!-- jwic:end -->");
             std::fs::write(&file, format!("{before}{old_block}{eol}{after}")).expect("write");
             assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
             let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
             assert_eq!(text, format!("{before}{new_block}{eol}{after}"), "só o bloco muda");
             assert_eq!(text.matches("<!-- agentdeck:start -->").count(), 1);
-            assert!(!text.contains("commanddeck"), "{text:?}");
+            assert!(!text.contains("jwic"), "{text:?}");
             // Com o bloco novo, nada mais muda.
             assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
         }
@@ -654,7 +690,7 @@ mod tests {
         for eol in ["\n", "\r\n"] {
             let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
             let new_a = format!("<!-- agentdeck:start -->{eol}velho{eol}<!-- agentdeck:end -->");
-            let old_b = format!("<!-- commanddeck:start -->{eol}antigo{eol}<!-- commanddeck:end -->");
+            let old_b = format!("<!-- jwic:start -->{eol}antigo{eol}<!-- jwic:end -->");
             // No fim (caso do app antigo), no meio e colado ao primeiro.
             let cases = [
                 (format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}"), format!("# Regras{eol}{eol}{new_block}{eol}")),
@@ -781,7 +817,6 @@ mod tests {
         let opts = crate::StartOptions {
             search_path: Some(root.join("vazio").into_os_string()),
             home_dir: Some(root.join("home")),
-            ollama_discovery: false,
             watch_workspace: true,
             config: Some(crate::Config::with_project(ws.clone())),
             system_dirs: false,

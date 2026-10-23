@@ -479,12 +479,12 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
     vec![
         project(
             "p1",
-            "commanddeck-dev",
+            "agentdeck-dev",
             true,
             vec![
                 agent("claude", None, "claude", "Claude", theme::CLAUDE, true),
                 agent("claude@dev", Some("claude"), "claude", "Claude · Dev", theme::CLAUDE, false),
-                agent("ollama:qwen3.5:9b", Some("claude@dev"), "ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", theme::OLLAMA, false),
+                agent("codex", Some("claude@dev"), "codex", "Codex", theme::SHELL, false),
                 agent("antigravity@sidebar", Some("claude"), "antigravity", "Antigravity · Sidebar", theme::ANTIGRAVITY, false),
                 agent("claude@review", None, "claude", "Claude · Review", theme::CLAUDE, false),
             ],
@@ -495,7 +495,7 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
 }
 
 /// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`AGENTDECK_DEBUG_UI=usage-demo` e `usage-panel`): Claude
-/// no meio da sessão, Antigravity com a semana em aviso (e os três grupos de modelos), Codex com a sessão esgotada e Ollama local.
+/// no meio da sessão, Antigravity com a semana em aviso (e os três grupos de modelos), Codex com a sessão esgotada.
 fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage> {
     use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
     let now = agentdeck_core::util::now_ms();
@@ -525,7 +525,6 @@ fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage
                 ..Default::default()
             },
         ),
-        ("ollama".into(), AgentUsage { local: true, updated_ms: now, ..Default::default() }),
     ])
 }
 
@@ -854,8 +853,8 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             f.brief = "Explicar no memory/ARCHITECTURE.md cada rota, com o corpo de exemplo e os códigos de erro.\n\nConferir também o texto do ask-agent --task.".into();
             if item == "tasks-new-attach" {
                 f.attachments = vec![
-                    r"C:\Users\voce\commanddeck-dev\dados\anexos\1a2b3c-captura de tela.png".into(),
-                    r"C:\Users\voce\commanddeck-dev\dados\anexos\9f8e-relatorio.pdf".into(),
+                    r"C:\Users\voce\agentdeck-dev\dados\anexos\1a2b3c-captura de tela.png".into(),
+                    r"C:\Users\voce\agentdeck-dev\dados\anexos\9f8e-relatorio.pdf".into(),
                 ];
             }
             f.focus_title = false;
