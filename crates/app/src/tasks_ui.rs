@@ -1022,7 +1022,7 @@ pub fn demo_tasks() -> Vec<Task> {
         report: Some("Corrigi o vazamento de handle no PTY.".into()),
         diff_stat: Some(" crates/app/src/terminal/mod.rs | 6 +++---\n 1 file changed, 3 insertions(+), 3 deletions(-)\n".into()),
         events: vec![ev(150, "relatório recebido; em revisão")],
-        effort: Some(Effort::Low),
+        effort: Some(Effort::High),
         ..base("t5", "Corrigir vazamento de handle ao fechar a aba", TaskStatus::Review, "antigravity", Some("gemini-4-argon-high"))
     };
     let running = Task {
