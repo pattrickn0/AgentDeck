@@ -31,13 +31,15 @@ fn is_ignored_entry(name: &str) -> bool {
 
 pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
     // Só subpastas do workspace (`""` = a raiz): nada de `..`, absoluto ou `C:` no Windows.
-    if !rel_dir.is_empty() && !crate::git::safe_rel(rel_dir) {
+    // A barra invertida é separador no Windows (é o que `rel_path` usava antes) e no Unix seria o
+    // nome de um arquivo: normaliza antes de validar e de juntar, senão `zeta\` não abre no Linux.
+    let rel_dir = rel_dir.replace('\\', "/");
+    if !rel_dir.is_empty() && !crate::git::safe_rel(&rel_dir) {
         return Vec::new();
     }
-    let target = workspace.join(rel_dir);
+    let target = workspace.join(rel_dir.as_str());
     let Ok(rd) = std::fs::read_dir(&target) else { return Vec::new() };
-    let rel_norm = rel_dir.replace('\\', "/");
-    let rel_norm = rel_norm.trim_start_matches("./").trim_matches('/');
+    let rel_norm = rel_dir.trim_start_matches("./").trim_matches('/');
     let mut items: Vec<DirEntry> = rd
         .flatten()
         .filter_map(|e| {
