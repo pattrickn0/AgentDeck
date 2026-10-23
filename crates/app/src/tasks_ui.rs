@@ -954,7 +954,15 @@ impl Deck {
                             self.tasks.feedback.clear();
                         }
                     }
-                    Err(e) => self.tasks.notice = Some(e.message().to_owned()),
+                    Err(e) => {
+                        // O aviso só aparece no detalhe: uma ação recusada pelo botão do cartão (na lista)
+                        // abre o detalhe da tarefa, senão a recusa passa sem ninguém ver.
+                        if self.tasks.view == TasksView::List {
+                            self.tasks.view = TasksView::Detail(id.clone());
+                            self.tasks_clear_detail_state();
+                        }
+                        self.tasks.notice = Some(e.message().to_owned());
+                    }
                 }
                 self.tasks_refresh();
             }

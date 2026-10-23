@@ -20,6 +20,14 @@ whisper/models/*.bin
 whisper/*.zip
 whisper/bin-cuda/
 
+# Dos binários pré-compilados do whisper.cpp o app só usa o whisper-cli e as DLLs dele: os exemplos,
+# testes e ferramentas que vêm no pacote (e as DLLs só deles) ficam fora do repositório.
+whisper/bin-*/**/*.exe
+!whisper/bin-*/**/whisper-cli.exe
+whisper/bin-*/**/llama.dll
+whisper/bin-*/**/SDL2.dll
+whisper/bin-*/**/parakeet.dll
+
 # Código-fonte externo do whisper.cpp e pastas de compilação intermediária
 whisper/src/
 

@@ -304,13 +304,16 @@ fn a_refused_merge_shows_the_core_message_and_discard_asks_first() {
     env.core.task_done(&env.project(), &id, "Feito.").expect("done");
     env.pump("revisão", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
 
-    // O repositório principal sujo recusa a mesclagem: a mensagem do core vira o aviso vermelho.
+    // O repositório principal sujo recusa a mesclagem: a mensagem do core vira o aviso vermelho. Pelo botão
+    // do cartão (na lista), a recusa abre o detalhe, que é onde o aviso aparece.
     std::fs::write(env.ws.join("a.txt"), "mudou\n").expect("w");
+    env.deck.tasks.view = TasksView::List;
     env.deck.tasks_act(&id, TaskAct::Merge);
     env.deck.tasks_confirm_accepted();
     env.pump("a recusa", |d| d.tasks.busy.is_none());
     let notice = env.deck.tasks.notice.clone().expect("aviso");
     assert!(notice.contains("alterações sem commit") && notice.contains("a.txt"), "{notice}");
+    assert_eq!(env.deck.tasks.view, TasksView::Detail(id.clone()), "a recusa vinda da lista abre o detalhe");
     assert_eq!(env.task(&id).status, TaskStatus::Review, "continua em revisão");
 
     // Descartar: confirmação primeiro (cancelar não faz nada), depois roda e fecha tudo.
