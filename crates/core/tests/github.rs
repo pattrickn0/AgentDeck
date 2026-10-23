@@ -25,7 +25,6 @@ fn start(root: &Path) -> Core {
     let opts = StartOptions {
         search_path: Some(search.into_os_string()),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,
@@ -118,7 +117,6 @@ fn live_overview_of_this_repository() {
     let opts = StartOptions {
         search_path: Some(search.into_os_string()),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::with_project(repo_dir)),
         system_dirs: false,

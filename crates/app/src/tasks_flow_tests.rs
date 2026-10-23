@@ -79,7 +79,6 @@ impl Env {
         let opts = StartOptions {
             search_path: Some(std::env::join_paths([root.join("fake-bin"), git_dir()]).expect("PATH")),
             home_dir: Some(root.join("home")),
-            ollama_discovery: false,
             watch_workspace: false,
             config: Some(Config::with_project(ws.clone())),
             system_dirs: false,

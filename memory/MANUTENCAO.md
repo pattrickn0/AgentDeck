@@ -46,13 +46,12 @@ crates/
 │   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas, arquivos delas e commits da base)
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
-│   ├── ollama.rs     agente Ollama: ferramentas, sandbox do workspace, loop de tool calling
 │   ├── whisper.rs    transcrição de voz (whisper.cpp); download.rs baixa o motor e o modelo
 │   ├── usage.rs      uso dos planos (sessão e semana); usage/codex.rs e usage/antigravity.rs leem cada fonte
-│   ├── context.rs    ponto de extensão para RAG (ContextProvider; o Ollama e o headless o consultam)
+│   ├── context.rs    ponto de extensão para RAG (ContextProvider; o headless o consulta)
 │   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
 │   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
-│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher e `read_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
+│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher, `resolve_workspace_path` e `read_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
 │   ├── attachments.rs, sessions.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
 │   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
@@ -86,9 +85,8 @@ crates/
 │       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
 │       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
 │       └── menus.rs (nova aba, configurações), shortcuts.rs (atalhos), overlay.rs (arrastar arquivos), empty_state.rs (nenhum agente aberto)
-└── cli/    (agentdeck-cli)    ask-agent e ollama-agent
+└── cli/    (agentdeck-cli)    ask-agent
     ├── src/bin/ask-agent.rs     o comando dos agentes (`parse_task`, `learn_command`, `models_command`, com testes)
-    ├── src/bin/ollama-agent.rs  o agente local com ferramentas
     └── tests/ask_agent.rs, tests/tasks.rs   o `ask-agent` de verdade contra uma ponte real
 ```
 
@@ -188,9 +186,7 @@ nem IME (`handle_key`, `handle_ime`) e o fim de turno marca `Tab.done` mesmo na 
 os arquivos abertos (`docs_reload_files`). `tasks_flow_tests.rs` cobre o fluxo com o core e o git reais. Para ver sem nada disso:
 `AGENTDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`; `docs_demo.rs`).
 
-**Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
-
-**Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O agente Ollama já consulta os provedores registrados.
+**Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O executor headless já consulta os provedores registrados.
 
 **Adicionar um teste.** Coloque um `#[test]` num bloco `#[cfg(test)] mod tests` no fim do arquivo. Para testes de ponta a ponta, use `crates/core/tests/`.
 Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident).env["AGENTDECK_TOKEN"]`
@@ -211,22 +207,19 @@ A lista fica em [pendencias.md](pendencias.md), por área; o que ainda não rodo
 
 ## 6. Migração do nome (CommandDeck → AgentDeck)
 
-O app se chamava CommandDeck e passou a AgentDeck (tarefa `t20`). Durante a transição o código **lê os dois nomes** e
-**escreve só o novo**:
+O app se chamava CommandDeck e passou a AgentDeck (tarefa `t20`). Na `t32` (2026-10-23, antes da promoção para a `main`) o código
+deixou de aceitar os nomes antigos: as variáveis `COMMANDDECK_*` (só `AGENTDECK_*` valem), o cabeçalho `x-commanddeck-token`, o
+marcador `<!-- commanddeck:start/end -->` do `AGENTS.md` e a trava `dados/.commanddeck.lock`. Uma aba aberta pela versão antiga
+precisa ser fechada e reaberta; um `AGENTS.md` ainda com o bloco `commanddeck:` ganha o bloco novo ao lado (apague o velho à mão).
 
-| O quê | Novo | Também aceito (antigo) |
-| :-- | :-- | :-- |
-| Variáveis de ambiente (`PORT`, `TOKEN`, `AGENT`, `ROLE`, `DEPTH`, `ASK_WAIT`, `HOME`, `SMOKE`, `DEBUG_*`, `OLLAMA_*`…) | `AGENTDECK_*` | `COMMANDDECK_*` (só se a nova faltar ou estiver vazia; ajudante `agentdeck_core::env_var`) |
-| Cabeçalho da ponte | `x-agentdeck-token` | `x-commanddeck-token` |
-| Marcadores do `AGENTS.md` | `<!-- agentdeck:start/end -->` | `commanddeck:`, `orquestra:`, `jwic:` (o bloco é trocado pelo novo) |
-| Trava da pasta de dados | `dados/.agentdeck.lock` | `dados/.commanddeck.lock` (travada também; o app novo não abre com o antigo aberto) |
-| Configuração | `%APPDATA%/AgentDeck/config.json` | `%APPDATA%/CommandDeck/config.json` (copiada para o novo na primeira abertura, com as abas; o antigo não é apagado) |
+**Fica uma reserva só**, em `config.rs`: `config::legacy_config_files` começa por `%APPDATA%/CommandDeck/config.json`. Quem nunca
+abriu o AgentDeck e atualiza teria a lista de projetos perdida; então, sem `AgentDeck/config.json`, o app **copia** a do CommandDeck
+(com as abas; o antigo não é apagado). As configurações de `CommandDeck Terminal` (Electron) e de `orquestra` seguem lidas sem as
+abas. Com `AGENTDECK_HOME` o app é isolado e não lê config nenhuma do usuário. Os executáveis são `agentdeck.exe` e `ask-agent`.
 
-Os executáveis são `agentdeck.exe`, `ask-agent` e `ollama-agent` (os dois últimos não mudaram de nome). `dados/` não mudou.
-
-**Até quando:** até a próxima versão depois da promoção da `dev` para a `main`. Depois disso, tire os fallbacks de uma vez
-(`env.rs`, `bridge::token_header`, `workspace::marker_re`, `LOCK_FILES` em `lib.rs`, `config::legacy_config_files`), junto com os
-testes que os cobrem. Por que não antes: [aprendizados/nomes-antigos-aceitos-na-migracao.md](aprendizados/nomes-antigos-aceitos-na-migracao.md).
+**Até quando:** numa versão depois da promoção da `dev` para a `main` (item em [pendencias.md](pendencias.md)). Tire então
+`legacy_config_files`, `is_commanddeck_config`, a cópia em `Config::load_from` e os testes `*_commanddeck_*`.
+Contexto: [aprendizados/migracao-da-config-do-commanddeck.md](aprendizados/migracao-da-config-do-commanddeck.md).
 
 **Depois de atualizar:** o repositório do GitHub já se chama `AgentDeck`; falta renomear a pasta local `commanddeck-dev`
 (ação do usuário; o GitHub redireciona a URL antiga).

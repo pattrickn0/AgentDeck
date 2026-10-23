@@ -1341,7 +1341,6 @@ mod tests {
         let opts = crate::StartOptions {
             search_path: Some(Default::default()),
             home_dir: Some(root.join("home")),
-            ollama_discovery: false,
             watch_workspace: false,
             config: Some(crate::Config::with_project(paths.default_workspace.clone())),
             system_dirs: false,

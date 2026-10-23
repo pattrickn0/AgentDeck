@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use agentdeck_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_OLLAMA, COLOR_SHELL};
+use agentdeck_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_SHELL};
 use agentdeck_core::{AgentInfo, Ident};
 use egui::Color32;
 
@@ -16,10 +16,6 @@ pub fn shell_label(core_label: Option<&str>) -> String {
     } else {
         core_label.filter(|l| !l.is_empty()).unwrap_or("Terminal").to_owned()
     }
-}
-
-fn is_ollama(id: &str) -> bool {
-    id == "ollama" || id.starts_with("ollama:")
 }
 
 /// Item de menu (nova aba / estado vazio).
@@ -56,10 +52,6 @@ impl Agents {
             self.colors.insert(a.id.clone(), color_of(a));
             let name = if a.id == "shell" { shell_label(Some(&a.label)) } else { a.label.clone() };
             self.names.insert(a.id.clone(), name);
-            if a.id.starts_with("ollama:") {
-                self.colors.entry("ollama".into()).or_insert(color_of(a));
-                self.names.entry("ollama".into()).or_insert_with(|| "Ollama".into());
-            }
         }
         self.colors.entry("shell".into()).or_insert(theme::SHELL);
         let shell_core = agents.iter().find(|a| a.id == "shell");
@@ -89,9 +81,9 @@ impl Agents {
         self.loaded = true;
     }
 
-    /// `COLORS[kind]` (com os fallbacks de `openTab` para Ollama).
+    /// `COLORS[kind]`.
     pub fn color(&self, kind: &str) -> Option<Color32> {
-        self.colors.get(kind).copied().or_else(|| is_ollama(kind).then_some(theme::OLLAMA))
+        self.colors.get(kind).copied()
     }
 
     /// Cor da aba: `COLORS[kind] || '#9aa0a6'`, com as cores oficiais como fallback quando o
@@ -101,7 +93,6 @@ impl Agents {
             let hex = match kind {
                 "claude" => COLOR_CLAUDE,
                 "antigravity" => COLOR_ANTIGRAVITY,
-                k if is_ollama(k) => COLOR_OLLAMA,
                 _ => COLOR_SHELL,
             };
             theme::parse_hex_color(hex).unwrap_or(theme::SHELL)
@@ -113,13 +104,9 @@ impl Agents {
         if let Some(n) = self.names.get(kind) {
             return n.clone();
         }
-        if let Some(model) = kind.strip_prefix("ollama:") {
-            return format!("Ollama ({model})");
-        }
         match kind {
             "claude" => "Claude".into(),
             "antigravity" => "Antigravity".into(),
-            "ollama" => "Ollama".into(),
             "shell" => shell_label(None),
             other => other.to_owned(),
         }
@@ -160,25 +147,25 @@ impl Agents {
 mod tests {
     use super::*;
 
-    fn agent(id: &str, label: &str, installed: bool, peer: bool, model: Option<&str>) -> AgentInfo {
-        AgentInfo { id: id.into(), label: label.into(), color: "#d97757".into(), installed, peer, model: model.map(Into::into) }
+    fn agent(id: &str, label: &str, installed: bool, peer: bool) -> AgentInfo {
+        AgentInfo { id: id.into(), label: label.into(), color: "#d97757".into(), installed, peer }
     }
 
     #[test]
     fn build_menus_and_names() {
         let mut a = Agents::new();
         a.build(&[
-            agent("claude", "Claude", false, true, None),
-            agent("codex", "Codex", false, true, None),
-            agent("ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", true, true, Some("qwen3.5:9b")),
-            agent("shell", "Terminal", true, false, None),
+            agent("claude", "Claude", false, true),
+            agent("codex", "Codex", false, true),
+            agent("opencode", "OpenCode", true, true),
+            agent("shell", "Terminal", true, false),
         ]);
         let kinds: Vec<&str> = a.new_tab_menu.iter().map(|m| m.kind.as_str()).collect();
-        assert_eq!(kinds, vec!["claude", "ollama:qwen3.5:9b", "shell"]);
+        assert_eq!(kinds, vec!["claude", "opencode", "shell"]);
         assert_eq!(a.new_tab_menu[0].label, "Claude (não instalado)");
         assert_eq!(a.empty_actions[0].label, "Abrir Claude");
-        assert!(a.knows("ollama"));
-        assert_eq!(a.name("ollama"), "Ollama");
+        assert!(a.knows("opencode") && !a.knows("ollama"));
+        assert_eq!(a.name("opencode"), "OpenCode");
         assert_eq!(a.name("desconhecido"), "desconhecido");
         assert_eq!(a.fallback_kind(), "claude");
         assert_eq!(a.who_color(Some("você")), theme::pal().user);

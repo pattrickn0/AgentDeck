@@ -670,7 +670,7 @@ mod tests {
         for k in ["claude", "antigravity", "opencode"] {
             assert!(picks_model(k), "{k}");
         }
-        for k in ["codex", "shell", "ollama", "ollama:qwen3.5:9b", "aider"] {
+        for k in ["codex", "shell", "aider"] {
             assert!(!picks_model(k), "{k}");
         }
     }

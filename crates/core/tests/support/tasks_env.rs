@@ -83,7 +83,6 @@ pub fn start_core(root: &Path, config: Config, tab_delivery: bool) -> (Core, Rec
     let opts = StartOptions {
         search_path: Some(search),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(config),
         system_dirs: false,

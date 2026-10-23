@@ -129,7 +129,6 @@ pub fn pal() -> &'static Palette {
 pub const CLAUDE: Color32 = rgb(0xd97757);
 pub const ANTIGRAVITY: Color32 = rgb(0x4f8cf7);
 pub const SHELL: Color32 = rgb(0x9aa0a6);
-pub const OLLAMA: Color32 = rgb(0xf59e0b);
 
 // ---------- Cor de destaque = cor do agente ativo ----------
 
@@ -596,7 +595,6 @@ mod tests {
     fn agent_colors_match_the_core() {
         assert_eq!(Some(CLAUDE), parse_hex_color(agentdeck_core::agents::COLOR_CLAUDE));
         assert_eq!(Some(ANTIGRAVITY), parse_hex_color(agentdeck_core::agents::COLOR_ANTIGRAVITY));
-        assert_eq!(Some(OLLAMA), parse_hex_color(agentdeck_core::agents::COLOR_OLLAMA));
         assert_eq!(Some(SHELL), parse_hex_color(agentdeck_core::agents::COLOR_SHELL));
     }
 
@@ -742,7 +740,7 @@ mod tests {
         assert!(rel_lum(p.text_2) > rel_lum(p.text_3));
         assert!(rel_lum(p.text_3) > rel_lum(p.text_faint));
         // O texto sobre cada cor de agente (botão primário, segmento ativo).
-        for a in [CLAUDE, ANTIGRAVITY, OLLAMA, SHELL, p.accent_neutral] {
+        for a in [CLAUDE, ANTIGRAVITY, SHELL, p.accent_neutral] {
             assert!(contrast(p.on_accent, a) >= 4.5, "on_accent sobre {a:?}: {}", contrast(p.on_accent, a));
         }
     }

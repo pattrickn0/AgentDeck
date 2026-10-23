@@ -106,7 +106,7 @@ o teclado usa em Wayland.
 | Ditado (CPU) | `libgomp`, `libstdc++` | `libgomp`, `libstdc++` | o `whisper-cli` baixado não roda |
 | Detectar GPU | `pciutils` (`lspci`), `nvidia-smi` | idem | cai no motor de CPU |
 
-CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; Antigravity e Ollama têm instalador próprio. O app
+CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; o Antigravity tem instalador próprio. O app
 procura no `PATH`, em `~/.local/bin`, em `~/.claude/local/claude` e em `~/.antigravity/bin/agy`.
 
 ## 4. O que está coberto pelo código e pelos testes
@@ -117,7 +117,7 @@ procura no `PATH`, em `~/.local/bin`, em `~/.claude/local/claude` e em `~/.antig
 | PTY/terminal | `portable-pty` + `alacritty_terminal`; `TERM=xterm-256color`, `COLORTERM=truecolor` |
 | Aba Terminal | `$SHELL` ou `/bin/bash`; sem shims `.cmd` (isso é só Windows) |
 | Ambiente das abas | `PATH` com a pasta de binários do app na frente; variáveis `AGENTDECK_*`; sem `PYTHONUTF8`/MSYS |
-| Instância única | trava de arquivo em `dados/.agentdeck.lock` (e a antiga `.commanddeck.lock`) |
+| Instância única | trava de arquivo em `dados/.agentdeck.lock` |
 | Git | `git` do `PATH`, sem shell, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, SSH em `BatchMode` |
 | GitHub | token por `git credential fill` e, se houver, `gh auth token`; sem gravar em disco |
 | Agentes | resolução por `which`/pastas do usuário; sem `cmd.exe` |

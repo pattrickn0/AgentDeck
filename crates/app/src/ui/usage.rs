@@ -1,7 +1,7 @@
 //! Uso das assinaturas na barra de título: para cada agente com cota, o logo do modelo e duas barras
 //! empilhadas (a sessão de 5 h em cima, a semana embaixo) com as porcentagens. Passar o mouse num item abre o
 //! painel de uso daquele agente, em detalhe (quanto foi usado e quando renova; no Antigravity, por grupo de
-//! modelos, e o clique no nome de um grupo o fixa na barra). Locais (Ollama) não têm cota nem item.
+//! modelos, e o clique no nome de um grupo o fixa na barra). Agentes locais não têm cota nem item.
 
 use std::collections::HashMap;
 
@@ -127,7 +127,7 @@ pub fn has_quota(usage: &AgentUsage) -> bool {
     !usage.local && (usage.session.is_some() || usage.weekly.is_some())
 }
 
-/// A ordem dos agentes na barra: a do menu de agentes (`ollama:x` conta como `ollama`) e, depois, os que o menu
+/// A ordem dos agentes na barra: a do menu de agentes e, depois, os que o menu
 /// não tem, em ordem alfabética.
 fn ordered_models(available: &[String], usage: &HashMap<String, AgentUsage>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -591,9 +591,9 @@ mod tests {
     #[test]
     fn agents_follow_the_menu_order_and_the_unknown_come_last() {
         let usage: HashMap<String, AgentUsage> =
-            ["zeta", "codex", "claude", "ollama"].into_iter().map(|k| (k.to_owned(), AgentUsage::default())).collect();
-        let menu = ["claude", "antigravity", "ollama:qwen", "ollama:llama", "codex"].map(String::from);
-        assert_eq!(ordered_models(&menu, &usage), ["claude", "ollama", "codex", "zeta"]);
+            ["zeta", "codex", "claude", "aider"].into_iter().map(|k| (k.to_owned(), AgentUsage::default())).collect();
+        let menu = ["claude", "antigravity", "opencode", "codex"].map(String::from);
+        assert_eq!(ordered_models(&menu, &usage), ["claude", "codex", "aider", "zeta"]);
     }
 
     #[test]
