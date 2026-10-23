@@ -1044,7 +1044,7 @@ pub fn demo_tasks() -> Vec<Task> {
         brief: "Rodar o clippy com -D warnings e corrigir o que aparecer.".into(),
         created_ms: now - 3 * 60 * min,
         events: vec![ev(180, "criada")],
-        ..base("t7", "Limpar os avisos do clippy no crate app", TaskStatus::Draft, "ollama:qwen3.5:9b", None)
+        ..base("t7", "Limpar os avisos do clippy no crate app", TaskStatus::Draft, "opencode", None)
     };
     let failed = Task {
         created_ms: now - 5 * 60 * min,

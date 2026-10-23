@@ -12,11 +12,11 @@ Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com a
 | Render | **glutin + glow** com **egui** (`egui-winit` + `egui_glow`) | widgets prontos e estilização fina para reproduzir o CSS; OpenGL leve (roda até em Xvfb/llvmpipe para testes) |
 | Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação madura; o render da grade é nosso (pintado no egui) |
 | Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/models`, `/team`, `/ask`, `/reply`, `/signal`, `/usage`, `/learn`, `/tasks`; token por processo de agente + validação de Host |
-| Cliente HTTP | **ureq** (Ollama `/api/chat`, `/api/tags`, downloads) | bloqueante e simples, roda em threads |
+| Cliente HTTP | **ureq** (GitHub, cota do Antigravity, downloads) | bloqueante e simples, roda em threads |
 | Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
 | Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
 
-Sem Node/Electron em runtime: `ask-agent` e `ollama-agent` viram binários Rust ao lado do app.
+Sem Node/Electron em runtime: `ask-agent` vira um binário Rust ao lado do app.
 
 ## Crates
 
@@ -24,7 +24,7 @@ Sem Node/Electron em runtime: `ask-agent` e `ollama-agent` viram binários Rust 
 (raiz)
 ├── crates/core   agentdeck-core   backend sem GUI
 ├── crates/app    agentdeck        UI winit+egui
-└── crates/cli    agentdeck-cli    bins ask-agent e ollama-agent
+└── crates/cli    agentdeck-cli    bin ask-agent
 ```
 
 A UI fala com o backend apenas via `agentdeck_core::Core` (métodos ≈ canais IPC) e recebe
@@ -33,8 +33,8 @@ A UI fala com o backend apenas via `agentdeck_core::Core` (métodos ≈ canais I
 
 ## Ponto de extensão para RAG (futuro)
 
-`core::context::ContextProvider` — hoje vazio. O motor Ollama e o executor headless
-consultam os provedores registrados antes de enviar o prompt; plugar RAG local/remoto
+`core::context::ContextProvider` — hoje vazio. O executor headless
+consulta os provedores registrados antes de enviar o prompt; plugar RAG local/remoto
 não exige alterar o resto do sistema.
 
 ## Protocolo entre agentes (`ask-agent`)
@@ -74,7 +74,7 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `GET /inbox`, `GET /inbox?all=1` | `{"answers":[{"request","from","text","failed","ts","delivered"}]}`: as respostas que o chamador recebeu (só token de aba; 400 com o mestre). Sem `all`, as ainda não entregues; com `all`, as 20 últimas. Ler marca todas como entregues (`ask-agent --inbox`) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
-| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
+| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell` recusado) |
 | `GET /tasks`, `GET /tasks/<id>` | as tarefas do projeto de quem chama (`{"tasks": […]}`, sem brief, relatório nem histórico) ou uma tarefa completa (`{"task": {…}}`); com o token mestre, `?project=<id>` escolhe o projeto. Qualquer token pode ler |
 | `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"base"][,"start"]}` → `{"task"}`: cria a tarefa (`kind` padrão `claude`; `start: true` já a inicia) e grava quem pediu como criador; 400 para título vazio, agente ou modelo inválidos, base que não é branch local ou projeto sem git/commit; se `start` falha, devolve o erro com a tarefa criada |
 | `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` → `{"task"}`: inicia, mescla (a tarefa fica aguardando validação), valida (conclui e limpa) ou descarta (409 se o estado não permite, se o repositório principal não está pronto, se há conflito ou se a validação não pode limpar; 500 em erro do git) |
@@ -86,8 +86,7 @@ Toda requisição exige o cabeçalho `x-agentdeck-token` (comparado em tempo con
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
 mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupando a vaga até a resposta chegar), e
 os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
-mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e memória em
-processo no Ollama.
+mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e e os demais CLIs começam sem histórico no headless.
 
 **Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
@@ -130,7 +129,7 @@ Ao abrir a instância vale, na ordem: o pedido (`ask-agent --model` → `"model"
 o gravado em `tab_models` (reabrir o app mantém), o padrão de `Config.role_models` (chave `modelo@cargo` ou só
 `modelo`; `modelo@cargo` vence) e, por fim, o do próprio CLI (nenhum argumento). O resultado é gravado em
 `tab_models` por `Core::assign_model` (idempotente; chamado pela ponte ao criar a instância e por `spawn_spec_for`).
-Só aceitam modelo `claude`, `antigravity`, `codex` e `opencode` (os modelos do Ollama já vão no tipo); o nome é
+Só aceitam modelo `claude`, `antigravity`, `codex` e `opencode` ; o nome é
 validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims `.cmd` ainda passam por `cmd_safe_arg`.
 - **Nas abas** (`spawn_spec_for`): `claude`, `agy` e `codex` recebem `--model <m>`. O TUI do **OpenCode** não tem
   `--model` (só `run` e `mini` têm `-m`): a aba abre `opencode --standalone` com `OPENCODE_CONFIG_CONTENT={"model":"<m>"}`
@@ -147,14 +146,14 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
   `opencode` = `opencode models`. As duas últimas rodam numa thread (a interface chama por
   `Deck::request_models`), com limite de 15 s e cache de 10 min (60 s se falhou); sem lista o menu mostra
   só "Padrão". Como o `opencode models` mistura todos os provedores conectados, os dois menus usam
-  `models::by_provider` e pedem o **provedor antes do modelo** (`opencode`, `opencode-go`, `ollama`…, o
+  `models::by_provider` e pedem o **provedor antes do modelo** (`opencode`, `opencode-go`…, o
   prefixo antes da `/`); os modelos `-free` levam a marca "grátis" (`models::is_free`) e vêm primeiro em
   cada lista. Com um provedor só, `models::sole_provider` pula o passo do provedor e mostra os modelos
   dele direto.
 - **Inventário para os agentes** (`ask-agent --models [agente]`, `GET /models[?agent=<id>]`, `Core::models_inventory`):
   imprime, por agente instalado, o nome como vale no `--agent` e os modelos como o `--model` aceita, com os `-free`
   primeiro e marcados "(grátis)"; o OpenCode sai agrupado por provedor, uma linha cada (`models::by_provider`); os
-  modelos do Ollama saem juntos como `ollama:<modelo>`; o Codex não tem lista e os CLIs sem escolha de modelo
+  o Codex não tem lista e os CLIs sem escolha de modelo
   (aider…) saem como tal. Agente não instalado não aparece (e `--models <agente>` dele dá 404); uma listagem que
   falha vira uma linha ("não consegui listar") sem derrubar o resto. Usa o cache de `known_models` e consulta os
   CLIs em paralelo, então demora no máximo o `LIST_TIMEOUT`. A formatação é a função pura `models::format_inventory`.
@@ -181,10 +180,8 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
    termina com HTTP 202 e um aviso, e a resposta, quando chegar (até 10 minutos), é **digitada no terminal
    de quem perguntou** como uma mensagem nova (`Delivery { answer: true }`). Isso só vale para abas de
    agentes: num terminal comum (`shell`) o texto seria executado como comando, então ali o `ask-agent`
-   espera até o fim, assim como nas execuções headless e no `ollama-agent` (`AGENTDECK_ASK_WAIT=0`).
-5. O `ollama-agent` devolve a resposta sozinho (`POST /reply` com o número lido da instrução, que só conclui
-   perguntas pendentes e nunca cria uma nova), porque modelos pequenos esquecem de rodar o comando.
-6. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**
+   espera até o fim, assim como nas execuções headless.
+5. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**
    descarta as perguntas dela. Ciclos de espera (A espera B, B espera C, C espera A) são recusados na hora
    (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
    digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
@@ -366,10 +363,9 @@ quando renova cada janela, "bloqueado até").
   (janelas `5h` e `weekly`; alternativa: `fetchAvailableModels`) com o token do CLI (Gerenciador de Credenciais do
   Windows `gemini:antigravity` ou `~/.gemini/oauth_creds.json`) enquanto ele vale; quem o renova é o próprio CLI. API interna: qualquer falha
   vira "sem dados" (o agente fica com o último valor lido, ou fora da barra se nunca houve leitura). O token nunca vai para log, Feed ou interface.
-- **Ollama**: local, sem limite.
 
 **Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
-(`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (todo `ollama:*` vira `ollama`). A cada quadro,
+(`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (o próprio tipo; `claude@dev@ana` fica no grupo `claude`). A cada quadro,
 `Deck::plan_panes` calcula a grade (`grid_shape` → `layout` com as proporções salvas, que voltam a iguais quando
 o formato muda), distribui os grupos (`assign`: os que não cabem dividem a última janela) e escolhe a aba
 visível de cada janela (a de `shown` mais alto). `Deck::active` continua sendo a aba que recebe o teclado: é a

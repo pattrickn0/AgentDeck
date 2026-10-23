@@ -46,13 +46,12 @@ crates/
 │   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas, arquivos delas e commits da base)
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
-│   ├── ollama.rs     agente Ollama: ferramentas, sandbox do workspace, loop de tool calling
 │   ├── whisper.rs    transcrição de voz (whisper.cpp); download.rs baixa o motor e o modelo
 │   ├── usage.rs      uso dos planos (sessão e semana); usage/codex.rs e usage/antigravity.rs leem cada fonte
-│   ├── context.rs    ponto de extensão para RAG (ContextProvider; o Ollama e o headless o consultam)
+│   ├── context.rs    ponto de extensão para RAG (ContextProvider; o headless o consulta)
 │   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
 │   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
-│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher e `read_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
+│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher, `resolve_workspace_path` e `read_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
 │   ├── attachments.rs, sessions.rs, config.rs, paths.rs, process.rs, util.rs
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
 │   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
@@ -86,9 +85,8 @@ crates/
 │       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
 │       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
 │       └── menus.rs (nova aba, configurações), shortcuts.rs (atalhos), overlay.rs (arrastar arquivos), empty_state.rs (nenhum agente aberto)
-└── cli/    (agentdeck-cli)    ask-agent e ollama-agent
+└── cli/    (agentdeck-cli)    ask-agent
     ├── src/bin/ask-agent.rs     o comando dos agentes (`parse_task`, `learn_command`, `models_command`, com testes)
-    ├── src/bin/ollama-agent.rs  o agente local com ferramentas
     └── tests/ask_agent.rs, tests/tasks.rs   o `ask-agent` de verdade contra uma ponte real
 ```
 
@@ -188,9 +186,7 @@ nem IME (`handle_key`, `handle_ime`) e o fim de turno marca `Tab.done` mesmo na 
 os arquivos abertos (`docs_reload_files`). `tasks_flow_tests.rs` cobre o fluxo com o core e o git reais. Para ver sem nada disso:
 `AGENTDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`; `docs_demo.rs`).
 
-**Mudar o texto ou as ferramentas do agente Ollama.** Edite `crates/core/src/ollama.rs` (`system_prompt` e `tool_schemas`/`execute_tool`).
-
-**Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O agente Ollama já consulta os provedores registrados.
+**Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O executor headless já consulta os provedores registrados.
 
 **Adicionar um teste.** Coloque um `#[test]` num bloco `#[cfg(test)] mod tests` no fim do arquivo. Para testes de ponta a ponta, use `crates/core/tests/`.
 Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident).env["AGENTDECK_TOKEN"]`

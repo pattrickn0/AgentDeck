@@ -61,11 +61,11 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 (`t13`, `t15`, `t16`) e descrita em [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - [ ] **Resumo de API por arquivo (estilo skeleton)**: entregar a assinatura das funções/tipos de um arquivo em vez do arquivo inteiro, para o agente ler menos. Casa com o `touches` dos aprendizados (mesmo gancho, `ask-agent --learn <arquivo>` poderia anexá-lo).
-- [ ] **Injeção nas abas que não são de tarefa**: hoje só o `start_message` de uma tarefa leva a memória; os agentes das abas normais (e o Ollama, que tem o `ContextProvider`) não recebem os aprendizados nem a situação atual.
-- [ ] **`ContextProvider` geral**: virar os aprendizados e a situação atual provedores registrados e consultados por todos os caminhos de entrega. O trait (`crates/core/src/context.rs`) hoje é consultado só pelo Ollama e pelo executor headless (`headless.rs`); falta o spawn das abas, entregando o contexto pelo canal que cada CLI suporta (flag, `AGENTS.md` ou mensagem de sistema). RAG/embeddings entram aqui depois (ver "Adiados").
-- [ ] **Perfis de agente em arquivo**, editáveis sem recompilar. Hoje cada agente recebe as instruções por um caminho diferente: Claude por `--append-system-prompt` (`agents.rs`/`headless.rs`), Antigravity pelo bloco marcado no `AGENTS.md` do workspace e Ollama pelo prompt fixo de `ollama.rs` (`system_prompt`). Proposta:
+- [ ] **Injeção nas abas que não são de tarefa**: hoje só o `start_message` de uma tarefa leva a memória; os agentes das abas normais não recebem os aprendizados nem a situação atual.
+- [ ] **`ContextProvider` geral**: virar os aprendizados e a situação atual provedores registrados e consultados por todos os caminhos de entrega. O trait (`crates/core/src/context.rs`) hoje é consultado só pelo executor headless (`headless.rs`); falta o spawn das abas, entregando o contexto pelo canal que cada CLI suporta (flag, `AGENTS.md` ou mensagem de sistema). RAG/embeddings entram aqui depois (ver "Adiados").
+- [ ] **Perfis de agente em arquivo**, editáveis sem recompilar. Hoje cada agente recebe as instruções por um caminho diferente: Claude por `--append-system-prompt` (`agents.rs`/`headless.rs`), Antigravity pelo bloco marcado no `AGENTS.md` do workspace. Proposta:
   - `prompts/_comum.md`: regras de colaboração válidas para todos (usar `ask-agent`, não resumir a Conversa integrada, não parar para perguntar ao usuário etc.);
-  - `prompts/<agente>.md`: ajustes por agente (`ollama.md`, `claude.md`, `antigravity.md`...).
+  - `prompts/<agente>.md`: ajustes por agente (`claude.md`, `antigravity.md`...).
 - [ ] **Situação atual mais rica**: decisões recentes (as outras tarefas, os arquivos delas, os sem commit e os últimos commits já entram).
 - [ ] **Aprendizados que envelhecem**: nada avisa quando um `touches` aponta para um arquivo que foi renomeado ou removido (só o teste dos aprendizados do repositório, para caminhos literais); pensar em um comando de conferência e em como aposentar um aprendizado.
 - [ ] **Aprendizado criado pelo agente chega à base só ao mesclar**: outro agente que comece antes da mescla não o vê. Aceitável na fase 1; se incomodar, a "Situação atual" poderia listar os arquivos de aprendizado novos nas branches em andamento.
@@ -74,7 +74,7 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 ## Ponte e instâncias
 
 - [ ] Pré-autorizar o `ask-agent` nos CLIs que pedirem aprovação na aba (hoje só o Claude abre com `--allowedTools`; quais pedem é verificado em [testes.md](testes.md), seção "Ponte e instâncias").
-- [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
+- [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal).
 - [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
 - [ ] Falta `ask-agent --cancel <n>` para desistir de uma pergunta (hoje ela expira em 10 min).
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar. A resposta que não chegou a quem perguntou (200 sem leitor, aba fechada) fica em `ask-agent --inbox`; falta só um jeito de reentregá-la sozinha.
@@ -108,7 +108,7 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 ## Git e GitHub
 
 - A troca da `main` pela `dev` está no bloco "Próximo", item d).
-- [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). Continua aparecendo quando a lista de agentes muda (outra máquina, outros modelos do Ollama) e, em repositório sem `AGENTS.md`, como não rastreado. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
+- [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). Continua aparecendo quando a lista de agentes muda (outra máquina, outros CLIs instalados) e, em repositório sem `AGENTS.md`, como não rastreado. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
 - [ ] Com `commit.gpgsign` e pinentry gráfico, a chave travada é recusada na hora (com a explicação de como destravar numa aba) em vez de abrir o diálogo de senha. Avaliar deixar o diálogo abrir quando houver pinentry gráfico.
 - [ ] **GitHub, depois:** comentar e aprovar PRs, criar issue e reexecutar um job pelo app (hoje é só leitura + "Enviar para agente"); o caminho `gh auth token` não foi exercitado (o `gh` não está instalado aqui).
 

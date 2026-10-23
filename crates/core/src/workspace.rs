@@ -78,6 +78,20 @@ pub enum TextFile {
     Binary,
 }
 
+/// Garante que o caminho acessado esteja estritamente dentro do workspace (normalização
+/// lexical: funciona com caminhos inexistentes; case-insensitive no Windows).
+pub fn resolve_workspace_path(rel_or_abs: &str, workspace: &Path) -> Result<PathBuf, String> {
+    if workspace.as_os_str().is_empty() {
+        return Err("Workspace não configurado.".into());
+    }
+    let ws = crate::util::absolutize(workspace);
+    let target = crate::util::normalize_lexical(&ws.join(rel_or_abs));
+    if !crate::util::path_within(&target, &ws) {
+        return Err(format!("Acesso negado: o caminho \"{rel_or_abs}\" está fora do workspace configurado (\"{}\").", workspace.display()));
+    }
+    Ok(target)
+}
+
 /// Lê um arquivo de texto do workspace para a visualização somente leitura. O caminho precisa ser
 /// relativo e seguro (`git::safe_rel`) e, depois de resolver links simbólicos, continuar dentro do
 /// workspace. Bytes que não são UTF-8 viram `�` (arquivos antigos em Latin-1 ainda se leem).
@@ -468,6 +482,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sandbox_resolution() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        assert_eq!(resolve_workspace_path("a/b.txt", &ws).expect("ok"), ws.join("a").join("b.txt"));
+        assert_eq!(resolve_workspace_path("novo/inexistente/../x.txt", &ws).expect("ok"), ws.join("novo").join("x.txt"));
+        assert_eq!(resolve_workspace_path(".", &ws).expect("ok"), ws);
+        assert_eq!(resolve_workspace_path(&ws.join("in.txt").to_string_lossy(), &ws).expect("ok"), ws.join("in.txt"));
+        for bad in ["../fora.txt", "a/../../fora", "../ws-irmao/x", "../../../../../../etc/passwd"] {
+            let err = resolve_workspace_path(bad, &ws).expect_err(bad);
+            assert!(err.starts_with("Acesso negado: o caminho"), "{err}");
+        }
+        let outside = tmp.path().join("fora.txt");
+        assert!(resolve_workspace_path(&outside.to_string_lossy(), &ws).is_err());
+        #[cfg(unix)]
+        assert!(resolve_workspace_path("/etc/passwd", &ws).is_err());
+        #[cfg(windows)]
+        {
+            let upper = ws.to_string_lossy().to_uppercase();
+            assert!(resolve_workspace_path(&format!("{upper}\\x.txt"), &ws).is_ok());
+            assert!(resolve_workspace_path("C:\\Windows\\win.ini", &ws).is_err());
+        }
+    }
+
+    #[test]
     fn read_text_reads_text_and_refuses_big_binary_and_outside_files() {
         let tmp = tempfile::tempdir().expect("tmp");
         let ws = tmp.path().join("ws");
@@ -781,7 +820,6 @@ mod tests {
         let opts = crate::StartOptions {
             search_path: Some(root.join("vazio").into_os_string()),
             home_dir: Some(root.join("home")),
-            ollama_discovery: false,
             watch_workspace: true,
             config: Some(crate::Config::with_project(ws.clone())),
             system_dirs: false,

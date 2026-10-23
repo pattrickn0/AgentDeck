@@ -52,7 +52,6 @@ pub(super) fn agent_icon(kind: &str) -> Option<Icon> {
     match model {
         "claude" => Some(Icon::ClaudeLogo),
         "antigravity" => Some(Icon::AntigravityLogo),
-        "ollama" => Some(Icon::OllamaLogo),
         "codex" => Some(Icon::CodexLogo),
         _ => None,
     }
@@ -908,19 +907,19 @@ mod tests {
 
     #[test]
     fn filhos_vem_logo_abaixo_do_pai() {
-        // claude, antigravity (aberto pelo claude), claude@dev (aberto pelo claude), ollama (pelo claude@dev), codex (raiz)
+        // claude, antigravity (aberto pelo claude), claude@dev (aberto pelo claude), codex2 (pelo claude@dev), codex (raiz)
         let agents = [
             ag("claude", None),
             ag("antigravity", Some("claude")),
             ag("codex", None),
             ag("claude@dev", Some("claude")),
-            ag("ollama", Some("claude@dev")),
+            ag("codex2", Some("claude@dev")),
         ];
         let rows = agent_tree(&agents);
         assert_eq!(shape(&rows), [(0, 0), (1, 1), (3, 1), (4, 2), (2, 0)]);
         assert!(rows[0].has_kids && !rows[1].has_kids);
         assert!(!rows[1].last && rows[2].last && rows[3].last);
-        // O ollama está sob o último filho do claude: a guia do nível 1 não continua.
+        // O codex2 está sob o último filho do claude: a guia do nível 1 não continua.
         assert_eq!(rows[3].rails, [false]);
     }
 
@@ -934,11 +933,11 @@ mod tests {
 
     #[test]
     fn nao_se_solta_um_agente_dentro_da_propria_equipe() {
-        let agents = [ag("claude", None), ag("dev", Some("claude")), ag("ollama", Some("dev")), ag("review", None)];
-        assert!(in_subtree(&agents, "ollama", "claude"), "neto");
+        let agents = [ag("claude", None), ag("dev", Some("claude")), ag("codex2", Some("dev")), ag("review", None)];
+        assert!(in_subtree(&agents, "codex2", "claude"), "neto");
         assert!(in_subtree(&agents, "dev", "dev"), "ele mesmo");
         assert!(!in_subtree(&agents, "review", "claude"));
-        assert!(!in_subtree(&agents, "claude", "ollama"), "subir para o avô pode");
+        assert!(!in_subtree(&agents, "claude", "codex2"), "subir para o avô pode");
     }
 
     #[test]

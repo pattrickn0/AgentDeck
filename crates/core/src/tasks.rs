@@ -155,7 +155,7 @@ pub struct Task {
     pub branch: String,
     /// Pasta (absoluta) da worktree: `<raiz do repositório>/.agentdeck/worktrees/<id>`.
     pub worktree: PathBuf,
-    /// Agente (`claude`, `antigravity`, `opencode`, `ollama:qwen3.5:9b`…).
+    /// Agente (`claude`, `antigravity`, `opencode`, `codex`…).
     pub kind: String,
     /// Modelo de LLM (pelas regras de `models.rs`); `None` = o padrão do CLI.
     pub model: Option<String>,
@@ -717,8 +717,7 @@ impl Core {
             )));
         }
         let kinds = self.inner.agents.peers();
-        let ollama = self.inner.agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
-        let kind = crate::bridge::resolve_target(&asked, &kinds, &ollama);
+        let kind = crate::agents::resolve_alias(&asked).to_owned();
         if !kinds.contains(&kind) || Ident::parse(&kind).is_none() {
             return Err(TaskError::Invalid(format!(
                 "agente desconhecido ou não instalado \"{}\". Disponíveis: {}",

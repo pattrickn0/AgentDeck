@@ -28,7 +28,6 @@ fn start_core(root: &std::path::Path) -> Core {
     let opts = StartOptions {
         search_path: Some(fake_bin.into_os_string()),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,

@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn app_vars_are_recognized_with_both_prefixes() {
         assert!(is_app_var("AGENTDECK_ROLE") && is_app_var("COMMANDDECK_ROLE") && is_app_var("commanddeck_role"));
-        assert!(!is_app_var("OLLAMA_HOST") && !is_app_var("AGENT") && !is_app_var("é"));
+        assert!(!is_app_var("HOME") && !is_app_var("AGENT") && !is_app_var("é"));
         assert!(is_app_var_named("AGENTDECK_ASK_WAIT", "ASK_WAIT") && is_app_var_named("commanddeck_ask_wait", "ASK_WAIT"));
         assert!(!is_app_var_named("AGENTDECK_ASK_WAITX", "ASK_WAIT") && !is_app_var_named("AGENTDECK_ROLE", "ASK_WAIT"));
     }

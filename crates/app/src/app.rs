@@ -484,7 +484,7 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
             vec![
                 agent("claude", None, "claude", "Claude", theme::CLAUDE, true),
                 agent("claude@dev", Some("claude"), "claude", "Claude · Dev", theme::CLAUDE, false),
-                agent("ollama:qwen3.5:9b", Some("claude@dev"), "ollama:qwen3.5:9b", "Ollama (qwen3.5:9b)", theme::OLLAMA, false),
+                agent("codex", Some("claude@dev"), "codex", "Codex", theme::SHELL, false),
                 agent("antigravity@sidebar", Some("claude"), "antigravity", "Antigravity · Sidebar", theme::ANTIGRAVITY, false),
                 agent("claude@review", None, "claude", "Claude · Review", theme::CLAUDE, false),
             ],
@@ -495,7 +495,7 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
 }
 
 /// SOMENTE DEPURAÇÃO: uso fictício na barra de título (`AGENTDECK_DEBUG_UI=usage-demo` e `usage-panel`): Claude
-/// no meio da sessão, Antigravity com a semana em aviso (e os três grupos de modelos), Codex com a sessão esgotada e Ollama local.
+/// no meio da sessão, Antigravity com a semana em aviso (e os três grupos de modelos), Codex com a sessão esgotada.
 fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage> {
     use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
     let now = agentdeck_core::util::now_ms();
@@ -525,7 +525,6 @@ fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage
                 ..Default::default()
             },
         ),
-        ("ollama".into(), AgentUsage { local: true, updated_ms: now, ..Default::default() }),
     ])
 }
 

@@ -90,11 +90,11 @@ mod tests {
 
     #[test]
     fn ciclo_e_recusado() {
-        let m = map(&[("claude@dev", "claude"), ("ollama", "claude@dev")]);
+        let m = map(&[("claude@dev", "claude"), ("codex", "claude@dev")]);
         assert!(would_cycle(&m, "claude", "claude"), "chefe de si mesmo");
-        assert!(would_cycle(&m, "claude", "ollama"), "o chefe ficaria abaixo do subordinado");
-        assert!(!would_cycle(&m, "ollama", "claude"));
-        assert!(!would_cycle(&m, "antigravity", "ollama"));
+        assert!(would_cycle(&m, "claude", "codex"), "o chefe ficaria abaixo do subordinado");
+        assert!(!would_cycle(&m, "codex", "claude"));
+        assert!(!would_cycle(&m, "antigravity", "codex"));
         // Mapa já corrompido não trava.
         assert!(would_cycle(&map(&[("a", "b"), ("b", "a")]), "c", "a"));
     }
@@ -109,13 +109,13 @@ mod tests {
 
     #[test]
     fn fechar_passa_a_equipe_ao_avo() {
-        let mut m = map(&[("dev", "claude"), ("ollama", "dev"), ("qa", "dev")]);
+        let mut m = map(&[("dev", "claude"), ("codex", "dev"), ("qa", "dev")]);
         let mut touched = remove(&mut m, "dev");
         touched.sort();
-        assert_eq!(touched, ids(&["claude", "ollama", "qa"]));
-        assert_eq!(m, map(&[("ollama", "claude"), ("qa", "claude")]));
+        assert_eq!(touched, ids(&["claude", "codex", "qa"]));
+        assert_eq!(m, map(&[("codex", "claude"), ("qa", "claude")]));
         // Sem chefe, a equipe vai para a raiz.
-        assert_eq!(remove(&mut m, "claude"), ids(&["ollama", "qa"]));
+        assert_eq!(remove(&mut m, "claude"), ids(&["codex", "qa"]));
         assert!(m.is_empty());
     }
 
@@ -130,8 +130,8 @@ mod tests {
 
     #[test]
     fn renomear_mantem_a_arvore() {
-        let mut m = map(&[("dev", "claude"), ("ollama", "dev")]);
+        let mut m = map(&[("dev", "claude"), ("codex", "dev")]);
         rename(&mut m, "dev", "dev@ana");
-        assert_eq!(m, map(&[("dev@ana", "claude"), ("ollama", "dev@ana")]));
+        assert_eq!(m, map(&[("dev@ana", "claude"), ("codex", "dev@ana")]));
     }
 }

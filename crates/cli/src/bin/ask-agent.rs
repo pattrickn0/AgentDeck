@@ -1068,8 +1068,8 @@ pronto"
         ] {
             assert!(d.contains(needle), "{needle}\n{d}");
         }
-        let draft = json!({ "id": "t4", "title": "T", "status": "draft", "instance": "ollama:qwen3.5:4b@t4" });
-        assert_eq!(task_line(&draft), "t4    rascunho   ollama:qwen3.5:4b@t4       T");
+        let draft = json!({ "id": "t4", "title": "T", "status": "draft", "instance": "opencode@t4" });
+        assert_eq!(task_line(&draft), "t4    rascunho   opencode@t4                T");
     }
 
     #[test]

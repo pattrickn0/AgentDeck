@@ -91,8 +91,6 @@ pub enum CoreEvent {
     /// O repositório git do workspace mudou (`.git/HEAD`, índice, refs…: commit, checkout, fetch
     /// feitos pelo terminal ou por um agente) — reler o status.
     GitChanged,
-    /// A lista de agentes/modelos Ollama foi atualizada em background.
-    AgentsChanged,
     /// Progresso de um download em segundo plano.
     Download(DownloadProgress),
     /// Uma pergunta do `ask-agent` para uma instância (aba): a UI abre a aba se `create` e digita

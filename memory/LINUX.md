@@ -106,7 +106,7 @@ o teclado usa em Wayland.
 | Ditado (CPU) | `libgomp`, `libstdc++` | `libgomp`, `libstdc++` | o `whisper-cli` baixado não roda |
 | Detectar GPU | `pciutils` (`lspci`), `nvidia-smi` | idem | cai no motor de CPU |
 
-CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; Antigravity e Ollama têm instalador próprio. O app
+CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; o Antigravity tem instalador próprio. O app
 procura no `PATH`, em `~/.local/bin`, em `~/.claude/local/claude` e em `~/.antigravity/bin/agy`.
 
 ## 4. O que está coberto pelo código e pelos testes

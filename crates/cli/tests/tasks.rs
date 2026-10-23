@@ -64,7 +64,6 @@ fn start_core(root: &Path) -> Core {
     let opts = StartOptions {
         search_path: Some(std::env::join_paths([fake_bin, git_dir]).expect("PATH")),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,

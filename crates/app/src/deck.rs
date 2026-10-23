@@ -184,7 +184,7 @@ pub struct AgentBadge {
     pub id: String,
     /// Chefe da instância (`None` = responde ao usuário). Vem do core (`Core::set_boss`).
     pub parent: Option<String>,
-    /// Modelo (`claude`, `antigravity`, `ollama:…`): escolhe o logo.
+    /// Modelo (`claude`, `antigravity`…): escolhe o logo.
     pub kind: String,
     /// Nome mostrado (`Claude · Dev`).
     pub label: String,
@@ -605,7 +605,7 @@ impl Deck {
         });
     }
 
-    /// `api.listAgents()` numa thread (pode demorar ~1,5 s consultando o Ollama).
+    /// `api.listAgents()` numa thread (procura os CLIs no disco).
     pub fn refresh_agents(&self) {
         self.spawn_bg("list-agents", |core| Some(UiMsg::Agents(core.list_agents())));
     }
@@ -707,7 +707,6 @@ impl Deck {
                 self.git_refresh_soon();
             }
             CoreEvent::GitChanged => self.git_refresh_soon(),
-            CoreEvent::AgentsChanged => self.refresh_agents(),
             CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { project, id, busy } => self.on_agent_signal(&project, &id, busy),
@@ -1057,7 +1056,8 @@ impl Deck {
     fn restore_tabs(&mut self) {
         for p in self.core.projects() {
             if p.id != self.active_project {
-                for id in &p.open_tabs {
+                // Aba de um agente que não existe mais (config antiga, ex.: `ollama:…`): fica de fora, em silêncio.
+                for id in p.open_tabs.iter().filter(|id| Ident::parse(id).is_some_and(|i| self.agents.knows(&i.kind))) {
                     self.core.restore_instance(&p.id, id);
                 }
             }
@@ -2340,7 +2340,7 @@ impl Deck {
             "Sim — portable-pty usa ConPTY no Windows 10+.\nNada a mudar.",
         ));
         self.add_feed(mk(FeedKind::System, None, None, "Projeto ativo alterado para: workspace"));
-        self.add_feed(mk(FeedKind::Error, Some("ollama:qwen3.5:9b"), None, "Falha ao contatar o Ollama em 127.0.0.1:11434."));
+        self.add_feed(mk(FeedKind::Error, Some("opencode"), None, "Falha ao contatar o provedor do modelo."));
         self.add_feed(mk(FeedKind::Thinking, Some("claude"), None, "⚙️ [read_file] README.md"));
     }
 
@@ -2624,10 +2624,10 @@ mod tests {
 
     #[test]
     fn renaming_a_tab_renames_its_feed_items_and_thinking_entry() {
-        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Ollama", None)];
+        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Codex", None)];
         rename_in_feed(&mut feed, "Claude", "Claude@dev");
         let names: Vec<_> = feed.iter().map(|f| (f.who.as_deref().unwrap(), f.to.as_deref())).collect();
-        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Ollama", None)]);
+        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Codex", None)]);
 
         let mut thinking = HashMap::from([("p#claude".to_owned(), 1), ("q#claude".to_owned(), 9)]);
         rename_thinking(&mut thinking, "p", "claude", "claude@dev");

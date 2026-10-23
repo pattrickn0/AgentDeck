@@ -1,6 +1,6 @@
 //! AgentDeck — núcleo (backend) sem dependências de interface gráfica.
 //!
-//! Este crate é o equivalente Rust de `main.js` + `ollamaAgent.js` da versão Electron.
+//! Este crate é o equivalente Rust de `main.js` da versão Electron.
 //! A interface (crate `agentdeck`) conversa com ele exclusivamente através de [`Core`]
 //! e dos eventos [`CoreEvent`] — o mesmo papel que o IPC/preload tinha no Electron.
 //!
@@ -26,7 +26,6 @@ pub mod inbox;
 pub mod instances;
 pub mod learnings;
 pub mod models;
-pub mod ollama;
 pub mod paths;
 pub(crate) mod process;
 pub mod sessions;
@@ -77,11 +76,9 @@ pub struct Transcription {
 pub struct StartOptions {
     /// PATH usado para localizar os CLIs dos agentes (`None` = PATH do processo).
     pub search_path: Option<OsString>,
-    /// Pasta pessoal usada na resolução de agentes, nos manifests do Ollama e na regra
-    /// "nunca escrever AGENTS.md na pasta do usuário" (`None` = a do sistema).
+    /// Pasta pessoal usada na resolução de agentes e na regra "nunca escrever AGENTS.md na
+    /// pasta do usuário" (`None` = a do sistema).
     pub home_dir: Option<PathBuf>,
-    /// Descobrir o Ollama (executável, `/api/tags` e manifests em disco).
-    pub ollama_discovery: bool,
     /// Observar o workspace e emitir [`CoreEvent::WorkspaceChanged`].
     pub watch_workspace: bool,
     /// Configuração a usar em vez de ler `paths.config_file` (não é gravada até `update_config`).
@@ -93,7 +90,7 @@ pub struct StartOptions {
 
 impl Default for StartOptions {
     fn default() -> Self {
-        Self { search_path: None, home_dir: None, ollama_discovery: true, watch_workspace: true, config: None, system_dirs: true }
+        Self { search_path: None, home_dir: None, watch_workspace: true, config: None, system_dirs: true }
     }
 }
 
@@ -112,7 +109,6 @@ pub(crate) struct CoreInner {
     pub home: PathBuf,
     pub watch_workspace: bool,
     pub agents: agents::Registry,
-    pub ollama: ollama::OllamaAgent,
     pub providers: context::Providers,
     pub processes: process::ProcessRegistry,
     /// Chave do par (com o escopo do projeto) → id da sessão/conversa headless.
@@ -224,7 +220,7 @@ pub(crate) mod state {
         pub bridge_port: parking_lot::Mutex<u16>,
         pub bridge_token: String,
         pub session_id: String,
-        /// Sinal de encerramento (interrompe execuções do Ollama na ponte).
+        /// Sinal de encerramento (interrompe as execuções headless da ponte).
         pub shutdown: std::sync::atomic::AtomicBool,
     }
 }
@@ -259,7 +255,6 @@ impl Core {
         config.fix_workspace(&paths, &home);
         let providers = context::Providers::default();
         let inner = CoreInner {
-            ollama: ollama::OllamaAgent::with_providers(config.ollama_host.clone(), providers.clone()),
             config: RwLock::new(config),
             events_tx: tx,
             waker: RwLock::new(None),
@@ -267,7 +262,6 @@ impl Core {
             agents: agents::Registry::new(agents::Discovery {
                 search_path: opts.search_path,
                 home: home.clone(),
-                ollama: opts.ollama_discovery,
                 system_dirs: opts.system_dirs,
             }),
             home,
@@ -307,19 +301,6 @@ impl Core {
 
         usage::start_poller(&core);
 
-        // Atualiza os modelos Ollama em segundo plano (a lista inicial vem do disco).
-        if opts.ollama_discovery {
-            let weak = Arc::downgrade(&core.inner);
-            let _ = std::thread::Builder::new().name("cd-ollama-refresh".into()).spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                let Some(inner) = weak.upgrade() else { return };
-                let core = Core { inner };
-                if core.inner.agents.refresh_ollama_models(&core.config().ollama_host) {
-                    core.refresh_agent_context();
-                    core.emit(CoreEvent::AgentsChanged);
-                }
-            });
-        }
         Ok((core, rx))
     }
 
@@ -361,11 +342,6 @@ impl Core {
         self.inner.providers.write().push(provider);
     }
 
-    /// Motor do agente Ollama compartilhado (conversas da ponte).
-    pub fn ollama_agent(&self) -> &ollama::OllamaAgent {
-        &self.inner.ollama
-    }
-
     // ---------- Configuração (config:get / config:save) ----------
 
     pub fn config(&self) -> Config {
@@ -388,10 +364,8 @@ impl Core {
             cfg.clone()
         };
         if self.inner.config_read_only.load(Ordering::SeqCst) {
-            self.inner.ollama.set_host(snapshot.ollama_host.clone());
             return;
         }
-        self.inner.ollama.set_host(snapshot.ollama_host.clone());
         if let Err(e) = snapshot.save(&self.paths().config_file) {
             log::warn!("falha ao salvar a configuração em {}: {e}", self.paths().config_file.display());
         }
@@ -399,16 +373,14 @@ impl Core {
 
     // ---------- Agentes (agents:list / pty:spawn) ----------
 
-    /// Lista de agentes para menus (mesma semântica de `agents:list`, incluindo
-    /// expansão `ollama:<modelo>`). Pode bloquear até ~1,5 s (consulta /api/tags):
-    /// chame fora da thread da UI.
+    /// Lista de agentes para menus (mesma semântica de `agents:list`). Pode bloquear (procura os
+    /// CLIs no disco e consulta o `gh`): chame fora da thread da UI.
     pub fn list_agents(&self) -> Vec<AgentInfo> {
-        self.inner.agents.refresh_ollama_models(&self.config().ollama_host);
         self.inner.agents.list()
     }
 
     /// Monta o comando para abrir, na pasta do projeto `project`, um terminal interativo do agente
-    /// `kind` (`claude`, `antigravity`, `ollama`, `ollama:<modelo>`, `shell`, ...).
+    /// `kind` (`claude`, `antigravity`, `shell`, ...).
     /// Erro = mensagem amigável ("não instalado", projeto desconhecido) a ser escrita no terminal.
     pub fn spawn_spec(&self, project: &str, kind: &str) -> Result<SpawnSpec, String> {
         agents::spawn_spec(self, project, kind)
@@ -838,7 +810,7 @@ impl Core {
         if ws.as_os_str().is_empty() {
             anyhow::bail!("nenhum projeto aberto");
         }
-        let full = match ollama::resolve_workspace_path(rel_path, &ws) {
+        let full = match workspace::resolve_workspace_path(rel_path, &ws) {
             Ok(p) => p,
             Err(e) => {
                 let abs = util::normalize_lexical(&ws.join(rel_path));

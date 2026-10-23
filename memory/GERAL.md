@@ -21,12 +21,11 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 
 ### O app
 
-Terminal desktop nativo em Rust (winit + egui). São três executáveis, que precisam ficar **na mesma pasta**:
+Terminal desktop nativo em Rust (winit + egui). São dois executáveis, que precisam ficar **na mesma pasta**:
 
 - `agentdeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (mesa de tarefas, Conversa
   integrada, Git e GitHub);
-- `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si;
-- `ollama-agent` (crate `cli`): o agente local com ferramentas, que roda numa aba.
+- `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si.
 
 O "backend" é a crate `core`, sem interface. A interface só fala com ele pelos métodos de `Core` e recebe de
 volta eventos `CoreEvent`.
@@ -75,8 +74,7 @@ Nenhuma outra variável `AGENTDECK_*` do ambiente do app passa para os agentes.
 As instruções da ponte chegam a cada agente por um canal diferente:
 
 - **Claude:** `--append-system-prompt`;
-- **Antigravity e outros:** o bloco gerado no `AGENTS.md` do workspace;
-- **Ollama:** o prompt de sistema do `ollama-agent`.
+- **Antigravity e outros:** o bloco gerado no `AGENTS.md` do workspace.
 
 ### O caminho de uma pergunta entre agentes
 
@@ -100,7 +98,7 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | :-- | :-- |
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); com a barra lateral recolhida, a **chave Agentes | Documentos** compacta logo depois do logo (ver abaixo); à direita, o **uso de cada agente com cota**, com ou sem janela aberta (logo + barra fina da sessão de 5 h em cima e barra grossa da semana embaixo, com as porcentagens; âmbar a partir de 80 %, vermelho em 100 %; passar o mouse abre o **painel de uso**, com todos os agentes, quanto usaram e quando renova cada janela) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | a **chave Agentes | Documentos** no topo, **PROJETOS** (cada projeto com os seus agentes, o modelo de cada um à direita; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (controle Abas | Dividida | Destaque) e **ARQUIVOS**, o explorador (cinza, com a letra do Git; atualizar, recolher tudo); recolhe com Ctrl+B |
-| Centro | duas visões, escolhidas pela **chave** do topo da barra lateral: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
+| Centro | duas visões, escolhidas pela **chave** do topo da barra lateral: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
@@ -111,7 +109,7 @@ na primeira vez que o projeto é selecionado (ou quando um agente chama alguém 
 padrão: sem projeto, o centro pede uma pasta.
 
 A **tela dividida** organiza as abas por tipo de agente:
-- abas do mesmo tipo ficam na mesma janela (2 Claude = 1 janela com 2 abas; todos os modelos do Ollama juntos;
+- abas do mesmo tipo ficam na mesma janela (2 Claude = 1 janela com 2 abas;
   `claude@dev` fica na janela do Claude); um tipo novo abre mais uma janela;
 - as janelas ficam numa grade automática: 2 lado a lado; 3 = 2 em cima + 1 largo embaixo; 4 = 2×2; 5 = 3+2;
   6 = 3×2. Se não cabem no tamanho mínimo (~260 × 140 px), os tipos que sobram viram abas da última janela;
@@ -265,7 +263,7 @@ ela dura.
 **Como usuário:**
 
 - Abrir abas de agentes: Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q,
-  Open Interpreter, modelos Ollama e um terminal comum.
+  Open Interpreter e um terminal comum.
 - Organizar o trabalho em **projetos** (uma pasta cada): cada projeto tem as suas abas, que continuam rodando
   escondidas quando se troca de projeto.
 - Ver os agentes de todos os projetos **em árvore** na barra lateral e reorganizar a **equipe** arrastando um
@@ -298,7 +296,7 @@ ela dura.
 | `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão (`--file <arquivo>` lê de um arquivo; preserva acentos, que o PowerShell troca por `?` no stdin) |
 | `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
 | `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
-| `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor; Ollama como `ollama:<modelo>`), ou só os de um agente; antes de escolher `--agent`/`--model` |
+| `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor), ou só os de um agente; antes de escolher `--agent`/`--model` |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --learn [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; sem argumentos, os aprendizados globais por inteiro e o índice dos demais. O agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
 | `ask-agent --inbox [--all]` | mostra as respostas às suas perguntas que ainda não chegaram a você (a que demorou e não foi digitada, a que o `ask-agent` não leu); `--all` mostra as 20 últimas. Ler as pendentes as marca como entregues |
