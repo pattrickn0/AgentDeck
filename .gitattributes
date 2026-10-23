@@ -1,0 +1,2 @@
+# Scripts de shell rodam no bash também no Windows (CI): sem CRLF.
+*.sh text eol=lf
