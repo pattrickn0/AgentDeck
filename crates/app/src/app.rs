@@ -479,7 +479,7 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
     vec![
         project(
             "p1",
-            "commanddeck-dev",
+            "agentdeck-dev",
             true,
             vec![
                 agent("claude", None, "claude", "Claude", theme::CLAUDE, true),
@@ -820,8 +820,8 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             f.brief = "Explicar no memory/ARCHITECTURE.md cada rota, com o corpo de exemplo e os códigos de erro.\n\nConferir também o texto do ask-agent --task.".into();
             if item == "tasks-new-attach" {
                 f.attachments = vec![
-                    r"C:\Users\voce\commanddeck-dev\dados\anexos\1a2b3c-captura de tela.png".into(),
-                    r"C:\Users\voce\commanddeck-dev\dados\anexos\9f8e-relatorio.pdf".into(),
+                    r"C:\Users\voce\agentdeck-dev\dados\anexos\1a2b3c-captura de tela.png".into(),
+                    r"C:\Users\voce\agentdeck-dev\dados\anexos\9f8e-relatorio.pdf".into(),
                 ];
             }
             f.focus_title = false;

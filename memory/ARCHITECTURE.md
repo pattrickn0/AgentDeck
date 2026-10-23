@@ -82,19 +82,19 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `POST /tasks/<id>/return` | `{"feedback"}` → `{"task"}`: devolve a tarefa em revisão ao agente, com o feedback |
 | `POST /tasks/<id>/reject` | `{"feedback"}` → `{"task"}`: reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, com o motivo (400 para motivo vazio; 409 fora de `Validating` ou com as abas dos agentes desligadas) |
 
-Toda requisição exige o cabeçalho `x-agentdeck-token` (comparado em tempo constante; o nome antigo, `x-commanddeck-token`, também é aceito durante a migração) e um `Host`
+Toda requisição exige o cabeçalho `x-agentdeck-token` (comparado em tempo constante) e um `Host`
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
 mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupando a vaga até a resposta chegar), e
 os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
-mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e e os demais CLIs começam sem histórico no headless.
+mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity; os demais CLIs começam sem histórico no headless.
 
 **Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
 
-**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` e também `dados/.commanddeck.lock` (a trava da versão antiga, durante a migração) ao iniciar; uma segunda janela
-na mesma pasta, nova ou antiga, é recusada com uma mensagem (defina `AGENTDECK_HOME` para abrir outra instância isolada).
+**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` ao iniciar; uma segunda janela
+na mesma pasta é recusada com uma mensagem (defina `AGENTDECK_HOME` para abrir outra instância isolada).
 
 ### Instâncias (abas) e perguntas entre elas
 

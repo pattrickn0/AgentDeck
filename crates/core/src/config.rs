@@ -392,6 +392,11 @@ impl Config {
 /// Configurações de versões anteriores: `CommandDeck` (o nome antes de AgentDeck, no mesmo formato),
 /// a versão Electron (userData = "CommandDeck Terminal") e o nome antigo "orquestra". A primeira que
 /// existir é a origem quando `AgentDeck/config.json` ainda não existe.
+///
+/// ÚNICA reserva do nome CommandDeck que o app ainda carrega (as variáveis `COMMANDDECK_*`, o cabeçalho
+/// da ponte, o marcador do `AGENTS.md` e a trava saíram na t32): quem nunca abriu o AgentDeck perderia a
+/// lista de projetos. Sai (esta função, `is_commanddeck_config`, a cópia em `load_from` e os testes
+/// `*_commanddeck_*`) numa versão depois da promoção da `dev` para a `main`; ver `memory/pendencias.md`.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
     vec![

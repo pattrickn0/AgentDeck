@@ -359,9 +359,7 @@ Com a pasta de dados e a configuração de quem usava o CommandDeck (`%APPDATA%\
 
 - [ ] Abrir o `agentdeck.exe`: a janela se chama AgentDeck, os projetos e as abas abertas da versão antiga aparecem, e
   `%APPDATA%\AgentDeck\config.json` foi criado (o `CommandDeck\config.json` continua lá).
-- [ ] Com o `commanddeck.exe` antigo aberto na mesma pasta de dados, o `agentdeck.exe` recusa abrir ("Outra janela do AgentDeck já está usando a pasta de dados…").
 - [ ] As tarefas existentes (`dados/tarefas/`) e o histórico continuam na mesa.
-- [ ] Um projeto cujo `AGENTS.md` tem o bloco `<!-- commanddeck:start -->`: ao abrir o projeto, o bloco vira `<!-- agentdeck:start -->`, sem duplicar, e o resto do arquivo não muda.
 - [ ] Numa aba de agente nova, `ask-agent --list` funciona e `echo %AGENTDECK_PORT%` (ou `$env:AGENTDECK_PORT`) tem valor.
 
 ## Para fechar

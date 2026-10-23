@@ -76,9 +76,6 @@ fn start_core(root: &Path) -> Core {
 /// `ask-agent` com o token mestre (usuário) ou o de uma aba (`agent = Some((id, token))`).
 fn run(core: &Core, agent: Option<(&str, &str)>, args: &[&str], stdin: &str) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    for name in ["PORT", "TOKEN", "AGENT", "DEPTH", "ASK_WAIT"] {
-        cmd.env_remove(format!("COMMANDDECK_{name}"));
-    }
     cmd.args(args).env_remove("AGENTDECK_DEPTH").env("AGENTDECK_PORT", core.bridge_port().to_string());
     match agent {
         Some((id, token)) => cmd.env("AGENTDECK_TOKEN", token).env("AGENTDECK_AGENT", id),

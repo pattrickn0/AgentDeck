@@ -1,7 +1,6 @@
 //! Ponte HTTP local agente → agente (equivalente a `startBridge`).
 //!
-//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-agentdeck-token` (aceita também o
-//! nome antigo, `x-commanddeck-token`, de uma aba aberta pela versão anterior) e valida o
+//! Escuta só em 127.0.0.1 (porta efêmera), exige o token `x-agentdeck-token` e valida o
 //! cabeçalho `Host` contra DNS rebinding. Cada processo de agente recebe um token próprio, e é o
 //! token que diz quem está perguntando (o `from` do corpo só vale com o token mestre, usado em
 //! testes). Requisições para o mesmo par `de->para` são atendidas em ordem de chegada (fila FIFO
@@ -186,10 +185,9 @@ fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
     req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
 }
 
-/// Cabeçalho do token: `x-agentdeck-token` ou, na falta dele, o nome antigo `x-commanddeck-token`
-/// (uma aba aberta pela versão anterior; ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`).
+/// Cabeçalho do token (`x-agentdeck-token`); vazio se faltar.
 fn token_header(req: &Request) -> &str {
-    ["x-agentdeck-token", "x-commanddeck-token"].iter().filter_map(|name| header(req, name)).find(|v| !v.is_empty()).unwrap_or("")
+    header(req, "x-agentdeck-token").filter(|v| !v.is_empty()).unwrap_or("")
 }
 
 /// Atende uma requisição. `port` é a porta da ponte (conhecida antes da primeira requisição: o

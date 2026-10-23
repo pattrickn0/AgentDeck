@@ -501,8 +501,7 @@ pub(crate) fn build_agent_env(
         }
         let removed = if cfg!(windows) { REMOVE.iter().any(|r| r.eq_ignore_ascii_case(&k)) } else { REMOVE.contains(&k.as_str()) }
             // Nada do AgentDeck que abriu este app (ex.: o app rodando dentro de uma aba de
-            // outro AgentDeck, ou da versão antiga, CommandDeck) vaza para os agentes: cargo,
-            // pasta de dados, depuração… Vale para os dois prefixos.
+            // outro AgentDeck) vaza para os agentes: cargo, pasta de dados, depuração…
             || (crate::env::is_app_var(&k) && !crate::env::is_app_var_named(&k, "ASK_WAIT"));
         if !removed {
             env.insert(k, v);
@@ -702,26 +701,17 @@ mod tests {
             ("AGENTDECK_HOME".to_owned(), "/outro".to_owned()),
             ("AGENTDECK_TOKEN".to_owned(), "velho".to_owned()),
             ("AGENTDECK_DEBUG_UI".to_owned(), "1".to_owned()),
-            // ...ou da versão antiga (CommandDeck): o prefixo antigo também é filtrado.
-            ("COMMANDDECK_ROLE".to_owned(), "dev".to_owned()),
-            ("COMMANDDECK_HOME".to_owned(), "/outro".to_owned()),
-            ("COMMANDDECK_TOKEN".to_owned(), "velho".to_owned()),
-            ("COMMANDDECK_DEBUG_UI".to_owned(), "1".to_owned()),
-            // Configuração do usuário: continua valendo, com os dois nomes.
+            // Configuração do usuário: continua valendo.
             ("AGENTDECK_ASK_WAIT".to_owned(), "300".to_owned()),
-            ("COMMANDDECK_ASK_WAIT".to_owned(), "200".to_owned()),
             // Modelo da aba do OpenCode que abriu este app: não passa para os agentes.
             ("OPENCODE_CONFIG_CONTENT".to_owned(), r#"{"model":"herdado"}"#.to_owned()),
         ];
         let env = build_agent_env(base, Path::new("/app/bin"), 1234, "tok", "claude", 1);
-        for k in ["AGENTDECK_ROLE", "AGENTDECK_HOME", "AGENTDECK_DEBUG_UI", "COMMANDDECK_ROLE", "COMMANDDECK_HOME", "COMMANDDECK_DEBUG_UI"]
-        {
+        for k in ["AGENTDECK_ROLE", "AGENTDECK_HOME", "AGENTDECK_DEBUG_UI"] {
             assert!(!env.contains_key(k), "{k} herdado");
         }
         assert_eq!(env["AGENTDECK_TOKEN"], "tok");
-        assert!(!env.contains_key("COMMANDDECK_TOKEN"), "o app escreve só os nomes novos");
         assert_eq!(env["AGENTDECK_ASK_WAIT"], "300");
-        assert_eq!(env["COMMANDDECK_ASK_WAIT"], "200");
         assert!(!env.contains_key("CLAUDECODE"));
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
         assert!(!env.contains_key("OPENCODE_CONFIG_CONTENT"), "a configuração da aba do OpenCode que abriu o app vazou");

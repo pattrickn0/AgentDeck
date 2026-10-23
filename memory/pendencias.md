@@ -41,7 +41,7 @@ Fica para **depois** da promoção para a `main` (decidido com o usuário em 202
 ### d) Estabilizar e promover a `dev` para a `main`
 
 - [ ] **Substituir a `main` pela `dev`** (aprovado pelo usuário em 2026-10-22). A `main` de hoje é o piloto em TypeScript: ela é **trocada inteira** pelo conteúdo da `dev`, sem mesclagem; a `main` antiga fica numa tag para consulta. O usuário usa a versão em Rust todo dia e considera a maior parte de [testes.md](testes.md) conferida no uso, mesmo sem marcar (os itens continuam lá). Antes da troca: a `t29` (suporte a Linux), a tarefa de validação para a `main` e a correção da janela maximizada.
-- [ ] **Tirar os nomes antigos aceitos** na próxima versão depois da promoção: `COMMANDDECK_*`, `x-commanddeck-token`, marcadores `commanddeck:`, `.commanddeck.lock` e a config `CommandDeck/` (lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
+- [ ] **Tirar a migração da config `CommandDeck/`** numa versão depois da promoção (a única reserva do nome antigo que sobrou; `config::legacy_config_files`, lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
 - [ ] **Renomear a pasta local `commanddeck-dev`** (ação do usuário): o repositório no GitHub já se chama `AgentDeck` e as URLs antigas redirecionam; falta só a pasta.
 
 ## Mesa de tarefas

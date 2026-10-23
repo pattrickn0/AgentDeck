@@ -147,7 +147,7 @@ pub(crate) struct CoreInner {
     /// Tarefas (mesa de tarefas) de cada projeto, em `dados/tarefas/<projeto>.json`.
     pub tasks: tasks::TaskStore,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
-    _data_lock: Vec<std::fs::File>,
+    _data_lock: std::fs::File,
 }
 
 /// Quem chamou a ponte, pelo token que recebeu no ambiente.
@@ -187,30 +187,23 @@ fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Travas da pasta de dados: `.agentdeck.lock` e, durante a migração do nome, também o arquivo da
-/// versão antiga (CommandDeck), para o app novo não abrir sobre a mesma pasta com o antigo ainda
-/// aberto (e vice-versa). Ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`.
-const LOCK_FILES: [&str; 2] = [".agentdeck.lock", ".commanddeck.lock"];
+/// Arquivo de trava da pasta de dados: uma instância do app por pasta.
+const LOCK_FILE: &str = ".agentdeck.lock";
 
-/// Trava `dados/.agentdeck.lock` e `dados/.commanddeck.lock`. Erro se outra instância do app, nova ou
-/// antiga, já usa a pasta.
-fn lock_data_dir(data_dir: &Path) -> anyhow::Result<Vec<std::fs::File>> {
+/// Trava `dados/.agentdeck.lock`. Erro se outra instância do app já usa a pasta.
+fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
     std::fs::create_dir_all(data_dir)?;
-    let mut locks = Vec::with_capacity(LOCK_FILES.len());
-    for name in LOCK_FILES {
-        let path = data_dir.join(name);
-        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
-        match file.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(
-                "Outra janela do AgentDeck já está usando a pasta de dados {}.\n\nFeche-a, ou defina AGENTDECK_HOME com outra pasta para abrir uma instância separada.",
-                data_dir.display()
-            ),
-            Err(std::fs::TryLockError::Error(e)) => log::warn!("não consegui travar {}: {e}", path.display()),
-        }
-        locks.push(file);
+    let path = data_dir.join(LOCK_FILE);
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(
+            "Outra janela do AgentDeck já está usando a pasta de dados {}.\n\nFeche-a, ou defina AGENTDECK_HOME com outra pasta para abrir uma instância separada.",
+            data_dir.display()
+        ),
+        Err(std::fs::TryLockError::Error(e)) => log::warn!("não consegui travar {}: {e}", path.display()),
     }
-    Ok(locks)
+    Ok(file)
 }
 
 pub(crate) mod state {
@@ -918,12 +911,6 @@ pub fn ref_path(workspace: &Path, abs: &Path) -> String {
 mod tests {
     use super::*;
 
-    fn hold(dir: &Path, name: &str) -> std::fs::File {
-        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(name)).expect("open");
-        file.try_lock().expect("travar");
-        file
-    }
-
     #[test]
     fn the_data_dir_is_locked_by_one_instance() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -932,27 +919,5 @@ mod tests {
         assert!(err.starts_with("Outra janela do AgentDeck já está usando a pasta de dados"), "{err}");
         drop(first);
         lock_data_dir(tmp.path()).expect("livre de novo");
-    }
-
-    /// O app antigo (CommandDeck) trava `.commanddeck.lock`: o novo, na mesma pasta, recusa abrir.
-    #[test]
-    fn the_old_commanddeck_lock_in_use_blocks_opening() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let old_app = hold(tmp.path(), ".commanddeck.lock");
-        let err = lock_data_dir(tmp.path()).expect_err("recusa").to_string();
-        assert!(err.starts_with("Outra janela do AgentDeck já está usando a pasta de dados"), "{err}");
-        // Recusar não deixa o arquivo novo travado.
-        drop(old_app);
-        lock_data_dir(tmp.path()).expect("sem a trava antiga, abre");
-    }
-
-    /// O app novo também segura a trava antiga: abrir o app antigo depois também é recusado.
-    #[test]
-    fn the_new_instance_also_holds_the_old_lock() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let _new_app = lock_data_dir(tmp.path()).expect("abre");
-        let old =
-            std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(tmp.path().join(".commanddeck.lock")).expect("open");
-        assert!(matches!(old.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
     }
 }

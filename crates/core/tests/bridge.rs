@@ -119,19 +119,16 @@ fn ask(env: &Env, body: Value) -> (u16, Value) {
     http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), env.core.bridge_token(), &body.to_string())
 }
 
-/// Uma aba aberta pela versão antiga (CommandDeck) ainda manda `x-commanddeck-token`: a ponte aceita.
+/// O cabeçalho do nome antigo (`x-commanddeck-token`) não vale mais: só `x-agentdeck-token` autentica.
 #[test]
-fn the_old_token_header_is_still_accepted() {
+fn the_old_token_header_is_refused() {
     let env = start(&[("claude", "cat >/dev/null; echo ok")]);
     let port = env.core.bridge_port();
     let token = env.core.bridge_token().to_owned();
     let host = format!("127.0.0.1:{port}");
 
     let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, &token, "");
-    assert_eq!(st, 200, "{b}");
-    let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, "errado", "");
     assert_eq!((st, b), (403, json!({"error": "token inválido"})));
-    // O nome novo continua valendo.
     assert_eq!(http(port, "GET", "/agents", &host, &token, "").0, 200);
 }
 

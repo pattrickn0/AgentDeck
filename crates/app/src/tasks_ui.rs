@@ -1000,7 +1000,7 @@ pub fn demo_tasks() -> Vec<Task> {
         status,
         base: "dev".into(),
         branch: format!("tarefa/{id}-{}", agentdeck_core::tasks::slugify(title, 40)),
-        worktree: format!(r"C:\Users\voce\commanddeck-dev\.agentdeck\worktrees\{id}").into(),
+        worktree: format!(r"C:\Users\voce\agentdeck-dev\.agentdeck\worktrees\{id}").into(),
         kind: kind.to_owned(),
         model: model.map(str::to_owned),
         instance: format!("{kind}@{id}"),
@@ -1016,7 +1016,7 @@ pub fn demo_tasks() -> Vec<Task> {
         diff_stat: Some(" crates/app/src/tasks_ui.rs       | 412 +++++++++++++++++++++++++++\n crates/app/src/ui/tasks.rs      | 688 ++++++++++++++++++++++++++++++++++++\n crates/app/src/ui/right_panel.rs |  14 +-\n crates/core/src/tasks.rs        |  23 ++\n 4 files changed, 1129 insertions(+), 8 deletions(-)\n".into()),
         events: vec![
             ev(95, "criada"),
-            ev(90, "iniciada: worktree C:\\Users\\voce\\commanddeck-dev\\.agentdeck\\worktrees\\t4 na branch tarefa/t4-aba-tarefas-na-barra-direita"),
+            ev(90, "iniciada: worktree C:\\Users\\voce\\agentdeck-dev\\.agentdeck\\worktrees\\t4 na branch tarefa/t4-aba-tarefas-na-barra-direita"),
             ev(90, "brief entregue ao agente"),
             ev(6, "relatório recebido; em revisão"),
         ],

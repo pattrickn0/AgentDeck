@@ -35,7 +35,7 @@ volta eventos `CoreEvent`.
 | Pasta | Conteúdo |
 | :-- | :-- |
 | `workspace/` | o workspace antigo, do tempo em que havia uma pasta global. Hoje cada **projeto** tem a sua pasta (o `cwd` das abas dele); `workspace/` só serve de destino na migração de uma config antiga (`Config::migrate_legacy`) |
-| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log`, `agentdeck.log` (o log do app, gira acima de 2 MB) e as travas `.agentdeck.lock` e `.commanddeck.lock` (esta, só durante a migração do nome) |
+| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log`, `agentdeck.log` (o log do app, gira acima de 2 MB) e a trava `.agentdeck.lock` |
 | `whisper/` | motor e modelos do ditado por voz (whisper.cpp) |
 | `%APPDATA%\AgentDeck\config.json` | configuração (na primeira abertura, copiada de `%APPDATA%\CommandDeck\config.json`, se existir). Com `AGENTDECK_HOME`, tudo isso fica dentro dessa pasta |
 
