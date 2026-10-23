@@ -373,6 +373,8 @@ pub fn actions_for(task: &Task, tab_open: bool) -> Vec<TaskAct> {
         TaskStatus::Running => vec![tab, TaskAct::Discard],
         TaskStatus::Review => vec![TaskAct::Merge, TaskAct::Return, tab, TaskAct::Discard],
         TaskStatus::Validating => vec![TaskAct::Validate, TaskAct::Reject, tab, TaskAct::Discard],
+        // Com relatório, a mesclagem falhou (de uma versão anterior): dá para devolver ao agente como em revisão.
+        TaskStatus::Failed if task.report.is_some() => vec![TaskAct::Retry, TaskAct::Return, tab, TaskAct::Discard],
         TaskStatus::Failed => vec![TaskAct::Retry, TaskAct::Discard],
         TaskStatus::Merged | TaskStatus::Discarded => Vec::new(),
     }
@@ -988,7 +990,7 @@ pub fn demo_tasks() -> Vec<Task> {
             ev(90, "brief entregue ao agente"),
             ev(6, "relatório recebido; em revisão"),
         ],
-        ..base("t4", "Aba Tarefas na barra direita", TaskStatus::Review, "claude", Some("claude-opus-4-5"))
+        ..base("t4", "Aba Tarefas na barra direita", TaskStatus::Review, "claude", Some("claude-opus-5-5"))
     };
     let review2 = Task {
         created_ms: now - 50 * min,
@@ -997,13 +999,13 @@ pub fn demo_tasks() -> Vec<Task> {
         report: Some("Corrigi o vazamento de handle no PTY.".into()),
         diff_stat: Some(" crates/app/src/terminal/mod.rs | 6 +++---\n 1 file changed, 3 insertions(+), 3 deletions(-)\n".into()),
         events: vec![ev(150, "relatório recebido; em revisão")],
-        ..base("t5", "Corrigir vazamento de handle ao fechar a aba", TaskStatus::Review, "antigravity", Some("gemini-3-pro"))
+        ..base("t5", "Corrigir vazamento de handle ao fechar a aba", TaskStatus::Review, "antigravity", Some("gemini-4-argon-high"))
     };
     let running = Task {
         created_ms: now - 25 * min,
         started_ms: Some(now - 24 * min),
         events: vec![ev(25, "criada"), ev(24, "iniciada: worktree … na branch tarefa/t6")],
-        ..base("t6", "Documentar as rotas /tasks da ponte", TaskStatus::Running, "claude", Some("sonnet"))
+        ..base("t6", "Documentar as rotas /tasks da ponte", TaskStatus::Running, "claude", Some("claude-sonnet-5-5"))
     };
     let draft = Task {
         brief: "Rodar o clippy com -D warnings e corrigir o que aparecer.".into(),
@@ -1018,7 +1020,7 @@ pub fn demo_tasks() -> Vec<Task> {
             ev(300, "criada"),
             ev(299, "erro: não consegui criar a worktree: a branch tarefa/t3-nova-branch já existe neste repositório"),
         ],
-        ..base("t3", "Trocar o parser de markdown do relatório", TaskStatus::Failed, "opencode", Some("opencode/glm-5.3"))
+        ..base("t3", "Trocar o parser de markdown do relatório", TaskStatus::Failed, "opencode", Some("opencode/deepseek-v4.1-flash-free"))
     };
     let validating = Task {
         brief: "Mostrar o estado da mesclagem no cabeçalho do detalhe.".into(),
@@ -1037,14 +1039,14 @@ pub fn demo_tasks() -> Vec<Task> {
             ev(20, "relatório recebido; em revisão"),
             ev(8, "mesclada em dev (a1b2c3d); aguardando validação"),
         ],
-        ..base("t8", "Estado da mesclagem no cabeçalho do detalhe", TaskStatus::Validating, "claude", Some("sonnet"))
+        ..base("t8", "Estado da mesclagem no cabeçalho do detalhe", TaskStatus::Validating, "claude", Some("claude-sonnet-5-5"))
     };
     let merged = Task {
         created_ms: now - 26 * 60 * min,
         started_ms: Some(now - 26 * 60 * min),
         finished_ms: Some(now - 24 * 60 * min),
         events: vec![ev(24 * 60, "validada; concluída; worktree e branch removidas")],
-        ..base("t2", "Rotas /tasks na ponte", TaskStatus::Merged, "claude", Some("opus"))
+        ..base("t2", "Rotas /tasks na ponte", TaskStatus::Merged, "claude", Some("claude-opus-5-5"))
     };
     let discarded = Task {
         created_ms: now - 50 * 60 * min,
@@ -1260,6 +1262,11 @@ mod tests {
             [TaskAct::Validate, TaskAct::Reject, TaskAct::ReopenTab, TaskAct::Discard]
         );
         assert_eq!(actions_for(&t(TaskStatus::Failed, false), false), [TaskAct::Retry, TaskAct::Discard]);
+        // Mesclagem que falhou antes (Failed com relatório): também se devolve ao agente.
+        assert_eq!(
+            actions_for(&t(TaskStatus::Failed, true), true),
+            [TaskAct::Retry, TaskAct::Return, TaskAct::GoToTab, TaskAct::Discard]
+        );
         assert!(actions_for(&t(TaskStatus::Merged, true), false).is_empty());
         assert!(actions_for(&t(TaskStatus::Discarded, false), false).is_empty());
         // Só a ação principal vem cheia; mesclar mostra a base.

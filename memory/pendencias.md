@@ -14,9 +14,6 @@ Combinado em 2026-10-21, nesta ordem.
 
 ### a) O que sobrou da mesa de tarefas
 
-- [ ] **Becos vistos no uso real da `t20` (2026-10-22):**
-  - **Mesclar falha quando o app reescreveu o `AGENTS.md` da pasta principal.** O app mantém o bloco marcado atualizado (ex.: uma linha nova nas instruções da ponte), o arquivo fica alterado sem commit e o `git merge` recusa ("commit your changes or stash them before you merge"). Com o app aberto, isso trava qualquer mesclagem que mexa no `AGENTS.md`. A mesa deveria tolerar o arquivo gerado (ex.: descartar a alteração só do bloco antes de mesclar e regravá-lo depois) ou deixar de versionar o bloco (ver "Git e GitHub").
-  - **Tarefa com mesclagem falhada vira beco.** No estado `erro`, `--task return` recusa ("só se devolve uma tarefa em revisão") e `--task done` também; o agente não consegue entregar o ajuste pela mesa e o orquestrador precisa falar com a aba direto. Uma mesclagem que falhou por motivo externo deveria voltar a `Review` (e o "Tentar de novo" continuar).
 - [ ] **Revisão do fluxo (t10, 2026-10-21): o que sobrou.** Os demais achados saíram na `t18` (ver [historico.md](historico.md)); ficam:
   - **Pasta da worktree que não sai ao validar.** Agora a tarefa fica em `Validating` e dá para tentar de novo, mas não há como ver qual processo segura a pasta; só a mensagem do git (`remove_task_worktree`, `tasks.rs:1439`). Visto em uso real na `t14` (2026-10-21): cinco tentativas de validar falharam com "a pasta ficou" antes de a pasta sair. Um teste desse caso não é possível sem simular o bloqueio do Windows.
   - **Mensagens ao agente não citam a validação.** `start_message` não conta ao agente que, depois de mesclada, a tarefa ainda pode voltar reprovada; hoje ele só descobre quando `reject_message` chega. Conferir no uso real se faz falta.
@@ -36,13 +33,11 @@ A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [his
 - [ ] **Selecionar e copiar texto** da visualização de arquivo e do diff (hoje só rolam; o markdown segue o egui). Também: buscar dentro do documento.
 - [ ] **Explorador mais útil:** hoje só mostra a árvore. Ideias: marcar o que mudou (git), filtrar/buscar e abrir os arquivos de uma tarefa a partir do detalhe dela.
 
-### c) Identidade visual e temas
+### c) Temas
 
 É a tarefa logo depois do rename (o nome já é AgentDeck, ver [historico.md](historico.md), `t20`), e vem antes da promoção para a `main`: o visual novo e o nome chegam a quem usa a `main` numa vez só. Logo e ícone entram aqui.
 
-- [ ] **Identidade visual e temas** (pedido do usuário, 18/10). **Partes 1 (base, `t21`) e 2 (barra lateral e centro, `t22`) feitas; falta a parte 3 (barra direita, menus e modais), que ainda usa o visual antigo sobre o fundo novo.** O app funciona, mas o visual é inconsistente: a barra lateral esquerda parece de outro tema que a barra direita, e algumas partes estão sem personalidade.
-  - Primeiro, padronizar: revisar barra lateral, barra direita, barra de título, abas e modais com as mesmas cores, espaçamentos, cantos e estados (hover, seleção), tudo vindo dos tokens de `theme.rs`, sem cor fixa espalhada pelo código.
-  - Depois, temas para o usuário escolher: trocar as constantes de `theme.rs` por uma paleta carregada em tempo de execução, escolhida nas configurações e gravada em `Config`. A paleta inclui o fundo e as 16 cores do terminal (`TERM_BG`/`TERM_FG`, `terminal/colors.rs`), então um tema muda o fundo de todas as abas de uma vez (CLIs com tema próprio, como o OpenCode, continuam usando o tema deles).
+- [ ] **Temas** (pedido do usuário, 18/10). A identidade visual (visual C) está feita nas três partes (`t21`, `t22`, `t23`, ver [historico.md](historico.md)), com os tokens de `theme.rs` e sem cor solta. Falta o resto do pedido, os temas para o usuário escolher: trocar as constantes de `theme.rs` por uma paleta carregada em tempo de execução, escolhida nas configurações e gravada em `Config`. A paleta inclui o fundo e as 16 cores do terminal (`TERM_BG`/`TERM_FG`, `terminal/colors.rs`), então um tema muda o fundo de todas as abas de uma vez (CLIs com tema próprio, como o OpenCode, continuam usando o tema deles).
 
 ### d) Estabilizar e promover a `dev` para a `main`
 
@@ -54,7 +49,7 @@ A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [his
 
 O que sobrou da mesa está no bloco "Próximo", item a).
 
-- [ ] **Mesa de tarefas, depois:** a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho; os dados de demonstração (`tasks-demo`, em `tasks_ui.rs`) usam nomes de modelos antigos (`claude-opus-4-5`).
+- [ ] **Mesa de tarefas, depois:** a linha do tempo das mensagens entre agentes de cada tarefa (para aposentar a Conversa integrada); rodar os testes do projeto ao receber o relatório; editar uma tarefa em rascunho.
 
 ## Modelos
 
@@ -108,8 +103,6 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 - [ ] **Uso do Antigravity com o token vencido:** o app usa só o token que o CLI mantém (sem guardar client ID/secret de terceiros), então com o CLI fechado por mais de ~1 h a barra mostra "sem dados". Avaliar ler o client ID/secret do CLI instalado para renovar em memória.
 - [ ] **Uso do Antigravity depende de API interna** (`v1internal:retrieveUserQuotaSummary`): pode mudar sem aviso; hoje qualquer falha vira "sem dados". Avaliar um aviso discreto quando falhar por muito tempo.
 - [ ] **Uso do Codex só testado com arquivos de exemplo** (o Codex não estava instalado): conferir o formato real de `rate_limits` nos `rollout-*.jsonl`.
-- [ ] **A dica de "Atalhos do app acima do terminal" ainda cita o Ctrl+L** (`crates/app/src/ui/menus.rs:442`), que era da caixa de mensagem da barra direita, removida na `t11`: nenhum código trata mais o Ctrl+L (nem a lista de atalhos o traz). Tirar o Ctrl+L da dica. Os comentários de código dessa caixa também ficaram para trás (`crates/app/src/main.rs:5`, `theme.rs:73`, `terminal/input.rs:194`, `crates/core/src/config.rs:101`, `agents.rs:44`, `ui/shortcuts.rs:221`).
-- [ ] **Statusline do usuário perde o `padding`**: a nossa (`ask-agent --usage`) fixa 0 (`agents.rs`, `write_claude_hooks`) e repassa a dele.
 
 ## Git e GitHub
 
