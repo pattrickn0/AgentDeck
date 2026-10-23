@@ -181,7 +181,8 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md criado no workspace do app");
     assert!(md.starts_with("<!-- agentdeck:start -->\nVocê está rodando dentro do AgentDeck"));
-    assert!(md.contains("Seu nome aqui está na variável de ambiente AGENTDECK_AGENT"));
+    assert!(md.contains("Seu nome e cargo estão nas variáveis AGENTDECK_AGENT e AGENTDECK_ROLE"));
+    assert!(md.contains("NÃO use subagentes internos do seu CLI"));
 
     let shell = env.core.spawn_spec(&p, "shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
@@ -1463,13 +1464,16 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
     let oc = env.core.spawn_spec_for(&p, &ident("opencode")).expect("opencode");
     assert_eq!(oc.args, ["--standalone"]);
     let conf: Value = serde_json::from_str(&oc.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
-    assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free"}));
-    // Sem modelo, o OpenCode abre como sempre: sem argumentos e sem a variável.
+    let instructions = env.root.join("dados").join("agentdeck-instructions.md");
+    assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free", "instructions": [instructions.to_string_lossy()]}));
+    // Sem modelo, o OpenCode ainda recebe as instruções do AgentDeck (servidor próprio + arquivo na configuração).
     env.core.update_config(|c| {
         c.role_models.remove("opencode");
     });
     let plain = env.core.spawn_spec_for(&p, &ident("opencode@qa")).expect("opencode sem modelo");
-    assert!(plain.args.is_empty() && !plain.env.contains_key("OPENCODE_CONFIG_CONTENT"), "{:?}", plain.args);
+    assert_eq!(plain.args, ["--standalone"]);
+    let conf: Value = serde_json::from_str(&plain.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
+    assert_eq!(conf, json!({"instructions": [instructions.to_string_lossy()]}));
 
     // Quem não escolhe modelo não ganha um, nem do padrão nem do pedido.
     assert_eq!(env.core.spawn_spec_for(&p, &ident("aider")).expect("aider").model, None);

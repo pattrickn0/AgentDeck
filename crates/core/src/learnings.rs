@@ -341,6 +341,18 @@ pub fn render(all: &[Learning], paths: &[String], budget: usize) -> String {
     out
 }
 
+/// Como criar um aprendizado, para o projeto que ainda não tem a pasta nem o `README.md` com o formato.
+const FORMAT_HELP: &str = "Para criar um, grave memory/aprendizados/<nome-curto>.md (um por armadilha, decisão ou convenção que custou tempo e o código não mostra):
+
+---
+titulo: uma linha
+resumo: uma linha (é o que aparece no índice)
+touches: [globs/dos/arquivos/**, outro.rs]   # opcional; sem ele vale para o projeto todo
+---
+O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
+
+Versionado no git, passa pela mesma revisão que o código.";
+
 /// Orçamento dos aprendizados entregues numa devolução ou reprovação ([`render_specific`]).
 pub const FEEDBACK_BUDGET: usize = 3_000;
 
@@ -365,7 +377,11 @@ pub fn render_specific(all: &[Learning], paths: &[String], budget: usize) -> Str
 /// globais por inteiro e o índice dos específicos.
 pub fn learn_report(all: &[Learning], paths: &[String]) -> String {
     if all.is_empty() {
-        return format!("O projeto ainda não tem aprendizados ({DIR}/ está vazia ou não existe).");
+        return format!(
+            "O projeto ainda não tem aprendizados ({DIR}/ está vazia ou não existe).
+
+{FORMAT_HELP}"
+        );
     }
     if paths.is_empty() {
         return format!(
@@ -580,7 +596,10 @@ mod tests {
         assert!(hit.starts_with("Aprendizados para: crates/cli/x.rs") && hit.contains("### T a") && hit.contains("### T g"), "{hit}");
         let miss = learn_report(&all, &strings(&["docs/x.md"]));
         assert!(miss.contains("Nenhum aprendizado específico") && !miss.contains("### T a") && miss.contains("### T g"), "{miss}");
-        assert!(learn_report(&[], &strings(&["a.rs"])).contains("ainda não tem aprendizados"));
+        let empty = learn_report(&[], &strings(&["a.rs"]));
+        assert!(empty.contains("ainda não tem aprendizados"));
+        // Sem aprendizados (projeto novo), o relatório ensina o formato: lá não há `memory/aprendizados/README.md`.
+        assert!(empty.contains("memory/aprendizados/<nome-curto>.md") && empty.contains("titulo:") && empty.contains("resumo:"), "{empty}");
     }
 
     #[test]
