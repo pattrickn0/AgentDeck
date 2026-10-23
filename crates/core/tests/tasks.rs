@@ -4,7 +4,7 @@ use std::process::Command;
 
 use agentdeck_core::models::Effort;
 use agentdeck_core::util::same_path;
-use agentdeck_core::{CoreEvent, Ident, TaskError, TaskSpec, TaskStatus};
+use agentdeck_core::{CoreEvent, Ident, MergeBlock, TaskError, TaskSpec, TaskStatus};
 
 #[path = "support/tasks_env.rs"]
 mod env;
@@ -568,9 +568,9 @@ fn a_merge_that_fails_for_an_external_reason_leaves_the_task_in_review() {
     let env = start();
     let core = &env.core;
     let t = task_in_review(&env, "Mesclagem externa", "feature.txt");
-    // Um arquivo sem rastreio na pasta principal que a branch também traz: o git recusa sobrescrevê-lo
-    // (falha que não é conflito).
-    std::fs::write(env.ws.join("feature.txt"), "meu\n").expect("w");
+    // O git não consegue tomar a trava do índice da pasta principal (falha que não é conflito).
+    let lock = env.ws.join(".git").join("index.lock");
+    std::fs::write(&lock, "").expect("w");
     match core.task_merge(&env.project, &t.id) {
         Err(TaskError::Failed(m)) => assert!(m.contains("a mesclagem falhou"), "{m}"),
         other => panic!("esperava falha da mesclagem, veio {other:?}"),
@@ -580,11 +580,11 @@ fn a_merge_that_fails_for_an_external_reason_leaves_the_task_in_review() {
     assert!(now.events.iter().any(|e| e.text.contains("erro: a mesclagem falhou")), "{:?}", now.events);
     assert!(now.worktree.is_dir() && branches(&env.ws).contains(&now.branch));
     // Sai do beco pelos dois lados: devolver ao agente...
-    let back = core.task_return(&env.project, &t.id, "Tente outro nome de arquivo.").expect("return");
+    let back = core.task_return(&env.project, &t.id, "Tente de novo.").expect("return");
     assert_eq!(back.status, TaskStatus::Running);
     core.task_done(&env.project, &t.id, "Feito de novo.").expect("done");
     // ...ou mesclar de novo, depois de tirar o obstáculo ("Tentar de novo").
-    std::fs::remove_file(env.ws.join("feature.txt")).expect("rm");
+    std::fs::remove_file(&lock).expect("rm");
     assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
     core.shutdown();
 }
@@ -743,6 +743,187 @@ fn a_conflicting_merge_is_aborted_and_the_task_stays_in_review() {
     core.task_done(&env.project, &t.id, "Resolvido.").expect("done 2");
     assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
     assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "resolvido\ndois\n");
+    core.shutdown();
+}
+
+fn stash_list(dir: &std::path::Path) -> Vec<String> {
+    git(dir, &["stash", "list"]).lines().map(str::to_owned).collect()
+}
+
+#[test]
+fn a_refused_merge_names_the_way_out_and_the_command_line_never_stashes() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Saídas", "feature.txt");
+
+    // 1. Alterações do usuário no repositório principal: a recusa traz o motivo, e a mesclagem comum não guarda nada.
+    std::fs::write(env.ws.join("a.txt"), "mudei\n").expect("w");
+    let refusal = core.task_merge_assisted(&env.project, &t.id, false).expect_err("recusa");
+    assert!(matches!(&refusal.error, TaskError::Conflict(m) if m.contains("alterações sem commit (a.txt)")), "{refusal:?}");
+    assert_eq!(refusal.block, Some(MergeBlock::MainDirty(vec!["a.txt".into()])));
+    let block = refusal.block.expect("motivo");
+    assert!(block.explain(&t).contains("guardá-las") && block.return_feedback(&t).is_none(), "o agente não resolve isto");
+    assert!(matches!(core.task_merge(&env.project, &t.id), Err(TaskError::Conflict(_))));
+    assert!(stash_list(&env.ws).is_empty(), "a linha de comando nunca guarda nada");
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "mudei\n");
+    git(&env.ws, &["checkout", "-q", "--", "a.txt"]);
+
+    // 2. Trabalho sem commit na pasta da tarefa: o pedido pronto cita os arquivos e a pasta, e devolve a tarefa.
+    std::fs::write(t.worktree.join("esqueci.txt"), "x").expect("w");
+    let refusal = core.task_merge_assisted(&env.project, &t.id, true).expect_err("recusa");
+    let block = refusal.block.expect("motivo");
+    assert_eq!(block, MergeBlock::TaskDirty(vec!["esqueci.txt".into()]));
+    let ask = block.return_feedback(&t).expect("pedido");
+    assert!(ask.contains("- esqueci.txt") && ask.contains(&t.worktree.display().to_string()) && ask.contains("git commit"), "{ask}");
+    assert_eq!(core.task_return(&env.project, &t.id, &ask).expect("return").status, TaskStatus::Running);
+    git(&t.worktree, &["add", "-A"]);
+    git(&t.worktree, &["commit", "-q", "-m", "feat: esqueci.txt"]);
+    core.task_done(&env.project, &t.id, "Commitei.").expect("done");
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
+    core.shutdown();
+}
+
+#[test]
+fn a_conflict_refusal_lists_the_files_and_asks_the_agent_to_merge_the_base() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = core.task_create(&env.project, spec("Conflito")).expect("create");
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    commit_file(&t.worktree, "a.txt", "versão da tarefa\ndois\n", "feat: muda a.txt na tarefa");
+    core.task_done(&env.project, &t.id, "Mudei a.txt.").expect("done");
+    commit_file(&env.ws, "a.txt", "versão da base\ndois\n", "fix: muda a.txt na base");
+    // Alteração do usuário em outro arquivo: o "guardar" volta mesmo quando a mesclagem é desfeita.
+    commit_file(&env.ws, "b.txt", "b\n", "docs: b");
+    std::fs::write(env.ws.join("b.txt"), "b do usuário\n").expect("w");
+
+    let refusal = core.task_merge_assisted(&env.project, &t.id, true).expect_err("conflito");
+    let block = refusal.block.clone().expect("motivo");
+    assert_eq!(block, MergeBlock::Conflict(vec!["a.txt".into()]), "{refusal:?}");
+    assert!(matches!(&refusal.error, TaskError::Conflict(m) if m.contains("conflito") && m.contains("voltaram")), "{refusal:?}");
+    let ask = block.return_feedback(&t).expect("pedido");
+    assert!(ask.contains("- a.txt") && ask.contains("git merge main") && ask.contains(&t.worktree.display().to_string()), "{ask}");
+    assert!(block.explain(&t).contains("\"main\"") && block.explain(&t).contains("a.txt"));
+    // Nada ficou pelo caminho: sem mesclagem em andamento, sem stash, alteração do usuário no lugar.
+    assert!(!env.ws.join(".git").join("MERGE_HEAD").exists() && stash_list(&env.ws).is_empty());
+    assert_eq!(std::fs::read_to_string(env.ws.join("b.txt")).expect("b.txt"), "b do usuário\n");
+    assert_eq!(core.task(&env.project, &t.id).expect("task").status, TaskStatus::Review);
+
+    // Devolvida com esse pedido, o agente junta a base na branch dele e a mesclagem passa.
+    core.task_return(&env.project, &t.id, &ask).expect("return");
+    let out = Command::new(git_exe().expect("git")).current_dir(&t.worktree).args(["merge", "main"]).output().expect("git");
+    assert!(!out.status.success(), "o conflito acontece na branch da tarefa");
+    commit_file(&t.worktree, "a.txt", "resolvido\ndois\n", "merge: resolve");
+    core.task_done(&env.project, &t.id, "Resolvido.").expect("done 2");
+    let merged = core.task_merge_assisted(&env.project, &t.id, true).expect("merge");
+    assert_eq!(merged.task.status, TaskStatus::Validating);
+    assert_eq!(std::fs::read_to_string(env.ws.join("b.txt")).expect("b.txt"), "b do usuário\n");
+    core.shutdown();
+}
+
+#[test]
+fn stash_and_merge_gives_the_changes_back_cleanly() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    // Uma entrada antiga na pilha do stash (de outra worktree, por exemplo) não pode ser tocada.
+    commit_file(&env.ws, "velho.txt", "v\n", "docs: velho");
+    std::fs::write(env.ws.join("velho.txt"), "guardado por outro\n").expect("w");
+    git(&env.ws, &["stash", "push", "-q", "-m", "de outra worktree"]);
+    let t = task_in_review(&env, "Guardar e mesclar", "feature.txt");
+
+    // O usuário tem: um arquivo alterado, um novo já no índice e um novo não rastreado (que fica onde está).
+    std::fs::write(env.ws.join("a.txt"), "um\ndois\ntres do usuário\n").expect("w");
+    std::fs::write(env.ws.join("staged.txt"), "novo no índice\n").expect("w");
+    git(&env.ws, &["add", "staged.txt"]);
+    std::fs::write(env.ws.join("rascunho.txt"), "solto\n").expect("w");
+
+    let out = core.task_merge_assisted(&env.project, &t.id, true).expect("guardar e mesclar");
+    assert_eq!(out.task.status, TaskStatus::Validating);
+    let note = out.note.expect("aviso");
+    assert!(note.contains("voltaram"), "{note}");
+    // A mesclagem trouxe o arquivo da tarefa; cada coisa do usuário está de volta; só a entrada antiga continua no stash.
+    assert!(env.ws.join("feature.txt").is_file());
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "um\ndois\ntres do usuário\n");
+    assert_eq!(std::fs::read_to_string(env.ws.join("staged.txt")).expect("staged.txt"), "novo no índice\n");
+    assert_eq!(std::fs::read_to_string(env.ws.join("rascunho.txt")).expect("rascunho.txt"), "solto\n");
+    let list = stash_list(&env.ws);
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert!(list[0].contains("de outra worktree"), "{list:?}");
+    assert!(core.task(&env.project, &t.id).expect("task").events.iter().any(|e| e.text.contains("devolvidas")));
+    core.shutdown();
+}
+
+#[test]
+fn stash_and_merge_keeps_the_changes_in_the_stash_when_they_clash_with_the_task() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = core.task_create(&env.project, spec("Mesma linha")).expect("create");
+    let t = core.task_start(&env.project, &t.id).expect("start");
+    commit_file(&t.worktree, "a.txt", "da tarefa\ndois\n", "feat: muda a.txt na tarefa");
+    core.task_done(&env.project, &t.id, "Mudei a.txt.").expect("done");
+    // O usuário mexeu, sem commit, na mesma linha.
+    std::fs::write(env.ws.join("a.txt"), "do usuário\ndois\n").expect("w");
+
+    let out = core.task_merge_assisted(&env.project, &t.id, true).expect("a mesclagem passa");
+    assert_eq!(out.task.status, TaskStatus::Validating);
+    let note = out.note.expect("aviso");
+    assert!(note.contains("continuam guardadas") && note.contains("a.txt") && note.contains("git stash pop"), "{note}");
+    // A pasta fica limpa, com a versão da tarefa (sem marcas de conflito), e as alterações do usuário intactas no stash.
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "da tarefa\ndois\n");
+    assert_eq!(git(&env.ws, &["status", "--porcelain", "--untracked-files=no"]).trim(), "");
+    let list = stash_list(&env.ws);
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert!(list[0].contains("agentdeck: guardado antes de mesclar a tarefa t1"), "{list:?}");
+    assert!(git(&env.ws, &["stash", "show", "-p", "stash@{0}"]).contains("+do usuário"));
+    assert!(core.task(&env.project, &t.id).expect("task").events.iter().any(|e| e.text.contains("continuam no stash")));
+    // Recuperar à mão, como o aviso ensina, traz o conflito para o usuário resolver (o stash não se perdeu).
+    let pop = Command::new(git_exe().expect("git")).current_dir(&env.ws).args(["stash", "pop"]).output().expect("git");
+    assert!(!pop.status.success(), "o conflito é real");
+    core.shutdown();
+}
+
+#[test]
+fn stash_and_merge_refuses_before_touching_anything_when_a_new_file_of_the_user_clashes() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Arquivo novo", "feature.txt");
+    // Um arquivo novo do usuário, não rastreado, com o nome que a tarefa também cria; e uma alteração para guardar.
+    std::fs::write(env.ws.join("feature.txt"), "meu\n").expect("w");
+    std::fs::write(env.ws.join("a.txt"), "mudei\n").expect("w");
+    let refusal = core.task_merge_assisted(&env.project, &t.id, true).expect_err("recusa");
+    assert!(matches!(&refusal.error, TaskError::Conflict(m) if m.contains("arquivos novos seus") && m.contains("feature.txt")), "{refusal:?}");
+    assert_eq!(refusal.block, None, "não há botão: o arquivo é do usuário e o stash não o leva");
+    assert!(stash_list(&env.ws).is_empty(), "nada foi guardado");
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "mudei\n");
+    assert_eq!(std::fs::read_to_string(env.ws.join("feature.txt")).expect("feature.txt"), "meu\n");
+    // Sem as alterações rastreadas a recusa é a mesma (a conferência vale com ou sem guardar).
+    git(&env.ws, &["checkout", "-q", "--", "a.txt"]);
+    let refusal = core.task_merge_assisted(&env.project, &t.id, false).expect_err("recusa");
+    assert!(matches!(&refusal.error, TaskError::Conflict(m) if m.contains("arquivos novos seus")), "{refusal:?}");
+    // Tirado o obstáculo, guardar e mesclar passa.
+    std::fs::write(env.ws.join("a.txt"), "mudei\n").expect("w");
+    std::fs::remove_file(env.ws.join("feature.txt")).expect("rm");
+    let out = core.task_merge_assisted(&env.project, &t.id, true).expect("merge");
+    assert_eq!(out.task.status, TaskStatus::Validating);
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "mudei\n");
+    core.shutdown();
+}
+
+#[test]
+fn stash_and_merge_does_not_stash_when_the_task_dir_still_has_work_to_commit() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review(&env, "Pasta suja", "feature.txt");
+    std::fs::write(env.ws.join("a.txt"), "mudei\n").expect("w");
+    std::fs::write(t.worktree.join("esqueci.txt"), "x").expect("w");
+    let refusal = core.task_merge_assisted(&env.project, &t.id, true).expect_err("recusa");
+    assert!(matches!(refusal.block, Some(MergeBlock::TaskDirty(_))), "{refusal:?}");
+    assert!(stash_list(&env.ws).is_empty() && std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt") == "mudei\n");
     core.shutdown();
 }
 
