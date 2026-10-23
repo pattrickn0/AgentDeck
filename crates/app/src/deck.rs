@@ -303,6 +303,8 @@ pub struct Deck {
 
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
     pub debug_usage: Option<HashMap<String, agentdeck_core::AgentUsage>>,
+    /// SOMENTE DEPURAÇÃO: o painel de uso aberto sem o mouse (`AGENTDECK_DEBUG_UI=usage-panel`).
+    pub debug_usage_panel: bool,
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
     pub debug_projects: Option<Vec<ProjectView>>,
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=project:<id>`): troca para este projeto logo depois de restaurar as abas.
@@ -522,6 +524,7 @@ impl Deck {
             debug_pane_drop: None,
             show_seq: 0,
             debug_usage: None,
+            debug_usage_panel: false,
             debug_projects: None,
             debug_switch_project: None,
             quit_requested: false,
@@ -1612,22 +1615,6 @@ impl Deck {
 
     pub fn active_tab(&self) -> Option<&Tab> {
         self.active.and_then(|i| self.tabs.get(i))
-    }
-
-    /// Modelos das abas abertas, sem repetir e na ordem das abas (`ollama:*` vira `ollama`; sem o terminal comum).
-    pub fn open_models(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for t in &self.tabs {
-            let key = split::group_key(&t.kind);
-            if key != "shell" && !out.iter().any(|k| k == key) {
-                out.push(key.to_owned());
-            }
-        }
-        // Capturas de tela da demonstração sem abas abertas: os modelos fictícios + um sem dados.
-        if out.is_empty() && self.debug_usage.is_some() {
-            out = ["claude", "antigravity", "ollama", "codex"].map(String::from).to_vec();
-        }
-        out
     }
 
     /// Uso dos planos por modelo (o fictício em depuração).

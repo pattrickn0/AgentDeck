@@ -252,14 +252,15 @@ Barra de título, uso dos agentes e barra lateral ★
 - [ ] Redimensionar pelas 4 bordas e pelos 4 cantos (o cursor muda); maximizada, as bordas não reagem e a janela não cobre a barra de tarefas. No Linux, conferir em X11 e em Wayland.
 - [ ] Fechar pelo × salva o tamanho da janela, como antes.
 - [ ] ☰ abre as configurações alinhadas à esquerda.
-- [x] Uso: com uma aba do Claude, depois da primeira resposta aparece o logo + círculo com o % da sessão; o tooltip mostra sessão, semana e quando renovam. A statusline do Claude mostra "sessão N% · semana M%".
+- [ ] Uso: cada agente com cota aparece com o logo, a barra fina da sessão (em cima) e a grossa da semana (embaixo), com as porcentagens; passar o mouse abre o painel de uso (todos os agentes, "lido há", quando renova cada janela, "bloqueado até" com a sessão esgotada, locais no rodapé) e ele fica aberto enquanto o mouse está no item ou no painel.
+- [ ] Uso sem janela aberta: sem nenhuma aba do Antigravity (instalado e com login), o uso dele aparece em até ~3 min. Fechar e reabrir o app mantém o último uso do Claude (`dados/usage.json`), com "lido há" no painel.
 - [ ] Antigravity aberto: em até ~3 min aparece o uso dele; sem login ou sem rede, anel tracejado e "uso indisponível".
   - Conferido: com login, o uso do Antigravity aparece. Falta o caso sem login/sem rede.
-- [ ] Ollama: anel cinza, "local, sem limite". Fechar a última aba de um modelo tira o item da barra.
-- [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %, Antigravity com a semana esgotada = anel vermelho fechado, Ollama local, Codex sem dados).
+- [ ] Ollama: sem barra; aparece no rodapé do painel como "local, sem limite".
+- [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %/12 %, Antigravity com a semana em aviso, Codex com a sessão esgotada, Ollama local) e `usage-panel` (o mesmo com o painel aberto).
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
 - [x] Seção **ORGANIZAÇÃO** na barra lateral: o controle **Abas | Dividida** liga/desliga a divisão.
-- [ ] Uso: passado o horário de renovação da sessão sem o agente rodar, o círculo mostra 0% esmaecido e "sessão renovada (sem dados novos)".
+- [ ] Uso: passado o horário de renovação da sessão sem leitura nova, a barra da sessão mostra 0% esmaecido e o painel diz "renovou · aguardando leitura nova".
 - [ ] Antigravity com token vencido no Credential Manager e válido em `~\.gemini\oauth_creds.json`: a cota aparece. Sem login, o círculo reaparece em até 20 s depois do login.
 - [ ] Codex: abrir uma aba nova (rollout sem `rate_limits`): o uso da sessão anterior continua visível.
 

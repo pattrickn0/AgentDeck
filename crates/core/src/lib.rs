@@ -288,7 +288,7 @@ impl Core {
             whisper: whisper::WhisperState::default(),
             git: git::GitState::default(),
             github: github::GithubState::default(),
-            usage: usage::UsageStore::default(),
+            usage: usage::UsageStore::load(paths.data_dir.join(usage::USAGE_FILE)),
             tasks: tasks::TaskStore::default(),
             _data_lock: data_lock,
             paths,

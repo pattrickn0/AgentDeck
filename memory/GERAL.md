@@ -97,7 +97,7 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 
 | Área | O que tem |
 | :-- | :-- |
-| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); com a barra lateral recolhida, a **chave Agentes | Documentos** compacta logo depois do logo (ver abaixo); à direita, o **uso de cada agente aberto** (logo + círculo que enche com a sessão + anel que fecha com a semana e fica vermelho quando ela acaba) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
+| Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); com a barra lateral recolhida, a **chave Agentes | Documentos** compacta logo depois do logo (ver abaixo); à direita, o **uso de cada agente com cota**, com ou sem janela aberta (logo + barra fina da sessão de 5 h em cima e barra grossa da semana embaixo, com as porcentagens; âmbar a partir de 80 %, vermelho em 100 %; passar o mouse abre o **painel de uso**, com todos os agentes, quanto usaram e quando renova cada janela) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | a **chave Agentes | Documentos** no topo, **PROJETOS** (cada projeto com os seus agentes, o modelo de cada um à direita; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (controle Abas | Dividida) e **ARQUIVOS**, o explorador (cinza, com a letra do Git; atualizar, recolher tudo); recolhe com Ctrl+B |
 | Centro | duas visões, escolhidas pela **chave** do topo da barra lateral: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
@@ -264,7 +264,7 @@ ela dura.
   agente sobre outro.
 - Ver vários agentes ao mesmo tempo na **tela dividida** (uma janela por tipo de agente), com a chave na seção
   ORGANIZAÇÃO da barra lateral.
-- Acompanhar o **uso** de cada agente aberto (sessão e semana) na barra de título.
+- Acompanhar o **uso** de cada agente com cota (sessão e semana) na barra de título, com o painel de uso ao passar o mouse.
 - Falar com um agente pelo terminal da aba dele, com **anexos** (botão no cabeçalho da janela, arrastar arquivos sobre ela
   ou colar imagem) e **ditado por voz** (microfone no cabeçalho da janela).
 - Acompanhar as conversas entre agentes pela Conversa integrada (só leitura) e intervir pelas próprias abas.

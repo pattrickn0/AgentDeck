@@ -6,6 +6,10 @@
 //! - **Antigravity**: a cota consultada pela API que o próprio CLI usa;
 //! - **Ollama**: local, sem limite.
 //!
+//! Codex e Antigravity são consultados quando há aba aberta deles **ou** o CLI está instalado, e o último uso de
+//! cada um fica em `dados/usage.json`: a barra mostra todos os agentes com cota, mesmo sem janela aberta (o do Claude
+//! é o último que a statusline mandou).
+//!
 //! CONTRATO ESTÁVEL: `UsageWindow`, `AgentUsage`, `Core::usage_snapshot` e `Core::set_usage`
 //! são consumidos pela UI.
 
@@ -13,6 +17,7 @@ mod antigravity;
 mod codex;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,8 +30,12 @@ use crate::{util, Core, CoreEvent};
 const CODEX_EVERY: Duration = Duration::from_secs(60);
 /// De quanto em quanto tempo a cota do Antigravity é consultada (rede).
 const ANTIGRAVITY_EVERY: Duration = Duration::from_secs(180);
-/// Intervalo curto de nova tentativa quando uma leitura/consulta de uso falha (`None`).
+/// Intervalo curto de nova tentativa quando uma leitura/consulta de uso falha (`None`) com a aba aberta.
 const RETRY_EVERY: Duration = Duration::from_secs(20);
+/// De quanto em quanto tempo se confere quais CLIs estão instalados.
+const INSTALLED_EVERY: Duration = Duration::from_secs(600);
+/// O arquivo com o último uso conhecido, na pasta de dados.
+pub const USAGE_FILE: &str = "usage.json";
 
 /// Uma janela de limite (sessão de 5 h, semana…).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,13 +59,24 @@ pub struct AgentUsage {
     pub local: bool,
 }
 
-/// Último uso conhecido de cada modelo.
+/// Último uso conhecido de cada modelo; com `file`, guardado em disco a cada mudança.
 #[derive(Default)]
 pub struct UsageStore {
     map: Mutex<HashMap<String, AgentUsage>>,
+    file: Option<PathBuf>,
 }
 
 impl UsageStore {
+    /// Começa com o que `file` guardou (vazio se ele não existe ou não se lê).
+    pub(crate) fn load(file: PathBuf) -> Self {
+        let map = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .map(|v| store_from_json(&v))
+            .unwrap_or_default();
+        Self { map: Mutex::new(map), file: Some(file) }
+    }
+
     /// Grava e diz se mudou.
     fn set(&self, model: &str, usage: AgentUsage) -> bool {
         let mut map = self.map.lock();
@@ -64,7 +84,20 @@ impl UsageStore {
         // `updated_ms` sozinho não é mudança visível o bastante para acordar a UI.
         let changed = old.is_none_or(|o| o.session != usage.session || o.weekly != usage.weekly || o.local != usage.local);
         map.insert(model.to_owned(), usage);
+        if changed {
+            self.save(&map);
+        }
         changed
+    }
+
+    /// Grava ao lado e troca: uma queda no meio não deixa o arquivo pela metade.
+    fn save(&self, map: &HashMap<String, AgentUsage>) {
+        let Some(file) = &self.file else { return };
+        let tmp = file.with_extension("json.tmp");
+        let text = store_to_json(map).to_string();
+        if let Err(e) = std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, file)) {
+            log::warn!("não consegui guardar o uso em {}: {e}", file.display());
+        }
     }
 
     fn snapshot(&self) -> HashMap<String, AgentUsage> {
@@ -107,6 +140,29 @@ pub fn usage_from_json(v: &Value) -> Result<AgentUsage, String> {
         }
     };
     Ok(AgentUsage { session: window("session")?, weekly: window("weekly")?, ..Default::default() })
+}
+
+/// O retrato guardado em `usage.json`: `{"claude":{"session":…,"weekly":…,"updated_ms":…}}`. Os locais não vão
+/// (não têm cota; voltam quando o poller os vê).
+fn store_to_json(map: &HashMap<String, AgentUsage>) -> Value {
+    let mut out = serde_json::Map::new();
+    for (model, u) in map.iter().filter(|(_, u)| !u.local) {
+        let mut v = usage_to_json(u);
+        v["updated_ms"] = json!(u.updated_ms);
+        out.insert(model.clone(), v);
+    }
+    Value::Object(out)
+}
+
+/// Lê o `usage.json`; uma entrada inválida é pulada, não derruba as outras.
+fn store_from_json(v: &Value) -> HashMap<String, AgentUsage> {
+    let Some(obj) = v.as_object() else { return HashMap::new() };
+    obj.iter()
+        .filter_map(|(model, e)| {
+            let u = usage_from_json(e).ok()?;
+            Some((model.clone(), AgentUsage { updated_ms: e.get("updated_ms").and_then(Value::as_u64).unwrap_or(0), ..u }))
+        })
+        .collect()
 }
 
 /// Uso a partir do JSON que o Claude Code passa à statusline:
@@ -187,12 +243,14 @@ pub(crate) fn rfc3339_ms(s: &str) -> Option<u64> {
     u64::try_from(secs * 1000 + frac_ms).ok()
 }
 
-/// Thread `cd-usage`: enquanto houver aba de um modelo, mantém o uso dele atualizado.
+/// Thread `cd-usage`: mantém atualizado o uso de quem tem aba aberta ou o CLI instalado.
 /// O Claude não entra aqui: ele avisa sozinho pela statusline (`POST /usage`).
 pub(crate) fn start_poller(core: &Core) {
     let weak = Arc::downgrade(&core.inner);
     let _ = std::thread::Builder::new().name("cd-usage".into()).spawn(move || {
         let mut last: HashMap<&'static str, Instant> = HashMap::new();
+        let mut installed: HashMap<&'static str, bool> = HashMap::new();
+        let mut installed_at: Option<Instant> = None;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             let Some(inner) = weak.upgrade() else { return };
@@ -204,9 +262,16 @@ pub(crate) fn start_poller(core: &Core) {
             let has = |model: &str| {
                 open.iter().any(|id| id == model || id.starts_with(&format!("{model}@")) || id.starts_with(&format!("{model}:")))
             };
+            if installed_at.is_none_or(|t| t.elapsed() >= INSTALLED_EVERY) {
+                for id in ["codex", "antigravity", "ollama"] {
+                    installed.insert(id, core.inner.agents.resolve(id).is_some());
+                }
+                installed_at = Some(Instant::now());
+            }
+            let wanted = |model: &str| has(model) || installed.get(model).copied().unwrap_or(false);
             let due = |last: &HashMap<&str, Instant>, key: &str, every: Duration| last.get(key).is_none_or(|t| t.elapsed() >= every);
-            // Marca a leitura: depois de uma falha (sem login, rede fora, rollout sem dados) volta em
-            // `RETRY_EVERY`, não no intervalo normal.
+            // Marca a leitura: depois de uma falha (sem login, rede fora, rollout sem dados) com a aba aberta volta
+            // em `RETRY_EVERY`; sem aba (só instalado), no intervalo normal.
             let mark = |last: &mut HashMap<&'static str, Instant>, key: &'static str, every: Duration, ok: bool| {
                 let at = if ok {
                     Instant::now()
@@ -215,19 +280,19 @@ pub(crate) fn start_poller(core: &Core) {
                 };
                 last.insert(key, at);
             };
-            if has("ollama") && !core.inner.usage.map.lock().contains_key("ollama") {
+            if wanted("ollama") && !core.inner.usage.map.lock().contains_key("ollama") {
                 core.set_usage("ollama", AgentUsage { local: true, updated_ms: util::now_ms(), ..Default::default() });
             }
-            if has("codex") && due(&last, "codex", CODEX_EVERY) {
+            if wanted("codex") && due(&last, "codex", CODEX_EVERY) {
                 let usage = codex::read(&core.inner.home);
-                mark(&mut last, "codex", CODEX_EVERY, usage.is_some());
+                mark(&mut last, "codex", CODEX_EVERY, usage.is_some() || !has("codex"));
                 if let Some(u) = usage {
                     core.set_usage("codex", u);
                 }
             }
-            if has("antigravity") && due(&last, "antigravity", ANTIGRAVITY_EVERY) {
+            if wanted("antigravity") && due(&last, "antigravity", ANTIGRAVITY_EVERY) {
                 let usage = antigravity::fetch(&core.inner.home);
-                mark(&mut last, "antigravity", ANTIGRAVITY_EVERY, usage.is_some());
+                mark(&mut last, "antigravity", ANTIGRAVITY_EVERY, usage.is_some() || !has("antigravity"));
                 if let Some(u) = usage {
                     core.set_usage("antigravity", u);
                 }
@@ -248,6 +313,32 @@ mod tests {
         assert!(!store.set("claude", u(0.3, 2)));
         assert!(store.set("claude", u(0.4, 3)));
         assert_eq!(store.snapshot()["claude"].updated_ms, 3);
+    }
+
+    #[test]
+    fn the_last_usage_survives_a_restart_and_a_bad_file_starts_empty() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let file = tmp.path().join(USAGE_FILE);
+        let store = UsageStore::load(file.clone());
+        let claude = AgentUsage {
+            session: Some(UsageWindow { used: 0.25, resets_at_ms: Some(9_000) }),
+            weekly: Some(UsageWindow { used: 0.5, resets_at_ms: None }),
+            updated_ms: 1_234,
+            local: false,
+        };
+        assert!(store.set("claude", claude.clone()));
+        // Local não vai para o disco (não tem cota).
+        assert!(store.set("ollama", AgentUsage { local: true, updated_ms: 1, ..Default::default() }));
+        let again = UsageStore::load(file.clone());
+        assert_eq!(again.snapshot(), HashMap::from([("claude".to_owned(), claude)]));
+        // Arquivo corrompido: começa vazio; entrada inválida é pulada.
+        std::fs::write(&file, "{ nao e json").expect("write");
+        assert!(UsageStore::load(file.clone()).snapshot().is_empty());
+        let mixed = r#"{"codex":{"session":{"used":7}},"claude":{"session":null,"weekly":{"used":0.1},"updated_ms":5}}"#;
+        std::fs::write(&file, mixed).expect("write");
+        let partial = UsageStore::load(file).snapshot();
+        assert_eq!(partial.len(), 1);
+        assert_eq!(partial["claude"].updated_ms, 5);
     }
 
     #[test]
