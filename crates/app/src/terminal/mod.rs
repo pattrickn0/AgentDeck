@@ -6,9 +6,11 @@
 
 pub mod colors;
 pub mod input;
+pub mod record;
 pub mod view;
 
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -141,6 +143,8 @@ pub struct Shared {
     pub last_output: Mutex<Option<Instant>>,
     /// (geração, código de saída) quando o processo termina.
     exit: Mutex<Option<(u64, i64)>>,
+    /// Gravação da saída crua (só com `AGENTDECK_DEBUG_PTY=1`, ver [`record`]).
+    recorder: Mutex<Option<record::Recorder>>,
 }
 
 impl Shared {
@@ -186,6 +190,8 @@ pub struct Session {
     pty: Option<PtyHandle>,
     generation: u64,
     size: GridSize,
+    /// Pasta e nome da gravação de depuração (ver [`Session::record_to`]).
+    record_to: Option<(PathBuf, String)>,
 }
 
 impl Session {
@@ -206,8 +212,32 @@ impl Session {
             output_seq: AtomicU64::new(0),
             last_output: Mutex::new(None),
             exit: Mutex::new(None),
+            recorder: Mutex::new(None),
         });
-        Self { shared, pty: None, generation: 0, size }
+        Self { shared, pty: None, generation: 0, size, record_to: None }
+    }
+
+    /// Liga a gravação da saída crua dos próximos processos desta aba em `dir`, com `name` no nome dos arquivos.
+    pub fn record_to(&mut self, dir: PathBuf, name: String) {
+        self.record_to = Some((dir, name));
+    }
+
+    /// Tira a foto da grade quando a saída parou há [`record::SNAPSHOT_IDLE`]; devolve quando voltar a olhar.
+    pub fn record_tick(&self, now: Instant) -> Option<Instant> {
+        let seq = self.shared.output_seq.load(Ordering::Relaxed);
+        if self.shared.recorder.lock().as_ref().is_none_or(|r| r.snapped == seq) {
+            return None;
+        }
+        let due = (*self.shared.last_output.lock())? + record::SNAPSHOT_IDLE;
+        if now < due {
+            return Some(due);
+        }
+        let text = record::grid_text(&self.shared.emu.lock());
+        if let Some(r) = self.shared.recorder.lock().as_mut() {
+            r.snapshot(&text);
+            r.snapped = seq;
+        }
+        None
     }
 
     pub fn size(&self) -> GridSize {
@@ -260,6 +290,13 @@ impl Session {
         let writer = pair.master.take_writer()?;
         self.shared.attach_writer(writer, format!("pty-write-{}", spec.kind))?;
         *self.shared.exit.lock() = None;
+        *self.shared.recorder.lock() = self.record_to.as_ref().and_then(|(dir, name)| match record::Recorder::start(dir, name, self.size) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                log::warn!("AGENTDECK_DEBUG_PTY: não consegui abrir a gravação em {}: {e}", dir.display());
+                None
+            }
+        });
 
         // Leitora: alimenta o emulador e acorda a UI.
         let shared = self.shared.clone();
@@ -270,6 +307,9 @@ impl Session {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
+                        if let Some(r) = shared.recorder.lock().as_mut() {
+                            r.bytes(&buf[..n]);
+                        }
                         shared.emu.lock().feed(&buf[..n]);
                         *shared.last_output.lock() = Some(Instant::now());
                         shared.output_seq.fetch_add(1, Ordering::Relaxed);
@@ -330,6 +370,9 @@ impl Session {
             return;
         }
         self.size = size;
+        if let Some(r) = self.shared.recorder.lock().as_mut() {
+            r.resize(size);
+        }
         self.shared.emu.lock().term.resize(size);
         if let Some(p) = &self.pty {
             let _ = p.master.resize(PtySize { rows: size.rows as u16, cols: size.cols as u16, pixel_width: 0, pixel_height: 0 });

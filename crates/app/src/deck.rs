@@ -395,6 +395,8 @@ pub struct Deck {
     pub terminal_rect: Option<egui::Rect>,
     pub window_focused: bool,
     debug_fake_shell: bool,
+    /// `AGENTDECK_DEBUG_PTY=1`: grava a saída crua de cada aba em `dados/pty/` (ver `terminal::record`).
+    debug_pty: bool,
     /// SOMENTE DEPURAÇÃO: fecha as abas restauradas (captura do estado vazio).
     pub debug_close_all: bool,
 }
@@ -579,6 +581,7 @@ impl Deck {
             window_focused: true,
             debug_close_all: false,
             debug_fake_shell: agentdeck_core::env_var("DEBUG_FAKE_SHELL").is_some_and(|v| v == "1"),
+            debug_pty: agentdeck_core::env_var("DEBUG_PTY").is_some_and(|v| v == "1"),
         };
         deck.refresh_agents();
         deck.refresh_engine();
@@ -955,6 +958,9 @@ impl Deck {
                 }
             }
             if let Some(at) = tab.session.shared.emu.lock().expire_sync(now) {
+                want(at);
+            }
+            if let Some(at) = tab.session.record_tick(now) {
                 want(at);
             }
             if let Some((size, at)) = tab.pending_resize {
@@ -1404,6 +1410,9 @@ impl Deck {
         tab.held_keys.clear();
         if let Some(m) = &self.metrics {
             tab.session.resize(grid, m.cell_w, m.cell_h);
+        }
+        if self.debug_pty {
+            tab.session.record_to(self.core.paths().data_dir.join("pty"), ident.id());
         }
         match spec.and_then(|s| tab.session.spawn(&s, wake).map(|_| s).map_err(|e| e.to_string())) {
             Ok(spec) => {
