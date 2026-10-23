@@ -294,6 +294,14 @@ Projetos ★
 - [ ] Projetos: remover um projeto com pergunta em andamento entre abas dele. Quem perguntou recebe erro, e nada reaparece no projeto removido.
 - [ ] Abrir o projeto por um caminho com outra caixa na unidade (`c:\...`): a árvore e o Git atualizam.
 
+Janela maximizada (t30)
+
+- [ ] Botão do meio da barra de título: maximiza; o glifo vira "Restaurar" (dois quadrados) e a dica diz "Restaurar"; clicar de novo volta ao tamanho de antes.
+- [ ] Duplo clique na barra de título alterna maximizar/restaurar; Win+↑ e Win+↓ também, e o glifo acompanha.
+- [ ] Maximizada, o cursor nas bordas e cantos não vira seta de redimensionar; restaurada, volta a redimensionar.
+- [ ] Fechar maximizada e reabrir: abre maximizada; ao restaurar, a janela tem o tamanho de antes de maximizar (não o da tela).
+- [ ] Redimensionar para um tamanho qualquer, maximizar, fechar e reabrir: restaurar volta a esse tamanho.
+
 ## Git e GitHub ★
 
 Git — com a pasta de trabalho num repositório git:

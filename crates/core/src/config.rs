@@ -138,8 +138,11 @@ pub struct Config {
     pub split_enabled: bool,
     /// Destaque: fração da largura do centro que a janela grande ocupa (0 = padrão, 2/3).
     pub highlight_ratio: f32,
+    /// Tamanho da janela no modo janela (nunca o da tela cheia: com a janela maximizada fica o de antes).
     pub window_width: f32,
     pub window_height: f32,
+    /// A janela estava maximizada ao fechar: reabre maximizada, mas com o tamanho normal guardado acima.
+    pub window_maximized: bool,
     /// Host da API do Ollama (padrão `127.0.0.1:11434`, ou `OLLAMA_HOST`).
     pub ollama_host: String,
     /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
@@ -186,6 +189,7 @@ impl Default for Config {
             highlight_ratio: 0.0,
             window_width: 1280.0,
             window_height: 860.0,
+            window_maximized: false,
             ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
             auto_open_agent_tabs: true,
             app_shortcuts_first: false,

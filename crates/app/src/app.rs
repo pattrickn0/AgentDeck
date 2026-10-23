@@ -46,6 +46,18 @@ pub struct App {
     smoke: Option<Smoke>,
     dropped: Vec<PathBuf>,
     size_persist_at: Option<Instant>,
+    /// Estado da janela entregue ao egui a cada quadro (`ViewportInfo::maximized` etc.): o `EguiGlow` não o preenche.
+    viewport_info: egui::ViewportInfo,
+    viewport_first: bool,
+}
+
+/// Menor tamanho gravado/restaurado: abaixo disso é janela minimizada (0x0 no Windows) ou lixo.
+const MIN_SAVED_SIZE: (f32, f32) = (640.0, 480.0);
+
+/// Tamanho a gravar na `Config`, ou `None` para manter o que está lá. Maximizada, o tamanho da tela inteira
+/// não é "o tamanho da janela": gravá-lo faria a janela normal reabrir (ou restaurar) do tamanho da tela.
+fn size_to_persist(maximized: bool, size: (f32, f32)) -> Option<(f32, f32)> {
+    (!maximized && size.0 >= MIN_SAVED_SIZE.0 && size.1 >= MIN_SAVED_SIZE.1).then_some(size)
 }
 
 impl App {
@@ -65,6 +77,8 @@ impl App {
             smoke: Smoke::from_env(),
             dropped: Vec::new(),
             size_persist_at: None,
+            viewport_info: egui::ViewportInfo::default(),
+            viewport_first: true,
         }
     }
 
@@ -106,8 +120,12 @@ impl App {
         // Tamanho salvo da janela (a janela abre antes de a configuração ser lida).
         let cfg = core.config();
         if let Some(w) = self.window() {
-            if cfg.window_width >= 640.0 && cfg.window_height >= 480.0 {
+            if size_to_persist(false, (cfg.window_width, cfg.window_height)).is_some() {
                 let _ = w.request_inner_size(winit::dpi::LogicalSize::new(cfg.window_width as f64, cfg.window_height as f64));
+            }
+            // O tamanho normal fica guardado: ao restaurar, a janela volta a ele.
+            if cfg.window_maximized {
+                w.set_maximized(true);
             }
         }
         // SOMENTE DEPURAÇÃO: capturas e estados fictícios não gravam na configuração (um "empty" ou
@@ -136,6 +154,10 @@ impl App {
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
         let (Some(glw), Some(gl), Some(egui)) = (self.gl_window.as_ref(), self.gl.as_ref(), self.egui.as_mut()) else { return };
         let mut deck = self.deck.as_mut();
+        // Sem isto `viewport().maximized` é sempre `None` (o `EguiGlow` não chama `update_viewport_info`).
+        egui_winit::update_viewport_info(&mut self.viewport_info, &egui.egui_ctx, &glw.window, self.viewport_first);
+        self.viewport_first = false;
+        egui.egui_winit.egui_input_mut().viewports.insert(egui::ViewportId::ROOT, self.viewport_info.clone());
         egui.run(&glw.window, |ui| match deck.as_deref_mut() {
             Some(deck) => {
                 deck.before_frame(ui.ctx());
@@ -197,14 +219,24 @@ impl App {
         }
         let Some(core) = self.core.as_ref() else { return };
         if let Some(w) = self.window() {
-            let size = w.inner_size().to_logical::<f32>(w.scale_factor());
-            core.update_config(|c| {
-                c.window_width = size.width;
-                c.window_height = size.height;
-            });
+            persist_window(core, w);
         }
         core.shutdown();
     }
+}
+
+/// Grava o estado da janela: maximizada ou não, e o tamanho normal (só fora do maximizado).
+fn persist_window(core: &Core, w: &Window) {
+    let maximized = w.is_maximized();
+    let size = w.inner_size().to_logical::<f32>(w.scale_factor());
+    let size = size_to_persist(maximized, (size.width, size.height));
+    core.update_config(|c| {
+        c.window_maximized = maximized;
+        if let Some((width, height)) = size {
+            c.window_width = width;
+            c.window_height = height;
+        }
+    });
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -363,11 +395,7 @@ impl ApplicationHandler<UserEvent> for App {
             if now >= t {
                 self.size_persist_at = None;
                 if let (Some(w), Some(core)) = (self.window(), self.core.as_ref()) {
-                    let size = w.inner_size().to_logical::<f32>(w.scale_factor());
-                    core.update_config(|c| {
-                        c.window_width = size.width;
-                        c.window_height = size.height;
-                    });
+                    persist_window(core, w);
                 }
             }
         }
@@ -813,4 +841,23 @@ fn window_icon() -> Option<winit::window::Icon> {
     const SIZE: usize = 64;
     let rgba = crate::icons::logo_rgba(SIZE, theme::pal().bg);
     winit::window::Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maximized_window_keeps_the_normal_size() {
+        assert_eq!(size_to_persist(false, (1280.0, 860.0)), Some((1280.0, 860.0)));
+        assert_eq!(size_to_persist(true, (1920.0, 1040.0)), None);
+    }
+
+    #[test]
+    fn minimized_or_tiny_size_is_not_saved() {
+        assert_eq!(size_to_persist(false, (0.0, 0.0)), None);
+        assert_eq!(size_to_persist(false, (639.0, 900.0)), None);
+        assert_eq!(size_to_persist(false, (900.0, 479.0)), None);
+        assert_eq!(size_to_persist(false, MIN_SAVED_SIZE), Some(MIN_SAVED_SIZE));
+    }
 }
