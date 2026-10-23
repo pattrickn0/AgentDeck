@@ -14,7 +14,6 @@ Combinado em 2026-10-21, nesta ordem.
 
 ### a) O que sobrou da mesa de tarefas
 
-- [ ] **Resposta de `ask-agent --reply` perdida (2026-10-22).** O Antigravity respondeu a pergunta #1 com `--reply 1 --file …` (o terminal dele mostra o comando rodando), mas a resposta nunca foi digitada no terminal do Claude; a #0, do mesmo par, chegou. Provável colisão com o turno ocupado ou com o usuário digitando na mesma aba. Investigar a entrega pendente na ponte (`bridge.rs`): se a digitação falhar ou cair no meio de um turno, guardar e reentregar.
 - [ ] **Revisão do fluxo (t10, 2026-10-21): o que sobrou.** Os demais achados saíram na `t18` (ver [historico.md](historico.md)); ficam:
   - **Pasta da worktree que não sai ao validar.** Agora a tarefa fica em `Validating` e dá para tentar de novo, mas não há como ver qual processo segura a pasta; só a mensagem do git (`remove_task_worktree`, `tasks.rs:1439`). Visto em uso real na `t14` (2026-10-21): cinco tentativas de validar falharam com "a pasta ficou" antes de a pasta sair. Um teste desse caso não é possível sem simular o bloqueio do Windows.
   - **Mensagens ao agente não citam a validação.** `start_message` não conta ao agente que, depois de mesclada, a tarefa ainda pode voltar reprovada; hoje ele só descobre quando `reject_message` chega. Conferir no uso real se faz falta.
@@ -79,7 +78,7 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 - [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
 - [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
 - [ ] Falta `ask-agent --cancel <n>` para desistir de uma pergunta (hoje ela expira em 10 min).
-- [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar.
+- [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar. A resposta que não chegou a quem perguntou (200 sem leitor, aba fechada) fica em `ask-agent --inbox`; falta só um jeito de reentregá-la sozinha.
 - [ ] No headless, aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação recebendo texto de outros agentes. Avaliar modos mais restritos.
 - [ ] A ponte sem interface ainda usa o modo headless: não aparece nas abas.
 - [ ] **Equipe: as instruções da ponte são fixadas na partida.** Um agente aberto antes desta versão não sabe do `--team`/`--boss` até reabrir a aba. O aviso de equipe só chega com a próxima mensagem (de propósito, para não gastar turno).

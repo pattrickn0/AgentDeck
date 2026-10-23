@@ -35,7 +35,7 @@ volta eventos `CoreEvent`.
 | Pasta | Conteúdo |
 | :-- | :-- |
 | `workspace/` | o workspace antigo, do tempo em que havia uma pasta global. Hoje cada **projeto** tem a sua pasta (o `cwd` das abas dele); `workspace/` só serve de destino na migração de uma config antiga (`Config::migrate_legacy`) |
-| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log` e as travas `.agentdeck.lock` e `.commanddeck.lock` (esta, só durante a migração do nome) |
+| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log`, `agentdeck.log` (o log do app, gira acima de 2 MB) e as travas `.agentdeck.lock` e `.commanddeck.lock` (esta, só durante a migração do nome) |
 | `whisper/` | motor e modelos do ditado por voz (whisper.cpp) |
 | `%APPDATA%\AgentDeck\config.json` | configuração (na primeira abertura, copiada de `%APPDATA%\CommandDeck\config.json`, se existir). Com `AGENTDECK_HOME`, tudo isso fica dentro dessa pasta |
 
@@ -225,6 +225,7 @@ O `ask-agent` é um cliente da ponte local; o contrato completo (corpos, código
 | `POST /signal` | início e fim de turno (hooks) | `--signal` |
 | `POST /usage` | uso do plano (statusline do Claude) | `--usage` |
 | `POST /learn` | o que o projeto já aprendeu | `--learn` |
+| `GET /inbox` | as respostas recebidas por quem chama (só token de aba) | `--inbox` |
 | `GET /tasks`, `GET /tasks/<id>` | lista e detalhe das tarefas | `--task list`, `--task show` |
 | `POST /tasks` | cria uma tarefa (e a inicia, com `start`) | `--task new` |
 | `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | inicia, mescla, valida e descarta | `--task start`, `merge`, `validate`, `discard` |
@@ -293,6 +294,7 @@ ela dura.
 | `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor; Ollama como `ollama:<modelo>`), ou só os de um agente; antes de escolher `--agent`/`--model` |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --learn [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; sem argumentos, os aprendizados globais por inteiro e o índice dos demais. O agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
+| `ask-agent --inbox [--all]` | mostra as respostas às suas perguntas que ainda não chegaram a você (a que demorou e não foi digitada, a que o `ask-agent` não leu); `--all` mostra as 20 últimas. Ler as pendentes as marca como entregues |
 | `ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--base <branch>] [--start] -\|"pedido"\|--file <arq>` | cria uma tarefa (o pedido vem pela entrada padrão, como último argumento ou de um arquivo): uma worktree + branch + agente próprios; `--start` já a inicia |
 | `ask-agent --task list` / `show <id>` | lista as tarefas (id, estado, agente com modelo, título) / mostra uma, com relatório e diff |
 | `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | inicia o rascunho / mescla a tarefa em revisão na base (`--no-ff`) e a deixa **aguardando validação** (o agente e a worktree continuam) / conclui a tarefa aguardando validação e limpa / descarta e limpa |

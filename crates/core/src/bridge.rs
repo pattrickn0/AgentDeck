@@ -21,6 +21,7 @@ use crate::agents::resolve_alias;
 use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
 use crate::exchange::Reply;
 use crate::headless::HeadlessOptions;
+use crate::inbox::InboxEntry;
 use crate::instances::{scoped, unscoped, Ident};
 use crate::usage::AgentUsage;
 use crate::util::terminal_text;
@@ -168,12 +169,17 @@ pub(crate) fn start(core: &Core) -> anyhow::Result<(Arc<Server>, u16)> {
 }
 
 fn reply(req: Request, status: u16, body: Value) {
+    reply_checked(req, status, body);
+}
+
+/// Escreve a resposta HTTP. `false` = a escrita falhou (o cliente já tinha ido embora).
+fn reply_checked(req: Request, status: u16, body: Value) -> bool {
     let text = serde_json::to_string(&body).unwrap_or_else(|_| "{}".into());
     let mut resp = Response::from_string(text).with_status_code(status);
     if let Ok(h) = Header::from_bytes("content-type", "application/json") {
         resp = resp.with_header(h);
     }
-    let _ = req.respond(resp);
+    req.respond(resp).is_ok()
 }
 
 fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
@@ -258,6 +264,13 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             Err(e) => reply(req, 400, json!({ "error": e })),
         };
     }
+    if *req.method() == Method::Get && (route == "/inbox" || route.starts_with("/inbox?")) {
+        let Auth::Agent(c) = &auth else {
+            return reply(req, 400, json!({ "error": "só um agente tem caixa de entrada" }));
+        };
+        let all = route.split_once('?').is_some_and(|(_, q)| q.split('&').any(|kv| kv == "all=1"));
+        return reply(req, 200, json!({ "answers": core.inner.inbox.read(&c.key(&c.id), all) }));
+    }
     if *req.method() != Method::Post || !["/ask", "/reply", "/signal", "/usage"].contains(&route.as_str()) {
         return reply(req, 404, json!({ "error": "rota desconhecida" }));
     }
@@ -277,7 +290,17 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         "/usage" => usage(&core, &auth, &msg),
         _ => ask(&core, &caller, &msg, slot),
     };
-    reply(req, status, out);
+    // Uma resposta síncrona (200 ou erro de uma pergunta a uma aba) traz o número da pergunta: só vale
+    // como entregue se o corpo foi escrito sem erro; senão ela fica na caixa de entrada.
+    let answered = (route == "/ask" && status != 202).then(|| out.get("request").and_then(Value::as_u64)).flatten();
+    if reply_checked(req, status, out) {
+        if let Some(request) = answered {
+            core.inner.inbox.mark_delivered(request);
+        }
+    } else if let Some(request) = answered {
+        log::warn!("resposta #{request} não escrita: a conexão de quem perguntou já tinha sido encerrada");
+        core.answer_lost(&caller.project, request, "a conexão de quem perguntou já tinha sido encerrada");
+    }
 }
 
 /// Lê o corpo JSON da requisição, reservando antes o tamanho anunciado no orçamento de corpos (o
@@ -532,6 +555,12 @@ fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl 
 /// Resposta que chegou depois de o `ask-agent` de quem perguntou já ter terminado: é digitada
 /// no terminal de quem perguntou, como uma mensagem nova. `target` é o id sem o projeto.
 fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request: u64, outcome: Reply) {
+    let (text, failed) = match &outcome {
+        Reply::Answer(text) => (text, false),
+        Reply::Failed(text) => (text, true),
+    };
+    // Fica na caixa de entrada até a interface digitá-la no terminal (`Core::answer_typed`).
+    inbox_push(core, &scoped(project, &asker.id()), request, target, text, failed);
     let prompt = match outcome {
         Reply::Answer(text) => format!(
             "[Resposta do agente \"{target}\" à sua pergunta #{request}, recebida pelo AgentDeck]\n\n{}\n\n\
@@ -685,12 +714,23 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     };
     core.inner.exchange.remove(request);
     match outcome {
-        Reply::Answer(answer) => (200, json!({ "answer": answer })),
+        Reply::Answer(answer) => {
+            inbox_push(core, &asker_key, request, &target_id, &answer, false);
+            (200, json!({ "answer": answer, "request": request }))
+        }
         Reply::Failed(text) => {
+            inbox_push(core, &asker_key, request, &target_id, &text, true);
             caller.feed(core, FeedKind::Error, &target_id, &asker_id, text.clone());
-            (500, json!({ "error": text }))
+            (500, json!({ "error": text, "request": request }))
         }
     }
+}
+
+/// Guarda na caixa de entrada de `asker_key` (chave com escopo) o desfecho da pergunta `request`, ainda
+/// como não entregue. Quem o entrega marca depois (ver `Core::answer_typed` e o fim de [`handle`]).
+fn inbox_push(core: &Core, asker_key: &str, request: u64, from: &str, text: &str, failed: bool) {
+    let entry = InboxEntry { request, from: from.to_owned(), text: text.to_owned(), failed, ts: crate::util::now_ms(), delivered: false };
+    core.inner.inbox.push(asker_key, entry);
 }
 
 /// O `ask-agent` de quem perguntou volta agora (202) e a resposta, quando chegar, é digitada no
@@ -734,7 +774,8 @@ fn detach(
             "pending": request,
             "answer": format!(
                 "A pergunta #{request} foi entregue a \"{target}\", que ainda está trabalhando nela. A resposta será digitada \
-        neste terminal quando chegar, como uma nova mensagem. Não repita a pergunta: siga com outra parte da tarefa ou encerre o turno e aguarde."
+        neste terminal quando chegar, como uma nova mensagem. Não repita a pergunta: siga com outra parte da tarefa ou encerre o turno e aguarde. \
+        Se a resposta não aparecer, rode: ask-agent --inbox"
             ),
         }),
     )
