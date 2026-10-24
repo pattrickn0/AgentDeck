@@ -11,7 +11,7 @@ Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com a
 | Janela/eventos | **winit 0.30** (loop próprio, `ApplicationHandler`) | pedido do projeto; controle total do loop e de DnD |
 | Render | **glutin + glow** com **egui** (`egui-winit` + `egui_glow`) | widgets prontos e estilização fina para reproduzir o CSS; OpenGL leve (roda até em Xvfb/llvmpipe para testes) |
 | Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação madura; o render da grade é nosso (pintado no egui) |
-| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/models`, `/team`, `/ask`, `/reply`, `/signal`, `/usage`, `/learn`, `/tasks`; token por processo de agente + validação de Host |
+| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/models`, `/team`, `/ask`, `/reply`, `/signal`, `/usage`, `/learn`, `/outline`, `/tasks`; token por processo de agente + validação de Host |
 | Cliente HTTP | **ureq** (GitHub, cota do Antigravity, downloads) | bloqueante e simples, roda em threads |
 | Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
 | Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
@@ -92,6 +92,7 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `GET /team` | `{"id","boss","crew","models"}`: a posição de quem chama na equipe (só token de aba); `models` traz o modelo de quem aparece na resposta |
 | `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido, profundidade `>= 2`, `model` fora de `[A-Za-z0-9:._/#@+-]{1,128}` ou agente que não escolhe modelo (`o agente X não aceita escolher modelo`); 404 para `reply_to` que não está pendente; 409 para ciclo de espera ou para `model` diferente do da instância já aberta (`claude@dev já está aberta com sonnet; use --new para abrir outra com opus`); 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
 | `POST /learn` | `{"paths": [...]}` (até 50 caminhos; vazio = sem arquivos) → `{"text"}`: o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos (`ask-agent --learn`); sem caminhos, os globais por inteiro e o índice dos demais; 400 se não acha o repositório do projeto (ver "Memória em duas camadas") |
+| `POST /outline` | `{"paths": [...]}` (até 50 arquivos) → `{"text"}`: o esqueleto de cada arquivo, com assinaturas e linha, sem os corpos (`ask-agent --outline`); mesmo controle de identidade do `/learn`; 400 sem arquivos ou sem repositório do projeto (ver "Memória em duas camadas") |
 | `GET /inbox`, `GET /inbox?all=1` | `{"answers":[{"request","from","text","failed","ts","delivered"}]}`: as respostas que o chamador recebeu (só token de aba; 400 com o mestre). Sem `all`, as ainda não entregues; com `all`, as 20 últimas. Ler marca todas como entregues (`ask-agent --inbox`) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
@@ -109,7 +110,7 @@ mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupan
 os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
 mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity; os demais CLIs começam sem histórico no headless.
 
-**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
+**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--outline <arquivo…>` (`/outline`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
@@ -307,7 +308,7 @@ app passa por `Docs::confirm` (`Unsaved::{Tab, Quit, Revert}`; `request_quit` no
 cujo `layouter` devolve o galley de `docs::Shaped` — realce (`highlight::Cache`) e galley guardados por impressão digital do texto,
 largura de quebra, escala da tela e busca, de modo que repintar não refaz nada; as linhas quebram na largura (o `TextEdit` multilinha do egui
 não rola na horizontal) e a coluna dos números fica à parte, alinhada às linhas do galley. O realce é o tokenizador próprio
-`highlight.rs` (sem `syntect`, ver `memory/aprendizados/editor-de-documentos.md`); as cores são `Palette::syn_*`. O que se pinta à mão (o
+`highlight.rs` (hoje em `crates/core`, reexportado pelo app com `pub use agentdeck_core::highlight`; sem `syntect`, ver `memory/aprendizados/editor-de-documentos.md`); as cores são `Palette::syn_*`. O que se pinta à mão (o
 diff, `ui/diff_view.rs`, e o arquivo grande, `ui/code.rs::text_body`) usa a seleção de `ui/select.rs` (posição = linha + byte; arrastar,
 Ctrl+A, Ctrl+C) e `highlight::pieces` para juntar realce e marcas da busca por linha. `Find` (por documento) guarda a consulta e os
 achados (bytes para o código; linhas para o diff e o arquivo grande).
@@ -326,6 +327,19 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   arquivos (até `LEARN_BUDGET`, 12 000 caracteres); sem arquivos, os globais por inteiro e o índice de todos os outros
   (`learnings::learn_report`). As instruções da ponte (`agents.rs`) mandam rodá-lo antes de mexer em arquivos. Caminhos absolutos dentro da worktree ou do repositório viram caminhos do
   repositório (`learnings::relativize`). Lê a pasta da worktree da tarefa de quem pergunta ou, sem tarefa, do repositório do projeto.
+- **Sob demanda: `ask-agent --outline <arquivo>…`** (`POST /outline` → `Core::outline`, `outline.rs`; fase 2): o esqueleto do arquivo, com a
+  **assinatura** e o **número da linha** de cada item e sem os corpos, para o agente ler só o trecho de que precisa (com offset) em vez do
+  arquivo inteiro. O léxico é o de `highlight.rs` (que por isso mora no core): as faixas de texto entre aspas e de comentário saem do
+  código antes de contar chaves, então `"{"`, `'}'`, raw string e `// fn x() {` não enganam. Não é um analisador: o item é achado pela
+  profundidade das chaves e pela palavra que abre a linha. Rust: itens de topo e, sob `impl`/`trait`/`mod`, os membros (recuo = nível);
+  assinatura que quebra linhas vira uma só; campos de `struct` e variantes de `enum` entram numa linha só com os nomes (cortada na
+  largura); `#[cfg(test)] mod tests` vira "— N testes"; a 1ª frase do `///` entra no fim se couber. JS/TS (`function`, `class` e métodos,
+  `export`, `interface`, `type`, `const x = (...) =>`), Python (`def`/`class` por recuo, sem funções aninhadas), Markdown (títulos `#`–`###`),
+  PowerShell e shell (`function`); as demais linguagens ganham uma linha dizendo que não há resumo e quantas linhas o arquivo tem.
+  Orçamento de 6 000 caracteres por arquivo e 16 000 por chamada (`FILE_BUDGET`, `OUTLINE_BUDGET`); o que passar vira "… e mais N itens
+  (linhas X–Y)". Caminhos e raiz como no `--learn` (worktree da tarefa de quem pergunta ou, sem tarefa, o repositório); `..`, caminho fora da
+  raiz (também por link simbólico), pasta, arquivo inexistente, binário ou acima de 1 MB viram uma linha de aviso, não erro. As instruções da
+  ponte citam o comando numa frase.
 - **Escrita.** A regra da tarefa manda criar um arquivo em `memory/aprendizados/` na própria branch para algo não óbvio e citá-lo no
   relatório: o aprendizado passa pela mesma revisão e mescla que o código.
 - **Curto prazo: "Situação atual"** (`situation::render`, orçamento de 1 500 caracteres): as **outras tarefas em andamento** do projeto
