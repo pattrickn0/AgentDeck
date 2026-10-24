@@ -42,6 +42,8 @@ crates/
 │   ├── activity.rs   última atividade de cada aba (o que a entrega nas abas consulta)
 │   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos e o inventário do `ask-agent --models`
 │   ├── tasks.rs      mesa de tarefas: Task, ciclo de vida (criar/iniciar/relatório/devolver/mesclar/validar/reprovar/descartar), worktrees, mensagens ao agente, armazenamento em dados/tarefas
+│   ├── highlight.rs  léxico do realce de sintaxe (tokenizador próprio por linguagem: `Tok`, `Span`, `Lang`, `highlight_lines`); mora no core porque o `outline.rs` o usa, e `app/src/highlight.rs` o reexporta e acrescenta a busca, `pieces` e `Cache`
+│   ├── outline.rs    `ask-agent --outline`: esqueleto de um arquivo (assinaturas com a linha, sem corpos) por linguagem, com orçamento
 │   ├── learnings.rs  memória de longo prazo: aprendizados de memory/aprendizados/ (frontmatter, globs, caminhos do brief, entrega com orçamento, `ask-agent --learn`)
 │   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas, arquivos delas e commits da base)
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
@@ -70,7 +72,6 @@ crates/
 │   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
 │   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
 │   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, validar, descartar, reabrir a aba)
-│   ├── highlight.rs  realce de sintaxe (tokenizador próprio por linguagem, `pieces` para juntar realce e busca, `Cache`)
 │   ├── docs.rs       modo Documentos do centro: `CenterView`, `DocKind`/`DocTab`/`DocState` (inclusive `Source`, o arquivo editável, e `Find`, a busca), `Docs` (abrir, focar, fechar, duplicata, por projeto), a lista de arquivos de um diff (`diff_files`), o selo da chave (`Badge`) e, em `impl Deck`, abrir cada tipo de documento e ler fora da thread da interface (`UiMsg::Doc`); testes puros
 │   ├── docs_demo.rs  documentos fictícios do `AGENTDECK_DEBUG_UI=docs-demo*`
 │   ├── dictation.rs  ditado por voz: estados do microfone e destino fixo na aba onde a gravação começou (funções puras, com testes)

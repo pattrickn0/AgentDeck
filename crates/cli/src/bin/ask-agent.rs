@@ -11,6 +11,7 @@
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
 //!      ask-agent --learn [<arquivo>...]   (o que o projeto já aprendeu, no geral ou sobre esses arquivos)
+//!      ask-agent --outline <arquivo>...   (as assinaturas de cada arquivo com a linha, sem os corpos)
 //!      ask-agent --inbox [--all]          (respostas às suas perguntas ainda não entregues; --all: as 20 últimas)
 //!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--effort low|medium|high] [--base <branch>] [--start] -|"pedido"|--file <arq>
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
@@ -43,7 +44,7 @@ use agentdeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task; o esforço de uma tarefa: --task new \"título\" --effort low|medium|high)";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --outline <arquivo>...   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task; o esforço de uma tarefa: --task new \"título\" --effort low|medium|high)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -115,6 +116,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "--learn") {
         return learn_command(&bridge, &args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "--outline") {
+        return outline_command(&bridge, &args[1..]);
     }
     if args.first().is_some_and(|a| a == "--inbox") {
         return inbox_command(&bridge, &args[1..]);
@@ -348,6 +352,30 @@ fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     match bridge.request("POST", "/learn", Some(&json!({ "paths": paths })), Some(Duration::from_secs(15))) {
+        Ok((200, json)) => {
+            println!("{}", json.get("text").and_then(Value::as_str).unwrap_or(""));
+            ExitCode::SUCCESS
+        }
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Err(e) => fail(e, 1),
+    }
+}
+
+// ---------- Resumo de um arquivo (`--outline`) ----------
+
+const OUTLINE_USAGE: &str =
+    "Uso: ask-agent --outline <arquivo>...   (as assinaturas de cada arquivo com o número da linha, sem os corpos: leia só o trecho de que precisa)";
+
+/// `ask-agent --outline <caminho>...`: imprime o esqueleto de cada arquivo (itens com assinatura e linha).
+fn outline_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
+    if paths.iter().any(|p| p == "-h" || p == "--help") {
+        println!("{OUTLINE_USAGE}");
+        return ExitCode::SUCCESS;
+    }
+    if paths.is_empty() {
+        return fail(OUTLINE_USAGE, 2);
+    }
+    match bridge.request("POST", "/outline", Some(&json!({ "paths": paths })), Some(Duration::from_secs(30))) {
         Ok((200, json)) => {
             println!("{}", json.get("text").and_then(Value::as_str).unwrap_or(""));
             ExitCode::SUCCESS

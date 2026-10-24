@@ -219,6 +219,71 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
 }
 
 #[test]
+fn outline_answers_from_the_worktree_of_the_asking_agent() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    std::fs::create_dir_all(env.ws.join("src")).expect("pasta");
+    commit_file(
+        &env.ws,
+        "src/lib.rs",
+        "pub struct S {
+    a: u8,
+}
+
+impl S {
+    pub fn go(&self) -> u8 {
+        self.a
+    }
+}
+",
+        "src",
+    );
+    core.register_instance(&env.project, "claude");
+    let boss = tab_token(&env, "claude");
+    let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": "Com resumo", "brief": "Faça.", "start": true }).to_string());
+    assert_eq!(st, 200, "{b}");
+    let worktree = b["task"]["worktree"].as_str().expect("worktree").to_owned();
+    // O que a tarefa muda na worktree aparece no resumo dela, não no do repositório.
+    std::fs::write(
+        Path::new(&worktree).join("src").join("lib.rs"),
+        "pub fn only_in_the_task() {}
+",
+    )
+    .expect("escreve");
+    let agent = tab_token(&env, "claude@t1");
+    let ask = |token: &str, paths: Value| http(core, "POST", "/outline", token, &json!({ "paths": paths }).to_string());
+
+    let (st, rel) = ask(&agent, json!(["src/lib.rs"]));
+    assert_eq!(st, 200, "{rel}");
+    let rel = rel["text"].as_str().expect("texto").to_owned();
+    assert!(rel.contains("src/lib.rs — 1 linha, Rust") && rel.contains("    1  pub fn only_in_the_task()"), "{rel}");
+    // Caminho absoluto dentro da worktree dá a mesma resposta.
+    let absolute = Path::new(&worktree).join("src").join("lib.rs").to_string_lossy().into_owned();
+    let (st, abs) = ask(&agent, json!([absolute]));
+    assert_eq!((st, abs["text"].as_str()), (200, Some(rel.as_str())));
+    // Sem tarefa (o orquestrador) lê o repositório do projeto.
+    let (st, b) = ask(&boss, json!(["src/lib.rs"]));
+    let text = b["text"].as_str().unwrap_or("");
+    assert!(st == 200 && text.contains("pub struct S { a }") && text.contains("  pub fn go(&self) -> u8"), "{st} {b}");
+    // Arquivo que não existe, `..` e pasta viram aviso, não erro; o resto da lista continua.
+    let (st, b) = ask(&agent, json!(["nao-existe.rs", "../fora.rs", "src", "src/lib.rs"]));
+    let text = b["text"].as_str().unwrap_or("");
+    assert!(
+        st == 200
+            && text.contains("nao-existe.rs — não existe")
+            && text.contains("../fora.rs — recusado")
+            && text.contains("src — é uma pasta")
+            && text.contains("only_in_the_task"),
+        "{st} {b}"
+    );
+    // Sem arquivos: erro de uso. Só POST.
+    assert_eq!(ask(&agent, json!([])).0, 400);
+    assert_eq!(http(core, "GET", "/outline", &boss, "").0, 404);
+    core.shutdown();
+}
+
+#[test]
 fn the_bridge_reads_the_effort_of_a_new_task() {
     need_git!();
     let env = start();
