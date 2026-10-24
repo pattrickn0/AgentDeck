@@ -100,17 +100,25 @@ pub fn headless_args(kind: &str, model: &str) -> Vec<String> {
     }
 }
 
-/// Como abrir o TUI do OpenCode com um modelo: `(argumentos, variável de ambiente)`.
+/// Como abrir o TUI do OpenCode com o modelo e as instruções do AgentDeck: `(argumentos, variável de ambiente)`.
 ///
-/// O TUI não tem `--model` (só `run` e `mini` têm `-m`). A configuração `{"model": "..."}` em
-/// `OPENCODE_CONFIG_CONTENT` vale por cima da configuração do usuário e do projeto, mas só é lida por
-/// quem sobe o servidor, e por padrão o TUI usa o serviço em segundo plano compartilhado (que ignora a
-/// variável do nosso processo). Por isso `--standalone`: servidor próprio da aba, com o nosso ambiente.
-/// Verificado com o OpenCode 2.0.32 (a linha de status do TUI mostra o modelo pedido). A variante
-/// (`modelo#alta`) não existe na configuração, só no `run -m`: aqui vai só o modelo.
-pub fn opencode_tui(model: &str) -> (Vec<String>, (String, String)) {
-    let base = model.split('#').next().unwrap_or(model);
-    (vec!["--standalone".into()], ("OPENCODE_CONFIG_CONTENT".into(), serde_json::json!({ "model": base }).to_string()))
+/// O TUI não tem `--model` (só `run` e `mini` têm `-m`) nem opção de instruções. A configuração em
+/// `OPENCODE_CONFIG_CONTENT` (`{"model": "...", "instructions": ["<arquivo>"]}`) vale por cima da configuração do
+/// usuário e do projeto, e as `instructions` somam-se às dele (o `AGENTS.md` do projeto continua lido). Mas ela só
+/// é lida por quem sobe o servidor, e por padrão o TUI usa o serviço em segundo plano compartilhado (que ignora a
+/// variável do nosso processo). Por isso `--standalone`: servidor próprio da aba, com o nosso ambiente. Verificado
+/// com o OpenCode 2.0.32 (a linha de status do TUI mostra o modelo pedido; `opencode run --standalone` com a
+/// configuração obedece a uma regra do arquivo de instruções). A variante (`modelo#alta`) não existe na
+/// configuração, só no `run -m`: aqui vai só o modelo.
+pub fn opencode_tui(model: Option<&str>, instructions: Option<&std::path::Path>) -> (Vec<String>, (String, String)) {
+    let mut config = serde_json::Map::new();
+    if let Some(model) = model {
+        config.insert("model".into(), model.split('#').next().unwrap_or(model).into());
+    }
+    if let Some(file) = instructions {
+        config.insert("instructions".into(), serde_json::json!([file.to_string_lossy()]));
+    }
+    (vec!["--standalone".into()], ("OPENCODE_CONFIG_CONTENT".into(), serde_json::Value::Object(config).to_string()))
 }
 
 /// Esforço de raciocínio de uma tarefa. Cada CLI o traduz do seu jeito ([`effort_args`], [`effort_model`]);
@@ -593,7 +601,7 @@ mod tests {
 
     #[test]
     fn opencode_tui_uses_a_private_server_with_the_model_in_the_config() {
-        let (args, (key, value)) = opencode_tui("opencode/glm-5.3-flash-free");
+        let (args, (key, value)) = opencode_tui(Some("opencode/glm-5.3-flash-free"), None);
         assert_eq!(args, ["--standalone"]);
         assert_eq!(key, "OPENCODE_CONFIG_CONTENT");
         assert_eq!(
@@ -601,7 +609,21 @@ mod tests {
             serde_json::json!({ "model": "opencode/glm-5.3-flash-free" })
         );
         // A variante só existe no `run -m`.
-        assert_eq!(opencode_tui("opencode/big-pickle#high").1 .1, r#"{"model":"opencode/big-pickle"}"#);
+        assert_eq!(opencode_tui(Some("opencode/big-pickle#high"), None).1 .1, r#"{"model":"opencode/big-pickle"}"#);
+    }
+
+    #[test]
+    fn opencode_tui_always_gets_the_instructions_file_even_without_a_model() {
+        let file = std::path::Path::new("/dados/agentdeck-instructions.md");
+        let (args, (_, value)) = opencode_tui(None, Some(file));
+        assert_eq!(args, ["--standalone"]);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&value).expect("json"),
+            serde_json::json!({ "instructions": ["/dados/agentdeck-instructions.md"] })
+        );
+        let (_, (_, both)) = opencode_tui(Some("p/m#alta"), Some(file));
+        let both: serde_json::Value = serde_json::from_str(&both).expect("json");
+        assert_eq!((both["model"].as_str(), both["instructions"][0].as_str()), (Some("p/m"), Some("/dados/agentdeck-instructions.md")));
     }
 
     #[test]

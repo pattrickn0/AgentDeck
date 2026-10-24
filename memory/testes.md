@@ -94,6 +94,15 @@ Pela aba **Tarefas** da barra direita:
 - [ ] **Aprendizados no feedback** (t16): devolver (ou reprovar) uma tarefa com um feedback que cita um arquivo com aprendizado específico que o agente ainda não recebeu: a mensagem traz "O que o projeto já aprendeu sobre os arquivos citados"; um arquivo que já estava no pedido ou em feedback anterior não repete. A devolução também repete os feedbacks anteriores (até 5).
 - [ ] **Aprendizado criado pelo agente** (t13): o agente da tarefa cria um arquivo em `memory/aprendizados/` na branch e o cita no relatório; depois de mesclar, o `ask-agent --learn` de outra tarefa o mostra. Um arquivo com frontmatter inválido é ignorado, com aviso no log, sem derrubar a tarefa.
 
+- [ ] **Instruções em toda aba, num projeto novo sem `AGENTS.md`** (t38): abra uma pasta nova (sem `AGENTS.md`) como projeto e abra uma aba de cada CLI instalado. Os testes automáticos cobrem os argumentos com agentes falsos; falta ver com o CLI real que ele **recebeu e obedece** (pergunte "o que o AgentDeck mandou você fazer quando precisar de outro agente?" ou peça uma revisão por outro agente e veja se ele abre uma aba em vez de um subagente):
+  - Claude (`--append-system-prompt`), OpenCode (`instructions` em `OPENCODE_CONFIG_CONTENT`; conferido com `opencode run --standalone`, falta o TUI);
+  - **Codex** (`-c developer_instructions=...`; não instalado na máquina de desenvolvimento): confira que o valor entra e que, com a instalação por npm no Windows (shim `.cmd`, texto cru sem aspas), o `codex` não recusa a opção;
+  - **Aider** (`--read`) e **Open Interpreter** (`--custom_instructions`): confira que as flags existem na versão instalada;
+  - **Antigravity** (cota esgotada na hora do desenvolvimento): a pasta ganha um `AGENTS.md` só com o bloco do app, a Conversa avisa uma vez, e o agente conhece o `ask-agent` e a regra dos subagentes; abrir de novo não muda o arquivo nem avisa.
+- [ ] O `git status` do projeto novo: com Claude, Codex, OpenCode e Aider, nada novo; com Antigravity/Goose/Copilot, só o `AGENTS.md` (uma vez, sem mudar a cada abertura).
+- [ ] Um projeto que já tem `AGENTS.md` próprio: o texto do usuário fica como está, só ganha o bloco do app (o caso de sempre), e a Conversa não avisa de criação.
+- [ ] `ask-agent --learn` num projeto sem `memory/aprendizados/` mostra "o projeto ainda não tem aprendizados" e o formato do arquivo (`titulo`, `resumo`, `touches`).
+
 ## Ponte e instâncias
 
 Conversa entre agentes ★

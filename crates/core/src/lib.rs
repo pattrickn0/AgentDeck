@@ -724,8 +724,28 @@ impl Core {
             log::warn!("falha ao criar a pasta do projeto {}: {e}", path.display());
         }
         let instructions = self.bridge_instructions(None);
-        if let Err(e) = workspace::ensure_agent_context(path, &self.paths().app_dir, &self.inner.home, &instructions) {
+        if let Err(e) = workspace::ensure_agent_context(path, &self.paths().app_dir, &self.inner.home, &instructions, false) {
             log::warn!("falha ao atualizar AGENTS.md em {}: {e}", path.display());
+        }
+    }
+
+    /// Para o CLI que só lê o `AGENTS.md` da pasta onde roda (ver `agents::reads_only_agents_md`): cria o arquivo em
+    /// `dir`, só com o bloco do app, se a pasta não tem um, e avisa o usuário na Conversa. Um `AGENTS.md` que já
+    /// existe fica como está aqui (o bloco dele é mantido por `prepare_workspace`/`ensure_project_context`; numa
+    /// worktree de tarefa, o arquivo é o versionado). Nunca na pasta pessoal.
+    fn ensure_agents_file(&self, project: &str, dir: &Path) {
+        if dir.join("AGENTS.md").exists() {
+            return;
+        }
+        let instructions = self.bridge_instructions(None);
+        match workspace::ensure_agent_context(dir, &self.paths().app_dir, &self.inner.home, &instructions, true) {
+            Ok(workspace::AgentContext::Created) => {
+                log::info!("AGENTS.md criado em {} (o CLI só lê instruções de lá)", dir.display());
+                let text = "O AgentDeck criou um AGENTS.md só com as instruções dele nesta pasta, porque este CLI só lê instruções de lá.                             Ele aparece como arquivo novo no git: faça o commit ou apague-o à vontade.";
+                self.feed(FeedEntry::system(text).in_project(project));
+            }
+            Ok(_) => {}
+            Err(e) => log::warn!("falha ao criar AGENTS.md em {}: {e}", dir.display()),
         }
     }
 
@@ -774,7 +794,7 @@ impl Core {
             return;
         }
         let instructions = self.bridge_instructions(None);
-        if let Err(e) = workspace::ensure_agent_context(&ws, &self.paths().app_dir, &self.inner.home, &instructions) {
+        if let Err(e) = workspace::ensure_agent_context(&ws, &self.paths().app_dir, &self.inner.home, &instructions, false) {
             log::warn!("falha ao atualizar AGENTS.md: {e}");
         }
     }

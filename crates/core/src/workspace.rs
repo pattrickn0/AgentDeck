@@ -233,29 +233,39 @@ fn replace_marker_blocks(old: &str, block: &str) -> String {
 pub enum AgentContext {
     /// Workspace é a pasta pessoal do usuário: nunca escrevemos lá.
     SkippedHome,
-    /// Fora da pasta do app e sem AGENTS.md pré-existente.
+    /// Fora da pasta do app, sem AGENTS.md pré-existente e sem pedido para criá-lo.
     SkippedForeign,
     /// Conteúdo já estava atualizado.
     Unchanged,
     Written,
+    /// O arquivo não existia e foi criado, só com o bloco do app (pedido com `create`).
+    Created,
 }
 
 /// Mantém o bloco marcado do AgentDeck no AGENTS.md do workspace (o Antigravity CLI não
 /// tem flag para anexar instruções ao prompt de sistema). Equivalente a `ensureAgentContext`.
 ///
-/// REGRA: nunca cria AGENTS.md na pasta do usuário; fora da pasta do app só atualiza um
-/// AGENTS.md que já exista.
-pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instructions: &str) -> std::io::Result<AgentContext> {
+/// REGRA: fora da pasta do app só atualiza um AGENTS.md que já exista; criar um na pasta do usuário
+/// (`create`) é só para o CLI que não tem outro jeito de receber as instruções (ver `agents::reads_only_agents_md`).
+/// Na pasta pessoal do usuário, nunca.
+pub fn ensure_agent_context(
+    workspace: &Path,
+    app_dir: &Path,
+    home: &Path,
+    instructions: &str,
+    create: bool,
+) -> std::io::Result<AgentContext> {
     let ws = crate::util::absolutize(workspace);
     if !home.as_os_str().is_empty() && crate::util::same_path(&ws, &crate::util::absolutize(home)) {
         return Ok(AgentContext::SkippedHome);
     }
     let file = workspace.join("AGENTS.md");
     let is_app_workspace = crate::util::path_within(&ws, &crate::util::absolutize(app_dir));
-    if !is_app_workspace && !file.exists() {
+    if !is_app_workspace && !file.exists() && !create {
         return Ok(AgentContext::SkippedForeign);
     }
-    let old = if file.exists() { std::fs::read_to_string(&file)? } else { String::new() };
+    let existed = file.exists();
+    let old = if existed { std::fs::read_to_string(&file)? } else { String::new() };
     // Mantém o fim de linha do arquivo (CRLF em repositórios com `core.autocrlf`): EOL misto
     // sujaria o `git status` a cada abertura.
     let eol = if old.contains("\r\n") { "\r\n" } else { "\n" };
@@ -272,7 +282,7 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
         return Ok(AgentContext::Unchanged);
     }
     write_atomic(&file, new.as_bytes())?;
-    Ok(AgentContext::Written)
+    Ok(if existed { AgentContext::Written } else { AgentContext::Created })
 }
 
 /// `text` sem os blocos marcados do app e sem diferença de fim de linha: o que sobra é do usuário.
@@ -708,33 +718,72 @@ mod tests {
         }
 
         // Pasta pessoal: nunca.
-        assert_eq!(ensure_agent_context(&home, &app, &home, "X").expect("ok"), AgentContext::SkippedHome);
+        assert_eq!(ensure_agent_context(&home, &app, &home, "X", false).expect("ok"), AgentContext::SkippedHome);
         assert!(!home.join("AGENTS.md").exists());
         // Fora do app, sem AGENTS.md: não cria.
-        assert_eq!(ensure_agent_context(&foreign, &app, &home, "X").expect("ok"), AgentContext::SkippedForeign);
+        assert_eq!(ensure_agent_context(&foreign, &app, &home, "X", false).expect("ok"), AgentContext::SkippedForeign);
         assert!(!foreign.join("AGENTS.md").exists());
         // Dentro do app: cria.
-        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X").expect("ok"), AgentContext::Written);
+        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X", false).expect("ok"), AgentContext::Created);
         let text = std::fs::read_to_string(ws_app.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("{MARKER_START}\nX\n{MARKER_END}\n"));
-        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X").expect("ok"), AgentContext::Unchanged);
+        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X", false).expect("ok"), AgentContext::Unchanged);
 
         // Fora do app, AGENTS.md existente com bloco legado: substitui só o bloco.
         std::fs::write(foreign.join("AGENTS.md"), "# Regras\n\n<!-- jwic:start -->\nvelho $1\n<!-- jwic:end -->\n\nfim\n").expect("write");
-        assert_eq!(ensure_agent_context(&foreign, &app, &home, "novo $1").expect("ok"), AgentContext::Written);
+        assert_eq!(ensure_agent_context(&foreign, &app, &home, "novo $1", false).expect("ok"), AgentContext::Written);
         let text = std::fs::read_to_string(foreign.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("# Regras\n\n{MARKER_START}\nnovo $1\n{MARKER_END}\n\nfim\n"));
 
         // AGENTS.md existente sem bloco: acrescenta ao final.
         std::fs::write(foreign.join("AGENTS.md"), "# Regras\n\n\n").expect("write");
-        ensure_agent_context(&foreign, &app, &home, "Y").expect("ok");
+        ensure_agent_context(&foreign, &app, &home, "Y", false).expect("ok");
         let text = std::fs::read_to_string(foreign.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("# Regras\n\n{MARKER_START}\nY\n{MARKER_END}\n"));
 
         // Pasta "irmã" com prefixo de string igual não conta como dentro do app.
         let sibling = tmp.path().join("app-x");
         std::fs::create_dir_all(&sibling).expect("mkdir");
-        assert_eq!(ensure_agent_context(&sibling, &app, &home, "X").expect("ok"), AgentContext::SkippedForeign);
+        assert_eq!(ensure_agent_context(&sibling, &app, &home, "X", false).expect("ok"), AgentContext::SkippedForeign);
+    }
+
+    #[test]
+    fn agents_md_is_created_only_when_asked_and_never_in_the_home() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let app = tmp.path().join("app");
+        let home = tmp.path().join("home");
+        let project = tmp.path().join("projeto");
+        for d in [&app, &home, &project] {
+            std::fs::create_dir_all(d).expect("mkdir");
+        }
+        // Pasta pessoal: nem com o pedido.
+        assert_eq!(ensure_agent_context(&home, &app, &home, "X", true).expect("ok"), AgentContext::SkippedHome);
+        assert!(!home.join("AGENTS.md").exists());
+        // Projeto novo, com o pedido: cria só com o bloco; da segunda vez nada muda (nada novo no `git status`).
+        assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Created);
+        let text = std::fs::read_to_string(project.join("AGENTS.md")).expect("read");
+        assert_eq!(
+            text,
+            format!(
+                "{MARKER_START}
+X
+{MARKER_END}
+"
+            )
+        );
+        assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Unchanged);
+        // Um AGENTS.md do usuário que já existe nunca é "criado": só ganha o bloco.
+        std::fs::write(
+            project.join("AGENTS.md"),
+            "# Meu
+",
+        )
+        .expect("write");
+        assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Written);
+        assert!(std::fs::read_to_string(project.join("AGENTS.md")).expect("read").starts_with(
+            "# Meu
+"
+        ));
     }
 
     #[test]
@@ -750,12 +799,12 @@ mod tests {
             "# Regras\r\n\r\n<!-- jwic:start -->\r\nvelho\r\n<!-- jwic:end -->\r\n",
         ] {
             std::fs::write(&file, start).expect("write");
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Written);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2", false).expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
             assert!(only_crlf(&text), "{text:?}");
             assert!(text.contains(&format!("{MARKER_START}\r\nlinha 1\r\nlinha 2\r\n{MARKER_END}\r\n")), "{text:?}");
             // Segunda vez: nada muda.
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Unchanged);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2", false).expect("ok"), AgentContext::Unchanged);
             assert_eq!(std::fs::read_to_string(&file).expect("read"), text);
         }
         // Nenhum temporário fica para trás.
@@ -777,14 +826,14 @@ mod tests {
             let after = format!("{eol}## Fim{eol}Obrigado.{eol}");
             let old_block = format!("<!-- jwic:start -->{eol}texto velho{eol}<!-- jwic:end -->");
             std::fs::write(&file, format!("{before}{old_block}{eol}{after}")).expect("write");
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
             let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
             assert_eq!(text, format!("{before}{new_block}{eol}{after}"), "só o bloco muda");
             assert_eq!(text.matches("<!-- agentdeck:start -->").count(), 1);
             assert!(!text.contains("jwic"), "{text:?}");
             // Com o bloco novo, nada mais muda.
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Unchanged);
         }
     }
 
@@ -811,9 +860,9 @@ mod tests {
             ];
             for (start, expected) in cases {
                 std::fs::write(&file, &start).expect("write");
-                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Written);
                 assert_eq!(std::fs::read_to_string(&file).expect("read"), expected, "{start:?}");
-                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Unchanged);
                 assert_eq!(std::fs::read_to_string(&file).expect("read"), expected);
             }
         }

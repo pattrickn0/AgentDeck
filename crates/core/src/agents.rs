@@ -381,7 +381,7 @@ impl Registry {
         AGENTS.iter().filter(|a| a.peer && self.resolve(a.id).is_some()).map(|a| a.id.to_owned()).collect()
     }
 
-    /// Texto injetado no prompt de sistema / AGENTS.md (equivalente a `bridgeInstructions`).
+    /// Como [`Registry::bridge_instructions`], para a instância `ident`, com o cargo dela.
     pub fn bridge_instructions_for(&self, ident: &Ident) -> String {
         let mut text = self.bridge_instructions(Some(&ident.id()));
         if let Some(role) = &ident.role {
@@ -390,33 +390,34 @@ impl Registry {
         text
     }
 
+    /// As instruções do AgentDeck, a "memória geral" igual para todos os agentes. Com `self_id`, leva o nome da
+    /// instância e a lista dos outros agentes; sem ele (texto de arquivo, igual para qualquer aba), manda ler o
+    /// nome na variável de ambiente e não lista ninguém, para o arquivo não mudar de máquina para máquina.
     pub fn bridge_instructions(&self, self_id: Option<&str>) -> String {
-        let others: Vec<String> = self.peers().into_iter().filter(|p| Some(p.as_str()) != self_id).collect();
-        let first = match self_id {
-            Some(id) => format!(
-                "Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA. Seu nome aqui é \"{id}\"."
+        const INTRO: &str = "Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA.";
+        let (first, listed) = match self_id {
+            Some(id) => {
+                let others: Vec<String> = self.peers().into_iter().filter(|p| p != id).collect();
+                (format!("{INTRO} Seu nome aqui é \"{id}\"."), format!(" (agentes: {})", others.join(",")))
+            }
+            None => (
+                format!("{INTRO} Seu nome e cargo estão nas variáveis AGENTDECK_AGENT e AGENTDECK_ROLE; nunca pergunte a si mesmo."),
+                String::new(),
             ),
-            None => "Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA. Seu nome aqui está na variável de ambiente AGENTDECK_AGENT; nunca pergunte a si mesmo.".to_owned(),
         };
-        // `${others}` no JS converte o array com "," (sem espaço) — mantido igual.
         [
             first,
-            "Para conversar com outro agente, execute no shell:".to_owned(),
-            "  ask-agent <agente> \"sua mensagem\"".to_owned(),
-            format!(
-                "Agentes disponíveis: {}. A resposta é impressa no stdout e pode levar alguns minutos (use timeout de até 600000 ms). Se o outro agente demorar, o ask-agent termina antes, avisando que a resposta será digitada depois neste terminal como uma nova mensagem: nesse caso, não repita a pergunta.",
-                others.join(",")
-            ),
-            "Para saber que agentes e modelos este computador tem, rode ask-agent --models (ou ask-agent --models <agente>) antes de escolher --agent/--model.".to_owned(),
-            "Antes de mexer em arquivos, rode ask-agent --learn <arquivo>... (ou ask-agent --learn) para ver o que o projeto já aprendeu sobre eles.".to_owned(),
-            "O histórico de cada par de agentes é mantido entre chamadas. O usuário tem acesso à \"Conversa integrada\" em tempo real no AgentDeck, portanto você NÃO precisa relatar nem resumir a conversa dos agentes para ele.".to_owned(),
-            "Ao colaborar com outro agente (ex: Antigravity), mantenha o diálogo diretamente com ele (iterando, tirando dúvidas e alinhando) até concluir a tarefa, em vez de parar no meio para fazer perguntas ao usuário.".to_owned(),
-            "Cada aba é uma instância com nome <modelo>[@<cargo>[@<nome>]] (ex.: claude, claude@dev, claude@dev@ana). Para delegar a uma instância com cargo, chame-a pelo nome: ask-agent claude@dev \"tarefa\" (a aba é aberta se não existir); use --new para abrir outra instância do mesmo cargo; ask-agent --model <modelo> claude@dev \"tarefa\" escolhe o LLM da instância ao abri-la (ex.: sonnet). Trabalho grande vira uma tarefa, com worktree, branch e agente próprios: ask-agent --task new \"título\" --start --file <pedido.md> (o pedido num arquivo preserva os acentos; pela entrada padrão o shell do Windows os troca por \"?\").".to_owned(),
-            "Quando outro agente lhe mandar uma mensagem, responda executando o comando indicado nela (ask-agent --reply <número> \"sua resposta\"; em textos longos ou com acentos, escreva-os num arquivo e use --file <arquivo>): é só assim que a resposta chega a ele.".to_owned(),
-            "A resposta a uma pergunta sua que demorou é digitada neste terminal quando chega. Se ela não aparecer, rode ask-agent --inbox (as respostas ainda não entregues; --inbox --all mostra as 20 últimas).".to_owned(),
-            "Os agentes formam uma equipe: cada um pode ter um chefe e subordinados, e o usuário pode reorganizá-la a qualquer momento. Antes de delegar ou de reportar, consulte a sua posição com ask-agent --team; delegue de preferência à sua equipe e, ao concluir algo que o seu chefe pediu, reporte a ele com ask-agent --boss \"mensagem\".".to_owned(),
+            format!("Para falar com outro agente, rode no shell: ask-agent <agente> \"mensagem\"{listed}. Precisando de outro agente, abra-o no AgentDeck (ask-agent <agente>, ask-agent <agente>@<cargo> ou ask-agent --task new): NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça."),
+            "A resposta sai no stdout e pode levar minutos (timeout de até 600000 ms). Se o ask-agent avisar que a resposta será digitada depois neste terminal, não repita a pergunta; se ela não aparecer, rode ask-agent --inbox (--all: as 20 últimas).".to_owned(),
+            "ask-agent --models [<agente>] lista os agentes e modelos desta máquina. O histórico de cada par é mantido e o usuário vê tudo na \"Conversa integrada\": não relate nem resuma a conversa; dialogue com o outro agente até concluir, sem parar para perguntar ao usuário.".to_owned(),
+            "Cada aba é uma instância <modelo>[@<cargo>[@<nome>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev \"tarefa\" abre a aba se não existir; --new abre outra do mesmo cargo; --model <modelo> escolhe o LLM ao abrir. Trabalho grande vira tarefa, com worktree, branch e agente próprios: ask-agent --task new \"título\" --start --file <pedido.md>.".to_owned(),
+            "Texto com acento vai num arquivo (--file <arquivo>): pela entrada padrão o shell do Windows troca os acentos por \"?\".".to_owned(),
+            "Quando outro agente lhe mandar uma mensagem, responda com o comando indicado nela (ask-agent --reply <número> \"resposta\" ou --file <arquivo>): só assim a resposta chega a ele.".to_owned(),
+            "Os agentes formam uma equipe (chefe e subordinados; o usuário pode reorganizá-la). Antes de delegar ou reportar, veja a sua posição com ask-agent --team; delegue de preferência à equipe e, ao concluir algo que o chefe pediu, reporte com ask-agent --boss \"mensagem\".".to_owned(),
+            "Memória do projeto: memory/aprendizados/, um .md por armadilha, decisão ou convenção que custou tempo e o código não mostra. Formato: cabeçalho --- titulo: … / resumo: uma linha / touches: [globs dos arquivos; opcional] --- e o corpo curto, com Por quê e Como aplicar. Antes de mexer em arquivos, rode ask-agent --learn <arquivo>... (sem argumentos: o índice); ao descobrir algo assim, crie o arquivo.".to_owned(),
         ]
-        .join("\n")
+        .join("
+")
     }
 
     /// Lista para menus (equivalente a `agents:list`).
@@ -579,6 +580,48 @@ fn user_statusline_in(file: &Path) -> Option<serde_json::Value> {
     (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| sl.clone())
 }
 
+/// Nome do arquivo (em `dados/`) com as instruções do AgentDeck, para os CLIs que leem instruções de um arquivo.
+const INSTRUCTIONS_FILE: &str = "agentdeck-instructions.md";
+
+/// Grava `dados/agentdeck-instructions.md` (só se mudou) e devolve o caminho. Fica fora do repositório do usuário.
+fn write_instructions_file(data_dir: &Path, text: &str) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(data_dir)?;
+    let path = data_dir.join(INSTRUCTIONS_FILE);
+    let text = format!(
+        "{text}
+"
+    );
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+        std::fs::write(&path, text)?;
+    }
+    Ok(path)
+}
+
+/// Argumentos que passam as instruções do AgentDeck a `kind`, sem mexer no repositório do usuário. O Claude
+/// (`--append-system-prompt`) e o OpenCode (configuração, ver [`models::opencode_tui`]) são montados à parte.
+/// - Codex: `-c developer_instructions=…` (o valor é TOML; num shim `.cmd` as aspas não sobrevivem e o texto vai
+///   cru, que o Codex aceita como texto quando não é TOML válido);
+/// - Aider: `--read <arquivo>` (arquivo só de leitura);
+/// - Open Interpreter: `--custom_instructions` (acrescenta ao prompt de sistema).
+fn instruction_args(kind: &str, text: &str, file: Option<&Path>, shim: bool) -> Vec<String> {
+    match kind {
+        "codex" => {
+            let value = if shim { text.to_owned() } else { serde_json::Value::from(text).to_string() };
+            vec!["-c".into(), format!("developer_instructions={value}")]
+        }
+        "aider" => file.map(|f| vec!["--read".into(), f.to_string_lossy().into_owned()]).unwrap_or_default(),
+        "interpreter" => vec!["--custom_instructions".into(), text.to_owned()],
+        _ => Vec::new(),
+    }
+}
+
+/// CLIs sem opção de instruções que só leem o `AGENTS.md` da pasta onde rodam: sem o arquivo, não sabem do
+/// `ask-agent`. Para eles o app cria o `AGENTS.md` só com o bloco dele quando a pasta não tem um (ver
+/// [`Core::ensure_agents_file`]).
+fn reads_only_agents_md(kind: &str) -> bool {
+    matches!(kind, "antigravity" | "goose" | "copilot")
+}
+
 /// Monta o comando de uma aba interativa (equivalente a `pty:spawn`).
 pub(crate) fn spawn_spec(core: &Core, project: &str, kind: &str) -> Result<SpawnSpec, String> {
     spawn_spec_for(core, project, &Ident::main(kind))
@@ -600,6 +643,11 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     let reg = &core.inner.agents;
     let def = agent_def(kind).ok_or_else(|| format!("Agente desconhecido: {kind}"))?;
     let data_dir = core.paths().data_dir.to_string_lossy().into_owned();
+    // Nenhum CLI depende do `AGENTS.md` do usuário: cada um recebe as instruções pelo canal que ele tem.
+    let instructions = reg.bridge_instructions_for(ident);
+    let generic_file = write_instructions_file(&core.paths().data_dir, &reg.bridge_instructions(None))
+        .map_err(|e| log::warn!("não consegui gravar o arquivo de instruções do AgentDeck: {e}"))
+        .ok();
     let mut env = agent_env(core, &id, 0, &core.tab_token(project, &id));
     if let Some(role) = &ident.role {
         env.insert("AGENTDECK_ROLE".into(), role.clone());
@@ -617,7 +665,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     }
     if kind == "claude" {
         args.push("--append-system-prompt".into());
-        args.push(reg.bridge_instructions_for(ident));
+        args.push(instructions.clone());
         // Responder a outro agente é rodar `ask-agent`: libera só esse comando, sem perguntar.
         args.push("--allowedTools".into());
         args.push("Bash(ask-agent:*)".into());
@@ -636,19 +684,19 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         args.push("-c".into());
         args.push(r#"notify=["ask-agent","--signal","idle"]"#.into());
     }
+    args.extend(instruction_args(kind, &instructions, generic_file.as_deref(), resolved.shim.is_some()));
     if kind == "claude" || kind == "antigravity" {
         args.push("--add-dir".into());
         args.push(data_dir);
     }
-    if let Some(m) = &model {
-        if kind == "opencode" {
-            // O TUI não tem --model: servidor próprio + modelo na configuração (ver `models::opencode_tui`).
-            let (extra, (key, value)) = models::opencode_tui(m);
-            args.extend(extra);
-            env.insert(key, value);
-        } else {
-            args.extend(models::cli_args(kind, m));
-        }
+    if kind == "opencode" {
+        // O TUI não tem --model nem --system: servidor próprio + modelo e instruções na configuração
+        // (ver `models::opencode_tui`).
+        let (extra, (key, value)) = models::opencode_tui(model.as_deref(), generic_file.as_deref());
+        args.extend(extra);
+        env.insert(key, value);
+    } else if let Some(m) = &model {
+        args.extend(models::cli_args(kind, m));
     }
     // Esforço da tarefa (o do Antigravity já está no nome do modelo; ver `Task::effort`).
     if let Some(effort) = core.task_of_instance(project, &id).and_then(|t| t.effort) {
@@ -665,6 +713,9 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     full.extend(args);
 
     core.ensure_project_context(project, &project_dir);
+    if reads_only_agents_md(kind) {
+        core.ensure_agents_file(project, &cwd);
+    }
     Ok(SpawnSpec {
         program: resolved.program,
         args: full,
@@ -681,6 +732,89 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn registry() -> Registry {
+        Registry::new(Discovery { search_path: Some(OsString::new()), home: PathBuf::from("/h"), system_dirs: false })
+    }
+
+    /// As instruções não crescem (ficam no tamanho das de antes da t38, 2580 caracteres, sem agentes na lista) e
+    /// trazem a regra dos subagentes, a ponte e a memória geral.
+    #[test]
+    fn the_instructions_carry_the_rules_and_stay_short() {
+        let reg = registry();
+        let text = reg.bridge_instructions(Some("claude@dev"));
+        assert!(text.chars().count() <= 2580, "{} caracteres", text.chars().count());
+        for needle in [
+            "NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça",
+            "ask-agent <agente>@<cargo> ou ask-agent --task new",
+            "memory/aprendizados/",
+            "titulo:",
+            "resumo:",
+            "touches:",
+            "ask-agent --learn",
+            "ask-agent --reply",
+            "ask-agent --boss",
+        ] {
+            assert!(text.contains(needle), "falta {needle:?}");
+        }
+        assert!(text.contains("Seu nome aqui é \"claude@dev\"") && text.contains("(agentes: )"), "{text}");
+    }
+
+    /// O texto de arquivo (igual para qualquer aba) não lista agentes: não muda de máquina para máquina.
+    #[test]
+    fn the_generic_instructions_do_not_list_the_installed_agents() {
+        let reg = registry();
+        let text = reg.bridge_instructions(None);
+        assert!(text.contains("AGENTDECK_AGENT") && text.contains("AGENTDECK_ROLE") && !text.contains("(agentes:"), "{text}");
+    }
+
+    #[test]
+    fn each_cli_gets_its_own_instruction_channel() {
+        let file = Path::new("/dados/agentdeck-instructions.md");
+        let text = "Você \"é\"
+ok";
+        // Codex: valor TOML (string básica) com aspas e quebra de linha escapadas; num shim, o texto cru.
+        assert_eq!(instruction_args("codex", text, Some(file), false), ["-c", r#"developer_instructions="Você \"é\"\nok""#]);
+        assert_eq!(
+            instruction_args("codex", text, Some(file), true),
+            [
+                "-c",
+                "developer_instructions=Você \"é\"
+ok"
+            ]
+        );
+        assert_eq!(instruction_args("aider", text, Some(file), false), ["--read", "/dados/agentdeck-instructions.md"]);
+        assert!(instruction_args("aider", text, None, false).is_empty());
+        assert_eq!(instruction_args("interpreter", text, Some(file), false), ["--custom_instructions", text]);
+        // Claude e OpenCode são montados à parte; o Antigravity lê o AGENTS.md.
+        for kind in ["claude", "opencode", "antigravity", "goose", "shell"] {
+            assert!(instruction_args(kind, text, Some(file), false).is_empty(), "{kind}");
+        }
+        assert!(["antigravity", "goose", "copilot"].iter().all(|k| reads_only_agents_md(k)));
+        assert!(["claude", "codex", "opencode", "aider", "interpreter", "shell"].iter().all(|k| !reads_only_agents_md(k)));
+    }
+
+    #[test]
+    fn the_instructions_file_is_rewritten_only_when_it_changes() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let dados = tmp.path().join("dados");
+        let path = write_instructions_file(&dados, "um").expect("gravar");
+        assert_eq!(path, dados.join(INSTRUCTIONS_FILE));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("ler"),
+            "um
+"
+        );
+        let before = std::fs::metadata(&path).and_then(|m| m.modified()).expect("mtime");
+        write_instructions_file(&dados, "um").expect("de novo");
+        assert_eq!(std::fs::metadata(&path).and_then(|m| m.modified()).expect("mtime"), before);
+        write_instructions_file(&dados, "dois").expect("muda");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("ler"),
+            "dois
+"
+        );
+    }
 
     #[test]
     fn aliases() {

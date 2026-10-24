@@ -71,10 +71,14 @@ O nome é o endereço usado pelo `ask-agent`. As abas voltam com o mesmo nome qu
 
 Nenhuma outra variável `AGENTDECK_*` do ambiente do app passa para os agentes.
 
-As instruções da ponte chegam a cada agente por um canal diferente:
+As instruções do AgentDeck (a "memória geral", igual para todos, com a regra de não usar subagentes internos do CLI)
+chegam a cada agente pelo canal que o CLI tem, sem depender do `AGENTS.md` do usuário:
 
-- **Claude:** `--append-system-prompt`;
-- **Antigravity e outros:** o bloco gerado no `AGENTS.md` do workspace.
+- **Claude:** `--append-system-prompt`; **Codex:** `-c developer_instructions`; **OpenCode:** `instructions` na
+  configuração da aba; **Aider:** `--read`; **Open Interpreter:** `--custom_instructions`;
+- **Antigravity, Goose e Copilot** (só leem o `AGENTS.md`): o app cria um só com o bloco dele se a pasta não tem, e avisa.
+
+Tabela completa em [ARCHITECTURE.md](ARCHITECTURE.md), "Protocolo entre agentes".
 
 ### O caminho de uma pergunta entre agentes
 
