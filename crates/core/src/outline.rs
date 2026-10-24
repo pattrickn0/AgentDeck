@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 
 use crate::highlight::{highlight_lines, Lang, Span, Tok};
 
-/// Caracteres da resposta de um arquivo e da chamada inteira (como o `LEARN_BUDGET` do `--learn`).
+/// Caracteres da resposta de um arquivo e da chamada inteira (como o `LEARN_BUDGET` do `--learn`). Um arquivo tem
+/// pelo menos `FILE_BUDGET`; pedido sozinho (ou com poucos), divide a chamada inteira com os outros.
 pub const FILE_BUDGET: usize = 6_000;
 pub const OUTLINE_BUDGET: usize = 16_000;
 /// Passou disto o arquivo não é lido: vira uma linha de aviso.
@@ -517,6 +518,7 @@ impl crate::Core {
         let canonical_root = work_root.canonicalize().unwrap_or_else(|_| work_root.clone());
         let mut parts = Vec::new();
         let mut left = OUTLINE_BUDGET;
+        let share = (OUTLINE_BUDGET / paths.len().max(1)).max(FILE_BUDGET);
         for p in paths {
             let rel = crate::learnings::relativize(p, &roots);
             if rel.is_empty() {
@@ -526,7 +528,7 @@ impl crate::Core {
                 parts.push(format!("{rel} — fora do orçamento desta resposta; peça este arquivo sozinho"));
                 continue;
             }
-            let part = outline_path(&work_root, &canonical_root, &rel, FILE_BUDGET.min(left));
+            let part = outline_path(&work_root, &canonical_root, &rel, share.min(left));
             left = left.saturating_sub(part.chars().count() + 2);
             parts.push(part);
         }
