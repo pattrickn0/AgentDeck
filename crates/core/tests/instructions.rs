@@ -44,19 +44,26 @@ fn start(agents: &[&str]) -> Env {
     Env { _tmp: tmp, users: tempfile::tempdir().expect("tmp"), core, rx, root }
 }
 
+/// O executável de cada agente: o Antigravity é `agy`; os outros, o próprio nome.
+fn exe_name(name: &str) -> &str {
+    if name == "antigravity" {
+        "agy"
+    } else {
+        name
+    }
+}
+
 #[cfg(unix)]
 fn write_fake(dir: &Path, name: &str) {
     use std::os::unix::fs::PermissionsExt;
-    let path = dir.join(name);
+    let path = dir.join(exe_name(name));
     std::fs::write(&path, "#!/bin/sh\n").expect("write");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
 }
 
 #[cfg(not(unix))]
 fn write_fake(dir: &Path, name: &str) {
-    // Antigravity é `agy.exe`; os outros, `<nome>.exe`.
-    let exe = if name == "antigravity" { "agy" } else { name };
-    std::fs::write(dir.join(format!("{exe}.exe")), "").expect("write");
+    std::fs::write(dir.join(format!("{}.exe", exe_name(name))), "").expect("write");
 }
 
 impl Env {
