@@ -1,5 +1,6 @@
 //! Testes de ponta a ponta da ponte HTTP, e do executor headless, com `Core`
-//! em pastas temporárias e (no Unix) um "claude" falso no PATH de busca.
+//! em pastas temporárias e agentes falsos no PATH de busca (o binário `fake_agent`,
+//! ver `support/fake_agent.rs`).
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -15,17 +16,16 @@ use serde_json::{json, Value};
 struct Env {
     _tmp: tempfile::TempDir,
     core: Core,
-    #[cfg_attr(not(unix), allow(dead_code))]
     rx: Receiver<CoreEvent>,
     root: std::path::PathBuf,
 }
 
-fn start(fake_agents: &[(&str, &str)]) -> Env {
+fn start(fake_agents: &[(&str, Value)]) -> Env {
     start_cfg(fake_agents, |_| {})
 }
 
 /// Como [`start`], com a configuração ajustada por `tweak` antes de o `Core` subir.
-fn start_cfg(fake_agents: &[(&str, &str)], tweak: impl FnOnce(&mut Config)) -> Env {
+fn start_cfg(fake_agents: &[(&str, Value)], tweak: impl FnOnce(&mut Config)) -> Env {
     let tmp = tempfile::tempdir().expect("tmp");
     let root = tmp.path().to_path_buf();
     let paths = AppPaths {
@@ -38,8 +38,8 @@ fn start_cfg(fake_agents: &[(&str, &str)], tweak: impl FnOnce(&mut Config)) -> E
     };
     let fake_bin = root.join("fake-bin");
     std::fs::create_dir_all(&fake_bin).expect("mkdir");
-    for (name, script) in fake_agents {
-        write_script(&fake_bin.join(name), script);
+    for (name, spec) in fake_agents {
+        install_fake(&fake_bin, name, spec);
     }
     let mut config = Config::with_project(paths.default_workspace.clone());
     tweak(&mut config);
@@ -77,15 +77,43 @@ fn tab_token_in(env: &Env, project: &str, id: &str) -> String {
     env.core.spawn_spec_for(project, &ident).expect("spec").env["AGENTDECK_TOKEN"].clone()
 }
 
-#[cfg(unix)]
-fn write_script(path: &Path, body: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).expect("write");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+/// Caminho do agente falso compilado junto com os testes (o `[[bin]]` `fake_agent`).
+const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake_agent");
+
+/// Nome do arquivo executável de um agente, como o sistema procura no PATH de busca.
+fn exe_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    }
 }
 
-#[cfg(not(unix))]
-fn write_script(_path: &Path, _body: &str) {}
+/// Comportamento do agente falso que imprime `text` (e sempre lê a entrada padrão). Os campos são
+/// descritos em `support/fake_agent.rs`.
+fn says(text: &str) -> Value {
+    json!({ "stdout": text })
+}
+
+/// Agente falso que imprime os argumentos (as instruções viram `<sys>`), o ambiente e devolve o
+/// prompt recebido na entrada padrão.
+fn echoing_agent() -> Value {
+    json!({ "echo_args": true, "echo_env": ["AGENTDECK_AGENT", "AGENTDECK_DEPTH"], "echo_stdin": true })
+}
+
+/// Instala o agente falso `name` em `dir`: o binário deste crate com o nome que o PATH procura e, ao
+/// lado, `<nome>.fake.json` com o comportamento.
+fn install_fake(dir: &Path, name: &str, spec: &Value) {
+    std::fs::create_dir_all(dir).expect("mkdir");
+    let exe = dir.join(exe_name(name));
+    std::fs::copy(FAKE_AGENT, &exe).expect("copiar o agente falso");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    std::fs::write(exe.with_extension("fake.json"), spec.to_string()).expect("comportamento do agente falso");
+}
 
 /// Cliente HTTP mínimo (permite forjar o cabeçalho Host).
 fn http(port: u16, method: &str, path: &str, host: &str, token: &str, body: &str) -> (u16, Value) {
@@ -122,7 +150,7 @@ fn ask(env: &Env, body: Value) -> (u16, Value) {
 /// O cabeçalho do nome antigo (`x-commanddeck-token`) não vale mais: só `x-agentdeck-token` autentica.
 #[test]
 fn the_old_token_header_is_refused() {
-    let env = start(&[("claude", "cat >/dev/null; echo ok")]);
+    let env = start(&[("claude", says("ok"))]);
     let port = env.core.bridge_port();
     let token = env.core.bridge_token().to_owned();
     let host = format!("127.0.0.1:{port}");
@@ -134,7 +162,7 @@ fn the_old_token_header_is_refused() {
 
 #[test]
 fn auth_and_validation() {
-    let env = start(&[("claude", "cat >/dev/null; echo ok")]);
+    let env = start(&[("claude", says("ok"))]);
     let port = env.core.bridge_port();
     let token = env.core.bridge_token().to_owned();
     assert_eq!(token.len(), 32);
@@ -155,27 +183,23 @@ fn auth_and_validation() {
     let (st, b) = http(port, "GET", "/agents", &host, &token, "");
     assert_eq!(st, 200);
     let agents = b["agents"].as_array().expect("lista").clone();
-    if cfg!(unix) {
-        assert_eq!(agents, vec![json!("claude")]);
-    }
+    assert_eq!(agents, vec![json!("claude")]);
 
     let (st, b) = ask(&env, json!({"from": "shell", "to": "bogus", "message": "oi"}));
     assert_eq!(st, 400);
     let err = b["error"].as_str().expect("erro");
     assert!(err.starts_with("agente desconhecido ou não instalado \"bogus\". Disponíveis: "), "{err}");
 
-    if cfg!(unix) {
-        let (st, b) = ask(&env, json!({"from": "claude", "to": "ClaudeCode", "message": "oi"}));
-        assert_eq!((st, b), (400, json!({"error": "um agente não pode perguntar a si mesmo"})));
-        let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi", "depth": 2}));
-        assert_eq!((st, b), (400, json!({"error": "profundidade máxima de conversa entre agentes atingida"})));
-    }
+    let (st, b) = ask(&env, json!({"from": "claude", "to": "ClaudeCode", "message": "oi"}));
+    assert_eq!((st, b), (400, json!({"error": "um agente não pode perguntar a si mesmo"})));
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi", "depth": 2}));
+    assert_eq!((st, b), (400, json!({"error": "profundidade máxima de conversa entre agentes atingida"})));
     env.core.shutdown();
 }
 
 #[test]
 fn workspace_agents_md_and_spawn_specs() {
-    let env = start(&[("claude", "echo ok")]);
+    let env = start(&[("claude", says("ok"))]);
     let p = env.core.active_project_id();
     let ws = env.core.workspace();
     assert_eq!(ws, env.root.join("workspace"));
@@ -213,28 +237,25 @@ fn workspace_agents_md_and_spawn_specs() {
     assert!(std::fs::read_to_string(other_dir.join("AGENTS.md")).expect("AGENTS.md do outro projeto").contains("AGENTDECK_AGENT"));
     assert_eq!(env.core.workspace(), ws);
 
-    #[cfg(unix)]
-    {
-        let claude = env.core.spawn_spec(&p, "claude").expect("claude");
-        assert_eq!(claude.program, env.root.join("fake-bin").join("claude"));
-        assert_eq!(claude.args[0], "--append-system-prompt");
-        assert!(claude.args[1].contains("Seu nome aqui é \"claude\"."));
-        let hooks = env.root.join("dados").join("hooks").join("claude-settings.json");
-        assert_eq!(
-            &claude.args[2..],
-            [
-                "--allowedTools".to_owned(),
-                "Bash(ask-agent:*)".to_owned(),
-                "--settings".to_owned(),
-                hooks.display().to_string(),
-                "--add-dir".to_owned(),
-                env.root.join("dados").display().to_string()
-            ]
-        );
-        assert!(std::fs::read_to_string(&hooks).expect("hooks gravados").contains("ask-agent --signal idle"));
-        assert!(claude.double_enter_on_mention);
-        assert_eq!(claude.label, "Claude");
-    }
+    let claude = env.core.spawn_spec(&p, "claude").expect("claude");
+    assert_eq!(claude.program, env.root.join("fake-bin").join(exe_name("claude")));
+    assert_eq!(claude.args[0], "--append-system-prompt");
+    assert!(claude.args[1].contains("Seu nome aqui é \"claude\"."));
+    let hooks = env.root.join("dados").join("hooks").join("claude-settings.json");
+    assert_eq!(
+        &claude.args[2..],
+        [
+            "--allowedTools".to_owned(),
+            "Bash(ask-agent:*)".to_owned(),
+            "--settings".to_owned(),
+            hooks.display().to_string(),
+            "--add-dir".to_owned(),
+            env.root.join("dados").display().to_string()
+        ]
+    );
+    assert!(std::fs::read_to_string(&hooks).expect("hooks gravados").contains("ask-agent --signal idle"));
+    assert!(claude.double_enter_on_mention);
+    assert_eq!(claude.label, "Claude");
 
     let list = env.core.list_agents();
     let ids: Vec<&str> = list.iter().map(|a| a.id.as_str()).collect();
@@ -244,13 +265,9 @@ fn workspace_agents_md_and_spawn_specs() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
-const ECHO_AGENT: &str = r#"printf 'ARGS:'; for a in "$@"; do case "$a" in *AgentDeck*) printf ' [<sys>]';; *) printf ' [%s]' "$a";; esac; done; echo; echo "ENV: $AGENTDECK_AGENT $AGENTDECK_DEPTH"; cat"#;
-
-#[cfg(unix)]
 #[test]
 fn ask_runs_headless_with_sessions() {
-    let env = start(&[("claude", ECHO_AGENT)]);
+    let env = start(&[("claude", echoing_agent())]);
     let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "Qual a capital?"}));
     assert_eq!(st, 200, "{b}");
     let answer = b["answer"].as_str().expect("answer");
@@ -285,12 +302,12 @@ fn ask_runs_headless_with_sessions() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn failing_resumed_session_retries_and_errors_report_tail() {
     // Falha sempre que receber --resume; senão responde. Erros vão para o stderr.
-    let script = r#"for a in "$@"; do [ "$a" = "--resume" ] && { echo "sessão expirada" >&2; exit 1; }; done; cat >/dev/null; echo novo"#;
-    let env = start(&[("claude", script), ("aider", "echo l1 >&2; echo l2 >&2; exit 3")]);
+    let claude = json!({"fail_on_arg": "--resume", "stderr": "sessão expirada", "stdout": "novo"});
+    let aider = json!({"stderr": "l1\nl2", "exit": 3});
+    let env = start(&[("claude", claude), ("aider", aider)]);
     assert_eq!(ask(&env, json!({"from": "shell", "to": "claude", "message": "a"})).1["answer"], "novo");
     // Sessão "expira": a ponte descarta e tenta de novo, limpa.
     assert_eq!(ask(&env, json!({"from": "shell", "to": "claude", "message": "b"})).1["answer"], "novo");
@@ -300,13 +317,12 @@ fn failing_resumed_session_retries_and_errors_report_tail() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn same_pair_requests_are_serialized() {
     let tmp_log = tempfile::NamedTempFile::new().expect("tmp");
-    let log = tmp_log.path().display().to_string();
-    let script = format!("echo start >> '{log}'; sleep 0.3; echo end >> '{log}'; cat >/dev/null; echo ok");
-    let env = std::sync::Arc::new(start(&[("claude", &script)]));
+    let log = tmp_log.path().to_string_lossy().into_owned();
+    let script = json!({"log": log, "log_first": "start", "sleep_ms": 300, "log_last": "end", "stdout": "ok"});
+    let env = std::sync::Arc::new(start(&[("claude", script)]));
     let mut hs = Vec::new();
     for i in 0..3 {
         let env = env.clone();
@@ -534,10 +550,9 @@ fn next_delivery(env: &Env) -> agentdeck_core::Delivery {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn a_question_is_typed_into_the_tab_and_answered_by_callback() {
-    let env = start(&[("claude", "echo headless")]);
+    let env = start(&[("claude", says("headless"))]);
     env.core.enable_tab_delivery();
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
 
@@ -560,10 +575,9 @@ fn a_question_is_typed_into_the_tab_and_answered_by_callback() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn a_role_opens_a_new_instance_and_new_forces_another() {
-    let env = start(&[("claude", "echo headless")]);
+    let env = start(&[("claude", says("headless"))]);
     let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
@@ -593,10 +607,9 @@ fn a_role_opens_a_new_instance_and_new_forces_another() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn a_failed_delivery_unblocks_the_asker() {
-    let env = start(&[("claude", "echo headless")]);
+    let env = start(&[("claude", says("headless"))]);
     env.core.enable_tab_delivery();
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
     let asker = std::thread::spawn(move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "oi"})));
@@ -607,10 +620,9 @@ fn a_failed_delivery_unblocks_the_asker() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
-    let env = start(&[("claude", "echo x"), ("agy", "echo x")]);
+    let env = start(&[("claude", says("x")), ("agy", says("x"))]);
     let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
     env.core.register_instance(&p, "claude"); // a aba principal do Claude
@@ -643,11 +655,10 @@ fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn without_tab_delivery_the_bridge_still_answers_headless() {
     // A interface não ligou a entrega (CLI/testes) ou o usuário desligou a opção: modo headless.
-    let env = start(&[("claude", "cat >/dev/null; echo resposta-headless")]);
+    let env = start(&[("claude", says("resposta-headless"))]);
     let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
     assert_eq!((st, b["answer"].as_str()), (200, Some("resposta-headless")));
 
@@ -659,10 +670,9 @@ fn without_tab_delivery_the_bridge_still_answers_headless() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn reply_route_only_completes_pending_questions() {
-    let env = start(&[("claude", "echo x")]);
+    let env = start(&[("claude", says("x"))]);
     env.core.enable_tab_delivery();
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
     let host = format!("127.0.0.1:{port}");
@@ -760,15 +770,10 @@ fn fake_claude(env: &Env) {
     fake_cli(env, "claude");
 }
 
-/// Deixa o agente `name` (`claude`, `codex`, `opencode`, `agy`…) "instalado" para o core.
+/// Deixa o agente `name` (`claude`, `codex`, `opencode`, `agy`…) "instalado" para o core. O
+/// comportamento fica vazio: estes testes nunca o executam.
 fn fake_cli(env: &Env, name: &str) {
-    if cfg!(windows) {
-        let bin = env.root.join("home").join(".local").join("bin");
-        std::fs::create_dir_all(&bin).expect("mkdir");
-        std::fs::write(bin.join(format!("{name}.exe")), b"").expect("write");
-    } else {
-        write_script(&env.root.join("fake-bin").join(name), "exit 0");
-    }
+    install_fake(&env.root.join("fake-bin"), name, &json!({}));
 }
 
 #[test]
@@ -810,10 +815,9 @@ fn one_app_per_data_dir() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn headless_runs_get_their_own_short_lived_token() {
-    let env = start(&[("claude", r#"cat >/dev/null; echo "$AGENTDECK_TOKEN""#)]);
+    let env = start(&[("claude", json!({ "print_env": "AGENTDECK_TOKEN" }))]);
     let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
     assert_eq!(st, 200, "{b}");
     let token = b["answer"].as_str().expect("token").trim().to_owned();
@@ -824,10 +828,9 @@ fn headless_runs_get_their_own_short_lived_token() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn only_the_asked_agent_can_answer_a_question() {
-    let env = start(&[("claude", "echo x"), ("agy", "echo x")]);
+    let env = start(&[("claude", says("x")), ("agy", says("x"))]);
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
@@ -850,10 +853,9 @@ fn only_the_asked_agent_can_answer_a_question() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn the_depth_limit_also_holds_between_tabs() {
-    let env = start(&[("claude", "echo x"), ("agy", "echo x")]);
+    let env = start(&[("claude", says("x")), ("agy", says("x"))]);
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
@@ -874,10 +876,9 @@ fn the_depth_limit_also_holds_between_tabs() {
     let _ = (first.join(), second.join());
 }
 
-#[cfg(unix)]
 #[test]
 fn a_slow_answer_is_typed_later_into_the_askers_tab() {
-    let env = start(&[("claude", "echo x")]);
+    let env = start(&[("claude", says("x"))]);
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
@@ -912,10 +913,9 @@ fn a_slow_answer_is_typed_later_into_the_askers_tab() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn closing_the_askers_tab_drops_its_questions() {
-    let env = start(&[("claude", "echo x")]);
+    let env = start(&[("claude", says("x"))]);
     let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
@@ -940,11 +940,10 @@ fn closing_the_askers_tab_drops_its_questions() {
     let _ = again.join();
 }
 
-#[cfg(unix)]
 #[test]
 fn a_plain_terminal_waits_until_the_end_instead_of_getting_typed_answers() {
     // Numa aba "shell", uma resposta digitada depois seria executada como comando.
-    let env = start(&[("claude", "echo x")]);
+    let env = start(&[("claude", says("x"))]);
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
@@ -998,10 +997,9 @@ fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
     env.core.shutdown();
 }
 
-#[cfg(unix)]
 #[test]
 fn an_agent_becomes_the_boss_of_the_role_it_opens_and_the_new_one_is_told() {
-    let env = start(&[("claude", "echo headless")]);
+    let env = start(&[("claude", says("headless"))]);
     let p = env.core.active_project_id();
     env.core.enable_tab_delivery();
     let port = env.core.bridge_port();
@@ -1561,10 +1559,9 @@ fn a_saved_model_survives_restarting_the_app() {
     assert_eq!(again.project(&p).map(|x| x.tab_models.clone()), Some([("claude".to_owned(), "sonnet".to_owned())].into()));
 }
 
-#[cfg(unix)]
 #[test]
 fn headless_runs_get_the_requested_or_default_model() {
-    let env = start_cfg(&[("claude", ECHO_AGENT), ("aider", "echo ok")], |c| {
+    let env = start_cfg(&[("claude", echoing_agent()), ("aider", says("ok"))], |c| {
         c.role_models.insert("claude".into(), "opus".into());
     });
     let ask_model = |model: Option<&str>| {
