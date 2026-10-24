@@ -36,7 +36,7 @@ Fica para **depois** da promoção para a `main` (decidido com o usuário em 202
 
 ### d) Depois da promoção para a `main`
 
-A `main` passou a ser a `dev` em 2026-10-24 (a antiga ficou na tag `piloto-typescript`; ver [historico.md](historico.md)).
+A `main` passou a ser a `dev` em 2026-10-24 (o piloto em TypeScript foi apagado; ver [historico.md](historico.md)).
 
 - [ ] **Tirar a migração da config `CommandDeck/`** numa versão depois da promoção (a única reserva do nome antigo que sobrou; `config::legacy_config_files`, lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
 - [ ] **Renomear a pasta local `commanddeck-dev`** (ação do usuário): o repositório no GitHub já se chama `AgentDeck` e as URLs antigas redirecionam; falta só a pasta.

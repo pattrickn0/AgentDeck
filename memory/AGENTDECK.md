@@ -72,4 +72,4 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
    dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md), seção 6) e o visual (`t21`–`t23`). Os **temas** ficam para depois
    da `main` ([pendencias.md](pendencias.md), bloco "Próximo").
 6. **Substituir a `main` pela `dev`**: **feito em 2026-10-24**. A `main` é a reescrita em Rust; o piloto em TypeScript
-   ficou na tag `piloto-typescript`. O passo seguinte é o bloco "Depois da `main`" acima.
+   foi apagado. O passo seguinte é o bloco "Depois da `main`" acima.
