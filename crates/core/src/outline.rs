@@ -447,19 +447,29 @@ pub fn outline(path: &str, text: &str, budget: usize) -> String {
     if items.is_empty() {
         return format!("{head}\n      (nenhum item encontrado)");
     }
-    let mut out = head;
     let limit = budget.saturating_sub(TAIL_RESERVE);
+    let keep = fit_members(&head, &items, limit);
+    let mut out = head;
     let mut shown = 0;
-    for it in &items {
-        let line = format!("\n{:>5}  {}{}", it.line, "  ".repeat(it.depth), it.text);
+    let mut cut = None;
+    for (i, it) in items.iter().enumerate() {
+        if !keep[i] {
+            continue;
+        }
+        let mut line = format!("\n{:>5}  {}{}", it.line, "  ".repeat(it.depth), it.text);
+        let hidden = items[i + 1..].iter().take_while(|m| m.depth > it.depth).zip(&keep[i + 1..]).filter(|(_, k)| !**k).count();
+        if hidden > 0 {
+            line.push_str(&format!(" (+{hidden} {} dentro)", if hidden == 1 { "item" } else { "itens" }));
+        }
         if out.chars().count() + line.chars().count() > limit && shown > 0 {
+            cut = Some(i);
             break;
         }
         out.push_str(&line);
         shown += 1;
     }
-    if shown < items.len() {
-        let rest = &items[shown..];
+    if let Some(cut) = cut {
+        let rest = &items[cut..];
         let (first, last) = (rest[0].line, rest[rest.len() - 1].line);
         out.push_str(&format!(
             "\n      … e mais {} {} (linhas {first}–{last})",
@@ -468,6 +478,38 @@ pub fn outline(path: &str, text: &str, budget: usize) -> String {
         ));
     }
     out
+}
+
+/// Reserva, por item de topo com membros, para a nota "(+N itens dentro)".
+const HIDDEN_NOTE: usize = 20;
+
+/// Quais itens entram quando nem todos cabem em `limit`: os de topo (a menor profundidade do arquivo) sempre, e os
+/// membros (de `impl`, `mod`, seção) em ordem enquanto sobra lugar. Assim o orçamento estourado tira detalhe do meio,
+/// não o fim do arquivo (o `impl Core` e os testes, que costumam vir por último). Se nem os de topo cabem, `outline`
+/// corta o fim como antes.
+fn fit_members(head: &str, items: &[Item], limit: usize) -> Vec<bool> {
+    let size = |it: &Item| format!("{:>5}  {}{}", it.line, "  ".repeat(it.depth), it.text).chars().count() + 1;
+    if head.chars().count() + items.iter().map(size).sum::<usize>() <= limit {
+        return vec![true; items.len()];
+    }
+    let top = items.iter().map(|it| it.depth).min().unwrap_or(0);
+    let mut keep: Vec<bool> = items.iter().map(|it| it.depth == top).collect();
+    let fixed: usize = items
+        .iter()
+        .enumerate()
+        .filter(|(_, it)| it.depth == top)
+        .map(|(i, it)| size(it) + if items.get(i + 1).is_some_and(|m| m.depth > top) { HIDDEN_NOTE } else { 0 })
+        .sum();
+    let mut left = limit.saturating_sub(head.chars().count() + fixed);
+    for (i, it) in items.iter().enumerate().filter(|(_, it)| it.depth > top) {
+        let s = size(it);
+        if s > left {
+            break;
+        }
+        left -= s;
+        keep[i] = true;
+    }
+    keep
 }
 
 // ---------- Core ----------
@@ -701,6 +743,23 @@ mod tests {
         assert!(tail.contains("… e mais ") && tail.contains("itens (linhas ") && tail.ends_with("–40)"), "{tail}");
         // Dentro do orçamento, nada é cortado.
         assert!(!outline("a.rs", &text, 10_000).contains("… e mais"));
+    }
+
+    #[test]
+    fn over_budget_the_members_go_before_the_end_of_the_file() {
+        let members: String = (1..=40).map(|i| format!("    pub fn metodo_numero_{i}(&self) {{}}\n")).collect();
+        let text = format!(
+            "pub struct Core;\n\nimpl Core {{\n{members}}}\n\npub fn ultima() {{}}\n\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn t() {{}}\n}}\n"
+        );
+        let out = outline("a.rs", &text, 600);
+        assert!(out.chars().count() <= 600, "{}", out.chars().count());
+        assert!(out.contains("impl Core (+") && out.contains("itens dentro)"), "{out}");
+        assert!(out.contains("pub fn ultima()") && out.contains("mod tests — 1 teste"), "{out}");
+        assert!(out.contains("metodo_numero_1(") && !out.contains("… e mais"), "{out}");
+        // Markdown sem título de nível 1: os `##` são o topo.
+        let md: String = (1..=30).map(|i| format!("## Seção {i}\n\n### Detalhe longo da seção número {i}\n\n")).collect();
+        let out = outline("a.md", &md, 1500);
+        assert!(out.contains("## Seção 30") && !out.contains("… e mais"), "{out}");
     }
 
     #[test]
