@@ -408,6 +408,8 @@ pub struct Deck {
     pub terminal_rect: Option<egui::Rect>,
     pub window_focused: bool,
     debug_fake_shell: bool,
+    /// `AGENTDECK_DEBUG_PTY=1`: grava a saída crua de cada aba em `dados/pty/` (ver `terminal::record`).
+    debug_pty: bool,
     /// SOMENTE DEPURAÇÃO: fecha as abas restauradas (captura do estado vazio).
     pub debug_close_all: bool,
 }
@@ -453,6 +455,16 @@ fn discard_recorder(rec: audio::Recorder) {
 fn attachment_paths(core: &Core, refs: Vec<String>) -> Vec<PathBuf> {
     let dir = core.paths().data_dir.join("anexos");
     refs.iter().filter_map(|r| Path::new(r).file_name()).map(|name| dir.join(name)).collect()
+}
+
+/// Abre uma pasta no explorador de arquivos do sistema.
+fn open_in_file_manager(path: &Path) {
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
 }
 
 /// O arquivo é uma cópia nossa em `dados/anexos` (só essas o "×" apaga).
@@ -596,6 +608,7 @@ impl Deck {
             window_focused: true,
             debug_close_all: false,
             debug_fake_shell: agentdeck_core::env_var("DEBUG_FAKE_SHELL").is_some_and(|v| v == "1"),
+            debug_pty: agentdeck_core::env_var("DEBUG_PTY").is_some_and(|v| v == "1"),
         };
         deck.refresh_agents();
         deck.refresh_engine();
@@ -986,6 +999,9 @@ impl Deck {
                 }
             }
             if let Some(at) = tab.session.shared.emu.lock().expire_sync(now) {
+                want(at);
+            }
+            if let Some(at) = tab.session.record_tick(now) {
                 want(at);
             }
             if let Some((size, at)) = tab.pending_resize {
@@ -1437,6 +1453,9 @@ impl Deck {
         if let Some(m) = &self.metrics {
             tab.session.resize(grid, m.cell_w, m.cell_h);
         }
+        if self.debug_pty {
+            tab.session.record_to(self.core.paths().data_dir.join("pty"), ident.id());
+        }
         match spec.and_then(|s| tab.session.spawn(&s, wake).map(|_| s).map_err(|e| e.to_string())) {
             Ok(spec) => {
                 tab.alive = true;
@@ -1629,6 +1648,42 @@ impl Deck {
             _ => {}
         }
         self.persist_tabs_now();
+    }
+
+    /// Pasta das gravações de diagnóstico do terminal (`dados/pty`).
+    pub fn pty_dir(&self) -> PathBuf {
+        self.core.paths().data_dir.join("pty")
+    }
+
+    /// Liga ou desliga a gravação de diagnóstico do terminal da aba `idx` (item do menu da aba) e avisa onde ficam os arquivos.
+    pub fn toggle_terminal_recording(&mut self, idx: usize) {
+        let dir = self.pty_dir();
+        let Some(tab) = self.tabs.get_mut(idx) else { return };
+        let id = tab.ident.id();
+        if tab.session.recording() {
+            tab.session.set_recording(None);
+            self.system(format!("Gravação do terminal de {id} desligada. Os arquivos ficam em {}.", dir.display()));
+        } else {
+            tab.session.set_recording(Some((dir.clone(), id.clone())));
+            self.system(format!(
+                "Gravando o terminal de {id} daqui em diante em {} (três arquivos por gravação: .bin, .events.txt e .grid.txt). Quando o defeito aparecer, use \"Salvar foto da grade agora\" no menu da aba (botão direito) e mande esses arquivos.",
+                dir.display()
+            ));
+        }
+    }
+
+    /// Salva a grade do terminal da aba `idx` agora e abre a pasta (item do menu da aba).
+    pub fn save_terminal_snapshot(&mut self, idx: usize) {
+        let dir = self.pty_dir();
+        let Some(tab) = self.tabs.get(idx) else { return };
+        let id = tab.ident.id();
+        match tab.session.save_snapshot(&dir, &id) {
+            Ok(path) => {
+                self.system(format!("Foto da grade do terminal de {id} salva em {}.", path.display()));
+                open_in_file_manager(&dir);
+            }
+            Err(e) => self.system(format!("Não consegui salvar a foto da grade do terminal de {id}: {e}")),
+        }
     }
 
     pub fn start_rename_tab(&mut self, idx: usize) {

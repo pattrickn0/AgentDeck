@@ -483,6 +483,8 @@ mod tests {
         session: Session,
         state: ViewState,
         time: f64,
+        /// Formas pintadas no último quadro.
+        shapes: Vec<egui::epaint::ClippedShape>,
     }
 
     impl Harness {
@@ -490,7 +492,7 @@ mod tests {
         fn new(modes: &str) -> Self {
             let session = Session::new(GridSize { cols: 30, rows: 15 });
             session.shared.emu.lock().feed(modes.as_bytes());
-            let mut h = Self { ctx: egui::Context::default(), session, state: ViewState::default(), time: 0.0 };
+            let mut h = Self { ctx: egui::Context::default(), session, state: ViewState::default(), time: 0.0, shapes: Vec::new() };
             h.frame(vec![], Modifiers::NONE); // registra o widget (o hover usa o quadro anterior)
             h
         }
@@ -510,6 +512,7 @@ mod tests {
                 out = Some(show(ui, AREA, egui::Id::new("t"), session, state, true, true, "", &metrics()));
             });
             full.textures_delta.clear(); // sem GPU: nada a aplicar
+            self.shapes = std::mem::take(&mut full.shapes);
             out.expect("quadro executado")
         }
 
@@ -615,6 +618,42 @@ mod tests {
         assert!(wheel(&mut h, cell(1, 1), 2.0, Modifiers::SHIFT).is_empty(), "nada vai ao programa");
         assert_eq!(h.session.shared.emu.lock().term.grid().display_offset(), 2);
         assert_eq!(wheel(&mut h, cell(1, 1), 1.0, Modifiers::NONE), b"\x1b[<64;2;2M");
+    }
+
+    /// Linhas da tela (base 0) em que o quadro pintou texto.
+    fn painted_rows(h: &Harness) -> Vec<usize> {
+        let mut rows: Vec<usize> = h
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) if !t.galley.text().trim().is_empty() => Some(((t.pos.y - PAD_TOP) / 20.0).round() as usize),
+                _ => None,
+            })
+            .collect();
+        rows.dedup();
+        rows
+    }
+
+    #[test]
+    fn the_frame_paints_every_row_the_grid_has_text_in_and_no_other() {
+        // Defeito t37 ("metade de cima em branco"): o quadro desenha a grade como ela está, sem cache de linhas.
+        // Uma sessão real do Claude Code (gravação) depois de encolher e alargar a tela, e depois com o histórico rolado.
+        const BYTES: &[u8] = include_bytes!("testdata/claude-classico-encolhe-e-alarga.bin");
+        const EVENTS: &str = include_str!("testdata/claude-classico-encolhe-e-alarga.events.txt");
+        let mut h = Harness::new("");
+        h.session = crate::terminal::record::replay::run(BYTES, EVENTS);
+        h.frame(vec![], Modifiers::NONE);
+        let screen = crate::terminal::record::replay::screen(&h.session);
+        let with_text: Vec<usize> = screen.iter().enumerate().filter(|(_, l)| !l.is_empty()).map(|(i, _)| i).collect();
+        assert!(with_text.len() > 30, "a gravação enche a tela");
+        assert_eq!(painted_rows(&h), with_text);
+
+        // Rolado 6 linhas para cima: as 6 últimas linhas da grade saem e entram 6 do histórico.
+        h.session.shared.emu.lock().term.scroll_display(Scroll::Delta(6));
+        h.frame(vec![], Modifiers::NONE);
+        let painted = painted_rows(&h);
+        assert!(painted.len() >= with_text.len(), "o histórico rolado também tem texto nas primeiras linhas: {painted:?}");
+        assert_eq!(painted.first(), Some(&0), "a primeira linha do quadro tem texto");
     }
 
     #[test]

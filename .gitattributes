@@ -1,6 +1,9 @@
 # Scripts de shell rodam no bash também no Windows (CI): sem CRLF.
 *.sh text eol=lf
 
+# Gravações do PTY usadas nos testes: bytes exatos, sem troca de fim de linha.
+crates/app/src/terminal/testdata/* -text
+
 # Cada tarefa acrescenta a sua linha no topo do histórico, e duas tarefas em paralelo conflitavam ali em toda
 # mesclagem. "union" junta as linhas dos dois lados (o arquivo só recebe entradas novas, não edita as antigas).
 memory/historico.md merge=union

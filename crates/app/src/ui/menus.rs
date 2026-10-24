@@ -538,9 +538,25 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     // Quando a instância tem modelo de LLM, ele aparece no alto (só leitura: trocar com a aba aberta
     // exigiria reiniciar o agente).
     let model = deck.tabs[idx].model.clone();
-    let w = if model.is_some() { 220.0 } else { 130.0 };
+    let recording = deck.tabs[idx].session.recording();
+    // (ação, texto, dica): "Gravar" e "Foto" são o diagnóstico do terminal (ver `terminal/record.rs`).
+    let items: [(TabAction, &str, Option<&str>); 4] = [
+        (TabAction::Rename, "Renomear", None),
+        (
+            TabAction::Record,
+            if recording { "Parar de gravar o terminal" } else { "Gravar o terminal (diagnóstico)" },
+            Some("Guarda o que o programa desta aba escreve no terminal, para achar defeitos de tela. Ocupa disco enquanto ligado."),
+        ),
+        (
+            TabAction::Snapshot,
+            "Salvar foto da grade agora",
+            Some("Salva o texto que o terminal tem agora (tela e histórico) e abre a pasta. Use quando a tela ficar errada."),
+        ),
+        (TabAction::Close, "Fechar", None),
+    ];
+    let w = 250.0;
     let item_h = 26.0;
-    let h = item_h * (2.0 + if model.is_some() { 1.0 } else { 0.0 }) + 8.0;
+    let h = item_h * (items.len() as f32 + if model.is_some() { 1.0 } else { 0.0 }) + 8.0;
     let pos = keep_on_screen(ctx, pos, Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut action = None;
@@ -560,44 +576,48 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
             super::place(p, r0.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, g, pal.text_3);
             separator(p, Pos2::new(r0.min.x + 4.0, r0.max.y - 0.5), Pos2::new(r0.max.x - 4.0, r0.max.y - 0.5));
         }
-        // "Renomear"
-        let r1 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, top), Vec2::new(w - 8.0, item_h));
-        let resp1 = super::clickable(ui, r1, Id::new("tab-ctx-rename"));
-        if resp1.hovered() {
-            p.rect_filled(r1, 5.0, pal.hover);
-        }
-        text_in(p, r1.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Renomear", font.clone(), pal.text);
-        if resp1.clicked() {
-            action = Some(1);
-        }
-
-        // "Fechar"
-        let r2 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, r1.max.y), Vec2::new(w - 8.0, item_h));
-        let resp2 = super::clickable(ui, r2, Id::new("tab-ctx-close"));
-        if resp2.hovered() {
-            p.rect_filled(r2, 5.0, pal.hover);
-        }
-        text_in(p, r2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Fechar", font, pal.text);
-        if resp2.clicked() {
-            action = Some(2);
+        for (n, (what, label, hint)) in items.iter().enumerate() {
+            let r = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, top + n as f32 * item_h), Vec2::new(w - 8.0, item_h));
+            let mut resp = super::clickable(ui, r, Id::new(("tab-ctx", n)));
+            if let Some(hint) = hint {
+                resp = super::tip(resp, *hint);
+            }
+            if resp.hovered() {
+                p.rect_filled(r, 5.0, pal.hover);
+            }
+            // O diagnóstico ligado fica visível no próprio item: bolinha na cor de perigo, como um "REC".
+            let color = if *what == TabAction::Record && recording { pal.danger_text } else { pal.text };
+            text_in(p, r.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, label, font.clone(), color);
+            if resp.clicked() {
+                action = Some(*what);
+            }
         }
     });
 
     match action {
-        Some(1) => {
+        Some(what) => {
             deck.tab_context_menu = None;
-            deck.start_rename_tab(idx);
+            match what {
+                TabAction::Rename => deck.start_rename_tab(idx),
+                TabAction::Record => deck.toggle_terminal_recording(idx),
+                TabAction::Snapshot => deck.save_terminal_snapshot(idx),
+                TabAction::Close => deck.close_tab(idx),
+            }
         }
-        Some(2) => {
-            deck.tab_context_menu = None;
-            deck.close_tab(idx);
-        }
-        _ => {
+        None => {
             if ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu_rect.contains(p))) {
                 deck.tab_context_menu = None;
             }
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TabAction {
+    Rename,
+    Record,
+    Snapshot,
+    Close,
 }
 
 /// Modal para renomear um agente / instância (formato modelo@cargo@nome).

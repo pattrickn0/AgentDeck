@@ -1,0 +1,384 @@
+[6n[?9001h[?1004h[m]0;C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe[?25hPS C:\Users\pattr> [?25l[91m[1;18H> [97m1[90m..[97m200 [37m| [93m% [37m{ ([36m"L{0:D5} " [90m-f [92m$_[37m) [90m+ [37m([36m"abcdefgh[?25h[?25l[m[1;18H> [97m1[90m..[97m200 [37m| [93m% [37m{ ([36m"L{0:D5} " [90m-f [92m$_[37m) [90m+ [37m([36m"abcdefghij" [90m* [97m3[37m) }[?25h[m
+L00001 abcdefghijabcdefghijabcdefghij
+L00002 abcdefghijabcdefghijabcdefghij
+L00003 abcdefghijabcdefghijabcdefghij
+L00004 abcdefghijabcdefghijabcdefghij
+L00005 abcdefghijabcdefghijabcdefghij
+L00006 abcdefghijabcdefghijabcdefghij
+L00007 abcdefghijabcdefghijabcdefghij
+L00008 abcdefghijabcdefghijabcdefghij
+L00009 abcdefghijabcdefghijabcdefghij
+L00010 abcdefghijabcdefghijabcdefghij
+L00011 abcdefghijabcdefghijabcdefghij
+L00012 abcdefghijabcdefghijabcdefghij
+L00013 abcdefghijabcdefghijabcdefghij
+L00014 abcdefghijabcdefghijabcdefghij
+L00015 abcdefghijabcdefghijabcdefghij
+L00016 abcdefghijabcdefghijabcdefghij
+L00017 abcdefghijabcdefghijabcdefghij
+L00018 abcdefghijabcdefghijabcdefghij
+L00019 abcdefghijabcdefghijabcdefghij
+L00020 abcdefghijabcdefghijabcdefghij
+L00021 abcdefghijabcdefghijabcdefghij
+L00022 abcdefghijabcdefghijabcdefghij
+L00023 abcdefghijabcdefghijabcdefghij
+L00024 abcdefghijabcdefghijabcdefghij
+L00025 abcdefghijabcdefghijabcdefghij
+L00026 abcdefghijabcdefghijabcdefghij
+L00027 abcdefghijabcdefghijabcdefghij
+L00028 abcdefghijabcdefghijabcdefghij
+L00029 abcdefghijabcdefghijabcdefghij
+L00030 abcdefghijabcdefghijabcdefghij
+L00031 abcdefghijabcdefghijabcdefghij
+L00032 abcdefghijabcdefghijabcdefghij
+L00033 abcdefghijabcdefghijabcdefghij
+L00034 abcdefghijabcdefghijabcdefghij
+L00035 abcdefghijabcdefghijabcdefghij
+L00036 abcdefghijabcdefghijabcdefghij
+L00037 abcdefghijabcdefghijabcdefghij
+L00038 abcdefghijabcdefghijabcdefghij
+L00039 abcdefghijabcdefghijabcdefghij
+L00040 abcdefghijabcdefghijabcdefghij
+L00041 abcdefghijabcdefghijabcdefghij
+L00042 abcdefghijabcdefghijabcdefghij
+L00043 abcdefghijabcdefghijabcdefghij
+L00044 abcdefghijabcdefghijabcdefghij
+L00045 abcdefghijabcdefghijabcdefghij
+L00046 abcdefghijabcdefghijabcdefghij
+L00047 abcdefghijabcdefghijabcdefghij
+L00048 abcdefghijabcdefghijabcdefghij
+L00049 abcdefghijabcdefghijabcdefghij
+L00050 abcdefghijabcdefghijabcdefghij
+L00051 abcdefghijabcdefghijabcdefghij
+L00052 abcdefghijabcdefghijabcdefghij
+L00053 abcdefghijabcdefghijabcdefghij
+L00054 abcdefghijabcdefghijabcdefghij
+L00055 abcdefghijabcdefghijabcdefghij
+L00056 abcdefghijabcdefghijabcdefghij
+L00057 abcdefghijabcdefghijabcdefghij
+L00058 abcdefghijabcdefghijabcdefghij
+L00059 abcdefghijabcdefghijabcdefghij
+L00060 abcdefghijabcdefghijabcdefghij
+L00061 abcdefghijabcdefghijabcdefghij
+L00062 abcdefghijabcdefghijabcdefghij
+L00063 abcdefghijabcdefghijabcdefghij
+L00064 abcdefghijabcdefghijabcdefghij
+L00065 abcdefghijabcdefghijabcdefghij
+L00066 abcdefghijabcdefghijabcdefghij
+L00067 abcdefghijabcdefghijabcdefghij
+L00068 abcdefghijabcdefghijabcdefghij
+L00069 abcdefghijabcdefghijabcdefghij
+L00070 abcdefghijabcdefghijabcdefghij
+L00071 abcdefghijabcdefghijabcdefghij
+L00072 abcdefghijabcdefghijabcdefghij
+L00073 abcdefghijabcdefghijabcdefghij
+L00074 abcdefghijabcdefghijabcdefghij
+L00075 abcdefghijabcdefghijabcdefghij
+L00076 abcdefghijabcdefghijabcdefghij
+L00077 abcdefghijabcdefghijabcdefghij
+L00078 abcdefghijabcdefghijabcdefghij
+L00079 abcdefghijabcdefghijabcdefghij
+L00080 abcdefghijabcdefghijabcdefghij
+L00081 abcdefghijabcdefghijabcdefghij
+L00082 abcdefghijabcdefghijabcdefghij
+L00083 abcdefghijabcdefghijabcdefghij
+L00084 abcdefghijabcdefghijabcdefghij
+L00085 abcdefghijabcdefghijabcdefghij
+L00086 abcdefghijabcdefghijabcdefghij
+L00087 abcdefghijabcdefghijabcdefghij
+L00088 abcdefghijabcdefghijabcdefghij
+L00089 abcdefghijabcdefghijabcdefghij
+L00090 abcdefghijabcdefghijabcdefghij
+L00091 abcdefghijabcdefghijabcdefghij
+L00092 abcdefghijabcdefghijabcdefghij
+L00093 abcdefghijabcdefghijabcdefghij
+L00094 abcdefghijabcdefghijabcdefghij
+L00095 abcdefghijabcdefghijabcdefghij
+L00096 abcdefghijabcdefghijabcdefghij
+L00097 abcdefghijabcdefghijabcdefghij
+L00098 abcdefghijabcdefghijabcdefghij
+L00099 abcdefghijabcdefghijabcdefghij
+L00100 abcdefghijabcdefghijabcdefghij
+L00101 abcdefghijabcdefghijabcdefghij
+L00102 abcdefghijabcdefghijabcdefghij
+L00103 abcdefghijabcdefghijabcdefghij
+L00104 abcdefghijabcdefghijabcdefghij
+L00105 abcdefghijabcdefghijabcdefghij
+L00106 abcdefghijabcdefghijabcdefghij
+L00107 abcdefghijabcdefghijabcdefghij
+L00108 abcdefghijabcdefghijabcdefghij
+L00109 abcdefghijabcdefghijabcdefghij
+L00110 abcdefghijabcdefghijabcdefghij
+L00111 abcdefghijabcdefghijabcdefghij
+L00112 abcdefghijabcdefghijabcdefghij
+L00113 abcdefghijabcdefghijabcdefghij
+L00114 abcdefghijabcdefghijabcdefghij
+L00115 abcdefghijabcdefghijabcdefghij
+L00116 abcdefghijabcdefghijabcdefghij
+L00117 abcdefghijabcdefghijabcdefghij
+L00118 abcdefghijabcdefghijabcdefghij
+L00119 abcdefghijabcdefghijabcdefghij
+L00120 abcdefghijabcdefghijabcdefghij
+L00121 abcdefghijabcdefghijabcdefghij
+L00122 abcdefghijabcdefghijabcdefghij
+L00123 abcdefghijabcdefghijabcdefghij
+L00124 abcdefghijabcdefghijabcdefghij
+L00125 abcdefghijabcdefghijabcdefghij
+L00126 abcdefghijabcdefghijabcdefghij
+L00127 abcdefghijabcdefghijabcdefghij
+L00128 abcdefghijabcdefghijabcdefghij
+L00129 abcdefghijabcdefghijabcdefghij
+L00130 abcdefghijabcdefghijabcdefghij
+L00131 abcdefghijabcdefghijabcdefghij
+L00132 abcdefghijabcdefghijabcdefghij
+L00133 abcdefghijabcdefghijabcdefghij
+L00134 abcdefghijabcdefghijabcdefghij
+L00135 abcdefghijabcdefghijabcdefghij
+L00136 abcdefghijabcdefghijabcdefghij
+L00137 abcdefghijabcdefghijabcdefghij
+L00138 abcdefghijabcdefghijabcdefghij
+L00139 abcdefghijabcdefghijabcdefghij
+L00140 abcdefghijabcdefghijabcdefghij
+L00141 abcdefghijabcdefghijabcdefghij
+L00142 abcdefghijabcdefghijabcdefghij
+L00143 abcdefghijabcdefghijabcdefghij
+L00144 abcdefghijabcdefghijabcdefghij
+L00145 abcdefghijabcdefghijabcdefghij
+L00146 abcdefghijabcdefghijabcdefghij
+L00147 abcdefghijabcdefghijabcdefghij
+L00148 abcdefghijabcdefghijabcdefghij
+L00149 abcdefghijabcdefghijabcdefghij
+L00150 abcdefghijabcdefghijabcdefghij
+L00151 abcdefghijabcdefghijabcdefghij
+L00152 abcdefghijabcdefghijabcdefghij
+L00153 abcdefghijabcdefghijabcdefghij
+L00154 abcdefghijabcdefghijabcdefghij
+L00155 abcdefghijabcdefghijabcdefghij
+L00156 abcdefghijabcdefghijabcdefghij
+L00157 abcdefghijabcdefghijabcdefghij
+L00158 abcdefghijabcdefghijabcdefghij
+L00159 abcdefghijabcdefghijabcdefghij
+L00160 abcdefghijabcdefghijabcdefghij
+L00161 abcdefghijabcdefghijabcdefghij
+L00162 abcdefghijabcdefghijabcdefghij
+L00163 abcdefghijabcdefghijabcdefghij
+L00164 abcdefghijabcdefghijabcdefghij
+L00165 abcdefghijabcdefghijabcdefghij
+L00166 abcdefghijabcdefghijabcdefghij
+L00167 abcdefghijabcdefghijabcdefghij
+L00168 abcdefghijabcdefghijabcdefghij
+L00169 abcdefghijabcdefghijabcdefghij
+L00170 abcdefghijabcdefghijabcdefghij
+L00171 abcdefghijabcdefghijabcdefghij
+L00172 abcdefghijabcdefghijabcdefghij
+L00173 abcdefghijabcdefghijabcdefghij
+L00174 abcdefghijabcdefghijabcdefghij
+L00175 abcdefghijabcdefghijabcdefghij
+L00176 abcdefghijabcdefghijabcdefghij
+L00177 abcdefghijabcdefghijabcdefghij
+L00178 abcdefghijabcdefghijabcdefghij
+L00179 abcdefghijabcdefghijabcdefghij
+L00180 abcdefghijabcdefghijabcdefghij
+L00181 abcdefghijabcdefghijabcdefghij
+L00182 abcdefghijabcdefghijabcdefghij
+L00183 abcdefghijabcdefghijabcdefghij
+L00184 abcdefghijabcdefghijabcdefghij
+L00185 abcdefghijabcdefghijabcdefghij
+L00186 abcdefghijabcdefghijabcdefghij
+L00187 abcdefghijabcdefghijabcdefghij
+L00188 abcdefghijabcdefghijabcdefghij
+L00189 abcdefghijabcdefghijabcdefghij
+L00190 abcdefghijabcdefghijabcdefghij
+L00191 abcdefghijabcdefghijabcdefghij
+L00192 abcdefghijabcdefghijabcdefghij
+L00193 abcdefghijabcdefghijabcdefghij
+L00194 abcdefghijabcdefghijabcdefghij
+L00195 abcdefghijabcdefghijabcdefghij
+L00196 abcdefghijabcdefghijabcdefghij
+L00197 abcdefghijabcdefghijabcdefghij
+L00198 abcdefghijabcdefghijabcdefghij
+L00199 abcdefghijabcdefghijabcdefghij
+L00200 abcdefghijabcdefghijabcdefghij
+PS C:\Users\pattr> [?25l[8;30;120t[HL00172 abcdefghijabcdefghijabcdefghij[K
+L00173 abcdefghijabcdefghijabcdefghij[K
+L00174 abcdefghijabcdefghijabcdefghij[K
+L00175 abcdefghijabcdefghijabcdefghij[K
+L00176 abcdefghijabcdefghijabcdefghij[K
+L00177 abcdefghijabcdefghijabcdefghij[K
+L00178 abcdefghijabcdefghijabcdefghij[K
+L00179 abcdefghijabcdefghijabcdefghij[K
+L00180 abcdefghijabcdefghijabcdefghij[K
+L00181 abcdefghijabcdefghijabcdefghij[K
+L00182 abcdefghijabcdefghijabcdefghij[K
+L00183 abcdefghijabcdefghijabcdefghij[K
+L00184 abcdefghijabcdefghijabcdefghij[K
+L00185 abcdefghijabcdefghijabcdefghij[K
+L00186 abcdefghijabcdefghijabcdefghij[K
+L00187 abcdefghijabcdefghijabcdefghij[K
+L00188 abcdefghijabcdefghijabcdefghij[K
+L00189 abcdefghijabcdefghijabcdefghij[K
+L00190 abcdefghijabcdefghijabcdefghij[K
+L00191 abcdefghijabcdefghijabcdefghij[K
+L00192 abcdefghijabcdefghijabcdefghij[K
+L00193 abcdefghijabcdefghijabcdefghij[K
+L00194 abcdefghijabcdefghijabcdefghij[K
+L00195 abcdefghijabcdefghijabcdefghij[K
+L00196 abcdefghijabcdefghijabcdefghij[K
+L00197 abcdefghijabcdefghijabcdefghij[K
+L00198 abcdefghijabcdefghijabcdefghij[K
+L00199 abcdefghijabcdefghijabcdefghij[K
+L00200 abcdefghijabcdefghijabcdefghij[K
+PS C:\Users\pattr>[K[1C[?25h[?25l[HL00172 abcdefghijabcdefghijabcdefghij[K
+L00173 abcdefghijabcdefghijabcdefghij[K
+L00174 abcdefghijabcdefghijabcdefghij[K
+L00175 abcdefghijabcdefghijabcdefghij[K
+L00176 abcdefghijabcdefghijabcdefghij[K
+L00177 abcdefghijabcdefghijabcdefghij[K
+L00178 abcdefghijabcdefghijabcdefghij[K
+L00179 abcdefghijabcdefghijabcdefghij[K
+L00180 abcdefghijabcdefghijabcdefghij[K
+L00181 abcdefghijabcdefghijabcdefghij[K
+L00182 abcdefghijabcdefghijabcdefghij[K
+L00183 abcdefghijabcdefghijabcdefghij[K
+L00184 abcdefghijabcdefghijabcdefghij[K
+L00185 abcdefghijabcdefghijabcdefghij[K
+L00186 abcdefghijabcdefghijabcdefghij[K
+L00187 abcdefghijabcdefghijabcdefghij[K
+L00188 abcdefghijabcdefghijabcdefghij[K
+L00189 abcdefghijabcdefghijabcdefghij[K
+L00190 abcdefghijabcdefghijabcdefghij[K
+L00191 abcdefghijabcdefghijabcdefghij[K
+L00192 abcdefghijabcdefghijabcdefghij[K
+L00193 abcdefghijabcdefghijabcdefghij[K
+L00194 abcdefghijabcdefghijabcdefghij[K
+L00195 abcdefghijabcdefghijabcdefghij[K
+L00196 abcdefghijabcdefghijabcdefghij[K
+L00197 abcdefghijabcdefghijabcdefghij[K
+L00198 abcdefghijabcdefghijabcdefghij[K
+L00199 abcdefghijabcdefghijabcdefghij[K
+L00200 abcdefghijabcdefghijabcdefghij[K
+PS C:\Users\pattr>[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[30;20H[?25h[?25l[HL00172 abcdefghijabcdefghijabcdefghij[K
+L00173 abcdefghijabcdefghijabcdefghij[K
+L00174 abcdefghijabcdefghijabcdefghij[K
+L00175 abcdefghijabcdefghijabcdefghij[K
+L00176 abcdefghijabcdefghijabcdefghij[K
+L00177 abcdefghijabcdefghijabcdefghij[K
+L00178 abcdefghijabcdefghijabcdefghij[K
+L00179 abcdefghijabcdefghijabcdefghij[K
+L00180 abcdefghijabcdefghijabcdefghij[K
+L00181 abcdefghijabcdefghijabcdefghij[K
+L00182 abcdefghijabcdefghijabcdefghij[K
+L00183 abcdefghijabcdefghijabcdefghij[K
+L00184 abcdefghijabcdefghijabcdefghij[K
+L00185 abcdefghijabcdefghijabcdefghij[K
+L00186 abcdefghijabcdefghijabcdefghij[K
+L00187 abcdefghijabcdefghijabcdefghij[K
+L00188 abcdefghijabcdefghijabcdefghij[K
+L00189 abcdefghijabcdefghijabcdefghij[K
+L00190 abcdefghijabcdefghijabcdefghij[K
+L00191 abcdefghijabcdefghijabcdefghij[K
+L00192 abcdefghijabcdefghijabcdefghij[K
+L00193 abcdefghijabcdefghijabcdefghij[K
+L00194 abcdefghijabcdefghijabcdefghij[K
+L00195 abcdefghijabcdefghijabcdefghij[K
+L00196 abcdefghijabcdefghijabcdefghij[K
+L00197 abcdefghijabcdefghijabcdefghij[K
+L00198 abcdefghijabcdefghijabcdefghij[K
+L00199 abcdefghijabcdefghijabcdefghij[K
+L00200 abcdefghijabcdefghijabcdefghij[K
+PS C:\Users\pattr>[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[30;20H[?25h[?25l[HL00172 abcdefghijabcdefghijabcdefghij[K
+L00173 abcdefghijabcdefghijabcdefghij[K
+L00174 abcdefghijabcdefghijabcdefghij[K
+L00175 abcdefghijabcdefghijabcdefghij[K
+L00176 abcdefghijabcdefghijabcdefghij[K
+L00177 abcdefghijabcdefghijabcdefghij[K
+L00178 abcdefghijabcdefghijabcdefghij[K
+L00179 abcdefghijabcdefghijabcdefghij[K
+L00180 abcdefghijabcdefghijabcdefghij[K
+L00181 abcdefghijabcdefghijabcdefghij[K
+L00182 abcdefghijabcdefghijabcdefghij[K
+L00183 abcdefghijabcdefghijabcdefghij[K
+L00184 abcdefghijabcdefghijabcdefghij[K
+L00185 abcdefghijabcdefghijabcdefghij[K
+L00186 abcdefghijabcdefghijabcdefghij[K
+L00187 abcdefghijabcdefghijabcdefghij[K
+L00188 abcdefghijabcdefghijabcdefghij[K
+L00189 abcdefghijabcdefghijabcdefghij[K
+L00190 abcdefghijabcdefghijabcdefghij[K
+L00191 abcdefghijabcdefghijabcdefghij[K
+L00192 abcdefghijabcdefghijabcdefghij[K
+L00193 abcdefghijabcdefghijabcdefghij[K
+L00194 abcdefghijabcdefghijabcdefghij[K
+L00195 abcdefghijabcdefghijabcdefghij[K
+L00196 abcdefghijabcdefghijabcdefghij[K
+L00197 abcdefghijabcdefghijabcdefghij[K
+L00198 abcdefghijabcdefghijabcdefghij[K
+L00199 abcdefghijabcdefghijabcdefghij[K
+L00200 abcdefghijabcdefghijabcdefghij[K
+PS C:\Users\pattr>[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[30;20H[?25h

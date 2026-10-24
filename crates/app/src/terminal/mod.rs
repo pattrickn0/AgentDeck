@@ -6,9 +6,12 @@
 
 pub mod colors;
 pub mod input;
+pub mod record;
+pub mod resize;
 pub mod view;
 
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -115,6 +118,15 @@ impl Emulator {
         self.parser.advance(&mut self.term, bytes);
     }
 
+    /// Muda o tamanho da grade (no Windows, como o ConPTY espera: ver [`resize`]).
+    pub fn resize(&mut self, size: GridSize) {
+        self.resize_as(size, cfg!(windows));
+    }
+
+    /// [`Emulator::resize`] com a escolha explícita (os testes reproduzem gravações do ConPTY em qualquer sistema).
+    pub fn resize_as(&mut self, size: GridSize, keep_top: bool) {
+        resize::resize(&mut self.term, size, keep_top);
+    }
     /// Atualização sincronizada (`ESC[?2026h`, usada pelo Claude Code): o parser retém a saída até o
     /// `ESC[?2026l`, mas o prazo de 150 ms fica a cargo de quem o usa (no Alacritty, o laço do PTY).
     /// Sem isto, um fim perdido (ex.: no redesenho do ConPTY ao redimensionar) congela a tela.
@@ -141,6 +153,8 @@ pub struct Shared {
     pub last_output: Mutex<Option<Instant>>,
     /// (geração, código de saída) quando o processo termina.
     exit: Mutex<Option<(u64, i64)>>,
+    /// Gravação da saída crua (só com `AGENTDECK_DEBUG_PTY=1`, ver [`record`]).
+    recorder: Mutex<Option<record::Recorder>>,
 }
 
 impl Shared {
@@ -186,6 +200,8 @@ pub struct Session {
     pty: Option<PtyHandle>,
     generation: u64,
     size: GridSize,
+    /// Pasta e nome da gravação de depuração (ver [`Session::record_to`]).
+    record_to: Option<(PathBuf, String)>,
 }
 
 impl Session {
@@ -206,8 +222,64 @@ impl Session {
             output_seq: AtomicU64::new(0),
             last_output: Mutex::new(None),
             exit: Mutex::new(None),
+            recorder: Mutex::new(None),
         });
-        Self { shared, pty: None, generation: 0, size }
+        Self { shared, pty: None, generation: 0, size, record_to: None }
+    }
+
+    /// Liga a gravação da saída crua dos próximos processos desta aba em `dir`, com `name` no nome dos arquivos.
+    pub fn record_to(&mut self, dir: PathBuf, name: String) {
+        self.record_to = Some((dir, name));
+    }
+
+    /// A gravação de diagnóstico desta aba está ligada (variável de ambiente ou item do menu da aba).
+    pub fn recording(&self) -> bool {
+        self.record_to.is_some()
+    }
+
+    /// Liga (`Some`) ou desliga (`None`) a gravação desta aba. Ligada com o processo rodando, começa agora: o `.bin` só tem
+    /// o que vier depois, e a grade de agora vai para o `.grid.txt` (não dá para reproduzir o que veio antes).
+    pub fn set_recording(&mut self, to: Option<(PathBuf, String)>) {
+        self.record_to = to;
+        let now = self
+            .record_to
+            .as_ref()
+            .filter(|_| self.pty.is_some())
+            .and_then(|(dir, name)| record::Recorder::start(dir, name, self.size).ok());
+        let text = now.as_ref().map(|_| record::grid_text(&self.shared.emu.lock()));
+        if let (Some(r), Some(text)) = (&now, text) {
+            r.snapshot(&text);
+        }
+        *self.shared.recorder.lock() = now;
+    }
+
+    /// Salva a grade (tela e fim do histórico) agora, em `dir`; devolve o arquivo. Com a gravação ligada reescreve o
+    /// `.grid.txt` dela.
+    pub fn save_snapshot(&self, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+        let text = record::grid_text(&self.shared.emu.lock());
+        if let Some(r) = self.shared.recorder.lock().as_ref() {
+            r.snapshot(&text);
+            return Ok(r.grid_path().to_owned());
+        }
+        record::write_snapshot(dir, name, &text)
+    }
+
+    /// Tira a foto da grade quando a saída parou há [`record::SNAPSHOT_IDLE`]; devolve quando voltar a olhar.
+    pub fn record_tick(&self, now: Instant) -> Option<Instant> {
+        let seq = self.shared.output_seq.load(Ordering::Relaxed);
+        if self.shared.recorder.lock().as_ref().is_none_or(|r| r.snapped == seq) {
+            return None;
+        }
+        let due = (*self.shared.last_output.lock())? + record::SNAPSHOT_IDLE;
+        if now < due {
+            return Some(due);
+        }
+        let text = record::grid_text(&self.shared.emu.lock());
+        if let Some(r) = self.shared.recorder.lock().as_mut() {
+            r.snapshot(&text);
+            r.snapped = seq;
+        }
+        None
     }
 
     pub fn size(&self) -> GridSize {
@@ -260,6 +332,14 @@ impl Session {
         let writer = pair.master.take_writer()?;
         self.shared.attach_writer(writer, format!("pty-write-{}", spec.kind))?;
         *self.shared.exit.lock() = None;
+        *self.shared.recorder.lock() =
+            self.record_to.as_ref().and_then(|(dir, name)| match record::Recorder::start(dir, name, self.size) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    log::warn!("AGENTDECK_DEBUG_PTY: não consegui abrir a gravação em {}: {e}", dir.display());
+                    None
+                }
+            });
 
         // Leitora: alimenta o emulador e acorda a UI.
         let shared = self.shared.clone();
@@ -270,6 +350,9 @@ impl Session {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
+                        if let Some(r) = shared.recorder.lock().as_mut() {
+                            r.bytes(&buf[..n]);
+                        }
                         shared.emu.lock().feed(&buf[..n]);
                         *shared.last_output.lock() = Some(Instant::now());
                         shared.output_seq.fetch_add(1, Ordering::Relaxed);
@@ -330,7 +413,10 @@ impl Session {
             return;
         }
         self.size = size;
-        self.shared.emu.lock().term.resize(size);
+        if let Some(r) = self.shared.recorder.lock().as_mut() {
+            r.resize(size);
+        }
+        self.shared.emu.lock().resize(size);
         if let Some(p) = &self.pty {
             let _ = p.master.resize(PtySize { rows: size.rows as u16, cols: size.cols as u16, pixel_width: 0, pixel_height: 0 });
         }

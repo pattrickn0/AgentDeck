@@ -171,6 +171,7 @@ Segurança, ambiente e agentes novos
 - [ ] No vim/htop com mouse ligado, Ctrl+roda e Alt+roda chegam ao programa com o modificador. Shift+roda rola o histórico do terminal, com ou sem programa usando o mouse.
 - [ ] Arrastar devagar a borda da barra direita ou o divisor com o Claude aberto: durante o arrasto a aba não se redesenha; ao soltar, o Claude se redesenha uma vez na largura nova (no histórico fica no máximo uma cópia antiga por arrasto).
 - [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
+- [ ] **Linhas em branco depois de mudar o tamanho (t37)**: numa aba do PowerShell, rode `1..3000 | % { "linha $_ " * 12 }`, depois mude o tamanho da janela várias vezes (Destaque, divisor, maximizar), para menor e para maior; role o histórico até o começo: as linhas continuam em ordem, sem buracos, e nada some quando a janela cresce (embaixo pode sobrar espaço em branco: é como o Windows Terminal faz). Botão direito na aba: "Gravar o terminal (diagnóstico)" liga a gravação (o item vira "Parar de gravar o terminal" e a Conversa diz onde ficam os arquivos, `dados/pty/`); "Salvar foto da grade agora" salva o texto da tela e do histórico e abre a pasta. Sem ligar nada, nada é gravado em `dados/pty/`.
 
 ## Interface
 
