@@ -331,8 +331,9 @@ fn join_marked(models: &[String], strip: impl Fn(&str) -> &str) -> String {
 }
 
 /// O texto de `ask-agent --models`: uma linha por agente (o OpenCode, uma por provedor), curto o
-/// bastante para um agente ler. Função pura (testada); quem busca os dados é [`Core::models_inventory`].
-pub fn format_inventory(items: &[AgentModels]) -> String {
+/// bastante para um agente ler, e a cota de quem tem (`quotas`: agente → linha, de [`Core::quota_lines`]).
+/// Função pura (testada); quem busca os dados é [`Core::models_inventory`].
+pub fn format_inventory(items: &[AgentModels], quotas: &std::collections::HashMap<String, String>) -> String {
     if items.is_empty() {
         return "Nenhum agente instalado neste computador.".to_owned();
     }
@@ -358,6 +359,9 @@ pub fn format_inventory(items: &[AgentModels]) -> String {
             ModelList::Failed => {
                 lines.push(format!("{agent}: não consegui listar os modelos (o CLI não respondeu); sem --model ele usa o padrão"))
             }
+        }
+        if let Some(q) = quotas.get(agent) {
+            lines.push(format!("  cota: {q}"));
         }
     }
     lines.join("\n")
@@ -748,13 +752,15 @@ mod tests {
         let expected = [
             "claude --model: opus, sonnet",
             "antigravity --model: gemini-4-argon-free (grátis), gemini-4-argon-low",
+            "  cota: Gemini 4 Argon ESGOTADA",
             "codex --model <nome> (este computador não lista os modelos)",
             "opencode --model <provedor>/<modelo>:",
             "  opencode/: glm-5.3-flash-free (grátis), beam-free#alta (grátis), pago",
             "  opencode-go/: deepseek-v4.1-flash",
             "aider: sem escolha de modelo (usa o padrão do CLI)",
         ];
-        assert_eq!(format_inventory(&items), expected.join("\n"));
+        let quotas = std::collections::HashMap::from([("antigravity".to_owned(), "Gemini 4 Argon ESGOTADA".to_owned())]);
+        assert_eq!(format_inventory(&items, &quotas), expected.join("\n"));
     }
 
     #[test]
@@ -762,12 +768,12 @@ mod tests {
         // O CLI instalado que não listou nada (tempo esgotado, erro): uma linha, sem derrubar as outras.
         let items = vec![classify("opencode", Vec::new()), classify("claude", strs(&["opus"]))];
         assert_eq!(items[0].list, ModelList::Failed);
-        let text = format_inventory(&items);
+        let text = format_inventory(&items, &Default::default());
         assert_eq!(text.lines().count(), 2, "{text}");
         assert!(text.starts_with("opencode: não consegui listar os modelos"), "{text}");
         assert!(text.ends_with("claude --model: opus"), "{text}");
         // Nenhum agente instalado.
-        assert_eq!(format_inventory(&[]), "Nenhum agente instalado neste computador.");
+        assert_eq!(format_inventory(&[], &Default::default()), "Nenhum agente instalado neste computador.");
     }
 
     #[test]

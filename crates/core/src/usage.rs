@@ -146,6 +146,157 @@ impl Core {
     }
 }
 
+// ---------- Cota de um modelo (`--models`, `--team` e a recusa do `/ask`) ----------
+
+/// Uso a partir do qual a cota conta como esgotada (o servidor arredonda: 0,5% restante não dá uma resposta).
+const EXHAUSTED: f32 = 0.995;
+/// Acima disto, `--models` e `--team` avisam que a cota está acabando.
+const LOW: f32 = 0.85;
+/// Leitura mais velha que isto não serve para recusar uma pergunta (a cota pode ter sido renovada ou comprada).
+const FRESH_MS: u64 = 60 * 60 * 1000;
+
+/// A cota que vale para um modelo: a do grupo dele, quando a fonte separa (o Antigravity: Gemini, Argon,
+/// Claude/GPT), ou a do plano todo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelQuota {
+    /// O grupo ("Gemini 4 Argon"); `None` = o plano do agente.
+    pub group: Option<String>,
+    /// Fração usada da janela mais gasta, de 0.0 a 1.0.
+    pub used: f32,
+    /// Quando ela renova (ms Unix), se a fonte disser.
+    pub resets_at_ms: Option<u64>,
+}
+
+impl ModelQuota {
+    pub fn exhausted(&self) -> bool {
+        self.used >= EXHAUSTED
+    }
+
+    /// "cota de Gemini 4 Argon esgotada, renova em 8 h 45 min", "cota 92% usada"; `None` com folga.
+    pub fn note(&self, now_ms: u64) -> Option<String> {
+        let of = self.group.as_ref().map(|g| format!(" de {g}")).unwrap_or_default();
+        let renews = self.resets_at_ms.filter(|&r| r > now_ms).map(|r| format!(", renova em {}", duration_text(r - now_ms)));
+        if self.exhausted() {
+            Some(format!("cota{of} esgotada{}", renews.unwrap_or_default()))
+        } else if self.used >= LOW {
+            Some(format!("cota{of} {:.0}% usada{}", self.used * 100.0, renews.unwrap_or_default()))
+        } else {
+            None
+        }
+    }
+}
+
+/// "45 min", "8 h 45 min", "3 dias".
+fn duration_text(ms: u64) -> String {
+    let min = ms.div_ceil(60_000);
+    match (min / 60, min % 60) {
+        (0, m) => format!("{m} min"),
+        (h, _) if h >= 48 => format!("{} dias", h / 24),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
+}
+
+/// O grupo de cota de `model` do Antigravity: o Argon tem o seu, os outros Gemini dividem "Gemini Models" e Claude
+/// e GPT dividem "Claude and GPT models".
+fn group_of<'a>(groups: &'a [UsageGroup], model: &str) -> Option<&'a UsageGroup> {
+    let m = model.to_ascii_lowercase();
+    groups.iter().find(|g| {
+        let n = g.name.to_ascii_lowercase();
+        if m.contains("argon") {
+            n.contains("argon")
+        } else if m.starts_with("gemini") {
+            n.contains("gemini") && !n.contains("argon")
+        } else {
+            n.contains("claude") || n.contains("gpt")
+        }
+    })
+}
+
+/// A cota de `model` em `u`, ignorando as janelas já renovadas. Com grupos, só a do grupo do modelo (sem modelo ou
+/// sem grupo dele, `None`: o padrão do CLI pode ser qualquer um).
+pub fn model_quota(u: &AgentUsage, model: Option<&str>, now_ms: u64) -> Option<ModelQuota> {
+    let (group, windows) = if u.groups.is_empty() {
+        (None, [u.session, u.weekly])
+    } else {
+        let g = group_of(&u.groups, model?)?;
+        (Some(g.name.clone()), [g.session, g.weekly])
+    };
+    let live: Vec<UsageWindow> = windows.into_iter().flatten().filter(|w| w.resets_at_ms.is_none_or(|r| r > now_ms)).collect();
+    let used = live.iter().map(|w| w.used).fold(None, |a: Option<f32>, u| Some(a.map_or(u, |a| a.max(u))))?;
+    // Esgotada, vale quando a última janela esgotada renova; senão, a da mais gasta.
+    let resets_at_ms = if used >= EXHAUSTED {
+        live.iter().filter(|w| w.used >= EXHAUSTED).filter_map(|w| w.resets_at_ms).max()
+    } else {
+        live.iter().find(|w| w.used == used).and_then(|w| w.resets_at_ms)
+    };
+    Some(ModelQuota { group, used, resets_at_ms })
+}
+
+/// As cotas de `u` numa linha para o `--models`: "Gemini Models 0%, Gemini 4 Argon esgotada (renova em 8 h)…".
+pub fn quota_line(u: &AgentUsage, now_ms: u64) -> Option<String> {
+    let one = |name: Option<&str>, windows: [Option<UsageWindow>; 2]| {
+        let q = model_quota(&AgentUsage { session: windows[0], weekly: windows[1], ..Default::default() }, None, now_ms)?;
+        let name = name.map(|n| format!("{n} ")).unwrap_or_default();
+        let renews = q.resets_at_ms.filter(|&r| r > now_ms).map(|r| format!(" (renova em {})", duration_text(r - now_ms)));
+        Some(if q.exhausted() {
+            format!("{name}ESGOTADA{}", renews.unwrap_or_default())
+        } else {
+            format!("{name}{:.0}% usada{}", q.used * 100.0, if q.used >= LOW { renews.unwrap_or_default() } else { String::new() })
+        })
+    };
+    let parts: Vec<String> = if u.groups.is_empty() {
+        one(None, [u.session, u.weekly]).into_iter().collect()
+    } else {
+        u.groups.iter().filter_map(|g| one(Some(&g.name), [g.session, g.weekly])).collect()
+    };
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+impl Core {
+    /// A cota de `model` do agente `kind` (`claude`, `antigravity`…), pela última leitura; `None` sem dado.
+    pub fn model_quota(&self, kind: &str, model: Option<&str>) -> Option<ModelQuota> {
+        let usage = self.inner.usage.snapshot();
+        model_quota(usage.get(kind)?, model, util::now_ms())
+    }
+
+    /// O aviso de cota de cada instância de `ids` que está perto do fim ou sem cota (id → aviso), para o `--team`.
+    pub fn quota_notes(&self, models: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<String, String> {
+        let now = util::now_ms();
+        models
+            .iter()
+            .filter_map(|(id, model)| {
+                let kind = crate::Ident::parse(id)?.kind;
+                Some((id.clone(), self.model_quota(&kind, Some(model))?.note(now)?))
+            })
+            .collect()
+    }
+
+    /// A linha de cota de cada agente com dado (agente → linha), para o `--models`.
+    pub fn quota_lines(&self) -> HashMap<String, String> {
+        let now = util::now_ms();
+        self.inner.usage.snapshot().iter().filter_map(|(kind, u)| Some((kind.clone(), quota_line(u, now)?))).collect()
+    }
+
+    /// O erro para uma pergunta a `id` (agente `kind`, modelo `model`) quando a cota do modelo acabou, por uma
+    /// leitura recente. Sem dado, com folga ou com leitura velha, `None`: a pergunta segue.
+    pub(crate) fn quota_refusal(&self, id: &str, kind: &str, model: Option<&str>) -> Option<String> {
+        let usage = self.inner.usage.snapshot();
+        let u = usage.get(kind)?;
+        let now = util::now_ms();
+        if now.saturating_sub(u.updated_ms) > FRESH_MS {
+            return None;
+        }
+        let q = model_quota(u, model, now).filter(ModelQuota::exhausted)?;
+        let using = model.map(|m| format!(" usa {m} e a")).unwrap_or_else(|| ": a".to_owned());
+        let note = q.note(now).unwrap_or_default();
+        Some(format!(
+            "{id}{using} {note}; a mensagem não foi entregue. Escolha um modelo com cota (ask-agent --models {kind} mostra a cota de \
+             cada grupo) e abra outra instância: ask-agent {id} --new --model <modelo> \"mensagem\". Ou outro agente da equipe (ask-agent --team)."
+        ))
+    }
+}
+
 // ---------- Formatos JSON ----------
 
 /// Corpo do `POST /usage`: `{"session":{"used":0.34,"resets_at_ms":…}|null,"weekly":…}`, com
@@ -397,6 +548,46 @@ mod tests {
         let partial = UsageStore::load(file).snapshot();
         assert_eq!(partial.len(), 1);
         assert_eq!(partial["claude"].updated_ms, 5);
+    }
+
+    #[test]
+    fn each_model_counts_against_its_own_group() {
+        // A cota real do Antigravity em 24/10: Argon esgotado na semana, Flash quase intacto, Claude/GPT em 95%.
+        const NOW: u64 = 1_000_000_000;
+        let w = |used, h: u64| Some(UsageWindow { used, resets_at_ms: Some(NOW + h * 3_600_000) });
+        let group = |name: &str, session, weekly| UsageGroup { name: name.into(), session, weekly };
+        let agy = AgentUsage {
+            session: w(0.0, 5),
+            weekly: w(1.0, 9),
+            updated_ms: NOW,
+            local: false,
+            groups: vec![
+                group("Gemini Models", w(0.0, 5), w(0.004, 34)),
+                group("Gemini 4 Argon", None, w(1.0, 9)),
+                group("Claude and GPT models", w(0.39, 4), w(0.95, 140)),
+            ],
+        };
+        let argon = model_quota(&agy, Some("gemini-4-argon-high"), NOW).expect("argon");
+        assert!(argon.exhausted());
+        assert_eq!(argon.note(NOW).as_deref(), Some("cota de Gemini 4 Argon esgotada, renova em 9 h"));
+        let flash = model_quota(&agy, Some("gemini-3.8-flash-high"), NOW).expect("flash");
+        assert_eq!((flash.group.as_deref(), flash.note(NOW)), (Some("Gemini Models"), None));
+        let sonnet = model_quota(&agy, Some("claude-sonnet-5-5-high"), NOW).expect("sonnet");
+        assert_eq!(sonnet.note(NOW).as_deref(), Some("cota de Claude and GPT models 95% usada, renova em 5 dias"));
+        // Sem modelo, o padrão do CLI pode ser qualquer grupo: não se sabe.
+        assert_eq!(model_quota(&agy, None, NOW), None);
+        // Renovada desde a leitura: deixa de contar.
+        assert!(!model_quota(&agy, Some("gemini-4-argon-low"), NOW + 10 * 3_600_000).is_some_and(|q| q.exhausted()));
+        assert_eq!(
+            quota_line(&agy, NOW).as_deref(),
+            Some("Gemini Models 0% usada, Gemini 4 Argon ESGOTADA (renova em 9 h), Claude and GPT models 95% usada (renova em 5 dias)")
+        );
+        // Sem grupos (o Claude): vale o plano, a janela mais gasta.
+        let claude = AgentUsage { session: w(0.2, 1), weekly: w(0.5, 30), ..Default::default() };
+        let q = model_quota(&claude, Some("sonnet"), NOW).expect("claude");
+        assert_eq!((q.group, q.used, q.resets_at_ms), (None, 0.5, Some(NOW + 30 * 3_600_000)));
+        assert_eq!(duration_text(45 * 60_000), "45 min");
+        assert_eq!(duration_text(125 * 60_000), "2 h 5 min");
     }
 
     #[test]

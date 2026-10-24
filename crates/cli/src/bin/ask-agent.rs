@@ -6,7 +6,7 @@
 //!      ask-agent --reply <n> "resposta"       (responde à pergunta número n)
 //!      ask-agent --list
 //!      ask-agent --team                       (seu chefe e sua equipe)
-//!      ask-agent --models [agente]            (agentes instalados e modelos que o --model aceita)
+//!      ask-agent --models [agente]            (agentes instalados, modelos que o --model aceita e a cota)
 //!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
 //!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
 //!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
@@ -311,12 +311,23 @@ fn with_model(id: &str, models: &BTreeMap<String, String>) -> String {
     }
 }
 
-/// O mapa `models` (id → modelo) de uma resposta da ponte.
+/// O mapa `models` (id → modelo) de uma resposta da ponte, com o aviso de cota (`quota`) de quem está sem ou perto do
+/// fim: "gemini-4-argon-high; cota de Gemini 4 Argon esgotada, renova em 9 h".
 fn models_of(json: &Value) -> BTreeMap<String, String> {
-    json.get("models")
-        .and_then(Value::as_object)
-        .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
-        .unwrap_or_default()
+    let map = |key: &str| -> BTreeMap<String, String> {
+        json.get(key)
+            .and_then(Value::as_object)
+            .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
+            .unwrap_or_default()
+    };
+    let quota = map("quota");
+    let mut models = map("models");
+    for (id, model) in models.iter_mut() {
+        if let Some(note) = quota.get(id) {
+            *model = format!("{model}; {note}");
+        }
+    }
+    models
 }
 
 /// Resposta de `GET /team`.
@@ -1136,5 +1147,9 @@ pronto"
         assert_eq!(with_model("claude@dev", &models), "claude@dev (sonnet)");
         assert_eq!(with_model("claude", &models), "claude");
         assert!(models_of(&json!({})).is_empty());
+        // O aviso de cota vai junto do modelo.
+        let json =
+            json!({ "models": { "antigravity@arquiteto": "gemini-4-argon-high" }, "quota": { "antigravity@arquiteto": "cota esgotada" } });
+        assert_eq!(with_model("antigravity@arquiteto", &models_of(&json)), "antigravity@arquiteto (gemini-4-argon-high; cota esgotada)");
     }
 }

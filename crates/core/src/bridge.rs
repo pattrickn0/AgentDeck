@@ -211,7 +211,8 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             Auth::Agent(c) => c.project.clone(),
             Auth::Master => core.active_project_id(),
         };
-        return reply(req, 200, json!({ "agents": core.peers(&project), "models": core.instance_models(&project) }));
+        let models = core.instance_models(&project);
+        return reply(req, 200, json!({ "agents": core.peers(&project), "quota": core.quota_notes(&models), "models": models }));
     }
     if *req.method() == Method::Get && (req.url() == "/models" || req.url().starts_with("/models?")) {
         let url = req.url().to_owned();
@@ -220,7 +221,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             return reply(req, 400, json!({ "error": "agente inválido" }));
         }
         return match core.models_inventory(only) {
-            Ok(items) => reply(req, 200, json!({ "text": crate::models::format_inventory(&items) })),
+            Ok(items) => reply(req, 200, json!({ "text": crate::models::format_inventory(&items, &core.quota_lines()) })),
             Err(e) => reply(req, 404, json!({ "error": e })),
         };
     }
@@ -237,7 +238,11 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             .into_iter()
             .filter(|(id, _)| *id == c.id || team.boss.as_ref() == Some(id) || team.crew.contains(id))
             .collect();
-        return reply(req, 200, json!({ "id": c.id, "boss": team.boss, "crew": team.crew, "models": models }));
+        return reply(
+            req,
+            200,
+            json!({ "id": c.id, "boss": team.boss, "crew": team.crew, "quota": core.quota_notes(&models), "models": models }),
+        );
     }
     let route = req.url().to_owned();
     if route == "/tasks" || route.starts_with("/tasks/") || route.starts_with("/tasks?") {
@@ -633,6 +638,10 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     if id == from {
         return forget(400, json!({ "error": "um agente não pode perguntar a si mesmo" }));
     }
+    // Um modelo sem cota não responde: melhor o agente saber agora e escolher outro.
+    if let Some(error) = core.quota_refusal(&id, &ident.kind, core.instance_model(project, &ident).as_deref()) {
+        return forget(409, json!({ "error": error }));
+    }
     // Com abas a profundidade não viaja no ambiente (a pergunta é digitada): mede-se pela cadeia
     // de perguntas pendentes de quem pergunta. Um ciclo de espera é recusado primeiro (409).
     let (from_key, target_key) = (caller.key(from), caller.key(&id));
@@ -872,6 +881,9 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
     }
     // Sem abas não há instância viva: vale o pedido, senão o gravado ou o padrão do cargo.
     let model = model.or_else(|| to_ident.as_ref().and_then(|i| core.instance_model(project, i)));
+    if let Some(error) = core.quota_refusal(&to, &kind, model.as_deref()) {
+        return (409, json!({ "error": error }));
+    }
 
     caller.feed(core, FeedKind::Ask, from, &to, message.clone());
     let prompt = format!(

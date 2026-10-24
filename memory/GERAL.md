@@ -313,7 +313,7 @@ ela dura.
 | `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão (`--file <arquivo>` lê de um arquivo; preserva acentos, que o PowerShell troca por `?` no stdin) |
 | `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
 | `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
-| `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor), ou só os de um agente; antes de escolher `--agent`/`--model` |
+| `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor), ou só os de um agente, com a linha "cota:" de cada agente que tem (grupo a grupo no Antigravity); antes de escolher `--agent`/`--model`. A ponte recusa (409) a pergunta a uma instância cujo modelo está sem cota |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --learn [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; sem argumentos, os aprendizados globais por inteiro e o índice dos demais. O agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
 | `ask-agent --inbox [--all]` | mostra as respostas às suas perguntas que ainda não chegaram a você (a que demorou e não foi digitada, a que o `ask-agent` não leu); `--all` mostra as 20 últimas. Ler as pendentes as marca como entregues |

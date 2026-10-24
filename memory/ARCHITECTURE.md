@@ -427,6 +427,12 @@ quando renova cada janela, "bloqueado até").
   (janelas `5h` e `weekly`; alternativa: `fetchAvailableModels`) com o token do CLI (Gerenciador de Credenciais do
   Windows `gemini:antigravity` ou `~/.gemini/oauth_creds.json`) enquanto ele vale; quem o renova é o próprio CLI. API interna: qualquer falha
   vira "sem dados" (o agente fica com o último valor lido, ou fora da barra se nunca houve leitura). O token nunca vai para log, Feed ou interface.
+- **Cota de um modelo, para os agentes** (`usage::model_quota`, `Core::quota_refusal`): cada modelo conta no seu grupo
+  (`group_of`: Argon no "Gemini 4 Argon", os outros Gemini em "Gemini Models", Claude/GPT em "Claude and GPT models"; sem
+  grupos, o plano todo), ignorando janelas já renovadas. O `/ask` recusa com 409, antes de criar a aba, a pergunta a
+  uma instância cujo modelo está esgotado (uso ≥ 99,5%) por uma leitura de até 1 h; sem modelo num agente com grupos,
+  ou sem dado, a pergunta segue. `--models` ganha a linha "cota:" por agente (`quota_line`) e `--team`/`--list` o aviso ao
+  lado do modelo (campo `quota` de `/team` e `/agents`, só de quem está acima de 85% ou esgotado).
 
 **Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
 (`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (o próprio tipo; `claude@dev@ana` fica no grupo `claude`). A cada quadro,

@@ -977,7 +977,7 @@ fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
 
     // Cada aba consulta a própria posição pelo token.
     let (st, b) = http(port, "GET", "/team", &host, &tab_token(&env, "shell@dev"), "");
-    assert_eq!((st, b), (200, json!({"id": "shell@dev", "boss": "shell", "crew": ["shell@qa"], "models": {}})));
+    assert_eq!((st, b), (200, json!({"id": "shell@dev", "boss": "shell", "crew": ["shell@qa"], "quota": {}, "models": {}})));
     let (st, _) = http(port, "GET", "/team", &host, env.core.bridge_token(), "");
     assert_eq!(st, 400, "o token mestre não é um agente");
 
@@ -1262,6 +1262,48 @@ fn the_team_notice_waits_for_a_message_that_is_really_typed() {
     env.core.close_instance(&p, "claude@qa");
     assert!(env.core.take_team_notice(&p, "claude").expect("aviso").contains("sua equipe: claude@dev"));
     env.core.shutdown();
+}
+
+#[test]
+fn a_model_without_quota_is_refused_before_opening_the_tab() {
+    use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
+    let env = start(&[]);
+    fake_cli(&env, "agy");
+    env.core.enable_tab_delivery();
+    let p = env.core.active_project_id();
+    let port = env.core.bridge_port();
+    let master = env.core.bridge_token().to_owned();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("relógio").as_millis() as u64;
+    let w = |used, h: u64| Some(UsageWindow { used, resets_at_ms: Some(now + h * 3_600_000) });
+    let group = |name: &str, weekly| UsageGroup { name: name.into(), session: None, weekly };
+    let groups = vec![group("Gemini Models", w(0.0, 30)), group("Gemini 4 Argon", w(1.0, 9))];
+    env.core.set_usage("antigravity", AgentUsage { weekly: w(1.0, 9), updated_ms: now, groups, ..Default::default() });
+
+    // Argon sem cota: 409 que explica e sugere outro modelo; nenhuma aba é criada.
+    let (st, body) =
+        ask_raw(port, &master, json!({"from": "shell", "to": "antigravity@arq", "message": "oi", "model": "gemini-4-argon-high"}));
+    assert_eq!(st, 409, "{body}");
+    let error = body["error"].as_str().expect("erro");
+    assert!(error.starts_with("antigravity@arq usa gemini-4-argon-high e a cota de Gemini 4 Argon esgotada, renova em"), "{error}");
+    assert!(error.contains("--new --model <modelo>"), "{error}");
+    assert!(env.core.project_instance_ids(&p).is_empty(), "nada foi criado");
+    assert!(env.core.projects()[0].tab_models.is_empty());
+
+    // O Flash conta em outro grupo: entrega normalmente.
+    let asking = master_ask(&env, json!({"from": "shell", "to": "antigravity@arq", "message": "oi", "model": "gemini-3.8-flash-high"}));
+    let d = next_delivery(&env);
+    assert_eq!((d.ident.id().as_str(), d.create), ("antigravity@arq", true));
+    env.core.fail_delivery(d.request, "teste");
+    assert_eq!(asking.join().expect("thread").0, 500);
+
+    // Uma leitura velha não recusa: a cota pode ter voltado.
+    let stale = vec![group("Gemini 4 Argon", w(1.0, 9))];
+    env.core.set_usage("antigravity", AgentUsage { updated_ms: now - 2 * 3_600_000, groups: stale, ..Default::default() });
+    let asking = master_ask(&env, json!({"from": "shell", "to": "antigravity@b", "message": "oi", "model": "gemini-4-argon-low"}));
+    let d = next_delivery(&env);
+    assert_eq!(d.ident.id(), "antigravity@b");
+    env.core.fail_delivery(d.request, "teste");
+    assert_eq!(asking.join().expect("thread").0, 500);
 }
 
 /// `POST /ask` com o token mestre (o `from` do corpo vale), numa thread.
@@ -1556,7 +1598,7 @@ fn the_models_inventory_of_this_machine() {
     let (core, _rx) = Core::start_with(paths, opts).expect("start");
     let started = std::time::Instant::now();
     let items = core.models_inventory(None).expect("inventário");
-    println!("{}\n({:?})", agentdeck_core::models::format_inventory(&items), started.elapsed());
+    println!("{}\n({:?})", agentdeck_core::models::format_inventory(&items, &core.quota_lines()), started.elapsed());
     core.shutdown();
 }
 
