@@ -371,7 +371,7 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   das tarefas, e por isso sobrevive a reabrir o app. Teto: 300 mensagens por tarefa (as mais antigas saem) e 6 000 caracteres
   cada (`tasks::MAX_MESSAGES`, `MAX_MESSAGE_CHARS`); uma pergunta entre duas tarefas entra nas duas. O detalhe da tarefa mostra
   a seção MENSAGENS (`ui/tasks.rs::timeline`, do mais antigo ao mais novo, recolhida em 280 caracteres/4 linhas, o clique abre
-  inteira). A Conversa integrada em si continua só na memória (`Deck::feed`, 500 entradas).
+  inteira). A Conversa integrada em si continua só na memória (`Deck::feed`, 1000 entradas).
 - **Aprendizados na devolução e na reprovação.** `Core::feedback_learnings` pega os arquivos que o feedback novo cita
   (`paths_in_text` na worktree), tira os que já apareciam no pedido (`brief`, ou o título) ou nos feedbacks anteriores e entrega
   só os aprendizados **específicos** que casam (`learnings::render_specific`, até `FEEDBACK_BUDGET`, 3 000 caracteres; sem índice
