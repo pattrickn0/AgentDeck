@@ -96,7 +96,7 @@ fn arg_after(args: &[String], flag: &str) -> String {
 
 #[test]
 fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
-    let env = start(&["claude", "codex", "opencode", "aider", "interpreter"]);
+    let env = start(&["claude", "codex", "opencode", "aider", "interpreter", "antigravity"]);
     let (project, dir) = env.user_project("novo");
 
     // Claude: prompt de sistema, com a regra dos subagentes e a memória geral.
@@ -131,6 +131,16 @@ fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
     let interpreter = env.spec(&project, "interpreter");
     assert!(arg_after(&interpreter.args, "--custom_instructions").contains("NÃO use subagentes internos"));
 
+    // Antigravity: um `AGENTS.md` da instância numa pasta de dados passada em `--add-dir` (o `agy` lê os das pastas
+    // adicionadas junto com o do projeto).
+    let agy = env.spec(&project, "antigravity@arquiteto");
+    let dirs: Vec<PathBuf> =
+        agy.args.iter().zip(agy.args.iter().skip(1)).filter(|(a, _)| *a == "--add-dir").map(|(_, d)| PathBuf::from(d)).collect();
+    let own = dirs.iter().find(|d| d.join("AGENTS.md").is_file()).unwrap_or_else(|| panic!("sem AGENTS.md em {dirs:?}"));
+    assert!(own.starts_with(env.root.join("dados")), "{}", own.display());
+    let agy_text = std::fs::read_to_string(own.join("AGENTS.md")).expect("ler");
+    assert!(agy_text.contains("NÃO use subagentes internos") && agy_text.contains("antigravity@arquiteto"), "{agy_text}");
+
     // Nada disso suja o repositório do usuário.
     assert!(!dir.join("AGENTS.md").exists(), "o app criou AGENTS.md para um CLI que tem canal próprio");
     assert!(env.feed_texts().is_empty());
@@ -138,11 +148,11 @@ fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
 
 #[test]
 fn a_cli_that_only_reads_agents_md_gets_one_with_just_the_app_block() {
-    let env = start(&["antigravity"]);
+    let env = start(&["goose"]);
     let (project, dir) = env.user_project("novo");
     assert!(!dir.join("AGENTS.md").exists());
 
-    env.spec(&project, "antigravity");
+    env.spec(&project, "goose");
     let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md criado");
     assert!(text.starts_with("<!-- agentdeck:start -->") && text.trim_end().ends_with("<!-- agentdeck:end -->"), "{text}");
     assert!(text.contains("NÃO use subagentes internos") && text.contains("memory/aprendizados/"), "{text}");
@@ -152,18 +162,18 @@ fn a_cli_that_only_reads_agents_md_gets_one_with_just_the_app_block() {
     assert!(notices[0].contains("AGENTS.md"), "{notices:?}");
 
     // Abrir de novo não muda nada nem avisa de novo (nada novo no `git status`).
-    env.spec(&project, "antigravity");
+    env.spec(&project, "goose");
     assert_eq!(std::fs::read_to_string(dir.join("AGENTS.md")).expect("ler"), text);
     assert!(env.feed_texts().is_empty());
 }
 
 #[test]
 fn the_users_own_agents_md_is_kept_and_not_announced_as_created() {
-    let env = start(&["antigravity"]);
+    let env = start(&["goose"]);
     let (project, dir) = env.user_project("com-regras");
     std::fs::write(dir.join("AGENTS.md"), "# Regras do meu projeto\n\nUse tabs.\n").expect("write");
 
-    env.spec(&project, "antigravity");
+    env.spec(&project, "goose");
     let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("ler");
     assert!(text.starts_with("# Regras do meu projeto\n\nUse tabs.\n") && text.contains("NÃO use subagentes internos"), "{text}");
     assert!(env.feed_texts().is_empty());

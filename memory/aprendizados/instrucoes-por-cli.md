@@ -1,6 +1,6 @@
 ---
 titulo: Cada CLI recebe as instruções do AgentDeck por um canal próprio
-resumo: Claude, Codex, OpenCode, Aider e Interpreter por opção; Antigravity, Goose e Copilot só pelo AGENTS.md (criado só com o bloco do app).
+resumo: Claude, Codex, OpenCode, Aider e Interpreter por opção; Antigravity por um AGENTS.md em dados/ via --add-dir; Goose e Copilot só pelo AGENTS.md do projeto (criado só com o bloco do app).
 touches: [crates/core/src/agents.rs, crates/core/src/models.rs, crates/core/src/workspace.rs, crates/core/src/headless.rs, AGENTS.md]
 ---
 As instruções do AgentDeck (regra de não usar subagentes internos, `ask-agent`, memória geral) não podem depender do
@@ -13,12 +13,17 @@ As instruções do AgentDeck (regra de não usar subagentes internos, `ask-agent
   `opencode run --standalone` a regra do arquivo foi obedecida. Só o servidor próprio da aba lê a variável, então o TUI
   agora **sempre** abre com `--standalone`, com ou sem modelo.
 - **Aider:** `--read <arquivo>`. **Interpreter:** `--custom_instructions` (não verificados).
-- **Antigravity, Goose, Copilot:** só leem o `AGENTS.md` (o `agy` também lê `GEMINI.md` e `~/.gemini/AGENTS.md`, e aceita
-  plugins globais; nenhuma opção de sistema). O app cria um `AGENTS.md` só com o bloco quando a pasta não tem um, avisa na
-  Conversa e nunca toca num que já exista (`Core::ensure_agents_file`).
+- **Antigravity:** sem opção de sistema, mas o `agy` lê o `AGENTS.md` de cada pasta passada em `--add-dir`, **somado** ao
+  do projeto. Conferido em 2026-10-24 (`agy` 1.4.7, Flash): uma regra num `AGENTS.md` fora do projeto valeu só com o
+  `--add-dir`, e junto com a regra do `AGENTS.md` do projeto. O app grava `dados/agy/<instância>/AGENTS.md` (com o nome e o
+  cargo, como o Claude) e passa a pasta (`write_agy_instructions`): nada no repositório do usuário.
+- **Goose, Copilot:** só leem o `AGENTS.md` do projeto. O app cria um só com o bloco quando a pasta não tem um, avisa na
+  Conversa e nunca toca num que já exista (`Core::ensure_agents_file`). Não verificados (não instalados aqui).
 - O texto genérico (arquivo e bloco) não lista os agentes instalados: senão o arquivo mudaria de máquina para máquina e
   sujaria o `git status`.
 
 **Por quê:** relato de usuário novo (23/10): os agentes não usavam o `ask-agent` e abriam subagentes do CLI.
 **Como aplicar:** CLI novo = achar a opção de instruções dele (`--help`, documentação) e acrescentar a `instruction_args`;
-só sem opção entra em `reads_only_agents_md`. O que a cota impede de testar vai para `memory/testes.md`.
+antes de cair em `reads_only_agents_md`, teste se ele lê o `AGENTS.md` de uma pasta adicionada (como o `agy`): uma regra
+fácil de ver ("comece a resposta com ABACAXI-7") num `AGENTS.md` fora do projeto, com e sem a opção. O que a cota impede
+de testar vai para `memory/testes.md`.

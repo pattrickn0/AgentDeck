@@ -1497,7 +1497,9 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
     assert_eq!(tail(&codex.args, 2), ["--model", "gpt-5-codex"]);
     assert!(codex.args.iter().any(|a| a.starts_with("notify=")));
     let agy = env.core.spawn_spec_for(&p, &ident("antigravity@x")).expect("agy");
-    assert_eq!((agy.model, tail(&agy.args, 1)), (None, vec![data]), "sem modelo, sem --model");
+    // Por último, a pasta das instruções da instância (`dados/agy/<id>`), depois da pasta de dados.
+    let own = std::path::Path::new(&data).join("agy").join("antigravity@x").to_string_lossy().into_owned();
+    assert_eq!((agy.model, tail(&agy.args, 3)), (None, vec![data, "--add-dir".to_owned(), own]), "sem modelo, sem --model");
     env.core.assign_model(&p, &ident("antigravity@x"), Some("claude-sonnet-5-5-medium"));
     let agy = env.core.spawn_spec_for(&p, &ident("antigravity@x")).expect("agy");
     assert_eq!(tail(&agy.args, 2), ["--model", "claude-sonnet-5-5-medium"]);

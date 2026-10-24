@@ -617,9 +617,24 @@ fn instruction_args(kind: &str, text: &str, file: Option<&Path>, shim: bool) -> 
 
 /// CLIs sem opção de instruções que só leem o `AGENTS.md` da pasta onde rodam: sem o arquivo, não sabem do
 /// `ask-agent`. Para eles o app cria o `AGENTS.md` só com o bloco dele quando a pasta não tem um (ver
-/// [`Core::ensure_agents_file`]).
+/// [`Core::ensure_agents_file`]). O Antigravity saiu daqui: ele lê o `AGENTS.md` de uma pasta passada em `--add-dir`
+/// (ver [`write_agy_instructions`]).
 fn reads_only_agents_md(kind: &str) -> bool {
-    matches!(kind, "antigravity" | "goose" | "copilot")
+    matches!(kind, "goose" | "copilot")
+}
+
+/// Grava `dados/agy/<instância>/AGENTS.md` com as instruções da instância (só se mudou) e devolve a pasta, para o
+/// `--add-dir` do Antigravity: o `agy` lê o `AGENTS.md` das pastas adicionadas junto com o do projeto (conferido em
+/// 2026-10-24 com o 1.4.7), então nada é criado no repositório do usuário.
+fn write_agy_instructions(data_dir: &Path, id: &str, text: &str) -> std::io::Result<PathBuf> {
+    let dir = data_dir.join("agy").join(id);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("AGENTS.md");
+    let text = format!("{text}\n");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+        std::fs::write(&path, text)?;
+    }
+    Ok(dir)
 }
 
 /// Monta o comando de uma aba interativa (equivalente a `pty:spawn`).
@@ -688,6 +703,15 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     if kind == "claude" || kind == "antigravity" {
         args.push("--add-dir".into());
         args.push(data_dir);
+    }
+    if kind == "antigravity" {
+        match write_agy_instructions(&core.paths().data_dir, &id, &instructions) {
+            Ok(dir) => {
+                args.push("--add-dir".into());
+                args.push(dir.to_string_lossy().into_owned());
+            }
+            Err(e) => log::warn!("não consegui gravar as instruções do Antigravity: {e}"),
+        }
     }
     if kind == "opencode" {
         // O TUI não tem --model nem --system: servidor próprio + modelo e instruções na configuração
@@ -791,8 +815,8 @@ ok"
         for kind in ["claude", "opencode", "antigravity", "goose", "shell"] {
             assert!(instruction_args(kind, text, Some(file), false).is_empty(), "{kind}");
         }
-        assert!(["antigravity", "goose", "copilot"].iter().all(|k| reads_only_agents_md(k)));
-        assert!(["claude", "codex", "opencode", "aider", "interpreter", "shell"].iter().all(|k| !reads_only_agents_md(k)));
+        assert!(["goose", "copilot"].iter().all(|k| reads_only_agents_md(k)));
+        assert!(["claude", "codex", "opencode", "aider", "interpreter", "shell", "antigravity"].iter().all(|k| !reads_only_agents_md(k)));
     }
 
     #[test]
