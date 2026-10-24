@@ -10,7 +10,8 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 | [GERAL.md](GERAL.md) (este) | quiser o mapa geral |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | for mexer na ponte, nas abas, nas instâncias ou no protocolo entre agentes |
 | [MANUTENCAO.md](MANUTENCAO.md) | for compilar, testar, achar um arquivo ou seguir uma receita (ex.: novo agente) |
-| [pendencias.md](pendencias.md) | quiser saber o que falta desenvolver, na ordem em que será feito, por área, e o que está adiado |
+| [pendencias.md](pendencias.md) | quiser saber os próximos passos (no máximo 10, na ordem em que serão feitos) |
+| [ideias.md](ideias.md) | quiser ver as ideias sem data e as limitações conhecidas (o que não está entre os próximos passos) |
 | [historico.md](historico.md) | quiser saber o que já foi feito (o destino de todo item concluído de pendencias.md) |
 | [testes.md](testes.md) | for testar à mão, no Windows, com os agentes reais (roteiro com caixas de marcar) |
 | [LINUX.md](LINUX.md) | for compilar, rodar ou testar no Linux (Ubuntu e Fedora) e quiser saber o que já foi verificado e o que falta |
@@ -340,7 +341,8 @@ Cada documento cuida de um assunto. Mudou o assunto? Atualize o documento **no m
 | `memory/aprendizados/` | a memória de longo prazo: um arquivo por armadilha, decisão ou convenção que não é óbvia no código | formato e quando criar em `aprendizados/README.md`; os `touches` precisam existir (o teste `every_learning_in_the_repository_is_valid` confere) |
 | `memory/ARCHITECTURE.md` | stack, crates, protocolo da ponte, instâncias, entrega nas abas | **contrato**: rotas, códigos HTTP, variáveis de ambiente e limites da ponte. Mudou o protocolo? Atualize aqui |
 | `memory/MANUTENCAO.md` | guia prático: Rust, comandos, mapa do código, receitas | mapa do código e receitas (ex.: novo agente: prompt nunca cru na linha de comando, hooks se o CLI tiver) |
-| `memory/pendencias.md` | o que falta desenvolver: o bloco "Próximo" no topo e depois por área, com os adiados no fim | item concluído sai de `pendencias.md` e vai para `historico.md` com uma linha do que foi feito; limitação nova vira item; só desenvolvimento (testes manuais ficam em `testes.md`); o arquivo não guarda `[x]` |
+| `memory/pendencias.md` | os próximos passos, numerados, no máximo 10 ("Agora" e "Depois") | item concluído sai de `pendencias.md` e vai para `historico.md` com uma linha do que foi feito; um item novo só entra se couber nos 10 (senão vai para `ideias.md`); só desenvolvimento (testes manuais ficam em `testes.md`); o arquivo não guarda `[x]` |
+| `memory/ideias.md` | ideias sem data, por área, e as limitações conhecidas | ideia que entra em `pendencias.md` sai daqui; limitação nova entra aqui; não guarda item concluído |
 | `memory/historico.md` | o que já foi feito, do mais recente para o mais antigo (inclui a auditoria de 15/10) | só recebe o que saiu de `pendencias.md`; o texto de cada entrada fica como foi escrito na época |
 | `memory/testes.md` | roteiro de testes manuais (Windows, agentes reais), por área (as mesmas de `pendencias.md`) | marcar `[x]` o que passou; o que falhar vira item em `pendencias.md`; funcionalidade nova que só dá para validar à mão ganha um item na área dela; função removida leva os itens dela embora |
 | `memory/LINUX.md` | dependências, o que foi verificado e o roteiro manual do Linux (Ubuntu e Fedora) | atualizar no mesmo commit em que mudar dependência de sistema, caminho de fonte/pasta de dados ou suporte a GPU; falha de Linux vira item em `pendencias.md` |

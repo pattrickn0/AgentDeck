@@ -12,4 +12,4 @@ numa sonda (portable-pty + alacritty_terminal + o `claude.exe` real): uma cópia
 a tela e a conversa sumiria.
 **Como aplicar:** o PTY só muda de tamanho com o mouse solto e o tamanho parado por 150 ms (`RESIZE_DEBOUNCE`,
 `resize_due` em `deck.rs`): um arrasto vira uma cópia só. Não encurte esse prazo nem redimensione o PTY a cada
-quadro. O problema de fundo continua aberto em `pendencias.md` (seção Terminal).
+quadro. O problema de fundo continua aberto em `ideias.md` ("Limitações conhecidas").

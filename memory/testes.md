@@ -13,7 +13,7 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 - Itens com ★ são os mais importantes (mudanças grandes que ainda não rodaram no Windows).
 - "(uso real, t1–t16)" marca o que a própria mesa de tarefas já fez de verdade, conferido nos eventos das tarefas
   (`dados/tarefas/<projeto>.json`): vale como teste passado, mas repita se a área mudar.
-- O roteiro é por **área**, na mesma ordem de [pendencias.md](pendencias.md). Comece pela Preparação e pelas áreas com ★.
+- O roteiro é por **área** (as mesmas de [ideias.md](ideias.md)). Comece pela Preparação e pelas áreas com ★.
 
 ---
 

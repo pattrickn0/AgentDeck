@@ -37,15 +37,15 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
   projeto); a **do projeto** (`memory/aprendizados/` do repositório do usuário, versionada nele); e a **local** (a do
   usuário e dos CLIs, que nunca vai para o git).
 - Licença **MIT**. Hoje só o usuário desenvolve; contribuições de outras pessoas, talvez depois de publicado.
-- **Depois da `main`**, nesta ordem aproximada: mais revisão e estabilidade, o **instalador**, inglês na interface,
-  temas. **Bem mais para frente**, com o app bem estável: acompanhar e falar com os agentes **pelo celular**.
+- **Depois da `main`** (revisto em 2026-10-24): estabilidade e a linha do tempo por tarefa primeiro, depois o
+  **instalador** e o inglês na interface; temas deixados de lado ([pendencias.md](pendencias.md)). **Bem mais para frente**, com o app bem estável: acompanhar e falar com os agentes **pelo celular**.
 - Não fazer por enquanto: comentários linha a linha no diff para devolver ao agente (o "devolver com texto" basta).
 
 ## Rumo (ordem decidida pelo orquestrador)
 
 1. ~~Modelo de LLM por instância~~ (feito em 2026-10-17).
 2. ~~**Mesa de tarefas**~~ (fases A e B feitas em 2026-10-17; a etapa "aguardando validação" veio na `t10`; o que sobrou está em
-   [pendencias.md](pendencias.md), bloco "Próximo") no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
+   [ideias.md](ideias.md); a linha do tempo por tarefa está em [pendencias.md](pendencias.md)) no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
    acompanhar, receber o relatório, revisar o diff, mesclar, validar (ou reprovar) ou descartar com um botão. É o fluxo que o
    orquestrador fazia à mão.
 3. **Memória em duas camadas, nossa.** **Fase 1 feita** (tarefas `t13`, `t15` e `t16`): `memory/aprendizados/*.md` com `touches`, entregues
@@ -53,12 +53,12 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
    feedbacks e aprendizados dos arquivos citados nas devoluções e reprovações; `ask-agent --learn` com e sem arquivos. Como funciona: [ARCHITECTURE.md](ARCHITECTURE.md) ("Memória em duas camadas"). **Fase 2 feita**
    (2026-10-23, `t40` e `t41`), **por demanda**: `ask-agent --outline <arquivo>` (as assinaturas com a linha) e, no `--learn` de
    qualquer aba, a situação atual e o aviso de arquivo que outra tarefa em andamento também mexe. O `ContextProvider` geral, que
-   empurraria o contexto em todos os canais, ficou adiado: [pendencias.md](pendencias.md), "Memória".
+   empurraria o contexto em todos os canais, ficou adiado: [ideias.md](ideias.md), "Memória".
    O plano original, para referência: Longo prazo: "aprendizados" em markdown versionado no repositório, com
    frontmatter que diz que arquivos tocam (`touches`), entregues ao agente quando a tarefa dele mexe nesses arquivos;
    e um resumo da API de um arquivo (estilo `skeleton`) para o agente ler menos. Curto prazo: o pedido da tarefa, as
    decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto", adiado; ver "Memória" de
-   [pendencias.md](pendencias.md)).
+   [ideias.md](ideias.md)).
    - **Trail-Code avaliado em 2026-10-17 e não adotado como dependência.** O `skeleton` é bom (−87% de tokens), mas
      o `ask` é léxico e não ganhou do `grep`, o `callers` não resolve chamadas de método entre crates em Rust, o `init`
      escreve hooks no `~/.claude` global (afeta todos os repositórios) mesmo com `--no-global`, e toda saída dele
@@ -67,9 +67,9 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
 4. **Diff legível para o usuário validar** (combinado em 2026-10-21): hoje o diff mora espremido na barra direita. O centro
    passa a ter "abas de documento" ao lado das abas de terminal, e o diff de uma tarefa (e depois o editor de arquivos e um
    explorador mais útil) abre nelas, em largura de tela cheia. É o que falta para o humano validar sem sair do app.
-   Detalhes e subitens: [pendencias.md](pendencias.md), bloco "Próximo", item b).
+   A fase 2 (diff lado a lado, extras do editor, explorador) está em [ideias.md](ideias.md).
 5. **Renomear para AgentDeck e identidade visual** (combinado em 2026-10-22). **Feitos**: o nome (tarefa `t20`, com migração
-   dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md), seção 6) e o visual (`t21`–`t23`). Os **temas** ficam para depois
-   da `main` ([pendencias.md](pendencias.md), bloco "Próximo").
+   dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md), seção 6) e o visual (`t21`–`t23`). Os **temas** foram deixados de
+   lado em 2026-10-24 ([ideias.md](ideias.md)).
 6. **Substituir a `main` pela `dev`**: **feito em 2026-10-24**. A `main` é a reescrita em Rust; o piloto em TypeScript
    foi apagado. O passo seguinte é o bloco "Depois da `main`" acima.

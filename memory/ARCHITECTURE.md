@@ -373,7 +373,7 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   mensagem fica como antes.
 - **Fase 2 (2026-10-23, `t40` e `t41`):** o `--outline` e a situação atual no `--learn` de qualquer aba, as duas **por demanda**:
   o agente pede quando vai mexer, e recebe o estado de agora. Um `ContextProvider` geral que empurrasse esse contexto em todos os
-  canais foi recusado por ora (ver `pendencias.md`, "Memória"); RAG/embeddings continuam adiados.
+  canais foi recusado por ora (ver `ideias.md`, "Memória"); RAG/embeddings continuam adiados.
 
 **Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
 bloqueantes; a UI chama numa thread):

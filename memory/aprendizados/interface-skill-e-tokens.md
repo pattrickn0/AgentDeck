@@ -8,7 +8,7 @@ A interface é egui pintado à mão (`Painter`, `ui.interact`), com regras próp
 tokens. Cores, fontes e tamanhos vêm de `crates/app/src/theme.rs`, nunca como cor solta no código.
 
 **Por quê:** o visual ficou inconsistente quando cada área escolhia suas cores (a barra esquerda parecia de outro
-tema que a direita); está em `pendencias.md` ("Identidade visual e temas"), e os temas futuros dependem de tudo vir
+tema que a direita); os temas estão em `ideias.md` ("Interface"), e os temas futuros dependem de tudo vir
 do `theme.rs`.
 **Como aplicar:** antes de criar ou mudar qualquer coisa na interface, invoque a skill `agentdeck-ui`. Depois
 compile, rode com `AGENTDECK_SMOKE` e `AGENTDECK_DEBUG_UI=<estado>` numa pasta de dados separada

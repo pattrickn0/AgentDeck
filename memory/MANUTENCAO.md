@@ -208,7 +208,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 
 ## 5. Limitações conhecidas
 
-A lista fica em [pendencias.md](pendencias.md), por área; o que ainda não rodou no Windows está em [testes.md](testes.md).
+A lista fica em [ideias.md](ideias.md), seção "Limitações conhecidas"; o que ainda não rodou no Windows está em [testes.md](testes.md).
 
 ## 6. Migração do nome (CommandDeck → AgentDeck)
 

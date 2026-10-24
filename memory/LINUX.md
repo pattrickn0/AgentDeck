@@ -49,11 +49,11 @@ vazio. Correção em `crates/core/src/workspace.rs`: normalizar o separador no c
 valendo (e passa) no Windows. Ver
 [aprendizados/caminho-com-barra-invertida-no-read-dir.md](aprendizados/caminho-com-barra-invertida-no-read-dir.md).
 
-### 2.2 A CI parou de validar o Linux (desde 22/10)
+### 2.2 A CI parou de validar o Linux (de 22/10 até a dívida de formatação ser paga)
 
-A partir do `run 47` (commit `146a486`), o passo **Formatação** (`cargo fmt --all -- --check`) falha no Windows **e**
-no Ubuntu, e os passos de build, teste e clippy nem rodam. Ou seja: desde 22/10 nenhuma linha de Linux é testada na
-CI. Isso é dívida de formatação da base, não regressão de Linux; o item está em [pendencias.md](pendencias.md).
+A partir do `run 47` (commit `146a486`), o passo **Formatação** (`cargo fmt --all -- --check`) falhava no Windows **e**
+no Ubuntu, e os passos de build, teste e clippy nem rodavam. A dívida foi paga depois: em 2026-10-24 a CI passou inteira
+nos três jobs (Windows, Ubuntu, Fedora), com a formatação.
 
 ### 2.3 Pasta de dados em instalação de sistema
 
@@ -196,9 +196,9 @@ verdes no Ubuntu até o `run 46`.
    faz nada e não avisa.
 8. **Versão do runner**: o rótulo `ubuntu-latest` migra para Ubuntu 26 a partir de 19/10/2026; o job pode mudar de
    base sem aviso. Se aparecer dependência nova, conferir o log do passo “Dependências de sistema”.
-9. **Formatação**: enquanto `cargo fmt --all -- --check` falhar, nenhum job chega a rodar os testes — inclusive o
-   Fedora. O item está em [pendencias.md](pendencias.md); não é para “resolver” reformatando arquivos de outras
-   tarefas (ver [aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md](aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md)).
+9. **Formatação**: se `cargo fmt --all -- --check` voltar a falhar, nenhum job chega a rodar os testes — inclusive o
+   Fedora. Não é para “resolver” reformatando arquivos de outras tarefas (ver
+   [aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md](aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md)).
 10. **WSLg**: o X11 foi forçado (seção 2.8), mas ninguém abriu o app dentro de um WSLg. Faltam: janela maximizada
     (deslocamento de 32 px), escala (sempre 1, interface pequena em 4K), arrastar/redimensionar, cursor e a cota do
     Antigravity lida do chaveiro de lá. Um `WINIT_UNIX_BACKEND=wayland` reproduz o caminho quebrado, para comparar.
