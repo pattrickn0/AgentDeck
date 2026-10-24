@@ -43,3 +43,13 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# Agente falso dos testes da ponte: um binário de verdade no lugar dos scripts de shell, para os mesmos
+# testes rodarem no Windows e no Unix. Os testes o copiam para o PATH de busca e escrevem o
+# comportamento ao lado (ver `tests/support/fake_agent.rs`).
+[[bin]]
+name = "fake_agent"
+path = "tests/support/fake_agent.rs"
+test = false
+bench = false
+doc = false
