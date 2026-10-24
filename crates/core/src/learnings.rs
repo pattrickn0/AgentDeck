@@ -297,6 +297,15 @@ fn clip(text: &str, max: usize) -> String {
 /// `budget` caracteres; o que passar do orçamento e os demais aprendizados viram uma linha de índice
 /// (arquivo + resumo). Vazio quando a pasta não tem aprendizado algum.
 pub fn render(all: &[Learning], paths: &[String], budget: usize) -> String {
+    render_with(all, paths, budget, INDEX_BUDGET)
+}
+
+/// Cabeçalho do índice em [`render_with`].
+const INDEX_HEADER: &str =
+    "Outros aprendizados (abra o arquivo, ou rode ask-agent --learn <arquivo> antes de mexer num arquivo relacionado):\n";
+
+/// Como [`render`], com o teto das linhas do índice em `index_budget` caracteres; `0` tira o índice.
+fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budget: usize) -> String {
     if all.is_empty() {
         return String::new();
     }
@@ -321,15 +330,15 @@ pub fn render(all: &[Learning], paths: &[String], budget: usize) -> String {
         out.push_str("Valem para este trabalho (projeto todo ou os arquivos em questão):\n\n");
         out.push_str(&full.join("\n\n"));
     }
-    if !index.is_empty() {
+    if !index.is_empty() && index_budget > 0 {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
-        out.push_str("Outros aprendizados (abra o arquivo, ou rode ask-agent --learn <arquivo> antes de mexer num arquivo relacionado):\n");
+        out.push_str(INDEX_HEADER);
         let mut lines = String::new();
         for (n, l) in index.iter().enumerate() {
             let line = clip(&l.index_line(), 220);
-            if lines.chars().count() + line.chars().count() + 1 > INDEX_BUDGET {
+            if lines.chars().count() + line.chars().count() + 1 > index_budget {
                 lines.push_str(&format!("- … e mais {} (veja a pasta {DIR})\n", index.len() - n));
                 break;
             }
@@ -376,6 +385,11 @@ pub fn render_specific(all: &[Learning], paths: &[String], budget: usize) -> Str
 /// Resposta de `ask-agent --learn [<caminho>…]`: o que o projeto aprendeu sobre esses arquivos; sem caminhos, os
 /// globais por inteiro e o índice dos específicos.
 pub fn learn_report(all: &[Learning], paths: &[String]) -> String {
+    learn_report_with(all, paths, LEARN_BUDGET, INDEX_BUDGET)
+}
+
+/// [`learn_report`] com os tetos dos aprendizados por inteiro (`budget`) e das linhas do índice (`index_budget`).
+fn learn_report_with(all: &[Learning], paths: &[String], budget: usize, index_budget: usize) -> String {
     if all.is_empty() {
         return format!(
             "O projeto ainda não tem aprendizados ({DIR}/ está vazia ou não existe).
@@ -388,11 +402,11 @@ pub fn learn_report(all: &[Learning], paths: &[String]) -> String {
             "Aprendizados do projeto:
 
 {}",
-            render(all, &[], LEARN_BUDGET)
+            render_with(all, &[], budget, index_budget)
         );
     }
     let specific = all.iter().filter(|l| !l.is_global() && l.touches_any(paths)).count();
-    let body = render(all, paths, LEARN_BUDGET);
+    let body = render_with(all, paths, budget, index_budget);
     let head = if specific == 0 {
         format!("Nenhum aprendizado específico para: {}. Valem só os globais, se houver:\n\n", paths.join(", "))
     } else {
@@ -419,17 +433,67 @@ pub fn relativize(path: &str, roots: &[std::path::PathBuf]) -> String {
 impl crate::Core {
     /// Resposta de `ask-agent --learn`: o que o projeto aprendeu sobre `paths`. Lê a pasta de aprendizados da
     /// worktree da tarefa de `instance` (onde o agente trabalha, com os aprendizados que ele mesmo criou) ou, sem
-    /// tarefa, do repositório do projeto.
+    /// tarefa, do repositório do projeto. Soma a situação atual do projeto ([`crate::situation`]): com `paths`, no
+    /// topo, o aviso dos que outra tarefa em andamento também mexe; sem `paths`, no fim, a seção inteira. O agente
+    /// de uma tarefa não se vê nela.
     pub fn learn(&self, project: &str, instance: &str, paths: &[String]) -> Result<String, String> {
-        let project_root = self.project_path(project).and_then(|p| self.git_repo_at(&p).ok()).map(|r| r.root);
+        let repo = self.project_path(project).and_then(|p| self.git_repo_at(&p).ok());
+        let project_root = repo.as_ref().map(|r| r.root.clone());
         let work_root = self.task_cwd(project, instance).or_else(|| project_root.clone());
         let Some(work_root) = work_root else {
             return Err("não achei o repositório do projeto: os aprendizados moram em memory/aprendizados/ dele".into());
         };
         let roots: Vec<std::path::PathBuf> = [Some(work_root.clone()), project_root].into_iter().flatten().collect();
         let paths: Vec<String> = paths.iter().map(|p| relativize(p, &roots)).filter(|p| !p.is_empty()).collect();
-        Ok(learn_report(&load(&work_root), &paths))
+        let all = load(&work_root);
+        let Some(repo) = repo else { return Ok(learn_report(&all, &paths)) };
+        let others = self.busy_tasks(project, &repo, instance);
+        if !paths.is_empty() {
+            let report = learn_report(&all, &paths);
+            let warnings = crate::situation::clash_warnings(&others, &paths);
+            return Ok(if warnings.is_empty() { report } else { format!("ATENÇÃO:\n{warnings}\n\n{report}") });
+        }
+        let base = self.task_of_instance(project, instance).map(|t| t.base).or_else(|| current_branch(&repo));
+        let base = base.unwrap_or_else(|| "HEAD".into());
+        let commits = crate::situation::base_commits(&repo, &base);
+        let render = |commits: &[String]| crate::situation::render(&others, commits, &base, &[], crate::situation::BUDGET);
+        Ok(learn_with_situation(&all, &render(&commits), &render(&[])))
     }
+}
+
+/// `--learn` sem arquivos: os aprendizados e a situação atual sob um teto só (`LEARN_BUDGET`). Cabe tudo? Senão
+/// corta primeiro os commits da situação (`lean_situation` é ela sem eles), depois o índice dos aprendizados e por
+/// último os globais por inteiro.
+fn learn_with_situation(all: &[Learning], full_situation: &str, lean_situation: &str) -> String {
+    let join = |report: String, situation: &str| format!("{report}\n\nSituação atual:\n{situation}");
+    let size = |text: &str| text.chars().count();
+    for situation in [full_situation, lean_situation] {
+        let text = join(learn_report(all, &[]), situation);
+        if size(&text) <= LEARN_BUDGET {
+            return text;
+        }
+    }
+    // O índice ocupa o que sobra depois dos globais e da situação enxuta (o cabeçalho dele também conta).
+    let without_index = join(learn_report_with(all, &[], LEARN_BUDGET, 0), lean_situation);
+    // A linha final "… e mais N" passa um pouco do teto do índice: sobra uma margem para ela.
+    let spare = LEARN_BUDGET.saturating_sub(size(&without_index) + size(INDEX_HEADER) + 100);
+    if spare > 0 {
+        let text = join(learn_report_with(all, &[], LEARN_BUDGET, spare), lean_situation);
+        if size(&text) <= LEARN_BUDGET {
+            return text;
+        }
+    }
+    if size(&without_index) <= LEARN_BUDGET {
+        return without_index;
+    }
+    let overhead = size(&join("Aprendizados do projeto:\n\n".to_owned(), lean_situation));
+    join(learn_report_with(all, &[], LEARN_BUDGET.saturating_sub(overhead), 0), lean_situation)
+}
+
+/// A branch em que o repositório principal está (vazio em HEAD solto).
+fn current_branch(repo: &crate::git::Repo) -> Option<String> {
+    let out = repo.read(&["branch", "--show-current"]).ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_owned()).filter(|b| !b.is_empty())
 }
 
 #[cfg(test)]
@@ -610,6 +674,34 @@ mod tests {
         assert!(out.contains("### T g") && out.contains("global"), "{out}");
         assert!(!out.contains("### T a") && out.contains(&format!("- {DIR}/a.md — R a")), "{out}");
         assert!(learn_report(&[], &[]).contains("ainda não tem aprendizados"));
+    }
+
+    #[test]
+    fn the_learn_with_situation_cuts_the_commits_then_the_index_then_the_globals() {
+        let size = |t: &str| t.chars().count();
+        let specific: Vec<Learning> = (0..30).map(|n| learning(&format!("e{n}"), &["crates/**"], "corpo")).collect();
+        let (full, lean) = ("situação completa\ncommits".to_owned(), "situação enxuta".to_owned());
+        // Cabe tudo: nada é cortado.
+        let mut all = vec![learning("g", &[], "global")];
+        all.extend(specific.clone());
+        let text = learn_with_situation(&all, &full, &lean);
+        assert!(text.contains("situação completa") && text.contains("### T g") && !text.contains("- … e mais"), "{text}");
+        // Os globais ocupam quase tudo: a situação perde os commits, o índice encolhe, os globais ficam.
+        let big = "x".repeat(LEARN_BUDGET - 700);
+        let mut all = vec![learning("g", &[], &big)];
+        all.extend(specific.clone());
+        let text = learn_with_situation(&all, &"c".repeat(1_500), &lean);
+        assert!(size(&text) <= LEARN_BUDGET && text.contains(&big) && text.contains("situação enxuta"), "{}", size(&text));
+        assert!(text.contains("- … e mais"), "o índice encolheu: {} {}", size(&text), text.split("Outros").nth(1).unwrap_or("sem índice"));
+        // Nem os globais cabem com a situação: o índice some, depois os globais; a situação enxuta fica.
+        let huge = "x".repeat(LEARN_BUDGET - 60);
+        let all = vec![learning("g", &[], &huge), learning("e", &["crates/**"], "corpo")];
+        let text = learn_with_situation(&all, &full, &lean);
+        assert!(
+            size(&text) <= LEARN_BUDGET && text.ends_with("situação enxuta") && !text.contains("Outros aprendizados"),
+            "{}",
+            size(&text)
+        );
     }
 
     #[test]
