@@ -71,6 +71,5 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
 5. **Renomear para AgentDeck e identidade visual** (combinado em 2026-10-22). **Feitos**: o nome (tarefa `t20`, com migração
    dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md), seção 6) e o visual (`t21`–`t23`). Os **temas** ficam para depois
    da `main` ([pendencias.md](pendencias.md), bloco "Próximo").
-6. **Substituir a `main` pela `dev`** (aprovado pelo usuário em 2026-10-22). A `main` é o piloto em TypeScript; a `dev` é a
-   reescrita em Rust, que o usuário usa todo dia. A `main` é trocada inteira pela `dev` (sem mesclagem), depois da `t29`
-   (Linux), de uma tarefa de validação e da correção da janela maximizada.
+6. **Substituir a `main` pela `dev`**: **feito em 2026-10-24**. A `main` é a reescrita em Rust; o piloto em TypeScript
+   ficou na tag `piloto-typescript`. O passo seguinte é o bloco "Depois da `main`" acima.

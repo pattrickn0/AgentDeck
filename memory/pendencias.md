@@ -34,9 +34,10 @@ Fica para **depois** da promoção para a `main` (decidido com o usuário em 202
 
 - [ ] **Temas** (pedido do usuário, 18/10). A identidade visual (visual C) está feita nas três partes (`t21`, `t22`, `t23`, ver [historico.md](historico.md)), com os tokens de `theme.rs` e sem cor solta. Falta o resto do pedido, os temas para o usuário escolher: trocar as constantes de `theme.rs` por uma paleta carregada em tempo de execução, escolhida nas configurações e gravada em `Config`. A paleta inclui o fundo e as 16 cores do terminal (`TERM_BG`/`TERM_FG`, `terminal/colors.rs`), então um tema muda o fundo de todas as abas de uma vez (CLIs com tema próprio, como o OpenCode, continuam usando o tema deles).
 
-### d) Estabilizar e promover a `dev` para a `main`
+### d) Depois da promoção para a `main`
 
-- [ ] **Substituir a `main` pela `dev`** (aprovado pelo usuário em 2026-10-22). A `main` de hoje é o piloto em TypeScript: ela é **trocada inteira** pelo conteúdo da `dev`, sem mesclagem; a `main` antiga fica numa tag para consulta. O usuário usa a versão em Rust todo dia e considera a maior parte de [testes.md](testes.md) conferida no uso, mesmo sem marcar (os itens continuam lá). Antes da troca: a `t29` (suporte a Linux), a tarefa de validação para a `main` e a correção da janela maximizada.
+A `main` passou a ser a `dev` em 2026-10-24 (a antiga ficou na tag `piloto-typescript`; ver [historico.md](historico.md)).
+
 - [ ] **Tirar a migração da config `CommandDeck/`** numa versão depois da promoção (a única reserva do nome antigo que sobrou; `config::legacy_config_files`, lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
 - [ ] **Renomear a pasta local `commanddeck-dev`** (ação do usuário): o repositório no GitHub já se chama `AgentDeck` e as URLs antigas redirecionam; falta só a pasta.
 
@@ -104,7 +105,7 @@ As fases 1 (`t13`, `t15`, `t16`) e 2 (`t40`: `ask-agent --outline`; `t41`: a sit
 
 ## Git e GitHub
 
-- A troca da `main` pela `dev` está no bloco "Próximo", item d).
+- A troca da `main` pela `dev` foi feita em 2026-10-24 (ver [historico.md](historico.md)).
 - [ ] **Instruções do Antigravity/Goose/Copilot sem criar `AGENTS.md`** (t38): hoje o app cria o arquivo na pasta do usuário porque não achei outro canal verificado. A cota do Antigravity estava esgotada na hora do teste; ver se `agy` lê `AGENTS.md`/`GEMINI.md` de uma pasta passada em `--add-dir` (o app já passa `dados/`: bastaria gravar lá) ou se um plugin do `agy` (`~/.gemini/config/plugins/<nome>/rules/AGENTS.md`, global e valendo fora do AgentDeck) compensa. O Amazon Q (`.amazonq/rules`) segue sem canal, e a execução headless só leva as instruções no Claude.
 - [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). O bloco não lista mais os agentes instalados (t38), então não muda de máquina para máquina. Em repositório sem `AGENTS.md`, só Antigravity, Goose e Copilot (que não têm outro canal) fazem o app criá-lo, como não rastreado, com aviso na Conversa; os demais CLIs recebem as instruções sem tocar no repositório. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
 - [ ] Com `commit.gpgsign` e pinentry gráfico, a chave travada é recusada na hora (com a explicação de como destravar numa aba) em vez de abrir o diálogo de senha. Avaliar deixar o diálogo abrir quando houver pinentry gráfico.
