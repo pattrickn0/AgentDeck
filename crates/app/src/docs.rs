@@ -262,6 +262,9 @@ pub struct Source {
     pub locked: Option<String>,
     /// O disco mudou com edição não salva: o texto de lá, esperando a escolha entre manter a minha ou recarregar.
     pub external: Option<String>,
+    /// O BOM, o fim de linha e a trava do texto de `external`: recarregá-lo adota os três (gravar com os do arquivo
+    /// antigo reescreveria todas as linhas, ou gravaria por cima de bytes que não viraram texto).
+    external_form: Option<(bool, Eol, Option<String>)>,
     /// O arquivo sumiu (ou ficou ilegível) enquanto havia edição não salva: ela continua aqui.
     pub gone: bool,
     /// Uma gravação em andamento, e o erro da última que falhou.
@@ -315,6 +318,7 @@ impl Source {
             raw: false,
             locked,
             external: None,
+            external_form: None,
             gone: false,
             saving: false,
             save_error: None,
@@ -342,16 +346,20 @@ impl Source {
             }
             (self.text, self.disk, self.bom, self.eol, self.locked) = (text.clone(), text, bom, eol, locked);
             self.external = None;
+            self.external_form = None;
             return;
         }
         if text == self.disk {
             self.external = None;
+            self.external_form = None;
         } else if text == self.text {
             // O agente escreveu o mesmo que o usuário: não há o que escolher.
             self.disk = text;
             self.external = None;
+            self.external_form = None;
         } else {
             self.external = Some(text);
+            self.external_form = Some((bom, eol, locked));
         }
     }
 
@@ -360,6 +368,7 @@ impl Source {
         if let Some(ext) = self.external.take() {
             self.disk = ext;
         }
+        self.external_form = None;
     }
 
     /// "Recarregar a do disco": a edição é descartada.
@@ -368,6 +377,17 @@ impl Source {
             self.text = ext.clone();
             self.disk = ext;
             self.version += 1;
+            self.adopt_external_form();
+        }
+    }
+
+    /// O texto de `external` virou o da tela: o BOM, o fim de linha e a trava passam a ser os dele.
+    fn adopt_external_form(&mut self) {
+        if let Some((bom, eol, locked)) = self.external_form.take() {
+            (self.bom, self.eol, self.locked) = (bom, eol, locked);
+            if self.locked.is_some() {
+                self.editing = false;
+            }
         }
     }
 
@@ -383,6 +403,9 @@ impl Source {
 
     /// Joga fora a edição: a tela volta ao que está no disco (ou ao texto novo que o disco trouxe).
     pub fn discard(&mut self) {
+        if self.external.is_some() {
+            self.adopt_external_form();
+        }
         self.text = self.external.take().unwrap_or_else(|| self.disk.clone());
         self.disk = self.text.clone();
         self.version += 1;
@@ -393,6 +416,7 @@ impl Source {
     pub fn mark_saved(&mut self, saved: &str) {
         self.disk = saved.to_owned();
         self.external = None;
+        self.external_form = None;
         self.gone = false;
         self.saving = false;
         self.save_error = None;
@@ -1060,7 +1084,26 @@ impl Deck {
         let Some(tab) = self.docs.get_mut(uid) else { return };
         let (Some(rel), project) = (tab.kind.file_path().map(str::to_owned), tab.project.clone()) else { return };
         let DocState::Source(src) = &mut tab.state else { return };
-        if src.saving || src.locked.is_some() || src.external.is_some() {
+        if src.saving {
+            // A gravação já em andamento leva o que vem depois (ex.: "Salvar tudo e sair" logo depois do Ctrl+S).
+            if after != After::Nothing {
+                self.docs.pending.insert(uid, after);
+            }
+            return;
+        }
+        if src.locked.is_some() || src.external.is_some() {
+            // Pedido pela pergunta de fechar (o Ctrl+S e o botão já ficam desligados): mostra o documento e diz por quê.
+            if after != After::Nothing {
+                let why = if src.external.is_some() {
+                    "o arquivo mudou no disco; escolha antes entre manter a sua edição ou recarregar a do disco"
+                } else {
+                    "o arquivo está só em leitura"
+                };
+                let name = tab.subtitle.clone();
+                self.docs.focus(uid);
+                self.docs.view = CenterView::Docs;
+                self.system(format!("Não gravei {name}: {why}."));
+            }
             return;
         }
         if !src.dirty() {
@@ -1580,6 +1623,33 @@ Binary files a/img.png and b/img.png differ
         assert_eq!((s.text.as_str(), s.disk.as_str(), s.external.is_none()), ("dois\n", "dois\n", true));
         assert!(s.version > v);
         assert!(!s.dirty());
+    }
+
+    #[test]
+    fn reloading_the_agents_text_takes_its_line_ending_bom_and_lock() {
+        let mut s = source("um\n");
+        s.set_editing(true);
+        s.text = "um\nminha\n".into();
+        s.touched();
+        s.reload("\u{feff}um\r\nagente\r\n");
+        s.take_disk();
+        assert_eq!((s.text.as_str(), s.eol, s.bom), ("um\nagente\n", Eol::Crlf, true));
+        // Manter a minha deixa o formato do arquivo que estava aberto.
+        let mut s = source("um\n");
+        s.set_editing(true);
+        s.text = "um\nminha\n".into();
+        s.touched();
+        s.reload("um\r\nagente\r\n");
+        s.keep_mine();
+        assert_eq!((s.eol, s.bom), (Eol::Lf, false));
+        // O texto do agente que não é UTF-8 trava a gravação, e a edição sai.
+        let mut s = source("um\n");
+        s.set_editing(true);
+        s.text = "um\nminha\n".into();
+        s.touched();
+        s.reload("um\u{fffd}\n");
+        s.take_disk();
+        assert!(s.locked.is_some() && !s.editing);
     }
 
     #[test]

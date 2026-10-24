@@ -219,7 +219,8 @@ pub fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc, find: &mut Fi
     if find.open {
         find.refresh(doc.lines.len() as u64, |q| (Vec::new(), highlight::find_lines(doc.lines.iter().map(String::as_str), q)));
     }
-    let current = find.current_line();
+    // A busca fechada guarda a consulta (volta ao reabrir), mas não marca nada.
+    let current = find.current_line().filter(|_| find.open);
     let sel_id = Id::new(("doc-text-sel", uid));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(Align::Min)));
     child.set_clip_rect(body);
@@ -256,7 +257,7 @@ pub fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc, find: &mut Fi
             );
             let line = &doc.lines[n];
             let spans = doc.spans.get(n).map_or(&[][..], Vec::as_slice);
-            let hits = if find.lines.binary_search(&n).is_ok() { highlight::find_all(line, &find.query) } else { Vec::new() };
+            let hits = if find.open && find.lines.binary_search(&n).is_ok() { highlight::find_all(line, &find.query) } else { Vec::new() };
             let galley = painter.layout_job(diff_view::piece_job(line, &(0..line.len()), spans, &hits, current == Some(n), p.text, &font));
             let at = Pos2::new(row.min.x + gutter, row.min.y);
             if let Some(r) = sel.and_then(|s| s.on_line(n, line.len())).filter(|r| !r.is_empty()) {
