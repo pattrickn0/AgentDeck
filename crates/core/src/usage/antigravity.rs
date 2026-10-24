@@ -18,9 +18,11 @@
 //! maior uso.
 //!
 //! # Credenciais
-//! No Windows, o CLI armazena o token ativo no Gerenciador de Credenciais
-//! do Windows (`gemini:antigravity`). Em outros sistemas ou como fallback,
-//! lê `~/.gemini/oauth_creds.json`.
+//! O CLI guarda o token ativo no chaveiro do sistema: no Windows, o Gerenciador de Credenciais (`gemini:antigravity`);
+//! no Linux, o Secret Service por D-Bus (`service=gemini`, `username=antigravity`, como o `zalando/go-keyring` que
+//! ele usa). O conteúdo é o mesmo JSON nos dois (`parse_creds_json` entende o formato do keyring).
+//! Como fallback, lê `~/.gemini/oauth_creds.json` e o arquivo que o `agy` usa quando não há chaveiro
+//! (`GEMINI_FORCE_FILE_STORAGE=true`, o caminho de SSH, contêiner e WSL): `~/.gemini/antigravity-cli/antigravity-oauth-token`.
 //! Só o `access_token` válido é usado: quem o renova é o próprio CLI (enquanto roda).
 //! Vencido, a cota fica "sem dados" até ele renovar; o app não guarda credenciais OAuth
 //! de terceiros nem renova tokens por conta própria.
@@ -45,6 +47,18 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Versão do CLI no `User-Agent` quando não dá para perguntar ao `agy` instalado (uma conferida que
 /// recebe os grupos do Gemini).
 const FALLBACK_CLI_VERSION: &str = "1.4.5";
+
+/// Serviço e usuário com que o `agy` grava o token no Secret Service do Linux (`zalando/go-keyring`: os atributos
+/// `service` e `username`, com o rótulo "Password for 'antigravity' on 'gemini'").
+#[cfg(target_os = "linux")]
+const KEYRING_SERVICE: &str = "gemini";
+#[cfg(target_os = "linux")]
+const KEYRING_USER: &str = "antigravity";
+
+/// Quanto a leitura do chaveiro pode segurar a consulta de cota. Ela roda em segundo plano, a cada poucos minutos:
+/// sem sessão gráfica (SSH, contêiner) ou com o chaveiro travado, tem de desistir e cair nos arquivos.
+#[cfg(target_os = "linux")]
+const KEYRING_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// O `User-Agent` do CLI (`antigravity/cli/1.4.5 (aidev_client; os_type=windows; arch=amd64)`).
 fn user_agent(version: Option<&str>) -> String {
@@ -127,6 +141,40 @@ mod wincred {
     }
 }
 
+#[cfg(target_os = "linux")]
+mod secret_service {
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    /// Lê o segredo `service`/`username` do chaveiro do sistema (Secret Service, por D-Bus).
+    ///
+    /// A busca roda numa thread própria com prazo: sem sessão D-Bus (SSH, contêiner) ou com o chaveiro travado, a
+    /// chamada pode esperar, e a consulta de cota não pode ficar presa por isso. Só os itens já destravados são
+    /// lidos — destravar abriria um pedido de senha na tela do usuário.
+    pub fn read(service: &str, user: &str, timeout: Duration) -> Option<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (service, user) = (service.to_owned(), user.to_owned());
+        std::thread::Builder::new()
+            .name("cd-keyring".into())
+            .spawn(move || {
+                let _ = tx.send(lookup(&service, &user));
+            })
+            .ok()?;
+        rx.recv_timeout(timeout).ok().flatten()
+    }
+
+    fn lookup(service: &str, user: &str) -> Option<String> {
+        use secret_service::blocking::SecretService;
+        use secret_service::EncryptionType;
+
+        // Sessão "plain": o segredo não sai da máquina e o `go-keyring` do `agy` também abre a sessão assim.
+        let ss = SecretService::connect(EncryptionType::Plain).ok()?;
+        let found = ss.search_items(HashMap::from([("service", service), ("username", user)])).ok()?;
+        let secret = found.unlocked.into_iter().find_map(|item| item.get_secret().ok());
+        secret.and_then(|bytes| String::from_utf8(bytes).ok())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RawCreds {
     access_token: String,
@@ -163,25 +211,36 @@ where
 
 fn credential_sources(home: &Path) -> Vec<String> {
     let mut out = Vec::new();
-    // O Credential Manager é do usuário do sistema: com uma home isolada (testes, `StartOptions`)
-    // ele não entra.
+    // O chaveiro é do usuário do sistema: com uma home isolada (testes, `StartOptions`) ele não entra.
+    #[cfg(any(windows, target_os = "linux"))]
+    let own_home = dirs::home_dir().filter(|h| util::same_path(h, home));
+
     #[cfg(windows)]
-    if dirs::home_dir().is_some_and(|h| util::same_path(&h, home)) {
+    if own_home.is_some() {
         if let Some(json_str) = wincred::read_generic("gemini:antigravity") {
             out.push(json_str);
         }
     }
 
-    // Fallback: ~/.gemini/oauth_creds.json na pasta home passada
-    let path = home.join(".gemini").join("oauth_creds.json");
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        out.push(content);
+    // Linux: o `agy` guarda o token no Secret Service, com o mesmo JSON que usa no Gerenciador de Credenciais do
+    // Windows (`service=gemini`, `username=antigravity`).
+    #[cfg(target_os = "linux")]
+    if own_home.is_some() {
+        match secret_service::read(KEYRING_SERVICE, KEYRING_USER, KEYRING_TIMEOUT) {
+            Some(secret) => out.push(secret),
+            None => log::debug!("cota do Antigravity: o chaveiro do sistema não devolveu o token {KEYRING_SERVICE}/{KEYRING_USER}"),
+        }
     }
 
-    // Fallback adicional: home do sistema operacional (se diferente da home configurada)
-    if let Some(sys_home) = dirs::home_dir() {
-        if !util::same_path(&sys_home, home) {
-            let path = sys_home.join(".gemini").join("oauth_creds.json");
+    // Fallback: ~/.gemini/oauth_creds.json na pasta home passada, e depois na home do sistema (se for outra).
+    let system_home = dirs::home_dir();
+    let mut bases = vec![home];
+    if let Some(h) = system_home.as_deref().filter(|h| !util::same_path(h, home)) {
+        bases.push(h);
+    }
+    for base in bases {
+        for rel in [["oauth_creds.json"].as_slice(), ["antigravity-cli", "antigravity-oauth-token"].as_slice()] {
+            let path = rel.iter().fold(base.join(".gemini"), |p, part| p.join(part));
             if let Ok(content) = std::fs::read_to_string(&path) {
                 out.push(content);
             }
@@ -674,6 +733,21 @@ mod tests {
         let v = json!({});
         assert!(parse_quota_summary(&v, NOW).is_none());
         assert!(parse_available_models(&v, NOW).is_none());
+    }
+
+    #[test]
+    fn the_token_file_of_a_keyring_less_agy_is_another_source() {
+        // Sem chaveiro (SSH, contêiner, WSL), o `agy` grava o mesmo JSON em disco quando
+        // `GEMINI_FORCE_FILE_STORAGE=true`.
+        let home = tempfile::tempdir().expect("home");
+        let dir = home.path().join(".gemini").join("antigravity-cli");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let secret = r#"{"token":{"access_token":"ya29.disco","refresh_token":"1//r","expiry":"2999-01-01T00:00:00Z","token_type":"Bearer"},"auth_method":"consumer"}"#;
+        std::fs::write(dir.join("antigravity-oauth-token"), secret).expect("write");
+
+        let sources = credential_sources(home.path());
+        assert!(sources.iter().any(|s| s == secret), "o arquivo do `agy` sem chaveiro entra nas fontes");
+        assert_eq!(valid_access_token(home.path(), NOW).as_deref(), Some("ya29.disco"));
     }
 
     #[test]

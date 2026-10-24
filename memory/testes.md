@@ -20,7 +20,7 @@ O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); 
 ## Preparação
 
 - [x] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\agentdeck.exe` (os três `.exe` na mesma pasta).
-- [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode, Ollama.
+- [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode.
 - [x] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
 - [x] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
 - [x] Abrir um projeto seu que seja repositório git ("+" da seção PROJETOS na barra lateral).
@@ -51,13 +51,15 @@ Pela aba **Tarefas** da barra direita:
 
 - [ ] Abrir o app mostra Tarefas como a primeira aba da barra direita. Num projeto git sem tarefas, aparece a explicação e "+ Nova tarefa".
 - [ ] "+ Nova": com o título vazio, o botão fica desligado; a base vem com a branch atual; base inexistente dá erro inline; Ctrl+Enter cria. Com "Iniciar agora", o detalhe abre em andamento e a aba do agente aparece na worktree com o pedido digitado. Sem ele, a tarefa fica em rascunho e "Iniciar" a começa.
-- [ ] **Esforço no formulário** (t25): em "+ Nova" o campo ESFORÇO vem em "Padrão". Com Claude, escolher "Alto" e criar com "Iniciar agora": o cartão e o detalhe mostram "Claude · <modelo> · alto" e a aba abre com `--effort high` (o Claude mostra o esforço na linha de status ou em `/model`; se não mostrar, conferir a linha de comando do processo). Com Antigravity, escolher um modelo `…-argon-low` e "Alto": o modelo da tarefa vira `…-argon-high`; sem modelo escolhido o seletor fica apagado, com a dica ao passar o mouse. Com OpenCode (e Codex/Ollama) o seletor fica apagado, com a dica. `ask-agent --task new "x" --effort alto --start --file p.md` aceita `low|medium|high` (ou baixo|médio|alto) e `--effort max` dá erro.
+- [ ] **Esforço no formulário** (t25): em "+ Nova" o campo ESFORÇO vem em "Padrão". Com Claude, escolher "Alto" e criar com "Iniciar agora": o cartão e o detalhe mostram "Claude · <modelo> · alto" e a aba abre com `--effort high` (o Claude mostra o esforço na linha de status ou em `/model`; se não mostrar, conferir a linha de comando do processo). Com Antigravity, escolher um modelo `…-argon-low` e "Alto": o modelo da tarefa vira `…-argon-high`; sem modelo escolhido o seletor fica apagado, com a dica ao passar o mouse. Com OpenCode (e Codex) o seletor fica apagado, com a dica. `ask-agent --task new "x" --effort alto --start --file p.md` aceita `low|medium|high` (ou baixo|médio|alto) e `--effort max` dá erro.
 - [ ] Fechar a aba de uma tarefa em andamento: o detalhe mostra "Reabrir aba", que a abre de novo na worktree com o modelo da tarefa.
 - [ ] O agente roda `ask-agent --task done tN -`: o cartão vai sozinho para "Em revisão", o selo do ícone sobe e aparece "N arquivos +X −Y".
 - [ ] No detalhe em revisão: relatório, alterações por arquivo, e "Ver diff completo" abre o diff **no centro** (modo Documentos, t19: lista de arquivos à esquerda, cores, linhas longas quebradas na largura, sem rolagem horizontal); a barra direita continua no detalhe, com os botões da revisão visíveis. **Abrir em Documentos** embaixo do Pedido e do Relatório abre cada um formatado.
 - [ ] **"Ver o que foi mesclado"** (t18): em aguardando validação (e depois em concluída), o detalhe mostra o hash curto da mesclagem ao lado de `branch → base` e o botão das alterações diz "Ver o que foi mesclado"; ele abre (no centro) só o que a mesclagem trouxe (sem o que a base ganhou antes) e "←" volta. Uma tarefa mesclada antes desta versão (sem o hash) não mostra o botão. Em revisão e em andamento o botão segue "Ver diff completo".
 - [ ] "Devolver" com Ctrl+Enter: a tarefa volta a andamento e o texto chega à aba do agente, reabrindo-a se estiver fechada.
 - [ ] "Mesclar em <base>" pede confirmação. Com o repositório principal sujo, mostra a recusa e a tarefa fica em revisão. Limpo, mescla e move para **Aguardando validação** (o selo do ícone continua contando); a aba do agente segue aberta.
+- [ ] **Recusa da mesclagem com saída** (t35). Em revisão, com o repositório principal sujo (alterar um arquivo rastreado, sem commit), "Mesclar" → "sim": o aviso explica em linguagem comum ("Há alterações suas, ainda sem commit…") e traz **Guardar minhas alterações e mesclar** e **Ver o que está sem commit** (mostra todos os arquivos). O primeiro guarda (`git stash`), mescla e devolve: a tarefa vai a "Aguardando validação", a sua alteração continua na pasta e o aviso âmbar diz que ela voltou; `git stash list` fica vazio (ou só com o que já havia). Se a sua alteração mexe na mesma linha que a tarefa, a mesclagem passa, a pasta fica limpa (sem marcas de conflito) e o aviso diz que a alteração continua guardada e como recuperar (`git stash list` e `git stash pop`); confira que `git stash show -p` mostra o seu texto. Um arquivo novo seu, não rastreado, com o nome de um que a tarefa cria, recusa antes de mexer em qualquer coisa (sem botão; mova o arquivo). `ask-agent --task merge` continua recusando sem guardar nada.
+- [ ] **Pedir ao agente** (t35): com trabalho sem commit na pasta da tarefa, a recusa traz **Pedir ao agente para fazer o commit**; com conflito, **Pedir ao agente para resolver o conflito**. O clique devolve a tarefa à aba do agente com o pedido pronto (arquivos listados, a pasta da tarefa e, no conflito, `git merge <base>`); depois de ele entregar de novo, "Mesclar" passa. HEAD solto, outra branch, operação do git em andamento ou branch sumida: só a mensagem, sem botão.
 - [ ] Aguardando validação: "Validar" conclui sem perguntar (fecha a aba, apaga a worktree, move para Concluídas). "Reprovar" abre o campo do motivo (Ctrl+Enter envia): a tarefa volta a andamento e o motivo chega ao mesmo agente.
 - [ ] "Descartar" pede confirmação (aguardando validação, avisa que o que já foi mesclado continua na base); depois a aba fecha e a worktree e a branch somem.
 - [ ] Na largura mínima (280 px), nada vaza na lista, no detalhe nem no formulário; trocar de projeto mostra as tarefas do outro.
@@ -74,12 +76,12 @@ Pela aba **Tarefas** da barra direita:
 - [ ] `ask-agent --list` e `--team` mostram `claude@dev (sonnet)`.
 - [ ] `"roleModels": {"claude@dev": "sonnet"}` no config.json: abrir `claude@dev` já usa sonnet, `claude@qa` cai no padrão e um `--model` explícito vence.
 - [ ] Reabrir o app: as abas voltam com o mesmo modelo. Renomear mantém o modelo, e fechar a aba apaga a entrada de `tabModels`.
-- [ ] "+ Novo agente" › do Claude lista Padrão, opus, sonnet, haiku, fable. O › do OpenCode mostra primeiro os provedores (`ollama`, `opencode`, `opencode-go`) com a contagem de modelos; escolher um lista só os modelos dele, com os `-free` primeiro e marcados "grátis", e o "‹" do cabeçalho volta aos provedores. Com um provedor só conectado, o menu vai direto aos modelos dele, sem o passo do provedor. O do Antigravity mostra "Carregando modelos…" e depois a lista (sem CLI ou rede, só "Padrão"). Clicar no nome abre com o padrão.
+- [ ] "+ Novo agente" › do Claude lista Padrão, opus, sonnet, haiku, fable. O › do OpenCode mostra primeiro os provedores (`opencode`, `opencode-go`) com a contagem de modelos; escolher um lista só os modelos dele, com os `-free` primeiro e marcados "grátis", e o "‹" do cabeçalho volta aos provedores. Com um provedor só conectado, o menu vai direto aos modelos dele, sem o passo do provedor. O do Antigravity mostra "Carregando modelos…" e depois a lista (sem CLI ou rede, só "Padrão"). Clicar no nome abre com o padrão.
 - [ ] "Nova tarefa" › Modelo com o OpenCode: o menu começa nos provedores (Padrão + a lista), depois mostra os modelos do provedor, com os `-free` primeiro; "‹ Provedores" volta e "Padrão" limpa o modelo. Com um provedor só, o menu vai direto aos modelos (com "Padrão"), sem "‹ Provedores". O modelo gravado na tarefa mantém o prefixo do provedor (`opencode/…`).
 - [ ] Clique direito numa aba com modelo mostra "Modelo: <m>" no alto do menu.
 - [ ] Antigravity com `--model claude-sonnet-5-5-medium`: o rodapé do agy mostra "Claude Sonnet 5.5 · medium".
 - [ ] Codex com `--model <m>` (se instalado): abre com o modelo e o aviso de fim de turno continua funcionando.
-- [ ] **`ask-agent --models`** (t14): de dentro de uma aba, lista um bloco por agente instalado, na ordem do `--list`, com o nome como vale no `--agent` e os modelos como o `--model` aceita; os `-free` vêm primeiro e levam "(grátis)"; o OpenCode sai agrupado por provedor (`opencode/: …`); os modelos do Ollama saem juntos como `ollama:<modelo>`; o Codex sai como "não lista os modelos" e os CLIs sem escolha (aider…) como "sem escolha de modelo".
+- [ ] **`ask-agent --models`** (t14): de dentro de uma aba, lista um bloco por agente instalado, na ordem do `--list`, com o nome como vale no `--agent` e os modelos como o `--model` aceita; os `-free` vêm primeiro e levam "(grátis)"; o OpenCode sai agrupado por provedor (`opencode/: …`); o Codex sai como "não lista os modelos" e os CLIs sem escolha (aider…) como "sem escolha de modelo".
 - [ ] **`ask-agent --models <agente>`** (t14), ex.: `--models opencode` ou `--models claude`: lista só aquele agente; um agente que não está instalado dá erro (404) e um nome inválido, "agente inválido". Com o CLI sem responder, a linha diz "não consegui listar os modelos" e o resto continua.
 
 ## Memória ★
@@ -92,6 +94,15 @@ Pela aba **Tarefas** da barra direita:
 - [ ] **Aprendizados no feedback** (t16): devolver (ou reprovar) uma tarefa com um feedback que cita um arquivo com aprendizado específico que o agente ainda não recebeu: a mensagem traz "O que o projeto já aprendeu sobre os arquivos citados"; um arquivo que já estava no pedido ou em feedback anterior não repete. A devolução também repete os feedbacks anteriores (até 5).
 - [ ] **Aprendizado criado pelo agente** (t13): o agente da tarefa cria um arquivo em `memory/aprendizados/` na branch e o cita no relatório; depois de mesclar, o `ask-agent --learn` de outra tarefa o mostra. Um arquivo com frontmatter inválido é ignorado, com aviso no log, sem derrubar a tarefa.
 
+- [ ] **Instruções em toda aba, num projeto novo sem `AGENTS.md`** (t38): abra uma pasta nova (sem `AGENTS.md`) como projeto e abra uma aba de cada CLI instalado. Os testes automáticos cobrem os argumentos com agentes falsos; falta ver com o CLI real que ele **recebeu e obedece** (pergunte "o que o AgentDeck mandou você fazer quando precisar de outro agente?" ou peça uma revisão por outro agente e veja se ele abre uma aba em vez de um subagente):
+  - Claude (`--append-system-prompt`), OpenCode (`instructions` em `OPENCODE_CONFIG_CONTENT`; conferido com `opencode run --standalone`, falta o TUI);
+  - **Codex** (`-c developer_instructions=...`; não instalado na máquina de desenvolvimento): confira que o valor entra e que, com a instalação por npm no Windows (shim `.cmd`, texto cru sem aspas), o `codex` não recusa a opção;
+  - **Aider** (`--read`) e **Open Interpreter** (`--custom_instructions`): confira que as flags existem na versão instalada;
+  - **Antigravity** (cota esgotada na hora do desenvolvimento): a pasta ganha um `AGENTS.md` só com o bloco do app, a Conversa avisa uma vez, e o agente conhece o `ask-agent` e a regra dos subagentes; abrir de novo não muda o arquivo nem avisa.
+- [ ] O `git status` do projeto novo: com Claude, Codex, OpenCode e Aider, nada novo; com Antigravity/Goose/Copilot, só o `AGENTS.md` (uma vez, sem mudar a cada abertura).
+- [ ] Um projeto que já tem `AGENTS.md` próprio: o texto do usuário fica como está, só ganha o bloco do app (o caso de sempre), e a Conversa não avisa de criação.
+- [ ] `ask-agent --learn` num projeto sem `memory/aprendizados/` mostra "o projeto ainda não tem aprendizados" e o formato do arquivo (`titulo`, `resumo`, `touches`).
+
 ## Ponte e instâncias
 
 Conversa entre agentes ★
@@ -103,12 +114,10 @@ Conversa entre agentes ★
 - [x] Delegação por cargo: `ask-agent claude@dev "tarefa"` abre a aba **Claude · Dev** em segundo plano.
 - [ ] Fechar a aba de quem perguntou no meio da espera: nada trava; a outra aba segue normal.
 - [ ] Cadeia longa: A pergunta a B, B a C, e C tenta perguntar a um quarto agente → recusado com "profundidade máxima" (o limite é 2 saltos).
-- [ ] Aba do Ollama: "quem é você?" responde com o nome da instância (`ollama:<modelo>`); com o Ollama parado, quem perguntou recebe "não consegui responder" em vez de esperar 10 min.
 - [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
 - [ ] Ponte: pergunta com resposta atrasada (202); renomear a aba de quem perguntou e a do destino antes da resposta. A resposta é digitada na aba renomeada de quem perguntou.
 - [ ] Ponte: depois de um 202, o destino roda `ask-agent <quem perguntou> "pergunta"`. Chega como pergunta nova, e a original continua esperando o `--reply N`.
 - [ ] Ponte: responder pela forma antiga com apelido (`ask-agent agy "..."` para uma pergunta do Antigravity) entrega a resposta, sem 409.
-- [ ] Ollama: duas perguntas para a mesma aba do Ollama (de agentes diferentes, ou com renomeação no meio) voltam cada uma a quem perguntou.
 - [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o agentdeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
 
 Quando a mensagem é digitada na aba ★
@@ -203,11 +212,21 @@ Documentos no centro ★ (t19)
 - [ ] **Aba Git**: no diff de um arquivo alterado e no detalhe de um commit do Histórico, "Abrir em Documentos" abre o diff só para ler; o preparo por trecho continua na barra direita. Com a barra estreita (a padrão incluída) o botão vira só um ícone (caixa com seta) ao lado de + e ↶, com a dica; alargando a barra, volta o texto.
 - [ ] **Largura mínima da janela (~820 px)**: com Documentos à vista, nada vaza no centro nem na barra de título (a chave compacta cabe ao lado do logo com a barra recolhida; o uso dos agentes encolhe); o diff põe a lista de arquivos em cima do diff quando o centro é estreito.
 
+Documentos: editor, realce e busca ★ (t39)
+
+- [ ] **Editar e salvar**: duplo clique num `.rs` do projeto, **Editar**, digitar. Na aba aparece um ponto âmbar no lugar do × e, no título, "● Não salvo"; **Ctrl+S** (ou **Salvar**) grava e o ponto some. Conferir no explorador do Windows/`git diff` que só as linhas editadas mudaram. Tab indenta com 4 espaços, Shift+Tab desfaz o recuo (com várias linhas selecionadas, todas), Ctrl+Z desfaz.
+- [ ] **Fim de linha e BOM**: um arquivo com CRLF (comum no Windows) volta com CRLF depois de gravar; um com LF volta com LF; um com BOM mantém o BOM; um sem BOM não ganha. Um arquivo que mistura CRLF e LF, ou que não é UTF-8 (salvar um `.txt` em ANSI com acento), abre só para leitura e uma faixa explica o motivo (sem botão Editar).
+- [ ] **Fechar com edição não salva**: o × da aba pergunta (Salvar / Não salvar / Cancelar) e cada botão faz o que diz; **Recarregar** sobre uma edição pergunta antes de descartar; fechar o app (× da janela, Alt+F4) com edição pergunta, e "Salvar tudo e sair" grava todos os arquivos antes de sair.
+- [ ] **Um agente muda o arquivo aberto**: com edição não salva, pedir a um agente que mude o mesmo arquivo. Aparece a faixa "O arquivo mudou no disco (um agente?)…" com **Manter a minha** e **Recarregar a do disco**; nada do que foi digitado some antes da escolha; Ctrl+S e Salvar não gravam enquanto a escolha não é feita. "Manter a minha" e salvar põe o texto do usuário por cima; "Recarregar a do disco" mostra o do agente. Sem edição não salva, o arquivo só atualiza sozinho. Apagar o arquivo com edição: aviso, a edição fica e Ctrl+S o recria.
+- [ ] **Realce**: abrir arquivos de cada tipo (Rust, Markdown, TOML, JSON, YAML, JS/TS, Python, PowerShell, shell): palavras-chave, textos, números, comentários, tipos e chaves coloridos; digitar não trava num arquivo de ~250 KB (o limite do editor); um arquivo maior (ou com linha de mais de 4 000 caracteres, como um JSON minificado) abre só para leitura, com a faixa, e rola com fluidez. No diff, o código tem as cores da linguagem do arquivo, e um `/* … */` aberto num lado não pinta o outro.
+- [ ] **Buscar (Ctrl+F)**: num arquivo, num arquivo grande e num diff: o campo ganha o foco, cada achado fica marcado (o atual mais forte), "n de m", Enter/Shift+Enter e ‹ › andam e rolam até o achado, Esc fecha. No `.md` formatado, Ctrl+F mostra o código.
+- [ ] **Selecionar e copiar**: arrastar no arquivo seleciona (duplo clique uma palavra) e Ctrl+C copia; no diff e no arquivo grande, arrastar seleciona (passando da borda de cima ou de baixo a tela rola), Ctrl+A seleciona tudo e Ctrl+C copia só o código, sem número de linha nem `+`/`−`; colar num editor externo confere (tabulações do arquivo de volta).
+
 Tela dividida ★
 
 - [x] "+" no cabeçalho do Claude: a 2ª aba do Claude entra **na mesma janela** (não divide de novo).
-- [x] Abrir um Ollama (ou Codex, ou Terminal) pelo "+" da topbar: a tela vira **2 em cima + 1 largo embaixo**. Com o 4º tipo, 2×2.
-- [x] Dois modelos do Ollama ficam na **mesma janela**, um em cada aba. `claude@dev` fica na janela do Claude.
+- [x] Abrir um Codex (ou Terminal) pelo "+" da topbar: a tela vira **2 em cima + 1 largo embaixo**. Com o 4º tipo, 2×2.
+- [x] `claude@dev` fica na **mesma janela** do Claude, em outra aba.
 - [x] Clicar numa janela: ela ganha o **contorno na cor do agente** e o que você digita vai para ela.
 - [x] A rolagem do mouse funciona na janela sob o ponteiro, mesmo sem foco.
 - [x] Ctrl+Tab troca de aba **só dentro** da janela focada; Ctrl+Alt+← → ↑ ↓ passa o foco para a janela vizinha (anotar se o driver de vídeo girar a tela com esse atalho).
@@ -219,7 +238,7 @@ Tela dividida ★
 - [x] Janela mínima (~820 px) com 3 ou mais tipos: as janelas empilham; o que não cabe vira aba da última janela, sem sumir nada.
 - [ ] Com um diff do Git aberto, a barra **mantém a largura** (o conteúdo rola dentro dela) e as janelas **não mudam de tamanho**.
 - [x] Com 4–6 janelas e agentes respondendo ao mesmo tempo: o app continua fluido (anotar se travar).
-- [ ] **Destaque** (t28), com 3 CLIs abertos (Claude, Antigravity, Ollama): em ORGANIZAÇÃO, "Destaque" põe a janela do agente selecionado com 2/3 do centro, à esquerda, e as outras duas empilhadas à direita com a mesma altura e a fresta de 6 px.
+- [ ] **Destaque** (t28), com 3 CLIs abertos (Claude, Antigravity, Codex): em ORGANIZAÇÃO, "Destaque" põe a janela do agente selecionado com 2/3 do centro, à esquerda, e as outras duas empilhadas à direita com a mesma altura e a fresta de 6 px.
 - [ ] **Destaque: trocar o destaque** (t28): clicar no terminal ou no cabeçalho de uma janela pequena, clicar noutro agente da barra lateral, Ctrl+Tab/atalho para outro CLI e o botão "Trazer para o destaque" (ícone de expandir, à esquerda do microfone) trazem o CLI dele para a janela grande. Dois agentes do mesmo CLI continuam em abas na mesma janela. Depois da troca o Claude Code não duplica a conversa (o PTY muda de tamanho uma vez, com o tamanho parado).
 - [ ] **Destaque: divisor** (t28): arrastar a fresta entre a janela grande e a coluna muda a largura (as duas mantêm ~260 px no mínimo); duplo clique volta aos 2/3; a proporção volta ao reabrir o app.
 - [ ] **Destaque: aperto** (t28): estreitar a janela do app até caber uma coluna só (<~526 px de centro): fica só a janela grande, com os outros CLIs como abas. Diminuir a altura até as pequenas não caberem (140 px cada): as que sobram viram abas da última pequena. Com um CLI só, a janela ocupa o centro todo, sem halo.
@@ -232,6 +251,12 @@ Tela dividida ★
 
 Ditado e anexos ★
 
+- [ ] **Ditado opcional: primeira abertura limpa** (t34): numa pasta de dados sem `whisper/models/` e sem `config.json` (use `AGENTDECK_HOME` novo; a pasta `whisper/` ao lado do executável não pode ter o modelo), o app abre normalmente e mostra o modal "Ditado por voz (opcional)" com o tamanho do download (cerca de 1,6 GB). Nada é baixado antes de responder (a barra direita não mostra progresso).
+- [ ] **Ditado opcional: "Agora não"** (t34): o modal fecha (Esc faz o mesmo), nada baixa, o `config.json` ganha `"dictation": "no"` e, ao fechar e abrir o app, a pergunta não volta. O microfone da janela (e `Ctrl+Shift+M`) abre o mesmo modal em vez de gravar; a dica do microfone diz "Ditado por voz não instalado: clique para baixar".
+- [ ] **Ditado opcional: baixar** (t34): "Baixar" no modal (ou, depois, ☰ Configurações → "Baixar (cerca de 1,6 GB)") grava `"dictation": "yes"`, mostra a faixa de progresso na barra direita e, ao terminar, o estado em Configurações vira "instalado"; o microfone grava e transcreve como antes. Durante o download o microfone avisa na Conversa que ainda está baixando (e a dica do botão diz o mesmo).
+- [ ] **Ditado opcional: remover** (t34): ☰ Configurações → "Remover do disco" pede confirmação ("Confirmar: apagar do disco"; fechar o menu desfaz a confirmação); confirmando, `whisper/models/ggml-large-v3-turbo.bin` (e `bin-cuda/`) somem, o estado vira "não instalado", o config grava `"no"` e o microfone volta a oferecer o download. Com o ditado gravando, a remoção é recusada com aviso.
+- [ ] **Ditado opcional: quem já tem o Whisper** (t34): com o modelo já baixado e config sem o campo `dictation` (o caso de quem atualiza), o app não pergunta nada e o ditado funciona como antes; o `config.json` passa a ter `"dictation": "yes"`.
+- [ ] **Ditado opcional: captura de tela** (t34): `AGENTDECK_SMOKE` continua sem baixar nem perguntar; `AGENTDECK_DEBUG_UI=dictation-ask` mostra o modal para conferir o visual.
 - [ ] **Ditado preso à aba (`Ctrl+Shift+M` ou ícone de microfone na aba)**: clicar no microfone da aba grava (pisca em vermelho), clicar de novo transcreve ("Transcrevendo…" na aba) e digita o texto no PTY daquela aba **sem Enter**; trocar de aba durante a gravação/transcrição mantém o destino na aba onde começou; fechar a aba antes do fim descarta o texto com aviso na Conversa.
 - [ ] **Microfone e anexo no cabeçalho da janela** (t11): cada janela tem, ao lado do "+", os botões de microfone e de anexar arquivo; os dois agem na **aba visível daquela janela** (não na janela focada nem na primeira): com duas janelas, gravar na segunda digita na aba visível da segunda; trocar a aba visível muda o alvo. O botão fica apagado quando a aba visível não está viva (ou enquanto transcreve) e a aba mostra só o indicador (ponto vermelho pulsando, "Abrindo…" ou "Transcrevendo…").
 - [ ] **Anexar pelo cabeçalho** (t11): o botão de anexo copia o arquivo para `dados/anexos` e digita `@caminho` no Claude (o caminho puro nos demais CLIs) na aba visível, **sem Enter**; um arquivo com o mesmo nome de outro não o sobrescreve.
@@ -260,12 +285,11 @@ Barra de título, uso dos agentes e barra lateral ★
 - [ ] Redimensionar pelas 4 bordas e pelos 4 cantos (o cursor muda); maximizada, as bordas não reagem e a janela não cobre a barra de tarefas. No Linux, conferir em X11 e em Wayland.
 - [ ] Fechar pelo × salva o tamanho da janela, como antes.
 - [ ] ☰ abre as configurações alinhadas à esquerda.
-- [ ] Uso: cada agente com cota aparece com o logo, a barra fina da sessão (em cima) e a grossa da semana (embaixo), com as porcentagens; passar o mouse abre o painel de uso (todos os agentes, "lido há", quando renova cada janela, "bloqueado até" com a sessão esgotada, locais no rodapé) e ele fica aberto enquanto o mouse está no item ou no painel.
+- [ ] Uso: cada agente com cota aparece com o logo, a barra fina da sessão (em cima) e a grossa da semana (embaixo), com as porcentagens; passar o mouse abre o painel de uso (todos os agentes, "lido há", quando renova cada janela, "bloqueado até" com a sessão esgotada) e ele fica aberto enquanto o mouse está no item ou no painel.
 - [ ] Uso sem janela aberta: sem nenhuma aba do Antigravity (instalado e com login), o uso dele aparece em até ~3 min. Fechar e reabrir o app mantém o último uso do Claude (`dados/usage.json`), com "lido há" no painel.
 - [ ] Antigravity aberto: em até ~3 min aparece o uso dele; sem login ou sem rede, anel tracejado e "uso indisponível".
   - Conferido: com login, o uso do Antigravity aparece. Falta o caso sem login/sem rede.
-- [ ] Ollama: sem barra; aparece no rodapé do painel como "local, sem limite".
-- [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %/12 %, Antigravity com a semana em aviso, Codex com a sessão esgotada, Ollama local) e `usage-panel` (o mesmo com o painel aberto).
+- [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %/12 %, Antigravity com a semana em aviso, Codex com a sessão esgotada) e `usage-panel` (o mesmo com o painel aberto).
 - [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
 - [x] Seção **ORGANIZAÇÃO** na barra lateral: o controle **Abas | Dividida | Destaque** escolhe como as janelas se arrumam (Abas = janela só).
 - [ ] Uso: passado o horário de renovação da sessão sem leitura nova, a barra da sessão mostra 0% esmaecido e o painel diz "renovou · aguardando leitura nova".
@@ -363,9 +387,7 @@ Com a pasta de dados e a configuração de quem usava o CommandDeck (`%APPDATA%\
 
 - [ ] Abrir o `agentdeck.exe`: a janela se chama AgentDeck, os projetos e as abas abertas da versão antiga aparecem, e
   `%APPDATA%\AgentDeck\config.json` foi criado (o `CommandDeck\config.json` continua lá).
-- [ ] Com o `commanddeck.exe` antigo aberto na mesma pasta de dados, o `agentdeck.exe` recusa abrir ("Outra janela do AgentDeck já está usando a pasta de dados…").
 - [ ] As tarefas existentes (`dados/tarefas/`) e o histórico continuam na mesa.
-- [ ] Um projeto cujo `AGENTS.md` tem o bloco `<!-- commanddeck:start -->`: ao abrir o projeto, o bloco vira `<!-- agentdeck:start -->`, sem duplicar, e o resto do arquivo não muda.
 - [ ] Numa aba de agente nova, `ask-agent --list` funciona e `echo %AGENTDECK_PORT%` (ou `$env:AGENTDECK_PORT`) tem valor.
 
 ## Para fechar

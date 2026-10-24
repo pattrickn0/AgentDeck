@@ -26,8 +26,8 @@ pub fn valid_model(s: &str) -> bool {
     !s.is_empty() && s.len() <= MAX_MODEL_LEN && s.chars().all(|c| c.is_ascii_alphanumeric() || ":._/#@+-".contains(c))
 }
 
-/// O agente aceita escolher o modelo (`--model` ou, no OpenCode, a configuração). Os modelos do
-/// Ollama já vão no tipo (`ollama:qwen3.5:9b`) e os demais agentes não têm a opção.
+/// O agente aceita escolher o modelo (`--model` ou, no OpenCode, a configuração); os demais
+/// agentes não têm a opção.
 pub fn accepts_model(kind: &str) -> bool {
     matches!(kind, "claude" | "antigravity" | "codex" | "opencode")
 }
@@ -100,17 +100,25 @@ pub fn headless_args(kind: &str, model: &str) -> Vec<String> {
     }
 }
 
-/// Como abrir o TUI do OpenCode com um modelo: `(argumentos, variável de ambiente)`.
+/// Como abrir o TUI do OpenCode com o modelo e as instruções do AgentDeck: `(argumentos, variável de ambiente)`.
 ///
-/// O TUI não tem `--model` (só `run` e `mini` têm `-m`). A configuração `{"model": "..."}` em
-/// `OPENCODE_CONFIG_CONTENT` vale por cima da configuração do usuário e do projeto, mas só é lida por
-/// quem sobe o servidor, e por padrão o TUI usa o serviço em segundo plano compartilhado (que ignora a
-/// variável do nosso processo). Por isso `--standalone`: servidor próprio da aba, com o nosso ambiente.
-/// Verificado com o OpenCode 2.0.32 (a linha de status do TUI mostra o modelo pedido). A variante
-/// (`modelo#alta`) não existe na configuração, só no `run -m`: aqui vai só o modelo.
-pub fn opencode_tui(model: &str) -> (Vec<String>, (String, String)) {
-    let base = model.split('#').next().unwrap_or(model);
-    (vec!["--standalone".into()], ("OPENCODE_CONFIG_CONTENT".into(), serde_json::json!({ "model": base }).to_string()))
+/// O TUI não tem `--model` (só `run` e `mini` têm `-m`) nem opção de instruções. A configuração em
+/// `OPENCODE_CONFIG_CONTENT` (`{"model": "...", "instructions": ["<arquivo>"]}`) vale por cima da configuração do
+/// usuário e do projeto, e as `instructions` somam-se às dele (o `AGENTS.md` do projeto continua lido). Mas ela só
+/// é lida por quem sobe o servidor, e por padrão o TUI usa o serviço em segundo plano compartilhado (que ignora a
+/// variável do nosso processo). Por isso `--standalone`: servidor próprio da aba, com o nosso ambiente. Verificado
+/// com o OpenCode 2.0.32 (a linha de status do TUI mostra o modelo pedido; `opencode run --standalone` com a
+/// configuração obedece a uma regra do arquivo de instruções). A variante (`modelo#alta`) não existe na
+/// configuração, só no `run -m`: aqui vai só o modelo.
+pub fn opencode_tui(model: Option<&str>, instructions: Option<&std::path::Path>) -> (Vec<String>, (String, String)) {
+    let mut config = serde_json::Map::new();
+    if let Some(model) = model {
+        config.insert("model".into(), model.split('#').next().unwrap_or(model).into());
+    }
+    if let Some(file) = instructions {
+        config.insert("instructions".into(), serde_json::json!([file.to_string_lossy()]));
+    }
+    (vec!["--standalone".into()], ("OPENCODE_CONFIG_CONTENT".into(), serde_json::Value::Object(config).to_string()))
 }
 
 /// Esforço de raciocínio de uma tarefa. Cada CLI o traduz do seu jeito ([`effort_args`], [`effort_model`]);
@@ -281,8 +289,6 @@ pub enum ModelList {
     Unlisted,
     /// Não escolhe modelo: usa o padrão do CLI.
     Fixed,
-    /// O modelo vai no nome do agente (`ollama:<modelo>`).
-    InName,
     /// A listagem falhou: o CLI não respondeu a tempo ou a lista veio vazia.
     Failed,
 }
@@ -301,9 +307,7 @@ pub fn has_model_list(kind: &str) -> bool {
 
 /// A entrada do inventário de `kind`, dada a lista que [`Core::known_models`] devolveu (vazia = falhou).
 pub fn classify(kind: &str, models: Vec<String>) -> AgentModels {
-    let list = if kind.starts_with("ollama:") {
-        ModelList::InName
-    } else if has_model_list(kind) {
+    let list = if has_model_list(kind) {
         if models.is_empty() {
             ModelList::Failed
         } else {
@@ -333,7 +337,6 @@ pub fn format_inventory(items: &[AgentModels]) -> String {
         return "Nenhum agente instalado neste computador.".to_owned();
     }
     let mut lines = Vec::new();
-    let local: Vec<&str> = items.iter().filter(|i| i.list == ModelList::InName).map(|i| i.agent.as_str()).collect();
     for item in items {
         let agent = &item.agent;
         match &item.list {
@@ -354,12 +357,6 @@ pub fn format_inventory(items: &[AgentModels]) -> String {
             ModelList::Fixed => lines.push(format!("{agent}: sem escolha de modelo (usa o padrão do CLI)")),
             ModelList::Failed => {
                 lines.push(format!("{agent}: não consegui listar os modelos (o CLI não respondeu); sem --model ele usa o padrão"))
-            }
-            ModelList::InName => {
-                // Todos os modelos do Ollama saem juntos, na posição do primeiro.
-                if local.first() == Some(&agent.as_str()) {
-                    lines.push(format!("{} (locais; o modelo vai no nome do agente, sem --model)", local.join(", ")));
-                }
             }
         }
     }
@@ -484,37 +481,25 @@ impl Core {
     }
 
     /// Os agentes instalados e os seus modelos (`ask-agent --models`), com o cache de [`Core::known_models`].
-    /// `only` limita a um agente (aceita apelidos como `agy` e `ollama:<modelo>`). As consultas aos CLIs
+    /// `only` limita a um agente (aceita apelidos como `agy`). As consultas aos CLIs
     /// correm juntas, então demora o mesmo que a mais lenta (até `LIST_TIMEOUT`). BLOQUEANTE.
     /// Erro = o agente pedido não está instalado.
     pub fn models_inventory(&self, only: Option<&str>) -> Result<Vec<AgentModels>, String> {
         let agents = &self.inner.agents;
-        let mut kinds: Vec<String> = crate::agents::AGENTS
-            .iter()
-            .filter(|a| a.peer && a.id != "ollama" && agents.resolve(a.id).is_some())
-            .map(|a| a.id.to_owned())
-            .collect();
-        let local: Vec<String> = agents.resolve_ollama(None).map(|o| o.models).unwrap_or_default();
+        let mut kinds: Vec<String> =
+            crate::agents::AGENTS.iter().filter(|a| a.peer && agents.resolve(a.id).is_some()).map(|a| a.id.to_owned()).collect();
         if let Some(only) = only {
             let name = crate::agents::resolve_alias(only);
-            let wanted = if name.starts_with("ollama") { "ollama" } else { name };
-            let installed = kinds.iter().any(|k| k == wanted) || (wanted == "ollama" && agents.resolve_ollama(None).is_some());
-            if !installed {
-                let mut have: Vec<&str> = kinds.iter().map(String::as_str).collect();
-                if agents.resolve_ollama(None).is_some() {
-                    have.push("ollama");
-                }
+            if !kinds.iter().any(|k| k == name) {
+                let have: Vec<&str> = kinds.iter().map(String::as_str).collect();
                 return Err(format!("o agente \"{only}\" não está instalado neste computador (instalados: {})", have.join(", ")));
             }
-            kinds.retain(|k| k == wanted);
+            kinds.retain(|k| k == name);
         }
-        let mut out: Vec<AgentModels> = std::thread::scope(|s| {
+        let out: Vec<AgentModels> = std::thread::scope(|s| {
             let jobs: Vec<_> = kinds.iter().map(|k| s.spawn(move || classify(k, self.known_models(k)))).collect();
             jobs.into_iter().zip(&kinds).map(|(j, k)| j.join().unwrap_or_else(|_| classify(k, Vec::new()))).collect()
         });
-        if only.is_none_or(|o| crate::agents::resolve_alias(o).starts_with("ollama")) {
-            out.extend(local.iter().map(|m| classify(&format!("ollama:{m}"), Vec::new())));
-        }
         Ok(out)
     }
 }
@@ -548,7 +533,7 @@ mod tests {
         for k in ["claude", "antigravity", "codex", "opencode"] {
             assert!(accepts_model(k), "{k}");
         }
-        for k in ["ollama", "ollama:qwen3.5:9b", "shell", "aider", "goose", "copilot", "q", "interpreter"] {
+        for k in ["shell", "aider", "goose", "copilot", "q", "interpreter"] {
             assert!(!accepts_model(k), "{k}");
         }
     }
@@ -570,9 +555,9 @@ mod tests {
         // d) nada: o padrão do CLI.
         assert_eq!(resolve_model(&id("antigravity"), None, None, &cfg), None);
         // Quem não escolhe modelo nunca ganha um, nem do padrão.
-        let all = defaults(&[("shell", "x"), ("ollama", "x")]);
+        let all = defaults(&[("shell", "x"), ("aider", "x")]);
         assert_eq!(resolve_model(&id("shell"), Some("x"), None, &all), None);
-        assert_eq!(resolve_model(&id("ollama:qwen3.5:9b"), None, None, &all), None);
+        assert_eq!(resolve_model(&id("aider"), None, None, &all), None);
         // Valores inválidos (config editada à mão) são ignorados.
         let bad = defaults(&[("claude", "a b"), ("claude@dev", "ok;rm")]);
         assert_eq!(resolve_model(&dev, Some("x y"), Some("z&"), &bad), None);
@@ -616,7 +601,7 @@ mod tests {
 
     #[test]
     fn opencode_tui_uses_a_private_server_with_the_model_in_the_config() {
-        let (args, (key, value)) = opencode_tui("opencode/glm-5.3-flash-free");
+        let (args, (key, value)) = opencode_tui(Some("opencode/glm-5.3-flash-free"), None);
         assert_eq!(args, ["--standalone"]);
         assert_eq!(key, "OPENCODE_CONFIG_CONTENT");
         assert_eq!(
@@ -624,7 +609,21 @@ mod tests {
             serde_json::json!({ "model": "opencode/glm-5.3-flash-free" })
         );
         // A variante só existe no `run -m`.
-        assert_eq!(opencode_tui("opencode/big-pickle#high").1 .1, r#"{"model":"opencode/big-pickle"}"#);
+        assert_eq!(opencode_tui(Some("opencode/big-pickle#high"), None).1 .1, r#"{"model":"opencode/big-pickle"}"#);
+    }
+
+    #[test]
+    fn opencode_tui_always_gets_the_instructions_file_even_without_a_model() {
+        let file = std::path::Path::new("/dados/agentdeck-instructions.md");
+        let (args, (_, value)) = opencode_tui(None, Some(file));
+        assert_eq!(args, ["--standalone"]);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&value).expect("json"),
+            serde_json::json!({ "instructions": ["/dados/agentdeck-instructions.md"] })
+        );
+        let (_, (_, both)) = opencode_tui(Some("p/m#alta"), Some(file));
+        let both: serde_json::Value = serde_json::from_str(&both).expect("json");
+        assert_eq!((both["model"].as_str(), both["instructions"][0].as_str()), (Some("p/m"), Some("/dados/agentdeck-instructions.md")));
     }
 
     #[test]
@@ -652,7 +651,7 @@ mod tests {
         assert_eq!(effort_model("antigravity", "gemini-4-flash", Effort::High), "gemini-4-flash");
         assert_eq!(effort_model("claude", "sonnet", Effort::High), "sonnet");
         // Os demais não recebem nada na linha de comando.
-        for k in ["antigravity", "opencode", "codex", "ollama:qwen3.5:9b", "shell"] {
+        for k in ["antigravity", "opencode", "codex", "shell"] {
             assert!(effort_args(k, Effort::High).is_empty(), "{k}");
         }
     }
@@ -665,7 +664,7 @@ mod tests {
         assert!(effort_unavailable("antigravity", None).is_some_and(|d| d.contains("modelo")));
         assert!(effort_unavailable("antigravity", Some("gemini-4-flash")).is_some());
         assert!(effort_unavailable("opencode", Some("opencode/big-pickle")).is_some_and(|d| d.contains("headless")));
-        for k in ["codex", "ollama:qwen3.5:9b", "shell"] {
+        for k in ["codex", "shell"] {
             assert!(effort_unavailable(k, None).is_some(), "{k}");
         }
     }
@@ -680,7 +679,7 @@ mod tests {
     #[test]
     fn models_are_grouped_by_provider() {
         let list = [
-            "ollama/qwen3.5:4b",
+            "lmstudio/qwen3.5:4b",
             "opencode/pago-antes",
             "opencode/glm-5.3-flash-free",
             "opencode-go/deepseek-v4.1-flash",
@@ -691,7 +690,7 @@ mod tests {
         .map(str::to_owned)
         .to_vec();
         let groups = by_provider(&list);
-        assert_eq!(groups.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["ollama", "opencode", "opencode-go"]);
+        assert_eq!(groups.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["lmstudio", "opencode", "opencode-go"]);
         // Gratuitos primeiro, e a ordem original dentro de cada grupo (ordenação estável).
         assert_eq!(groups[1].1, ["opencode/glm-5.3-flash-free", "opencode/beam-free", "opencode/pago-antes", "opencode/big-pickle"]);
         assert_eq!(groups[2].1, ["opencode-go/deepseek-v4.1-flash", "opencode-go/glm-5.3"]);
@@ -713,7 +712,7 @@ mod tests {
     fn a_single_provider_skips_the_provider_step() {
         let one = by_provider(&["opencode/pago".to_owned(), "opencode/gratis-free".to_owned()]);
         assert_eq!(sole_provider(&one), Some("opencode"));
-        let two = by_provider(&["opencode/a".to_owned(), "ollama/b".to_owned()]);
+        let two = by_provider(&["opencode/a".to_owned(), "lmstudio/b".to_owned()]);
         assert_eq!(sole_provider(&two), None);
         assert_eq!(sole_provider(&[]), None);
     }
@@ -721,7 +720,7 @@ mod tests {
     #[test]
     fn providers_and_free_models_are_recognized() {
         assert_eq!(provider("opencode-go/gpt-6-luna"), Some("opencode-go"));
-        assert_eq!(provider("ollama/qwen3.5:9b"), Some("ollama"));
+        assert_eq!(provider("lmstudio/qwen3.5:9b"), Some("lmstudio"));
         assert_eq!(provider("sonnet"), None);
         assert_eq!(provider("/x"), None);
         assert!(is_free("opencode/deepseek-v4.1-flash-free"));
@@ -744,8 +743,6 @@ mod tests {
                 "opencode",
                 strs(&["opencode/pago", "opencode/glm-5.3-flash-free", "opencode-go/deepseek-v4.1-flash", "opencode/beam-free#alta"]),
             ),
-            classify("ollama:qwen3.5:4b", Vec::new()),
-            classify("ollama:qwen3.5:9b", Vec::new()),
             classify("aider", Vec::new()),
         ];
         let expected = [
@@ -755,7 +752,6 @@ mod tests {
             "opencode --model <provedor>/<modelo>:",
             "  opencode/: glm-5.3-flash-free (grátis), beam-free#alta (grátis), pago",
             "  opencode-go/: deepseek-v4.1-flash",
-            "ollama:qwen3.5:4b, ollama:qwen3.5:9b (locais; o modelo vai no nome do agente, sem --model)",
             "aider: sem escolha de modelo (usa o padrão do CLI)",
         ];
         assert_eq!(format_inventory(&items), expected.join("\n"));
@@ -778,8 +774,8 @@ mod tests {
     fn model_lists_are_parsed() {
         let agy = "Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\ngemini-4-argon-medium\trepetido\n";
         assert_eq!(parse_agy_models(agy), ["gemini-4-argon-medium", "claude-opus-5-5-low"]);
-        let oc = "ollama/qwen3.5:4b\nopencode/big-pickle\n\nruído sem barra\nopencode/big-pickle\n";
-        assert_eq!(parse_opencode_models(oc), ["ollama/qwen3.5:4b", "opencode/big-pickle"]);
+        let oc = "lmstudio/qwen3.5:4b\nopencode/big-pickle\n\nruído sem barra\nopencode/big-pickle\n";
+        assert_eq!(parse_opencode_models(oc), ["lmstudio/qwen3.5:4b", "opencode/big-pickle"]);
         assert!(parse_agy_models("erro").is_empty());
     }
 }

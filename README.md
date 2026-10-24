@@ -1,7 +1,7 @@
 # ⚡ AgentDeck
 
 Terminal desktop nativo (Rust + winit) que conecta agentes de IA: **Claude Code**, **Antigravity CLI**,
-**Codex**, **OpenCode**, **modelos locais via Ollama** e outros CLIs. Os agentes conversam entre si (`ask-agent`) e
+**Codex**, **OpenCode** e outros CLIs (um modelo local entra por um CLI que o suporte, como o OpenCode). Os agentes conversam entre si (`ask-agent`) e
 trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada**.
 
 ![Tela principal](docs/screenshots/main.png)
@@ -16,21 +16,21 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
 - **Memória do projeto**: o que o projeto já aprendeu (`memory/aprendizados/`, versionado) e a situação atual (as outras
   tarefas em andamento e os últimos commits) chegam ao agente no início de cada tarefa e em cada devolução; o agente
   também consulta com `ask-agent --learn`.
-- **Tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Ollama…) ganha uma janela com as próprias
+- **Tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Codex…) ganha uma janela com as próprias
   abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar ou desligar a divisão.
 - **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real (somente leitura).
   Quando as abas de uma janela não cabem, setas ‹ › e o menu ▾ levam às escondidas.
 - **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
 - **GitHub** do projeto noutra aba: PRs abertos com os checks, issues, execuções do Actions e o fim do log do job que
   falhou; um clique manda o PR ou a falha para um agente.
-- Explorador de arquivos do workspace: clique insere o caminho do arquivo na aba ativa, duplo clique abre o arquivo (texto ou markdown, só leitura) no modo **Documentos** do centro, onde também se leem, com a largura toda, o diff de uma tarefa, de um commit ou de um arquivo e o pedido e o relatório das tarefas.
+- Explorador de arquivos do workspace: clique insere o caminho do arquivo na aba ativa, duplo clique abre o arquivo no modo **Documentos** do centro, onde ele se **edita** (botão Editar, `Ctrl+S` grava com o mesmo fim de linha, `Ctrl+F` busca, realce de sintaxe, aviso quando um agente muda o arquivo com edição não salva) e onde também se leem, com a largura toda, o diff de uma tarefa (com o código realçado, que se seleciona e copia), de um commit ou de um arquivo e o pedido e o relatório das tarefas.
 - Anexos por botão no cabeçalho de cada janela de agente (e no formulário "Nova tarefa"), arrastar e soltar sobre a janela/formulário ou colar imagem (Ctrl+V).
-- Ditado por voz com **whisper.cpp** local (CUDA / Vulkan / CPU) no cabeçalho de cada janela de agente (e `Ctrl+Shift+M`), preso à aba visível daquela janela (com indicador de gravação/transcrição na aba); o áudio é apagado logo após transcrever.
-- Agente **Ollama** autônomo com ferramentas no workspace (ler/escrever/editar arquivos, rodar comandos).
+- Ditado por voz **opcional**, com **whisper.cpp** local (CUDA / Vulkan / CPU) no cabeçalho de cada janela de agente (e `Ctrl+Shift+M`), preso à aba visível daquela janela (com indicador de gravação/transcrição na aba); o áudio é apagado logo após transcrever. Na primeira abertura o app **pergunta** se você quer o ditado e avisa do download (cerca de 1,6 GB); "Agora não" não baixa nada, e dá para baixar ou remover depois em Configurações (☰).
 - Som de notificação quando um agente termina.
 
 Atalhos: `Ctrl+T` nova aba · `Ctrl+Tab` / `Ctrl+Shift+Tab` alternar · `Ctrl+B` barra lateral ·
-`Ctrl+Shift+M` ditar na aba · `Ctrl+Shift+D` alterna o centro entre Agentes e Documentos · `Ctrl+/` lista os atalhos.
+`Ctrl+Shift+M` ditar na aba · `Ctrl+Shift+D` alterna o centro entre Agentes e Documentos · `Ctrl+S` grava e `Ctrl+F` busca no documento aberto ·
+`Ctrl+/` lista os atalhos.
 Com o terminal focado, `Ctrl+B` vai para o terminal (tmux); a opção
 "Atalhos do app acima do terminal" (☰) o devolve ao app.
 
@@ -43,7 +43,7 @@ cargo build --workspace --release
 .\target\release\agentdeck.exe
 ```
 
-Os três executáveis (`agentdeck`, `ask-agent`, `ollama-agent`) precisam ficar **na mesma pasta**.
+Os dois executáveis (`agentdeck` e `ask-agent`) precisam ficar **na mesma pasta**.
 As pastas `dados/`, `workspace/` e `whisper/` são procuradas subindo a partir do executável
 (ou defina `AGENTDECK_HOME`). Configuração em `%APPDATA%\AgentDeck\config.json`.
 
@@ -52,7 +52,6 @@ CLIs suportados (instale os que quiser usar):
 - Antigravity: `irm https://antigravity.google/cli/install.ps1 | iex`
 - Codex: `npm install -g @openai/codex`
 - OpenCode: `npm install -g opencode-ai`
-- Ollama: https://ollama.com/download
 
 ## Compilar e rodar (Linux)
 
@@ -75,18 +74,20 @@ o executável e as pastas dele).
 - Para abrir pastas e links e escolher arquivos, o sistema precisa do `xdg-utils` (`xdg-open`), do `xdg-desktop-portal`
   e de um backend (`xdg-desktop-portal-gtk` no GNOME/XFCE, `xdg-desktop-portal-kde` no KDE). Sem o portal, os
   diálogos de arquivo não abrem.
-- Os três executáveis ficam juntos em `target/release/`; para usar o `ask-agent` fora do app, ponha essa pasta no
+- Os dois executáveis ficam juntos em `target/release/`; para usar o `ask-agent` fora do app, ponha essa pasta no
   `PATH` (dentro das abas o app já resolve).
 - Os dados (`dados/`, `workspace/` e `whisper/`) ficam ao lado do executável, como no Windows, ou em
   `AGENTDECK_HOME`. Se essa pasta não for gravável (app instalado em `/usr/local/bin`, por exemplo), vão para
   `~/.local/share/AgentDeck`. Configuração em `~/.config/AgentDeck/config.json`.
-- Ditado: o motor de CPU e o modelo são baixados sozinhos (os binários do Linux pedem `libgomp` e `libstdc++`, que
+- Ditado (opcional, o app pergunta antes de baixar): o motor de CPU e o modelo são baixados quando você aceita (os binários do Linux pedem `libgomp` e `libstdc++`, que
   já vêm nas instalações desktop). Para usar a GPU, deixe no `PATH` um `whisper-cli` compilado com CUDA ou Vulkan;
   o app não baixa esses motores no Linux. `pciutils` (`lspci`) e `nvidia-smi` ajudam a detectar a GPU.
-- CLIs: os mesmos `npm install -g …` acima; Antigravity e Ollama têm instalador de Linux nos sites
-  (https://antigravity.google, https://ollama.com/download).
+- CLIs: os mesmos `npm install -g …` acima; o Antigravity tem instalador de Linux no site
+  (https://antigravity.google).
 - Testado em X11 (Ubuntu). Wayland é suportado pela biblioteca de janelas, mas ainda não foi validado a fundo; se a
   janela não abrir, force o X11 com `WINIT_UNIX_BACKEND=x11 ./target/release/agentdeck`.
+- **WSL (WSLg)**: o app detecta o WSLg e abre pelo X11, porque o Wayland de lá quebra a janela; a escala do WSLg é
+  sempre 1 (a interface fica pequena em tela de alta densidade). Para quem está no Windows, o caminho é o app nativo.
 - O Fedora é verificado na CI (build e testes num contêiner). O roteiro de verificação e as limitações conhecidas
   estão em [`memory/LINUX.md`](memory/LINUX.md).
 

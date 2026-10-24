@@ -1,12 +1,13 @@
 # Suporte a Linux (Ubuntu e Fedora)
 
-Verificação feita na tarefa `t29` (2026-10-22). Este documento diz **o que foi conferido, como**, o que foi corrigido,
-as dependências de cada distro e o que continua sem validação. O roteiro manual de Windows continua em
-[testes.md](testes.md); o de Linux está aqui no fim.
+Verificação feita nas tarefas `t29` (2026-10-22) e `t33` (2026-10-23). Este documento diz **o que foi conferido, como**,
+o que foi corrigido, as dependências de cada distro e o que continua sem validação. O roteiro manual de Windows
+continua em [testes.md](testes.md); o de Linux está aqui no fim.
 
 > **Resumo:** o app compila e passa os testes no Ubuntu (CI) e agora também no Fedora (job em contêiner). A interface
 > foi validada à mão só no X11 do Ubuntu; Wayland e um desktop Fedora de verdade ainda não foram testados. Não há
-> pacote, instalador nem arquivo `.desktop`.
+> pacote, instalador nem arquivo `.desktop`. A cota do Antigravity passou a ler o chaveiro do sistema (t33) e, sob o
+> WSLg, o app abre pelo X11 (t33) — nenhum dos dois foi exercitado numa máquina Linux de verdade.
 
 ## 1. Como esta verificação foi feita
 
@@ -24,6 +25,11 @@ Não havia máquina Linux, WSL nem Docker nesta máquina, então a verificação
 
 `cargo check --target x86_64-unknown-linux-gnu` chegou a ser tentado, mas para no `ring` porque não há toolchain
 `x86_64-linux-gnu-gcc` nesta máquina — por isso o build de Linux é verificado só pela CI.
+
+A cota do Antigravity e o WSLg (seções 2.7 e 2.8) foram verificados por revisão de código e pelas fontes
+(`zalando/go-keyring`, issues do `winit` e do WSLg). O módulo do chaveiro compila para `x86_64-unknown-linux-gnu`
+numa crate separada (como em `t29`, o workspace para no `ring` por falta do gcc cruzado) e o trecho que força o X11
+foi conferido do mesmo jeito; mas não houve Linux nem WSL para abrir o app.
 
 ## 2. O que estava quebrado e foi corrigido
 
@@ -77,6 +83,45 @@ embutidas; isso vale para o terminal e para os símbolos).
 - `.github/workflows/ci.yml`: saiu o `libgtk-3-dev`; entrou um job **`fedora`** (`container: fedora:latest`) que
   instala as dependências do README e roda `cargo build --workspace` e `cargo test --workspace`.
 
+### 2.7 Cota do Antigravity pelo chaveiro do sistema (t33)
+
+No Linux o `agy` não guarda o token em `~/.gemini/oauth_creds.json`: ele usa o **Secret Service** (o chaveiro do
+GNOME/KDE, por D-Bus), com `service=gemini`, `username=antigravity` e o mesmo JSON do Gerenciador de Credenciais
+do Windows. O app só olhava o arquivo, então a cota ficava "sem dados". `crates/core/src/usage/antigravity.rs`
+ganhou a leitura do chaveiro com a crate `secret-service` (Rust puro, por `zbus`; nenhuma biblioteca C nova na
+CI), numa thread própria com prazo de 3 s e só para itens já destravados — destravar abriria um pedido de senha
+em segundo plano. Sem sessão D-Bus (SSH, contêiner) a busca falha em silêncio e o app cai nos arquivos como
+antes; a leitura só acontece quando a home usada é a do sistema, como já era no Windows. Entrou também o arquivo
+que o `agy` grava quando não há chaveiro (`GEMINI_FORCE_FILE_STORAGE=true`, o caminho de SSH, contêiner e WSL):
+`~/.gemini/antigravity-cli/antigravity-oauth-token`, depois do `~/.gemini/oauth_creds.json` na ordem das fontes.
+Ver [aprendizados/antigravity-token-no-secret-service.md](aprendizados/antigravity-token-no-secret-service.md).
+
+Para conferir: `secret-tool lookup service gemini username antigravity` (pacote `libsecret-tools` no Ubuntu,
+`libsecret` no Fedora) imprime o JSON, e pede para destravar o chaveiro se ele estiver trancado. Com o token válido,
+a cota aparece na próxima consulta (a cada 3 min, ou em 20 s depois de uma falha). Se não aparecer, rode com
+`RUST_LOG=debug`: o `agentdeck.log` registra quando o chaveiro não devolveu o token.
+
+### 2.8 WSLg: abrir pelo X11 (t33)
+
+Sob o WSLg o desktop é um Weston 9 (Wayland) com um XWayland ao lado. O cliente Wayland do Weston 9 quebra
+janelas que desenham a própria decoração e redimensionam, e o Weston já caiu com clientes Wayland (`winit#4306`,
+`microsoft/wslg#1008` e `#633`). O app agora detecta o WSLg (`WSL_DISTRO_NAME` ou "microsoft" no
+`/proc/sys/kernel/osrelease`, mais a pasta `/mnt/wslg`) e força o backend X11 do `winit`
+(`crates/app/src/wslg.rs`, com teste da função pura; `main.rs`). Fora do WSLg nada muda, e um
+`WINIT_UNIX_BACKEND` definido pelo usuário continua mandando.
+
+O que o app não resolve, e por que o README manda usar o app nativo no Windows:
+
+- **Escala sempre 1**: no X11 a escala vem do XSettings (`Xft/DPI`), que o WSLg não publica; em tela de alta
+  densidade a interface fica pequena. O `winit` 0.30 não tem mais `WINIT_X11_SCALE_FACTOR` (foi removido), então
+  não há variável de ambiente para contornar — mudar isso exige tratar a escala no app.
+- **Janela maximizada sem decoração**: já apareceu deslocada em 32 px no WSLg; sem uma máquina Windows com WSLg,
+  não dá para confirmar nem corrigir.
+- **Redimensionamento e cursor**: são justamente os pontos que quebram no Wayland do WSLg; no X11 devem funcionar,
+  mas ninguém abriu o app lá.
+
+Ver [aprendizados/wslg-forca-x11.md](aprendizados/wslg-forca-x11.md).
+
 ## 3. Dependências
 
 ### 3.1 Para compilar
@@ -102,11 +147,12 @@ o teclado usa em Wayland.
 | Abrir pasta / links | `xdg-utils` (`xdg-open`) | `xdg-utils` | falha silenciosa |
 | Diálogo de arquivo | `xdg-desktop-portal` + `xdg-desktop-portal-gtk` | idem | o diálogo não abre |
 | Fonte do terminal | `fonts-dejavu-core` (ou Liberation/Noto) | `dejavu-sans-mono-fonts` | cai na fonte embutida do egui |
+| Chaveiro (cota do Antigravity) | Secret Service (`gnome-keyring`/`kwallet`) | idem | a cota do Antigravity fica sem dados |
 | Git / GitHub | `git` (e `gh` opcional) | `git` (`gh` opcional) | abas Git/GitHub sem função |
 | Ditado (CPU) | `libgomp`, `libstdc++` | `libgomp`, `libstdc++` | o `whisper-cli` baixado não roda |
 | Detectar GPU | `pciutils` (`lspci`), `nvidia-smi` | idem | cai no motor de CPU |
 
-CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; Antigravity e Ollama têm instalador próprio. O app
+CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; o Antigravity tem instalador próprio. O app
 procura no `PATH`, em `~/.local/bin`, em `~/.claude/local/claude` e em `~/.antigravity/bin/agy`.
 
 ## 4. O que está coberto pelo código e pelos testes
@@ -117,17 +163,18 @@ procura no `PATH`, em `~/.local/bin`, em `~/.claude/local/claude` e em `~/.antig
 | PTY/terminal | `portable-pty` + `alacritty_terminal`; `TERM=xterm-256color`, `COLORTERM=truecolor` |
 | Aba Terminal | `$SHELL` ou `/bin/bash`; sem shims `.cmd` (isso é só Windows) |
 | Ambiente das abas | `PATH` com a pasta de binários do app na frente; variáveis `AGENTDECK_*`; sem `PYTHONUTF8`/MSYS |
-| Instância única | trava de arquivo em `dados/.agentdeck.lock` (e a antiga `.commanddeck.lock`) |
+| Instância única | trava de arquivo em `dados/.agentdeck.lock` |
 | Git | `git` do `PATH`, sem shell, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, SSH em `BatchMode` |
 | GitHub | token por `git credential fill` e, se houver, `gh auth token`; sem gravar em disco |
 | Agentes | resolução por `which`/pastas do usuário; sem `cmd.exe` |
 | Documentos/workspace | `workspace::read_dir` normaliza `/` e `\`; `read_text` recusa link que sai do projeto |
 | Whisper (CPU) | baixa `whisper-bin-ubuntu-x64.tar.gz` (ou arm64), `chmod 0o755`, `LD_LIBRARY_PATH` com a pasta do motor |
-| Uso/cotas | Antigravity lê `~/.gemini/oauth_creds.json`; Codex lê `~/.codex/sessions` |
+| Uso/cotas | Antigravity lê o Secret Service (`service=gemini`, `username=antigravity`) e, sem ele, `~/.gemini/oauth_creds.json` e `~/.gemini/antigravity-cli/antigravity-oauth-token`; Codex lê `~/.codex/sessions` |
 | Interface | fontes embutidas; `xdg-open` para pastas; `open` (crate) para URLs |
 
-A suíte tem 192 testes no app, 250 no core, 32 da ponte e 37 das tarefas, além dos de git/github; rodada localmente no
-Windows em 22/10, todos passam. No Linux, o único que falhava era o de `read_dir` (corrigido aqui); os demais rodaram
+A suíte tem 196 testes no app (mais 1 ignorado, o de cota real), 253 no core (mais 2 ignorados), 31 da ponte e 37 das
+tarefas, além dos de git/github; rodada localmente no Windows em 23/10, todos passam. No Linux, o único que falhava era
+o de `read_dir` (corrigido aqui); os demais rodaram
 verdes no Ubuntu até o `run 46`.
 
 ## 5. O que continua sem verificação (ou sem suporte)
@@ -152,6 +199,9 @@ verdes no Ubuntu até o `run 46`.
 9. **Formatação**: enquanto `cargo fmt --all -- --check` falhar, nenhum job chega a rodar os testes — inclusive o
    Fedora. O item está em [pendencias.md](pendencias.md); não é para “resolver” reformatando arquivos de outras
    tarefas (ver [aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md](aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md)).
+10. **WSLg**: o X11 foi forçado (seção 2.8), mas ninguém abriu o app dentro de um WSLg. Faltam: janela maximizada
+    (deslocamento de 32 px), escala (sempre 1, interface pequena em 4K), arrastar/redimensionar, cursor e a cota do
+    Antigravity lida do chaveiro de lá. Um `WINIT_UNIX_BACKEND=wayland` reproduz o caminho quebrado, para comparar.
 
 ## 6. Roteiro manual (Ubuntu e Fedora)
 
@@ -173,6 +223,8 @@ Rodar numa pasta de dados separada para não mexer na configuração real:
 - [ ] `ask-agent claude "..."` numa aba e a resposta digitada chegam; a Conversa integrada mostra o par.
 - [ ] Criar uma tarefa (`--task new ... --start`), ver a worktree, entregar com `--task done` e ler o relatório.
 - [ ] `ask-agent --learn` mostra os aprendizados; o `AGENTS.md` do projeto é atualizado só onde já existia.
+- [ ] A cota do Antigravity aparece na barra de título com o `agy` logado; `secret-tool lookup service gemini
+      username antigravity` devolve o JSON e, com `RUST_LOG=debug`, o `agentdeck.log` não acusa falha ao ler o chaveiro.
 
 **Interface**
 
@@ -186,6 +238,14 @@ Rodar numa pasta de dados separada para não mexer na configuração real:
 
 - [ ] Com microfone: segurar o atalho, falar e ver o texto na aba; o `.wav` temporário desaparece de `dados/`.
 - [ ] Sem microfone ou sem `libgomp`: o app explica o que falta em vez de travar.
+
+**WSLg (a partir do Windows, com o app compilado no WSL)**
+
+- [ ] `./target/release/agentdeck` abre pelo X11 (o log diz “WSLg detectado”); a janela não pisca, não some e o
+      terminal aceita teclado.
+- [ ] Maximizar, restaurar, arrastar e redimensionar; o cursor aparece e o texto não fica cortado.
+- [ ] Numa tela de alta densidade, anotar a escala (hoje é sempre 1, então a interface fica pequena) e o que falta.
+- [ ] `WINIT_UNIX_BACKEND=wayland ./target/release/agentdeck` reproduz a falha do Wayland do WSLg, para comparar.
 
 **Fim**
 

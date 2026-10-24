@@ -9,7 +9,7 @@ log="${1:?uso: ci-falha.sh <log>}"
 
 # Sem cores (CARGO_TERM_COLOR=always) e só as linhas que dizem o que quebrou.
 relevant=$(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" \
-  | grep -E '^(error|warning)(\[|:)|^ *--> |panicked at|^---- .* ----$|^test .* FAILED$|^ *(left|right):|^failures:|^error: test failed' \
+  | sed -n -E '/panicked at/{N;N;N;p;d}; /^(error|warning)(\[|:)|^ *--> |^---- .* ----$|^test .* FAILED$|^ *(left|right):|^error: test failed/p' \
   | head -n 200)
 [ -n "$relevant" ] || relevant=$(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" | tail -n 40)
 

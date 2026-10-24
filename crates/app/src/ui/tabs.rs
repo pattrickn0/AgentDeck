@@ -43,6 +43,8 @@ pub struct Item {
     pub lead: Lead,
     /// A dica ao passar o mouse.
     pub tip: String,
+    /// Tem edição não salva (documento): um ponto no lugar do "✕" até o mouse chegar nele.
+    pub dirty: bool,
 }
 
 /// Como a faixa se comporta: o prefixo dos ids (abas de agente e de documento não se misturam), se
@@ -157,6 +159,7 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
                 mic: dictation::button_visual(deck.mic_phase, MicTarget::Tab(tab.uid)),
                 lead: Lead::Dot,
                 tip: tab_tip(&tab.label, tab.model.as_deref()),
+                dirty: false,
             }
         })
         .collect();
@@ -346,10 +349,14 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         };
         let c = close_rect.center();
         let h = 3.0;
-        painter.line_segment([c + Vec2::new(-h, -h), c + Vec2::new(h, h)], Stroke::new(1.3, x_color));
-        painter.line_segment([c + Vec2::new(-h, h), c + Vec2::new(h, -h)], Stroke::new(1.3, x_color));
+        if item.dirty && !close_hot {
+            painter.circle_filled(c, 3.5, if solid { p.on_accent } else { p.warning });
+        } else {
+            painter.line_segment([c + Vec2::new(-h, -h), c + Vec2::new(h, h)], Stroke::new(1.3, x_color));
+            painter.line_segment([c + Vec2::new(-h, h), c + Vec2::new(h, -h)], Stroke::new(1.3, x_color));
+        }
 
-        if tip(close_resp, "Fechar").clicked() {
+        if tip(close_resp, if item.dirty { "Fechar (tem alterações não salvas)" } else { "Fechar" }).clicked() {
             click = Some(StripClick::Close(n));
         } else if kind.tab_menu && resp.double_clicked() {
             click = Some(StripClick::Rename(n));

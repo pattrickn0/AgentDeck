@@ -21,12 +21,11 @@ com ele e **quais regras cada documento define**. Os detalhes ficam nos outros a
 
 ### O app
 
-Terminal desktop nativo em Rust (winit + egui). São três executáveis, que precisam ficar **na mesma pasta**:
+Terminal desktop nativo em Rust (winit + egui). São dois executáveis, que precisam ficar **na mesma pasta**:
 
 - `agentdeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (mesa de tarefas, Conversa
   integrada, Git e GitHub);
-- `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si;
-- `ollama-agent` (crate `cli`): o agente local com ferramentas, que roda numa aba.
+- `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si.
 
 O "backend" é a crate `core`, sem interface. A interface só fala com ele pelos métodos de `Core` e recebe de
 volta eventos `CoreEvent`.
@@ -36,7 +35,7 @@ volta eventos `CoreEvent`.
 | Pasta | Conteúdo |
 | :-- | :-- |
 | `workspace/` | o workspace antigo, do tempo em que havia uma pasta global. Hoje cada **projeto** tem a sua pasta (o `cwd` das abas dele); `workspace/` só serve de destino na migração de uma config antiga (`Config::migrate_legacy`) |
-| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log`, `agentdeck.log` (o log do app, gira acima de 2 MB) e as travas `.agentdeck.lock` e `.commanddeck.lock` (esta, só durante a migração do nome) |
+| `dados/` | dados de execução: anexos, prompts longos (`prompts/`), hooks do Claude (`hooks/`), as tarefas (`tarefas/`: um `<projeto>.json` e os `<projeto>-<id>-brief.md`/`-feedback.md` entregues aos agentes), sessões, `crash.log`, `agentdeck.log` (o log do app, gira acima de 2 MB) e a trava `.agentdeck.lock` |
 | `whisper/` | motor e modelos do ditado por voz (whisper.cpp) |
 | `%APPDATA%\AgentDeck\config.json` | configuração (na primeira abertura, copiada de `%APPDATA%\CommandDeck\config.json`, se existir). Com `AGENTDECK_HOME`, tudo isso fica dentro dessa pasta |
 
@@ -72,11 +71,14 @@ O nome é o endereço usado pelo `ask-agent`. As abas voltam com o mesmo nome qu
 
 Nenhuma outra variável `AGENTDECK_*` do ambiente do app passa para os agentes.
 
-As instruções da ponte chegam a cada agente por um canal diferente:
+As instruções do AgentDeck (a "memória geral", igual para todos, com a regra de não usar subagentes internos do CLI)
+chegam a cada agente pelo canal que o CLI tem, sem depender do `AGENTS.md` do usuário:
 
-- **Claude:** `--append-system-prompt`;
-- **Antigravity e outros:** o bloco gerado no `AGENTS.md` do workspace;
-- **Ollama:** o prompt de sistema do `ollama-agent`.
+- **Claude:** `--append-system-prompt`; **Codex:** `-c developer_instructions`; **OpenCode:** `instructions` na
+  configuração da aba; **Aider:** `--read`; **Open Interpreter:** `--custom_instructions`;
+- **Antigravity, Goose e Copilot** (só leem o `AGENTS.md`): o app cria um só com o bloco dele se a pasta não tem, e avisa.
+
+Tabela completa em [ARCHITECTURE.md](ARCHITECTURE.md), "Protocolo entre agentes".
 
 ### O caminho de uma pergunta entre agentes
 
@@ -100,7 +102,7 @@ Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer a
 | :-- | :-- |
 | Barra de título | própria (a janela não tem a do sistema): ☰ (configurações), recolher a barra esquerda (ícone de painel), "AgentDeck", "+" (nova aba); com a barra lateral recolhida, a **chave Agentes | Documentos** compacta logo depois do logo (ver abaixo); à direita, o **uso de cada agente com cota**, com ou sem janela aberta (logo + barra fina da sessão de 5 h em cima e barra grossa da semana embaixo, com as porcentagens; âmbar a partir de 80 %, vermelho em 100 %; passar o mouse abre o **painel de uso**, com todos os agentes, quanto usaram e quando renova cada janela) e minimizar/maximizar/fechar. Arrastar move a janela, duplo clique maximiza, as bordas redimensionam |
 | Barra esquerda | a **chave Agentes | Documentos** no topo, **PROJETOS** (cada projeto com os seus agentes, o modelo de cada um à direita; o ativo lista as abas dele; "+" abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), a seção **ORGANIZAÇÃO** (controle Abas | Dividida | Destaque) e **ARQUIVOS**, o explorador (cinza, com a letra do Git; atualizar, recolher tudo); recolhe com Ctrl+B |
-| Centro | duas visões, escolhidas pela **chave** do topo da barra lateral: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Ollama, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
+| Centro | duas visões, escolhidas pela **chave** do topo da barra lateral: **Agentes** (a **tela dividida por tipo de agente**: cada tipo, como Claude, Antigravity, Codex ou Terminal, tem uma janela com as próprias abas; no cabeçalho de cada janela ficam também o microfone e o anexo) e **Documentos** (diff, arquivos e markdown para ler com a largura toda do centro); ver abaixo |
 | Barra direita | **fixa, não recolhe**; a largura muda arrastando a borda. No topo, quatro abas com ícone: **Tarefas** (a primeira e a que abre; o número é o de tarefas esperando a sua revisão ou validação), **Conversa** (balões, **só leitura**: o feed das mensagens entre agentes, sem caixa de mensagem; com o número de mensagens novas enquanto você está em outra aba), **Git** (branch) e **GitHub** (PRs, issues e Actions; com o número de PRs abertos). Para falar com um agente, use o terminal da aba dele; o ditado e o anexo ficam no cabeçalho de cada janela |
 
 **Projetos.** O projeto é a unidade de trabalho: uma pasta com os seus agentes. Cada aba pertence ao projeto em
@@ -111,7 +113,7 @@ na primeira vez que o projeto é selecionado (ou quando um agente chama alguém 
 padrão: sem projeto, o centro pede uma pasta.
 
 A **tela dividida** organiza as abas por tipo de agente:
-- abas do mesmo tipo ficam na mesma janela (2 Claude = 1 janela com 2 abas; todos os modelos do Ollama juntos;
+- abas do mesmo tipo ficam na mesma janela (2 Claude = 1 janela com 2 abas;
   `claude@dev` fica na janela do Claude); um tipo novo abre mais uma janela;
 - as janelas ficam numa grade automática: 2 lado a lado; 3 = 2 em cima + 1 largo embaixo; 4 = 2×2; 5 = 3+2;
   6 = 3×2. Se não cabem no tamanho mínimo (~260 × 140 px), os tipos que sobram viram abas da última janela;
@@ -136,8 +138,9 @@ A **tela dividida** organiza as abas por tipo de agente:
 
 **Documentos (a chave do centro).** O diff que o usuário valida e o que ele lê (pedido, relatório, arquivos) ficavam espremidos
 na barra direita (280–400 px). Por isso o **centro inteiro** alterna, em vez de ganhar uma janela ao lado dos agentes (com 3 agentes,
-cada janela tem 1/3 da largura). Fase 1: **só leitura**; edição, realce de sintaxe, diff lado a lado e gravar os documentos abertos
-ficam para a fase 2 (ver [pendencias.md](pendencias.md)).
+cada janela tem 1/3 da largura). Fase 1 (`t19`): só leitura. Fase 2 (`t39`): os arquivos de texto pequenos **se editam**, com realce de sintaxe,
+busca e seleção; diff lado a lado, gravar as abas de documento entre aberturas e documento ao lado de um agente seguem em
+[pendencias.md](pendencias.md).
 - **A chave** fica no topo da barra lateral (com ela recolhida, na barra de título, logo depois do logo): dois segmentos, **Agentes** e **Documentos (n)** (n =
   documentos abertos do projeto ativo). Ctrl+Shift+D alterna (o app o toma mesmo com o terminal focado, como o Ctrl+Shift+M; sem
   documentos abertos não faz nada). Abrir qualquer documento muda para Documentos sozinho; fechar o último volta para Agentes; clicar
@@ -151,18 +154,30 @@ ficam para a fase 2 (ver [pendencias.md](pendencias.md)).
   teclado, o IME e o arrastar arquivos não chegam ao terminal escondido.
 - **Faixa de abas de documento**: o mesmo desenho das abas dos agentes (setas ‹ › quando não cabem, menu ▾ com todos, × em cada
   aba), um sinal do tipo antes do nome (`±` diff, `≡` arquivo, `¶` markdown). Embaixo, o título do documento e as ações
-  (**Recarregar**; **Abrir no programa padrão** nos arquivos). Os documentos são **por projeto** (trocar de projeto troca a lista) e
-  **não são gravados**; abrir um documento já aberto só o foca. Ctrl+Tab passa pelos documentos.
+  (**Editar** / **Salvar** / **Só leitura**, **Recarregar**; **Abrir no programa padrão** nos arquivos). Os documentos são **por projeto** (trocar de projeto troca a lista) e
+  **as abas não são gravadas entre aberturas**; abrir um documento já aberto só o foca. Ctrl+Tab passa pelos documentos. Uma aba com edição não
+  salva mostra um ponto âmbar no lugar do × (o × ou fechar o app perguntam: Salvar, Não salvar, Cancelar).
 - **Diff**: lista de arquivos à esquerda (letra `A`/`M`/`D`/`R`, nome e `+`/`−`; clicar rola o diff até o arquivo) e o diff à direita,
   no mesmo desenho do diff da aba Git, sem as ações por trecho. Em janela estreita (centro < 560 px) a lista vai para cima do diff.
   Vem de: **Ver diff completo** / **Ver o que foi mesclado** do detalhe da tarefa (a barra direita não tem mais a tela do diff), o botão
   **Abrir em Documentos** do detalhe de um commit (Histórico da aba Git) e o do diff de um arquivo alterado (aba Git, que mantém o diff dela
   para preparar por trecho).
-- **Arquivo**: duplo clique no explorador abre uma visualização monoespaçada, com número de linha e rolagem, que relê sozinha
-  quando o arquivo muda no disco (o watcher da pasta). Acima de 1 MB ou binário, uma explicação no lugar do conteúdo. O clique simples
+- **Arquivo**: duplo clique no explorador abre o arquivo **como código** (`DocState::Source`): monoespaçado, com número de linha, **realce de
+  sintaxe** (Rust, Markdown, TOML, JSON, YAML, JS/TS, Python, PowerShell e shell; `highlight.rs`, tokenizador próprio), seleção e cópia do
+  mouse, `Ctrl+F` (campo, "n de m", Enter/Shift+Enter, Esc) e rolagem; relê sozinho quando o arquivo muda no disco (o watcher da pasta).
+  **Editar** liga a edição (o fundo muda; Tab e Shift+Tab indentam; Ctrl+Z desfaz); **Ctrl+S** grava ao lado e troca (`workspace::write_text`)
+  **no mesmo fim de linha** (CRLF/LF) e com o BOM que o arquivo já tinha (nunca acrescenta). Se um agente muda o arquivo com edição não salva,
+  uma faixa pergunta: **Manter a minha** (o disco novo vira a base; a próxima gravação o sobrescreve) ou **Recarregar a do disco**; nada é
+  trocado sozinho, e o Ctrl+S espera a escolha. Arquivo apagado com edição: aviso, e a edição fica. Abre **só para leitura**, com a razão numa
+  faixa, o que mistura CRLF e LF ou não é UTF-8; acima de 256 KB (ou com linha de mais de 4 000 bytes) vira `DocState::Text`, só leitura
+  com seleção, cópia e busca, pintada linha a linha; acima de 1 MB ou binário, uma explicação no lugar do conteúdo. O clique simples
   continua inserindo `@arquivo` no terminal.
 - **Markdown**: os `.md` abertos pelo explorador e, no detalhe da tarefa, o **Pedido** e o **Relatório** (botão **Abrir em Documentos** em
-  cada um) aparecem formatados: títulos, listas (com `- [ ]`), negrito e itálico, código, tabelas e citações.
+  cada um) aparecem formatados: títulos, listas (com `- [ ]`), negrito e itálico, código, tabelas e citações. O `.md` de arquivo tem o botão
+  **Ver código** (e **Editar**, que mostra o código); `Ctrl+F` também mostra o código. O formatado se seleciona e copia como o egui faz; o
+  pedido e o relatório não têm busca.
+- **Diff**: o código do diff leva o realce da linguagem de cada arquivo; arrastar seleciona (rola ao passar da borda), `Ctrl+A` seleciona
+  tudo, `Ctrl+C` copia só o código (sem número de linha nem `+`/`−`); `Ctrl+F` marca as linhas achadas.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
 - topo: branch atual e menu de branches (trocar, criar, **mesclar** ou fazer **rebase** da branch escolhida); buscar, puxar
@@ -265,7 +280,7 @@ ela dura.
 **Como usuário:**
 
 - Abrir abas de agentes: Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q,
-  Open Interpreter, modelos Ollama e um terminal comum.
+  Open Interpreter e um terminal comum.
 - Organizar o trabalho em **projetos** (uma pasta cada): cada projeto tem as suas abas, que continuam rodando
   escondidas quando se troca de projeto.
 - Ver os agentes de todos os projetos **em árvore** na barra lateral e reorganizar a **equipe** arrastando um
@@ -298,7 +313,7 @@ ela dura.
 | `cat arquivo \| ask-agent <agente> -` | manda a mensagem pela entrada padrão (`--file <arquivo>` lê de um arquivo; preserva acentos, que o PowerShell troca por `?` no stdin) |
 | `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas, com o modelo: `claude@dev (sonnet)` |
 | `ask-agent --team` | mostra o seu chefe e a sua equipe (como estão agora), com o modelo de cada um |
-| `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor; Ollama como `ollama:<modelo>`), ou só os de um agente; antes de escolher `--agent`/`--model` |
+| `ask-agent --models [<agente>]` | lista, por agente instalado, os modelos como o `--model` aceita (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor), ou só os de um agente; antes de escolher `--agent`/`--model` |
 | `ask-agent --boss "mensagem"` | pergunta/reporta ao seu chefe |
 | `ask-agent --learn [<arquivo>...]` | mostra o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos; sem argumentos, os aprendizados globais por inteiro e o índice dos demais. O agente de uma tarefa roda antes de mexer num arquivo pela primeira vez |
 | `ask-agent --inbox [--all]` | mostra as respostas às suas perguntas que ainda não chegaram a você (a que demorou e não foi digitada, a que o `ask-agent` não leu); `--all` mostra as 20 últimas. Ler as pendentes as marca como entregues |

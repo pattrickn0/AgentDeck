@@ -4,8 +4,9 @@ use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec
 
 use agentdeck_core::models;
 
-use super::{button, button_width, dot, frame, section_label, separator, shadow, text_in, text_w, ButtonKind};
+use super::{button, button_danger, button_width, dot, frame, section_label, separator, shadow, text_in, text_w, ButtonKind};
 use crate::deck::Deck;
+use crate::dictation::Setup;
 use crate::theme;
 
 /// Posição do canto superior esquerdo para um menu `size` não sair da tela (pelos lados e por
@@ -361,13 +362,16 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
 /// `#settings-menu`
 pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     if !deck.settings_open {
+        // A confirmação de remover o ditado vale só enquanto o menu está aberto.
+        deck.dictation_confirm_remove = false;
         return;
     }
     let w = 260.0;
     let title_h = super::SECTION_LABEL_H;
     let item_h = 26.0;
     let btn_h = 28.0;
-    let h = 6.0 + title_h + 2.0 + item_h * 3.0 + 13.0 + btn_h + 8.0;
+    // O ditado por voz é opcional: uma linha de estado e um botão para baixar ou remover.
+    let h = 6.0 + title_h + 2.0 + item_h * 3.0 + 13.0 + btn_h + 13.0 + item_h + btn_h + 8.0;
     // O botão ☰ fica no canto esquerdo da barra de título: o menu abre alinhado a ele.
     let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x + 4.0, anchor.max.y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
@@ -375,6 +379,9 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     let mut toggle_tabs = false;
     let mut toggle_keys = false;
     let mut test = false;
+    let mut dictation_click = false;
+    let setup = deck.dictation_setup();
+    let confirm_remove = deck.dictation_confirm_remove;
     let sound = deck.sound_enabled;
     let auto_tabs = deck.auto_open_agent_tabs;
     let app_keys = deck.app_shortcuts_first;
@@ -434,6 +441,45 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         if button(ui, btn, Id::new("setting-test-sound"), "▶ Testar som", ButtonKind::Secondary).clicked() {
             test = true;
         }
+
+        // Ditado por voz (Whisper local): baixar depois, ou apagar para liberar o espaço.
+        separator(p, Pos2::new(inner.min.x + 4.0, btn.max.y + 6.5), Pos2::new(inner.max.x - 4.0, btn.max.y + 6.5));
+        let row = Rect::from_min_size(Pos2::new(inner.min.x, btn.max.y + 13.0), Vec2::new(inner.width(), item_h));
+        text_in(p, row.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Ditado por voz", theme::ui(12.0), pal.text);
+        let (status, status_color) = match setup {
+            Setup::Ready => ("instalado", pal.success),
+            Setup::Downloading => ("baixando…", pal.text_3),
+            Setup::NotInstalled => ("não instalado", pal.text_3),
+        };
+        text_in(p, row.shrink2(Vec2::new(8.0, 0.0)), Align2::RIGHT_CENTER, status, theme::meta(10.5), status_color);
+        let action = Rect::from_min_size(Pos2::new(inner.min.x + 2.0, row.max.y), Vec2::new(inner.width() - 4.0, btn_h));
+        let id = Id::new("setting-dictation");
+        let size = crate::dictation::DOWNLOAD_SIZE;
+        match setup {
+            Setup::Downloading => {
+                text_in(
+                    p,
+                    action.shrink2(Vec2::new(6.0, 0.0)),
+                    Align2::LEFT_CENTER,
+                    "O progresso está na barra direita.",
+                    theme::ui(11.5),
+                    pal.text_3,
+                );
+            }
+            Setup::NotInstalled => {
+                let r = button(ui, action, id, &format!("Baixar ({size})"), ButtonKind::Secondary);
+                dictation_click |= super::tip(r, "Baixa o Whisper para ditar por voz; o áudio fica no computador.").clicked();
+            }
+            Setup::Ready if confirm_remove => {
+                let r = button_danger(ui, action, id, "Confirmar: apagar do disco");
+                dictation_click |= super::tip(r, "Apaga o modelo e o motor CUDA. Dá para baixar de novo depois.").clicked();
+            }
+            Setup::Ready => {
+                let r = button(ui, action, id, "Remover do disco", ButtonKind::Secondary);
+                dictation_click |=
+                    super::tip(r, format!("Apaga o Whisper ({size}) para liberar espaço; dá para baixar de novo.")).clicked();
+            }
+        }
     });
     if toggle {
         deck.sound_enabled = !deck.sound_enabled;
@@ -452,6 +498,14 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     }
     if test {
         deck.play_sound(true);
+    }
+    if dictation_click {
+        match setup {
+            Setup::NotInstalled => deck.dictation_accept(),
+            Setup::Ready if confirm_remove => deck.dictation_remove(),
+            Setup::Ready => deck.dictation_confirm_remove = true,
+            Setup::Downloading => {}
+        }
     }
     if closes_on_outside(ctx, menu_rect, anchor) {
         deck.settings_open = false;
@@ -681,6 +735,76 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
     }
 }
 
+/// A pergunta do ditado por voz: na primeira abertura (sem Whisper baixado) e quando se clica no microfone sem ele.
+/// "Agora não" (ou Esc) grava o "não" e nada é baixado; só o botão de baixar começa o download.
+pub fn dictation_modal(deck: &mut Deck, ctx: &egui::Context) {
+    if !deck.dictation_prompt {
+        return;
+    }
+    super::modal_backdrop(deck, ctx, "dictation-backdrop");
+    let pal = theme::pal();
+    let w = 400.0;
+    let pad = 20.0;
+    let size = crate::dictation::DOWNLOAD_SIZE;
+    let intro = "Fale em vez de digitar: o AgentDeck transcreve a sua voz aqui no computador, sem enviar o áudio para a internet.";
+    let detail = format!(
+        "Para isso ele baixa o Whisper (modelo e motor de transcrição): {size}, e mais uns 700 MB do motor CUDA se houver uma placa NVIDIA. \
+         O download roda em segundo plano e o progresso aparece na barra direita."
+    );
+    let later = "Você pode baixar ou remover o ditado depois, em Configurações.";
+    let mut accept = false;
+    let mut decline = ctx.input(|i| i.key_pressed(Key::Escape));
+
+    // O texto quebra em linhas: mede antes para saber a altura do cartão.
+    let measure = ctx.fonts_mut(|f| {
+        let mut lay = |t: &str, font: egui::FontId| f.layout(t.to_owned(), font, pal.text_2, w - pad * 2.0).size().y;
+        (lay(intro, theme::ui(12.0)), lay(&detail, theme::ui(12.0)), lay(later, theme::ui(11.5)))
+    });
+    let h = 14.0 + 22.0 + measure.0 + 8.0 + measure.1 + 8.0 + measure.2 + 18.0 + 28.0 + 16.0;
+    let rect = Rect::from_center_size(ctx.content_rect().center(), Vec2::new(w, h));
+    Area::new(Id::new("dictation-modal")).order(Order::Tooltip).fixed_pos(rect.min).show(ctx, |ui| {
+        let (r, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
+        let p = ui.painter().clone();
+        shadow(&p, r, 10, 8, 24, pal.shadow);
+        frame(&p, r, 10.0, pal.popup, pal.glass_border);
+        let mut y = r.min.y + 14.0;
+        let title = super::galley(&p, "Ditado por voz (opcional)", theme::ui_semibold(13.0), pal.text_strong);
+        super::place(
+            &p,
+            Rect::from_min_size(Pos2::new(r.min.x + pad, y), Vec2::new(w - pad * 2.0, 18.0)),
+            Align2::LEFT_CENTER,
+            title,
+            pal.text_strong,
+        );
+        y += 22.0;
+        for (text, font, color) in
+            [(intro, theme::ui(12.0), pal.text), (detail.as_str(), theme::ui(12.0), pal.text_2), (later, theme::ui(11.5), pal.text_3)]
+        {
+            let g = p.layout(text.to_owned(), font, color, w - pad * 2.0);
+            let h = g.size().y;
+            p.galley(Pos2::new(r.min.x + pad, y), g, color);
+            y += h + 8.0;
+        }
+        y += 10.0;
+        let download = format!("Baixar ({size})");
+        let accept_w = button_width(&p, &download, ButtonKind::Primary);
+        let decline_w = button_width(&p, "Agora não", ButtonKind::Secondary);
+        let accept_r = Rect::from_min_size(Pos2::new(r.max.x - pad - accept_w, y), Vec2::new(accept_w, 28.0));
+        let decline_r = Rect::from_min_size(Pos2::new(accept_r.min.x - 8.0 - decline_w, y), Vec2::new(decline_w, 28.0));
+        if button(ui, decline_r, Id::new("dictation-decline-btn"), "Agora não", ButtonKind::Secondary).clicked() {
+            decline = true;
+        }
+        if button(ui, accept_r, Id::new("dictation-accept-btn"), &download, ButtonKind::Primary).clicked() {
+            accept = true;
+        }
+    });
+    if accept {
+        deck.dictation_accept();
+    } else if decline {
+        deck.dictation_decline();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,7 +814,7 @@ mod tests {
         for k in ["claude", "antigravity", "opencode"] {
             assert!(picks_model(k), "{k}");
         }
-        for k in ["codex", "shell", "ollama", "ollama:qwen3.5:9b", "aider"] {
+        for k in ["codex", "shell", "aider"] {
             assert!(!picks_model(k), "{k}");
         }
     }

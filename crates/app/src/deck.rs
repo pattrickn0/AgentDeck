@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use agentdeck_core::delivery::{self, Gate, Mailbox, TabState};
 use agentdeck_core::{
-    AgentInfo, Core, CoreEvent, Delivery, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident, Organization, SpawnSpec,
+    AgentInfo, Core, CoreEvent, Delivery, DictationChoice, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident,
+    Organization, SpawnSpec,
 };
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
@@ -18,7 +19,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::agents::Agents;
 use crate::audio;
-use crate::dictation::{self, MicPhase, MicTarget, TabDelivery, ToggleOutcome};
+use crate::dictation::{self, MicPhase, MicTarget, Setup, TabDelivery, ToggleOutcome};
 use crate::docs::CenterView;
 use crate::icons::IconCache;
 use crate::split;
@@ -66,6 +67,8 @@ pub enum UiMsg {
     Tasks(u64, crate::tasks_ui::TaskReply),
     /// Um documento do modo Documentos terminou de carregar (uid do documento).
     Doc(u64, crate::docs::Loaded),
+    /// A gravação de um arquivo editado terminou: o documento, o texto gravado e o resultado.
+    DocSaved(u64, String, Result<(), String>),
 }
 
 /// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
@@ -86,6 +89,10 @@ pub enum Action {
     CopyText(String),
     /// Ctrl+Shift+D: alterna o centro entre Agentes e Documentos.
     ToggleCenter,
+    /// Ctrl+S no modo Documentos: grava o arquivo em edição.
+    SaveDoc,
+    /// Ctrl+F no modo Documentos: abre a busca do documento.
+    FindInDoc,
 }
 
 /// Mensagem de outro agente (ou da UI) esperando para ser digitada no terminal da aba.
@@ -184,7 +191,7 @@ pub struct AgentBadge {
     pub id: String,
     /// Chefe da instância (`None` = responde ao usuário). Vem do core (`Core::set_boss`).
     pub parent: Option<String>,
-    /// Modelo (`claude`, `antigravity`, `ollama:…`): escolhe o logo.
+    /// Modelo (`claude`, `antigravity`…): escolhe o logo.
     pub kind: String,
     /// Nome mostrado (`Claude · Dev`).
     pub label: String,
@@ -367,6 +374,12 @@ pub struct Deck {
     /// Agentes cuja lista de modelos está sendo buscada agora.
     models_loading: HashSet<String>,
     pub settings_open: bool,
+    /// A pergunta do ditado por voz (baixar o Whisper?) está aberta.
+    pub dictation_prompt: bool,
+    /// O modelo e um motor do whisper estão no disco (lido do disco na abertura e quando o core avisa).
+    dictation_installed: bool,
+    /// Configurações: o botão "Remover" já foi clicado uma vez e pede confirmação.
+    pub dictation_confirm_remove: bool,
     /// Aba sendo renomeada pelo usuário (índice, buffer de edição, erro opcional).
     pub rename_tab: Option<(usize, String, Option<String>)>,
     /// Menu de contexto aberto em uma aba (índice da aba, posição do clique).
@@ -495,6 +508,7 @@ const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
 impl Deck {
     pub fn new(core: Core, events: Receiver<CoreEvent>, wake: Wake) -> Self {
         let cfg = core.config();
+        let dictation_installed = core.dictation_installed();
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut deck = Self {
             workspace: core.workspace(),
@@ -571,6 +585,9 @@ impl Deck {
             model_lists: HashMap::new(),
             models_loading: HashSet::new(),
             settings_open: false,
+            dictation_prompt: false,
+            dictation_installed,
+            dictation_confirm_remove: false,
             rename_tab: None,
             tab_context_menu: None,
             sound_enabled: cfg.sound_enabled,
@@ -618,7 +635,7 @@ impl Deck {
         });
     }
 
-    /// `api.listAgents()` numa thread (pode demorar ~1,5 s consultando o Ollama).
+    /// `api.listAgents()` numa thread (procura os CLIs no disco).
     pub fn refresh_agents(&self) {
         self.spawn_bg("list-agents", |core| Some(UiMsg::Agents(core.list_agents())));
     }
@@ -688,6 +705,16 @@ impl Deck {
             }
             Action::ToggleSidebar => self.toggle_sidebar(),
             Action::ToggleCenter => self.docs.toggle(&self.active_project),
+            Action::SaveDoc => {
+                if let Some(uid) = self.docs.current_uid(&self.active_project) {
+                    self.docs_save(uid, crate::docs::After::Nothing);
+                }
+            }
+            Action::FindInDoc => {
+                if let Some(uid) = self.docs.current_uid(&self.active_project) {
+                    self.docs_find(uid);
+                }
+            }
             Action::CycleTab { back } if self.docs.view == CenterView::Docs => self.docs.cycle(&self.active_project, back),
             Action::CycleTab { back } => {
                 // Só entre as abas da janela focada.
@@ -720,7 +747,10 @@ impl Deck {
                 self.git_refresh_soon();
             }
             CoreEvent::GitChanged => self.git_refresh_soon(),
-            CoreEvent::AgentsChanged => self.refresh_agents(),
+            CoreEvent::DictationChanged => {
+                self.dictation_installed = self.core.dictation_installed();
+                self.refresh_engine();
+            }
             CoreEvent::Download(_) if self.debug_hold_download => {}
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { project, id, busy } => self.on_agent_signal(&project, &id, busy),
@@ -841,6 +871,7 @@ impl Deck {
             UiMsg::Git(generation, reply) => self.on_git(generation, reply),
             UiMsg::Tasks(generation, reply) => self.on_tasks(generation, reply),
             UiMsg::Doc(uid, loaded) => self.on_doc_loaded(uid, loaded),
+            UiMsg::DocSaved(uid, saved, result) => self.on_doc_saved(uid, saved, result),
         }
     }
 
@@ -1073,7 +1104,8 @@ impl Deck {
     fn restore_tabs(&mut self) {
         for p in self.core.projects() {
             if p.id != self.active_project {
-                for id in &p.open_tabs {
+                // Aba de um agente que não existe mais (config antiga, ex.: `ollama:…`): fica de fora, em silêncio.
+                for id in p.open_tabs.iter().filter(|id| Ident::parse(id).is_some_and(|i| self.agents.knows(&i.kind))) {
                     self.core.restore_instance(&p.id, id);
                 }
             }
@@ -1893,6 +1925,13 @@ impl Deck {
                 }
                 return true;
             }
+            // Lendo documentos: Ctrl+S grava o que se edita e Ctrl+F abre a busca (o terminal está escondido).
+            if !mods.shift_key() && !term_visible && matches!(lower.as_str(), "s" | "f") {
+                if !ev.repeat {
+                    self.push_action(if lower == "s" { Action::SaveDoc } else { Action::FindInDoc });
+                }
+                return true;
+            }
             let app_key = app_claims_ctrl(&lower, term_keys, self.app_shortcuts_first);
             match lower.as_str() {
                 "t" if !ev.repeat => {
@@ -2395,7 +2434,7 @@ impl Deck {
             "Sim — portable-pty usa ConPTY no Windows 10+.\nNada a mudar.",
         ));
         self.add_feed(mk(FeedKind::System, None, None, "Projeto ativo alterado para: workspace"));
-        self.add_feed(mk(FeedKind::Error, Some("ollama:qwen3.5:9b"), None, "Falha ao contatar o Ollama em 127.0.0.1:11434."));
+        self.add_feed(mk(FeedKind::Error, Some("opencode"), None, "Falha ao contatar o provedor do modelo."));
         self.add_feed(mk(FeedKind::Thinking, Some("claude"), None, "⚙️ [read_file] README.md"));
     }
 
@@ -2506,9 +2545,75 @@ impl Deck {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Ditado opcional (o Whisper só é baixado se a pessoa quiser)
+    // ------------------------------------------------------------------
+
+    /// Na abertura do app: baixa o que faltar (quem já usa o ditado) ou abre a pergunta (quem nunca foi perguntado).
+    pub fn dictation_startup(&mut self) {
+        match self.core.dictation_startup() {
+            agentdeck_core::whisper::Startup::Ensure => self.core.ensure_whisper_async(),
+            agentdeck_core::whisper::Startup::Ask => self.dictation_prompt = true,
+            agentdeck_core::whisper::Startup::Skip => {}
+        }
+    }
+
+    /// Estado do Whisper no disco, para o botão de microfone e as configurações.
+    pub fn dictation_setup(&self) -> Setup {
+        Setup::of(self.dictation_installed, self.core.dictation_downloading())
+    }
+
+    /// "Baixar": grava o "sim" e baixa em segundo plano (a faixa de progresso aparece na barra direita).
+    pub fn dictation_accept(&mut self) {
+        self.dictation_prompt = false;
+        self.core.set_dictation_choice(DictationChoice::Yes);
+        self.core.ensure_whisper_async();
+        self.refresh_engine();
+    }
+
+    /// "Agora não": grava o "não" (não pergunta de novo nem baixa) e fecha a pergunta.
+    pub fn dictation_decline(&mut self) {
+        self.dictation_prompt = false;
+        self.core.set_dictation_choice(DictationChoice::No);
+    }
+
+    /// Configurações: apaga o que o ditado baixou.
+    pub fn dictation_remove(&mut self) {
+        self.dictation_confirm_remove = false;
+        if self.mic_phase != MicPhase::Idle {
+            self.system("Termine a gravação do ditado antes de remover o Whisper.");
+            return;
+        }
+        match self.core.remove_dictation() {
+            Ok(_) => {
+                self.dictation_installed = self.core.dictation_installed();
+                self.system("Ditado por voz removido do disco. Dá para baixar de novo pelas configurações.");
+            }
+            Err(e) => self.system(format!("Não foi possível remover o ditado por voz: {e}.")),
+        }
+    }
+
+    /// Antes de gravar: com o Whisper pronto segue; sem ele, explica ou oferece o download em vez de falhar calado.
+    fn mic_ready(&mut self) -> bool {
+        match self.dictation_setup() {
+            Setup::Ready => true,
+            Setup::Downloading => {
+                self.system("O ditado por voz ainda está baixando (veja a barra direita). Tente de novo quando terminar.");
+                false
+            }
+            Setup::NotInstalled => {
+                self.dictation_prompt = true;
+                false
+            }
+        }
+    }
+
     /// Aciona o microfone para `target` (`Tab(uid)`). Abrir o dispositivo pode levar
     /// até 5 s: vai para uma thread, e um segundo clique enquanto isso desiste.
     fn toggle_mic_for(&mut self, target: MicTarget) {
+        if self.mic_phase == MicPhase::Idle && !self.mic_ready() {
+            return;
+        }
         match dictation::toggle(&mut self.mic_phase, target) {
             ToggleOutcome::StartOpening(_) => {
                 self.spawn_bg("mic-open", |_| Some(UiMsg::MicOpened(audio::Recorder::start())));
@@ -2679,10 +2784,10 @@ mod tests {
 
     #[test]
     fn renaming_a_tab_renames_its_feed_items_and_thinking_entry() {
-        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Ollama", None)];
+        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Codex", None)];
         rename_in_feed(&mut feed, "Claude", "Claude@dev");
         let names: Vec<_> = feed.iter().map(|f| (f.who.as_deref().unwrap(), f.to.as_deref())).collect();
-        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Ollama", None)]);
+        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Codex", None)]);
 
         let mut thinking = HashMap::from([("p#claude".to_owned(), 1), ("q#claude".to_owned(), 9)]);
         rename_thinking(&mut thinking, "p", "claude", "claude@dev");

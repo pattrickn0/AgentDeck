@@ -6,7 +6,7 @@
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{Task, TaskStatus};
+use agentdeck_core::{MergeBlock, Task, TaskStatus};
 
 use super::{
     button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label,
@@ -55,6 +55,12 @@ enum Act {
     /// "Abrir em Documentos" no pedido (`false`) ou no relatório (`true`).
     OpenText(String, bool),
     DismissNotice,
+    /// "Guardar minhas alterações e mesclar" no aviso da recusa.
+    MergeStash(String),
+    /// "Pedir ao agente para fazer o commit" / "…resolver o conflito".
+    AskAgent(String),
+    /// "Ver o que está sem commit" / "Esconder a lista".
+    ToggleNoticeFiles,
     ConfirmYes,
     ConfirmNo,
     SendReturn(String),
@@ -114,7 +120,10 @@ fn apply(deck: &mut Deck, act: Act) {
         Act::Task(id, act) => deck.tasks_act(&id, act),
         Act::OpenDiff(id) => deck.docs_open_task_diff(&id),
         Act::OpenText(id, report) => deck.docs_open_task_text(&id, report),
-        Act::DismissNotice => deck.tasks.notice = None,
+        Act::DismissNotice => deck.tasks_clear_notice(),
+        Act::MergeStash(id) => deck.tasks_merge_stash(&id),
+        Act::AskAgent(id) => deck.tasks_ask_agent(&id),
+        Act::ToggleNoticeFiles => deck.tasks.notice_files = !deck.tasks.notice_files,
         Act::ConfirmYes => deck.tasks_confirm_accepted(),
         Act::ConfirmNo => deck.tasks.confirm = None,
         Act::SendReturn(id) => deck.tasks_send_return(&id),
@@ -304,19 +313,21 @@ fn muted_line(ui: &mut Ui, text: &str) {
 
 /// Faixa vermelha com o erro (e o "×" opcional). Devolve se o "×" foi clicado.
 fn error_box(ui: &mut Ui, text: &str, dismiss: bool) -> bool {
+    notice_box(ui, text, dismiss, true)
+}
+
+/// Faixa do aviso: vermelha (`danger`) para erro, âmbar (`warning`) para o que deu certo mas o usuário precisa saber.
+fn notice_box(ui: &mut Ui, text: &str, dismiss: bool, danger: bool) -> bool {
+    let (tone, text_color) =
+        if danger { (theme::pal().danger, theme::pal().danger_text) } else { (theme::pal().warning, theme::pal().text) };
     let w = ui.available_width() - 2.0 * PAD;
-    let g = ui.painter().layout(
-        text.to_owned(),
-        theme::ui(12.0),
-        theme::pal().danger_text,
-        (w - 22.0 - if dismiss { 18.0 } else { 0.0 }).max(40.0),
-    );
+    let g = ui.painter().layout(text.to_owned(), theme::ui(12.0), text_color, (w - 22.0 - if dismiss { 18.0 } else { 0.0 }).max(40.0));
     let h = g.size().y + 16.0;
     let (outer, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 12.0), Sense::hover());
     let r = Rect::from_min_size(Pos2::new(outer.min.x + PAD, outer.min.y + 3.0), Vec2::new(w, h));
-    ui.painter().rect_filled(r, 7.0, theme::with_alpha(theme::pal().danger, 0.12));
-    ui.painter().rect_stroke(r, 7.0, Stroke::new(1.0, theme::with_alpha(theme::pal().danger, 0.45)), egui::StrokeKind::Inside);
-    ui.painter().galley(Pos2::new(r.min.x + 10.0, r.min.y + 8.0), g, theme::pal().danger_text);
+    ui.painter().rect_filled(r, 7.0, theme::with_alpha(tone, 0.12));
+    ui.painter().rect_stroke(r, 7.0, Stroke::new(1.0, theme::with_alpha(tone, 0.45)), egui::StrokeKind::Inside);
+    ui.painter().galley(Pos2::new(r.min.x + 10.0, r.min.y + 8.0), g, text_color);
     let mut closed = false;
     if dismiss {
         let x = Rect::from_min_size(Pos2::new(r.max.x - 24.0, r.min.y + 2.0), Vec2::splat(22.0));
@@ -827,6 +838,9 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
     let agent_color = deck.agents.tab_color(&task.kind);
     let agent_name = deck.agents.name(&task.kind);
     let notice = deck.tasks.notice.clone();
+    let notice_info = deck.tasks.notice_info;
+    let notice_block = deck.tasks.notice_block.clone();
+    let notice_files = deck.tasks.notice_files;
     let return_open = deck.tasks.return_open && matches!(task.status, TaskStatus::Review | TaskStatus::Validating);
     let body = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
     let mut child = ui.new_child(UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -900,8 +914,13 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
             error_box(ui, err, false);
         }
         if let Some(n) = &notice {
-            if error_box(ui, n, true) {
+            // Recusa da mesclagem com saída: a explicação em linguagem comum no lugar do texto do git, e o botão da saída.
+            let shown = notice_block.as_ref().map_or_else(|| n.clone(), |b| b.explain(task));
+            if notice_box(ui, &shown, true, !notice_info) {
                 acts.push(Act::DismissNotice);
+            }
+            if let Some(block) = &notice_block {
+                refusal_buttons(ui, task, block, notice_files, !working, acts);
             }
         }
 
@@ -993,6 +1012,64 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         }
         ui.add_space(14.0);
     });
+}
+
+/// Os botões da saída da recusa da mesclagem (e, para o que está sem commit, a lista completa de arquivos).
+fn refusal_buttons(ui: &mut Ui, task: &Task, block: &MergeBlock, files_open: bool, enabled: bool, acts: &mut Vec<Act>) {
+    let mergeable = matches!(task.status, TaskStatus::Review | TaskStatus::Failed);
+    if !mergeable {
+        return;
+    }
+    let (buttons, files): (Vec<(String, BtnKind, bool, &str)>, bool) = match block {
+        MergeBlock::MainDirty(_) => (
+            vec![
+                (
+                    "Guardar minhas alterações e mesclar".to_owned(),
+                    BtnKind::Primary,
+                    enabled,
+                    "Guarda as suas alterações sem commit (git stash), mescla a tarefa e devolve as alterações; se elas se chocarem com a tarefa, ficam guardadas e o aviso diz como recuperar",
+                ),
+                (
+                    if files_open { "Esconder a lista" } else { "Ver o que está sem commit" }.to_owned(),
+                    BtnKind::Secondary,
+                    true,
+                    "Mostra todos os arquivos com alterações sem commit na pasta principal",
+                ),
+            ],
+            true,
+        ),
+        MergeBlock::TaskDirty(_) => (
+            vec![(
+                "Pedir ao agente para fazer o commit".to_owned(),
+                BtnKind::Primary,
+                enabled,
+                "Devolve a tarefa ao agente com a lista dos arquivos e o pedido de fazer o commit",
+            )],
+            false,
+        ),
+        MergeBlock::Conflict(_) => (
+            vec![(
+                "Pedir ao agente para resolver o conflito".to_owned(),
+                BtnKind::Primary,
+                enabled,
+                "Devolve a tarefa ao agente pedindo para juntar a base na branch dele (git merge) e resolver os arquivos em conflito",
+            )],
+            false,
+        ),
+    };
+    match button_flow(ui, &buttons, "refusal") {
+        Some(0) if files => acts.push(Act::MergeStash(task.id.clone())),
+        Some(0) => acts.push(Act::AskAgent(task.id.clone())),
+        Some(_) => acts.push(Act::ToggleNoticeFiles),
+        None => {}
+    }
+    if files_open && files {
+        let list = block.files().join(
+            "
+",
+        );
+        paragraph(ui, &clip_text(&list, TEXT_MAX), theme::mono(11.0), theme::pal().text_2);
+    }
 }
 
 /// "Abrir em Documentos" embaixo do pedido e do relatório: eles aparecem formatados no modo Documentos.
@@ -1485,7 +1562,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             submenu: false,
         })
         .collect();
-    // O OpenCode lista todos os provedores conectados (`opencode`, `opencode-go`, `ollama`…): o menu
+    // O OpenCode lista todos os provedores conectados (`opencode`, `opencode-go`…): o menu
     // pede o provedor antes e mostra só os modelos dele. Os outros agentes têm uma lista só.
     let groups = models::by_provider(&known);
     let sole = models::sole_provider(&groups).map(str::to_owned);

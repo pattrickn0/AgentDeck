@@ -6,10 +6,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::agents::{self, agent_def, resolve_alias, DEFAULT_OLLAMA_MODEL};
+use crate::agents::{self, agent_def, resolve_alias};
 use crate::context::{self, ContextRequest};
-use crate::events::{FeedEntry, FeedKind};
-use crate::ollama::{AgentEvent, RunOptions};
 use crate::process::{run_captured, Exit};
 use crate::Core;
 
@@ -29,7 +27,7 @@ pub struct HeadlessOptions {
     /// Pasta onde o agente roda (a do projeto); vazia = a do projeto ativo.
     pub cwd: std::path::PathBuf,
     pub depth: i64,
-    /// Substitui as instruções da ponte no prompt de sistema (Claude/Ollama).
+    /// Substitui as instruções da ponte no prompt de sistema (Claude).
     pub extra_system: Option<String>,
     pub attachments: Vec<String>,
     /// Modelo de LLM (`--model`; no OpenCode, `run -m`). Ignorado nos agentes que não escolhem modelo.
@@ -119,7 +117,7 @@ fn walk_agy(v: &Value, text: &mut Option<String>, id: &mut Option<String>) {
 
 impl Core {
     /// Executa `agent` em modo headless e devolve a resposta limpa. BLOQUEANTE.
-    /// Equivalente a `runHeadless`; o Ollama usa o motor interno com ferramentas.
+    /// Equivalente a `runHeadless`.
     pub fn run_headless(&self, agent: &str, prompt: &str, opts: HeadlessOptions) -> anyhow::Result<String> {
         self.run_headless_with(agent, prompt, opts, &self.inner.state.shutdown)
     }
@@ -131,38 +129,11 @@ impl Core {
         opts: HeadlessOptions,
         cancel: &AtomicBool,
     ) -> anyhow::Result<String> {
-        let sub_model = agent.strip_prefix("ollama:");
-        let base = if sub_model.is_some() { "ollama" } else { resolve_alias(agent) };
+        let base = resolve_alias(agent);
         let def = agent_def(base).ok_or_else(|| anyhow::anyhow!("Agente desconhecido: {agent}"))?;
         let reg = &self.inner.agents;
         let workspace = if opts.cwd.as_os_str().is_empty() { self.workspace() } else { opts.cwd.clone() };
         let project = opts.project.clone();
-
-        if base == "ollama" {
-            let resolved = reg.resolve_ollama(sub_model).ok_or_else(|| anyhow::anyhow!("{}", def.missing))?;
-            let model = sub_model.map(str::to_owned).unwrap_or(resolved.model);
-            let model = if model.is_empty() { DEFAULT_OLLAMA_MODEL.to_owned() } else { model };
-            let mut ro = RunOptions::new(model, prompt, workspace.clone());
-            ro.session_key = opts.session_key;
-            ro.extra_system = opts.extra_system;
-            ro.attachments = opts.attachments;
-            // `ask-agent` chamado pelo modelo enxerga a ponte (com a profundidade correta).
-            // Token próprio desta execução: a ponte sabe quem pergunta, sem confiar no `from`.
-            let guard = self.headless_token(&project, agent);
-            ro.command_env = Some(agents::agent_env(self, agent, opts.depth, &guard.token));
-            let core = self.clone();
-            let out = self.inner.ollama.run(ro, cancel, &mut |ev| {
-                if let AgentEvent::ToolCall { name, summary } = ev {
-                    core.feed(
-                        FeedEntry::new(FeedKind::Thinking, Some("ollama"), None, format!("⚙️ [{name}] {summary}")).in_project(&project),
-                    );
-                }
-            })?;
-            if out.cancelled {
-                anyhow::bail!("execução interrompida");
-            }
-            return Ok(out.text);
-        }
 
         let resolved = reg.resolve(base).ok_or_else(|| anyhow::anyhow!("{}", def.missing))?;
         let data_dir = self.paths().data_dir.to_string_lossy().into_owned();

@@ -46,7 +46,6 @@ fn start_cfg(fake_agents: &[(&str, &str)], tweak: impl FnOnce(&mut Config)) -> E
     let opts = StartOptions {
         search_path: Some(fake_bin.into_os_string()),
         home_dir: Some(root.join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(config),
         system_dirs: false,
@@ -120,19 +119,16 @@ fn ask(env: &Env, body: Value) -> (u16, Value) {
     http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), env.core.bridge_token(), &body.to_string())
 }
 
-/// Uma aba aberta pela versão antiga (CommandDeck) ainda manda `x-commanddeck-token`: a ponte aceita.
+/// O cabeçalho do nome antigo (`x-commanddeck-token`) não vale mais: só `x-agentdeck-token` autentica.
 #[test]
-fn the_old_token_header_is_still_accepted() {
+fn the_old_token_header_is_refused() {
     let env = start(&[("claude", "cat >/dev/null; echo ok")]);
     let port = env.core.bridge_port();
     let token = env.core.bridge_token().to_owned();
     let host = format!("127.0.0.1:{port}");
 
     let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, &token, "");
-    assert_eq!(st, 200, "{b}");
-    let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, "errado", "");
     assert_eq!((st, b), (403, json!({"error": "token inválido"})));
-    // O nome novo continua valendo.
     assert_eq!(http(port, "GET", "/agents", &host, &token, "").0, 200);
 }
 
@@ -185,7 +181,8 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md criado no workspace do app");
     assert!(md.starts_with("<!-- agentdeck:start -->\nVocê está rodando dentro do AgentDeck"));
-    assert!(md.contains("Seu nome aqui está na variável de ambiente AGENTDECK_AGENT"));
+    assert!(md.contains("Seu nome e cargo estão nas variáveis AGENTDECK_AGENT e AGENTDECK_ROLE"));
+    assert!(md.contains("NÃO use subagentes internos do seu CLI"));
 
     let shell = env.core.spawn_spec(&p, "shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
@@ -203,7 +200,7 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(env.core.spawn_spec(&p, "nada").expect_err("desconhecido"), "Agente desconhecido: nada");
     let missing = env.core.spawn_spec(&p, "antigravity").expect_err("não instalado");
     assert!(missing.starts_with("Antigravity CLI (agy) não encontrado."));
-    assert!(env.core.spawn_spec(&p, "ollama").expect_err("sem ollama").starts_with("Ollama CLI não encontrado."));
+    assert_eq!(env.core.spawn_spec(&p, "ollama").expect_err("o agente Ollama foi removido"), "Agente desconhecido: ollama");
     assert_eq!(env.core.spawn_spec("pdeadbeef", "shell").expect_err("sem projeto"), "Projeto desconhecido: pdeadbeef");
 
     // Outro projeto (não ativo): o terminal abre na pasta dele, que ganha o AGENTS.md na primeira aba.
@@ -241,9 +238,7 @@ fn workspace_agents_md_and_spawn_specs() {
 
     let list = env.core.list_agents();
     let ids: Vec<&str> = list.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(ids, ["claude", "antigravity", "ollama", "codex", "opencode", "aider", "goose", "copilot", "q", "interpreter", "shell"]);
-    let ollama = &list[2];
-    assert!(!ollama.installed && !ollama.peer && ollama.label == "Ollama");
+    assert_eq!(ids, ["claude", "antigravity", "codex", "opencode", "aider", "goose", "copilot", "q", "interpreter", "shell"]);
     let shell = list.last().expect("shell");
     assert!(shell.installed && !shell.peer);
     env.core.shutdown();
@@ -809,10 +804,7 @@ fn statusline_reports_usage_of_the_tab_model() {
 #[test]
 fn one_app_per_data_dir() {
     let env = start(&[]);
-    let second = Core::start_with(
-        paths_in(&env.root),
-        StartOptions { ollama_discovery: false, watch_workspace: false, system_dirs: false, ..Default::default() },
-    );
+    let second = Core::start_with(paths_in(&env.root), StartOptions { watch_workspace: false, system_dirs: false, ..Default::default() });
     let err = second.err().expect("a segunda instância na mesma pasta de dados é recusada").to_string();
     assert!(err.contains("já está usando a pasta de dados"), "{err}");
     env.core.shutdown();
@@ -1472,13 +1464,16 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
     let oc = env.core.spawn_spec_for(&p, &ident("opencode")).expect("opencode");
     assert_eq!(oc.args, ["--standalone"]);
     let conf: Value = serde_json::from_str(&oc.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
-    assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free"}));
-    // Sem modelo, o OpenCode abre como sempre: sem argumentos e sem a variável.
+    let instructions = env.root.join("dados").join("agentdeck-instructions.md");
+    assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free", "instructions": [instructions.to_string_lossy()]}));
+    // Sem modelo, o OpenCode ainda recebe as instruções do AgentDeck (servidor próprio + arquivo na configuração).
     env.core.update_config(|c| {
         c.role_models.remove("opencode");
     });
     let plain = env.core.spawn_spec_for(&p, &ident("opencode@qa")).expect("opencode sem modelo");
-    assert!(plain.args.is_empty() && !plain.env.contains_key("OPENCODE_CONFIG_CONTENT"), "{:?}", plain.args);
+    assert_eq!(plain.args, ["--standalone"]);
+    let conf: Value = serde_json::from_str(&plain.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
+    assert_eq!(conf, json!({"instructions": [instructions.to_string_lossy()]}));
 
     // Quem não escolhe modelo não ganha um, nem do padrão nem do pedido.
     assert_eq!(env.core.spawn_spec_for(&p, &ident("aider")).expect("aider").model, None);
@@ -1505,7 +1500,6 @@ fn a_saved_model_survives_restarting_the_app() {
     let opts = |config: Config| StartOptions {
         search_path: None,
         home_dir: Some(tmp.path().join("home")),
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(config),
         system_dirs: false,
@@ -1555,7 +1549,6 @@ fn the_models_inventory_of_this_machine() {
     let opts = StartOptions {
         search_path: None,
         home_dir: None,
-        ollama_discovery: true,
         watch_workspace: false,
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: true,
@@ -1577,7 +1570,6 @@ fn the_known_models_come_from_the_installed_clis() {
     let opts = StartOptions {
         search_path: None,
         home_dir: None,
-        ollama_discovery: false,
         watch_workspace: false,
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: true,

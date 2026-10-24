@@ -24,6 +24,8 @@ pub const SHORTCUTS: &[ShortcutItem] = &[
     ShortcutItem { keys: &["Ctrl+Alt+setas"], desc: "Ir para a janela vizinha (tela dividida)" },
     ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral *" },
     ShortcutItem { keys: &["Ctrl+Shift+D"], desc: "Alternar o centro: Agentes / Documentos" },
+    ShortcutItem { keys: &["Ctrl+S"], desc: "Gravar o arquivo em edição (modo Documentos)" },
+    ShortcutItem { keys: &["Ctrl+F"], desc: "Buscar no documento aberto (modo Documentos)" },
     ShortcutItem { keys: &["Ctrl+Shift+M"], desc: "Ditar por voz na aba ativa (sem enviar)" },
     ShortcutItem { keys: &["Duplo clique"], desc: "Renomear aba (modelo@cargo@nome)" },
     ShortcutItem { keys: &["Ctrl+/"], desc: "Mostrar ou fechar estes atalhos" },

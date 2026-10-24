@@ -12,11 +12,11 @@ Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com a
 | Render | **glutin + glow** com **egui** (`egui-winit` + `egui_glow`) | widgets prontos e estilização fina para reproduzir o CSS; OpenGL leve (roda até em Xvfb/llvmpipe para testes) |
 | Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação madura; o render da grade é nosso (pintado no egui) |
 | Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/models`, `/team`, `/ask`, `/reply`, `/signal`, `/usage`, `/learn`, `/tasks`; token por processo de agente + validação de Host |
-| Cliente HTTP | **ureq** (Ollama `/api/chat`, `/api/tags`, downloads) | bloqueante e simples, roda em threads |
+| Cliente HTTP | **ureq** (GitHub, cota do Antigravity, downloads) | bloqueante e simples, roda em threads |
 | Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
 | Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
 
-Sem Node/Electron em runtime: `ask-agent` e `ollama-agent` viram binários Rust ao lado do app.
+Sem Node/Electron em runtime: `ask-agent` vira um binário Rust ao lado do app.
 
 ## Crates
 
@@ -24,7 +24,7 @@ Sem Node/Electron em runtime: `ask-agent` e `ollama-agent` viram binários Rust 
 (raiz)
 ├── crates/core   agentdeck-core   backend sem GUI
 ├── crates/app    agentdeck        UI winit+egui
-└── crates/cli    agentdeck-cli    bins ask-agent e ollama-agent
+└── crates/cli    agentdeck-cli    bin ask-agent
 ```
 
 A UI fala com o backend apenas via `agentdeck_core::Core` (métodos ≈ canais IPC) e recebe
@@ -33,8 +33,8 @@ A UI fala com o backend apenas via `agentdeck_core::Core` (métodos ≈ canais I
 
 ## Ponto de extensão para RAG (futuro)
 
-`core::context::ContextProvider` — hoje vazio. O motor Ollama e o executor headless
-consultam os provedores registrados antes de enviar o prompt; plugar RAG local/remoto
+`core::context::ContextProvider` — hoje vazio. O executor headless
+consulta os provedores registrados antes de enviar o prompt; plugar RAG local/remoto
 não exige alterar o resto do sistema.
 
 ## Protocolo entre agentes (`ask-agent`)
@@ -43,6 +43,27 @@ Cada aba recebe no ambiente: `AGENTDECK_PORT` (porta da ponte), `AGENTDECK_TOKEN
 própria aba**), `AGENTDECK_AGENT` (nome do agente da aba), `AGENTDECK_DEPTH` (profundidade de chamadas) e a
 pasta dos executáveis no início do `PATH`. Nenhuma outra `AGENTDECK_*` do ambiente do app passa para os
 agentes (exceto `AGENTDECK_ASK_WAIT`, configuração do usuário).
+
+**Instruções do AgentDeck em toda aba.** O texto (`Registry::bridge_instructions`, `agents.rs`) é a "memória geral",
+igual para todos: como falar com outro agente, a regra de **não usar subagentes internos do CLI** (Task/Agent tool,
+sub-agents) a menos que o usuário peça, e a memória do projeto (`memory/aprendizados/`, o formato do arquivo e o
+`--learn`, para valer também num projeto que começa sem memória). Chega a cada CLI pelo canal dele, **sem depender do
+`AGENTS.md` do usuário** (`spawn_spec_for`, `instruction_args`):
+
+| CLI | canal |
+|---|---|
+| Claude | `--append-system-prompt` (texto com o nome e o cargo da instância) |
+| Codex | `-c developer_instructions=<TOML>` (num shim `.cmd` as aspas não sobrevivem: o texto vai cru, que o Codex aceita como texto) |
+| OpenCode | `instructions: ["dados/agentdeck-instructions.md"]` em `OPENCODE_CONFIG_CONTENT`, junto com o modelo; só o servidor próprio da aba (`--standalone`, agora sempre) lê a variável (`models::opencode_tui`) |
+| Aider | `--read dados/agentdeck-instructions.md` |
+| Open Interpreter | `--custom_instructions <texto>` |
+| Antigravity, Goose, Copilot | só leem o `AGENTS.md` da pasta: o app o **cria só com o bloco dele** se a pasta não tem um (`Core::ensure_agents_file`, `workspace::ensure_agent_context(.., create = true)`), avisa na Conversa e não o toca se já existe |
+| Amazon Q, Terminal | sem canal (o Q lê `.amazonq/rules`, que o app não escreve) |
+
+O arquivo `dados/agentdeck-instructions.md` e o bloco do `AGENTS.md` levam o texto genérico (`bridge_instructions(None)`):
+nome e cargo vêm de `AGENTDECK_AGENT`/`AGENTDECK_ROLE`, e a lista de agentes instalados fica de fora para o arquivo não
+mudar de máquina para máquina. Ver [aprendizados/instrucoes-por-cli.md](aprendizados/instrucoes-por-cli.md). A execução
+headless (`ask-agent <agente>` sem aba) só leva as instruções no Claude (como antes).
 
 **Identidade pelo token.** Cada processo de agente tem um token próprio: o da aba vale enquanto a instância
 existir (`Core::tab_token`); o de uma execução headless, só durante ela (`Core::headless_token`). A ponte
@@ -74,7 +95,7 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `GET /inbox`, `GET /inbox?all=1` | `{"answers":[{"request","from","text","failed","ts","delivered"}]}`: as respostas que o chamador recebeu (só token de aba; 400 com o mestre). Sem `all`, as ainda não entregues; com `all`, as 20 últimas. Ler marca todas como entregues (`ask-agent --inbox`) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
-| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell`/`ollama` recusados) |
+| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell` recusado) |
 | `GET /tasks`, `GET /tasks/<id>` | as tarefas do projeto de quem chama (`{"tasks": […]}`, sem brief, relatório nem histórico) ou uma tarefa completa (`{"task": {…}}`); com o token mestre, `?project=<id>` escolhe o projeto. Qualquer token pode ler |
 | `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"base"][,"start"]}` → `{"task"}`: cria a tarefa (`kind` padrão `claude`; `start: true` já a inicia) e grava quem pediu como criador; 400 para título vazio, agente ou modelo inválidos, base que não é branch local ou projeto sem git/commit; se `start` falha, devolve o erro com a tarefa criada |
 | `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` → `{"task"}`: inicia, mescla (a tarefa fica aguardando validação), valida (conclui e limpa) ou descarta (409 se o estado não permite, se o repositório principal não está pronto, se há conflito ou se a validação não pode limpar; 500 em erro do git) |
@@ -82,20 +103,19 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `POST /tasks/<id>/return` | `{"feedback"}` → `{"task"}`: devolve a tarefa em revisão ao agente, com o feedback |
 | `POST /tasks/<id>/reject` | `{"feedback"}` → `{"task"}`: reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, com o motivo (400 para motivo vazio; 409 fora de `Validating` ou com as abas dos agentes desligadas) |
 
-Toda requisição exige o cabeçalho `x-agentdeck-token` (comparado em tempo constante; o nome antigo, `x-commanddeck-token`, também é aceito durante a migração) e um `Host`
+Toda requisição exige o cabeçalho `x-agentdeck-token` (comparado em tempo constante) e um `Host`
 `127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
 mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupando a vaga até a resposta chegar), e
 os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
-mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity, e memória em
-processo no Ollama.
+mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity; os demais CLIs começam sem histórico no headless.
 
 **Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
 
-**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` e também `dados/.commanddeck.lock` (a trava da versão antiga, durante a migração) ao iniciar; uma segunda janela
-na mesma pasta, nova ou antiga, é recusada com uma mensagem (defina `AGENTDECK_HOME` para abrir outra instância isolada).
+**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` ao iniciar; uma segunda janela
+na mesma pasta é recusada com uma mensagem (defina `AGENTDECK_HOME` para abrir outra instância isolada).
 
 ### Instâncias (abas) e perguntas entre elas
 
@@ -130,7 +150,7 @@ Ao abrir a instância vale, na ordem: o pedido (`ask-agent --model` → `"model"
 o gravado em `tab_models` (reabrir o app mantém), o padrão de `Config.role_models` (chave `modelo@cargo` ou só
 `modelo`; `modelo@cargo` vence) e, por fim, o do próprio CLI (nenhum argumento). O resultado é gravado em
 `tab_models` por `Core::assign_model` (idempotente; chamado pela ponte ao criar a instância e por `spawn_spec_for`).
-Só aceitam modelo `claude`, `antigravity`, `codex` e `opencode` (os modelos do Ollama já vão no tipo); o nome é
+Só aceitam modelo `claude`, `antigravity`, `codex` e `opencode` ; o nome é
 validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims `.cmd` ainda passam por `cmd_safe_arg`.
 - **Nas abas** (`spawn_spec_for`): `claude`, `agy` e `codex` recebem `--model <m>`. O TUI do **OpenCode** não tem
   `--model` (só `run` e `mini` têm `-m`): a aba abre `opencode --standalone` com `OPENCODE_CONFIG_CONTENT={"model":"<m>"}`
@@ -147,14 +167,14 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
   `opencode` = `opencode models`. As duas últimas rodam numa thread (a interface chama por
   `Deck::request_models`), com limite de 15 s e cache de 10 min (60 s se falhou); sem lista o menu mostra
   só "Padrão". Como o `opencode models` mistura todos os provedores conectados, os dois menus usam
-  `models::by_provider` e pedem o **provedor antes do modelo** (`opencode`, `opencode-go`, `ollama`…, o
+  `models::by_provider` e pedem o **provedor antes do modelo** (`opencode`, `opencode-go`…, o
   prefixo antes da `/`); os modelos `-free` levam a marca "grátis" (`models::is_free`) e vêm primeiro em
   cada lista. Com um provedor só, `models::sole_provider` pula o passo do provedor e mostra os modelos
   dele direto.
 - **Inventário para os agentes** (`ask-agent --models [agente]`, `GET /models[?agent=<id>]`, `Core::models_inventory`):
   imprime, por agente instalado, o nome como vale no `--agent` e os modelos como o `--model` aceita, com os `-free`
   primeiro e marcados "(grátis)"; o OpenCode sai agrupado por provedor, uma linha cada (`models::by_provider`); os
-  modelos do Ollama saem juntos como `ollama:<modelo>`; o Codex não tem lista e os CLIs sem escolha de modelo
+  o Codex não tem lista e os CLIs sem escolha de modelo
   (aider…) saem como tal. Agente não instalado não aparece (e `--models <agente>` dele dá 404); uma listagem que
   falha vira uma linha ("não consegui listar") sem derrubar o resto. Usa o cache de `known_models` e consulta os
   CLIs em paralelo, então demora no máximo o `LIST_TIMEOUT`. A formatação é a função pura `models::format_inventory`.
@@ -181,10 +201,8 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
    termina com HTTP 202 e um aviso, e a resposta, quando chegar (até 10 minutos), é **digitada no terminal
    de quem perguntou** como uma mensagem nova (`Delivery { answer: true }`). Isso só vale para abas de
    agentes: num terminal comum (`shell`) o texto seria executado como comando, então ali o `ask-agent`
-   espera até o fim, assim como nas execuções headless e no `ollama-agent` (`AGENTDECK_ASK_WAIT=0`).
-5. O `ollama-agent` devolve a resposta sozinho (`POST /reply` com o número lido da instrução, que só conclui
-   perguntas pendentes e nunca cria uma nova), porque modelos pequenos esquecem de rodar o comando.
-6. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**
+   espera até o fim, assim como nas execuções headless.
+5. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**
    descarta as perguntas dela. Ciclos de espera (A espera B, B espera C, C espera A) são recusados na hora
    (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
    digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
@@ -278,6 +296,22 @@ thread da interface e volta como `UiMsg::Doc(uid, Loaded)`. Do core só entram o
 `git_diff`, `parse_diff`) e `Core::read_text(rel)` (`workspace::read_text`: caminho relativo e seguro, links simbólicos resolvidos
 para dentro da pasta, até 1 MB, `TextFile::{Text, TooLarge, Binary}`). Terminais escondidos: o PTY não é redimensionado nem recebe teclado.
 
+**Editor (t39).** Um arquivo de texto que cabe (`Source::fits`: até 256 KB, linhas até 4 000 bytes) vira `DocState::Source(Source)`: o
+texto da tela (`\n`, sem BOM), o que está no disco (`disk`; sujo = `text != disk`), `Eol`/`bom` para gravar de volta igual, `editing`,
+`raw` (markdown como código), `locked` (CRLF+LF misturados ou não UTF-8: só leitura), `external` (o disco mudou com edição não salva),
+`gone`, `saving`/`save_error` e `version` (a chave do que depende do texto). `DocTab::apply` **nunca troca** um `Source` sujo por uma
+leitura: ela vira `Source::reload`, que só guarda o texto novo em `external`. Gravar é `Deck::docs_save` → thread → `Core::write_text` →
+`workspace::write_text` (`write_atomic`) → `UiMsg::DocSaved` → `on_doc_saved` (`After::{Nothing, Close, Quit}`). Fechar uma aba suja ou o
+app passa por `Docs::confirm` (`Unsaved::{Tab, Quit, Revert}`; `request_quit` no ×, em `CloseRequested` e em `quit_requested`) e pelo modal
+`ui/docs.rs::unsaved_modal`. A pintura do código é `ui/code.rs`: um `TextEdit` multilinha (sobre `&str` na leitura, `String` na edição)
+cujo `layouter` devolve o galley de `docs::Shaped` — realce (`highlight::Cache`) e galley guardados por impressão digital do texto,
+largura de quebra, escala da tela e busca, de modo que repintar não refaz nada; as linhas quebram na largura (o `TextEdit` multilinha do egui
+não rola na horizontal) e a coluna dos números fica à parte, alinhada às linhas do galley. O realce é o tokenizador próprio
+`highlight.rs` (sem `syntect`, ver `memory/aprendizados/editor-de-documentos.md`); as cores são `Palette::syn_*`. O que se pinta à mão (o
+diff, `ui/diff_view.rs`, e o arquivo grande, `ui/code.rs::text_body`) usa a seleção de `ui/select.rs` (posição = linha + byte; arrastar,
+Ctrl+A, Ctrl+C) e `highlight::pieces` para juntar realce e marcas da busca por linha. `Find` (por documento) guarda a consulta e os
+achados (bytes para o código; linhas para o diff e o arquivo grande).
+
 **Memória em duas camadas** (fase 1 do passo 3 do roadmap; `learnings.rs`, `situation.rs` e `tasks.rs`). O app entrega ao
 agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agora, no `start_message`:
 - **Longo prazo: aprendizados.** Um `.md` por aprendizado em `memory/aprendizados/` (versionado no git; formato no `README.md` da
@@ -366,10 +400,9 @@ quando renova cada janela, "bloqueado até").
   (janelas `5h` e `weekly`; alternativa: `fetchAvailableModels`) com o token do CLI (Gerenciador de Credenciais do
   Windows `gemini:antigravity` ou `~/.gemini/oauth_creds.json`) enquanto ele vale; quem o renova é o próprio CLI. API interna: qualquer falha
   vira "sem dados" (o agente fica com o último valor lido, ou fora da barra se nunca houve leitura). O token nunca vai para log, Feed ou interface.
-- **Ollama**: local, sem limite.
 
 **Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
-(`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (todo `ollama:*` vira `ollama`). A cada quadro,
+(`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (o próprio tipo; `claude@dev@ana` fica no grupo `claude`). A cada quadro,
 `Deck::plan_panes` calcula a grade (`grid_shape` → `layout` com as proporções salvas, que voltam a iguais quando
 o formato muda), distribui os grupos (`assign`: os que não cabem dividem a última janela) e escolhe a aba
 visível de cada janela (a de `shown` mais alto). `Deck::active` continua sendo a aba que recebe o teclado: é a

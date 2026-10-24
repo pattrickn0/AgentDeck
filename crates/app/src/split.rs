@@ -1,4 +1,4 @@
-//! Tela dividida por tipo de agente: cada grupo (`claude`, `antigravity`, `ollama`…) ganha uma
+//! Tela dividida por tipo de agente: cada grupo (`claude`, `antigravity`, `codex`…) ganha uma
 //! janela, e as janelas se organizam numa grade automática (Dividida) ou numa janela grande com as
 //! outras empilhadas ao lado (Destaque). Só cálculo (sem pintura), com testes.
 
@@ -10,14 +10,10 @@ pub const MIN_H: f32 = 140.0;
 /// Fresta entre as janelas (ilhas): o divisor arrastável mora nela.
 pub const GAP: f32 = crate::theme::ISLAND_GAP;
 
-/// Grupo (janela) de uma aba: todos os modelos do Ollama ficam juntos; o resto é o próprio tipo
-/// (`claude@dev@ana` é `kind = "claude"`, então fica no grupo do Claude).
+/// Grupo (janela) de uma aba: o próprio tipo (`claude@dev@ana` é `kind = "claude"`, então fica no
+/// grupo do Claude).
 pub fn group_key(kind: &str) -> &str {
-    if kind == "ollama" || kind.starts_with("ollama:") {
-        "ollama"
-    } else {
-        kind
-    }
+    kind
 }
 
 /// Quantas janelas por linha para `n` grupos numa área `w`×`h`. Até 2 grupos lado a lado; 3 =
@@ -272,9 +268,6 @@ mod tests {
     #[test]
     fn group_keys() {
         assert_eq!(group_key("claude"), "claude");
-        assert_eq!(group_key("ollama"), "ollama");
-        assert_eq!(group_key("ollama:qwen3.5:4b"), "ollama");
-        assert_eq!(group_key("ollama:user/custom:latest"), "ollama");
         assert_eq!(group_key("antigravity"), "antigravity");
         assert_eq!(group_key("shell"), "shell");
     }
@@ -388,8 +381,8 @@ mod tests {
 
     #[test]
     fn the_featured_group_goes_first_and_the_rest_keep_their_order() {
-        let order: Vec<String> = ["claude", "antigravity", "ollama", "codex"].map(String::from).to_vec();
-        assert_eq!(highlight_order(&order, Some("ollama")), ["ollama", "claude", "antigravity", "codex"]);
+        let order: Vec<String> = ["claude", "antigravity", "opencode", "codex"].map(String::from).to_vec();
+        assert_eq!(highlight_order(&order, Some("opencode")), ["opencode", "claude", "antigravity", "codex"]);
         assert_eq!(highlight_order(&order, Some("claude")), order);
         // Sem selecionado, ou grupo que não existe: a ordem das janelas.
         assert_eq!(highlight_order(&order, None), order);
@@ -461,9 +454,9 @@ mod tests {
 
     #[test]
     fn leftover_groups_share_the_last_window() {
-        let g = ["claude", "antigravity", "ollama", "codex"];
-        assert_eq!(assign(&g, 4), [vec!["claude"], vec!["antigravity"], vec!["ollama"], vec!["codex"]]);
-        assert_eq!(assign(&g, 2), [vec!["claude"], vec!["antigravity", "ollama", "codex"]]);
+        let g = ["claude", "antigravity", "opencode", "codex"];
+        assert_eq!(assign(&g, 4), [vec!["claude"], vec!["antigravity"], vec!["opencode"], vec!["codex"]]);
+        assert_eq!(assign(&g, 2), [vec!["claude"], vec!["antigravity", "opencode", "codex"]]);
         assert_eq!(assign(&g, 9).len(), 4);
         assert!(assign::<&str>(&[], 3).is_empty());
     }
@@ -471,18 +464,18 @@ mod tests {
     #[test]
     fn window_order_follows_the_open_groups() {
         let mut order = vec!["antigravity".to_owned(), "gone".to_owned()];
-        sync_order(&mut order, ["claude", "antigravity", "ollama:qwen3.5:4b", "claude", "ollama:qwen3.5:9b"].into_iter());
+        sync_order(&mut order, ["claude", "antigravity", "opencode", "claude", "opencode"].into_iter());
         // A ordem salva vale; o grupo fechado sai; os novos entram no fim, na ordem das abas.
-        assert_eq!(order, ["antigravity", "claude", "ollama"]);
-        sync_order(&mut order, ["claude", "ollama"].into_iter());
-        assert_eq!(order, ["claude", "ollama"]);
+        assert_eq!(order, ["antigravity", "claude", "opencode"]);
+        sync_order(&mut order, ["claude", "opencode"].into_iter());
+        assert_eq!(order, ["claude", "opencode"]);
         sync_order(&mut order, std::iter::empty());
         assert!(order.is_empty());
     }
 
     #[test]
     fn tabs_of_a_window_keep_the_tab_order() {
-        let keys = ["claude", "antigravity", "claude", "ollama", "codex"];
+        let keys = ["claude", "antigravity", "claude", "opencode", "codex"];
         assert_eq!(pane_tabs(&keys, &["claude".into()]), [0, 2]);
         // Janela com os grupos que sobraram: por grupo, cada um na ordem das abas.
         assert_eq!(pane_tabs(&keys, &["codex".into(), "antigravity".into()]), [4, 1]);
@@ -494,9 +487,6 @@ mod tests {
         // Abas restantes depois de fechar um Claude: o outro Claude (usado há mais tempo) ganha.
         let kinds = ["claude", "antigravity", "claude"];
         assert_eq!(after_close(&kinds, &[3, 9, 1], "claude"), Some(0));
-        // Ollama: os modelos são do mesmo grupo.
-        let kinds = ["ollama:a", "claude"];
-        assert_eq!(after_close(&kinds, &[0, 5], "ollama:b"), Some(0));
         // Último do grupo: a usada por último de todas.
         let kinds = ["claude", "antigravity", "codex"];
         assert_eq!(after_close(&kinds, &[4, 7, 2], "shell"), Some(1));

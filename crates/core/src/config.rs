@@ -19,7 +19,7 @@ pub struct ProjectCfg {
     pub open_tabs: Vec<String>,
     /// Índice em `open_tabs` da aba ativa (-1 = nenhuma).
     pub active_tab: i32,
-    /// Ordem das janelas da tela dividida (grupos: `claude`, `antigravity`, `ollama`…).
+    /// Ordem das janelas da tela dividida (grupos: `claude`, `antigravity`, `codex`…).
     pub pane_order: Vec<String>,
     /// Proporções das linhas da grade e das colunas de cada linha (vazias = iguais). Só valem se
     /// o formato da grade ainda for o mesmo.
@@ -111,6 +111,22 @@ impl Organization {
     }
 }
 
+/// A escolha da pessoa sobre o ditado por voz (Whisper local, download de ~1,6 GB).
+///
+/// Gravada no `dictation` do `config.json` (`"unasked"`, `"yes"` ou `"no"`): um instalador pode escrever
+/// o campo para responder a pergunta antes da primeira abertura do app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationChoice {
+    /// Ainda não perguntado: na primeira abertura o app pergunta (ou, se o Whisper já está baixado, conta como `Yes`).
+    #[default]
+    Unasked,
+    /// Quer o ditado: o app baixa o que faltar.
+    Yes,
+    /// Não quer: o app não baixa nada (a pessoa pode baixar depois, pelas configurações).
+    No,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
@@ -123,6 +139,8 @@ pub struct Config {
     #[serde(skip_serializing)]
     pub workspace: PathBuf,
     pub whisper_lang: String,
+    /// Ditado por voz: ver [`DictationChoice`].
+    pub dictation: DictationChoice,
     pub sound_enabled: bool,
     // --- Layout (novidade da versão Rust; a versão Electron guardava só em CSS) ---
     pub sidebar_width: f32,
@@ -143,8 +161,6 @@ pub struct Config {
     pub window_height: f32,
     /// A janela estava maximizada ao fechar: reabre maximizada, mas com o tamanho normal guardado acima.
     pub window_maximized: bool,
-    /// Host da API do Ollama (padrão `127.0.0.1:11434`, ou `OLLAMA_HOST`).
-    pub ollama_host: String,
     /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
     pub auto_open_agent_tabs: bool,
     /// Com o terminal focado, Ctrl+B é do app (barra lateral) em vez de ir ao terminal (prefixo
@@ -180,6 +196,7 @@ impl Default for Config {
             active_project: String::new(),
             workspace: PathBuf::new(),
             whisper_lang: "pt".into(),
+            dictation: DictationChoice::default(),
             sound_enabled: true,
             sidebar_width: 220.0,
             sidebar_collapsed: false,
@@ -190,7 +207,6 @@ impl Default for Config {
             window_width: 1280.0,
             window_height: 860.0,
             window_maximized: false,
-            ollama_host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
             auto_open_agent_tabs: true,
             app_shortcuts_first: false,
             role_models: BTreeMap::new(),
@@ -395,6 +411,11 @@ impl Config {
 /// Configurações de versões anteriores: `CommandDeck` (o nome antes de AgentDeck, no mesmo formato),
 /// a versão Electron (userData = "CommandDeck Terminal") e o nome antigo "orquestra". A primeira que
 /// existir é a origem quando `AgentDeck/config.json` ainda não existe.
+///
+/// ÚNICA reserva do nome CommandDeck que o app ainda carrega (as variáveis `COMMANDDECK_*`, o cabeçalho
+/// da ponte, o marcador do `AGENTS.md` e a trava saíram na t32): quem nunca abriu o AgentDeck perderia a
+/// lista de projetos. Sai (esta função, `is_commanddeck_config`, a cópia em `load_from` e os testes
+/// `*_commanddeck_*`) numa versão depois da promoção da `dev` para a `main`; ver `memory/pendencias.md`.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
     vec![
@@ -463,6 +484,30 @@ mod tests {
         assert!(!cfg.split_enabled);
     }
 
+    /// A escolha do ditado: arquivo antigo = "não perguntado"; um instalador pode gravar `"dictation": "yes"|"no"`.
+    #[test]
+    fn the_dictation_choice_defaults_to_unasked_and_is_writable_from_outside() {
+        let read = |json: &str| serde_json::from_str::<Config>(json).expect("config");
+        assert_eq!(read("{}").dictation, DictationChoice::Unasked);
+        assert_eq!(read("{\"dictation\": \"yes\"}").dictation, DictationChoice::Yes);
+        assert_eq!(read("{\"dictation\": \"no\"}").dictation, DictationChoice::No);
+        let text = serde_json::to_string(&Config { dictation: DictationChoice::No, ..Config::default() }).expect("json");
+        assert!(text.contains("\"dictation\":\"no\""), "{text}");
+    }
+
+    #[test]
+    fn a_config_saved_with_the_removed_ollama_agent_still_loads() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let text = r#"{ "ollamaHost": "127.0.0.1:11434", "whisperLang": "en",
+            "projectList": [{ "id": "p1", "path": "C:/x", "openTabs": ["claude", "ollama:qwen3.5:9b"] }] }"#;
+        let cfg = Config::from_json_over_defaults(text, &p);
+        assert_eq!(cfg.whisper_lang, "en");
+        assert_eq!(cfg.project_list[0].open_tabs, ["claude", "ollama:qwen3.5:9b"]);
+        let saved = serde_json::to_string(&cfg).expect("json");
+        assert!(!saved.contains("ollamaHost"), "{saved}");
+    }
+
     #[test]
     fn roundtrip_and_merge() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -470,7 +515,7 @@ mod tests {
         let mut cfg = Config::default_for(&p);
         cfg.whisper_lang = "en".into();
         let mut project = ProjectCfg::new(tmp.path().join("proj"), None, &[]);
-        project.open_tabs = vec!["claude".into(), "ollama:qwen3.5:9b".into()];
+        project.open_tabs = vec!["claude".into(), "claude@dev".into()];
         project.split_rows = vec![0.4, 0.6];
         cfg.active_project = project.id.clone();
         cfg.project_list.push(project.clone());

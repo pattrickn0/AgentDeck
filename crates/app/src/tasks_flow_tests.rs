@@ -7,7 +7,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, StartOptions, Task, TaskStatus};
+use agentdeck_core::{Config, Core, MergeBlock, StartOptions, Task, TaskStatus};
 
 use crate::deck::Deck;
 use crate::docs::{CenterView, DiffDoc, DocState};
@@ -24,8 +24,10 @@ fn git(dir: &Path, args: &[&str]) {
 
 /// Pasta do executável do git (para o PATH de busca do core).
 fn git_dir() -> PathBuf {
-    let probe = if cfg!(windows) { "where" } else { "which" };
-    let out = Command::new(probe).arg("git").output().expect("which git");
+    // `which` não vem no contêiner do Fedora da CI; `command -v` é do próprio shell.
+    let out =
+        if cfg!(windows) { Command::new("where").arg("git").output() } else { Command::new("sh").args(["-c", "command -v git"]).output() };
+    let out = out.expect("which git");
     let first = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_owned();
     Path::new(&first).parent().map(Path::to_path_buf).unwrap_or_default()
 }
@@ -77,7 +79,6 @@ impl Env {
         let opts = StartOptions {
             search_path: Some(std::env::join_paths([root.join("fake-bin"), git_dir()]).expect("PATH")),
             home_dir: Some(root.join("home")),
-            ollama_discovery: false,
             watch_workspace: false,
             config: Some(Config::with_project(ws.clone())),
             system_dirs: false,
@@ -331,6 +332,66 @@ fn a_refused_merge_shows_the_core_message_and_discard_asks_first() {
 }
 
 #[test]
+fn a_refused_merge_offers_the_way_out_in_the_notice() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes", |d| d.initialized);
+    let id = env.create_from_form("Saídas da recusa", true);
+    env.pump("a aba", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+    env.agent_commits(&id, "x.txt", "x\n");
+    env.core.task_done(&env.project(), &id, "Feito.").expect("done");
+    env.pump("revisão", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
+
+    // Alterações do usuário na pasta principal: o aviso traz o motivo e "Guardar minhas alterações e mesclar".
+    std::fs::write(env.ws.join("a.txt"), "mudou\n").expect("w");
+    env.deck.tasks_act(&id, TaskAct::Merge);
+    env.deck.tasks_confirm_accepted();
+    env.pump("a recusa", |d| d.tasks.busy.is_none());
+    assert_eq!(env.deck.tasks.notice_block, Some(MergeBlock::MainDirty(vec!["a.txt".into()])));
+    assert!(env.deck.tasks.notice.is_some() && !env.deck.tasks.notice_info);
+    // "Pedir ao agente" não vale para o que é do usuário.
+    env.deck.tasks_ask_agent(&id);
+    assert!(env.deck.tasks.busy.is_none() && env.task(&id).status == TaskStatus::Review);
+    // O clique guarda, mescla e devolve: o aviso passa a ser a nota (informação, sem motivo), a tarefa vai a validação.
+    env.deck.tasks_merge_stash(&id);
+    assert!(env.deck.tasks.busy.is_some() && env.deck.tasks.notice.is_none() && env.deck.tasks.notice_block.is_none());
+    env.pump("guardar e mesclar", |d| d.tasks.busy.is_none());
+    assert_eq!(env.task(&id).status, TaskStatus::Validating);
+    assert!(env.ws.join("x.txt").exists(), "a mesclagem trouxe o arquivo");
+    // (o git do usuário pode converter as quebras de linha ao devolver)
+    let back = std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt");
+    assert_eq!(back.replace("\r\n", "\n"), "mudou\n", "a alteração do usuário voltou");
+    let note = env.deck.tasks.notice.clone().expect("nota");
+    assert!(env.deck.tasks.notice_info && env.deck.tasks.notice_block.is_none() && note.contains("voltaram"), "{note}");
+
+    // Reprovada e entregue de novo, com trabalho esquecido na pasta da tarefa: "Pedir ao agente para fazer o commit".
+    git(&env.ws, &["checkout", "-q", "--", "a.txt"]);
+    env.deck.tasks_act(&id, TaskAct::Reject);
+    env.deck.tasks.feedback = "Ajuste.".into();
+    env.deck.tasks_send_return(&id);
+    env.pump("a reprovação", |d| d.tasks.busy.is_none());
+    env.agent_commits(&id, "y.txt", "y\n");
+    std::fs::write(env.task(&id).worktree.join("esqueci.txt"), "z\n").expect("w");
+    env.core.task_done(&env.project(), &id, "De novo.").expect("done");
+    env.pump("revisão 2", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
+    env.deck.tasks_act(&id, TaskAct::Merge);
+    env.deck.tasks_confirm_accepted();
+    env.pump("a recusa 2", |d| d.tasks.busy.is_none());
+    assert_eq!(env.deck.tasks.notice_block, Some(MergeBlock::TaskDirty(vec!["esqueci.txt".into()])));
+    assert!(!env.deck.tasks.notice_info);
+    env.deck.tasks_ask_agent(&id);
+    assert!(env.deck.tasks.busy.is_some() && env.deck.tasks.notice_block.is_none(), "limpa o aviso e devolve");
+    env.pump("devolver", |d| d.tasks.busy.is_none());
+    let back = env.task(&id);
+    assert_eq!(back.status, TaskStatus::Running);
+    assert!(back.events.iter().any(|e| e.text.contains("devolvida ao agente")), "{:?}", back.events);
+    assert!(env.deck.tasks.notice.is_none());
+}
+
+#[test]
 fn reopening_the_tab_of_a_running_task_registers_the_instance_again() {
     if !git_available() {
         eprintln!("git não instalado: teste pulado");
@@ -521,11 +582,12 @@ fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_
     env.deck.tree_file_double_click("a.rs");
     let rs = env.deck.docs.current_uid(&project).expect("a.rs");
     wait(&mut env, rs);
-    assert!(matches!(env.doc_state(rs), DocState::Text(t) if t.lines == ["fn a() {}", "    fn b() {}"]));
+    // Um arquivo pequeno abre como código (lê, busca e edita), sem edição ligada.
+    assert!(matches!(env.doc_state(rs), DocState::Source(s) if s.text == "fn a() {}\n\tfn b() {}\n" && !s.editing && !s.dirty()));
     env.deck.tree_file_double_click("nota.md");
     let md = env.deck.docs.current_uid(&project).expect("nota.md");
     wait(&mut env, md);
-    assert!(matches!(env.doc_state(md), DocState::Markdown(t) if t.starts_with("# Título")));
+    assert!(matches!(env.doc_state(md), DocState::Source(s) if s.text.starts_with("# Título") && !s.raw));
     env.deck.tree_file_double_click("bin.dat");
     let bin = env.deck.docs.current_uid(&project).expect("bin.dat");
     wait(&mut env, bin);
@@ -542,15 +604,15 @@ fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_
     // O arquivo muda no disco (o watcher avisa): o documento é relido sem passar por "Carregando…".
     std::fs::write(env.ws.join("a.rs"), "fn a() {}\nfn c() {}\n").expect("w");
     env.deck.docs_reload_files();
-    assert!(matches!(env.doc_state(rs), DocState::Text(_)), "a leitura antiga continua na tela até a nova chegar");
+    assert!(matches!(env.doc_state(rs), DocState::Source(_)), "a leitura antiga continua na tela até a nova chegar");
     env.pump(
         "o arquivo relido",
-        |d| matches!(d.docs.get(rs).map(|t| &t.state), Some(DocState::Text(t)) if t.lines.len() == 2 && t.lines[1] == "fn c() {}"),
+        |d| matches!(d.docs.get(rs).map(|t| &t.state), Some(DocState::Source(s)) if s.text == "fn a() {}\nfn c() {}\n"),
     );
     // O arquivo que sumiu aparece como erro; o que voltou, lido de novo.
     std::fs::write(env.ws.join("sumiu.txt"), "voltei\n").expect("w");
     env.deck.docs_reload_files();
-    env.pump("o arquivo que voltou", |d| matches!(d.docs.get(gone).map(|t| &t.state), Some(DocState::Text(_))));
+    env.pump("o arquivo que voltou", |d| matches!(d.docs.get(gone).map(|t| &t.state), Some(DocState::Source(_))));
 
     // O diff de um commit (Histórico) e o de um arquivo alterado (aba Git).
     git(&env.ws, &["add", "-A"]);
@@ -585,7 +647,7 @@ fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_
 
     // O documento é do projeto: um documento fechado durante a leitura não quebra nada, e "Recarregar" relê.
     env.deck.docs_reload(rs);
-    assert!(matches!(env.doc_state(rs), DocState::Loading));
+    assert!(matches!(env.doc_state(rs), DocState::Source(_)), "um arquivo aberto como código é relido sem passar por Carregando");
     env.deck.docs_close(rs);
     env.pump("a resposta de um documento fechado", |d| d.docs.get(rs).is_none());
     env.deck.before_frame(&env.ctx);
@@ -760,4 +822,242 @@ fn the_highlight_follows_the_active_tab_and_the_pty_resizes_once_per_switch() {
     env.deck.set_organization(Organization::Tabs);
     frame(&mut env);
     assert_eq!(env.deck.panes.len(), 1, "em Abas há uma janela só");
+}
+
+#[test]
+fn editing_a_file_saves_it_as_it_was_and_asks_before_losing_what_was_typed() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    let project = env.project();
+    let path = env.ws.join("edit.rs");
+    std::fs::write(&path, "fn a() {}\r\nfn b() {}\r\n").expect("w");
+    env.deck.docs_open_file("edit.rs");
+    let uid = env.deck.docs.current_uid(&project).expect("edit.rs");
+    env.pump("o arquivo", |d| matches!(d.docs.get(uid).map(|t| &t.state), Some(DocState::Source(_))));
+    let src = |env: &mut Env| match &mut env.deck.docs.get_mut(uid).expect("aberto").state {
+        DocState::Source(s) => s.clone(),
+        other => panic!("esperava código, veio {other:?}"),
+    };
+    let edit = |env: &mut Env, f: &dyn Fn(&mut crate::docs::Source)| {
+        if let DocState::Source(s) = &mut env.deck.docs.get_mut(uid).expect("aberto").state {
+            f(s);
+        }
+    };
+    assert_eq!(src(&mut env).text, "fn a() {}\nfn b() {}\n", "a tela trabalha com \\n");
+
+    // Editar e gravar: o disco ganha o texto novo no mesmo fim de linha (CRLF), sem BOM, e a edição deixa de estar suja.
+    edit(&mut env, &|s| {
+        s.set_editing(true);
+        s.text = "fn a() {}\nfn c() {}\n".into();
+        s.touched();
+    });
+    assert!(env.deck.docs.get(uid).expect("aberto").dirty());
+    env.deck.push_action(crate::deck::Action::SaveDoc);
+    env.deck.before_frame(&env.ctx);
+    assert!(src(&mut env).saving, "grava numa thread");
+    env.pump("a gravação", |d| !d.docs.get(uid).is_some_and(|t| t.dirty() || matches!(&t.state, DocState::Source(s) if s.saving)));
+    assert_eq!(std::fs::read(&path).expect("r"), b"fn a() {}\r\nfn c() {}\r\n");
+    // A releitura do watcher sobre o que acabou de ser gravado não avisa de nada.
+    env.deck.docs_reload_files();
+    env.pump("a releitura", |d| d.docs.get(uid).is_some_and(|t| matches!(&t.state, DocState::Source(s) if s.external.is_none())));
+    assert!(!env.deck.docs.get(uid).expect("aberto").dirty());
+
+    // Um agente muda o arquivo com edição não salva: pergunta (manter a minha / recarregar) e nada se perde.
+    edit(&mut env, &|s| {
+        s.text = "fn a() {}\nfn minha() {}\n".into();
+        s.touched();
+    });
+    std::fs::write(&path, "fn a() {}\r\nfn do_agente() {}\r\n").expect("w");
+    env.deck.docs_reload_files();
+    env.pump("o aviso", |d| d.docs.get(uid).is_some_and(|t| matches!(&t.state, DocState::Source(s) if s.external.is_some())));
+    assert_eq!(src(&mut env).text, "fn a() {}\nfn minha() {}\n", "o que o usuário digitou continua na tela");
+    // Sem escolher, o Ctrl+S não grava por cima do que o agente fez.
+    env.deck.docs_save(uid, crate::docs::After::Nothing);
+    assert!(!src(&mut env).saving);
+    assert_eq!(std::fs::read(&path).expect("r"), b"fn a() {}\r\nfn do_agente() {}\r\n");
+    edit(&mut env, &|s| s.keep_mine());
+    env.deck.docs_save(uid, crate::docs::After::Nothing);
+    env.pump("a gravação por cima", |d| {
+        !d.docs.get(uid).is_some_and(|t| t.dirty() || matches!(&t.state, DocState::Source(s) if s.saving))
+    });
+    assert_eq!(std::fs::read(&path).expect("r"), b"fn a() {}\r\nfn minha() {}\r\n");
+
+    // Fechar a aba com edição pergunta; cancelar mantém tudo; "salvar" grava e fecha; "não salvar" fecha sem gravar.
+    edit(&mut env, &|s| {
+        s.text.push_str("// mais\n");
+        s.touched();
+    });
+    env.deck.docs_request_close(uid);
+    assert_eq!(env.deck.docs.confirm, Some(crate::docs::Unsaved::Tab(uid)));
+    assert!(env.deck.docs.get(uid).is_some(), "a aba continua aberta enquanto pergunta");
+    env.deck.docs_answer(crate::docs::Answer::Cancel);
+    assert!(env.deck.docs.confirm.is_none() && env.deck.docs.get(uid).is_some() && env.deck.docs.get(uid).expect("aberto").dirty());
+    env.deck.docs_request_close(uid);
+    env.deck.docs_answer(crate::docs::Answer::Save);
+    env.pump("gravar e fechar", |d| d.docs.get(uid).is_none());
+    assert_eq!(std::fs::read(&path).expect("r"), b"fn a() {}\r\nfn minha() {}\r\n// mais\r\n");
+    env.deck.docs_open_file("edit.rs");
+    let again = env.deck.docs.current_uid(&project).expect("edit.rs");
+    env.pump("o arquivo de novo", |d| matches!(d.docs.get(again).map(|t| &t.state), Some(DocState::Source(_))));
+    if let Some(DocState::Source(s)) = env.deck.docs.get_mut(again).map(|t| &mut t.state) {
+        s.text.push_str("// descartado\n");
+    }
+    env.deck.docs_request_close(again);
+    env.deck.docs_answer(crate::docs::Answer::Discard);
+    assert!(env.deck.docs.get(again).is_none());
+    assert_eq!(std::fs::read(&path).expect("r"), b"fn a() {}\r\nfn minha() {}\r\n// mais\r\n", "descartar não grava");
+
+    // Fechar o app: sem edição, sai direto; com edição, pergunta (e "sair sem salvar" sai).
+    env.deck.docs_open_file("edit.rs");
+    let third = env.deck.docs.current_uid(&project).expect("edit.rs");
+    env.pump("o arquivo outra vez", |d| matches!(d.docs.get(third).map(|t| &t.state), Some(DocState::Source(_))));
+    if let Some(DocState::Source(s)) = env.deck.docs.get_mut(third).map(|t| &mut t.state) {
+        s.text.push_str("// sem gravar\n");
+    }
+    env.deck.request_quit();
+    assert!(!env.deck.quit_requested, "com edição não salva o app pergunta antes de sair");
+    assert_eq!(env.deck.docs.confirm, Some(crate::docs::Unsaved::Quit));
+    env.deck.docs_answer(crate::docs::Answer::Cancel);
+    assert!(!env.deck.quit_requested);
+    env.deck.request_quit();
+    env.deck.docs_answer(crate::docs::Answer::Save);
+    env.pump("gravar tudo e sair", |d| d.quit_requested);
+    assert!(std::fs::read(&path).expect("r").ends_with(b"// sem gravar\r\n"));
+    env.deck.quit_requested = false;
+    env.deck.request_quit();
+    assert!(env.deck.quit_requested, "sem edição não há o que perguntar");
+}
+
+/// Um quadro da janela inteira (1280 × 860) com os eventos de `events`; devolve o que foi copiado para a área de transferência.
+fn draw_frame(env: &mut Env, events: Vec<egui::Event>) -> Vec<String> {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 860.0))),
+        events,
+        ..Default::default()
+    };
+    let Env { deck, ctx, .. } = env;
+    let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+    out.textures_delta.clear();
+    out.platform_output
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_editor_takes_typing_the_search_and_the_diff_selects_and_copies() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    let project = env.project();
+    std::fs::write(env.ws.join("e.rs"), "fn a() {}\nfn b() {}\n").expect("w");
+    env.deck.docs_open_file("e.rs");
+    let uid = env.deck.docs.current_uid(&project).expect("e.rs");
+    env.pump("o arquivo", |d| matches!(d.docs.get(uid).map(|t| &t.state), Some(DocState::Source(_))));
+    let text = |env: &Env| match &env.deck.docs.get(uid).expect("aberto").state {
+        DocState::Source(s) => (s.text.clone(), s.dirty(), s.version),
+        other => panic!("esperava código, veio {other:?}"),
+    };
+    draw_frame(&mut env, vec![]);
+    // Em leitura o teclado não muda nada.
+    let editor = egui::Id::new(("doc-src", uid));
+    env.ctx.memory_mut(|m| m.request_focus(editor));
+    draw_frame(&mut env, vec![]);
+    draw_frame(&mut env, vec![egui::Event::Text("Z".into())]);
+    assert_eq!(text(&env).0, "fn a() {}\nfn b() {}\n", "só leitura não aceita digitação");
+
+    // Em edição, o que se digita entra no texto, marca como não salvo e conta uma versão nova.
+    if let Some(DocState::Source(s)) = env.deck.docs.get_mut(uid).map(|t| &mut t.state) {
+        s.set_editing(true);
+    }
+    draw_frame(&mut env, vec![]);
+    env.ctx.memory_mut(|m| m.request_focus(editor));
+    draw_frame(&mut env, vec![]);
+    let before = text(&env).2;
+    draw_frame(&mut env, vec![egui::Event::Text("Z".into())]);
+    let (typed, dirty, version) = text(&env);
+    assert!(typed.contains('Z') && dirty && version > before, "{typed:?}");
+    draw_frame(&mut env, vec![]);
+
+    // Ctrl+F abre a busca e o campo recebe o texto; o galley marca as ocorrências e a contagem aparece.
+    env.deck.push_action(crate::deck::Action::FindInDoc);
+    env.deck.before_frame(&env.ctx);
+    draw_frame(&mut env, vec![]);
+    let find_field = egui::Id::new(("doc-find", uid));
+    env.ctx.memory_mut(|m| m.request_focus(find_field));
+    draw_frame(&mut env, vec![egui::Event::Text("fn".into())]);
+    draw_frame(&mut env, vec![]);
+    let tab = env.deck.docs.get(uid).expect("aberto");
+    assert!(tab.find.open && tab.find.query == "fn" && tab.find.count() == 2, "{:?}", tab.find);
+
+    // Diff: seleciona arrastando e copia com Ctrl+C só o código das linhas (sem número, sem + nem −).
+    let id = env.create_from_form("Para o diff", true);
+    env.agent_commits(&id, "novo.rs", "// um\nfn dois() {}\n");
+    let (diff_uid, _) = env.open_task_diff(&id);
+    draw_frame(&mut env, vec![]);
+    draw_frame(&mut env, vec![]);
+    let at = |x: f32, y: f32| egui::Pos2::new(x, y);
+    let click = |pos| vec![egui::Event::PointerMoved(pos)];
+    let button =
+        |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let (start, end) = (at(520.0, 125.0), at(820.0, 240.0));
+    draw_frame(&mut env, click(start));
+    draw_frame(&mut env, vec![button(start, true)]);
+    draw_frame(&mut env, click(at(500.0, 160.0)));
+    draw_frame(&mut env, click(end));
+    draw_frame(&mut env, vec![button(end, false)]);
+    let copied = draw_frame(&mut env, vec![egui::Event::Copy]);
+    assert_eq!(copied.len(), 1, "um Ctrl+C copia uma vez: {copied:?}");
+    assert!(!copied[0].is_empty() && !copied[0].contains("+//") && !copied[0].starts_with('+'), "{:?}", copied[0]);
+    assert!(copied[0].contains("fn dois() {}"), "{:?}", copied[0]);
+    let _ = diff_uid;
+}
+
+#[test]
+fn every_document_state_draws_without_trouble() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    for item in [
+        "docs-demo",
+        "docs-demo-file",
+        "docs-demo-md",
+        "docs-demo-report",
+        "docs-demo-unreadable",
+        "docs-demo-many",
+        "docs-demo-edit",
+        "docs-demo-find",
+        "docs-demo-diff-find",
+        "docs-demo-external",
+        "docs-demo-confirm",
+        "docs-demo-large",
+        "docs-demo-md-code",
+    ] {
+        env.deck.docs = crate::docs::Docs::default();
+        crate::docs_demo::apply(&mut env.deck, item);
+        draw_frame(&mut env, vec![]);
+        draw_frame(&mut env, vec![]);
+    }
 }

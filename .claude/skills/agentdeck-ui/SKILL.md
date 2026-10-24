@@ -19,7 +19,7 @@ destas regras, valem estas.
 2. **Estado visível sem clicar.** Trabalhando = halo pulsando na cor do agente; concluído e não visto = anel;
    encerrado = apagado (40 %) e riscado. Reaproveite `paint_agent_mark` (`ui/projects.rs`) e o mesmo pulso de
    `ui/tabs.rs` — não crie outro código visual para o mesmo estado.
-3. **Agente se identifica pelo logo do modelo** (`Icon::ClaudeLogo`, `AntigravityLogo`, `OllamaLogo`,
+3. **Agente se identifica pelo logo do modelo** (`Icon::ClaudeLogo`, `AntigravityLogo`,
    `CodexLogo`), na cor do agente; o ponto (`dot`) só para quem não tem logo (terminal).
 4. **Hierarquia por recuo e linhas-guia**, como no explorador de arquivos (`agent_tree`/`paint_guides`).
 5. **Sem decoração gratuita.** Cor de destaque só para estado ou seleção; nada de pintar um cabeçalho inteiro
@@ -52,7 +52,7 @@ Cores vêm da paleta semântica: `theme::pal().<token>` (`Palette`, `DARK`). Nun
 | `danger`, `danger_text`, `success`, `warning`, `info` | | estados |
 | `scrim`, `shadow` | preto 50% / 28% | película do modal, sombra das ilhas |
 
-Cores dos agentes (não são da paleta): `CLAUDE`, `ANTIGRAVITY`, `OLLAMA`, `SHELL` ou `deck.agents.tab_color(kind)`.
+Cores dos agentes (não são da paleta): `CLAUDE`, `ANTIGRAVITY`, `SHELL` ou `deck.agents.tab_color(kind)`.
 Terminal: `TERM_BG` #16181c, `TERM_FG`, `TERM_SELECTION` #2f3542.
 
 **A cor de destaque é a do agente ativo**, nunca uma cor fixa de marca: `deck.accent()` (ou `theme::accent()`, que

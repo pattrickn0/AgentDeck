@@ -21,15 +21,11 @@ Combinado em 2026-10-21, nesta ordem.
 
 ### b) Modo Documentos, fase 2
 
-A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) está em [historico.md](historico.md) (`t19`). O que falta:
+A fase 1 (a chave **Agentes | Documentos** no centro, só leitura) e o editor com realce, busca e seleção (`t39`) estão em [historico.md](historico.md). O que falta:
 
-- [ ] **Editor de arquivos.** Editar os arquivos do workspace dentro do modo Documentos (hoje só se leem; "Abrir no programa padrão" é o caminho para editar).
-  - egui não tem editor de código pronto: avaliar `egui_extras::syntax_highlighting`/`syntect` para realce, ou um componente de editor de terceiros.
-  - Mínimo útil: editar e salvar (Ctrl+S), realce de sintaxe e aviso quando um agente alterar o arquivo aberto e ele tiver edição não salva (hoje a visualização só relê, sem aviso). A pré-visualização de Markdown já existe (só leitura).
-- [ ] **Realce de sintaxe** na visualização de arquivo e no diff (hoje monocromático).
 - [ ] **Diff lado a lado** (hoje só o unificado).
 - [ ] **Gravar as abas de documento** (hoje somem ao fechar o app) e **documento ao lado de um agente** (hoje a chave troca o centro inteiro; ver a razão em [GERAL.md](GERAL.md), "Documentos").
-- [ ] **Selecionar e copiar texto** da visualização de arquivo e do diff (hoje só rolam; o markdown segue o egui). Também: buscar dentro do documento.
+- [ ] **Editor, depois (`t39`, 2026-10-23):** o que ficou de fora de propósito. Recuo automático ao dar Enter; substituir (`Ctrl+H`); ir para a linha (`Ctrl+G`); menu de clique direito (Copiar, Selecionar tudo) no diff e no arquivo grande (hoje é só Ctrl+C); rolagem horizontal em vez de quebra de linha; arquivo com CRLF e LF misturados ou fora do UTF-8 (hoje só leitura, com a razão); busca no markdown formatado e no pedido/relatório (hoje `Ctrl+F` mostra o código do `.md` de arquivo, e o pedido e o relatório não buscam); busca no diff conta linhas, não ocorrências; realce do que está dentro de um bloco de código do markdown formatado; mais linguagens (Go, C/C++, HTML/CSS, SQL, Java, C#: `highlight.rs` é uma tabela por linguagem, ver `memory/aprendizados/editor-de-documentos.md` antes de trocar por `syntect`); remover um projeto com documento sujo descarta a edição sem perguntar (o × da aba e o fechar do app perguntam).
 - [ ] **Explorador mais útil:** hoje só mostra a árvore. Ideias: marcar o que mudou (git), filtrar/buscar e abrir os arquivos de uma tarefa a partir do detalhe dela.
 
 ### c) Temas (depois da `main`)
@@ -41,7 +37,7 @@ Fica para **depois** da promoção para a `main` (decidido com o usuário em 202
 ### d) Estabilizar e promover a `dev` para a `main`
 
 - [ ] **Substituir a `main` pela `dev`** (aprovado pelo usuário em 2026-10-22). A `main` de hoje é o piloto em TypeScript: ela é **trocada inteira** pelo conteúdo da `dev`, sem mesclagem; a `main` antiga fica numa tag para consulta. O usuário usa a versão em Rust todo dia e considera a maior parte de [testes.md](testes.md) conferida no uso, mesmo sem marcar (os itens continuam lá). Antes da troca: a `t29` (suporte a Linux), a tarefa de validação para a `main` e a correção da janela maximizada.
-- [ ] **Tirar os nomes antigos aceitos** na próxima versão depois da promoção: `COMMANDDECK_*`, `x-commanddeck-token`, marcadores `commanddeck:`, `.commanddeck.lock` e a config `CommandDeck/` (lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
+- [ ] **Tirar a migração da config `CommandDeck/`** numa versão depois da promoção (a única reserva do nome antigo que sobrou; `config::legacy_config_files`, lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
 - [ ] **Renomear a pasta local `commanddeck-dev`** (ação do usuário): o repositório no GitHub já se chama `AgentDeck` e as URLs antigas redirecionam; falta só a pasta.
 
 ## Mesa de tarefas
@@ -61,11 +57,11 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 (`t13`, `t15`, `t16`) e descrita em [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - [ ] **Resumo de API por arquivo (estilo skeleton)**: entregar a assinatura das funções/tipos de um arquivo em vez do arquivo inteiro, para o agente ler menos. Casa com o `touches` dos aprendizados (mesmo gancho, `ask-agent --learn <arquivo>` poderia anexá-lo).
-- [ ] **Injeção nas abas que não são de tarefa**: hoje só o `start_message` de uma tarefa leva a memória; os agentes das abas normais (e o Ollama, que tem o `ContextProvider`) não recebem os aprendizados nem a situação atual.
-- [ ] **`ContextProvider` geral**: virar os aprendizados e a situação atual provedores registrados e consultados por todos os caminhos de entrega. O trait (`crates/core/src/context.rs`) hoje é consultado só pelo Ollama e pelo executor headless (`headless.rs`); falta o spawn das abas, entregando o contexto pelo canal que cada CLI suporta (flag, `AGENTS.md` ou mensagem de sistema). RAG/embeddings entram aqui depois (ver "Adiados").
-- [ ] **Perfis de agente em arquivo**, editáveis sem recompilar. Hoje cada agente recebe as instruções por um caminho diferente: Claude por `--append-system-prompt` (`agents.rs`/`headless.rs`), Antigravity pelo bloco marcado no `AGENTS.md` do workspace e Ollama pelo prompt fixo de `ollama.rs` (`system_prompt`). Proposta:
+- [ ] **Injeção nas abas que não são de tarefa**: hoje só o `start_message` de uma tarefa leva a memória; os agentes das abas normais não recebem os aprendizados nem a situação atual.
+- [ ] **`ContextProvider` geral**: virar os aprendizados e a situação atual provedores registrados e consultados por todos os caminhos de entrega. O trait (`crates/core/src/context.rs`) hoje é consultado só pelo executor headless (`headless.rs`); falta o spawn das abas, entregando o contexto pelo canal que cada CLI suporta (flag, `AGENTS.md` ou mensagem de sistema). RAG/embeddings entram aqui depois (ver "Adiados").
+- [ ] **Perfis de agente em arquivo**, editáveis sem recompilar. Hoje cada agente recebe as instruções por um canal diferente (tabela em ARCHITECTURE.md, "Protocolo entre agentes"): Claude por `--append-system-prompt`, Codex por `-c developer_instructions`, OpenCode/Aider por arquivo, Antigravity pelo `AGENTS.md`. Proposta:
   - `prompts/_comum.md`: regras de colaboração válidas para todos (usar `ask-agent`, não resumir a Conversa integrada, não parar para perguntar ao usuário etc.);
-  - `prompts/<agente>.md`: ajustes por agente (`ollama.md`, `claude.md`, `antigravity.md`...).
+  - `prompts/<agente>.md`: ajustes por agente (`claude.md`, `antigravity.md`...).
 - [ ] **Situação atual mais rica**: decisões recentes (as outras tarefas, os arquivos delas, os sem commit e os últimos commits já entram).
 - [ ] **Aprendizados que envelhecem**: nada avisa quando um `touches` aponta para um arquivo que foi renomeado ou removido (só o teste dos aprendizados do repositório, para caminhos literais); pensar em um comando de conferência e em como aposentar um aprendizado.
 - [ ] **Aprendizado criado pelo agente chega à base só ao mesclar**: outro agente que comece antes da mescla não o vê. Aceitável na fase 1; se incomodar, a "Situação atual" poderia listar os arquivos de aprendizado novos nas branches em andamento.
@@ -74,7 +70,7 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 ## Ponte e instâncias
 
 - [ ] Pré-autorizar o `ask-agent` nos CLIs que pedirem aprovação na aba (hoje só o Claude abre com `--allowedTools`; quais pedem é verificado em [testes.md](testes.md), seção "Ponte e instâncias").
-- [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal), mas só o `ollama-agent` responde sozinho.
+- [ ] Se o agente da aba não responder por `ask-agent` (modelo fraco, ou o usuário assumiu o terminal), a pergunta expira em 10 minutos. Quem perguntou não fica mais bloqueado (recebe o aviso por escrito no terminal).
 - [ ] Hooks de início/fim de turno só no Claude e no Codex (este só avisa o fim, e só quando não é shim `.cmd`). Antigravity e os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
 - [ ] Falta `ask-agent --cancel <n>` para desistir de uma pergunta (hoje ela expira em 10 min).
 - [ ] A ponte não percebe quando o cliente (`ask-agent`) cai no meio da espera (limitação do `tiny_http`); a pergunta fica pendente até ser respondida ou expirar. A resposta que não chegou a quem perguntou (200 sem leitor, aba fechada) fica em `ask-agent --inbox`; falta só um jeito de reentregá-la sozinha.
@@ -109,7 +105,8 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 ## Git e GitHub
 
 - A troca da `main` pela `dev` está no bloco "Próximo", item d).
-- [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). Continua aparecendo quando a lista de agentes muda (outra máquina, outros modelos do Ollama) e, em repositório sem `AGENTS.md`, como não rastreado. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
+- [ ] **Instruções do Antigravity/Goose/Copilot sem criar `AGENTS.md`** (t38): hoje o app cria o arquivo na pasta do usuário porque não achei outro canal verificado. A cota do Antigravity estava esgotada na hora do teste; ver se `agy` lê `AGENTS.md`/`GEMINI.md` de uma pasta passada em `--add-dir` (o app já passa `dados/`: bastaria gravar lá) ou se um plugin do `agy` (`~/.gemini/config/plugins/<nome>/rules/AGENTS.md`, global e valendo fora do AgentDeck) compensa. O Amazon Q (`.amazonq/rules`) segue sem canal, e a execução headless só leva as instruções no Claude.
+- [ ] **O `AGENTS.md` que o app grava aparece como alterado/não rastreado** no repositório do usuário. Desde a auditoria, com o bloco igual ao do commit o conteúdo não muda (conferido em 2026-10-16 com `core.autocrlf=true`: mesmo hash do HEAD). O bloco não lista mais os agentes instalados (t38), então não muda de máquina para máquina. Em repositório sem `AGENTS.md`, só Antigravity, Goose e Copilot (que não têm outro canal) fazem o app criá-lo, como não rastreado, com aviso na Conversa; os demais CLIs recebem as instruções sem tocar no repositório. Avaliar escrever as instruções fora do arquivo versionado (ex.: `.git/info/exclude`, ou só pelo canal de cada CLI).
 - [ ] Com `commit.gpgsign` e pinentry gráfico, a chave travada é recusada na hora (com a explicação de como destravar numa aba) em vez de abrir o diálogo de senha. Avaliar deixar o diálogo abrir quando houver pinentry gráfico.
 - [ ] **GitHub, depois:** comentar e aprovar PRs, criar issue e reexecutar um job pelo app (hoje é só leitura + "Enviar para agente"); o caminho `gh auth token` não foi exercitado (o `gh` não está instalado aqui).
 
@@ -123,11 +120,12 @@ A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedback
 
 Windows e Linux. Para o Linux, ver [LINUX.md](LINUX.md) (dependências, o que já foi verificado e o roteiro manual).
 
-- [ ] **Cota do Antigravity no Linux** (relato de um usuário, 2026-10-23): não aparece. No Windows o token vem do
-  Gerenciador de Credenciais; no Linux o app só procura `~/.gemini/oauth_creds.json`, e o CLI guarda o token no
-  chaveiro do sistema (Secret Service). `crates/core/src/usage/antigravity.rs`, `credential_sources`.
-- [ ] **Interface toda bugada no WSL** (relato de um usuário, 2026-10-23: janelas e interface quebradas no WSLg).
-  Investigar; se for limite do WSLg, dizer no README que o caminho no Windows é o app nativo.
+- [ ] **WSLg: conferir a janela no X11** (relato de um usuário, 2026-10-23: janelas e interface quebradas no WSLg).
+  O app agora detecta o WSLg e abre pelo X11, porque o Wayland de lá quebra a janela (`crates/app/src/wslg.rs`), mas
+  ninguém abriu o app num WSLg. Faltam: janela maximizada (relato de deslocamento de 32 px), escala (o WSLg informa
+  sempre 1, então a interface fica pequena em tela de alta densidade; o `winit` 0.30 não tem mais
+  `WINIT_X11_SCALE_FACTOR`), arrastar/redimensionar, cursor e a cota do Antigravity pelo chaveiro de lá. Detalhe em
+  [LINUX.md](LINUX.md), seção 2.8.
 - [ ] **Celular** (bem mais para frente, com o app bem estável; usuário, 2026-10-23): acompanhar o que os agentes estão
   fazendo e falar com eles longe do computador.
 

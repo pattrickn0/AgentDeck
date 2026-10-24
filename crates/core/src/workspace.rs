@@ -78,6 +78,20 @@ pub enum TextFile {
     Binary,
 }
 
+/// Garante que o caminho acessado esteja estritamente dentro do workspace (normalização
+/// lexical: funciona com caminhos inexistentes; case-insensitive no Windows).
+pub fn resolve_workspace_path(rel_or_abs: &str, workspace: &Path) -> Result<PathBuf, String> {
+    if workspace.as_os_str().is_empty() {
+        return Err("Workspace não configurado.".into());
+    }
+    let ws = crate::util::absolutize(workspace);
+    let target = crate::util::normalize_lexical(&ws.join(rel_or_abs));
+    if !crate::util::path_within(&target, &ws) {
+        return Err(format!("Acesso negado: o caminho \"{rel_or_abs}\" está fora do workspace configurado (\"{}\").", workspace.display()));
+    }
+    Ok(target)
+}
+
 /// Lê um arquivo de texto do workspace para a visualização somente leitura. O caminho precisa ser
 /// relativo e seguro (`git::safe_rel`) e, depois de resolver links simbólicos, continuar dentro do
 /// workspace. Bytes que não são UTF-8 viram `�` (arquivos antigos em Latin-1 ainda se leem).
@@ -107,6 +121,74 @@ pub fn read_text(workspace: &Path, rel: &str) -> Result<TextFile, String> {
     Ok(TextFile::Text(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
+/// O fim de linha de um arquivo de texto (o editor trabalha com `\n` e grava de volta com o mesmo).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Eol {
+    #[default]
+    Lf,
+    Crlf,
+}
+
+impl Eol {
+    /// O texto com `\n` e o fim de linha que ele usava. `None` se mistura os dois (ou tem `\r` solto): trocar tudo
+    /// por um só alteraria linhas que o usuário não tocou.
+    pub fn normalize(text: &str) -> Option<(String, Eol)> {
+        let crlf = text.matches("\r\n").count();
+        let lf = text.matches('\n').count();
+        if text.replace("\r\n", "").contains('\r') {
+            return None;
+        }
+        match (crlf, lf) {
+            (0, _) => Some((text.to_owned(), Eol::Lf)),
+            (c, l) if c == l => Some((text.replace("\r\n", "\n"), Eol::Crlf)),
+            _ => None,
+        }
+    }
+
+    /// `text_lf` (só com `\n`) no fim de linha `self`.
+    pub fn apply(self, text_lf: &str) -> String {
+        match self {
+            Eol::Lf => text_lf.to_owned(),
+            Eol::Crlf => text_lf.replace('\n', "\r\n"),
+        }
+    }
+}
+
+/// Grava `text_lf` (com `\n`) em `rel`, no fim de linha `eol` e, se `bom`, com o BOM UTF-8 que o arquivo já tinha
+/// (nunca acrescenta um). Ao lado e trocando ([`write_atomic`]): um agente lendo o arquivo nunca o vê pela metade.
+/// O caminho precisa ser relativo e seguro e ficar dentro do workspace; o arquivo pode já não existir (apagado por
+/// um agente enquanto era editado), mas a pasta dele sim.
+pub fn write_text(workspace: &Path, rel: &str, text_lf: &str, eol: Eol, bom: bool) -> Result<(), String> {
+    if workspace.as_os_str().is_empty() {
+        return Err("nenhum projeto aberto".into());
+    }
+    if !crate::git::safe_rel(rel) {
+        return Err(format!("caminho inválido: {rel}"));
+    }
+    let root = std::fs::canonicalize(workspace).map_err(|e| format!("a pasta do projeto não abre: {e}"))?;
+    let joined = workspace.join(rel);
+    let target = match std::fs::canonicalize(&joined) {
+        Ok(full) => full,
+        Err(_) => {
+            let name = joined.file_name().ok_or_else(|| format!("caminho inválido: {rel}"))?.to_owned();
+            let parent = joined.parent().ok_or_else(|| format!("caminho inválido: {rel}"))?;
+            std::fs::canonicalize(parent).map_err(|e| format!("a pasta de {rel} não abre: {e}"))?.join(name)
+        }
+    };
+    if !crate::util::path_within(&target, &root) {
+        return Err(format!("{rel} está fora da pasta do projeto"));
+    }
+    if target.is_dir() {
+        return Err(format!("{rel} não é um arquivo"));
+    }
+    let mut bytes = Vec::with_capacity(text_lf.len() + 3);
+    if bom {
+        bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+    }
+    bytes.extend_from_slice(eol.apply(text_lf).as_bytes());
+    write_atomic(&target, &bytes).map_err(|e| format!("não consegui gravar {rel}: {e}"))
+}
+
 // ---------- AGENTS.md ----------
 
 pub const MARKER_START: &str = "<!-- agentdeck:start -->";
@@ -115,12 +197,9 @@ pub const MARKER_END: &str = "<!-- agentdeck:end -->";
 fn marker_re() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        // Reconhece também os marcadores dos nomes antigos (`commanddeck`, `jwic`, `orquestra`) e os troca
-        // pelo atual; ver `memory/aprendizados/nomes-antigos-aceitos-na-migracao.md`.
-        regex::Regex::new(
-            r"<!-- (?:orquestra|jwic|commanddeck|agentdeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|commanddeck|agentdeck):end -->",
-        )
-        .expect("regex válida")
+        // Reconhece também os marcadores de nomes mais antigos (`jwic`, `orquestra`) e os troca pelo atual.
+        regex::Regex::new(r"<!-- (?:orquestra|jwic|agentdeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|agentdeck):end -->")
+            .expect("regex válida")
     })
 }
 
@@ -154,29 +233,39 @@ fn replace_marker_blocks(old: &str, block: &str) -> String {
 pub enum AgentContext {
     /// Workspace é a pasta pessoal do usuário: nunca escrevemos lá.
     SkippedHome,
-    /// Fora da pasta do app e sem AGENTS.md pré-existente.
+    /// Fora da pasta do app, sem AGENTS.md pré-existente e sem pedido para criá-lo.
     SkippedForeign,
     /// Conteúdo já estava atualizado.
     Unchanged,
     Written,
+    /// O arquivo não existia e foi criado, só com o bloco do app (pedido com `create`).
+    Created,
 }
 
 /// Mantém o bloco marcado do AgentDeck no AGENTS.md do workspace (o Antigravity CLI não
 /// tem flag para anexar instruções ao prompt de sistema). Equivalente a `ensureAgentContext`.
 ///
-/// REGRA: nunca cria AGENTS.md na pasta do usuário; fora da pasta do app só atualiza um
-/// AGENTS.md que já exista.
-pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instructions: &str) -> std::io::Result<AgentContext> {
+/// REGRA: fora da pasta do app só atualiza um AGENTS.md que já exista; criar um na pasta do usuário
+/// (`create`) é só para o CLI que não tem outro jeito de receber as instruções (ver `agents::reads_only_agents_md`).
+/// Na pasta pessoal do usuário, nunca.
+pub fn ensure_agent_context(
+    workspace: &Path,
+    app_dir: &Path,
+    home: &Path,
+    instructions: &str,
+    create: bool,
+) -> std::io::Result<AgentContext> {
     let ws = crate::util::absolutize(workspace);
     if !home.as_os_str().is_empty() && crate::util::same_path(&ws, &crate::util::absolutize(home)) {
         return Ok(AgentContext::SkippedHome);
     }
     let file = workspace.join("AGENTS.md");
     let is_app_workspace = crate::util::path_within(&ws, &crate::util::absolutize(app_dir));
-    if !is_app_workspace && !file.exists() {
+    if !is_app_workspace && !file.exists() && !create {
         return Ok(AgentContext::SkippedForeign);
     }
-    let old = if file.exists() { std::fs::read_to_string(&file)? } else { String::new() };
+    let existed = file.exists();
+    let old = if existed { std::fs::read_to_string(&file)? } else { String::new() };
     // Mantém o fim de linha do arquivo (CRLF em repositórios com `core.autocrlf`): EOL misto
     // sujaria o `git status` a cada abertura.
     let eol = if old.contains("\r\n") { "\r\n" } else { "\n" };
@@ -193,7 +282,7 @@ pub fn ensure_agent_context(workspace: &Path, app_dir: &Path, home: &Path, instr
         return Ok(AgentContext::Unchanged);
     }
     write_atomic(&file, new.as_bytes())?;
-    Ok(AgentContext::Written)
+    Ok(if existed { AgentContext::Written } else { AgentContext::Created })
 }
 
 /// `text` sem os blocos marcados do app e sem diferença de fim de linha: o que sobra é do usuário.
@@ -468,6 +557,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sandbox_resolution() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        assert_eq!(resolve_workspace_path("a/b.txt", &ws).expect("ok"), ws.join("a").join("b.txt"));
+        assert_eq!(resolve_workspace_path("novo/inexistente/../x.txt", &ws).expect("ok"), ws.join("novo").join("x.txt"));
+        assert_eq!(resolve_workspace_path(".", &ws).expect("ok"), ws);
+        assert_eq!(resolve_workspace_path(&ws.join("in.txt").to_string_lossy(), &ws).expect("ok"), ws.join("in.txt"));
+        for bad in ["../fora.txt", "a/../../fora", "../ws-irmao/x", "../../../../../../etc/passwd"] {
+            let err = resolve_workspace_path(bad, &ws).expect_err(bad);
+            assert!(err.starts_with("Acesso negado: o caminho"), "{err}");
+        }
+        let outside = tmp.path().join("fora.txt");
+        assert!(resolve_workspace_path(&outside.to_string_lossy(), &ws).is_err());
+        #[cfg(unix)]
+        assert!(resolve_workspace_path("/etc/passwd", &ws).is_err());
+        #[cfg(windows)]
+        {
+            let upper = ws.to_string_lossy().to_uppercase();
+            assert!(resolve_workspace_path(&format!("{upper}\\x.txt"), &ws).is_ok());
+            assert!(resolve_workspace_path("C:\\Windows\\win.ini", &ws).is_err());
+        }
+    }
+
+    #[test]
     fn read_text_reads_text_and_refuses_big_binary_and_outside_files() {
         let tmp = tempfile::tempdir().expect("tmp");
         let ws = tmp.path().join("ws");
@@ -491,6 +605,47 @@ mod tests {
         assert!(read_text(&ws, "nao-existe.txt").is_err());
         assert!(read_text(&ws, "").is_err());
         assert!(read_text(Path::new(""), "sub/a.rs").is_err());
+    }
+
+    #[test]
+    fn line_endings_are_detected_and_restored() {
+        assert_eq!(Eol::normalize("a\nb\n"), Some(("a\nb\n".into(), Eol::Lf)));
+        assert_eq!(Eol::normalize("a\r\nb\r\n"), Some(("a\nb\n".into(), Eol::Crlf)));
+        assert_eq!(Eol::normalize("sem fim de linha"), Some(("sem fim de linha".into(), Eol::Lf)));
+        assert_eq!(Eol::normalize(""), Some((String::new(), Eol::Lf)));
+        // Misturado ou com \r solto: não dá para devolver igual.
+        assert_eq!(Eol::normalize("a\r\nb\n"), None);
+        assert_eq!(Eol::normalize("a\rb\n"), None);
+        assert_eq!(Eol::Crlf.apply("a\nb\n"), "a\r\nb\r\n");
+        assert_eq!(Eol::Lf.apply("a\nb\n"), "a\nb\n");
+        let (lf, eol) = Eol::normalize("x\r\ny\r\n").expect("crlf");
+        assert_eq!(eol.apply(&lf), "x\r\ny\r\n");
+    }
+
+    #[test]
+    fn write_text_keeps_the_line_ending_and_never_adds_a_bom() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(ws.join("sub")).expect("mkdir");
+        std::fs::write(tmp.path().join("fora.txt"), "fora").expect("write");
+        write_text(&ws, "sub/a.txt", "um\ndois\n", Eol::Crlf, false).expect("grava");
+        assert_eq!(std::fs::read(ws.join("sub/a.txt")).expect("read"), b"um\r\ndois\r\n");
+        write_text(&ws, "sub/a.txt", "x\n", Eol::Lf, false).expect("regrava");
+        assert_eq!(std::fs::read(ws.join("sub/a.txt")).expect("read"), b"x\n");
+        // O BOM só volta se o arquivo já tinha um.
+        write_text(&ws, "sub/b.txt", "x", Eol::Lf, true).expect("grava");
+        assert_eq!(std::fs::read(ws.join("sub/b.txt")).expect("read"), b"\xEF\xBB\xBFx");
+        // Nenhum temporário fica para trás.
+        let names: Vec<String> =
+            std::fs::read_dir(ws.join("sub")).expect("ls").flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        // Fora do projeto, absoluto, pasta, pasta inexistente e sem projeto.
+        assert!(write_text(&ws, "../fora.txt", "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, &tmp.path().join("fora.txt").to_string_lossy(), "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, "sub", "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, "nao/existe/a.txt", "x", Eol::Lf, false).is_err());
+        assert!(write_text(Path::new(""), "a.txt", "x", Eol::Lf, false).is_err());
+        assert_eq!(std::fs::read_to_string(tmp.path().join("fora.txt")).expect("read"), "fora");
     }
 
     #[test]
@@ -563,33 +718,72 @@ mod tests {
         }
 
         // Pasta pessoal: nunca.
-        assert_eq!(ensure_agent_context(&home, &app, &home, "X").expect("ok"), AgentContext::SkippedHome);
+        assert_eq!(ensure_agent_context(&home, &app, &home, "X", false).expect("ok"), AgentContext::SkippedHome);
         assert!(!home.join("AGENTS.md").exists());
         // Fora do app, sem AGENTS.md: não cria.
-        assert_eq!(ensure_agent_context(&foreign, &app, &home, "X").expect("ok"), AgentContext::SkippedForeign);
+        assert_eq!(ensure_agent_context(&foreign, &app, &home, "X", false).expect("ok"), AgentContext::SkippedForeign);
         assert!(!foreign.join("AGENTS.md").exists());
         // Dentro do app: cria.
-        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X").expect("ok"), AgentContext::Written);
+        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X", false).expect("ok"), AgentContext::Created);
         let text = std::fs::read_to_string(ws_app.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("{MARKER_START}\nX\n{MARKER_END}\n"));
-        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X").expect("ok"), AgentContext::Unchanged);
+        assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X", false).expect("ok"), AgentContext::Unchanged);
 
         // Fora do app, AGENTS.md existente com bloco legado: substitui só o bloco.
         std::fs::write(foreign.join("AGENTS.md"), "# Regras\n\n<!-- jwic:start -->\nvelho $1\n<!-- jwic:end -->\n\nfim\n").expect("write");
-        assert_eq!(ensure_agent_context(&foreign, &app, &home, "novo $1").expect("ok"), AgentContext::Written);
+        assert_eq!(ensure_agent_context(&foreign, &app, &home, "novo $1", false).expect("ok"), AgentContext::Written);
         let text = std::fs::read_to_string(foreign.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("# Regras\n\n{MARKER_START}\nnovo $1\n{MARKER_END}\n\nfim\n"));
 
         // AGENTS.md existente sem bloco: acrescenta ao final.
         std::fs::write(foreign.join("AGENTS.md"), "# Regras\n\n\n").expect("write");
-        ensure_agent_context(&foreign, &app, &home, "Y").expect("ok");
+        ensure_agent_context(&foreign, &app, &home, "Y", false).expect("ok");
         let text = std::fs::read_to_string(foreign.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("# Regras\n\n{MARKER_START}\nY\n{MARKER_END}\n"));
 
         // Pasta "irmã" com prefixo de string igual não conta como dentro do app.
         let sibling = tmp.path().join("app-x");
         std::fs::create_dir_all(&sibling).expect("mkdir");
-        assert_eq!(ensure_agent_context(&sibling, &app, &home, "X").expect("ok"), AgentContext::SkippedForeign);
+        assert_eq!(ensure_agent_context(&sibling, &app, &home, "X", false).expect("ok"), AgentContext::SkippedForeign);
+    }
+
+    #[test]
+    fn agents_md_is_created_only_when_asked_and_never_in_the_home() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let app = tmp.path().join("app");
+        let home = tmp.path().join("home");
+        let project = tmp.path().join("projeto");
+        for d in [&app, &home, &project] {
+            std::fs::create_dir_all(d).expect("mkdir");
+        }
+        // Pasta pessoal: nem com o pedido.
+        assert_eq!(ensure_agent_context(&home, &app, &home, "X", true).expect("ok"), AgentContext::SkippedHome);
+        assert!(!home.join("AGENTS.md").exists());
+        // Projeto novo, com o pedido: cria só com o bloco; da segunda vez nada muda (nada novo no `git status`).
+        assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Created);
+        let text = std::fs::read_to_string(project.join("AGENTS.md")).expect("read");
+        assert_eq!(
+            text,
+            format!(
+                "{MARKER_START}
+X
+{MARKER_END}
+"
+            )
+        );
+        assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Unchanged);
+        // Um AGENTS.md do usuário que já existe nunca é "criado": só ganha o bloco.
+        std::fs::write(
+            project.join("AGENTS.md"),
+            "# Meu
+",
+        )
+        .expect("write");
+        assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Written);
+        assert!(std::fs::read_to_string(project.join("AGENTS.md")).expect("read").starts_with(
+            "# Meu
+"
+        ));
     }
 
     #[test]
@@ -602,15 +796,15 @@ mod tests {
         for start in [
             "# Regras\r\n\r\nfim\r\n",
             "# Regras\r\n\r\n<!-- agentdeck:start -->\r\nvelho\r\n<!-- agentdeck:end -->\r\n",
-            "# Regras\r\n\r\n<!-- commanddeck:start -->\r\nvelho\r\n<!-- commanddeck:end -->\r\n",
+            "# Regras\r\n\r\n<!-- jwic:start -->\r\nvelho\r\n<!-- jwic:end -->\r\n",
         ] {
             std::fs::write(&file, start).expect("write");
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Written);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2", false).expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
             assert!(only_crlf(&text), "{text:?}");
             assert!(text.contains(&format!("{MARKER_START}\r\nlinha 1\r\nlinha 2\r\n{MARKER_END}\r\n")), "{text:?}");
             // Segunda vez: nada muda.
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2").expect("ok"), AgentContext::Unchanged);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2", false).expect("ok"), AgentContext::Unchanged);
             assert_eq!(std::fs::read_to_string(&file).expect("read"), text);
         }
         // Nenhum temporário fica para trás.
@@ -619,10 +813,10 @@ mod tests {
         assert_eq!(names, ["AGENTS.md"]);
     }
 
-    /// Um AGENTS.md escrito pela versão antiga (marcadores `commanddeck`) tem o bloco trocado pelo
+    /// Um AGENTS.md escrito por uma versão antiga (marcadores `jwic`) tem o bloco trocado pelo
     /// novo, sem duplicar e sem tocar no resto do arquivo.
     #[test]
-    fn an_old_commanddeck_block_is_replaced_not_duplicated() {
+    fn an_old_name_block_is_replaced_not_duplicated() {
         let tmp = tempfile::tempdir().expect("tmp");
         let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
         std::fs::create_dir_all(&ws).expect("mkdir");
@@ -630,16 +824,16 @@ mod tests {
         for eol in ["\n", "\r\n"] {
             let before = format!("# Regras{eol}{eol}Use tabs.{eol}{eol}");
             let after = format!("{eol}## Fim{eol}Obrigado.{eol}");
-            let old_block = format!("<!-- commanddeck:start -->{eol}texto velho{eol}<!-- commanddeck:end -->");
+            let old_block = format!("<!-- jwic:start -->{eol}texto velho{eol}<!-- jwic:end -->");
             std::fs::write(&file, format!("{before}{old_block}{eol}{after}")).expect("write");
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
             let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
             assert_eq!(text, format!("{before}{new_block}{eol}{after}"), "só o bloco muda");
             assert_eq!(text.matches("<!-- agentdeck:start -->").count(), 1);
-            assert!(!text.contains("commanddeck"), "{text:?}");
+            assert!(!text.contains("jwic"), "{text:?}");
             // Com o bloco novo, nada mais muda.
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Unchanged);
         }
     }
 
@@ -654,7 +848,7 @@ mod tests {
         for eol in ["\n", "\r\n"] {
             let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
             let new_a = format!("<!-- agentdeck:start -->{eol}velho{eol}<!-- agentdeck:end -->");
-            let old_b = format!("<!-- commanddeck:start -->{eol}antigo{eol}<!-- commanddeck:end -->");
+            let old_b = format!("<!-- jwic:start -->{eol}antigo{eol}<!-- jwic:end -->");
             // No fim (caso do app antigo), no meio e colado ao primeiro.
             let cases = [
                 (format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}"), format!("# Regras{eol}{eol}{new_block}{eol}")),
@@ -666,9 +860,9 @@ mod tests {
             ];
             for (start, expected) in cases {
                 std::fs::write(&file, &start).expect("write");
-                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Written);
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Written);
                 assert_eq!(std::fs::read_to_string(&file).expect("read"), expected, "{start:?}");
-                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo").expect("ok"), AgentContext::Unchanged);
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Unchanged);
                 assert_eq!(std::fs::read_to_string(&file).expect("read"), expected);
             }
         }
@@ -781,7 +975,6 @@ mod tests {
         let opts = crate::StartOptions {
             search_path: Some(root.join("vazio").into_os_string()),
             home_dir: Some(root.join("home")),
-            ollama_discovery: false,
             watch_workspace: true,
             config: Some(crate::Config::with_project(ws.clone())),
             system_dirs: false,

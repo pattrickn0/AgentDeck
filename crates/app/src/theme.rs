@@ -69,6 +69,15 @@ pub struct Palette {
     pub user: Color32,
     /// Sombra das ilhas.
     pub shadow: Color32,
+    /// Realce de sintaxe (arquivos e diff do modo Documentos; ver `highlight.rs`).
+    pub syn_keyword: Color32,
+    pub syn_type: Color32,
+    pub syn_function: Color32,
+    pub syn_string: Color32,
+    pub syn_number: Color32,
+    pub syn_comment: Color32,
+    pub syn_key: Color32,
+    pub syn_meta: Color32,
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -117,6 +126,14 @@ pub const DARK: Palette = Palette {
     glow: white(9),
     user: rgb(0x10b981),
     shadow: rgba8(0, 0, 0, 71),
+    syn_keyword: rgb(0xff7b72),
+    syn_type: rgb(0xffa657),
+    syn_function: rgb(0xd2a8ff),
+    syn_string: rgb(0xa5d6ff),
+    syn_number: rgb(0x79c0ff),
+    syn_comment: rgb(0x8b949e),
+    syn_key: rgb(0x7ee787),
+    syn_meta: rgb(0xe3b341),
 };
 
 /// A paleta em uso. Um tema novo troca só o que esta função devolve.
@@ -124,12 +141,40 @@ pub fn pal() -> &'static Palette {
     &DARK
 }
 
+impl Palette {
+    /// A cor de um pedaço de código; o que não tem categoria fica com `plain`.
+    pub fn syn(&self, tok: crate::highlight::Tok, plain: Color32) -> Color32 {
+        use crate::highlight::Tok;
+        match tok {
+            Tok::Plain => plain,
+            Tok::Keyword => self.syn_keyword,
+            Tok::Type => self.syn_type,
+            Tok::Function => self.syn_function,
+            Tok::String => self.syn_string,
+            Tok::Number => self.syn_number,
+            Tok::Comment => self.syn_comment,
+            Tok::Key => self.syn_key,
+            Tok::Meta => self.syn_meta,
+        }
+    }
+
+    /// A cor do texto e a do fundo de um pedaço de código com a marca da busca: o achado leva um fundo âmbar, e o atual
+    /// um mais forte com o texto escuro (o comentário cinza não se lê sobre âmbar).
+    pub fn syn_mark(&self, tok: crate::highlight::Tok, mark: crate::highlight::Mark, plain: Color32) -> (Color32, Color32) {
+        use crate::highlight::Mark;
+        match mark {
+            Mark::None => (self.syn(tok, plain), Color32::TRANSPARENT),
+            Mark::Found => (self.syn(tok, plain), with_alpha(self.warning, 0.30)),
+            Mark::Current => (self.on_accent, with_alpha(self.warning, 0.80)),
+        }
+    }
+}
+
 // ---------- Cores dos agentes (não são da paleta: identificam o agente) ----------
 
 pub const CLAUDE: Color32 = rgb(0xd97757);
 pub const ANTIGRAVITY: Color32 = rgb(0x4f8cf7);
 pub const SHELL: Color32 = rgb(0x9aa0a6);
-pub const OLLAMA: Color32 = rgb(0xf59e0b);
 
 // ---------- Cor de destaque = cor do agente ativo ----------
 
@@ -596,7 +641,6 @@ mod tests {
     fn agent_colors_match_the_core() {
         assert_eq!(Some(CLAUDE), parse_hex_color(agentdeck_core::agents::COLOR_CLAUDE));
         assert_eq!(Some(ANTIGRAVITY), parse_hex_color(agentdeck_core::agents::COLOR_ANTIGRAVITY));
-        assert_eq!(Some(OLLAMA), parse_hex_color(agentdeck_core::agents::COLOR_OLLAMA));
         assert_eq!(Some(SHELL), parse_hex_color(agentdeck_core::agents::COLOR_SHELL));
     }
 
@@ -742,8 +786,13 @@ mod tests {
         assert!(rel_lum(p.text_2) > rel_lum(p.text_3));
         assert!(rel_lum(p.text_3) > rel_lum(p.text_faint));
         // O texto sobre cada cor de agente (botão primário, segmento ativo).
-        for a in [CLAUDE, ANTIGRAVITY, OLLAMA, SHELL, p.accent_neutral] {
+        for a in [CLAUDE, ANTIGRAVITY, SHELL, p.accent_neutral] {
             assert!(contrast(p.on_accent, a) >= 4.5, "on_accent sobre {a:?}: {}", contrast(p.on_accent, a));
+        }
+        // O realce de sintaxe sobre o poço (o fundo dos arquivos) e sobre o trecho marcado da busca.
+        let well = over(p.well, p.bg);
+        for c in [p.syn_keyword, p.syn_type, p.syn_function, p.syn_string, p.syn_number, p.syn_comment, p.syn_key, p.syn_meta] {
+            assert!(contrast(c, well) >= 4.5, "realce {c:?} sobre o poço: {}", contrast(c, well));
         }
     }
 }
