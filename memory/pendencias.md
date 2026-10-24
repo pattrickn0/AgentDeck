@@ -51,14 +51,14 @@ O que sobrou da mesa está no bloco "Próximo", item a).
 - [ ] **Modelo por instância, depois:** trocar o modelo de uma aba aberta (hoje o menu só mostra); lista de modelos do Codex no "+ Novo agente" (hoje só por `--model`/`roleModels`); campo livre para um modelo fora da lista; editar `roleModels` pela interface (hoje só no config.json). No OpenCode a variante (`modelo#alta`) só vale no headless, e cada aba com modelo sobe um servidor próprio (`--standalone`).
 - O filtro de modelos com acesso está no bloco "Próximo", item a).
 
-## Memória (fase 2)
+## Memória
 
-A fase 1 (aprendizados com `touches`, "Situação atual", histórico de feedbacks, `--learn`) está em [historico.md](historico.md)
-(`t13`, `t15`, `t16`) e descrita em [ARCHITECTURE.md](ARCHITECTURE.md).
+As fases 1 (`t13`, `t15`, `t16`) e 2 (`t40`: `ask-agent --outline`; `t41`: a situação atual e o aviso de arquivo em uso no
+`--learn` de qualquer aba) estão em [historico.md](historico.md) e descritas em [ARCHITECTURE.md](ARCHITECTURE.md).
 
-- [ ] **Resumo de API por arquivo (estilo skeleton)**: entregar a assinatura das funções/tipos de um arquivo em vez do arquivo inteiro, para o agente ler menos. Casa com o `touches` dos aprendizados (mesmo gancho, `ask-agent --learn <arquivo>` poderia anexá-lo).
-- [ ] **Injeção nas abas que não são de tarefa**: hoje só o `start_message` de uma tarefa leva a memória; os agentes das abas normais não recebem os aprendizados nem a situação atual.
-- [ ] **`ContextProvider` geral**: virar os aprendizados e a situação atual provedores registrados e consultados por todos os caminhos de entrega. O trait (`crates/core/src/context.rs`) hoje é consultado só pelo executor headless (`headless.rs`); falta o spawn das abas, entregando o contexto pelo canal que cada CLI suporta (flag, `AGENTS.md` ou mensagem de sistema). RAG/embeddings entram aqui depois (ver "Adiados").
+- [ ] **`--outline` em mais linguagens**: hoje Rust e Markdown; JS/TS, Python e PowerShell/shell ficaram de fora da `t40` para caber no tempo (a heurística por chaves e recuo já existe no léxico, `outline.rs`).
+- [ ] **Medir no uso** se os agentes rodam `--learn`/`--outline` antes de mexer (as instruções mandam). Se não rodarem, aí sim pensar em entregar sem pedir.
+- [ ] **`ContextProvider` geral (adiado em 2026-10-23)**: a fase 2 escolheu entregar por demanda (`--learn`, `--outline`), porque o que se empurra no início da aba fica velho em minutos. Reabrir só se a medição acima mostrar que os agentes não pedem. A ideia era virar os aprendizados e a situação atual provedores registrados e consultados por todos os caminhos de entrega. O trait (`crates/core/src/context.rs`) hoje é consultado só pelo executor headless (`headless.rs`); falta o spawn das abas, entregando o contexto pelo canal que cada CLI suporta (flag, `AGENTS.md` ou mensagem de sistema). RAG/embeddings entram aqui depois (ver "Adiados").
 - [ ] **Perfis de agente em arquivo**, editáveis sem recompilar. Hoje cada agente recebe as instruções por um canal diferente (tabela em ARCHITECTURE.md, "Protocolo entre agentes"): Claude por `--append-system-prompt`, Codex por `-c developer_instructions`, OpenCode/Aider por arquivo, Antigravity pelo `AGENTS.md`. Proposta:
   - `prompts/_comum.md`: regras de colaboração válidas para todos (usar `ask-agent`, não resumir a Conversa integrada, não parar para perguntar ao usuário etc.);
   - `prompts/<agente>.md`: ajustes por agente (`claude.md`, `antigravity.md`...).

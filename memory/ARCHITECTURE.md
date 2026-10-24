@@ -327,6 +327,19 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   arquivos (até `LEARN_BUDGET`, 12 000 caracteres); sem arquivos, os globais por inteiro e o índice de todos os outros
   (`learnings::learn_report`). As instruções da ponte (`agents.rs`) mandam rodá-lo antes de mexer em arquivos. Caminhos absolutos dentro da worktree ou do repositório viram caminhos do
   repositório (`learnings::relativize`). Lê a pasta da worktree da tarefa de quem pergunta ou, sem tarefa, do repositório do projeto.
+  **Traz também a situação atual, para a aba de qualquer agente** (nada é empurrado no início da aba, que ficaria velho em minutos).
+  Sem arquivos, acrescenta no fim a seção "Situação atual" (`situation::render`: as tarefas em andamento com os arquivos delas e os
+  últimos commits da base; a base é a da tarefa de quem pergunta ou, numa aba normal, a branch do repositório principal); o agente
+  de uma tarefa não se vê nela. Aprendizados e situação dividem **um teto só** (`LEARN_BUDGET`, `learnings::learn_with_situation`):
+  se não couber, corta primeiro os commits da situação, depois o índice dos aprendizados e por último os globais. Com arquivos, põe no
+  topo um `ATENÇÃO:` com uma linha por arquivo que **outra** tarefa em andamento também mexe (`situation::clash_warnings`), dizendo
+  de onde veio: `já mexeu` (o arquivo está na branch ou sem commit na worktree dela) ou `o pedido cita` (`OtherTask::cited`:
+  `paths_in_text` do pedido dela, que cobre a tarefa recém-criada, ainda sem commit). Não avisa do arquivo da própria tarefa, de
+  `memory/historico.md` (mescla por união) nem de tarefa aguardando validação (já está na base); sem choque, nada a mais. A situação
+  do início da tarefa (`task_situation`) e o `--learn` usam a mesma `Core::busy_tasks` (`situation.rs`), que lê cada tarefa em
+  uma thread (diff da branch + `status --no-optional-locks`): ~220 ms com 3 tarefas abertas, sem cache (um cache de segundos
+  serviria a lista velha justo para a tarefa que acabou de nascer). O aviso casa o caminho exato (sem pasta nem glob) e o caminho
+  absoluto de **outra** worktree não é relativizado.
 - **Sob demanda: `ask-agent --outline <arquivo>…`** (`POST /outline` → `Core::outline`, `outline.rs`; fase 2): o esqueleto do arquivo, com a
   **assinatura** e o **número da linha** de cada item e sem os corpos, para o agente ler só o trecho de que precisa (com offset) em vez do
   arquivo inteiro. O léxico é o de `highlight::highlight_lines` (que por isso mora no core, sem a parte de interface): as faixas de texto entre aspas e de comentário saem do
@@ -358,8 +371,9 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   e sem globais, que o agente já recebeu no início). O texto pronto entra em `return_message`/`reject_message` (que continuam
   puras, sem ler disco) como "O que o projeto já aprendeu sobre os arquivos citados", depois do histórico; sem nada novo, a
   mensagem fica como antes.
-- **Fora desta fase** (ver `pendencias.md`, seção 2): resumo de API por arquivo (estilo skeleton), RAG/embeddings, injeção nas abas que
-  não são de tarefa e o `ContextProvider` geral.
+- **Fase 2 (2026-10-23, `t40` e `t41`):** o `--outline` e a situação atual no `--learn` de qualquer aba, as duas **por demanda**:
+  o agente pede quando vai mexer, e recebe o estado de agora. Um `ContextProvider` geral que empurrasse esse contexto em todos os
+  canais foi recusado por ora (ver `pendencias.md`, "Memória"); RAG/embeddings continuam adiados.
 
 **Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
 bloqueantes; a UI chama numa thread):

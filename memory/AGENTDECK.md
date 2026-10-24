@@ -50,12 +50,14 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
    orquestrador fazia à mão.
 3. **Memória em duas camadas, nossa.** **Fase 1 feita** (tarefas `t13`, `t15` e `t16`): `memory/aprendizados/*.md` com `touches`, entregues
    no início de cada tarefa e por `ask-agent --learn`; seção "Situação atual" (outras tarefas, os arquivos delas, inclusive os ainda sem commit, e os commits da base); histórico de
-   feedbacks e aprendizados dos arquivos citados nas devoluções e reprovações; `ask-agent --learn` com e sem arquivos. Como funciona: [ARCHITECTURE.md](ARCHITECTURE.md) ("Memória em duas camadas"). **Fase 2** (resumo
-   de API por arquivo, injeção nas abas que não são de tarefa, `ContextProvider` geral): [pendencias.md](pendencias.md), "Memória (fase 2)".
+   feedbacks e aprendizados dos arquivos citados nas devoluções e reprovações; `ask-agent --learn` com e sem arquivos. Como funciona: [ARCHITECTURE.md](ARCHITECTURE.md) ("Memória em duas camadas"). **Fase 2 feita**
+   (2026-10-23, `t40` e `t41`), **por demanda**: `ask-agent --outline <arquivo>` (as assinaturas com a linha) e, no `--learn` de
+   qualquer aba, a situação atual e o aviso de arquivo que outra tarefa em andamento também mexe. O `ContextProvider` geral, que
+   empurraria o contexto em todos os canais, ficou adiado: [pendencias.md](pendencias.md), "Memória".
    O plano original, para referência: Longo prazo: "aprendizados" em markdown versionado no repositório, com
    frontmatter que diz que arquivos tocam (`touches`), entregues ao agente quando a tarefa dele mexe nesses arquivos;
    e um resumo da API de um arquivo (estilo `skeleton`) para o agente ler menos. Curto prazo: o pedido da tarefa, as
-   decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto", em "Memória (fase 2)" de
+   decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto", adiado; ver "Memória" de
    [pendencias.md](pendencias.md)).
    - **Trail-Code avaliado em 2026-10-17 e não adotado como dependência.** O `skeleton` é bom (−87% de tokens), mas
      o `ask` é léxico e não ganhou do `grep`, o `callers` não resolve chamadas de método entre crates em Rust, o `init`
