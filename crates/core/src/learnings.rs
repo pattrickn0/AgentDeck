@@ -419,17 +419,37 @@ pub fn relativize(path: &str, roots: &[std::path::PathBuf]) -> String {
 impl crate::Core {
     /// Resposta de `ask-agent --learn`: o que o projeto aprendeu sobre `paths`. Lê a pasta de aprendizados da
     /// worktree da tarefa de `instance` (onde o agente trabalha, com os aprendizados que ele mesmo criou) ou, sem
-    /// tarefa, do repositório do projeto.
+    /// tarefa, do repositório do projeto. Soma a situação atual do projeto ([`crate::situation`]): com `paths`, no
+    /// topo, o aviso dos que outra tarefa em andamento também mexe; sem `paths`, no fim, a seção inteira. O agente
+    /// de uma tarefa não se vê nela.
     pub fn learn(&self, project: &str, instance: &str, paths: &[String]) -> Result<String, String> {
-        let project_root = self.project_path(project).and_then(|p| self.git_repo_at(&p).ok()).map(|r| r.root);
+        let repo = self.project_path(project).and_then(|p| self.git_repo_at(&p).ok());
+        let project_root = repo.as_ref().map(|r| r.root.clone());
         let work_root = self.task_cwd(project, instance).or_else(|| project_root.clone());
         let Some(work_root) = work_root else {
             return Err("não achei o repositório do projeto: os aprendizados moram em memory/aprendizados/ dele".into());
         };
         let roots: Vec<std::path::PathBuf> = [Some(work_root.clone()), project_root].into_iter().flatten().collect();
         let paths: Vec<String> = paths.iter().map(|p| relativize(p, &roots)).filter(|p| !p.is_empty()).collect();
-        Ok(learn_report(&load(&work_root), &paths))
+        let report = learn_report(&load(&work_root), &paths);
+        let Some(repo) = repo else { return Ok(report) };
+        let others = self.busy_tasks(project, &repo, instance);
+        if !paths.is_empty() {
+            let warnings = crate::situation::clash_warnings(&others, &paths);
+            return Ok(if warnings.is_empty() { report } else { format!("ATENÇÃO:\n{warnings}\n\n{report}") });
+        }
+        let base = self.task_of_instance(project, instance).map(|t| t.base).or_else(|| current_branch(&repo));
+        let base = base.unwrap_or_else(|| "HEAD".into());
+        let commits = crate::situation::base_commits(&repo, &base);
+        let situation = crate::situation::render(&others, &commits, &base, &[], crate::situation::BUDGET);
+        Ok(format!("{report}\n\nSituação atual:\n{situation}"))
     }
+}
+
+/// A branch em que o repositório principal está (vazio em HEAD solto).
+fn current_branch(repo: &crate::git::Repo) -> Option<String> {
+    let out = repo.read(&["branch", "--show-current"]).ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_owned()).filter(|b| !b.is_empty())
 }
 
 #[cfg(test)]

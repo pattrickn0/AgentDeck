@@ -957,24 +957,8 @@ impl Core {
     /// arquivos que a branch delas já mexeu, e os últimos commits da base. Vazia se não há repositório.
     fn task_situation(&self, project: &str, task: &Task, cited: &[String]) -> String {
         let Ok(repo) = self.task_repo(project) else { return String::new() };
-        let others: Vec<crate::situation::OtherTask> = self
-            .tasks(project)
-            .into_iter()
-            .filter(|t| t.id != task.id && matches!(t.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Validating))
-            .map(|t| {
-                // `Validating` já está na base (a branch foi alinhada): não há diff a mostrar.
-                // Em andamento, junta o que já está na branch com o que ainda não foi commitado.
-                let files = match t.status {
-                    TaskStatus::Validating => Vec::new(),
-                    _ => union_files(changed_files(&repo, &t.base, &t.branch), worktree_dirty_unlocked(&repo, &t.worktree)),
-                };
-                crate::situation::OtherTask { id: t.id, title: t.title, instance: t.instance, status: t.status.label().to_owned(), files }
-            })
-            .collect();
-        let commits: Vec<String> = repo
-            .read(&["log", "--oneline", "-8", &task.base, "--"])
-            .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::to_owned).collect())
-            .unwrap_or_default();
+        let others = self.busy_tasks(project, &repo, &task.instance);
+        let commits = crate::situation::base_commits(&repo, &task.base);
         crate::situation::render(&others, &commits, &task.base, cited, crate::situation::BUDGET)
     }
 
@@ -1798,7 +1782,7 @@ fn git_out(repo: &Repo, args: &[&str]) -> Result<String, GitError> {
 
 /// Arquivos que a branch trouxe em relação à base (`git diff --name-only base...branch`); vazio se a branch
 /// não existe mais ou o git falha.
-fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
+pub(crate) fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
     if !valid_task_branch(branch) || !crate::git::valid_branch_name(base) {
         return Vec::new();
     }
@@ -1831,7 +1815,7 @@ fn worktree_dirty(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
 
 /// Como [`worktree_dirty`], mas pedindo ao git que não tome o `index.lock` da worktree (`--no-optional-locks`):
 /// serve para olhar a pasta de outro agente sem atrapalhar o `git add`/`commit` dele.
-fn worktree_dirty_unlocked(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
+pub(crate) fn worktree_dirty_unlocked(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
     if !worktree.is_dir() {
         return None;
     }
@@ -1842,7 +1826,7 @@ fn worktree_dirty_unlocked(repo: &Repo, worktree: &Path) -> Option<Vec<String>> 
 
 /// Une os arquivos da branch com os sem commit: normalizados (`/`), sem repetição, em ordem alfabética e sem o
 /// `AGENTS.md`, que o app reescreve e não é trabalho do agente.
-fn union_files(committed: Vec<String>, dirty: Option<Vec<String>>) -> Vec<String> {
+pub(crate) fn union_files(committed: Vec<String>, dirty: Option<Vec<String>>) -> Vec<String> {
     let mut files: Vec<String> = committed
         .into_iter()
         .chain(dirty.unwrap_or_default())
