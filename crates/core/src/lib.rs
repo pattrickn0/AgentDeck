@@ -19,6 +19,7 @@ pub mod download;
 pub mod env;
 pub mod events;
 pub mod exchange;
+pub(crate) mod file_lock;
 pub mod git;
 pub mod github;
 pub mod headless;

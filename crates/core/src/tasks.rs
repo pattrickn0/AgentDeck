@@ -1753,11 +1753,11 @@ impl Core {
             if dir.exists() {
                 // O git desistiu (ou removeu só o registro): apaga a pasta, que é nossa.
                 if let Err(e) = std::fs::remove_dir_all(&dir) {
-                    warnings.push(format!(
-                        "a pasta {} ficou ({}{e})",
-                        dir.display(),
-                        if last.is_empty() { String::new() } else { format!("{last}; ") }
-                    ));
+                    // O que ficou e quem segura: sem isso não se descobre a causa (visto na `t14`).
+                    let left = crate::file_lock::leftovers(&dir).describe(&dir);
+                    let git = if last.is_empty() { String::new() } else { format!("{last}; ") };
+                    log::warn!("tarefa {}: a worktree {} não saiu ({git}{e}); {left}", task.id, dir.display());
+                    warnings.push(format!("a pasta {} ficou ({git}{e}); {left}", dir.display()));
                 }
             }
         } else {
