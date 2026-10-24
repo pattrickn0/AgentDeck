@@ -3,13 +3,17 @@
 //!
 //! - `docs-demo`: o diff de uma tarefa com quatro arquivos, em foco;
 //! - `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`: o documento em foco;
+//! - `docs-demo-edit` (editando, com alteração não salva), `docs-demo-find` (busca aberta no arquivo), `docs-demo-diff-find`
+//!   (busca no diff), `docs-demo-external` (o disco mudou com edição não salva), `docs-demo-confirm` (a pergunta ao fechar a
+//!   aba), `docs-demo-large` (arquivo grande, só leitura), `docs-demo-md-code` (markdown como código);
 //! - `docs-demo-many`: dez documentos (a faixa de abas rola);
 //! - `docs-demo-badge`: os agentes à vista, com o selo da chave (duas abas terminaram, uma trabalha).
 
 use agentdeck_core::git::parse_diff;
 
 use crate::deck::Deck;
-use crate::docs::{Badge, CenterView, DiffDoc, DocKind, DocState, MdSource, TextDoc};
+use crate::docs::{Badge, CenterView, DiffDoc, DocKind, DocState, MdSource, Source, TextDoc, Unsaved};
+use crate::highlight::Lang;
 
 const DIFF: &str = "diff --git a/crates/app/src/docs.rs b/crates/app/src/docs.rs
 new file mode 100644
@@ -193,15 +197,14 @@ pub fn apply(deck: &mut Deck, item: &str) {
         DocKind::Markdown(MdSource::File("memory/MANUTENCAO.md".into())),
         "MANUTENCAO.md",
         "memory/MANUTENCAO.md",
-        DocState::Markdown(README.into()),
+        DocState::Source(Source::open(README, Lang::Markdown).expect("cabe no editor")),
     );
-    open(
-        deck,
-        DocKind::File("crates/core/src/workspace.rs".into()),
-        "workspace.rs",
-        "crates/core/src/workspace.rs",
-        DocState::Text(TextDoc::new(FILE)),
-    );
+    let file_state = if item == "docs-demo-large" {
+        DocState::Text(TextDoc::highlighted(FILE, Lang::Rust))
+    } else {
+        DocState::Source(Source::open(FILE, Lang::Rust).expect("cabe no editor"))
+    };
+    open(deck, DocKind::File("crates/core/src/workspace.rs".into()), "workspace.rs", "crates/core/src/workspace.rs", file_state);
     open(
         deck,
         DocKind::TaskDiff { id: "t19".into(), merged: false },
@@ -212,7 +215,8 @@ pub fn apply(deck: &mut Deck, item: &str) {
     if item == "docs-demo-many" {
         for n in 1..=9 {
             let path = format!("crates/app/src/ui/arquivo_{n}.rs");
-            open(deck, DocKind::File(path.clone()), &format!("arquivo_{n}.rs"), &path, DocState::Text(TextDoc::new(FILE)));
+            let state = DocState::Source(Source::open(FILE, Lang::Rust).expect("cabe no editor"));
+            open(deck, DocKind::File(path.clone()), &format!("arquivo_{n}.rs"), &path, state);
         }
     }
     if item == "docs-demo-unreadable" {
@@ -226,8 +230,9 @@ pub fn apply(deck: &mut Deck, item: &str) {
     }
     // O foco: cada variante olha para um documento.
     let focus = match item {
-        "docs-demo-file" | "docs-demo-many" => DocKind::File("crates/core/src/workspace.rs".into()),
-        "docs-demo-md" => DocKind::Markdown(MdSource::File("memory/MANUTENCAO.md".into())),
+        "docs-demo-file" | "docs-demo-many" | "docs-demo-edit" | "docs-demo-find" | "docs-demo-external" | "docs-demo-confirm"
+        | "docs-demo-large" => DocKind::File("crates/core/src/workspace.rs".into()),
+        "docs-demo-md" | "docs-demo-md-code" => DocKind::Markdown(MdSource::File("memory/MANUTENCAO.md".into())),
         "docs-demo-report" => DocKind::Markdown(MdSource::TaskReport("t19".into())),
         "docs-demo-unreadable" => DocKind::File("whisper/models/ggml-base.bin".into()),
         _ => DocKind::TaskDiff { id: "t19".into(), merged: false },
@@ -236,5 +241,40 @@ pub fn apply(deck: &mut Deck, item: &str) {
     if item == "docs-demo-badge" {
         deck.docs.view = CenterView::Agents;
         deck.docs.debug_badge = Some(Badge { done: 2, busy: 1 });
+    }
+    let uid = deck.docs.current_uid(&project);
+    let source = |deck: &mut Deck, f: &mut dyn FnMut(&mut Source)| {
+        if let Some(DocState::Source(src)) = uid.and_then(|u| deck.docs.get_mut(u)).map(|t| &mut t.state) {
+            f(src);
+        }
+    };
+    match item {
+        "docs-demo-edit" | "docs-demo-confirm" | "docs-demo-external" => source(deck, &mut |src| {
+            src.set_editing(true);
+            src.text = src.text.replacen("Ok(TextFile::Text(", "Ok(TextFile::Utf8(", 1) + "\n// anotação nova, ainda sem gravar\n";
+            src.touched();
+            if item == "docs-demo-external" {
+                src.external = Some(src.disk.replacen("READ_TEXT_MAX", "LIMITE_DE_LEITURA", 1));
+            }
+        }),
+        "docs-demo-find" | "docs-demo-diff-find" => {
+            if item == "docs-demo-find" {
+                // Um arquivo comprido, com o achado no fim: a busca rola até ele.
+                source(deck, &mut |src| {
+                    src.text = format!("{}// fim do arquivo\n", FILE.repeat(6));
+                    src.disk = src.text.clone();
+                    src.touched();
+                });
+            }
+            if let Some(tab) = uid.and_then(|u| deck.docs.get_mut(u)) {
+                tab.find.show();
+                tab.find.query = if item == "docs-demo-find" { "fim do arquivo".into() } else { "doc".into() };
+            }
+        }
+        "docs-demo-md-code" => source(deck, &mut |src| src.raw = true),
+        _ => {}
+    }
+    if item == "docs-demo-confirm" {
+        deck.docs.confirm = uid.map(Unsaved::Tab);
     }
 }

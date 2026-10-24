@@ -56,7 +56,7 @@ pub use instances::Ident;
 pub use tasks::{MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 pub use team::Team;
 pub use usage::{AgentUsage, UsageGroup, UsageWindow};
-pub use workspace::{DirEntry, TextFile};
+pub use workspace::{DirEntry, Eol, TextFile};
 
 /// Função chamada sempre que um [`CoreEvent`] é emitido, para acordar o loop da UI
 /// (ex.: `EventLoopProxy::send_event`). Pode ser chamada de qualquer thread.
@@ -794,6 +794,13 @@ impl Core {
     /// projeto ativo, erro. Ver [`workspace::read_text`].
     pub fn read_text(&self, rel_path: &str) -> Result<workspace::TextFile, String> {
         workspace::read_text(&self.workspace(), rel_path)
+    }
+
+    /// Grava um arquivo editado no modo Documentos, na pasta do projeto `project` (o documento pode ser de um projeto
+    /// que não é o ativo). Ver [`workspace::write_text`]. BLOQUEANTE: chame numa thread.
+    pub fn write_text(&self, project: &str, rel_path: &str, text_lf: &str, eol: Eol, bom: bool) -> Result<(), String> {
+        let ws = self.project_path(project).ok_or_else(|| "o projeto não existe mais".to_owned())?;
+        workspace::write_text(&ws, rel_path, text_lf, eol, bom)
     }
 
     /// Abre um arquivo do workspace no app padrão do sistema. Aceita caminhos relativos ao

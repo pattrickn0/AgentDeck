@@ -275,6 +275,22 @@ thread da interface e volta como `UiMsg::Doc(uid, Loaded)`. Do core só entram o
 `git_diff`, `parse_diff`) e `Core::read_text(rel)` (`workspace::read_text`: caminho relativo e seguro, links simbólicos resolvidos
 para dentro da pasta, até 1 MB, `TextFile::{Text, TooLarge, Binary}`). Terminais escondidos: o PTY não é redimensionado nem recebe teclado.
 
+**Editor (t39).** Um arquivo de texto que cabe (`Source::fits`: até 256 KB, linhas até 4 000 bytes) vira `DocState::Source(Source)`: o
+texto da tela (`\n`, sem BOM), o que está no disco (`disk`; sujo = `text != disk`), `Eol`/`bom` para gravar de volta igual, `editing`,
+`raw` (markdown como código), `locked` (CRLF+LF misturados ou não UTF-8: só leitura), `external` (o disco mudou com edição não salva),
+`gone`, `saving`/`save_error` e `version` (a chave do que depende do texto). `DocTab::apply` **nunca troca** um `Source` sujo por uma
+leitura: ela vira `Source::reload`, que só guarda o texto novo em `external`. Gravar é `Deck::docs_save` → thread → `Core::write_text` →
+`workspace::write_text` (`write_atomic`) → `UiMsg::DocSaved` → `on_doc_saved` (`After::{Nothing, Close, Quit}`). Fechar uma aba suja ou o
+app passa por `Docs::confirm` (`Unsaved::{Tab, Quit, Revert}`; `request_quit` no ×, em `CloseRequested` e em `quit_requested`) e pelo modal
+`ui/docs.rs::unsaved_modal`. A pintura do código é `ui/code.rs`: um `TextEdit` multilinha (sobre `&str` na leitura, `String` na edição)
+cujo `layouter` devolve o galley de `docs::Shaped` — realce (`highlight::Cache`) e galley guardados por impressão digital do texto,
+largura de quebra, escala da tela e busca, de modo que repintar não refaz nada; as linhas quebram na largura (o `TextEdit` multilinha do egui
+não rola na horizontal) e a coluna dos números fica à parte, alinhada às linhas do galley. O realce é o tokenizador próprio
+`highlight.rs` (sem `syntect`, ver `memory/aprendizados/editor-de-documentos.md`); as cores são `Palette::syn_*`. O que se pinta à mão (o
+diff, `ui/diff_view.rs`, e o arquivo grande, `ui/code.rs::text_body`) usa a seleção de `ui/select.rs` (posição = linha + byte; arrastar,
+Ctrl+A, Ctrl+C) e `highlight::pieces` para juntar realce e marcas da busca por linha. `Find` (por documento) guarda a consulta e os
+achados (bytes para o código; linhas para o diff e o arquivo grande).
+
 **Memória em duas camadas** (fase 1 do passo 3 do roadmap; `learnings.rs`, `situation.rs` e `tasks.rs`). O app entrega ao
 agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agora, no `start_message`:
 - **Longo prazo: aprendizados.** Um `.md` por aprendizado em `memory/aprendizados/` (versionado no git; formato no `README.md` da

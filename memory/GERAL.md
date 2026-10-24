@@ -134,8 +134,9 @@ A **tela dividida** organiza as abas por tipo de agente:
 
 **Documentos (a chave do centro).** O diff que o usuário valida e o que ele lê (pedido, relatório, arquivos) ficavam espremidos
 na barra direita (280–400 px). Por isso o **centro inteiro** alterna, em vez de ganhar uma janela ao lado dos agentes (com 3 agentes,
-cada janela tem 1/3 da largura). Fase 1: **só leitura**; edição, realce de sintaxe, diff lado a lado e gravar os documentos abertos
-ficam para a fase 2 (ver [pendencias.md](pendencias.md)).
+cada janela tem 1/3 da largura). Fase 1 (`t19`): só leitura. Fase 2 (`t39`): os arquivos de texto pequenos **se editam**, com realce de sintaxe,
+busca e seleção; diff lado a lado, gravar as abas de documento entre aberturas e documento ao lado de um agente seguem em
+[pendencias.md](pendencias.md).
 - **A chave** fica no topo da barra lateral (com ela recolhida, na barra de título, logo depois do logo): dois segmentos, **Agentes** e **Documentos (n)** (n =
   documentos abertos do projeto ativo). Ctrl+Shift+D alterna (o app o toma mesmo com o terminal focado, como o Ctrl+Shift+M; sem
   documentos abertos não faz nada). Abrir qualquer documento muda para Documentos sozinho; fechar o último volta para Agentes; clicar
@@ -149,18 +150,30 @@ ficam para a fase 2 (ver [pendencias.md](pendencias.md)).
   teclado, o IME e o arrastar arquivos não chegam ao terminal escondido.
 - **Faixa de abas de documento**: o mesmo desenho das abas dos agentes (setas ‹ › quando não cabem, menu ▾ com todos, × em cada
   aba), um sinal do tipo antes do nome (`±` diff, `≡` arquivo, `¶` markdown). Embaixo, o título do documento e as ações
-  (**Recarregar**; **Abrir no programa padrão** nos arquivos). Os documentos são **por projeto** (trocar de projeto troca a lista) e
-  **não são gravados**; abrir um documento já aberto só o foca. Ctrl+Tab passa pelos documentos.
+  (**Editar** / **Salvar** / **Só leitura**, **Recarregar**; **Abrir no programa padrão** nos arquivos). Os documentos são **por projeto** (trocar de projeto troca a lista) e
+  **as abas não são gravadas entre aberturas**; abrir um documento já aberto só o foca. Ctrl+Tab passa pelos documentos. Uma aba com edição não
+  salva mostra um ponto âmbar no lugar do × (o × ou fechar o app perguntam: Salvar, Não salvar, Cancelar).
 - **Diff**: lista de arquivos à esquerda (letra `A`/`M`/`D`/`R`, nome e `+`/`−`; clicar rola o diff até o arquivo) e o diff à direita,
   no mesmo desenho do diff da aba Git, sem as ações por trecho. Em janela estreita (centro < 560 px) a lista vai para cima do diff.
   Vem de: **Ver diff completo** / **Ver o que foi mesclado** do detalhe da tarefa (a barra direita não tem mais a tela do diff), o botão
   **Abrir em Documentos** do detalhe de um commit (Histórico da aba Git) e o do diff de um arquivo alterado (aba Git, que mantém o diff dela
   para preparar por trecho).
-- **Arquivo**: duplo clique no explorador abre uma visualização monoespaçada, com número de linha e rolagem, que relê sozinha
-  quando o arquivo muda no disco (o watcher da pasta). Acima de 1 MB ou binário, uma explicação no lugar do conteúdo. O clique simples
+- **Arquivo**: duplo clique no explorador abre o arquivo **como código** (`DocState::Source`): monoespaçado, com número de linha, **realce de
+  sintaxe** (Rust, Markdown, TOML, JSON, YAML, JS/TS, Python, PowerShell e shell; `highlight.rs`, tokenizador próprio), seleção e cópia do
+  mouse, `Ctrl+F` (campo, "n de m", Enter/Shift+Enter, Esc) e rolagem; relê sozinho quando o arquivo muda no disco (o watcher da pasta).
+  **Editar** liga a edição (o fundo muda; Tab e Shift+Tab indentam; Ctrl+Z desfaz); **Ctrl+S** grava ao lado e troca (`workspace::write_text`)
+  **no mesmo fim de linha** (CRLF/LF) e com o BOM que o arquivo já tinha (nunca acrescenta). Se um agente muda o arquivo com edição não salva,
+  uma faixa pergunta: **Manter a minha** (o disco novo vira a base; a próxima gravação o sobrescreve) ou **Recarregar a do disco**; nada é
+  trocado sozinho, e o Ctrl+S espera a escolha. Arquivo apagado com edição: aviso, e a edição fica. Abre **só para leitura**, com a razão numa
+  faixa, o que mistura CRLF e LF ou não é UTF-8; acima de 256 KB (ou com linha de mais de 4 000 bytes) vira `DocState::Text`, só leitura
+  com seleção, cópia e busca, pintada linha a linha; acima de 1 MB ou binário, uma explicação no lugar do conteúdo. O clique simples
   continua inserindo `@arquivo` no terminal.
 - **Markdown**: os `.md` abertos pelo explorador e, no detalhe da tarefa, o **Pedido** e o **Relatório** (botão **Abrir em Documentos** em
-  cada um) aparecem formatados: títulos, listas (com `- [ ]`), negrito e itálico, código, tabelas e citações.
+  cada um) aparecem formatados: títulos, listas (com `- [ ]`), negrito e itálico, código, tabelas e citações. O `.md` de arquivo tem o botão
+  **Ver código** (e **Editar**, que mostra o código); `Ctrl+F` também mostra o código. O formatado se seleciona e copia como o egui faz; o
+  pedido e o relatório não têm busca.
+- **Diff**: o código do diff leva o realce da linguagem de cada arquivo; arrastar seleciona (rola ao passar da borda), `Ctrl+A` seleciona
+  tudo, `Ctrl+C` copia só o código (sem número de linha nem `+`/`−`); `Ctrl+F` marca as linhas achadas.
 
 A aba **Git** trabalha no repositório da pasta de trabalho, com o git instalado na máquina:
 - topo: branch atual e menu de branches (trocar, criar, **mesclar** ou fazer **rebase** da branch escolhida); buscar, puxar

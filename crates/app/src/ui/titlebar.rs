@@ -123,7 +123,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
     }
     if window_button(ui, &painter, close, "win-close", Glyph::Close, true) {
-        deck.quit_requested = true;
+        deck.request_quit();
     }
 
     // ---------- Uso das assinaturas (à esquerda dos botões da janela) ----------

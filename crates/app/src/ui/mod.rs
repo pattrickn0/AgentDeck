@@ -2,6 +2,7 @@
 //! O layout é calculado à mão para reproduzir as medidas do CSS ao pixel.
 
 mod background;
+mod code;
 mod diff_view;
 mod docs;
 mod empty_state;
@@ -13,6 +14,7 @@ mod overlay;
 mod panes;
 mod projects;
 mod right_panel;
+mod select;
 mod shortcuts;
 mod sidebar;
 mod tabs;
@@ -117,6 +119,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     menus::settings_menu(deck, &ctx, menus.settings_anchor);
     menus::tab_context_menu(deck, &ctx);
     menus::rename_tab_modal(deck, &ctx);
+    docs::unsaved_modal(deck, &ctx);
     menus::dictation_modal(deck, &ctx);
     shortcuts::shortcuts_modal(deck, &ctx);
     overlay::drop_overlay(deck, &ctx, window);

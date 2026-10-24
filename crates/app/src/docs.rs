@@ -1,17 +1,85 @@
 //! Modo Documentos do centro: o estado e a lógica pura (a pintura fica em `ui/docs.rs`).
 //!
 //! O centro alterna entre os agentes (a tela dividida) e os documentos: diff de uma tarefa, de um
-//! commit ou de um arquivo, arquivo de texto e markdown, todos só para leitura. Os documentos são por
-//! projeto e não são gravados. Abrir um documento já aberto só o foca; abrir qualquer um muda o centro
-//! para Documentos, e fechar o último volta para Agentes.
+//! commit ou de um arquivo, arquivo de texto e markdown. Os arquivos de texto pequenos se leem e se **editam** (`Source`:
+//! `Ctrl+S` grava, com o mesmo fim de linha e sem acrescentar BOM; o aviso quando um agente muda o arquivo com edição
+//! aberta). Os documentos são por projeto e não são gravados entre aberturas. Abrir um documento já aberto só o foca;
+//! abrir qualquer um muda o centro para Documentos, e fechar o último volta para Agentes.
 
 use std::collections::HashMap;
+use std::ops::Range;
+use std::sync::Arc;
 
 use agentdeck_core::git::{DiffKind, EntryKind, GitDiff, GitEntry, GitError};
 use agentdeck_core::workspace::READ_TEXT_MAX;
-use agentdeck_core::TextFile;
+use agentdeck_core::{Eol, TextFile};
 
 use crate::deck::{Deck, UiMsg};
+use crate::highlight::{self, Lang, Span};
+
+/// A fonte e a altura de uma linha do arquivo de texto (a mesma do diff).
+pub const TEXT_FONT: f32 = 12.0;
+pub const TEXT_ROW_H: f32 = 17.0;
+
+/// O que o desenho de um arquivo guarda entre quadros: o realce por versão do texto e o galley já montado. O `TextEdit`
+/// pede o galley a cada quadro; sem este cache o arquivo todo seria percorrido, colorido e medido de novo 60 vezes por
+/// segundo.
+#[derive(Debug, Clone, Default)]
+pub struct Shaped {
+    pub hl: highlight::Cache,
+    key: Option<ShapeKey>,
+    galley: Option<Arc<egui::Galley>>,
+}
+
+/// Para que o galley guardado vale: o texto, a linguagem, a largura de quebra, a escala da tela e a busca.
+#[derive(Debug, Clone, PartialEq)]
+struct ShapeKey {
+    hash: u64,
+    lang: Lang,
+    wrap: u32,
+    ppp: u32,
+    marks: Option<(String, u64, usize)>,
+}
+
+impl Shaped {
+    /// O galley de `text` (monoespaçado, realçado, quebrando em `wrap` px), refeito só se algo da chave mudou.
+    /// `marks` são as ocorrências da busca, em bytes de `text`, e `current` a atual entre elas.
+    pub fn galley(&mut self, fonts: &egui::Context, text: &str, lang: Lang, wrap: f32, find: &Find) -> Arc<egui::Galley> {
+        let hash = highlight::text_hash(text);
+        let ppp = fonts.pixels_per_point();
+        let marks = find.stamp().map(|(q, v)| (q.clone(), *v, find.current));
+        let key = ShapeKey { hash, lang, wrap: wrap.to_bits(), ppp: ppp.to_bits(), marks };
+        if let (Some(k), Some(g)) = (&self.key, &self.galley) {
+            if *k == key {
+                return g.clone();
+            }
+        }
+        let pal = crate::theme::pal();
+        let font = crate::theme::mono(TEXT_FONT);
+        let matches: &[Range<usize>] = if key.marks.is_some() { &find.ranges } else { &[] };
+        let pieces = highlight::pieces(text, self.hl.lines(lang, text, hash), matches, key.marks.as_ref().map(|_| find.current));
+        let mut job = egui::text::LayoutJob::default();
+        job.wrap.max_width = wrap;
+        job.keep_trailing_whitespace = true;
+        let format = |color, background| egui::TextFormat {
+            font_id: font.clone(),
+            color,
+            background,
+            line_height: Some(TEXT_ROW_H),
+            ..Default::default()
+        };
+        for p in &pieces {
+            let (color, background) = pal.syn_mark(p.tok, p.mark, pal.text);
+            job.append(&text[p.range.clone()], 0.0, format(color, background));
+        }
+        if pieces.is_empty() {
+            job.append("", 0.0, format(pal.text, egui::Color32::TRANSPARENT));
+        }
+        let galley = fonts.fonts_mut(|f| f.layout_job(job));
+        (self.key, self.galley) = (Some(key), Some(galley.clone()));
+        galley
+    }
+}
 
 /// O que o centro mostra.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -65,6 +133,14 @@ impl DocKind {
         }
     }
 
+    /// O arquivo de um diff de um arquivo só (o realce do código do diff).
+    pub fn diff_path(&self) -> Option<&str> {
+        match self {
+            DocKind::FileDiff { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+
     /// Dá para ler de novo (botão de recarregar): tudo que vem do core, não o texto de uma tarefa.
     pub fn reloadable(&self) -> bool {
         !matches!(self, DocKind::Markdown(MdSource::TaskBrief(_) | MdSource::TaskReport(_)))
@@ -114,12 +190,20 @@ impl DiffDoc {
     }
 }
 
-/// As linhas de um arquivo de texto.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// As linhas de um arquivo de texto que não abre no editor (grande demais, linha comprida demais).
+#[derive(Debug, Clone)]
 pub struct TextDoc {
     pub lines: Vec<String>,
     /// A linha mais comprida, em caracteres (a largura da rolagem horizontal).
     pub max_chars: usize,
+    /// O realce de cada linha (vazio sem linguagem); calculado uma vez, quando o arquivo carrega.
+    pub spans: Vec<Vec<Span>>,
+}
+
+impl PartialEq for TextDoc {
+    fn eq(&self, other: &Self) -> bool {
+        self.lines == other.lines
+    }
 }
 
 /// Uma linha com mais caracteres que isto é cortada na tela (como o diff faz com 1000): um arquivo de 1 MB numa linha só
@@ -140,7 +224,263 @@ impl TextDoc {
             })
             .collect();
         let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-        Self { lines, max_chars }
+        Self { lines, max_chars, spans: Vec::new() }
+    }
+
+    /// Como [`TextDoc::new`], com o realce de `lang` (uma vez só, aqui: a pintura só lê).
+    pub fn highlighted(text: &str, lang: Lang) -> Self {
+        let mut doc = Self::new(text);
+        if lang != Lang::Plain {
+            doc.spans = highlight::highlight_lines(lang, &doc.lines.join("\n"));
+        }
+        doc
+    }
+}
+
+/// Acima disto o arquivo abre só em leitura, sem editor: o desenho do editor refaz as letras de todo o texto e, com
+/// vários MB, travaria a interface.
+pub const EDIT_MAX: usize = 256 * 1024;
+/// Uma linha mais comprida que isto (JSON minificado) também deixa o editor de fora.
+const EDIT_LINE_MAX: usize = 4000;
+
+/// Um arquivo de texto aberto como código: o texto que está na tela (que se edita, se o usuário pedir), o que está no
+/// disco, e o que é preciso para gravar de volta igual. Também serve à leitura: o mesmo desenho dá seleção, cópia e busca.
+#[derive(Debug, Clone)]
+pub struct Source {
+    /// O texto na tela: com `\n`, sem BOM.
+    pub text: String,
+    /// O que está no disco, no mesmo formato; `text != disk` é "edição não salva".
+    pub disk: String,
+    pub eol: Eol,
+    pub bom: bool,
+    pub lang: Lang,
+    /// O usuário está editando (senão, só lendo).
+    pub editing: bool,
+    /// Markdown: o código em vez do texto formatado.
+    pub raw: bool,
+    /// Por que não dá para editar: gravar de volta mudaria o que o usuário não tocou.
+    pub locked: Option<String>,
+    /// O disco mudou com edição não salva: o texto de lá, esperando a escolha entre manter a minha ou recarregar.
+    pub external: Option<String>,
+    /// O arquivo sumiu (ou ficou ilegível) enquanto havia edição não salva: ela continua aqui.
+    pub gone: bool,
+    /// Uma gravação em andamento, e o erro da última que falhou.
+    pub saving: bool,
+    pub save_error: Option<String>,
+    /// Muda a cada alteração do texto (a chave do que se guarda: realce, busca).
+    pub version: u64,
+}
+
+/// O texto como o editor o guarda (sem BOM, com `\n`), o BOM e o fim de linha; e por que não dá para editar, se não dá.
+fn read_source(raw: &str) -> (String, bool, Eol, Option<String>) {
+    let (body, bom) = match raw.strip_prefix('\u{feff}') {
+        Some(rest) => (rest, true),
+        None => (raw, false),
+    };
+    let (text, eol, mut locked) = match Eol::normalize(body) {
+        Some((text, eol)) => (text, eol, None),
+        None => (
+            body.replace("\r\n", "\n"),
+            Eol::Lf,
+            Some(
+                "Este arquivo mistura fins de linha (CRLF e LF): gravar de volta mudaria linhas que você não tocou. Só leitura.".to_owned(),
+            ),
+        ),
+    };
+    if locked.is_none() && body.contains('\u{fffd}') {
+        locked = Some("Este arquivo não é UTF-8 (há bytes que não viram texto): gravar de volta o estragaria. Só leitura.".to_owned());
+    }
+    (text, bom, eol, locked)
+}
+
+impl Source {
+    /// O texto cabe no editor: não passa de `EDIT_MAX` e nenhuma linha passa de `EDIT_LINE_MAX`.
+    pub fn fits(raw: &str) -> bool {
+        raw.len() <= EDIT_MAX && !raw.split('\n').any(|l| l.len() > EDIT_LINE_MAX)
+    }
+
+    /// O arquivo como código, se cabe no editor (`EDIT_MAX`, sem linha comprida demais); senão `None`.
+    pub fn open(raw: &str, lang: Lang) -> Option<Source> {
+        if raw.len() > EDIT_MAX || raw.split('\n').any(|l| l.len() > EDIT_LINE_MAX) {
+            return None;
+        }
+        let (text, bom, eol, locked) = read_source(raw);
+        Some(Source {
+            disk: text.clone(),
+            text,
+            eol,
+            bom,
+            lang,
+            editing: false,
+            raw: false,
+            locked,
+            external: None,
+            gone: false,
+            saving: false,
+            save_error: None,
+            version: 0,
+        })
+    }
+
+    pub fn dirty(&self) -> bool {
+        self.text != self.disk
+    }
+
+    /// `raw` (o que o disco tem agora) é o que já está em `disk`?
+    pub fn is_disk(&self, raw: &str) -> bool {
+        self.external.is_none() && !self.gone && read_source(raw).0 == self.disk
+    }
+
+    /// O arquivo foi lido de novo (o watcher avisou). Sem edição não salva, a tela acompanha o disco; com ela, nada do
+    /// que o usuário digitou se perde: se o disco mudou de fato, o texto de lá espera em `external`.
+    pub fn reload(&mut self, raw: &str) {
+        let (text, bom, eol, locked) = read_source(raw);
+        self.gone = false;
+        if !self.dirty() {
+            if text != self.text {
+                self.version += 1;
+            }
+            (self.text, self.disk, self.bom, self.eol, self.locked) = (text.clone(), text, bom, eol, locked);
+            self.external = None;
+            return;
+        }
+        if text == self.disk {
+            self.external = None;
+        } else if text == self.text {
+            // O agente escreveu o mesmo que o usuário: não há o que escolher.
+            self.disk = text;
+            self.external = None;
+        } else {
+            self.external = Some(text);
+        }
+    }
+
+    /// "Manter a minha": o disco que mudou passa a ser a base; a edição continua e a próxima gravação a põe por cima.
+    pub fn keep_mine(&mut self) {
+        if let Some(ext) = self.external.take() {
+            self.disk = ext;
+        }
+    }
+
+    /// "Recarregar a do disco": a edição é descartada.
+    pub fn take_disk(&mut self) {
+        if let Some(ext) = self.external.take() {
+            self.text = ext.clone();
+            self.disk = ext;
+            self.version += 1;
+        }
+    }
+
+    /// Começa a editar (se pode). Markdown vai para o código enquanto se edita.
+    pub fn set_editing(&mut self, on: bool) {
+        if on && self.can_edit() {
+            self.editing = true;
+            self.raw = true;
+        } else if !on {
+            self.editing = false;
+        }
+    }
+
+    /// Joga fora a edição: a tela volta ao que está no disco (ou ao texto novo que o disco trouxe).
+    pub fn discard(&mut self) {
+        self.text = self.external.take().unwrap_or_else(|| self.disk.clone());
+        self.disk = self.text.clone();
+        self.version += 1;
+        self.save_error = None;
+    }
+
+    /// A gravação de `saved` deu certo.
+    pub fn mark_saved(&mut self, saved: &str) {
+        self.disk = saved.to_owned();
+        self.external = None;
+        self.gone = false;
+        self.saving = false;
+        self.save_error = None;
+    }
+
+    /// O texto foi editado (o editor devolveu mudança).
+    pub fn touched(&mut self) {
+        self.version += 1;
+    }
+
+    /// Dá para editar? (Não, se `locked`.)
+    pub fn can_edit(&self) -> bool {
+        self.locked.is_none()
+    }
+}
+
+/// A busca do documento aberto (`Ctrl+F`).
+#[derive(Debug, Clone, Default)]
+pub struct Find {
+    pub open: bool,
+    pub query: String,
+    /// A posição, nas ocorrências, da atual.
+    pub current: usize,
+    /// O campo pede o foco no próximo quadro.
+    pub focus: bool,
+    /// Rolar até a ocorrência atual no próximo quadro.
+    pub jump: bool,
+    /// Ocorrências em bytes do texto (arquivo no editor) ou linhas (diff, arquivo grande); só uma das duas se usa.
+    pub ranges: Vec<Range<usize>>,
+    pub lines: Vec<usize>,
+    /// Para que consulta e versão do texto as ocorrências valem.
+    key: Option<(String, u64)>,
+}
+
+impl Find {
+    pub fn show(&mut self) {
+        self.open = true;
+        self.focus = true;
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.focus = false;
+    }
+
+    pub fn count(&self) -> usize {
+        self.ranges.len() + self.lines.len()
+    }
+
+    /// Refaz as ocorrências se a consulta ou a versão do texto mudaram (`search` devolve bytes e linhas). Uma consulta
+    /// nova leva à primeira ocorrência; editar o texto não rola a tela.
+    pub fn refresh(&mut self, version: u64, search: impl FnOnce(&str) -> (Vec<Range<usize>>, Vec<usize>)) {
+        let same_query = self.key.as_ref().is_some_and(|(q, _)| *q == self.query);
+        if self.key.as_ref().is_some_and(|(q, v)| *q == self.query && *v == version) {
+            return;
+        }
+        (self.ranges, self.lines) = search(&self.query);
+        self.key = Some((self.query.clone(), version));
+        if !same_query {
+            self.current = 0;
+            self.jump = true;
+        } else if self.current >= self.count() {
+            self.current = 0;
+        }
+    }
+
+    /// A próxima (ou a anterior) ocorrência, dando a volta.
+    pub fn step(&mut self, back: bool) {
+        let n = self.count();
+        if n > 0 {
+            self.current = (self.current + if back { n - 1 } else { 1 }) % n;
+            self.jump = true;
+        }
+    }
+
+    /// De que consulta e versão do texto as ocorrências são (a chave do que depende delas, como o galley).
+    pub fn stamp(&self) -> Option<&(String, u64)> {
+        self.key.as_ref().filter(|_| self.open && !self.query.is_empty())
+    }
+
+    /// A ocorrência atual, em bytes (arquivo no editor).
+    pub fn current_range(&self) -> Option<&Range<usize>> {
+        self.ranges.get(self.current)
+    }
+
+    /// A linha da ocorrência atual (diff, arquivo grande).
+    pub fn current_line(&self) -> Option<usize> {
+        self.lines.get(self.current).copied()
     }
 }
 
@@ -150,7 +490,9 @@ pub enum DocState {
     Failed(String),
     Diff(DiffDoc),
     Text(TextDoc),
-    /// O texto markdown, desenhado já formatado.
+    /// Um arquivo de texto pequeno, como código: lê, seleciona, busca e edita.
+    Source(Source),
+    /// O texto markdown, desenhado já formatado (pedido e relatório da tarefa).
     Markdown(String),
     /// Um arquivo que não vira texto na tela (grande demais ou binário): a explicação.
     Unreadable(String),
@@ -174,16 +516,47 @@ pub struct DocTab {
     /// A linha de cima do documento (caminho, tarefa, commit) e a dica da aba.
     pub subtitle: String,
     pub state: DocState,
+    pub find: Find,
+    pub shaped: Shaped,
 }
 
 impl DocTab {
+    pub fn new(uid: u64, project: String, kind: DocKind, title: String, subtitle: String, state: DocState) -> Self {
+        Self { uid, project, kind, title, subtitle, state, find: Find::default(), shaped: Shaped::default() }
+    }
+
+    /// Há edição não salva.
+    pub fn dirty(&self) -> bool {
+        matches!(&self.state, DocState::Source(s) if s.dirty())
+    }
+
+    /// A linguagem do realce, pelo nome do arquivo.
+    pub fn lang(&self) -> Lang {
+        self.kind.file_path().map_or(Lang::Plain, Lang::from_path)
+    }
+
     /// Aplica o resultado de uma leitura. O estado vira o que o tipo do documento mostra; o arquivo
-    /// selecionado e a rolagem de um diff relido não se perdem (o `selected` só é mantido se ainda existe).
+    /// selecionado e a rolagem de um diff relido não se perdem (o `selected` só é mantido se ainda existe). Um arquivo
+    /// aberto como código com edição não salva nunca é trocado por uma leitura: ela só vira aviso (`Source::reload`).
     pub fn apply(&mut self, loaded: Loaded) {
+        if let DocState::Source(src) = &mut self.state {
+            match &loaded {
+                // Um arquivo que cresceu além do editor só segue o disco se não há edição a proteger.
+                Loaded::Text(Ok(TextFile::Text(raw))) if src.dirty() || Source::fits(raw) => return src.reload(raw),
+                Loaded::Text(_) if src.dirty() => {
+                    src.gone = true;
+                    return;
+                }
+                _ => {}
+            }
+        }
         let previous = match &self.state {
             DocState::Diff(d) => Some(d.selected),
             _ => None,
         };
+        let lang = self.lang();
+        let is_markdown = matches!(self.kind, DocKind::Markdown(_));
+        let from_file = self.kind.file_path().is_some();
         self.state = match loaded {
             Loaded::Diff(Err(e)) | Loaded::Text(Err(e)) => DocState::Failed(e),
             Loaded::Diff(Ok(diff)) => {
@@ -201,14 +574,18 @@ impl DocTab {
             Loaded::Text(Ok(TextFile::Binary)) => {
                 DocState::Unreadable("O arquivo é binário: o conteúdo não aparece aqui. Abra no programa padrão.".into())
             }
-            Loaded::Text(Ok(TextFile::Text(text))) if matches!(self.kind, DocKind::Markdown(_)) => DocState::Markdown(text),
-            Loaded::Text(Ok(TextFile::Text(text))) => DocState::Text(TextDoc::new(&text)),
+            Loaded::Text(Ok(TextFile::Text(text))) => match Source::open(&text, lang).filter(|_| from_file) {
+                Some(source) => DocState::Source(source),
+                None if is_markdown => DocState::Markdown(text),
+                None => DocState::Text(TextDoc::highlighted(&text, lang)),
+            },
         };
     }
 
     /// O texto já está na tela igual ao que chegou (a releitura do watcher não precisa repintar nada).
     pub fn same_text(&self, loaded: &Loaded) -> bool {
         match (&self.state, loaded) {
+            (DocState::Source(old), Loaded::Text(Ok(TextFile::Text(new)))) => old.is_disk(new),
             (DocState::Markdown(old), Loaded::Text(Ok(TextFile::Text(new)))) => old == new,
             (DocState::Text(old), Loaded::Text(Ok(TextFile::Text(new)))) => *old == TextDoc::new(new),
             _ => false,
@@ -243,6 +620,39 @@ pub struct Docs {
     pub debug_badge: Option<Badge>,
     /// O cache do markdown formatado (links e rolagem), compartilhado pelos documentos.
     pub md_cache: egui_commonmark::CommonMarkCache,
+    /// A pergunta aberta sobre edição não salva (fechar a aba ou o app).
+    pub confirm: Option<Unsaved>,
+    /// Gravações em andamento e o que fazer quando terminarem.
+    pub pending: HashMap<u64, After>,
+}
+
+/// O que a pergunta sobre edição não salva decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unsaved {
+    /// Fechar a aba do documento (uid).
+    Tab(u64),
+    /// Fechar o app.
+    Quit,
+    /// Descartar a edição e ler o arquivo do disco (o botão Recarregar).
+    Revert(u64),
+}
+
+/// O que fazer depois que uma gravação der certo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum After {
+    Nothing,
+    /// Fechar a aba.
+    Close,
+    /// Sair do app (quando não sobrar nada por gravar).
+    Quit,
+}
+
+/// A resposta do usuário à pergunta sobre edição não salva.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    Save,
+    Discard,
+    Cancel,
 }
 
 /// O resultado de `Docs::open`.
@@ -269,7 +679,7 @@ impl Docs {
         }
         self.next_uid += 1;
         let uid = self.next_uid;
-        self.tabs.push(DocTab { uid, project: project.to_owned(), kind, title, subtitle, state });
+        self.tabs.push(DocTab::new(uid, project.to_owned(), kind, title, subtitle, state));
         self.current.insert(project.to_owned(), uid);
         Opened { uid, fresh: true }
     }
@@ -359,6 +769,16 @@ impl Docs {
     /// agora não é o dele (a thread leu o workspace de outro projeto).
     pub fn accepts_load(&self, uid: u64, active_project: &str) -> bool {
         self.get(uid).is_some_and(|t| !t.kind.reads_active_project() || t.project == active_project)
+    }
+
+    /// Os documentos com edição não salva, de todos os projetos.
+    pub fn unsaved(&self) -> Vec<&DocTab> {
+        self.tabs.iter().filter(|t| t.dirty()).collect()
+    }
+
+    /// Alguma gravação ainda não voltou.
+    pub fn saving(&self) -> bool {
+        self.tabs.iter().any(|t| matches!(&t.state, DocState::Source(s) if s.saving))
     }
 
     /// Um projeto removido leva os documentos dele.
@@ -574,16 +994,171 @@ impl Deck {
         self.docs_open(kind, file_name(rel).to_owned(), rel.to_owned(), DocState::Loading);
     }
 
-    /// Fecha um documento (se era o último do projeto, o centro volta para os agentes).
+    /// Fecha um documento (se era o último do projeto, o centro volta para os agentes). Sem perguntar: quem fecha pela
+    /// interface usa [`Deck::docs_request_close`].
     pub fn docs_close(&mut self, uid: u64) {
         self.docs.close(uid);
+        if self.docs.confirm == Some(Unsaved::Tab(uid)) || self.docs.confirm == Some(Unsaved::Revert(uid)) {
+            self.docs.confirm = None;
+        }
+        self.docs.pending.remove(&uid);
     }
 
-    /// Lê o documento de novo, mostrando "Carregando…" (botão de recarregar).
+    /// O pedido de fechar um documento (o ×): com edição não salva, pergunta antes.
+    pub fn docs_request_close(&mut self, uid: u64) {
+        if self.docs.get(uid).is_some_and(DocTab::dirty) {
+            self.docs.focus(uid);
+            self.docs.confirm = Some(Unsaved::Tab(uid));
+        } else {
+            self.docs_close(uid);
+        }
+    }
+
+    /// O pedido de fechar o app (o × da janela): com edição não salva, pergunta antes.
+    pub fn request_quit(&mut self) {
+        let first = self.docs.unsaved().first().map(|t| (t.uid, t.project.clone()));
+        let Some((uid, project)) = first else {
+            self.quit_requested = true;
+            return;
+        };
+        // Mostra o primeiro documento com edição, se é do projeto à vista.
+        if project == self.active_project {
+            self.docs.focus(uid);
+            self.docs.view = CenterView::Docs;
+        }
+        self.docs.confirm = Some(Unsaved::Quit);
+    }
+
+    /// Lê o documento de novo (botão de recarregar). Um arquivo aberto como código não passa por "Carregando…": se tem
+    /// edição não salva, pergunta antes de jogá-la fora; senão relê e a tela acompanha o disco.
     pub fn docs_reload(&mut self, uid: u64) {
-        if let Some(tab) = self.docs.get_mut(uid).filter(|t| t.kind.reloadable()) {
+        let Some(tab) = self.docs.get_mut(uid).filter(|t| t.kind.reloadable()) else { return };
+        if tab.dirty() {
+            self.docs.confirm = Some(Unsaved::Revert(uid));
+        } else if matches!(tab.state, DocState::Source(_)) {
+            self.docs_load(uid);
+        } else {
             tab.state = DocState::Loading;
             self.docs_load(uid);
+        }
+    }
+
+    /// `Ctrl+F`: abre a busca do documento. O markdown formatado não tem onde marcar o achado: a busca mostra o código.
+    pub fn docs_find(&mut self, uid: u64) {
+        let Some(tab) = self.docs.get_mut(uid) else { return };
+        if let DocState::Source(src) = &mut tab.state {
+            src.raw = true;
+        }
+        if matches!(tab.state, DocState::Source(_) | DocState::Text(_) | DocState::Diff(_)) {
+            tab.find.show();
+        }
+    }
+
+    /// Grava a edição de `uid` (`Ctrl+S`). `after` é o que fazer quando a gravação der certo. Não grava com o disco
+    /// mudado e a escolha (manter a minha / recarregar) por fazer: o aviso do documento pede isso antes.
+    pub fn docs_save(&mut self, uid: u64, after: After) {
+        let Some(tab) = self.docs.get_mut(uid) else { return };
+        let (Some(rel), project) = (tab.kind.file_path().map(str::to_owned), tab.project.clone()) else { return };
+        let DocState::Source(src) = &mut tab.state else { return };
+        if src.saving || src.locked.is_some() || src.external.is_some() {
+            return;
+        }
+        if !src.dirty() {
+            return self.docs_finish(uid, after);
+        }
+        src.saving = true;
+        src.save_error = None;
+        let (text, eol, bom) = (src.text.clone(), src.eol, src.bom);
+        self.docs.pending.insert(uid, after);
+        self.spawn_bg("doc-save", move |core| {
+            let result = core.write_text(&project, &rel, &text, eol, bom);
+            Some(UiMsg::DocSaved(uid, text, result))
+        });
+    }
+
+    /// Grava todas as edições (a pergunta de fechar o app) e sai quando a última terminar. Se alguma não pode ser gravada
+    /// (o disco mudou e falta escolher), o app não sai: o documento é mostrado.
+    pub fn docs_save_all_and_quit(&mut self) {
+        let blocked = self.docs.unsaved().iter().find(|t| matches!(&t.state, DocState::Source(s) if s.external.is_some())).map(|t| t.uid);
+        if let Some(uid) = blocked {
+            self.docs.focus(uid);
+            self.docs.view = CenterView::Docs;
+            return;
+        }
+        let dirty: Vec<u64> = self.docs.unsaved().iter().map(|t| t.uid).collect();
+        for uid in dirty {
+            self.docs_save(uid, After::Quit);
+        }
+    }
+
+    /// A gravação de `uid` voltou. `saved` é o texto que foi gravado (o da tela pode ter mudado desde então).
+    pub fn on_doc_saved(&mut self, uid: u64, saved: String, result: Result<(), String>) {
+        let after = self.docs.pending.remove(&uid).unwrap_or(After::Nothing);
+        let Some(tab) = self.docs.get_mut(uid) else { return };
+        let DocState::Source(src) = &mut tab.state else { return };
+        match result {
+            Ok(()) => src.mark_saved(&saved),
+            Err(e) => {
+                src.saving = false;
+                src.save_error = Some(e.clone());
+                let name = tab.subtitle.clone();
+                self.docs.focus(uid);
+                self.docs.view = CenterView::Docs;
+                // O documento pode ser de um projeto que não está à vista: o aviso também vai para a Conversa.
+                self.system(format!("Não consegui gravar {name}: {e}"));
+                return;
+            }
+        }
+        self.docs_finish(uid, after);
+    }
+
+    /// O que vem depois de uma gravação (ou de um "nada a gravar").
+    fn docs_finish(&mut self, uid: u64, after: After) {
+        match after {
+            After::Nothing => {}
+            After::Close => {
+                // Digitou mais enquanto gravava: a aba fica, com o que falta gravar.
+                if self.docs.get(uid).is_some_and(|t| !t.dirty()) {
+                    self.docs_close(uid);
+                }
+            }
+            After::Quit => {
+                if self.docs.unsaved().is_empty() && !self.docs.saving() {
+                    self.quit_requested = true;
+                }
+            }
+        }
+    }
+
+    /// A resposta da pergunta sobre edição não salva.
+    pub fn docs_answer(&mut self, answer: Answer) {
+        let Some(asked) = self.docs.confirm else { return };
+        if answer == Answer::Cancel {
+            self.docs.confirm = None;
+            return;
+        }
+        match (asked, answer) {
+            (Unsaved::Tab(uid), Answer::Save) => {
+                self.docs.confirm = None;
+                self.docs_save(uid, After::Close);
+            }
+            (Unsaved::Tab(uid), Answer::Discard) => self.docs_close(uid),
+            (Unsaved::Quit, Answer::Save) => {
+                self.docs.confirm = None;
+                self.docs_save_all_and_quit();
+            }
+            (Unsaved::Quit, Answer::Discard) => {
+                self.docs.confirm = None;
+                self.quit_requested = true;
+            }
+            (Unsaved::Revert(uid), Answer::Discard | Answer::Save) => {
+                self.docs.confirm = None;
+                if let Some(DocState::Source(src)) = self.docs.get_mut(uid).map(|t| &mut t.state) {
+                    src.discard();
+                }
+                self.docs_load(uid);
+            }
+            (_, Answer::Cancel) => {}
         }
     }
 
@@ -942,20 +1517,235 @@ Binary files a/img.png and b/img.png differ
     }
 
     fn tab(kind: DocKind) -> DocTab {
-        DocTab { uid: 1, project: P.into(), kind, title: "t".into(), subtitle: String::new(), state: DocState::Loading }
+        DocTab::new(1, P.into(), kind, "t".into(), String::new(), DocState::Loading)
     }
 
     #[test]
     fn a_loaded_file_becomes_text_or_markdown_by_kind() {
         let mut t = tab(DocKind::File("a.rs".into()));
         t.apply(Loaded::Text(Ok(TextFile::Text("um\n\tdois\n".into()))));
+        // Um arquivo que cabe no editor abre como código (lê, busca e edita)...
+        let DocState::Source(src) = &t.state else { panic!("código") };
+        assert_eq!((src.text.as_str(), src.lang, src.editing), ("um\n\tdois\n", Lang::Rust, false));
+        // ...e o grande demais, ou com linha comprida demais, só se lê.
+        let big = "x\n".repeat(EDIT_MAX / 2 + 1);
+        t.apply(Loaded::Text(Ok(TextFile::Text(big))));
+        assert!(matches!(&t.state, DocState::Text(d) if d.lines.len() > 1000));
+        t.apply(Loaded::Text(Ok(TextFile::Text(format!("curta\n{}\n", "y".repeat(EDIT_LINE_MAX + 1))))));
         let DocState::Text(doc) = &t.state else { panic!("texto") };
-        assert_eq!(doc.lines, ["um", "    dois"]);
-        assert_eq!(doc.max_chars, 8);
+        assert_eq!(doc.lines[0], "curta");
+        t.apply(Loaded::Text(Ok(TextFile::Text("um\n\tdois\n".into()))));
+        assert!(matches!(&t.state, DocState::Source(_)));
 
         let mut m = tab(DocKind::Markdown(MdSource::File("a.md".into())));
         m.apply(Loaded::Text(Ok(TextFile::Text("# Oi".into()))));
-        assert!(matches!(&m.state, DocState::Markdown(t) if t == "# Oi"));
+        let DocState::Source(md) = &m.state else { panic!("markdown como código") };
+        assert_eq!((md.text.as_str(), md.lang), ("# Oi", Lang::Markdown));
+        // O pedido e o relatório de uma tarefa não vêm de arquivo: seguem como markdown formatado.
+        let mut brief = tab(DocKind::Markdown(MdSource::TaskBrief("t1".into())));
+        brief.apply(Loaded::Text(Ok(TextFile::Text("# Oi".into()))));
+        assert!(matches!(&brief.state, DocState::Markdown(t) if t == "# Oi"));
+    }
+
+    fn source(raw: &str) -> Source {
+        Source::open(raw, Lang::Plain).expect("cabe no editor")
+    }
+
+    #[test]
+    fn the_line_ending_and_the_bom_come_back_as_they_were() {
+        let s = source("\u{feff}um\r\ndois\r\n");
+        assert_eq!((s.text.as_str(), s.eol, s.bom, s.locked.is_none()), ("um\ndois\n", Eol::Crlf, true, true));
+        let s = source("um\ndois");
+        assert_eq!((s.eol, s.bom), (Eol::Lf, false));
+        // Fim de linha misturado, ou texto que não é UTF-8: só leitura, com a razão.
+        assert!(source("a\r\nb\n").locked.as_deref().is_some_and(|m| m.contains("mistura")));
+        assert!(source("a\u{fffd}b").locked.as_deref().is_some_and(|m| m.contains("UTF-8")));
+        assert!(!source("a\u{fffd}b").can_edit());
+    }
+
+    #[test]
+    fn a_big_file_or_a_long_line_does_not_open_in_the_editor() {
+        assert!(Source::open(&"a\n".repeat(EDIT_MAX / 2), Lang::Plain).is_some());
+        assert!(Source::open(&format!("{}a", "a\n".repeat(EDIT_MAX / 2)), Lang::Plain).is_none());
+        assert!(Source::open(&format!("ok\n{}", "a".repeat(EDIT_LINE_MAX + 1)), Lang::Plain).is_none());
+    }
+
+    #[test]
+    fn without_unsaved_edits_the_screen_follows_the_disk() {
+        let mut s = source("um\n");
+        let v = s.version;
+        s.reload("um\n");
+        assert_eq!(s.version, v, "o mesmo texto não conta como mudança");
+        s.reload("dois\n");
+        assert_eq!((s.text.as_str(), s.disk.as_str(), s.external.is_none()), ("dois\n", "dois\n", true));
+        assert!(s.version > v);
+        assert!(!s.dirty());
+    }
+
+    #[test]
+    fn an_agent_changing_the_file_during_an_edit_asks_instead_of_replacing() {
+        let mut s = source("um\n");
+        s.set_editing(true);
+        s.text = "um\nminha linha\n".into();
+        s.touched();
+        assert!(s.dirty());
+        // O disco ainda é o mesmo: nada a avisar (é o que a leitura do watcher traz depois de gravar).
+        s.reload("um\n");
+        assert!(s.external.is_none());
+        assert!(s.is_disk("um\n"));
+        // O agente mudou: o texto dele espera; o meu continua intacto.
+        s.reload("um\nlinha do agente\n");
+        assert_eq!(s.external.as_deref(), Some("um\nlinha do agente\n"));
+        assert_eq!(s.text, "um\nminha linha\n");
+        assert!(!s.is_disk("um\nlinha do agente\n"), "a releitura repete o aviso em vez de ser ignorada");
+        // Manter a minha: o disco novo vira a base e a edição continua para gravar por cima.
+        s.keep_mine();
+        assert_eq!((s.disk.as_str(), s.text.as_str(), s.external.is_none()), ("um\nlinha do agente\n", "um\nminha linha\n", true));
+        assert!(s.dirty());
+        // Recarregar a do disco: a edição se descarta.
+        s.reload("outra\n");
+        s.take_disk();
+        assert_eq!((s.text.as_str(), s.disk.as_str(), s.dirty()), ("outra\n", "outra\n", false));
+    }
+
+    #[test]
+    fn an_agent_writing_what_the_user_typed_needs_no_choice() {
+        let mut s = source("um\n");
+        s.text = "dois\n".into();
+        s.reload("dois\n");
+        assert!(s.external.is_none() && !s.dirty());
+    }
+
+    #[test]
+    fn a_save_that_finished_while_typing_leaves_the_rest_unsaved() {
+        let mut s = source("um\n");
+        s.text = "dois\n".into();
+        s.saving = true;
+        // O usuário digitou mais enquanto a gravação de "dois" andava.
+        s.text = "dois e meio\n".into();
+        s.mark_saved("dois\n");
+        assert!(!s.saving && s.dirty(), "o que veio depois ainda falta gravar");
+        s.mark_saved("dois e meio\n");
+        assert!(!s.dirty());
+    }
+
+    #[test]
+    fn discarding_goes_back_to_the_disk() {
+        let mut s = source("um\n");
+        s.text = "x\n".into();
+        s.save_error = Some("falhou".into());
+        s.discard();
+        assert_eq!((s.text.as_str(), s.dirty(), s.save_error.is_none()), ("um\n", false, true));
+    }
+
+    #[test]
+    fn a_dirty_file_is_never_replaced_by_a_read() {
+        let mut t = tab(DocKind::File("a.rs".into()));
+        t.apply(Loaded::Text(Ok(TextFile::Text("um\n".into()))));
+        let DocState::Source(src) = &mut t.state else { panic!("código") };
+        src.set_editing(true);
+        src.text = "meu\n".into();
+        // O arquivo foi apagado, ficou binário ou grande demais: a edição fica e o aviso aparece.
+        for gone in [Loaded::Text(Err("sumiu".into())), Loaded::Text(Ok(TextFile::Binary)), Loaded::Text(Ok(TextFile::TooLarge(9)))] {
+            t.apply(gone);
+            let DocState::Source(src) = &t.state else { panic!("a edição continua") };
+            assert!(src.gone && src.text == "meu\n" && src.editing);
+        }
+        // Voltou: o aviso some e o disco novo vira o aviso de "mudou".
+        t.apply(Loaded::Text(Ok(TextFile::Text("novo\n".into()))));
+        let DocState::Source(src) = &t.state else { panic!("código") };
+        assert!(!src.gone && src.external.as_deref() == Some("novo\n") && src.text == "meu\n");
+        // A mesma leitura de novo não repinta quando a tela já a mostra (sem edição) e repete o aviso com ela.
+        assert!(!t.same_text(&Loaded::Text(Ok(TextFile::Text("novo\n".into())))));
+    }
+
+    #[test]
+    fn a_tab_with_unsaved_edits_says_so() {
+        let mut t = tab(DocKind::File("a.rs".into()));
+        assert!(!t.dirty());
+        t.apply(Loaded::Text(Ok(TextFile::Text("um\n".into()))));
+        assert!(!t.dirty());
+        if let DocState::Source(s) = &mut t.state {
+            s.text.push('x');
+        }
+        assert!(t.dirty());
+        let mut docs = Docs::default();
+        docs.tabs.push(t);
+        assert_eq!(docs.unsaved().len(), 1);
+    }
+
+    #[test]
+    fn the_search_walks_through_the_matches_and_wraps_around() {
+        let mut f = Find::default();
+        f.show();
+        f.query = "ab".into();
+        f.refresh(1, |q| (highlight::find_all("AB ab xab", q), Vec::new()));
+        assert_eq!((f.count(), f.current, f.jump), (3, 0, true));
+        f.jump = false;
+        f.step(false);
+        f.step(false);
+        assert_eq!(f.current_range(), Some(&(7..9)));
+        f.step(false);
+        assert_eq!(f.current, 0, "dá a volta");
+        f.step(true);
+        assert_eq!(f.current, 2);
+        // A mesma consulta e versão não refaz; editar o texto refaz sem rolar a tela.
+        f.jump = false;
+        f.refresh(1, |_| panic!("não devia buscar de novo"));
+        f.refresh(2, |q| (highlight::find_all("ab", q), Vec::new()));
+        assert_eq!((f.count(), f.current, f.jump), (1, 0, false));
+        // Uma consulta nova volta à primeira ocorrência e rola até ela.
+        f.query = "b".into();
+        f.refresh(2, |q| (highlight::find_all("ab b", q), Vec::new()));
+        assert_eq!((f.count(), f.current, f.jump), (2, 0, true));
+        assert_eq!(f.stamp().map(|(q, v)| (q.as_str(), *v)), Some(("b", 2)));
+        f.close();
+        assert!(f.stamp().is_none(), "fechada, a busca não marca nada");
+    }
+
+    #[test]
+    fn the_search_by_lines_serves_the_diff_and_the_big_file() {
+        let mut f = Find::default();
+        f.show();
+        f.query = "oi".into();
+        f.refresh(0, |q| (Vec::new(), highlight::find_lines(["oi", "x", "Oi!"], q)));
+        assert_eq!((f.count(), f.current_line()), (2, Some(0)));
+        f.step(false);
+        assert_eq!(f.current_line(), Some(2));
+    }
+
+    #[test]
+    fn the_shaped_text_is_rebuilt_only_when_the_text_the_width_or_the_search_change() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
+        let mut shaped = Shaped::default();
+        let mut find = Find::default();
+        let a = shaped.galley(&ctx, "fn a() {}\nlet x = 1;", Lang::Rust, 600.0, &find);
+        let again = shaped.galley(&ctx, "fn a() {}\nlet x = 1;", Lang::Rust, 600.0, &find);
+        assert!(Arc::ptr_eq(&a, &again), "o mesmo texto reaproveita o galley");
+        assert_eq!(shaped.hl.runs, 1);
+        let wider = shaped.galley(&ctx, "fn a() {}\nlet x = 1;", Lang::Rust, 800.0, &find);
+        assert!(!Arc::ptr_eq(&a, &wider));
+        assert_eq!(shaped.hl.runs, 1, "a largura não refaz o realce");
+        let edited = shaped.galley(&ctx, "fn b() {}\nlet x = 1;", Lang::Rust, 800.0, &find);
+        assert!(!Arc::ptr_eq(&wider, &edited));
+        assert_eq!(shaped.hl.runs, 2);
+        // A busca aberta marca as ocorrências (outro galley); fechada, volta ao de antes.
+        find.show();
+        find.query = "x".into();
+        find.refresh(1, |q| (highlight::find_all("fn b() {}\nlet x = 1;", q), Vec::new()));
+        let marked = shaped.galley(&ctx, "fn b() {}\nlet x = 1;", Lang::Rust, 800.0, &find);
+        assert!(!Arc::ptr_eq(&edited, &marked));
+        assert_eq!(shaped.hl.runs, 2, "a busca não refaz o realce");
+        // Todo o texto está no galley, sem perder nem repetir nada.
+        assert_eq!(marked.job.text, "fn b() {}\nlet x = 1;");
+    }
+
+    #[test]
+    fn the_editor_shows_up_to_a_quarter_megabyte_and_lines_up_to_four_thousand_bytes() {
+        assert_eq!((EDIT_MAX, EDIT_LINE_MAX), (256 * 1024, 4000));
     }
 
     #[test]
