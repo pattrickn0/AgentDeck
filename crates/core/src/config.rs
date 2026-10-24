@@ -255,17 +255,20 @@ impl Config {
     /// Como [`Config::load`], com a lista de arquivos candidatos e a pasta pessoal explícitas.
     pub(crate) fn load_from(candidates: &[PathBuf], paths: &AppPaths, home: &Path) -> Self {
         let file = candidates.iter().find(|p| p.is_file());
-        let mut cfg = match file.and_then(|f| std::fs::read_to_string(f).ok().map(|t| (f, t))) {
-            Some((f, text)) => Self::try_from_json_over_defaults(&text, paths).unwrap_or_else(|| {
-                // Ilegível: guarda uma cópia antes que a próxima gravação ponha os padrões por cima
-                // (senão a lista de projetos se perde sem aviso).
-                let backup = f.with_extension(format!("json.ilegivel-{}", crate::util::now_ms()));
-                match std::fs::copy(f, &backup) {
-                    Ok(_) => log::error!("configuração ilegível em {}; cópia guardada em {}", f.display(), backup.display()),
-                    Err(e) => log::error!("configuração ilegível em {} (e a cópia falhou: {e})", f.display()),
-                }
-                Self::default_for(paths)
-            }),
+        let mut cfg = match file {
+            Some(f) => {
+                let text = std::fs::read(f).ok().and_then(|b| config_text(&b));
+                text.and_then(|t| Self::try_from_json_over_defaults(&t, paths)).unwrap_or_else(|| {
+                    // Ilegível: guarda uma cópia antes que a próxima gravação ponha os padrões por cima
+                    // (senão a lista de projetos se perde sem aviso).
+                    let backup = f.with_extension(format!("json.ilegivel-{}", crate::util::now_ms()));
+                    match std::fs::copy(f, &backup) {
+                        Ok(_) => log::error!("configuração ilegível em {}; cópia guardada em {}", f.display(), backup.display()),
+                        Err(e) => log::error!("configuração ilegível em {} (e a cópia falhou: {e})", f.display()),
+                    }
+                    Self::default_for(paths)
+                })
+            }
             None => Self::default_for(paths),
         };
         let from_legacy = file.filter(|f| **f != paths.config_file);
@@ -425,6 +428,18 @@ pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     ]
 }
 
+/// O texto do `config.json`: UTF-8, com ou sem BOM, ou UTF-16 com BOM (editado pelo PowerShell 5.1: `Set-Content
+/// -Encoding utf8` grava o BOM e `Out-File` grava UTF-16). Sem BOM e fora do UTF-8, `None`: o arquivo conta como
+/// ilegível (fica a cópia) em vez de virar texto com substituições, que estragaria as pastas dos projetos ao gravar.
+fn config_text(bytes: &[u8]) -> Option<String> {
+    let bom = [&[0xEF, 0xBB, 0xBF][..], &[0xFF, 0xFE], &[0xFE, 0xFF]].iter().any(|b| bytes.starts_with(b));
+    if bom {
+        Some(crate::util::decode_text(bytes))
+    } else {
+        String::from_utf8(bytes.to_vec()).ok()
+    }
+}
+
 /// Arquivos a tentar, em ordem: o de `paths.config_file` e, depois, os das versões anteriores. Com
 /// `AGENTDECK_HOME` (a configuração fica dentro da pasta do app) o app é isolado e não lê as
 /// configurações do usuário.
@@ -547,6 +562,27 @@ mod tests {
             .filter(|n| n.contains("ilegivel"))
             .collect();
         assert_eq!(kept.len(), 1, "cópia do arquivo ilegível: {kept:?}");
+    }
+
+    #[test]
+    fn a_config_edited_in_powershell_keeps_its_projects() {
+        // `Set-Content -Encoding utf8` grava o BOM; `Out-File` do PowerShell 5.1 grava UTF-16 LE com BOM.
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        std::fs::create_dir_all(p.config_file.parent().expect("dir")).expect("mkdir");
+        let json = format!(r#"{{"whisperLang":"en","projectList":[{{"id":"p1","path":{:?}}}]}}"#, tmp.path().join("joão"));
+        let utf16: Vec<u8> = [0xFF, 0xFE].into_iter().chain(json.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        for bytes in [[&[0xEF, 0xBB, 0xBF][..], json.as_bytes()].concat(), utf16] {
+            std::fs::write(&p.config_file, &bytes).expect("write");
+            let cfg = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
+            assert_eq!(cfg.whisper_lang, "en");
+            assert_eq!(cfg.project_list.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), [tmp.path().join("joão")]);
+        }
+        // Sem BOM e fora do UTF-8 (cp1252): ilegível, com a cópia, em vez de "jo�o" gravado depois.
+        std::fs::write(&p.config_file, b"{\"projectList\":[{\"id\":\"p1\",\"path\":\"C:/jo\xE3o\"}]}").expect("write");
+        assert!(Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home()).project_list.is_empty());
+        let kept = std::fs::read_dir(p.config_file.parent().expect("dir")).expect("ls").flatten();
+        assert_eq!(kept.filter(|e| e.file_name().to_string_lossy().contains("ilegivel")).count(), 1);
     }
 
     #[test]
