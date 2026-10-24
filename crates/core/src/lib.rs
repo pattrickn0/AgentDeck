@@ -47,13 +47,13 @@ use crossbeam_channel::{Receiver, Sender};
 use parking_lot::{Mutex, RwLock};
 
 pub use agents::{AgentInfo, SpawnSpec};
-pub use config::{Config, Organization, ProjectCfg};
+pub use config::{Config, DictationChoice, Organization, ProjectCfg};
 pub use env::{env_var, env_var_os};
 pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind};
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
-pub use tasks::{Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
+pub use tasks::{MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
 pub use team::Team;
 pub use usage::{AgentUsage, UsageGroup, UsageWindow};
 pub use workspace::{DirEntry, Eol, TextFile};
@@ -857,6 +857,41 @@ impl Core {
     /// Garante modelo/binários do whisper (download em background com feed de progresso).
     pub fn ensure_whisper_async(&self) {
         whisper::ensure_whisper_async(self);
+    }
+
+    /// O que fazer com o ditado por voz ao abrir o app (ver [`whisper::Startup`]). Quem já tem o Whisper
+    /// baixado e nunca foi perguntado passa a constar como "sim" na configuração.
+    pub fn dictation_startup(&self) -> whisper::Startup {
+        let installed = self.dictation_installed();
+        let (startup, choice) = whisper::startup(self.config().dictation, installed);
+        self.set_dictation_choice(choice);
+        startup
+    }
+
+    /// Grava a escolha do ditado (sem regravar o arquivo se não mudou).
+    pub fn set_dictation_choice(&self, choice: DictationChoice) {
+        if self.config().dictation != choice {
+            self.update_config(|c| c.dictation = choice);
+        }
+    }
+
+    /// O modelo e um motor do whisper estão no disco: o ditado pode ser usado.
+    pub fn dictation_installed(&self) -> bool {
+        whisper::is_installed(&self.paths().whisper_dir)
+    }
+
+    /// Há um download do ditado em andamento.
+    pub fn dictation_downloading(&self) -> bool {
+        whisper::is_downloading(self)
+    }
+
+    /// Apaga do disco o que o ditado baixou (modelo, motor CUDA, pacotes pela metade) e passa a escolha a
+    /// "não". Recusa enquanto baixa. Devolve os bytes liberados.
+    pub fn remove_dictation(&self) -> Result<u64, String> {
+        let freed = whisper::remove_downloaded(self)?;
+        self.set_dictation_choice(DictationChoice::No);
+        self.emit(CoreEvent::DictationChanged);
+        Ok(freed)
     }
 
     // ---------- Ponte ----------

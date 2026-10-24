@@ -120,6 +120,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     menus::tab_context_menu(deck, &ctx);
     menus::rename_tab_modal(deck, &ctx);
     docs::unsaved_modal(deck, &ctx);
+    menus::dictation_modal(deck, &ctx);
     shortcuts::shortcuts_modal(deck, &ctx);
     overlay::drop_overlay(deck, &ctx, window);
 
