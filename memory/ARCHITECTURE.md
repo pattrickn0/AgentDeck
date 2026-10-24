@@ -326,6 +326,15 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   arquivos (até `LEARN_BUDGET`, 12 000 caracteres); sem arquivos, os globais por inteiro e o índice de todos os outros
   (`learnings::learn_report`). As instruções da ponte (`agents.rs`) mandam rodá-lo antes de mexer em arquivos. Caminhos absolutos dentro da worktree ou do repositório viram caminhos do
   repositório (`learnings::relativize`). Lê a pasta da worktree da tarefa de quem pergunta ou, sem tarefa, do repositório do projeto.
+  **Traz também a situação atual, para a aba de qualquer agente** (nada é empurrado no início da aba, que ficaria velho em minutos):
+  sem arquivos, acrescenta no fim a seção "Situação atual" (`situation::render`: as tarefas em andamento com os arquivos delas e os
+  últimos commits da base; a base é a da tarefa de quem pergunta ou, numa aba normal, a branch do repositório principal) e o agente
+  de uma tarefa não se vê nela; com arquivos, põe no topo um `ATENÇÃO:` com uma linha por arquivo que **outra** tarefa em andamento
+  também mexe (`situation::clash_warnings`: "a t37 (claude@t37, em revisão) também mexe nele; mudanças nas mesmas linhas vão
+  conflitar na mesclagem"), sem avisar do arquivo da própria tarefa nem de `memory/historico.md` (mescla por união) e sem nada a mais
+  quando não há choque. As duas saídas e o `task_situation` usam `Core::busy_tasks` (`situation.rs`), que lê os arquivos de cada
+  tarefa em uma thread por tarefa (dois comandos do git cada): com 4 tarefas abertas o `--learn` responde em ~200 ms, sem cache.
+  O aviso casa o caminho exato; o caminho absoluto de **outra** worktree não é relativizado.
 - **Escrita.** A regra da tarefa manda criar um arquivo em `memory/aprendizados/` na própria branch para algo não óbvio e citá-lo no
   relatório: o aprendizado passa pela mesma revisão e mescla que o código.
 - **Curto prazo: "Situação atual"** (`situation::render`, orçamento de 1 500 caracteres): as **outras tarefas em andamento** do projeto
