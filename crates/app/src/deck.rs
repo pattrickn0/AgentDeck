@@ -2125,12 +2125,19 @@ impl Deck {
         });
     }
 
-    /// Pergunta (numa thread, sem congelar o quadro) se o projeto sai da lista.
+    /// Pergunta (numa thread, sem congelar o quadro) se o projeto sai da lista. Remover fecha os documentos dele sem
+    /// gravar, então a pergunta conta os que têm edição não salva.
     pub fn confirm_remove_project(&self, id: String, name: String) {
+        let unsaved = self.docs.unsaved().iter().filter(|t| t.project == id).count();
+        let lost = match unsaved {
+            0 => String::new(),
+            1 => "\n\nUm documento dele tem edição não salva, que será perdida.".to_owned(),
+            n => format!("\n\n{n} documentos dele têm edição não salva, que será perdida."),
+        };
         self.spawn_bg("confirm-remove-project", move |_| {
             let ok = rfd::MessageDialog::new()
                 .set_title("Remover projeto")
-                .set_description(format!("Deseja remover \"{name}\" da lista de projetos?"))
+                .set_description(format!("Deseja remover \"{name}\" da lista de projetos?{lost}"))
                 .set_buttons(rfd::MessageButtons::YesNo)
                 .show()
                 == rfd::MessageDialogResult::Yes;
