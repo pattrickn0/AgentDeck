@@ -56,7 +56,7 @@ pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
-pub use tasks::{MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
+pub use tasks::{MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskEvent, TaskMessage, TaskSpec, TaskStatus};
 pub use team::Team;
 pub use usage::{AgentUsage, UsageGroup, UsageWindow};
 pub use workspace::{DirEntry, Eol, TextFile};
@@ -321,6 +321,7 @@ impl Core {
 
     /// Atalho para emitir uma entrada na "Conversa integrada".
     pub fn feed(&self, entry: FeedEntry) {
+        self.record_task_message(&entry);
         self.emit(CoreEvent::Feed(entry));
     }
 

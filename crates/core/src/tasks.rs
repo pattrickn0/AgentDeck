@@ -38,7 +38,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::events::{CoreEvent, Delivery, FeedEntry};
+use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
 use crate::git::{run, GitError, Repo, RepoState, COMMIT_TIMEOUT, WRITE_TIMEOUT};
 use crate::instances::Ident;
 use crate::util::{self, now_ms, terminal_text};
@@ -48,6 +48,10 @@ use crate::{models, Core};
 pub const MAX_EVENTS: usize = 200;
 /// Feedbacks guardados por tarefa (os mais antigos saem), e o tamanho de cada um ao reaparecer numa mensagem.
 pub const MAX_FEEDBACKS: usize = 20;
+/// Mensagens guardadas por tarefa (as mais antigas saem).
+pub const MAX_MESSAGES: usize = 300;
+/// Tamanho de cada mensagem guardada (em caracteres); o resto é cortado com um aviso.
+pub const MAX_MESSAGE_CHARS: usize = 6_000;
 const HISTORY_ITEM_CHARS: usize = 700;
 /// Mensagens ao agente mostram só os últimos feedbacks anteriores.
 const HISTORY_SHOWN: usize = 5;
@@ -139,6 +143,17 @@ pub struct Feedback {
     pub text: String,
 }
 
+/// Uma mensagem da linha do tempo da tarefa: pergunta, resposta ou erro em que a instância dela fala ou ouve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskMessage {
+    pub at_ms: u64,
+    pub kind: FeedKind,
+    /// Id da instância que fala, sem o projeto.
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub text: String,
+}
+
 /// Uma tarefa. Os campos são os do JSON em disco e os da ponte (`GET /tasks/<id>`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -185,9 +200,41 @@ pub struct Task {
     /// Os feedbacks já dados ao agente, do mais antigo ao mais novo (no máximo [`MAX_FEEDBACKS`]); voltam
     /// nas mensagens de devolução e de reprovação para o agente não repetir o que já lhe foi dito.
     pub feedbacks: Vec<Feedback>,
+    /// Linha do tempo das mensagens do `ask-agent` em que a instância da tarefa fala ou ouve, da mais antiga
+    /// para a mais nova (no máximo [`MAX_MESSAGES`]). Ver [`Task::record_message`].
+    pub messages: Vec<TaskMessage>,
 }
 
 impl Task {
+    /// A entrada do feed pertence à linha do tempo desta tarefa? Só as perguntas, respostas e erros em que a
+    /// instância da tarefa é quem manda ou quem recebe (o indicador "pensando" é transitório; o aviso do
+    /// sistema não tem remetente e a tarefa já registra o que importa no histórico).
+    pub fn owns_message(&self, entry: &FeedEntry) -> bool {
+        matches!(entry.kind, FeedKind::Ask | FeedKind::Answer | FeedKind::Error)
+            && !self.instance.is_empty()
+            && (entry.from.as_deref() == Some(self.instance.as_str()) || entry.to.as_deref() == Some(self.instance.as_str()))
+    }
+
+    /// Guarda a entrada na linha do tempo (texto cortado em [`MAX_MESSAGE_CHARS`]; as mais antigas saem além
+    /// de [`MAX_MESSAGES`]). Devolve `false`, sem guardar, se ela não é desta tarefa.
+    pub fn record_message(&mut self, entry: &FeedEntry) -> bool {
+        if !self.owns_message(entry) {
+            return false;
+        }
+        self.messages.push(TaskMessage {
+            at_ms: entry.ts,
+            kind: entry.kind,
+            from: entry.from.clone(),
+            to: entry.to.clone(),
+            text: cap_text(&entry.text, MAX_MESSAGE_CHARS),
+        });
+        if self.messages.len() > MAX_MESSAGES {
+            let extra = self.messages.len() - MAX_MESSAGES;
+            self.messages.drain(..extra);
+        }
+        true
+    }
+
     /// Guarda um feedback entregue ao agente (os mais antigos saem além de [`MAX_FEEDBACKS`]).
     pub fn add_feedback(&mut self, origin: &str, text: &str) {
         self.feedbacks.push(Feedback { at_ms: now_ms(), origin: origin.to_owned(), text: text.to_owned() });
@@ -714,6 +761,27 @@ impl Core {
     pub fn task(&self, project: &str, id: &str) -> Option<Task> {
         let id = parse_task_id(id)?;
         self.with_tasks(project, false, |p| p.tasks.iter().find(|t| t.id == id).cloned())
+    }
+
+    /// Guarda a entrada do feed na linha do tempo de cada tarefa do projeto a que ela pertence (ver
+    /// [`Task::owns_message`]): uma pergunta entre duas tarefas aparece nas duas. Só grava o arquivo se houver dona.
+    pub(crate) fn record_task_message(&self, entry: &FeedEntry) {
+        let Some(project) = entry.project.as_deref() else { return };
+        if !matches!(entry.kind, FeedKind::Ask | FeedKind::Answer | FeedKind::Error) {
+            return;
+        }
+        let owners: Vec<String> =
+            self.with_tasks(project, false, |p| p.tasks.iter().filter(|t| t.owns_message(entry)).map(|t| t.id.clone()).collect());
+        if owners.is_empty() {
+            return;
+        }
+        self.with_tasks(project, true, |p| {
+            for id in &owners {
+                if let Some(t) = p.task_mut(id) {
+                    t.record_message(entry);
+                }
+            }
+        });
     }
 
     /// A tarefa de que a instância `instance` é o agente (e que ainda não terminou), se houver.
@@ -2214,6 +2282,63 @@ Fecha ao salvar.
         assert_eq!(serde_json::to_string(&TaskStatus::Validating).ok().as_deref(), Some("\"validating\""));
         assert_eq!((TaskStatus::Validating.as_str(), TaskStatus::Validating.label()), ("validating", "aguardando validação"));
         assert_eq!(TaskStatus::Merged.label(), "concluída");
+    }
+
+    fn entry(kind: FeedKind, from: Option<&str>, to: Option<&str>, text: &str) -> FeedEntry {
+        FeedEntry::new(kind, from, to, text)
+    }
+
+    #[test]
+    fn the_timeline_keeps_only_the_messages_of_the_task_instance() {
+        let mut t = Task { instance: "claude@t3".into(), ..sample() };
+        // Pergunta feita pela tarefa, resposta recebida e erro que volta: todos são dela.
+        assert!(t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("antigravity"), "e o css?")));
+        assert!(t.record_message(&entry(FeedKind::Answer, Some("antigravity"), Some("claude@t3"), "use flex")));
+        assert!(t.record_message(&entry(FeedKind::Error, Some("opencode"), Some("claude@t3"), "sem cota")));
+        // Outra instância, indicador transitório, mensagem do usuário e aviso do sistema ficam de fora.
+        assert!(!t.record_message(&entry(FeedKind::Ask, Some("claude"), Some("antigravity"), "outra")));
+        assert!(!t.record_message(&entry(FeedKind::Thinking, Some("claude@t3"), None, "⚙️ [read_file] x")));
+        assert!(!t.record_message(&entry(FeedKind::User, Some("você"), Some("claude@t3"), "oi")));
+        assert!(!t.record_message(&FeedEntry::system("Tarefa t3 iniciada")));
+        // `claude@t30` não é `claude@t3`.
+        assert!(!t.record_message(&entry(FeedKind::Ask, Some("claude@t30"), Some("claude"), "x")));
+        let texts: Vec<&str> = t.messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts, ["e o css?", "use flex", "sem cota"]);
+        assert_eq!(t.messages[0].from.as_deref(), Some("claude@t3"));
+        assert_eq!(t.messages[1].to.as_deref(), Some("claude@t3"));
+        // Uma tarefa sem instância (rascunho) não adota mensagens sem remetente nem destinatário.
+        let mut draft = sample();
+        assert!(!draft.record_message(&entry(FeedKind::Answer, None, None, "x")));
+    }
+
+    #[test]
+    fn the_timeline_has_a_ceiling_on_count_and_size() {
+        let mut t = Task { instance: "claude@t3".into(), ..sample() };
+        for i in 0..MAX_MESSAGES + 5 {
+            t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("x"), &format!("m{i}")));
+        }
+        assert_eq!(t.messages.len(), MAX_MESSAGES);
+        assert_eq!(t.messages[0].text, "m5", "as mais antigas saem");
+        t.record_message(&entry(FeedKind::Answer, Some("x"), Some("claude@t3"), &"a".repeat(MAX_MESSAGE_CHARS * 2)));
+        let last = &t.messages[t.messages.len() - 1].text;
+        assert!(
+            last.starts_with("aaaa") && last.contains("texto cortado") && last.chars().count() < MAX_MESSAGE_CHARS + 100,
+            "{}",
+            last.len()
+        );
+    }
+
+    #[test]
+    fn the_timeline_round_trips_through_the_file_and_old_files_still_load() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let file = tmp.path().join("p1.json");
+        let mut t = Task { instance: "claude@t3".into(), ..sample() };
+        t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("antigravity"), "pergunta"));
+        save_file(&file, &ProjectTasks { next: 4, tasks: vec![t.clone()], ..ProjectTasks::default() }).expect("save");
+        assert_eq!(load_file(&file).tasks[0].messages, t.messages);
+        // Um arquivo de antes da linha do tempo (sem `messages`) abre com ela vazia.
+        std::fs::write(&file, r#"{"version":1,"next":4,"tasks":[{"id":"t3","instance":"claude@t3"}]}"#).expect("write");
+        assert!(load_file(&file).tasks[0].messages.is_empty());
     }
 
     #[test]

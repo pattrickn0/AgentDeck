@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{MergeBlock, Task, TaskError, TaskEvent, TaskSpec, TaskStatus};
+use agentdeck_core::{FeedKind, MergeBlock, Task, TaskError, TaskEvent, TaskMessage, TaskSpec, TaskStatus};
 
 use crate::deck::{AttachTarget, Deck, UiMsg};
 
@@ -482,6 +482,50 @@ pub fn events_newest_first(task: &Task) -> Vec<&TaskEvent> {
     list
 }
 
+/// Mensagens da linha do tempo mostradas de uma vez (as mais novas); as anteriores viram uma linha de aviso.
+pub const MESSAGES_SHOWN: usize = 40;
+/// Uma mensagem recolhida mostra no máximo isto (em caracteres); o clique abre inteira.
+pub const MESSAGE_PREVIEW_CHARS: usize = 280;
+
+/// A linha do tempo da tarefa, da mais antiga para a mais nova (a ordem de chegada já é essa; o `sort` estável só
+/// protege contra um arquivo editado à mão).
+pub fn messages_in_order(task: &Task) -> Vec<&TaskMessage> {
+    let mut list: Vec<&TaskMessage> = task.messages.iter().collect();
+    list.sort_by_key(|m| m.at_ms);
+    list
+}
+
+/// Rótulo do tipo da mensagem na linha do tempo.
+pub fn message_kind_label(kind: FeedKind) -> &'static str {
+    match kind {
+        FeedKind::Ask => "pergunta",
+        FeedKind::Answer => "resposta",
+        FeedKind::Error => "erro",
+        FeedKind::User => "você",
+        FeedKind::System => "aviso",
+        FeedKind::Thinking => "andamento",
+    }
+}
+
+/// `de → para` de uma mensagem (um lado ausente vira `…`).
+pub fn message_route(m: &TaskMessage) -> String {
+    format!("{} → {}", m.from.as_deref().unwrap_or("…"), m.to.as_deref().unwrap_or("…"))
+}
+
+/// O texto recolhido da mensagem: as primeiras linhas, até [`MESSAGE_PREVIEW_CHARS`], com reticências. O segundo valor
+/// diz se algo ficou de fora (ou seja, se há o que abrir).
+pub fn message_preview(text: &str) -> (String, bool) {
+    let text = text.trim();
+    let lines: Vec<&str> = text.lines().collect();
+    let by_lines = lines.len() > 4;
+    let head = if by_lines { lines[..4].join("\n") } else { text.to_owned() };
+    match head.char_indices().nth(MESSAGE_PREVIEW_CHARS) {
+        Some((i, _)) => (format!("{}…", head[..i].trim_end()), true),
+        None if by_lines => (format!("{}…", head.trim_end()), true),
+        None => (head, false),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Estado
 // ---------------------------------------------------------------------------
@@ -503,6 +547,7 @@ pub enum Section {
     Brief,
     Report,
     Changes,
+    Messages,
     History,
 }
 
@@ -586,6 +631,8 @@ pub struct TasksUi {
     pub history_filter: HistoryFilter,
     pub history_menu: bool,
     pub closed_sections: HashSet<Section>,
+    /// Mensagens da linha do tempo abertas por inteiro (`id da tarefa`, hora da mensagem).
+    pub open_messages: HashSet<(String, u64)>,
     pub confirm: Option<Confirm>,
     /// O campo de feedback do "Devolver" (em revisão) ou do "Reprovar" (aguardando validação) está aberto.
     pub return_open: bool,
@@ -621,6 +668,7 @@ impl Default for TasksUi {
             history_filter: HistoryFilter::All,
             history_menu: false,
             closed_sections: HashSet::new(),
+            open_messages: HashSet::new(),
             confirm: None,
             return_open: false,
             feedback: String::new(),
@@ -1066,6 +1114,13 @@ pub fn demo_tasks() -> Vec<Task> {
     let now = agentdeck_core::util::now_ms();
     let min = 60_000u64;
     let ev = |ago_min: u64, text: &str| TaskEvent { at_ms: now - ago_min * min, text: text.to_owned() };
+    let msg = |ago_min: u64, kind: FeedKind, from: &str, to: &str, text: &str| TaskMessage {
+        at_ms: now - ago_min * min,
+        kind,
+        from: Some(from.to_owned()),
+        to: Some(to.to_owned()),
+        text: text.to_owned(),
+    };
     let base = |id: &str, title: &str, status: TaskStatus, kind: &str, model: Option<&str>| Task {
         id: id.to_owned(),
         title: title.to_owned(),
@@ -1094,6 +1149,15 @@ pub fn demo_tasks() -> Vec<Task> {
         ],
         effort: Some(Effort::High),
         ..base("t4", "Aba Tarefas na barra direita", TaskStatus::Review, "claude", Some("claude-opus-5-5"))
+    };
+    let review = Task {
+        messages: vec![
+            msg(92, FeedKind::Ask, "claude@t4", "antigravity", "Como o egui recorta o texto de um galley que já foi medido? Preciso de reticências no fim sem medir de novo a cada quadro."),
+            msg(91, FeedKind::Answer, "antigravity", "claude@t4", "Use `galley_trunc` de ui/mod.rs: ele já corta com reticências e devolve o galley final.\n\nSe o texto muda a cada quadro, guarde o galley pela impressão digital do texto.\n\nO custo grande é medir; pintar é barato. Para listas longas, só meça as linhas visíveis (ScrollArea::show_rows) e mantenha uma altura fixa por linha.\n\nExemplo:\n  let g = galley_trunc(painter, text, font, color, max_w);\n  place(painter, rect, Align2::LEFT_CENTER, g, color);"),
+            msg(40, FeedKind::Ask, "claude@t4", "opencode", "Pode revisar o diff do crate app?"),
+            msg(39, FeedKind::Error, "opencode", "claude@t4", "Sem cota: o modelo deepseek-v4.1-flash-free esgotou a semana."),
+        ],
+        ..review
     };
     let review2 = Task {
         created_ms: now - 50 * min,
@@ -1546,5 +1610,30 @@ mod tests {
         // Data dd/mm tem 5 caracteres com '/' no meio.
         let ddmm = task_date_ddmm(&tasks[0]);
         assert_eq!((ddmm.len(), ddmm.as_bytes()[2]), (5, b'/'), "{ddmm}");
+    }
+
+    fn message(at_ms: u64, text: &str) -> TaskMessage {
+        TaskMessage { at_ms, kind: FeedKind::Ask, from: Some("claude@t1".into()), to: None, text: text.into() }
+    }
+
+    #[test]
+    fn the_timeline_goes_oldest_first_and_names_both_sides() {
+        let t = Task { messages: vec![message(30, "c"), message(10, "a"), message(20, "b")], ..Task::default() };
+        assert_eq!(messages_in_order(&t).iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert_eq!(message_route(&t.messages[0]), "claude@t1 → …");
+        assert_eq!(
+            (message_kind_label(FeedKind::Ask), message_kind_label(FeedKind::Answer), message_kind_label(FeedKind::Error)),
+            ("pergunta", "resposta", "erro")
+        );
+    }
+
+    #[test]
+    fn a_long_message_is_collapsed_by_size_or_by_lines() {
+        assert_eq!(message_preview("  curta \n"), ("curta".into(), false));
+        let (cut, more) = message_preview(&"ação ".repeat(200));
+        assert!(more && cut.ends_with('…') && cut.chars().count() <= MESSAGE_PREVIEW_CHARS + 1, "{cut}");
+        let (cut, more) = message_preview("1\n2\n3\n4\n5\n6");
+        assert_eq!((cut.as_str(), more), ("1\n2\n3\n4…", true));
+        assert!(!message_preview("1\n2\n3\n4").1);
     }
 }
