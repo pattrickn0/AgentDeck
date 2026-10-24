@@ -2321,7 +2321,11 @@ Fecha ao salvar.
         assert_eq!(t.messages[0].text, "m5", "as mais antigas saem");
         t.record_message(&entry(FeedKind::Answer, Some("x"), Some("claude@t3"), &"a".repeat(MAX_MESSAGE_CHARS * 2)));
         let last = &t.messages[t.messages.len() - 1].text;
-        assert!(last.starts_with("aaaa") && last.contains("texto cortado") && last.chars().count() < MAX_MESSAGE_CHARS + 100, "{}", last.len());
+        assert!(
+            last.starts_with("aaaa") && last.contains("texto cortado") && last.chars().count() < MAX_MESSAGE_CHARS + 100,
+            "{}",
+            last.len()
+        );
     }
 
     #[test]

@@ -22,8 +22,9 @@ teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGEN
    falha de `remove_task_worktree`, o `agentdeck.log` e o aviso da tarefa dizem que arquivos ficaram e que processo os tem
    aberto (Restart Manager), ou que só pastas vazias ficaram (um processo com o diretório atual dentro dela). Falta a
    próxima ocorrência real: ler o aviso (procure "não saiu" no log) e corrigir a causa.
-4. [ ] **Linha do tempo das mensagens de cada tarefa**, para aposentar a Conversa integrada: no detalhe da tarefa, as
-   mensagens entre agentes daquela tarefa, em ordem.
+4. [ ] **Aposentar a Conversa integrada.** A linha do tempo por tarefa já existe (t43, seção MENSAGENS do detalhe, guardada em
+   `Task::messages`); falta validá-la no uso e então tirar a Conversa. O que a linha do tempo não tem: as mensagens do usuário
+   à aba (`FeedKind::User`) e os avisos do sistema.
 
 ## Depois (na lista, ainda não)
 

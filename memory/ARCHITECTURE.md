@@ -365,6 +365,13 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   continuam abrindo; no máximo 20) guarda cada devolução da revisão e cada reprovação da validação. `return_message` e
   `reject_message` repetem os anteriores (os últimos 5, cada um cortado em 700 caracteres) antes das regras, para o agente não
   repetir o que já lhe foi pedido; o feedback que está sendo entregue não entra na lista.
+- **Linha do tempo das mensagens.** `Core::feed` (por onde passa tudo o que a ponte mostra na Conversa integrada) também chama
+  `record_task_message`: a pergunta, resposta ou erro (`Ask`/`Answer`/`Error`) em que a instância de uma tarefa do projeto é quem
+  manda ou recebe vai para `Task::messages` (`TaskMessage { at_ms, kind, from, to, text }`, `serde(default)`), no mesmo JSON
+  das tarefas, e por isso sobrevive a reabrir o app. Teto: 300 mensagens por tarefa (as mais antigas saem) e 6 000 caracteres
+  cada (`tasks::MAX_MESSAGES`, `MAX_MESSAGE_CHARS`); uma pergunta entre duas tarefas entra nas duas. O detalhe da tarefa mostra
+  a seção MENSAGENS (`ui/tasks.rs::timeline`, do mais antigo ao mais novo, recolhida em 280 caracteres/4 linhas, o clique abre
+  inteira). A Conversa integrada em si continua só na memória (`Deck::feed`, 500 entradas).
 - **Aprendizados na devolução e na reprovação.** `Core::feedback_learnings` pega os arquivos que o feedback novo cita
   (`paths_in_text` na worktree), tira os que já apareciam no pedido (`brief`, ou o título) ou nos feedbacks anteriores e entrega
   só os aprendizados **específicos** que casam (`learnings::render_specific`, até `FEEDBACK_BUDGET`, 3 000 caracteres; sem índice

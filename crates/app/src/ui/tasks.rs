@@ -6,7 +6,7 @@
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{MergeBlock, Task, TaskStatus};
+use agentdeck_core::{FeedKind, MergeBlock, Task, TaskMessage, TaskStatus};
 
 use super::{
     button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label,
@@ -49,6 +49,8 @@ enum Act {
     CloseHistoryMenu,
     SetHistoryFilter(HistoryFilter),
     ToggleSection(Section),
+    /// Abre ou recolhe uma mensagem da linha do tempo (id da tarefa, hora da mensagem).
+    ToggleMessage(String, u64),
     Task(String, TaskAct),
     /// "Ver diff completo" / "Ver o que foi mesclado": abre o diff no centro.
     OpenDiff(String),
@@ -115,6 +117,11 @@ fn apply(deck: &mut Deck, act: Act) {
         Act::ToggleSection(s) => {
             if !deck.tasks.closed_sections.remove(&s) {
                 deck.tasks.closed_sections.insert(s);
+            }
+        }
+        Act::ToggleMessage(id, at_ms) => {
+            if !deck.tasks.open_messages.remove(&(id.clone(), at_ms)) {
+                deck.tasks.open_messages.insert((id, at_ms));
             }
         }
         Act::Task(id, act) => deck.tasks_act(&id, act),
@@ -1011,6 +1018,11 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 }
             }
         }
+        // Mensagens.
+        let messages = tasks_ui::messages_in_order(task);
+        if section_header(deck, ui, Section::Messages, "Mensagens", Some((messages.len().to_string(), p.text_3)), acts) {
+            timeline(deck, ui, task, &messages, acts);
+        }
         // Histórico.
         let events = events_newest_first(task);
         if section_header(deck, ui, Section::History, "Histórico", Some((events.len().to_string(), p.text_3)), acts) {
@@ -1161,6 +1173,85 @@ fn stat_box(ui: &mut Ui, stat: &str) {
             theme::ui(11.0),
             p.text_2,
         );
+    }
+}
+
+/// Linha do tempo das mensagens do `ask-agent` da tarefa, da mais antiga para a mais nova: hora, tipo, de → para, e o
+/// texto (recolhido; o clique abre inteiro).
+fn timeline(deck: &Deck, ui: &mut Ui, task: &Task, messages: &[&TaskMessage], acts: &mut Vec<Act>) {
+    if messages.is_empty() {
+        muted_line(ui, "Nenhuma pergunta nem resposta com outros agentes ainda.");
+        return;
+    }
+    let p = theme::pal();
+    let hidden = messages.len().saturating_sub(tasks_ui::MESSAGES_SHOWN);
+    if hidden > 0 {
+        muted_line(ui, &format!("… e mais {hidden} mensagens anteriores."));
+    }
+    for m in messages.iter().skip(hidden) {
+        let open = deck.tasks.open_messages.contains(&(task.id.clone(), m.at_ms));
+        let (preview, more) = tasks_ui::message_preview(&m.text);
+        let shown = if open { clip_text(m.text.trim(), TEXT_MAX).into_owned() } else { preview };
+        let body_color = if m.kind == FeedKind::Error { p.danger_text } else { p.text_2 };
+        let w = ui.available_width();
+        let body = ui.painter().layout(shown, theme::ui(12.0), body_color, (w - 2.0 * PAD).max(40.0));
+        let head_h = 18.0;
+        let foot_h = if more { 16.0 } else { 0.0 };
+        let h = head_h + body.size().y + foot_h + 8.0;
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
+        if more {
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if resp.clicked() {
+                acts.push(Act::ToggleMessage(task.id.clone(), m.at_ms));
+            }
+            tip(resp.clone(), if open { "Recolhe a mensagem" } else { "Abre a mensagem inteira" });
+        }
+        if more && resp.hovered() {
+            ui.painter().rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), 5.0, p.hover);
+        }
+        let painter = ui.painter();
+        let time = galley(painter, &tasks_ui::event_time(m.at_ms), theme::meta(10.5), p.text_3);
+        let time_w = time.size().x;
+        place(
+            painter,
+            Rect::from_min_size(Pos2::new(r.min.x + PAD, r.min.y + 3.0), Vec2::new(time_w, head_h)),
+            Align2::LEFT_CENTER,
+            time,
+            p.text_3,
+        );
+        let kind_color = if m.kind == FeedKind::Error { p.danger_text } else { p.text };
+        let kind = galley(painter, tasks_ui::message_kind_label(m.kind), theme::ui_medium(11.0), kind_color);
+        let kind_w = kind.size().x;
+        let kind_x = r.min.x + PAD + time_w + 8.0;
+        place(
+            painter,
+            Rect::from_min_size(Pos2::new(kind_x, r.min.y + 3.0), Vec2::new(kind_w, head_h)),
+            Align2::LEFT_CENTER,
+            kind,
+            kind_color,
+        );
+        let route_x = kind_x + kind_w + 8.0;
+        let route = galley_trunc(painter, &tasks_ui::message_route(m), theme::meta(10.5), p.text_3, (r.max.x - PAD - route_x).max(20.0));
+        place(
+            painter,
+            Rect::from_min_max(Pos2::new(route_x, r.min.y + 3.0), Pos2::new(r.max.x - PAD, r.min.y + 3.0 + head_h)),
+            Align2::LEFT_CENTER,
+            route,
+            p.text_3,
+        );
+        painter.galley(Pos2::new(r.min.x + PAD, r.min.y + 3.0 + head_h), body.clone(), body_color);
+        if more {
+            text_in(
+                painter,
+                Rect::from_min_size(Pos2::new(r.min.x + PAD, r.min.y + 3.0 + head_h + body.size().y), Vec2::new(w - 2.0 * PAD, foot_h)),
+                Align2::LEFT_CENTER,
+                if open { "recolher" } else { "ver tudo" },
+                theme::meta(10.5),
+                p.text_3,
+            );
+        }
     }
 }
 
