@@ -308,7 +308,7 @@ app passa por `Docs::confirm` (`Unsaved::{Tab, Quit, Revert}`; `request_quit` no
 cujo `layouter` devolve o galley de `docs::Shaped` — realce (`highlight::Cache`) e galley guardados por impressão digital do texto,
 largura de quebra, escala da tela e busca, de modo que repintar não refaz nada; as linhas quebram na largura (o `TextEdit` multilinha do egui
 não rola na horizontal) e a coluna dos números fica à parte, alinhada às linhas do galley. O realce é o tokenizador próprio
-`highlight.rs` (hoje em `crates/core`, reexportado pelo app com `pub use agentdeck_core::highlight`; sem `syntect`, ver `memory/aprendizados/editor-de-documentos.md`); as cores são `Palette::syn_*`. O que se pinta à mão (o
+`highlight.rs` (o léxico — `Tok`, `Span`, `Lang`, `Carry`, `highlight_line(s)` — mora em `crates/core/src/highlight.rs` e o app o reexporta; busca, `pieces` e `Cache` ficam no app; sem `syntect`, ver `memory/aprendizados/editor-de-documentos.md`); as cores são `Palette::syn_*`. O que se pinta à mão (o
 diff, `ui/diff_view.rs`, e o arquivo grande, `ui/code.rs::text_body`) usa a seleção de `ui/select.rs` (posição = linha + byte; arrastar,
 Ctrl+A, Ctrl+C) e `highlight::pieces` para juntar realce e marcas da busca por linha. `Find` (por documento) guarda a consulta e os
 achados (bytes para o código; linhas para o diff e o arquivo grande).
@@ -329,13 +329,12 @@ agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agor
   repositório (`learnings::relativize`). Lê a pasta da worktree da tarefa de quem pergunta ou, sem tarefa, do repositório do projeto.
 - **Sob demanda: `ask-agent --outline <arquivo>…`** (`POST /outline` → `Core::outline`, `outline.rs`; fase 2): o esqueleto do arquivo, com a
   **assinatura** e o **número da linha** de cada item e sem os corpos, para o agente ler só o trecho de que precisa (com offset) em vez do
-  arquivo inteiro. O léxico é o de `highlight.rs` (que por isso mora no core): as faixas de texto entre aspas e de comentário saem do
+  arquivo inteiro. O léxico é o de `highlight::highlight_lines` (que por isso mora no core, sem a parte de interface): as faixas de texto entre aspas e de comentário saem do
   código antes de contar chaves, então `"{"`, `'}'`, raw string e `// fn x() {` não enganam. Não é um analisador: o item é achado pela
   profundidade das chaves e pela palavra que abre a linha. Rust: itens de topo e, sob `impl`/`trait`/`mod`, os membros (recuo = nível);
   assinatura que quebra linhas vira uma só; campos de `struct` e variantes de `enum` entram numa linha só com os nomes (cortada na
-  largura); `#[cfg(test)] mod tests` vira "— N testes"; a 1ª frase do `///` entra no fim se couber. JS/TS (`function`, `class` e métodos,
-  `export`, `interface`, `type`, `const x = (...) =>`), Python (`def`/`class` por recuo, sem funções aninhadas), Markdown (títulos `#`–`###`),
-  PowerShell e shell (`function`); as demais linguagens ganham uma linha dizendo que não há resumo e quantas linhas o arquivo tem.
+  largura); `#[cfg(test)] mod tests` vira "— N testes" (N conta os `#[test]` do arquivo inteiro). Markdown: os títulos `#`–`###`. As demais
+  linguagens (JS/TS, Python, PowerShell e shell ficaram para depois) ganham uma linha dizendo que não há resumo e quantas linhas o arquivo tem.
   Orçamento de 6 000 caracteres por arquivo e 16 000 por chamada (`FILE_BUDGET`, `OUTLINE_BUDGET`); o que passar vira "… e mais N itens
   (linhas X–Y)". Caminhos e raiz como no `--learn` (worktree da tarefa de quem pergunta ou, sem tarefa, o repositório); `..`, caminho fora da
   raiz (também por link simbólico), pasta, arquivo inexistente, binário ou acima de 1 MB viram uma linha de aviso, não erro. As instruções da

@@ -42,7 +42,7 @@ crates/
 │   ├── activity.rs   última atividade de cada aba (o que a entrega nas abas consulta)
 │   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos e o inventário do `ask-agent --models`
 │   ├── tasks.rs      mesa de tarefas: Task, ciclo de vida (criar/iniciar/relatório/devolver/mesclar/validar/reprovar/descartar), worktrees, mensagens ao agente, armazenamento em dados/tarefas
-│   ├── highlight.rs  realce de sintaxe (tokenizador próprio por linguagem, `pieces` para juntar realce e busca, `Cache`); mora no core porque o `outline.rs` usa o mesmo léxico, e o app o reexporta
+│   ├── highlight.rs  léxico do realce de sintaxe (tokenizador próprio por linguagem: `Tok`, `Span`, `Lang`, `highlight_lines`); mora no core porque o `outline.rs` o usa, e `app/src/highlight.rs` o reexporta e acrescenta a busca, `pieces` e `Cache`
 │   ├── outline.rs    `ask-agent --outline`: esqueleto de um arquivo (assinaturas com a linha, sem corpos) por linguagem, com orçamento
 │   ├── learnings.rs  memória de longo prazo: aprendizados de memory/aprendizados/ (frontmatter, globs, caminhos do brief, entrega com orçamento, `ask-agent --learn`)
 │   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas, arquivos delas e commits da base)

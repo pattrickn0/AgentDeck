@@ -116,27 +116,10 @@ fn brace_depths(code: &[String]) -> Vec<usize> {
     out
 }
 
-/// Profundidade de `(`, `[` e `{` no começo de cada linha (Python: linha dentro de parênteses é continuação).
-fn bracket_depths(code: &[String]) -> Vec<usize> {
-    let mut depth = 0usize;
-    let mut out = Vec::with_capacity(code.len());
-    for line in code {
-        out.push(depth);
-        for b in line.bytes() {
-            match b {
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-    }
-    out
-}
-
 /// A assinatura que começa na linha `from`: o texto até o primeiro `stops` fora de parênteses, colchetes e chaves
 /// (que podem quebrar linha). Devolve o texto limpo, a linha onde parou e qual `stops` achou (`None` se não achou até o
-/// limite). Com `eol`, o fim da linha também para quando nada ficou aberto e a linha não termina num operador (JS sem `;`).
-fn signature(src: &Source, from: usize, stops: &[&str], eol: bool) -> (String, usize, Option<usize>) {
+/// limite).
+fn signature(src: &Source, from: usize, stops: &[&str]) -> (String, usize, Option<usize>) {
     let mut text = String::new();
     let mut depth = 0usize;
     let last = (from + MAX_SIGNATURE_LINES).min(src.len());
@@ -160,32 +143,8 @@ fn signature(src: &Source, from: usize, stops: &[&str], eol: bool) -> (String, u
         }
         text.push_str(shown);
         text.push(' ');
-        if eol
-            && depth == 0
-            && !src.code[k].trim().is_empty()
-            && !src.code[k].trim_end().ends_with([',', '=', '(', '+', '-', '*', '/', '&', '|', '?', ':', '.', '<'])
-        {
-            return (collapse(&text), k, None);
-        }
     }
     (collapse(&text), last.saturating_sub(1).max(from), None)
-}
-
-/// Primeira frase do comentário de documentação (`///`), curta.
-fn first_sentence(doc: &str) -> String {
-    let doc = doc.trim();
-    let cut = doc.find(". ").map_or(doc.len(), |i| i + 1);
-    doc[..cut].trim_end_matches('.').trim().to_owned()
-}
-
-/// Acrescenta `// doc` ao fim de `text` se couber no que sobra da largura.
-fn with_doc(text: String, doc: Option<&str>) -> String {
-    let Some(doc) = doc.filter(|d| !d.is_empty()) else { return text };
-    let room = MAX_ITEM.saturating_sub(text.chars().count() + 4);
-    if room < 24 {
-        return text;
-    }
-    format!("{text}  // {}", clip(doc, room.min(80)))
 }
 
 fn item(line: usize, depth: usize, text: String) -> Item {
@@ -260,11 +219,9 @@ fn item_kind(t: &str) -> Option<(Kind, bool)> {
     Some((kind, public))
 }
 
-/// Quantos `#[test]` (ou `#[tokio::test]`...) há entre as linhas `from` e `to` (exclusive).
-fn count_tests(code: &[String], from: usize, to: usize) -> usize {
-    code.get(from..to.min(code.len()))
-        .unwrap_or(&[])
-        .iter()
+/// Quantos `#[test]` (ou `#[tokio::test]`...) o arquivo tem.
+fn count_tests(code: &[String]) -> usize {
+    code.iter()
         .filter(|l| {
             let t = l.trim();
             t.strip_prefix("#[").is_some_and(|a| {
@@ -334,11 +291,12 @@ fn with_members(header: &str, names: &[String]) -> String {
 fn rust_items(src: &Source) -> Vec<Item> {
     let n = src.len();
     let depths = brace_depths(&src.code);
+    // Os `#[test]` do arquivo inteiro: a linha do `mod tests` diz quantos são, sem casar o aninhamento dos módulos.
+    let tests = count_tests(&src.code);
     let mut out = Vec::new();
     // Profundidade (de chaves) dos itens `impl`/`trait`/`mod` abertos: os membros moram um nível abaixo.
     let mut stack: Vec<usize> = Vec::new();
     let mut attrs: Vec<String> = Vec::new();
-    let mut doc: Option<String> = None;
     let mut i = 0;
     while i < n {
         let d = depths[i];
@@ -352,16 +310,8 @@ fn rust_items(src: &Source) -> Vec<Item> {
         }
         let t = src.code[i].trim();
         let raw = src.raw[i].trim_start();
-        if raw.starts_with("///") && !raw.starts_with("////") {
-            if doc.is_none() {
-                doc = Some(first_sentence(&raw[3..]));
-            }
-            i += 1;
-            continue;
-        }
         if t.is_empty() {
             if raw.is_empty() {
-                doc = None;
                 attrs.clear();
             }
             i += 1;
@@ -388,12 +338,11 @@ fn rust_items(src: &Source) -> Vec<Item> {
         }
         let Some((kind, _)) = item_kind(t) else {
             attrs.clear();
-            doc = None;
             i += 1;
             continue;
         };
         let stops: &[&str] = if kind == Kind::Use { &[";"] } else { &["{", ";"] };
-        let (sig, j, stop) = signature(src, i, stops, false);
+        let (sig, j, stop) = signature(src, i, stops);
         let opens_body = stop == Some(0);
         let indent = stack.len();
         let is_test_fn = attrs.iter().any(|a| a == "#[test]" || a.ends_with("::test]"));
@@ -417,8 +366,6 @@ fn rust_items(src: &Source) -> Vec<Item> {
                 text = with_members(&sig, &names);
             }
             Kind::Mod if opens_body && (cfg_test || name_is_tests) => {
-                let end = (j + 1..n).find(|&k| depths[k] <= d).unwrap_or(n);
-                let tests = count_tests(&src.code, j + 1, end);
                 text = format!(
                     "{}{sig} — {tests} {}",
                     if cfg_test { "#[cfg(test)] " } else { "" },
@@ -429,183 +376,13 @@ fn rust_items(src: &Source) -> Vec<Item> {
             _ => {}
         }
         if !text.is_empty() {
-            out.push(item(i, indent, with_doc(text, doc.as_deref())));
+            out.push(item(i, indent, text));
         }
         if container {
             stack.push(d);
         }
         attrs.clear();
-        doc = None;
         i = j + 1;
-    }
-    out
-}
-
-// ---------- JS / TS ----------
-
-const JS_NOT_METHODS: &[&str] =
-    &["if", "for", "while", "switch", "catch", "return", "function", "with", "else", "do", "try", "new", "await"];
-const JS_MODIFIERS: &[&str] =
-    &["export", "default", "declare", "abstract", "public", "private", "protected", "static", "readonly", "override"];
-
-fn js_items(src: &Source) -> Vec<Item> {
-    let n = src.len();
-    let depths = brace_depths(&src.code);
-    let mut out = Vec::new();
-    // Profundidade dos `class` (true) e `namespace` (false) abertos.
-    let mut stack: Vec<(usize, bool)> = Vec::new();
-    let mut i = 0;
-    while i < n {
-        let d = depths[i];
-        while stack.last().is_some_and(|&(c, _)| d <= c) {
-            stack.pop();
-        }
-        let scope = stack.last().map_or(0, |(c, _)| c + 1);
-        let t = src.code[i].trim();
-        if d != scope || t.is_empty() || t.starts_with('@') {
-            i += 1;
-            continue;
-        }
-        let in_class = stack.last().is_some_and(|&(_, class)| class);
-        let indent = stack.len();
-        // Palavras que abrem a linha, sem os modificadores.
-        let mut rest = t;
-        let mut exported = false;
-        loop {
-            let w = first_word(rest);
-            if JS_MODIFIERS.contains(&w) && !w.is_empty() && !rest[w.len()..].trim_start().starts_with(['(', '=', ':', ';', '<']) {
-                exported |= w == "export";
-                rest = rest[w.len()..].trim_start();
-            } else {
-                break;
-            }
-        }
-        let body = match rest.strip_prefix("async") {
-            Some(r) if r.starts_with(char::is_whitespace) => r.trim_start(),
-            _ => rest,
-        };
-        let word = first_word(body);
-        if in_class {
-            // Método (ou propriedade com função) dentro de uma classe.
-            let name = body.trim_start_matches(['*', '#']);
-            let ident = first_word(name);
-            let after = name[ident.len()..].trim_start();
-            let method = !ident.is_empty() && !JS_NOT_METHODS.contains(&ident) && after.starts_with(['(', '<']);
-            let arrow_prop = !ident.is_empty() && after.starts_with('=') && !after.starts_with("==");
-            if method || arrow_prop {
-                let (sig, j, stop) = signature(src, i, &["{", ";", "=>"], true);
-                if method || stop == Some(2) || sig.contains("function") {
-                    out.push(item(i, indent, if stop == Some(2) { format!("{sig} =>") } else { sig }));
-                }
-                i = j + 1;
-                continue;
-            }
-            i += 1;
-            continue;
-        }
-        let container = matches!(word, "class" | "namespace" | "module");
-        let header = matches!(word, "function" | "class" | "interface" | "enum" | "namespace" | "module")
-            || (word == "type" && body[4..].trim_start().starts_with(|c: char| c.is_alphabetic()));
-        if header {
-            if word == "type" {
-                out.push(item(i, indent, collapse(&src.shown[i])));
-                i += 1;
-                continue;
-            }
-            let (sig, j, stop) = signature(src, i, &["{", ";"], true);
-            let mut j = j;
-            let mut stop = stop;
-            if stop.is_none()
-                && (j + 1..n.min(j + 3))
-                    .find(|&k| !src.code[k].trim().is_empty())
-                    .is_some_and(|k| src.code[k].trim_start().starts_with('{'))
-            {
-                // `{` na linha de baixo.
-                j = (j + 1..n).find(|&k| !src.code[k].trim().is_empty()).unwrap_or(j);
-                stop = Some(0);
-            }
-            out.push(item(i, indent, sig));
-            if container && stop == Some(0) {
-                stack.push((d, word == "class"));
-            }
-            i = j + 1;
-            continue;
-        }
-        if matches!(word, "const" | "let" | "var") {
-            let (sig, j, stop) = signature(src, i, &["=>", "{", ";"], true);
-            let name = first_word(body[word.len()..].trim_start());
-            let init = sig.split_once('=').map_or("", |(_, r)| r.trim_start());
-            let function_like = stop == Some(0) || init.starts_with("function") || init.starts_with("async function");
-            if !name.is_empty() && (exported || function_like) {
-                let text = if function_like {
-                    if stop == Some(0) {
-                        format!("{sig} =>")
-                    } else {
-                        sig
-                    }
-                } else {
-                    sig.split_once('=').map_or(sig.clone(), |(h, _)| h.trim().to_owned())
-                };
-                out.push(item(i, indent, text));
-                i = j + 1;
-            } else {
-                i += 1;
-            }
-            continue;
-        }
-        if exported {
-            // `export { a, b }`, `export * from "x"`, `export default x`.
-            out.push(item(i, indent, collapse(&src.shown[i])));
-        } else if t.contains(" = function") || t.contains(" = async function") {
-            // `module.exports.x = function`, `Foo.prototype.bar = function`.
-            let (sig, j, _) = signature(src, i, &["{", ";"], true);
-            out.push(item(i, indent, sig));
-            i = j + 1;
-            continue;
-        }
-        i += 1;
-    }
-    out
-}
-
-// ---------- Python ----------
-
-fn indent_of(line: &str) -> usize {
-    line.chars().take_while(|c| *c == ' ' || *c == '\t').map(|c| if c == '\t' { 4 } else { 1 }).sum()
-}
-
-fn python_items(src: &Source) -> Vec<Item> {
-    let n = src.len();
-    let nest = bracket_depths(&src.code);
-    let mut out = Vec::new();
-    // (recuo, é função) do que está aberto.
-    let mut stack: Vec<(usize, bool)> = Vec::new();
-    let mut i = 0;
-    while i < n {
-        let t = src.code[i].trim();
-        if t.is_empty() || nest[i] > 0 {
-            i += 1;
-            continue;
-        }
-        let ind = indent_of(&src.code[i]);
-        while stack.last().is_some_and(|&(c, _)| ind <= c) {
-            stack.pop();
-        }
-        let body = match t.strip_prefix("async ") {
-            Some(r) => r.trim_start(),
-            None => t,
-        };
-        let is_def = body.starts_with("def ");
-        if is_def || body.starts_with("class ") {
-            let (sig, j, _) = signature(src, i, &[":"], false);
-            if !stack.iter().any(|&(_, def)| def) {
-                out.push(item(i, stack.len(), sig));
-            }
-            stack.push((ind, is_def));
-            i = j + 1;
-            continue;
-        }
-        i += 1;
     }
     out
 }
@@ -645,52 +422,14 @@ fn markdown_items(src: &Source) -> Vec<Item> {
     out
 }
 
-// ---------- PowerShell / shell ----------
-
-fn script_items(src: &Source, powershell: bool) -> Vec<Item> {
-    let mut out = Vec::new();
-    for (i, code) in src.code.iter().enumerate() {
-        let t = code.trim();
-        let lower = t.to_ascii_lowercase();
-        let keyword = if lower.starts_with("function ") {
-            Some(8)
-        } else if powershell && lower.starts_with("filter ") {
-            Some(6)
-        } else {
-            None
-        };
-        if let Some(k) = keyword {
-            let cut = t.find('{').unwrap_or(t.len());
-            let shown = src.shown[i].trim();
-            let shown = shown.get(..cut.min(shown.len())).unwrap_or(shown);
-            if !t[k..].trim().is_empty() {
-                out.push(item(i, 0, collapse(shown)));
-            }
-        } else if !powershell {
-            // `nome() {` do shell.
-            if let Some(pos) = t.find("()") {
-                let name = t[..pos].trim();
-                if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-')) {
-                    out.push(item(i, 0, format!("{name}()")));
-                }
-            }
-        }
-    }
-    out
-}
-
 // ---------- Resumo de um arquivo ----------
 
 /// Os itens de `text` na linguagem de `lang`; `None` se não há resumo para ela.
 fn items(lang: Lang, text: &str) -> Option<Vec<Item>> {
     match lang {
         Lang::Rust => Some(rust_items(&Source::new(lang, text))),
-        Lang::JsTs => Some(js_items(&Source::new(lang, text))),
-        Lang::Python => Some(python_items(&Source::new(lang, text))),
         Lang::Markdown => Some(markdown_items(&Source::new(lang, text))),
-        Lang::PowerShell => Some(script_items(&Source::new(lang, text), true)),
-        Lang::Shell => Some(script_items(&Source::new(lang, text), false)),
-        Lang::Plain | Lang::Toml | Lang::Json | Lang::Yaml => None,
+        _ => None,
     }
 }
 
@@ -814,7 +553,7 @@ mod tests {
             rust(src),
             [
                 "2:pub use crate::a::{b, c}",
-                "5:pub fn work(x: u32) -> u32  // Faz a coisa",
+                "5:pub fn work(x: u32) -> u32",
                 "11:pub const MAX: usize",
                 "12:static NAME: &str",
                 "13:type Alias = Vec<u8>",
@@ -843,7 +582,7 @@ mod tests {
             [
                 "1:impl Core",
                 "2:  pub fn new() -> Self",
-                "7:  pub(crate) async fn read(&self, p: &Path) -> String  // Lê",
+                "7:  pub(crate) async fn read(&self, p: &Path) -> String",
                 "10:  const ID: u8",
                 "13:pub trait Tr",
                 "14:  type Out",
@@ -885,6 +624,24 @@ mod tests {
     }
 
     #[test]
+    fn the_tests_are_counted_in_the_whole_file() {
+        let src = "#[test]
+fn outside() {}
+
+#[cfg(test)]
+mod tests {
+    mod nested {
+        #[test]
+        fn a() {}
+    }
+    #[test]
+    fn b() {}
+}
+";
+        assert_eq!(rust(src), ["5:#[cfg(test)] mod tests — 3 testes"]);
+    }
+
+    #[test]
     fn inline_modules_list_their_members_and_attributes_over_several_lines_are_skipped() {
         let src = "#[derive(\n    Debug,\n    Clone,\n)]\npub struct S {\n    a: u8,\n}\n\npub mod inner {\n    pub fn f() {}\n}\n\nmod external;\n\n#[test]\nfn top_level_test() {}\n";
         assert_eq!(rust(src), ["5:pub struct S { a }", "9:pub mod inner", "10:  pub fn f()", "13:mod external"]);
@@ -897,58 +654,10 @@ mod tests {
     }
 
     #[test]
-    fn python_lists_defs_and_classes_by_indentation_without_nested_functions() {
-        let src = "import os\n\n@decorator\ndef top(a, b=1):\n    def inner():\n        pass\n    return 1\n\nclass Foo(Base):\n    \"\"\"def fake(self):\"\"\"\n    x = 1\n\n    def method(self,\n               y: int) -> int:\n        return y\n\n    async def amethod(self):\n        pass\n\n    class Nested:\n        def deep(self): pass\n\ndef last(): ...\n";
-        let got = texts(&items(Lang::Python, src).expect("Python tem resumo"));
-        assert_eq!(
-            got,
-            [
-                "4:def top(a, b=1)",
-                "9:class Foo(Base)",
-                "13:  def method(self, y: int) -> int",
-                "17:  async def amethod(self)",
-                "20:  class Nested",
-                "21:    def deep(self)",
-                "23:def last()",
-            ]
-        );
-    }
-
-    #[test]
     fn markdown_gives_the_headings_with_their_lines_and_ignores_code_fences() {
         let src = "---\ntitulo: x\n# nao e titulo\n---\n# Um\n\ntexto\n\n## Dois\n\n```sh\n# comentario\n```\n\n### Tres\n\n#### Quatro\n####Sem espaco\n";
         let got = texts(&items(Lang::Markdown, src).expect("Markdown tem resumo"));
         assert_eq!(got, ["5:# Um", "9:  ## Dois", "15:    ### Tres"]);
-    }
-
-    #[test]
-    fn javascript_lists_functions_classes_methods_and_exports() {
-        let src = "import x from \"y\";\n\nexport async function load(a, b) {\n  const s = \"}\";\n  return s;\n}\n\nexport const arrow = async (a) => {\n  return a;\n};\nconst small = x => x + 1;\nconst data = { a: 1 };\nexport const VALUE = 42;\n\nclass Foo extends Bar {\n  constructor(a) {\n    super(a);\n  }\n\n  static create() {\n    if (x) {\n      return 1;\n    }\n  }\n\n  handler = (e) => {\n    e.stop();\n  };\n}\n\nexport interface Opts {\n  a: string;\n}\n\nexport type Mode = \"a\" | \"b\";\n\nfunction* gen() {}\n";
-        let got = texts(&items(Lang::JsTs, src).expect("JS tem resumo"));
-        assert_eq!(
-            got,
-            [
-                "3:export async function load(a, b)",
-                "8:export const arrow = async (a) =>",
-                "11:const small = x =>",
-                "13:export const VALUE",
-                "15:class Foo extends Bar",
-                "16:  constructor(a)",
-                "20:  static create()",
-                "26:  handler = (e) =>",
-                "31:export interface Opts",
-                "35:export type Mode = \"a\" | \"b\";",
-                "37:function* gen()",
-            ]
-        );
-    }
-
-    #[test]
-    fn powershell_and_shell_list_functions() {
-        let ps = "function Get-Thing {\n    param($a)\n}\n# function Fake {\nFunction Other($x) { 1 }\n";
-        assert_eq!(texts(&items(Lang::PowerShell, ps).expect("PS tem resumo")), ["1:function Get-Thing", "5:Function Other($x)"]);
-        let sh = "foo() {\n  echo hi\n}\nfunction bar {\n  :\n}\nbaz () { :; }\necho \"x()\"\n";
-        assert_eq!(texts(&items(Lang::Shell, sh).expect("Shell tem resumo")), ["1:foo()", "4:function bar", "7:baz()"]);
     }
 
     #[test]
@@ -960,6 +669,18 @@ mod tests {
         );
         let out = outline("a.html", "<p>x</p>", FILE_BUDGET);
         assert!(out.contains("sem resumo para este tipo de arquivo"), "{out}");
+        let out = outline(
+            "a.py",
+            "def f():
+    pass
+",
+            FILE_BUDGET,
+        );
+        assert_eq!(
+            out,
+            "a.py — 2 linhas, Python
+      (sem resumo para Python; leia o arquivo, são 2 linhas)"
+        );
     }
 
     #[test]
@@ -978,13 +699,6 @@ mod tests {
         assert!(tail.contains("… e mais ") && tail.contains("itens (linhas ") && tail.ends_with("–40)"), "{tail}");
         // Dentro do orçamento, nada é cortado.
         assert!(!outline("a.rs", &text, 10_000).contains("… e mais"));
-    }
-
-    #[test]
-    fn doc_comments_only_fit_when_the_line_has_room() {
-        let long = format!("/// Uma frase.\npub fn {}() {{}}\n", "n".repeat(135));
-        assert!(!rust(&long)[0].contains("//"), "{:?}", rust(&long));
-        assert!(rust("/// Uma frase. Outra.\nfn a() {}\n")[0].ends_with("fn a()  // Uma frase"));
     }
 
     #[test]

@@ -1,12 +1,12 @@
 ---
 titulo: O --outline acha os itens por chaves e pelo léxico do realce, não por um analisador
-resumo: outline.rs usa as faixas do highlight.rs (que mora no core) para ignorar aspas e comentários; erro de léxico vira item perdido.
-touches: [crates/core/src/outline.rs, crates/core/src/highlight.rs]
+resumo: outline.rs usa as faixas do highlight.rs (o léxico mora no core) para ignorar aspas e comentários; erro de léxico vira item perdido.
+touches: [crates/core/src/outline.rs, crates/core/src/highlight.rs, crates/app/src/highlight.rs]
 ---
 `ask-agent --outline` (`outline.rs`) não entende a linguagem: tira do código o texto entre aspas e os comentários, usando
 as faixas de `highlight::highlight_lines`, e acha cada item pela profundidade das chaves e pela palavra que abre a linha
-(`fn`, `struct`, `impl`...). Por isso o `highlight.rs` mora em `crates/core` (o app o reexporta com
-`pub use agentdeck_core::highlight`, e os `crate::highlight::...` do app não mudaram).
+(`fn`, `struct`, `impl`...). Por isso o léxico (`Tok`, `Span`, `Lang`, `Carry`, `highlight_line(s)`) mora em `crates/core/src/highlight.rs`; busca, `pieces` e
+`Cache` ficam em `crates/app/src/highlight.rs`, que reexporta o léxico (os `crate::highlight::...` do app não mudaram).
 
 **Por quê:** foi a forma mais barata de ter o resumo sem trazer `syn`/`tree-sitter`. O custo é que um erro do léxico quebra o
 resumo do arquivo inteiro: um `"` de várias linhas que o `highlight` não carregava para a linha seguinte fez o `/**` de
