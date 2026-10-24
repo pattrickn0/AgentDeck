@@ -4,7 +4,7 @@ use std::process::Command;
 
 use agentdeck_core::models::Effort;
 use agentdeck_core::util::same_path;
-use agentdeck_core::{CoreEvent, Ident, MergeBlock, TaskError, TaskSpec, TaskStatus};
+use agentdeck_core::{CoreEvent, FeedEntry, FeedKind, Ident, MergeBlock, TaskError, TaskSpec, TaskStatus};
 
 #[path = "support/tasks_env.rs"]
 mod env;
@@ -532,6 +532,31 @@ fn a_task_awaiting_validation_survives_a_restart() {
     assert_eq!(core.task_of_instance(env_project, "claude@t1").map(|t| t.id), Some("t1".to_owned()));
     assert!(same_path(&core.spawn_spec_for(env_project, &Ident::parse("claude@t1").expect("id")).expect("spec").cwd, &t.worktree));
     assert_eq!(core.task_validate(env_project, "t1").expect("validate").status, TaskStatus::Merged);
+    core.shutdown();
+    drop(_tmp);
+}
+
+#[test]
+fn the_timeline_of_a_task_survives_a_restart() {
+    need_git!();
+    let env = start();
+    let t = task_in_review(&env, "Linha do tempo", "feature.txt");
+    let ask = |kind, from: &str, to: &str, text: &str| {
+        env.core.feed(FeedEntry::new(kind, Some(from), Some(to), text).in_project(&env.project));
+    };
+    ask(FeedKind::Ask, "claude@t1", "antigravity", "como faço?");
+    ask(FeedKind::Answer, "antigravity", "claude@t1", "assim");
+    ask(FeedKind::Ask, "claude", "antigravity", "de outra aba");
+    // Em outro projeto não conta, mesmo com o mesmo id de instância.
+    env.core.feed(FeedEntry::new(FeedKind::Ask, Some("claude@t1"), Some("x"), "alheia").in_project("pOutro"));
+    let texts = |task: agentdeck_core::Task| task.messages.into_iter().map(|m| m.text).collect::<Vec<_>>();
+    assert_eq!(texts(env.core.task(&env.project, &t.id).expect("t1")), ["como faço?", "assim"]);
+    let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
+    let Env { _tmp, core: first, rx, .. } = env;
+    first.shutdown();
+    drop((first, rx));
+    let (core, _rx) = start_core(&root, config, true);
+    assert_eq!(texts(core.task(&project, "t1").expect("t1")), ["como faço?", "assim"]);
     core.shutdown();
     drop(_tmp);
 }
