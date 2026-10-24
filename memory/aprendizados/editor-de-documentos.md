@@ -1,7 +1,7 @@
 ---
 titulo: O editor do modo Documentos: decisões e armadilhas
 resumo: Realce por tokenizador próprio (sem syntect); o TextEdit pede o galley todo quadro (cache por impressão digital); edição suja nunca é trocada por leitura.
-touches: [crates/app/src/docs.rs, crates/app/src/highlight.rs, crates/app/src/ui/code.rs, crates/app/src/ui/select.rs, crates/app/src/ui/diff_view.rs, crates/app/src/ui/docs.rs]
+touches: [crates/app/src/docs.rs, crates/core/src/highlight.rs, crates/app/src/ui/code.rs, crates/app/src/ui/select.rs, crates/app/src/ui/diff_view.rs, crates/app/src/ui/docs.rs]
 ---
 O arquivo de texto pequeno do modo Documentos é um `DocState::Source` pintado por um `egui::TextEdit` (`ui/code.rs`); o diff e o
 arquivo grande são pintados à mão (`ui/diff_view.rs`, `ui/code.rs::text_body`) com a seleção de `ui/select.rs`.

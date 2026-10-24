@@ -414,7 +414,7 @@ impl Registry {
             "Texto com acento vai num arquivo (--file <arquivo>): pela entrada padrão o shell do Windows troca os acentos por \"?\".".to_owned(),
             "Quando outro agente lhe mandar uma mensagem, responda com o comando indicado nela (ask-agent --reply <número> \"resposta\" ou --file <arquivo>): só assim a resposta chega a ele.".to_owned(),
             "Os agentes formam uma equipe (chefe e subordinados; o usuário pode reorganizá-la). Antes de delegar ou reportar, veja a sua posição com ask-agent --team; delegue de preferência à equipe e, ao concluir algo que o chefe pediu, reporte com ask-agent --boss \"mensagem\".".to_owned(),
-            "Memória do projeto: memory/aprendizados/, um .md por armadilha, decisão ou convenção que custou tempo e o código não mostra. Formato: cabeçalho --- titulo: … / resumo: uma linha / touches: [globs dos arquivos; opcional] --- e o corpo curto, com Por quê e Como aplicar. Antes de mexer em arquivos, rode ask-agent --learn <arquivo>... (sem argumentos: o índice); ao descobrir algo assim, crie o arquivo.".to_owned(),
+            "Memória do projeto: memory/aprendizados/, um .md por armadilha, decisão ou convenção que custou tempo e o código não mostra. Formato: cabeçalho --- titulo: … / resumo: uma linha / touches: [globs dos arquivos; opcional] --- e o corpo curto, com Por quê e Como aplicar. Antes de mexer em arquivos, rode ask-agent --learn <arquivo>... (sem argumentos: o índice); ao descobrir algo assim, crie o arquivo. ask-agent --outline <arquivo>... mostra as assinaturas com a linha, para ler só o trecho necessário de um arquivo grande (offset).".to_owned(),
         ]
         .join("
 ")
@@ -737,13 +737,13 @@ mod tests {
         Registry::new(Discovery { search_path: Some(OsString::new()), home: PathBuf::from("/h"), system_dirs: false })
     }
 
-    /// As instruções não crescem (ficam no tamanho das de antes da t38, 2580 caracteres, sem agentes na lista) e
+    /// As instruções não crescem além do necessário (eram 2580 caracteres antes da t38; a t40 acrescentou o `--outline`) e
     /// trazem a regra dos subagentes, a ponte e a memória geral.
     #[test]
     fn the_instructions_carry_the_rules_and_stay_short() {
         let reg = registry();
         let text = reg.bridge_instructions(Some("claude@dev"));
-        assert!(text.chars().count() <= 2580, "{} caracteres", text.chars().count());
+        assert!(text.chars().count() <= 2740, "{} caracteres", text.chars().count());
         for needle in [
             "NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça",
             "ask-agent <agente>@<cargo> ou ask-agent --task new",
@@ -752,6 +752,7 @@ mod tests {
             "resumo:",
             "touches:",
             "ask-agent --learn",
+            "ask-agent --outline <arquivo>",
             "ask-agent --reply",
             "ask-agent --boss",
         ] {

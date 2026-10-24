@@ -16,7 +16,7 @@ mod docs;
 mod docs_demo;
 mod git_ui;
 mod github_ui;
-mod highlight;
+pub use agentdeck_core::highlight;
 mod icons;
 mod logfile;
 mod smoke;

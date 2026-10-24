@@ -558,7 +558,8 @@ fn scan(sp: &Spec, line: &str, start: usize, carry: &mut Carry, out: &mut Vec<Sp
                     push(out, i, end, tok);
                     i = end;
                 }
-                None if triple || c == b'`' => {
+                // Texto de várias linhas: o triplo, o crase do JS e o `"` do Rust (que continua na linha seguinte).
+                None if triple || c == b'`' || (sp.lang == Lang::Rust && c == b'"') => {
                     carry.quote = c;
                     carry.triple = triple;
                     push(out, i, b.len(), Tok::String);
@@ -1083,6 +1084,13 @@ mod tests {
         assert!(lines[4].iter().any(|s| s.tok == Tok::Keyword), "o código da cerca é Rust");
         assert_eq!(lines[5][0].tok, Tok::Meta);
         assert!(lines[6].is_empty(), "depois da cerca volta ao texto");
+    }
+
+    #[test]
+    fn a_rust_string_continues_on_the_next_lines() {
+        let spans = highlight_lines(Lang::Rust, "let a = \"x /* y\n// z\n  w\";\nfn f() {}");
+        assert!(spans[1].iter().all(|s| s.tok == Tok::String) && spans[1].len() == 1, "{spans:?}");
+        assert!(spans[3].iter().any(|s| s.tok == Tok::Keyword), "{spans:?}");
     }
 
     #[test]
