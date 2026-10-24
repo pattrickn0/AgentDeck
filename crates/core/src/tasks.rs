@@ -358,11 +358,14 @@ impl MergeBlock {
 pub struct MergeRefusal {
     pub error: TaskError,
     pub block: Option<MergeBlock>,
+    /// O aviso do stash ("guardar minhas alterações"), que também vai no fim do erro: a tela que troca o erro pela
+    /// explicação de `block` o mostra à parte, senão o usuário não sabe onde ficaram as alterações dele.
+    pub stash_note: Option<String>,
 }
 
 impl From<TaskError> for MergeRefusal {
     fn from(error: TaskError) -> Self {
-        MergeRefusal { error, block: None }
+        MergeRefusal { error, block: None, stash_note: None }
     }
 }
 
@@ -1289,7 +1292,7 @@ impl Core {
         let repo = self.task_repo(project)?;
         let refuse_with = |t: &Task, msg: String, block: Option<MergeBlock>| -> MergeRefusal {
             self.update_task(project, &t.id, |t| t.log(format!("mesclagem recusada: {msg}")));
-            MergeRefusal { error: TaskError::Conflict(msg), block }
+            MergeRefusal { error: TaskError::Conflict(msg), block, stash_note: None }
         };
         let refuse = |t: &Task, msg: String| -> MergeRefusal { refuse_with(t, msg, None) };
         let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
@@ -1479,7 +1482,11 @@ impl Core {
                             if files.is_empty() { "não identificados".to_owned() } else { short_list(&files) }
                         );
                         self.update_task(project, &task.id, |t| t.log(format!("conflito na mesclagem ({}); desfeita", short_list(&files))));
-                        Err(MergeRefusal { error: TaskError::Conflict(with_note(msg, note)), block: Some(MergeBlock::Conflict(files)) })
+                        Err(MergeRefusal {
+                            error: TaskError::Conflict(with_note(msg, note.clone())),
+                            block: Some(MergeBlock::Conflict(files)),
+                            stash_note: note,
+                        })
                     }
                     // Sem conseguir desfazer, a pasta está no meio da mesclagem: o stash não é devolvido por cima.
                     Err(abort) => Err(self
@@ -1950,26 +1957,34 @@ fn stash_pop(repo: &Repo, stash: &Stash) -> (String, bool) {
             true,
         )
     };
-    let Some(reference) = stash_ref(repo, &stash.sha) else {
+    if stash_ref(repo, &stash.sha).is_none() {
         return (
             "O stash com as suas alterações não está mais na lista do git (alguém o usou ou apagou?); confira com git stash list.".into(),
             true,
         );
-    };
+    }
     match stash_pop_conflicts(repo, &stash.sha) {
         Some(files) if files.is_empty() => {}
         Some(files) => return kept(format!("ao devolvê-las elas se chocariam com o que a tarefa trouxe em {}.", short_list(&files))),
         None => return kept("não consegui conferir se elas se chocam com o que a tarefa trouxe.".into()),
     }
-    match repo.write(&["stash", "pop", &reference], None) {
-        Ok(_) => ("Suas alterações sem commit foram guardadas durante a mesclagem e já voltaram para a pasta.".to_owned(), false),
-        Err(e) if stash_ref(repo, &stash.sha).is_some() => {
+    // Aplica pelo sha, não por `stash@{n}`: a pilha é de todas as worktrees, e um `stash push` de outro entre a conferência
+    // e a devolução mudaria a posição (o `pop` devolveria e apagaria a entrada de outra pessoa). A entrada só sai depois,
+    // procurada de novo pelo sha.
+    match repo.write(&["stash", "apply", &stash.sha], None) {
+        Ok(_) => {
+            if let Some(reference) = stash_ref(repo, &stash.sha) {
+                if let Err(e) = repo.write(&["stash", "drop", &reference], None) {
+                    log::warn!("as alterações voltaram, mas a entrada do stash ficou ({e})");
+                }
+            }
+            ("Suas alterações sem commit foram guardadas durante a mesclagem e já voltaram para a pasta.".to_owned(), false)
+        }
+        Err(e) => {
             let unmerged = git_out(repo, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
             let mess = if unmerged.trim().is_empty() { "" } else { " A pasta ficou com arquivos em conflito: confira com git status." };
             kept(format!("o git não conseguiu devolvê-las ({e}).{mess}"))
         }
-        // O pop falhou depois de já ter apagado a entrada: as alterações estão na pasta.
-        Err(_) => ("Suas alterações sem commit voltaram para a pasta.".into(), false),
     }
 }
 

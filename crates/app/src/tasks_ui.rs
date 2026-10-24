@@ -597,6 +597,8 @@ pub struct TasksUi {
     pub notice_info: bool,
     /// O motivo estruturado da recusa da mesclagem, quando há saída para oferecer num botão.
     pub notice_block: Option<MergeBlock>,
+    /// O aviso do stash que veio com a recusa (`MergeRefusal::stash_note`), mostrado depois da explicação.
+    pub notice_stash: Option<String>,
     /// A lista completa de arquivos da recusa está aberta ("Ver o que está sem commit").
     pub notice_files: bool,
     pub form: NewForm,
@@ -626,6 +628,7 @@ impl Default for TasksUi {
             notice: None,
             notice_info: false,
             notice_block: None,
+            notice_stash: None,
             notice_files: false,
             form: NewForm::default(),
             generation: 0,
@@ -699,7 +702,7 @@ pub enum TaskReply {
         id: String,
         op: TaskOp,
         result: Box<Result<Task, TaskError>>,
-        /// Só na mesclagem: o motivo da recusa que tem saída, ou o aviso sobre as alterações guardadas.
+        /// Só na mesclagem: o motivo da recusa que tem saída e o aviso sobre as alterações guardadas.
         merge: Box<MergeExtra>,
     },
 }
@@ -749,6 +752,7 @@ impl Deck {
         self.tasks.notice = None;
         self.tasks.notice_info = false;
         self.tasks.notice_block = None;
+        self.tasks.notice_stash = None;
         self.tasks.notice_files = false;
     }
 
@@ -883,6 +887,7 @@ impl Deck {
                     }
                     Err(refusal) => {
                         merge.block = refusal.block;
+                        merge.note = refusal.stash_note;
                         Err(refusal.error)
                     }
                 },
@@ -1028,6 +1033,7 @@ impl Deck {
                         }
                         self.tasks.notice = Some(e.message().to_owned());
                         self.tasks.notice_block = merge.block;
+                        self.tasks.notice_stash = merge.note;
                     }
                 }
                 self.tasks_refresh();

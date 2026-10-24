@@ -2602,6 +2602,11 @@ impl Deck {
 
     /// Antes de gravar: com o Whisper pronto segue; sem ele, explica ou oferece o download em vez de falhar calado.
     fn mic_ready(&mut self) -> bool {
+        // Compilado sem áudio (`--no-default-features`): oferecer o download seria baixar 1,6 GB para nada gravar.
+        if !crate::audio::AVAILABLE {
+            self.system("O ditado por voz não está disponível: o AgentDeck foi compilado sem o recurso de áudio.");
+            return false;
+        }
         match self.dictation_setup() {
             Setup::Ready => true,
             Setup::Downloading => {

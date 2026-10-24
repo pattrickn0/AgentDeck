@@ -840,6 +840,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
     let notice = deck.tasks.notice.clone();
     let notice_info = deck.tasks.notice_info;
     let notice_block = deck.tasks.notice_block.clone();
+    let notice_stash = deck.tasks.notice_stash.clone();
     let notice_files = deck.tasks.notice_files;
     let return_open = deck.tasks.return_open && matches!(task.status, TaskStatus::Review | TaskStatus::Validating);
     let body = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
@@ -915,7 +916,12 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         }
         if let Some(n) = &notice {
             // Recusa da mesclagem com saída: a explicação em linguagem comum no lugar do texto do git, e o botão da saída.
-            let shown = notice_block.as_ref().map_or_else(|| n.clone(), |b| b.explain(task));
+            // O aviso do stash vai junto: é a única frase que diz onde ficaram as alterações do usuário.
+            let shown = match (&notice_block, &notice_stash) {
+                (Some(b), Some(note)) => format!("{} {note}", b.explain(task)),
+                (Some(b), None) => b.explain(task),
+                (None, _) => n.clone(),
+            };
             if notice_box(ui, &shown, true, !notice_info) {
                 acts.push(Act::DismissNotice);
             }
