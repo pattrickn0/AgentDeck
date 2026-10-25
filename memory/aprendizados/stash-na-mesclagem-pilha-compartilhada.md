@@ -1,7 +1,7 @@
 ---
 titulo: O stash da mesclagem é compartilhado com as worktrees e não pode apagar nada
 resumo: "Guardar e mesclar" devolve pelo hash (stash apply <hash>, nunca pop stash@{n}), confere antes com git merge-tree e, na dúvida, deixa no stash.
-touches: [crates/core/src/tasks.rs]
+touches: [crates/core/src/tasks/**]
 ---
 `task_merge_assisted(.., stash_main = true)` guarda as alterações sem commit do repositório principal num `git stash`,
 mescla e devolve. A pilha do stash é **uma só para o repositório e todas as worktrees**, e o `pop` mal feito deixa a

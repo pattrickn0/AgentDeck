@@ -1,7 +1,7 @@
 ---
 titulo: A fila por escopo avança dentro da trava das operações e Validating não a segura
 resumo: A tarefa que sai de Running/Review libera a fila por advance_queue_locked (sem retomar a trava); aguardando validação não segura ninguém.
-touches: [crates/core/src/tasks.rs, crates/core/src/scope.rs]
+touches: [crates/core/src/tasks/**, crates/core/src/scope.rs]
 ---
 Uma tarefa com escopo (`Task::scope`, lista de caminhos; `scope.rs`) que se sobrepõe ao de outra `Running`/`Review` vai a
 `Queued` em `task_start`. Quem a tira de lá é `Core::advance_queue_locked`, chamado no fim de `merge_task` (sucesso),

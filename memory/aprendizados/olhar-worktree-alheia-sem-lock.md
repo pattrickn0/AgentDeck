@@ -1,7 +1,7 @@
 ---
 titulo: Olhar a worktree de outra tarefa sem tomar o lock do git
 resumo: Para ler o status da pasta de outro agente use worktree_dirty_unlocked (--no-optional-locks), não worktree_dirty.
-touches: [crates/core/src/tasks.rs, crates/core/src/situation.rs]
+touches: [crates/core/src/tasks/**, crates/core/src/situation.rs]
 ---
 `git status` comum atualiza o índice e cria `index.lock` na worktree. Se for a pasta de outro agente e ele rodar
 `git add`/`commit` no mesmo instante, o comando dele falha com erro de `index.lock`. A "Situação atual" olha as

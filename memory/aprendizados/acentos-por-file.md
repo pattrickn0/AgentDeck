@@ -1,7 +1,7 @@
 ---
 titulo: Acentos se perdem na entrada padrão do Windows
 resumo: PowerShell 5.1 manda stdin em ASCII; texto com acento vai por --file.
-touches: [crates/cli/**, crates/core/src/bridge.rs, crates/core/src/tasks.rs, crates/core/src/util.rs]
+touches: [crates/cli/**, crates/core/src/bridge.rs, crates/core/src/tasks/**, crates/core/src/util.rs]
 ---
 No Windows PowerShell 5.1 o `$OutputEncoding` é US-ASCII: texto canalizado (`... | ask-agent x -`) ou passado pelo
 shell perde todo caractere fora do ASCII (acentos e travessões viram `?`) antes de chegar ao `ask-agent`.

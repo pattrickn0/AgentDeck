@@ -1,7 +1,7 @@
 ---
 titulo: --effort só vale para quem aceita esforço na aba
 resumo: `--task new --effort` com codex ou opencode é recusado ("esforço não aplicável") e a tarefa nem é criada.
-touches: [crates/core/src/models.rs, crates/core/src/tasks.rs]
+touches: [crates/core/src/models.rs, crates/core/src/tasks/**]
 ---
 O Codex não tem esforço, e o OpenCode só aceita esforço no modo headless (a aba não recebe). Com `--effort`, o
 `ask-agent --task new` falha antes de criar a tarefa.

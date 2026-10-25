@@ -5,7 +5,7 @@
 //! caminho é igual a outro ou é prefixo dele **por componente** (`crates/core` cobre `crates/core/src/git.rs`;
 //! `crates/co` não cobre `crates/core`). A comparação ignora maiúsculas e trata `/` e `\` como iguais (o
 //! repositório vive no Windows). Quem usa o escopo para pôr tarefas na fila e avisar de arquivo fora dele é
-//! `tasks.rs`.
+//! `tasks/` (`lifecycle.rs`, `finish.rs`).
 
 /// Caminhos que nenhuma tarefa reserva (ficam fora da conferência de sobreposição e do aviso de "fora do escopo"):
 /// toda tarefa mexe neles, e eles já se resolvem na mesclagem (ver `memory/aprendizados/historico-mescla-por-uniao.md`).
