@@ -14,8 +14,10 @@ teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGEN
    "Gravar o terminal (diagnóstico)" no menu da aba e mandar `dados/pty/`), o editor de documentos (`t39`) e a recusa por
    cota (`ask-agent --models antigravity`, `--team`). Também do usuário: renomear a pasta local `commanddeck-dev` (o
    repositório no GitHub já se chama `AgentDeck`).
-2. [ ] **Segundo plano e bandeja** (decidido em 2026-10-24). Primeiro (T1a), o `Deck::tick` sai de dentro da pintura: hoje
-   ele só roda no `before_frame` e a janela escondida ou minimizada não pinta, então as entregas param. Depois (T1b), o X
+2. [ ] **Segundo plano e bandeja** (decidido em 2026-10-24). Primeiro (T1a, feito na `t44`), o `Deck::tick` saiu de dentro da
+   pintura: `Deck::background` roda a partir do laço do winit com a janela escondida ou minimizada (ver ARCHITECTURE.md,
+   "Trabalho com e sem quadro"; `app::is_hidden` decide). A T1b precisa, ao esconder a janela com `set_visible(false)`, pedir
+   uma rodada (`Background::wake`), porque o winit não avisa. Depois (T1b), o X
    esconde a janela na bandeja, sem perguntar (Windows: `tray-icon`/Win32; Linux: `ksni`, sem GTK; sem
    `StatusNotifierWatcher` no D-Bus, o X minimiza); a bandeja tem Abrir e Encerrar (Encerrar pergunta só com aba no meio de
    um turno); abrir o programa de novo traz a instância de volta, como o Discord (a segunda abertura lê a porta da ponte

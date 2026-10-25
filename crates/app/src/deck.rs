@@ -682,13 +682,27 @@ impl Deck {
         if self.docs.view != self.center_seen {
             self.center_changed();
         }
+        if let Some(t) = self.work(Some(ctx)) {
+            ctx.request_repaint_after(t.saturating_duration_since(Instant::now()));
+        }
+    }
+
+    /// O trabalho do `before_frame` que não depende de pintar (eventos do core, respostas das threads, entregas aos
+    /// terminais, temporizadores), para a janela escondida ou minimizada, que não recebe quadros (nem teclado, nem
+    /// ações). Devolve quando chamar de novo; `None` é nada agendado (acorda pelos eventos do core).
+    pub fn background(&mut self) -> Option<Instant> {
+        self.work(None)
+    }
+
+    /// Eventos, mensagens e `tick`: o mesmo trabalho com ou sem quadro (`ctx`), e só uma vez por vez que o laço o pede.
+    fn work(&mut self, ctx: Option<&egui::Context>) -> Option<Instant> {
         while let Ok(ev) = self.events.try_recv() {
             self.on_core_event(ev);
         }
         while let Ok(msg) = self.rx.try_recv() {
             self.on_msg(msg);
         }
-        self.tick(ctx);
+        self.tick(ctx)
     }
 
     fn apply_action(&mut self, ctx: &egui::Context, a: Action) {
@@ -875,8 +889,10 @@ impl Deck {
         }
     }
 
-    /// Temporizadores (setTimeout do renderer).
-    fn tick(&mut self, ctx: &egui::Context) {
+    /// Temporizadores (setTimeout do renderer). Sem `ctx` (janela escondida) nada depende do quadro: o que precisa
+    /// dele (copiar para a área de transferência, o mouse pressionado) espera o próximo quadro ou é dado como solto.
+    /// Devolve o próximo instante em que há o que fazer.
+    fn tick(&mut self, ctx: Option<&egui::Context>) -> Option<Instant> {
         let now = Instant::now();
         let mut next: Option<Instant> = None;
         let mut want = |t: Instant| next = Some(next.map_or(t, |n: Instant| n.min(t)));
@@ -934,7 +950,7 @@ impl Deck {
 
         let mut chime = false;
         let metrics = self.metrics.clone();
-        let dragging = ctx.input(|i| i.pointer.primary_down());
+        let dragging = ctx.is_some_and(|ctx| ctx.input(|i| i.pointer.primary_down()));
         let mut exits = Vec::new();
         let active = self.active;
         // Lendo documentos, nenhuma aba está à vista: o fim de um turno também conta como "não visto".
@@ -946,10 +962,12 @@ impl Deck {
             if tab.session.take_bell() {
                 chime = true;
             }
-            // OSC 52 das outras abas é descartado.
-            if let Some(text) = tab.session.take_clipboard() {
-                if crate::terminal::clipboard_allowed(i, active, &tab.project, &self.active_project) {
-                    ctx.copy_text(text);
+            // OSC 52 das outras abas é descartado. Sem quadro, o pedido fica para o próximo (é o `ctx` que copia).
+            if let Some(ctx) = ctx {
+                if let Some(text) = tab.session.take_clipboard() {
+                    if crate::terminal::clipboard_allowed(i, active, &tab.project, &self.active_project) {
+                        ctx.copy_text(text);
+                    }
                 }
             }
             // Enters agendados por `submit`; as teclas seguradas nesse meio-tempo vão logo depois.
@@ -1083,9 +1101,7 @@ impl Deck {
         if let Some(t) = self.git_tick(now) {
             want(t);
         }
-        if let Some(t) = next {
-            ctx.request_repaint_after(t.saturating_duration_since(now));
-        }
+        next
     }
 
     pub fn play_sound(&self, force: bool) {
@@ -1216,7 +1232,7 @@ impl Deck {
     ///
     /// Uma resposta atrasada (`d.answer`) vai para a aba de quem perguntou só se ela ainda está
     /// aberta e rodando: não reabre nada (a resposta já está na Conversa integrada).
-    fn on_deliver(&mut self, d: Delivery) {
+    pub(crate) fn on_deliver(&mut self, d: Delivery) {
         let id = d.ident.id();
         // Um projeto que ainda não foi aberto nesta sessão abre as abas salvas (escondidas) antes.
         if !d.answer {
