@@ -38,6 +38,7 @@ pub mod sessions;
 pub mod situation;
 pub mod tasks;
 pub mod team;
+pub(crate) mod trust;
 pub mod usage;
 pub mod util;
 pub mod whisper;

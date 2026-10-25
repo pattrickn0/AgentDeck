@@ -28,8 +28,7 @@ teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGEN
    assim que é conhecido, nunca `--continue`. Claude: `--session-id`/`--resume` com id nosso (o hook atualiza depois de
    `/clear`); OpenCode: `--session <id>` (cria se não existe); Antigravity: `--conversation <id>`, com o id lido do
    `--log-file` da aba; Codex: `codex resume <id>`, com o id do `notify`, e no Windows resolver o shim do npm até o
-   executável para o Codex ter hooks. Na mesma tarefa: o Antigravity pede a confiança da pasta a cada abertura (hipótese:
-   o `--add-dir dados`; um teste com 4 casos decide). Retomada que falha logo reabre do zero e avisa uma vez.
+   executável para o Codex ter hooks. Retomada que falha logo reabre do zero e avisa uma vez.
 4. [ ] **Memória medida, depois o grafo** (T3, depois T7). Medição automática sobre as tarefas já feitas: o certo são os
    aprendizados dos arquivos que a tarefa de fato mudou; o palpite é o que cada jeito entregaria lendo só o pedido (hoje;
    hoje + o índice de uma linha de todos; grafo); nota = acertos e tamanho entregue, com os aprendizados como estavam na

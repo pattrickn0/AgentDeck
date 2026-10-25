@@ -700,6 +700,8 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         args.push(r#"notify=["ask-agent","--signal","idle"]"#.into());
     }
     args.extend(instruction_args(kind, &instructions, generic_file.as_deref(), resolved.shim.is_some()));
+    // Sem a pergunta "Do you trust this folder?", que deixava parada a aba aberta em segundo plano.
+    args.extend(crate::trust::prepare(kind, &cwd, &project_dir, &core.inner.home));
     if kind == "claude" || kind == "antigravity" {
         args.push("--add-dir".into());
         args.push(data_dir);

@@ -76,6 +76,14 @@ nome e cargo vêm de `AGENTDECK_AGENT`/`AGENTDECK_ROLE`, e a lista de agentes in
 mudar de máquina para máquina. Ver [aprendizados/instrucoes-por-cli.md](aprendizados/instrucoes-por-cli.md). A execução
 headless (`ask-agent <agente>` sem aba) só leva as instruções no Claude (como antes).
 
+**Confiança da pasta.** Claude, Codex e Antigravity perguntam "Do you trust this folder?" numa pasta nova, e a aba aberta em
+segundo plano ficava parada ali. Abrir a pasta como projeto já é a decisão do usuário: antes de cada aba, `trust::prepare`
+(chamado em `spawn_spec_for`) registra a confiança da pasta da aba (e da do projeto) no lugar que cada CLI lê: o Claude em
+`~/.claude.json` (vale para as subpastas, então só grava sem pasta-mãe aceita), o Codex por `-c projects={...}` na linha de
+comando, sem arquivo, e o Antigravity nos `trustedWorkspaces` de `~/.gemini/antigravity-cli/settings.json` (caminho exato; a
+entrada da worktree sai com ela, em `remove_task_worktree`). A pasta pessoal e a raiz de um disco nunca entram. Ver
+[aprendizados/confianca-da-pasta-por-cli.md](aprendizados/confianca-da-pasta-por-cli.md).
+
 **Identidade pelo token.** Cada processo de agente tem um token próprio: o da aba vale enquanto a instância
 existir (`Core::tab_token`); o de uma execução headless, só durante ela (`Core::headless_token`). A ponte
 descobre **quem** pergunta pelo token, e o campo `from` do corpo é ignorado. Assim uma aba não consegue se

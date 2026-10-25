@@ -1974,6 +1974,9 @@ impl Core {
                     warnings.push(format!("a pasta {} ficou ({git}{e}); {left}", dir.display()));
                 }
             }
+            if !dir.exists() {
+                crate::trust::forget(&dir, &self.inner.home);
+            }
         } else {
             warnings.push(format!("a pasta {} não está em .agentdeck/worktrees: não mexi nela", task.worktree.display()));
         }
