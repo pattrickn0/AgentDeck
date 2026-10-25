@@ -1,7 +1,7 @@
 ---
 titulo: O AGENTS.md é reescrito pelo app e não pode travar a mesclagem
 resumo: O app mantém um bloco no AGENTS.md; a mesclagem o ignora na checagem de "sujo" e o guarda e regrava se a branch também mexe no arquivo.
-touches: [AGENTS.md, crates/core/src/workspace.rs, crates/core/src/tasks.rs]
+touches: [AGENTS.md, crates/core/src/workspace.rs, crates/core/src/tasks/**]
 ---
 O app mantém um bloco marcado no `AGENTS.md` do workspace com as instruções da ponte (o Antigravity não tem flag
 para isso). Só atualiza um arquivo que já exista (`workspace::ensure_agent_context`), gravando ao lado e trocando, e

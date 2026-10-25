@@ -1,7 +1,7 @@
 ---
 titulo: O feed (Conversa integrada) não é guardado; a linha do tempo da tarefa é
 resumo: Deck::feed vive só na memória (500 entradas); o que sobrevive é Task::messages, gravado em Core::feed.
-touches: [crates/core/src/lib.rs, crates/core/src/tasks.rs, crates/core/src/bridge.rs, crates/app/src/deck/**, crates/app/src/ui/tasks.rs]
+touches: [crates/core/src/lib.rs, crates/core/src/tasks/**, crates/core/src/bridge.rs, crates/app/src/deck/**, crates/app/src/ui/tasks.rs]
 ---
 A Conversa integrada (`Deck::feed`) é uma lista na memória da interface, com teto de `FEED_MAX`; fechar o app a apaga. A
 linha do tempo de cada tarefa não pode depender dela: `Core::feed` (único caminho do `ask-agent`: `bridge::Caller::feed`,

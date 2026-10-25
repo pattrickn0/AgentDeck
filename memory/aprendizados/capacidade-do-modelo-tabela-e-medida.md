@@ -1,7 +1,7 @@
 ---
 titulo: A capacidade do modelo vem da tabela de benchmarks e da medida; o modelo do agente é presumido
 resumo: capability.json (AA Coding Agent Index) dá o nível; 3+ tarefas num nível fazem a medida mandar; sem --model, vale o modelo presumido em defaults.
-touches: [crates/core/src/capability.rs, crates/core/src/capability.json, crates/core/src/tasks.rs]
+touches: [crates/core/src/capability.rs, crates/core/src/capability.json, crates/core/src/tasks/**]
 ---
 O nível que um modelo alcança (`simples`, `media`, `complexa`) sai de `capability.json` (nota do AA Coding Agent Index v2.0,
 limiares 53 e 40, fora da tabela = `simples`) e, com 3 ou mais tarefas num nível, da medida das tarefas já feitas
