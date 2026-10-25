@@ -8,6 +8,12 @@ Uma limitação que passar a incomodar no uso também sobe para lá.
 
 ### Mesa de tarefas e modelos
 
+- **Teste de fogo num projeto que não é o AgentDeck** (usuário, 2026-10-24): um jogo em Godot, depois da bandeja e do
+  retomar a conversa. Até aqui o app só foi usado para construir a si mesmo (Rust, `memory/` cheio, agentes que conhecem o
+  repositório). Observar: a memória começando vazia (os agentes criam aprendizados?), `--outline` sem GDScript, a
+  reimportação da pasta `.godot/` em cada worktree nova, a revisão de `.tscn`/`.tres` e dos assets binários, os testes
+  com `godot --headless`, e a fila do escopo com arquivos que todos mexem (`project.godot`, a cena principal).
+
 - **Mensagens ao agente não citam a validação:** `start_message` não conta que, depois de mesclada, a tarefa ainda pode
   voltar reprovada; ele só descobre quando `reject_message` chega. Conferir no uso se faz falta.
 - **Rodar os testes do projeto ao receber o relatório**; **editar uma tarefa em rascunho**.
