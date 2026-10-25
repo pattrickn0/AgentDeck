@@ -26,29 +26,25 @@ teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGEN
    `--log-file` da aba; Codex: `codex resume <id>`, com o id do `notify`, e no Windows resolver o shim do npm até o
    executável para o Codex ter hooks. Na mesma tarefa: o Antigravity pede a confiança da pasta a cada abertura (hipótese:
    o `--add-dir dados`; um teste com 4 casos decide). Retomada que falha logo reabre do zero e avisa uma vez.
-4. [ ] **Escopo de escrita por tarefa, com fila** (T2). `--scope <arquivos e pastas>` no `--task new` e campo no formulário;
-   a pasta reserva o que está dentro; `memory/**` e `Cargo.lock` não reservam; sem escopo, como hoje. A tarefa com escopo
-   sobreposto ao de outra em andamento fica "Na fila" e começa sozinha quando a outra é mesclada ou descartada, com a base
-   escolhida nesse momento. No `--task done`, a revisão marca os arquivos do diff fora do escopo.
-5. [ ] **Memória medida, depois o grafo** (T3, depois T7). Medição automática sobre as tarefas já feitas: o certo são os
+4. [ ] **Memória medida, depois o grafo** (T3, depois T7). Medição automática sobre as tarefas já feitas: o certo são os
    aprendizados dos arquivos que a tarefa de fato mudou; o palpite é o que cada jeito entregaria lendo só o pedido (hoje;
    hoje + o índice de uma linha de todos; grafo); nota = acertos e tamanho entregue, com os aprendizados como estavam na
    base da tarefa. O grafo começa pela co-mudança do `git log` (sem merges, sem commits grandes, sem `memory/**`), que
-   também sugere o escopo do item 4; só vale para a memória se ganhar do índice.
-6. [ ] **Fase da tarefa e "parado há N min"** (T5), só pelos hooks: `PostToolUse` do Claude (a última ferramenta usada
+   também sugere o escopo das tarefas; só vale para a memória se ganhar do índice.
+5. [ ] **Fase da tarefa e "parado há N min"** (T5), só pelos hooks: `PostToolUse` do Claude (a última ferramenta usada
    vira "editando", "testando"…); os outros CLIs mostram trabalhando/parado e há quanto tempo.
-7. [ ] **Correio durável** (T6). Mensagem de até ~200 caracteres, numa linha, continua digitada; a longa fica guardada em
+6. [ ] **Correio durável** (T6). Mensagem de até ~200 caracteres, numa linha, continua digitada; a longa fica guardada em
    disco e no terminal vai só o aviso (`ask-agent --read <n>`); o aviso é repetido no fim de turno se ninguém leu; o prazo
    de resposta conta a partir da leitura; as mensagens pendentes sobrevivem ao fechamento do app.
-8. [ ] **Pasta da worktree que não sai ao validar: achar a causa.** O log já existe (2026-10-24, `file_lock.rs`): a cada
+7. [ ] **Pasta da worktree que não sai ao validar: achar a causa.** O log já existe (2026-10-24, `file_lock.rs`): a cada
    falha de `remove_task_worktree`, o `agentdeck.log` e o aviso da tarefa dizem que arquivos ficaram e que processo os tem
    aberto (Restart Manager), ou que só pastas vazias ficaram (um processo com o diretório atual dentro dela). Falta a
    próxima ocorrência real: ler o aviso (procure "não saiu" no log) e corrigir a causa.
-9. [ ] **Aposentar a Conversa integrada.** A linha do tempo por tarefa já existe (t43, seção MENSAGENS do detalhe, guardada em
+8. [ ] **Aposentar a Conversa integrada.** A linha do tempo por tarefa já existe (t43, seção MENSAGENS do detalhe, guardada em
    `Task::messages`); falta validá-la no uso e então tirar a Conversa. O que a linha do tempo não tem: as mensagens do usuário
    à aba (`FeedKind::User`) e os avisos do sistema.
 
 ## Depois (na lista, ainda não)
 
-10. [ ] **Instalador para Windows**, e na mesma versão tirar a migração da config `CommandDeck/` (`config::legacy_config_files`;
+9. [ ] **Instalador para Windows**, e na mesma versão tirar a migração da config `CommandDeck/` (`config::legacy_config_files`;
    lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).

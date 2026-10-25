@@ -97,9 +97,9 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 | `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
 | `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
 | `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell` recusado) |
-| `GET /tasks`, `GET /tasks/<id>` | as tarefas do projeto de quem chama (`{"tasks": […]}`, sem brief, relatório nem histórico) ou uma tarefa completa (`{"task": {…}}`); com o token mestre, `?project=<id>` escolhe o projeto. Qualquer token pode ler |
-| `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"base"][,"start"]}` → `{"task"}`: cria a tarefa (`kind` padrão `claude`; `start: true` já a inicia) e grava quem pediu como criador; 400 para título vazio, agente ou modelo inválidos, base que não é branch local ou projeto sem git/commit; se `start` falha, devolve o erro com a tarefa criada |
-| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` → `{"task"}`: inicia, mescla (a tarefa fica aguardando validação), valida (conclui e limpa) ou descarta (409 se o estado não permite, se o repositório principal não está pronto, se há conflito ou se a validação não pode limpar; 500 em erro do git) |
+| `GET /tasks`, `GET /tasks/<id>` | as tarefas do projeto de quem chama (`{"tasks": […]}`, sem brief, relatório nem histórico; com `scope` e `waiting_for`) ou uma tarefa completa (`{"task": {…}}`); com o token mestre, `?project=<id>` escolhe o projeto. Qualquer token pode ler |
+| `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"effort"][,"base"][,"scope"][,"start"]}` → `{"task"}`: cria a tarefa (`kind` padrão `claude`; `start: true` já a inicia) e grava quem pediu como criador; `scope` é a lista de caminhos que a tarefa vai mexer (um texto por caminho, ou um texto só com um caminho por linha; vazio = sem escopo; ver "Escopo e fila"); 400 para título vazio, agente ou modelo inválidos, escopo com curinga/caminho absoluto/`..`, base que não é branch local ou projeto sem git/commit; se `start` falha, devolve o erro com a tarefa criada; se o escopo está ocupado, devolve 200 com a tarefa em `queued` |
+| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` → `{"task"}`: inicia (ou põe na fila, se o escopo está ocupado: a resposta traz `status: "queued"` e `waiting_for`), mescla (a tarefa fica aguardando validação), valida (conclui e limpa) ou descarta (409 se o estado não permite, se o repositório principal não está pronto, se há conflito ou se a validação não pode limpar; 500 em erro do git) |
 | `POST /tasks/<id>/done` | `{"report"}` → `{"task"}`: o agente da tarefa entrega o relatório (só o dono da tarefa, ou o token mestre) |
 | `POST /tasks/<id>/return` | `{"feedback"}` → `{"task"}`: devolve a tarefa em revisão ao agente, com o feedback |
 | `POST /tasks/<id>/reject` | `{"feedback"}` → `{"task"}`: reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, com o motivo (400 para motivo vazio; 409 fora de `Validating` ou com as abas dos agentes desligadas) |
@@ -110,7 +110,7 @@ mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupan
 os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
 mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity; os demais CLIs começam sem histórico no headless.
 
-**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--outline <arquivo…>` (`/outline`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
+**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--outline <arquivo…>` (`/outline`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base`, `--scope <caminho>…` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
 
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
@@ -208,14 +208,15 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
    (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
    digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
 
-**Tarefas** (`crates/core/src/tasks.rs`; ponte em `bridge.rs`, `ask-agent --task`). A unidade de trabalho do AgentDeck: um
+**Tarefas** (`crates/core/src/tasks.rs` e `scope.rs`; ponte em `bridge.rs`, `ask-agent --task`). A unidade de trabalho do AgentDeck: um
 pedido (brief), um agente com modelo, uma worktree + branch próprias, um relatório, um diff e um ciclo de vida.
 
 ```
 Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged ("concluída")
-  │                 ▲  ▲  ▲           │                  │ └─discard──▶ Discarded (de qualquer estado não final)
-  │                 │  │  └──return───┘                  │
-  │                 │  └────────────reject───────────────┘
+  │  │              ▲  ▲  ▲           │                  │ └─discard──▶ Discarded (de qualquer estado não final)
+  │  │              │  │  └──return───┘                  │
+  │  │              │  └────────────reject───────────────┘
+  │  └─ escopo ocupado ▶ Queued ──(a outra sai de Running/Review)──▶ Running
   └─ erro ao iniciar ▶ Failed ──start de novo──▶ Running
 ```
 
@@ -225,7 +226,7 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
 
 - **Dados.** `Task { id (t1, t2…: contador por projeto, nunca reaproveitado), title, brief, status, base, branch
   (tarefa/<id>-<slug>), worktree, kind, model, instance (<modelo>@<id>, ex.: claude@t3), creator, created_ms, started_ms,
-  finished_ms, report, diff_stat, error, merge_commit, events (últimos 200) }`. `merge_commit` é o hash completo do commit da última mesclagem (`git rev-parse HEAD` logo depois do `merge --no-ff`; `None` se nunca foi mesclada; uma nova mesclagem, depois de reprovar, sobrescreve; `#[serde(default)]`: tarefas antigas carregam com `None`). Ficam em `dados/tarefas/<projeto>.json`
+  finished_ms, report, diff_stat, error, merge_commit, scope, queued_ms, waiting_for, outside_scope, events (últimos 200) }`. `merge_commit` é o hash completo do commit da última mesclagem (`git rev-parse HEAD` logo depois do `merge --no-ff`; `None` se nunca foi mesclada; uma nova mesclagem, depois de reprovar, sobrescreve; `#[serde(default)]`: tarefas antigas carregam com `None`). Ficam em `dados/tarefas/<projeto>.json`
   (`{"version","next","tasks"}`), gravados por arquivo temporário + `rename`, uma gravação por vez, **fora do repositório do
   usuário**; um arquivo ilegível é copiado para `….json.ilegivel-<ms>` antes de recomeçar. Remover o projeto não apaga o arquivo.
 - **Worktrees.** Em `<raiz do repositório>/.agentdeck/worktrees/<id>` (dentro do repositório de propósito: agentes confinados
@@ -239,6 +240,27 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   worktree, commits pequenos, nada de merge nem push, o relatório em um arquivo com `ask-agent --task done <id> --file <arq>`, dúvidas ao chefe) vão
   para a aba por `CoreEvent::Deliver { request: 0 }`, o mesmo caminho das mensagens entre agentes (fila e regras de `delivery.rs`,
   sem esperar resposta). **Aba que precisa abrir** (nova, ou processo encerrado): digitar o texto num CLI que ainda sobe o perde (visto no Antigravity, que mostra um aviso na abertura). Então o texto completo (brief, devolução ou reprovação) vai para `dados/tarefas/<projeto>-<id>-brief.md` (ou `-feedback.md`) e `Delivery::boot` leva só uma linha curta em ASCII (`tasks::boot_line`: "Tarefa t11: … Leia o arquivo <caminho> e comece agora…"); a interface a guarda com `Core::set_boot_prompt` e `agents::spawn_spec_for` a põe na linha de comando, uma vez: Claude `claude "<linha>"` (posicional, **antes** das opções, porque `--add-dir`/`--allowedTools` aceitam vários valores), Antigravity `agy -i "<linha>"`, OpenCode `opencode --prompt "<linha>"` (`models::boot_prompt_flag`). Os demais CLIs, a aba já viva e o caminho com não-ASCII seguem digitando. Erro ao iniciar = `Failed` com a mensagem; `start` de novo tenta outra vez.
+- **Escopo e fila** (`crates/core/src/scope.rs`, funções puras; a fila em `tasks.rs`). `Task::scope` é uma **lista de caminhos**
+  (arquivos e pastas relativos à raiz do repositório, **não globs**; `task_create` normaliza: separador `/`, sem `./` nem barra no
+  fim, sem repetidos, e recusa curinga `*`/`?`, caminho absoluto e `..` com 400). Dois escopos se sobrepõem quando um caminho é igual ao
+  outro ou é prefixo dele **por componente** (`crates/core` cobre `crates/core/src/git.rs`; `crates/co` não cobre `crates/core`), sem
+  diferenciar maiúsculas e com `/` e `\` equivalentes. `scope::UNRESERVED` (`memory`, `Cargo.lock`) é a lista, num lugar só, do que
+  **nenhuma tarefa reserva** (toda tarefa mexe nisso e se resolve na mesclagem): fica fora da sobreposição e do aviso de "fora do
+  escopo". Sem escopo (ou só com esses caminhos) a tarefa **nunca entra na fila nem segura ninguém**, como antes. **Fila:** em
+  `task_start` (também ao sair do rascunho, pelo botão e por `--start`), se o escopo se sobrepõe ao de uma tarefa `Running` ou
+  `Review` (ou de uma que já espera na fila e entrou antes: ninguém fura a fila), a tarefa vai a `Queued` (`queued_ms` ordena a fila,
+  `waiting_for` diz por qual tarefa espera, cada uma com um evento no histórico), sem worktree, branch, instância nem entrega ao agente; o
+  `Ok` traz a tarefa já na fila. `Failed` sem relatório (nova tentativa) não entra na fila: recusa com 409 enquanto o escopo está
+  ocupado. **Começar sozinha:** `Core::advance_queue_locked` percorre a fila na ordem e chama o mesmo `start_locked` do botão Iniciar
+  (cria a worktree **a partir da base daquele momento**, já com a mesclagem da que saiu, e emite o mesmo `Deliver`, então a interface abre
+  a aba sem mudança no `Deck::tick`); roda ao fim de `merge_task` (sucesso), `task_discard` e de um `task_start` que falhou (a tarefa
+  `Failed` deixou de segurar), com a trava das operações já tomada. `Core::tasks_advance_queue(projeto)` faz o mesmo sob demanda: a
+  interface o chama na primeira leitura do projeto se há tarefa `Queued`, para cobrir um fechamento do app no meio. A fila é só o campo
+  `status` no JSON em `dados/tarefas/`: **sobrevive ao fechamento do app**. **`Validating` não segura a fila:** o código já foi mesclado
+  na base, a seguinte parte dele, e esperar o teste do usuário (que pode demorar) travaria o paralelismo; se a tarefa for reprovada e
+  voltar a `Running` sobreposta a outra, só ganha um evento de aviso (a próxima mesclagem pode conflitar, como sempre). No `task_done`,
+  os arquivos do diff (`changed_files` + o que está sem commit) fora do escopo vão para `Task::outside_scope` e para o histórico
+  ("mexeu fora do escopo: …"); a revisão mostra como **aviso**, nunca bloqueia.
 - **Relatório** (`task_done`): `Running`, ou `Validating` **com commits novos** na branch (`base..branch` > 0: o usuário corrigiu algo na aba
   enquanto a tarefa esperava validação e o agente entrega o que falta; evento "o agente entregou mais trabalho depois da mesclagem; em
   revisão"). Em `Validating` sem commits novos dá 409 ("já foi mesclada e espera a validação do usuário… quem decide é o usuário (Reprovar)").
@@ -283,8 +305,10 @@ encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com
   tarefa em andamento, em revisão ou aguardando validação é abrir a instância dela (`restore_instance` + aba): o terminal já abre na worktree.
 - **Interface** (`crates/app/src/tasks_ui.rs`, `ui/tasks.rs`): a aba Tarefas da barra direita. Cada chamada acima roda numa thread
   (`Deck::spawn_bg`) e volta como `UiMsg::Tasks`; a lista é relida a cada `TasksChanged` do projeto ativo. Grupos da lista: Em
-  revisão, **Aguardando validação**, Em andamento, Rascunho, Falhou, Concluídas, Canceladas; o selo do ícone conta revisão + validação.
-  Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
+  revisão, **Aguardando validação**, Em andamento, **Na fila**, Rascunho, Falhou, Concluídas, Canceladas; o selo do ícone conta revisão + validação.
+  O formulário "+ Nova" tem o campo Escopo (um caminho por linha ou separados por vírgula; `tasks_ui::parse_scope`); o cartão da tarefa
+  na fila diz "na fila · espera tN" e o detalhe mostra o escopo, a faixa "Na fila: o escopo se sobrepõe ao da tarefa tN…" e, em revisão, o
+  aviso "Mexeu fora do escopo: …". Na fila só há o botão Descartar. Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
   (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base. O botão do diff (`can_show_diff`) vale também em `Validating`/`Merged` com
   `merge_commit`, e aí diz **"Ver o que foi mesclado"** ("Ver diff completo" nos outros estados); o detalhe mostra o hash curto ao lado de
   `branch → base`. O diff abre no centro, no modo Documentos (abaixo); o pedido e o relatório também (**Abrir em Documentos**).

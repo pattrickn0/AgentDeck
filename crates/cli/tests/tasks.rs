@@ -225,3 +225,55 @@ fn the_task_commands_drive_the_whole_lifecycle() {
     assert!(text(&run(&core, None, &["--help"], "").stdout).contains("--task"));
     core.shutdown();
 }
+
+#[test]
+fn the_scope_flag_queues_an_overlapping_task_and_shows_it() {
+    if git_exe().is_none() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    isolated_git_config();
+    let tmp = tempfile::tempdir().expect("tmp");
+    let core = start_core(tmp.path());
+    let ws = tmp.path().join("workspace");
+    git(&ws, &["init", "-q"]);
+    std::fs::write(ws.join("a.txt"), "um\n").expect("w");
+    git(&ws, &["add", "-A"]);
+    git(&ws, &["commit", "-q", "-m", "inicial"]);
+    let project = core.active_project_id();
+
+    // O escopo vai até a próxima opção; o pedido vem antes dele (ou do arquivo).
+    let out = run(&core, None, &["--task", "new", "Mexe no core", "pedido", "--scope", "crates/core", "memory/GERAL.md", "--start"], "");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let shown = text(&out.stdout);
+    assert!(shown.contains("escopo: crates/core, memory/GERAL.md") && shown.contains("iniciada na worktree"), "{shown}");
+    assert_eq!(core.task(&project, "t1").expect("t1").brief, "pedido");
+
+    let out = run(&core, None, &["--task", "new", "Mexe no git.rs", "pedido", "--start", "--scope", r"crates\core\src\git.rs"], "");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let shown = text(&out.stdout);
+    assert!(shown.contains("na fila: o escopo se sobrepõe ao da t1"), "{shown}");
+    let t2 = core.task(&project, "t2").expect("t2");
+    assert_eq!((t2.status, t2.waiting_for.as_deref()), (agentdeck_core::TaskStatus::Queued, Some("t1")));
+    assert_eq!(t2.scope, ["crates/core/src/git.rs"], "o caminho chega normalizado");
+
+    let list = text(&run(&core, None, &["--task", "list"], "").stdout);
+    let line = list.lines().find(|l| l.starts_with("t2")).expect("t2");
+    assert!(line.contains("na fila") && line.ends_with("Mexe no git.rs (espera t1)"), "{list}");
+    let detail = text(&run(&core, None, &["--task", "show", "t2"], "").stdout);
+    assert!(detail.contains("Na fila: espera a tarefa t1") && detail.contains("Escopo: crates/core/src/git.rs"), "{detail}");
+
+    // Iniciar de novo continua na fila; descartar a primeira a faz começar sozinha.
+    let out = run(&core, None, &["--task", "start", "t2"], "");
+    assert!(text(&out.stdout).contains("Tarefa t2 na fila"), "{}", text(&out.stdout));
+    assert_eq!(run(&core, None, &["--task", "discard", "t1"], "").status.code(), Some(0));
+    assert_eq!(core.task(&project, "t2").expect("t2").status, agentdeck_core::TaskStatus::Running);
+
+    // Escopo inválido: a ponte recusa e nada é criado.
+    let out = run(&core, None, &["--task", "new", "Ruim", "pedido", "--scope", "crates/*.rs"], "");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("não de padrões"), "{}", text(&out.stderr));
+    assert_eq!(run(&core, None, &["--task", "new", "Ruim", "--scope"], "").status.code(), Some(2));
+    assert_eq!(core.tasks(&project).len(), 2);
+    core.shutdown();
+}

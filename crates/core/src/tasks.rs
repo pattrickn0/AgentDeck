@@ -5,11 +5,18 @@
 //!
 //! ```text
 //! Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged (concluída)
-//!   │                 ▲                 │ └─discard──▶ Discarded     │ └─discard──▶ Discarded
-//!   │                 ├───return────────┘                            │
-//!   │                 └───────────────reject─────────────────────────┘
+//!   │  │              ▲                 │ └─discard──▶ Discarded     │ └─discard──▶ Discarded
+//!   │  │              ├───return────────┘                            │
+//!   │  │              └───────────────reject─────────────────────────┘
+//!   │  └─ escopo ocupado ─▶ Queued ──(a outra sai de Running/Review)──▶ Running
 //!   └─ start com erro ─▶ Failed ──(start de novo)──▶ Running
 //! ```
+//!
+//! **Escopo e fila:** a tarefa pode declarar os caminhos que vai mexer ([`Task::scope`], ver [`crate::scope`]). Ao
+//! iniciar, se o escopo se sobrepõe ao de uma tarefa em andamento ou em revisão (ou ao de outra que já espera na
+//! fila, que chegou antes), ela fica em `Queued`, dizendo por qual espera ([`Task::waiting_for`]), e começa sozinha
+//! quando essa tarefa é mesclada, descartada ou falha ([`Core::advance_queue`]), partindo da base daquele momento.
+//! `Validating` não segura a fila: o código já está na base. Sem escopo, nada disso vale.
 //!
 //! Mesclar é "o diff parecia certo"; o teste de verdade o usuário faz depois, no app compilado. Por isso
 //! mesclar **não** encerra o agente: a tarefa fica em `Validating` (aba, worktree e branch vivas, a branch
@@ -62,6 +69,8 @@ pub const MAX_SLUG: usize = 40;
 /// Relatório e brief maiores que isto são cortados (em caracteres).
 pub const MAX_TEXT: usize = 200_000;
 /// Texto do `git diff --stat` guardado (em caracteres).
+/// Arquivos fora do escopo guardados por tarefa.
+const MAX_OUTSIDE: usize = 100;
 const MAX_STAT: usize = 8_000;
 /// Nome da pasta, na raiz do repositório, que guarda as worktrees.
 pub const AGENTDECK_DIR: &str = ".agentdeck";
@@ -79,6 +88,9 @@ pub enum TaskStatus {
     /// Criada; ainda sem worktree nem agente.
     #[default]
     Draft,
+    /// Iniciada, mas o escopo se sobrepõe ao de outra tarefa em andamento: espera a vez, sem worktree nem agente.
+    /// Começa sozinha quando o escopo liberar.
+    Queued,
     /// O agente está trabalhando na worktree.
     Running,
     /// O agente entregou o relatório: espera a revisão (mesclar, devolver ou descartar).
@@ -99,6 +111,7 @@ impl TaskStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             TaskStatus::Draft => "draft",
+            TaskStatus::Queued => "queued",
             TaskStatus::Running => "running",
             TaskStatus::Review => "review",
             TaskStatus::Merged => "merged",
@@ -112,6 +125,7 @@ impl TaskStatus {
     pub fn label(self) -> &'static str {
         match self {
             TaskStatus::Draft => "rascunho",
+            TaskStatus::Queued => "na fila",
             TaskStatus::Running => "em andamento",
             TaskStatus::Review => "em revisão",
             TaskStatus::Merged => "concluída",
@@ -203,6 +217,16 @@ pub struct Task {
     /// Linha do tempo das mensagens do `ask-agent` em que a instância da tarefa fala ou ouve, da mais antiga
     /// para a mais nova (no máximo [`MAX_MESSAGES`]). Ver [`Task::record_message`].
     pub messages: Vec<TaskMessage>,
+    /// Os caminhos (arquivos e pastas, relativos à raiz do repositório, já normalizados) que a tarefa declarou que
+    /// vai mexer; vazio = sem escopo (nunca entra na fila nem segura ninguém). Ver [`crate::scope`].
+    pub scope: Vec<String>,
+    /// Quando entrou na fila (`Queued`); define a ordem entre as que esperam. `None` fora da fila.
+    pub queued_ms: Option<u64>,
+    /// Em `Queued`, o id da tarefa por quem espera.
+    pub waiting_for: Option<String>,
+    /// Os arquivos do diff entregue que ficam fora do escopo (sem `memory/**` e `Cargo.lock`); a revisão mostra
+    /// como aviso, nunca como bloqueio. Vazio sem escopo.
+    pub outside_scope: Vec<String>,
 }
 
 impl Task {
@@ -271,6 +295,8 @@ impl Task {
             "finished_ms": self.finished_ms,
             "has_report": self.report.is_some(),
             "error": self.error,
+            "scope": self.scope,
+            "waiting_for": self.waiting_for,
         })
     }
 }
@@ -291,6 +317,8 @@ pub struct TaskSpec {
     pub base: Option<String>,
     /// Quem pediu (id de agente ou `usuário`).
     pub creator: Option<String>,
+    /// Os caminhos que a tarefa vai mexer ([`Task::scope`]); vazio = sem escopo. Normalizados em `task_create`.
+    pub scope: Vec<String>,
 }
 
 /// Por que uma operação com tarefas não foi feita. `http_status` é o código da ponte.
@@ -922,6 +950,8 @@ impl Core {
             return Err(TaskError::Invalid(format!("a base \"{}\" não é uma branch local deste repositório", base.escape_debug())));
         }
 
+        let scope = crate::scope::normalize_all(&spec.scope).map_err(TaskError::Invalid)?;
+
         let number = self.with_tasks(project, false, |p| p.next.max(1));
         let id = format!("t{number}");
         let instance = Ident::parse(&format!("{kind}@{id}"))
@@ -934,6 +964,7 @@ impl Core {
             title,
             brief,
             status: TaskStatus::Draft,
+            scope,
             base,
             kind,
             model,
@@ -958,12 +989,51 @@ impl Core {
 
     /// Inicia a tarefa: worktree + branch, instância do agente com o terminal na worktree e o brief
     /// entregue à aba. Vale para `Draft` e para `Failed` sem relatório (nova tentativa). Só com as abas dos
-    /// agentes ligadas (tarefas não rodam em headless). Roda o git: fora da thread da interface.
+    /// agentes ligadas (tarefas não rodam em headless). Se a tarefa tem escopo e ele se sobrepõe ao de uma tarefa em
+    /// andamento ou em revisão (ou de outra que já espera), ela vai para `Queued` em vez de começar (o `Ok` traz a
+    /// tarefa já na fila; uma que falhou ao iniciar não entra na fila: recusa com `Conflict`). Aceita também uma
+    /// tarefa `Queued`, para conferir de novo. Roda o git: fora da thread da interface.
     pub fn task_start(&self, project: &str, id: &str) -> Result<Task, TaskError> {
         let _op = self.inner.tasks.op.lock();
+        let result = self.start_locked(project, id);
+        if result.is_err() {
+            // Uma tarefa que falhou ao iniciar não segura mais o escopo dela.
+            self.advance_queue_locked(project);
+        }
+        result
+    }
+
+    /// Começa a fila que já pode começar, no projeto (ver [`Core::advance_queue_locked`]). A interface chama ao
+    /// abrir o projeto: cobre o que ficou pelo caminho se o app fechou entre a tarefa sair e a seguinte começar.
+    /// Roda o git: fora da thread da interface.
+    pub fn tasks_advance_queue(&self, project: &str) {
+        let _op = self.inner.tasks.op.lock();
+        self.advance_queue_locked(project);
+    }
+
+    /// Passa pela fila do projeto na ordem de chegada e inicia cada tarefa cujo escopo já não se sobrepõe ao de
+    /// ninguém que ande à frente; as que continuam bloqueadas só atualizam o "espera por". A base é a de agora:
+    /// a worktree sai do tip da base neste momento, já com o que a tarefa anterior mesclou. Quem chama já tem a
+    /// trava das operações. Uma falha (aba desligada, git) fica no histórico da tarefa e não para as seguintes.
+    fn advance_queue_locked(&self, project: &str) {
+        let mut queue: Vec<Task> = self.tasks(project).into_iter().filter(|t| t.status == TaskStatus::Queued).collect();
+        queue.sort_by_key(queue_key);
+        for task in queue {
+            if let Err(e) = self.start_locked(project, &task.id) {
+                log::warn!("fila: a tarefa {} não começou: {e}", task.id);
+                self.update_task(project, &task.id, |t| {
+                    if t.status == TaskStatus::Queued {
+                        t.log(format!("fila: não consegui começar: {e}"));
+                    }
+                });
+            }
+        }
+    }
+
+    fn start_locked(&self, project: &str, id: &str) -> Result<Task, TaskError> {
         let task = self.task_or_404(project, id)?;
         let retry = task.status == TaskStatus::Failed && task.report.is_none();
-        if task.status != TaskStatus::Draft && !retry {
+        if !matches!(task.status, TaskStatus::Draft | TaskStatus::Queued) && !retry {
             return Err(TaskError::Conflict(format!(
                 "a tarefa {} está {}: só se inicia um rascunho (ou uma tarefa que falhou ao iniciar)",
                 task.id,
@@ -975,6 +1045,26 @@ impl Core {
                 "as tarefas rodam nas abas dos agentes: ligue \"Abrir abas dos agentes\" nas Configurações (no modo headless não há aba nem worktree por agente)".into(),
             ));
         }
+        if let Some(holder) = queue_holder(&self.tasks(project), &task) {
+            if retry {
+                return Err(TaskError::Conflict(format!(
+                    "o escopo da tarefa {} se sobrepõe ao da {holder}, que está em andamento: tente de novo quando ela terminar",
+                    task.id
+                )));
+            }
+            let now = now_ms();
+            return self
+                .update_task(project, &task.id, |t| {
+                    if t.waiting_for.as_deref() != Some(holder.as_str()) {
+                        t.log(format!("na fila: o escopo se sobrepõe ao da {holder}; começa quando ela terminar"));
+                    }
+                    t.status = TaskStatus::Queued;
+                    t.queued_ms.get_or_insert(now);
+                    t.waiting_for = Some(holder);
+                    t.clone()
+                })
+                .ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")));
+        }
         if let Err(e) = self.prepare_worktree(project, &task, retry) {
             return Err(self.fail_task(project, &task.id, e.message().to_owned()));
         }
@@ -984,6 +1074,8 @@ impl Core {
             t.started_ms = Some(now);
             t.finished_ms = None;
             t.error = None;
+            t.queued_ms = None;
+            t.waiting_for = None;
             t.log(format!("iniciada: worktree {} na branch {}", t.worktree.display(), t.branch));
             t.clone()
         });
@@ -1186,17 +1278,24 @@ impl Core {
             return Err(TaskError::Invalid("o relatório está vazio: diga o que foi feito, os arquivos, os testes e o que falta".into()));
         }
         let report = cap_text(report, MAX_TEXT);
-        let (stat, warning) = match self.task_repo(project) {
-            Ok(repo) => (
-                diff_stat(&repo, &task.base, &task.branch),
-                worktree_dirty(&repo, &task.worktree).filter(|d| !d.is_empty()).map(|d| {
+        let (stat, warning, outside) = match self.task_repo(project) {
+            Ok(repo) => {
+                let dirty = worktree_dirty(&repo, &task.worktree).filter(|d| !d.is_empty());
+                let outside = match task.scope.is_empty() {
+                    true => Vec::new(),
+                    false => {
+                        crate::scope::outside(&task.scope, &union_files(changed_files(&repo, &task.base, &task.branch), dirty.clone()))
+                    }
+                };
+                let warning = dirty.map(|d| {
                     format!(
                         "atenção: há alterações sem commit na worktree ({}); o agente precisa fazer o commit antes da mesclagem",
                         short_list(&d)
                     )
-                }),
-            ),
-            Err(e) => (Err(e.message().to_owned()), None),
+                });
+                (diff_stat(&repo, &task.base, &task.branch), warning, outside)
+            }
+            Err(e) => (Err(e.message().to_owned()), None, Vec::new()),
         };
         let updated = self.update_task(project, &task.id, |t| {
             t.report = Some(report);
@@ -1207,6 +1306,10 @@ impl Core {
             if let Some(w) = &warning {
                 t.log(w.clone());
             }
+            if !outside.is_empty() {
+                t.log(format!("mexeu fora do escopo: {}", short_list(&outside)));
+            }
+            t.outside_scope = outside.into_iter().take(MAX_OUTSIDE).collect();
             t.status = TaskStatus::Review;
             t.finished_ms = Some(now_ms());
             t.log(if after_merge {
@@ -1586,6 +1689,8 @@ impl Core {
             FeedEntry::system(format!("Tarefa {} mesclada em {}, aguardando validação: {}", task.id, task.base, task.title))
                 .in_project(project),
         );
+        // A tarefa deixou de segurar o escopo: quem esperava por ela parte da base já com esta mesclagem.
+        self.advance_queue_locked(project);
         Ok(MergeOutcome { task, note })
     }
 
@@ -1711,6 +1816,12 @@ impl Core {
             (before, t.clone())
         });
         let (before, task) = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+        // `Validating` não segurava o escopo: se outra tarefa ocupou esse espaço nesse meio-tempo, só avisa.
+        if let Some(other) = queue_holder(&self.tasks(project), &task) {
+            self.update_task(project, &task.id, |t| {
+                t.log(format!("aviso: o escopo se sobrepõe ao da {other}, que está em andamento; a próxima mesclagem pode dar conflito"))
+            });
+        }
         let ident = self.open_task_instance(project, &task);
         let prompt = reject_message(&before, &feedback, aligned.is_ok(), &self.feedback_learnings(&before, &feedback));
         let boot = self.task_boot_prompt(project, &task, "feedback", "foi reprovada na validacao, com o motivo no arquivo", &prompt);
@@ -1784,6 +1895,7 @@ impl Core {
         let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
         self.emit(CoreEvent::GitChanged);
         self.feed(FeedEntry::system(format!("Tarefa {} descartada: {}", task.id, task.title)).in_project(project));
+        self.advance_queue_locked(project);
         Ok(task)
     }
 
@@ -1853,6 +1965,28 @@ fn valid_task_branch(branch: &str) -> bool {
 /// Saída padrão de um comando do git no repositório principal (limite das operações locais).
 fn git_out(repo: &Repo, args: &[&str]) -> Result<String, GitError> {
     run(repo.cmd(args), None, WRITE_TIMEOUT).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+}
+
+/// O número do id (`t12` → 12); 0 se o id não tem esse formato.
+fn task_number(id: &str) -> u64 {
+    id.strip_prefix('t').and_then(|n| n.parse().ok()).unwrap_or(0)
+}
+
+/// A ordem na fila: quem entrou antes, e pelo número em caso de empate. Quem não está na fila vai para o fim.
+fn queue_key(task: &Task) -> (u64, u64) {
+    (task.queued_ms.unwrap_or(u64::MAX), task_number(&task.id))
+}
+
+/// Por qual tarefa `task` espera, se espera: uma em andamento ou em revisão cujo escopo se sobrepõe ao dela (as
+/// primeiras a ser citadas) ou, não havendo, uma que já esperava na fila antes dela e tem escopo sobreposto.
+/// `Validating` não segura: o código já está na base. Sem escopo reservado (ver [`crate::scope`]) ninguém espera.
+fn queue_holder(tasks: &[Task], task: &Task) -> Option<String> {
+    let clash = |o: &&Task| o.id != task.id && crate::scope::overlaps(&o.scope, &task.scope);
+    let active = tasks.iter().filter(clash).find(|o| matches!(o.status, TaskStatus::Running | TaskStatus::Review));
+    let ahead = || {
+        tasks.iter().filter(clash).filter(|o| o.status == TaskStatus::Queued && queue_key(o) < queue_key(task)).min_by_key(|o| queue_key(o))
+    };
+    active.or_else(ahead).map(|o| o.id.clone())
 }
 
 /// Arquivos que a branch trouxe em relação à base (`git diff --name-only base...branch`); vazio se a branch
