@@ -901,9 +901,7 @@ impl Core {
 
         // Agente: instalado, com aba (nada de `shell`) e sem `@` (o cargo é o id da tarefa).
         let automatic_choice = spec.kind.trim().is_empty();
-        let selected = automatic_choice
-            .then(|| capability::select(&self.capability_candidates(&kinds, spec.effort), spec.level))
-            .flatten();
+        let selected = automatic_choice.then(|| capability::select(&self.capability_candidates(&kinds, spec.effort), spec.level)).flatten();
         let asked = match spec.kind.trim().to_lowercase() {
             k if k.is_empty() => selected
                 .as_ref()

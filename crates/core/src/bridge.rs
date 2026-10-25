@@ -1078,7 +1078,10 @@ fn task_spec(msg: &Value, creator: &str) -> Result<crate::tasks::TaskSpec, (u16,
         Some(l) => match crate::capability::Level::parse(&l) {
             Some(l) => l,
             None => {
-                let error = format!("nível inválido: \"{}\" (use simples, media ou complexa)", l.chars().take(20).collect::<String>().escape_debug());
+                let error = format!(
+                    "nível inválido: \"{}\" (use simples, media ou complexa)",
+                    l.chars().take(20).collect::<String>().escape_debug()
+                );
                 return Err((400, json!({ "error": error })));
             }
         },

@@ -1453,12 +1453,18 @@ fn the_task_level_is_recorded_and_the_choice_warns_when_the_model_falls_short() 
         .core
         .task_create(
             &env.project,
-            TaskSpec { level: Level::Complex, model: Some("sonnet".into()), effort: Some(agentdeck_core::models::Effort::Low), ..spec("Rápido") },
+            TaskSpec {
+                level: Level::Complex,
+                model: Some("sonnet".into()),
+                effort: Some(agentdeck_core::models::Effort::Low),
+                ..spec("Rápido")
+            },
         )
         .expect("create");
     assert!(log(&low).contains("claude sonnet só vai até media"), "{}", log(&low));
     // Agente automático: o capaz do nível, com o motivo registrado.
-    let auto = env.core.task_create(&env.project, TaskSpec { kind: String::new(), level: Level::Complex, ..spec("Automático") }).expect("create");
+    let auto =
+        env.core.task_create(&env.project, TaskSpec { kind: String::new(), level: Level::Complex, ..spec("Automático") }).expect("create");
     assert_eq!(auto.kind, "claude");
     assert!(log(&auto).contains("pela capacidade e pela cota: complexa: claude sonnet, capaz"), "{}", log(&auto));
 }
