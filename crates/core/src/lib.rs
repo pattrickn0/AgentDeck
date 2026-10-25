@@ -154,7 +154,7 @@ pub(crate) struct CoreInner {
     /// Tarefas (mesa de tarefas) de cada projeto, em `dados/tarefas/<projeto>.json`.
     pub tasks: tasks::TaskStore,
     /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
-    _data_lock: std::fs::File,
+    data_lock: Mutex<Option<std::fs::File>>,
 }
 
 /// Quem chamou a ponte, pelo token que recebeu no ambiente.
@@ -290,7 +290,7 @@ impl Core {
             github: github::GithubState::default(),
             usage: usage::UsageStore::load(paths.data_dir.join(usage::USAGE_FILE)),
             tasks: tasks::TaskStore::default(),
-            _data_lock: data_lock,
+            data_lock: Mutex::new(Some(data_lock)),
             paths,
         };
         let core = Core { inner: Arc::new(inner) };
@@ -964,6 +964,9 @@ impl Core {
             server.unblock();
         }
         *self.inner.watcher.lock() = None;
+        // A trava sai agora, não quando a última cópia do `Core` sumir: threads em segundo plano (ponte, cota) ainda
+        // seguram cópias por um instante, e uma nova abertura na mesma pasta de dados recusaria nesse intervalo.
+        self.inner.data_lock.lock().take();
     }
 }
 
@@ -985,5 +988,33 @@ mod tests {
         assert!(err.starts_with("Outra janela do AgentDeck já está usando a pasta de dados"), "{err}");
         drop(first);
         lock_data_dir(tmp.path()).expect("livre de novo");
+    }
+
+    /// Visto no CI do Fedora: depois do `shutdown`, uma cópia do `Core` ainda viva numa thread segurava a trava, e a
+    /// reabertura na mesma pasta de dados recusava.
+    #[test]
+    fn shutdown_frees_the_data_dir_even_with_a_copy_still_alive() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let root = tmp.path();
+        let paths = paths::AppPaths {
+            app_dir: root.join("app"),
+            bin_dir: root.join("bin"),
+            data_dir: root.join("dados"),
+            default_workspace: root.join("ws"),
+            whisper_dir: root.join("whisper"),
+            config_file: root.join("cfg").join("config.json"),
+        };
+        let opts = StartOptions {
+            search_path: Some(root.join("vazio").into_os_string()),
+            home_dir: Some(root.join("home")),
+            watch_workspace: false,
+            config: Some(Config::with_project(root.join("ws"))),
+            system_dirs: false,
+        };
+        let (core, _rx) = Core::start_with(paths, opts).expect("start");
+        let still_alive = core.clone();
+        core.shutdown();
+        lock_data_dir(&root.join("dados")).expect("a pasta fica livre logo depois do shutdown");
+        drop(still_alive);
     }
 }

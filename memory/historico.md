@@ -6,6 +6,7 @@ o estado atual em [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Concluído
 
+- [x] **Teste instável do Fedora: a trava da pasta de dados sai no `shutdown`** (2026-10-25): uma cópia do `Core` viva numa thread segurava `dados/.agentdeck.lock` e a reabertura recusava; `Core::shutdown` agora solta a trava.
 - [x] **`crates/app/src/deck.rs` dividido em módulos** (2026-10-25, `t54`): o arquivo de ~2.900 linhas virou `crates/app/src/deck/` (`mod`, `frame`, `tabs`, `keyboard`, `sidebar`, `projects`, `feed`, `attachments`, `dictation`), sem mudar comportamento.
 - [x] **Codex no Windows: a mensagem colada não fica mais parada no campo** (2026-10-25): o Enter espera 1 ms a mais por caractere colado (teto de 10 s), evitando virar quebra de linha antes de o Codex ler toda a colagem.
 - [x] **`tasks.rs` dividido em módulos** (2026-10-25, `t53`): `crates/core/src/tasks.rs` virou `crates/core/src/tasks/` (`mod`, `text`, `store`, `lifecycle`, `merge`, `finish`, `git_ops`, `stash`), sem mudar a API.
