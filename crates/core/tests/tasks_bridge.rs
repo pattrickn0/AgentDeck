@@ -301,3 +301,33 @@ fn the_bridge_reads_the_effort_of_a_new_task() {
     assert_eq!(status, 400);
     env.core.shutdown();
 }
+
+#[test]
+fn the_bridge_reads_the_scope_of_a_new_task_and_queues_on_start() {
+    need_git!();
+    let env = start();
+    let token = tab_token(&env, "claude");
+    let post = |body: &str| http(&env.core, "POST", "/tasks", &token, body);
+    // Lista de caminhos ou texto com um por linha; chega normalizado e aparece na lista e no detalhe.
+    let (status, body) = post(r#"{"title":"Core","kind":"claude","scope":["crates/core/","Crates\\Core\\"],"start":true}"#);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((body["task"]["status"].as_str(), &body["task"]["scope"]), (Some("running"), &json!(["crates/core"])));
+    let (status, body) = post(r#"{"title":"Git","kind":"claude","scope":"crates/core/src/git.rs\n\nmemory/GERAL.md","start":true}"#);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["task"]["status"], "queued");
+    assert_eq!(body["task"]["waiting_for"], "t1");
+    assert_eq!(body["task"]["scope"], json!(["crates/core/src/git.rs", "memory/GERAL.md"]));
+    let (status, list) = http(&env.core, "GET", "/tasks", &token, "");
+    assert_eq!(status, 200, "{list}");
+    assert_eq!((list["tasks"][1]["status"].as_str(), list["tasks"][1]["waiting_for"].as_str()), (Some("queued"), Some("t1")));
+    assert_eq!(list["tasks"][1]["scope"], json!(["crates/core/src/git.rs", "memory/GERAL.md"]));
+    let (status, shown) = http(&env.core, "GET", "/tasks/t2", &token, "");
+    assert_eq!((status, shown["task"]["waiting_for"].as_str()), (200, Some("t1")));
+    // Escopo inválido ou de outro tipo: 400, sem criar.
+    for bad in [r#""scope":["crates/*.rs"]"#, r#""scope":["/abs"]"#, r#""scope":["../x"]"#, r#""scope":[3]"#, r#""scope":7"#] {
+        let (status, body) = post(&format!(r#"{{"title":"Ruim","kind":"claude",{bad}}}"#));
+        assert_eq!(status, 400, "{bad}: {body}");
+    }
+    assert_eq!(env.core.tasks(&env.project).len(), 2);
+    env.core.shutdown();
+}
