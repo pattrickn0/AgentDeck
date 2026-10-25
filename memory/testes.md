@@ -148,7 +148,7 @@ Equipe e agentes em árvore ★
 
 Segurança, ambiente e agentes novos
 
-- [ ] Abrir **uma segunda janela** do AgentDeck: aparece a mensagem "outra janela já está usando a pasta de dados" e ela fecha.
+- [ ] Abrir **uma segunda janela** do AgentDeck: ela sai em silêncio e a primeira vem para a frente (ver "Bandeja e segunda abertura"). Só se a primeira estiver travada aparece "outra janela já está usando a pasta de dados".
 - [ ] Com `AGENTDECK_HOME` apontando para outra pasta, a segunda janela abre (instância separada).
 - [ ] Abrir o AgentDeck **de dentro de uma aba** de outro AgentDeck: a aba de origem não cai.
 - [ ] Pasta de dados com `&` no caminho (`AGENTDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.

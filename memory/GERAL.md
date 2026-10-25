@@ -40,8 +40,9 @@ volta eventos `CoreEvent`.
 | `whisper/` | motor e modelos do ditado por voz (whisper.cpp) |
 | `%APPDATA%\AgentDeck\config.json` | configuração (na primeira abertura, copiada de `%APPDATA%\CommandDeck\config.json`, se existir). Com `AGENTDECK_HOME`, tudo isso fica dentro dessa pasta |
 
-**Uma janela por pasta de dados:** uma segunda janela usando o mesmo `dados/` é recusada. Para abrir outra
-instância isolada, use `AGENTDECK_HOME`.
+**Uma janela por pasta de dados:** abrir o app de novo com o mesmo `dados/` traz a instância viva de volta (`POST /activate`)
+e sai em silêncio; o × da janela esconde na bandeja e quem encerra é o menu do ícone. Para abrir outra instância isolada,
+use `AGENTDECK_HOME`.
 
 ### Abas são instâncias
 
