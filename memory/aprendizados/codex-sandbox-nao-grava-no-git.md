@@ -13,3 +13,7 @@ mesclagem foi recusada por trabalho sem commit. O commit só saiu quando o coman
 **Como aplicar:** ao dar tarefa ao Codex, diga no pedido que o commit pede aprovação fora do sandbox. Melhor: o app fazer
 o commit do que sobrou na worktree ao receber o `--task done`, ou abrir o Codex das tarefas com outra política de
 sandbox (decisão do usuário).
+
+**Teste que só falha no sandbox:** `file_lock::tests::a_file_held_open_names_this_process` falha dentro do Codex (o
+Restart Manager devolve `[]`) e passa fora dele (visto na t55, 2026-10-25). Quem revisa roda os testes fora do sandbox
+antes de tratar essa falha como defeito.
