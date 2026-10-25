@@ -87,9 +87,9 @@ de um projeto que não é o ativo é escrito na primeira aba aberta nele.
 
 | Rota | Descrição |
 | :-- | :-- |
-| `GET /agents` | `{"agents": [...], "models": {id: modelo}}` com os agentes instalados e as instâncias abertas no projeto de quem chama, e o modelo de LLM das instâncias que têm um |
-| `GET /models`, `GET /models?agent=<id>` | `{"text"}`: o inventário de `ask-agent --models` (um bloco por agente instalado, ou só o de `agent`; ver "Inventário para os agentes" abaixo); 400 para `agent` fora de `[A-Za-z0-9:._/#@+-]{1,128}` e 404 para um agente que não está instalado |
-| `GET /team` | `{"id","boss","crew","models"}`: a posição de quem chama na equipe (só token de aba); `models` traz o modelo de quem aparece na resposta |
+| `GET /agents` | `{"agents": [...], "models": {id: modelo}, "quota": {id: cota}}` com os agentes instalados e as instâncias abertas no projeto de quem chama, o modelo de LLM das instâncias que têm um e a cota dele (porcentagem e renovação, ou `"cota: sem leitura"` / `"cota: última leitura há …"` nos quatro CLIs oficiais) |
+| `GET /models`, `GET /models?agent=<id>` | `{"text"}`: o inventário de `ask-agent --models` (um bloco por agente instalado, com os quatro CLIs oficiais ordenados por quem tem mais folga de cota primeiro quando sem `agent`, e sempre com a linha `"  cota: …"` neles; ver "Inventário para os agentes" abaixo); 400 para `agent` fora de `[A-Za-z0-9:._/#@+-]{1,128}` e 404 para um agente que não está instalado |
+| `GET /team` | `{"id","boss","crew","models","quota"}`: a posição de quem chama na equipe (só token de aba); `models` e `quota` trazem o modelo e a cota de quem aparece na resposta |
 | `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido, profundidade `>= 2`, `model` fora de `[A-Za-z0-9:._/#@+-]{1,128}` ou agente que não escolhe modelo (`o agente X não aceita escolher modelo`); 404 para `reply_to` que não está pendente; 409 para ciclo de espera ou para `model` diferente do da instância já aberta (`claude@dev já está aberta com sonnet; use --new para abrir outra com opus`); 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
 | `POST /learn` | `{"paths": [...]}` (até 50 caminhos; vazio = sem arquivos) → `{"text"}`: o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos (`ask-agent --learn`); sem caminhos, os globais por inteiro e o índice dos demais; 400 se não acha o repositório do projeto (ver "Memória em duas camadas") |
 | `POST /outline` | `{"paths": [...]}` (até 50 arquivos) → `{"text"}`: o esqueleto de cada arquivo, com assinaturas e linha, sem os corpos (`ask-agent --outline`); mesmo controle de identidade do `/learn`; 400 sem arquivos ou sem repositório do projeto (ver "Memória em duas camadas") |
@@ -174,13 +174,20 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
   dele direto.
 - **Inventário para os agentes** (`ask-agent --models [agente]`, `GET /models[?agent=<id>]`, `Core::models_inventory`):
   imprime, por agente instalado, o nome como vale no `--agent` e os modelos como o `--model` aceita, com os `-free`
-  primeiro e marcados "(grátis)"; o OpenCode sai agrupado por provedor, uma linha cada (`models::by_provider`); os
+  primeiro e marcados "(grátis)"; o OpenCode sai agrupado por provedor, uma linha cada (`models::by_provider`);
   o Codex não tem lista e os CLIs sem escolha de modelo
-  (aider…) saem como tal. Agente não instalado não aparece (e `--models <agente>` dele dá 404); uma listagem que
-  falha vira uma linha ("não consegui listar") sem derrubar o resto. Usa o cache de `known_models` e consulta os
-  CLIs em paralelo, então demora no máximo o `LIST_TIMEOUT`. A formatação é a função pura `models::format_inventory`.
-  As instruções da ponte e as regras da tarefa (`start_message`) só apontam o comando, sem colar a lista no prompt.
-- **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet)`, pelos campos `models` de `/agents` e `/team`), o
+  (aider…) saem como tal. Sem `agent`, os quatro CLIs oficiais (`claude`, `antigravity`, `codex`, `opencode`) vêm
+  primeiro, ordenados por **quem tem mais folga** (`models::sort_by_quota`, `Core::quota_used`: menor fração usada
+  primeiro; quem não tem leitura vem depois de quem tem folga e antes de quem está esgotado), e cada um deles traz
+  **sempre** a linha `"  cota: …"` (`Core::quota_lines`): quanto foi usado e quando renova, mesmo abaixo de 80%
+  (`"Gemini 4 Argon 4% usada (renova em 6 dias)"`, por grupo no Antigravity), ou `"cota: última leitura há N min"` /
+  `"cota: sem leitura"` quando não há leitura viva. Agente não instalado não aparece (e `--models <agente>` dele dá
+  404); uma listagem que falha vira uma linha ("não consegui listar") sem derrubar o resto. Usa o cache de
+  `known_models` e consulta os CLIs em paralelo, então demora no máximo o `LIST_TIMEOUT`. A formatação é a função pura
+  `models::format_inventory`. As instruções da ponte mandam consultar a cota de todos e distribuir o trabalho antes de
+  delegar ou de abrir tarefas.
+- **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet; cota 39% usada, renova em 2 h)` ou
+  `…; cota: sem leitura`, pelos campos `models` e `quota` de `/agents` e `/team`, `Core::quota_notes`), o
   cabeçalho da aba, a barra lateral e o menu de contexto da aba (só leitura: trocar o modelo de uma aba aberta exige
   reiniciar o agente e não existe ainda).
 

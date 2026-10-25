@@ -362,9 +362,26 @@ pub fn format_inventory(items: &[AgentModels], quotas: &std::collections::HashMa
         }
         if let Some(q) = quotas.get(agent) {
             lines.push(format!("  cota: {q}"));
+        } else if accepts_model(agent) {
+            lines.push("  cota: sem leitura".to_owned());
         }
     }
     lines.join("\n")
+}
+
+/// Ordena os agentes oficiais por quem tem mais folga primeiro (menor fração usada); quem não tem leitura vem
+/// depois de quem tem folga e antes de quem está esgotado, mantendo a ordem original em caso de empate.
+pub fn sort_by_quota(items: &mut [AgentModels], used: &std::collections::HashMap<String, f32>) {
+    items.sort_by_key(|item| {
+        if !accepts_model(&item.agent) {
+            return (1, 0, 0);
+        }
+        match used.get(&item.agent).copied() {
+            Some(u) if u < crate::usage::EXHAUSTED => (0, 0, (u.clamp(0.0, 1.0) * 10_000.0).round() as i32),
+            None => (0, 1, 0),
+            Some(u) => (0, 2, (u.clamp(0.0, 1.0) * 10_000.0).round() as i32),
+        }
+    });
 }
 
 /// Quanto tempo a lista de modelos de um agente fica em cache.
@@ -500,10 +517,13 @@ impl Core {
             }
             kinds.retain(|k| k == name);
         }
-        let out: Vec<AgentModels> = std::thread::scope(|s| {
+        let mut out: Vec<AgentModels> = std::thread::scope(|s| {
             let jobs: Vec<_> = kinds.iter().map(|k| s.spawn(move || classify(k, self.known_models(k)))).collect();
             jobs.into_iter().zip(&kinds).map(|(j, k)| j.join().unwrap_or_else(|_| classify(k, Vec::new()))).collect()
         });
+        if only.is_none() {
+            sort_by_quota(&mut out, &self.quota_used());
+        }
         Ok(out)
     }
 }
@@ -751,27 +771,50 @@ mod tests {
         ];
         let expected = [
             "claude --model: opus, sonnet",
+            "  cota: última leitura há 10 min",
             "antigravity --model: gemini-4-argon-free (grátis), gemini-4-argon-low",
             "  cota: Gemini 4 Argon ESGOTADA",
             "codex --model <nome> (este computador não lista os modelos)",
+            "  cota: sem leitura",
             "opencode --model <provedor>/<modelo>:",
             "  opencode/: glm-5.3-flash-free (grátis), beam-free#alta (grátis), pago",
             "  opencode-go/: deepseek-v4.1-flash",
+            "  cota: sem leitura",
             "aider: sem escolha de modelo (usa o padrão do CLI)",
         ];
-        let quotas = std::collections::HashMap::from([("antigravity".to_owned(), "Gemini 4 Argon ESGOTADA".to_owned())]);
+        let quotas = std::collections::HashMap::from([
+            ("claude".to_owned(), "última leitura há 10 min".to_owned()),
+            ("antigravity".to_owned(), "Gemini 4 Argon ESGOTADA".to_owned()),
+        ]);
         assert_eq!(format_inventory(&items, &quotas), expected.join("\n"));
     }
 
     #[test]
+    fn official_agents_are_ordered_by_who_has_the_most_quota_headroom_first() {
+        let mut items = vec![
+            classify("claude", strs(&["opus"])),
+            classify("antigravity", strs(&["gemini-4-argon-high"])),
+            classify("codex", Vec::new()),
+            classify("opencode", strs(&["opencode/glm-5.3-flash-free"])),
+            classify("aider", Vec::new()),
+        ];
+        // Antigravity acabou de renovar (4%), Claude em 60%, Codex esgotado, OpenCode sem leitura.
+        let used =
+            std::collections::HashMap::from([("claude".to_owned(), 0.60), ("antigravity".to_owned(), 0.04), ("codex".to_owned(), 1.0)]);
+        sort_by_quota(&mut items, &used);
+        let names: Vec<&str> = items.iter().map(|i| i.agent.as_str()).collect();
+        assert_eq!(names, ["antigravity", "claude", "opencode", "codex", "aider"]);
+    }
+
+    #[test]
     fn a_failed_listing_is_one_line_and_the_rest_stays() {
-        // O CLI instalado que não listou nada (tempo esgotado, erro): uma linha, sem derrubar as outras.
+        // O CLI instalado que não listou nada (tempo esgotado, erro): uma linha + a cota, sem derrubar as outras.
         let items = vec![classify("opencode", Vec::new()), classify("claude", strs(&["opus"]))];
         assert_eq!(items[0].list, ModelList::Failed);
         let text = format_inventory(&items, &Default::default());
-        assert_eq!(text.lines().count(), 2, "{text}");
+        assert_eq!(text.lines().count(), 4, "{text}");
         assert!(text.starts_with("opencode: não consegui listar os modelos"), "{text}");
-        assert!(text.ends_with("claude --model: opus"), "{text}");
+        assert!(text.ends_with("claude --model: opus\n  cota: sem leitura"), "{text}");
         // Nenhum agente instalado.
         assert_eq!(format_inventory(&[], &Default::default()), "Nenhum agente instalado neste computador.");
     }
