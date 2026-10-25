@@ -987,7 +987,7 @@ impl Core {
         });
         if automatic_choice {
             if let Some(choice) = selected_by_quota {
-                task.log(format!("agente escolhido automaticamente: {} ({})", choice.kind, choice.reason));
+                task.log(format!("agente escolhido automaticamente pela cota: {}", choice.reason));
             } else {
                 task.log(format!("agente escolhido automaticamente: {} (sem leitura de cota)", task.kind));
             }

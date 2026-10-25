@@ -32,15 +32,15 @@
 //! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do AgentDeck.
 //! `--signal` e `--usage` saem sempre com 0 (um hook que falha não pode atrapalhar o agente).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
-use agentdeck_core::usage::{from_claude_statusline, usage_to_json};
+use agentdeck_core::usage::{from_claude_statusline, quota_advisory, usage_to_json};
 use agentdeck_core::util::decode_text;
-use agentdeck_core::AgentUsage;
+use agentdeck_core::{AgentUsage, Ident};
 use serde_json::{json, Value};
 
 const USAGE: &str =
@@ -221,6 +221,12 @@ fn main() -> ExitCode {
         return fail("mensagem vazia.", 2);
     }
 
+    if reply_to.is_none() {
+        if let Some(note) = quota_advisory_for_target(&bridge, to) {
+            println!("Aviso de cota: {note}. A mensagem será enviada.");
+        }
+    }
+
     let wait = env("ASK_WAIT").and_then(|w| w.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_WAIT);
     // `ack`: a ponte só dá a resposta por entregue quando este processo confirma (ver `confirm_delivered`).
     let mut body = json!({ "from": from, "to": to, "message": message, "depth": depth, "new": force_new, "wait": wait, "ack": true });
@@ -301,6 +307,66 @@ fn models_command(bridge: &Bridge, only: Option<&str>) -> ExitCode {
         Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
         Err(e) => fail(e, 1),
     }
+}
+
+/// Lê a linha de cota do inventário (`--models`) sem impedir o envio se a leitura falhar.
+fn quota_advisory_for_target(bridge: &Bridge, target: &str) -> Option<String> {
+    let target = Ident::parse(target)?;
+    let kind = agentdeck_core::agents::resolve_alias(&target.kind);
+    if !["claude", "antigravity", "codex"].contains(&kind) {
+        return None;
+    }
+    let (status, json) = bridge.request("GET", "/models", None, Some(Duration::from_secs(40))).ok()?;
+    if status != 200 {
+        return None;
+    }
+    let text = json.get("text")?.as_str()?;
+    let (choices, used) = quota_usage_from_inventory(text);
+    quota_advisory(kind, &choices, &used)
+}
+
+/// Extrai o maior grupo relevante de cada linha `cota:` no inventário textual do `--models`.
+fn quota_usage_from_inventory(text: &str) -> (Vec<String>, HashMap<String, f32>) {
+    let official = ["claude", "antigravity", "codex"];
+    let mut choices = Vec::new();
+    let mut used = HashMap::new();
+    let mut current: Option<&str> = None;
+    for line in text.lines() {
+        if line.starts_with(' ') {
+            if let (Some(kind), Some(note)) = (current, line.trim_start().strip_prefix("cota:")) {
+                if let Some(value) = quota_used_from_note(note) {
+                    used.insert(kind.to_owned(), value);
+                }
+            }
+            continue;
+        }
+        let heading = line.split(" --model").next().or_else(|| line.split(':').next()).unwrap_or(line).trim();
+        current = official.iter().copied().find(|kind| *kind == heading);
+        if let Some(kind) = current {
+            if !choices.contains(&kind.to_owned()) {
+                choices.push(kind.to_owned());
+            }
+        }
+    }
+    (choices, used)
+}
+
+fn quota_used_from_note(note: &str) -> Option<f32> {
+    let groups: Vec<&str> = note.split(',').map(str::trim).collect();
+    let has_gemini = groups.iter().any(|group| group.to_ascii_lowercase().contains("gemini"));
+    groups
+        .iter()
+        .filter(|group| !has_gemini || group.to_ascii_lowercase().contains("gemini"))
+        .filter_map(|group| {
+            if group.to_ascii_uppercase().contains("ESGOTADA") {
+                return Some(1.0);
+            }
+            group.split_whitespace().find_map(|part| {
+                let percent = part.strip_suffix('%')?.parse::<f32>().ok()?;
+                Some((percent / 100.0).clamp(0.0, 1.0))
+            })
+        })
+        .max_by(f32::total_cmp)
 }
 
 /// `claude@dev (sonnet)` quando a instância tem modelo.
@@ -1249,5 +1315,16 @@ pronto"
         let json =
             json!({ "models": { "antigravity@arquiteto": "gemini-4-argon-high" }, "quota": { "antigravity@arquiteto": "cota esgotada" } });
         assert_eq!(with_model("antigravity@arquiteto", &models_of(&json)), "antigravity@arquiteto (gemini-4-argon-high; cota esgotada)");
+    }
+
+    #[test]
+    fn quota_inventory_uses_gemini_groups_and_excludes_opencode() {
+        let inventory = "claude --model: opus\n  cota: 74% usada\nantigravity --model: gemini-4-argon-high\n  cota: Gemini Models 45% usada, Gemini 4 Argon 48% usada, Claude and GPT models 98% usada\ncodex --model <nome> (este computador não lista os modelos)\n  cota: sem leitura\nopencode --model <provedor>/<modelo>: \n  cota: 0% usada";
+        let (choices, used) = quota_usage_from_inventory(inventory);
+        assert_eq!(choices, ["claude", "antigravity", "codex"]);
+        assert_eq!(used.get("claude"), Some(&0.74));
+        assert_eq!(used.get("antigravity"), Some(&0.48));
+        assert!(!used.contains_key("codex"));
+        assert!(!choices.iter().any(|kind| kind == "opencode"));
     }
 }

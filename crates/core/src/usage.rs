@@ -272,7 +272,7 @@ pub fn agent_used(u: &AgentUsage, now_ms: u64) -> Option<f32> {
         .fold(None, |a: Option<f32>, u| Some(a.map_or(u, |a| a.max(u))))
 }
 
-const OFFICIAL_AGENTS: [&str; 4] = ["claude", "antigravity", "codex", "opencode"];
+const OFFICIAL_AGENTS: [&str; 3] = ["claude", "antigravity", "codex"];
 
 /// Candidato elegível para a escolha de agente. A capacidade da tarefa pode filtrar esta lista antes da seleção.
 #[derive(Debug, Clone, PartialEq)]
@@ -299,14 +299,17 @@ pub fn select_agent_by_quota(candidates: &[AgentQuotaCandidate]) -> Option<Agent
         .min_by(|(a_index, a), (b_index, b)| a.used.unwrap().total_cmp(&b.used.unwrap()).then_with(|| a_index.cmp(b_index)))
         .map(|(_, candidate)| candidate)
         .or_else(|| candidates.first())?;
-    let reason = match candidate.used {
-        Some(used) => format!("menor uso de cota disponível ({:.0}% usada)", used * 100.0),
-        None => "sem leituras de cota; mantida a ordem oficial".to_owned(),
+    let describe = |candidate: &AgentQuotaCandidate| match candidate.used {
+        Some(used) => format!("{} {:.0}% usada", candidate.kind, used * 100.0),
+        None => format!("{} sem leitura", candidate.kind),
     };
+    let alternatives = candidates.iter().filter(|other| other.kind != candidate.kind).map(describe).collect::<Vec<_>>();
+    let reason =
+        if alternatives.is_empty() { describe(candidate) } else { format!("{} ({})", describe(candidate), alternatives.join(", ")) };
     Some(AgentQuotaChoice { kind: candidate.kind.clone(), used: candidate.used, reason })
 }
 
-/// Avisa quando o agente escolhido passou de 80% e outro CLI oficial tem uma leitura melhor.
+/// Avisa quando o escolhido passou de 80% e outro CLI oficial disponível está abaixo de 50%.
 pub fn quota_advisory(kind: &str, choices: &[String], used: &HashMap<String, f32>) -> Option<String> {
     let current = *used.get(kind)?;
     if current <= 0.80 {
@@ -318,7 +321,7 @@ pub fn quota_advisory(kind: &str, choices: &[String], used: &HashMap<String, f32
         .filter(|other| *other != kind)
         .filter(|other| choices.iter().any(|choice| choice == other))
         .filter_map(|other| used.get(other).map(|value| (other, *value)))
-        .filter(|(_, value)| *value < current)
+        .filter(|(_, value)| *value < 0.50)
         .min_by(|a, b| a.1.total_cmp(&b.1))?;
     Some(format!("{} está com {:.0}% da cota usada; {} está com {:.0}%", kind, current * 100.0, alternative.0, alternative.1 * 100.0))
 }
@@ -379,7 +382,7 @@ impl Core {
         select_agent_by_quota(&candidates)
     }
 
-    /// Aviso sem bloqueio para uma delegação acima de 80% quando outra CLI oficial está mais folgada.
+    /// Aviso sem bloqueio acima de 80%, quando outra CLI oficial disponível está abaixo de 50%.
     pub fn quota_advisory(&self, kind: &str, choices: &[String]) -> Option<String> {
         quota_advisory(kind, choices, &self.quota_used())
     }
@@ -623,6 +626,46 @@ mod tests {
         let group =
             UsageGroup { name: "Gemini 4 Argon".into(), session: None, weekly: Some(UsageWindow { used: 0.5, resets_at_ms: None }) };
         assert!(store.set("claude", AgentUsage { groups: vec![group], ..u(0.4, 4) }));
+    }
+
+    #[test]
+    fn quota_selection_chooses_the_least_used_candidate_and_lists_the_reason() {
+        let candidates = [
+            AgentQuotaCandidate { kind: "claude".into(), used: Some(0.74) },
+            AgentQuotaCandidate { kind: "antigravity".into(), used: Some(0.45) },
+            AgentQuotaCandidate { kind: "codex".into(), used: Some(0.0) },
+        ];
+        let choice = select_agent_by_quota(&candidates).expect("candidate");
+        assert_eq!(choice.kind, "codex");
+        assert_eq!(choice.reason, "codex 0% usada (claude 74% usada, antigravity 45% usada)");
+    }
+
+    #[test]
+    fn quota_selection_breaks_ties_by_candidate_order() {
+        let candidates = [
+            AgentQuotaCandidate { kind: "claude".into(), used: Some(0.25) },
+            AgentQuotaCandidate { kind: "codex".into(), used: Some(0.25) },
+        ];
+        assert_eq!(select_agent_by_quota(&candidates).expect("candidate").kind, "claude");
+    }
+
+    #[test]
+    fn quota_selection_uses_the_first_candidate_when_none_has_a_reading() {
+        let candidates =
+            [AgentQuotaCandidate { kind: "claude".into(), used: None }, AgentQuotaCandidate { kind: "codex".into(), used: None }];
+        let choice = select_agent_by_quota(&candidates).expect("candidate");
+        assert_eq!(choice.kind, "claude");
+        assert_eq!(choice.reason, "claude sem leitura (codex sem leitura)");
+    }
+
+    #[test]
+    fn quota_advisory_requires_more_than_80_percent_and_an_alternative_below_50() {
+        let choices = vec!["claude".into(), "codex".into(), "opencode".into()];
+        assert_eq!(quota_advisory("claude", &choices, &HashMap::from([("claude".into(), 0.79), ("codex".into(), 0.1)])), None);
+        assert!(quota_advisory("claude", &choices, &HashMap::from([("claude".into(), 0.81), ("codex".into(), 0.49)])).is_some());
+        assert_eq!(quota_advisory("claude", &choices, &HashMap::from([("claude".into(), 0.81), ("codex".into(), 0.51)])), None);
+        assert_eq!(quota_advisory("claude", &choices, &HashMap::from([("claude".into(), 0.81), ("codex".into(), 0.5)])), None);
+        assert_eq!(quota_advisory("claude", &choices, &HashMap::from([("claude".into(), 0.81), ("opencode".into(), 0.0)])), None);
     }
 
     #[test]

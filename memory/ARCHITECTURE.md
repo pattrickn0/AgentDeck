@@ -482,6 +482,14 @@ quando renova cada janela, "bloqueado até").
   uma instância cujo modelo está esgotado (uso ≥ 99,5%) por uma leitura de até 1 h; sem modelo num agente com grupos,
   ou sem dado, a pergunta segue. `--models` ganha a linha "cota:" por agente (`quota_line`) e `--team`/`--list` o aviso ao
   lado do modelo (campo `quota` de `/team` e `/agents`, só de quem está acima de 85% ou esgotado).
+- **Escolha para tarefas** (`usage::select_agent_by_quota`, `Core::best_agent_by_quota`): filtra os candidatos oficiais
+  instalados (Claude, Antigravity e Codex; OpenCode não fornece leitura de cota), depois escolhe a menor fração usada.
+  A função pura recebe a lista já elegível e devolve o agente com a justificativa e os números dos demais, para poder
+  filtrar capacidade antes da ordem por cota no futuro. Sem leituras, preserva a ordem recebida (Claude primeiro). O
+  formulário `+ Nova tarefa` mostra as leituras e mantém a recomendação até o usuário escolher manualmente; `ask-agent
+  --task new` sem `--agent` aplica a mesma escolha e grava o motivo no histórico. O envio `ask-agent <agente> <mensagem>`
+  lê a saída de `GET /models` e avisa sem bloquear quando o destino passa de 80% e outro CLI oficial instalado está abaixo
+  de 50%; a mesma regra é `usage::quota_advisory`.
 
 **Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
 (`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (o próprio tipo; `claude@dev@ana` fica no grupo `claude`). A cada quadro,
