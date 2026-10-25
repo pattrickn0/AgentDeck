@@ -1031,6 +1031,18 @@ fn body_text(msg: &Value, key: &str) -> Result<Option<String>, (u16, Value)> {
     }
 }
 
+/// O escopo de escrita do corpo: uma lista de textos (um caminho cada) ou um texto com um caminho por linha.
+/// Ausente, `null` ou vazio = sem escopo. A normalização dos caminhos é de `task_create`.
+fn body_scope(msg: &Value) -> Result<Vec<String>, (u16, Value)> {
+    let bad = || (400, json!({ "error": "\"scope\" precisa ser uma lista de caminhos (ou um texto com um caminho por linha)" }));
+    match msg.get("scope") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::String(s)) => Ok(s.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect()),
+        Some(Value::Array(items)) => items.iter().map(|i| i.as_str().map(|s| s.to_owned()).ok_or_else(bad)).collect(),
+        Some(_) => Err(bad()),
+    }
+}
+
 /// Os campos de `POST /tasks`.
 fn task_spec(msg: &Value, creator: &str) -> Result<crate::tasks::TaskSpec, (u16, Value)> {
     let effort = match body_text(msg, "effort")? {
@@ -1052,6 +1064,7 @@ fn task_spec(msg: &Value, creator: &str) -> Result<crate::tasks::TaskSpec, (u16,
         model: body_text(msg, "model")?,
         base: body_text(msg, "base")?,
         creator: Some(creator.to_owned()),
+        scope: body_scope(msg)?,
     })
 }
 

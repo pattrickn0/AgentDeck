@@ -31,6 +31,7 @@ pub mod models;
 pub mod outline;
 pub mod paths;
 pub(crate) mod process;
+pub mod scope;
 pub mod sessions;
 pub mod situation;
 pub mod tasks;
