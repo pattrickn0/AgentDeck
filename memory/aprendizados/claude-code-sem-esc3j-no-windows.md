@@ -1,7 +1,7 @@
 ---
 titulo: Claude Code duplica a conversa ao mudar a largura (sem ESC[3J no Windows)
 resumo: Cada largura nova gera uma cópia no histórico; por isso o PTY só muda com o tamanho parado.
-touches: [crates/app/src/deck.rs, crates/app/src/terminal/**]
+touches: [crates/app/src/deck/**, crates/app/src/terminal/**]
 ---
 Ao mudar de largura, o Claude Code limpa só a tela e reimprime a conversa. Fora do Windows ele manda `ESC[3J`
 (apaga o histórico); no Windows não manda, então a cópia anterior fica no histórico, na largura antiga. Foi medido

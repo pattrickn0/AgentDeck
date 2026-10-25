@@ -1,7 +1,7 @@
 ---
 titulo: No Windows o Codex engole o Enter que chega antes de terminar de ler a colagem
 resumo: O Codex lê a colagem tecla por tecla; o Enter cedo vira quebra de linha. O atraso do Enter cresce 1 ms por caractere (delivery::enter_delay).
-touches: [crates/core/src/delivery.rs, crates/app/src/deck.rs]
+touches: [crates/core/src/delivery.rs, crates/app/src/deck/**]
 ---
 O app cola as mensagens com bracketed paste e manda o Enter 250 ms depois. No Windows o Codex 0.164 liga o modo de
 colagem (`?2004h`), mas pelo ConPTY recebe o texto como teclas soltas e o digere aos poucos: o Enter que chega antes do

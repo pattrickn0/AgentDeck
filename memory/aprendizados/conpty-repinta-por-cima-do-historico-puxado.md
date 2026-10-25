@@ -1,7 +1,7 @@
 ---
 titulo: No Windows, a grade não pode puxar o histórico ao crescer: o ConPTY repinta por cima e as linhas somem (t37)
 resumo: Ao ganhar linhas (ou juntar linhas no reflow) o alacritty puxa histórico para a tela; o ConPTY repinta de ESC[H e apaga o puxado. terminal/resize.rs desfaz isso.
-touches: [crates/app/src/terminal/**, crates/app/src/deck.rs, tools/pty-probe/**]
+touches: [crates/app/src/terminal/**, crates/app/src/deck/**, tools/pty-probe/**]
 ---
 Defeito (usuário, 23/10): "às vezes, nos terminais" a tela fica com linhas em branco e o texto cortado, em qualquer CLI. Reproduzido **sem
 o Claude**, com `powershell` + `tools/pty-probe`: 200 linhas numeradas, janela 58→30→58 linhas, e as linhas 144 a 171 sumiam do histórico

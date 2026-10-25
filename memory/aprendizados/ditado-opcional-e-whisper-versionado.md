@@ -1,7 +1,7 @@
 ---
 titulo: O ditado é opcional e "instalado" é modelo + motor; bin-cpu e bin-vulkan vêm no git
 resumo: Config::dictation (unasked/yes/no) decide se baixa; quem já tem o modelo conta como "sim"; remover apaga só o modelo, o CUDA e sobras.
-touches: [crates/core/src/whisper.rs, crates/core/src/config.rs, crates/app/src/deck.rs, crates/app/src/ui/menus.rs]
+touches: [crates/core/src/whisper.rs, crates/core/src/config.rs, crates/app/src/deck/**, crates/app/src/ui/menus.rs]
 ---
 O Whisper só baixa se `Config::dictation` for `yes` (ou se já está no disco): `whisper::startup(choice, installed)` devolve
 `Ensure`, `Ask` ou `Skip` e a escolha a gravar. "Instalado" (`whisper::is_installed`) é o **modelo** em `whisper/models/`
