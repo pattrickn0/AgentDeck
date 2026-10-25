@@ -775,3 +775,53 @@ impl Deck {
         }
     }
 }
+
+/// Troca o nome de exibição de quem fala/para quem nos itens da Conversa (aba renomeada).
+fn rename_in_feed(feed: &mut [FeedItem], old_who: &str, new_who: &str) {
+    for item in feed {
+        for who in [&mut item.who, &mut item.to] {
+            if who.as_deref() == Some(old_who) {
+                *who = Some(new_who.to_owned());
+            }
+        }
+    }
+}
+
+/// O "pensando" de `old_id` no projeto passa a ser de `new_id` (chave `projeto#id`, ver `add_feed`).
+fn rename_thinking(thinking: &mut HashMap<String, u64>, project: &str, old_id: &str, new_id: &str) {
+    if let Some(item) = thinking.remove(&format!("{project}#{old_id}")) {
+        thinking.insert(format!("{project}#{new_id}"), item);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: u64, who: &str, to: Option<&str>) -> FeedItem {
+        FeedItem {
+            id,
+            kind: FeedKind::Thinking,
+            who: Some(who.into()),
+            to: to.map(Into::into),
+            text: String::new(),
+            time: String::new(),
+            color: Color32::WHITE,
+        }
+    }
+
+    #[test]
+    fn renaming_a_tab_renames_its_feed_items_and_thinking_entry() {
+        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Codex", None)];
+        rename_in_feed(&mut feed, "Claude", "Claude@dev");
+        let names: Vec<_> = feed.iter().map(|f| (f.who.as_deref().unwrap(), f.to.as_deref())).collect();
+        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Codex", None)]);
+
+        let mut thinking = HashMap::from([("p#claude".to_owned(), 1), ("q#claude".to_owned(), 9)]);
+        rename_thinking(&mut thinking, "p", "claude", "claude@dev");
+        assert_eq!(thinking.get("p#claude@dev"), Some(&1));
+        assert!(!thinking.contains_key("p#claude"));
+        // O mesmo id em outro projeto não é dele.
+        assert_eq!(thinking.get("q#claude"), Some(&9));
+    }
+}

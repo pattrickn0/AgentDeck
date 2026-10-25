@@ -106,3 +106,21 @@ impl Deck {
         }
     }
 }
+
+/// O arquivo é uma cópia nossa em `dados/anexos` (só essas o "×" apaga).
+fn in_attachments_dir(data_dir: &Path, path: &Path) -> bool {
+    path.parent().is_some_and(|p| p == data_dir.join("anexos"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_our_copies_in_the_attachments_folder_are_deleted() {
+        let data = Path::new("/dados");
+        assert!(in_attachments_dir(data, &data.join("anexos").join("s_x_1-foto.png")));
+        assert!(!in_attachments_dir(data, &data.join("anexos").join("sub").join("a.png")));
+        assert!(!in_attachments_dir(data, Path::new("/home/ana/foto.png")));
+    }
+}

@@ -205,3 +205,27 @@ impl Deck {
         });
     }
 }
+
+/// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+B (prefixo do tmux) vai ao terminal quando
+/// ele tem o foco, a não ser que o usuário dê prioridade ao app.
+fn app_claims_ctrl(key: &str, term_focused: bool, app_first: bool) -> bool {
+    match key {
+        "b" => !term_focused || app_first,
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_b_goes_to_the_focused_terminal_unless_the_app_comes_first() {
+        // Terminal focado: Ctrl+B é do tmux; Ctrl+T continua do app.
+        assert!(!app_claims_ctrl("b", true, false));
+        assert!(app_claims_ctrl("t", true, false));
+        // Fora do terminal, ou com a opção ligada, todos são do app.
+        assert!(app_claims_ctrl("b", false, false));
+        assert!(app_claims_ctrl("b", true, true));
+    }
+}

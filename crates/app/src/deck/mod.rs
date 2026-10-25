@@ -496,42 +496,11 @@ fn open_in_file_manager(path: &Path) {
     let _ = std::process::Command::new("xdg-open").arg(path).spawn();
 }
 
-/// O arquivo é uma cópia nossa em `dados/anexos` (só essas o "×" apaga).
-fn in_attachments_dir(data_dir: &Path, path: &Path) -> bool {
-    path.parent().is_some_and(|p| p == data_dir.join("anexos"))
-}
-
 /// O redimensionamento pendente do PTY já pode ser aplicado: tamanho parado e mouse solto.
 fn resize_due(now: Instant, at: Instant, dragging: bool) -> bool {
     now >= at && !dragging
 }
 
-/// Ctrl+<tecla> é atalho do app? Ctrl+T sempre; Ctrl+B (prefixo do tmux) vai ao terminal quando
-/// ele tem o foco, a não ser que o usuário dê prioridade ao app.
-fn app_claims_ctrl(key: &str, term_focused: bool, app_first: bool) -> bool {
-    match key {
-        "b" => !term_focused || app_first,
-        _ => true,
-    }
-}
-
-/// Troca o nome de exibição de quem fala/para quem nos itens da Conversa (aba renomeada).
-fn rename_in_feed(feed: &mut [FeedItem], old_who: &str, new_who: &str) {
-    for item in feed {
-        for who in [&mut item.who, &mut item.to] {
-            if who.as_deref() == Some(old_who) {
-                *who = Some(new_who.to_owned());
-            }
-        }
-    }
-}
-
-/// O "pensando" de `old_id` no projeto passa a ser de `new_id` (chave `projeto#id`, ver `add_feed`).
-fn rename_thinking(thinking: &mut HashMap<String, u64>, project: &str, old_id: &str, new_id: &str) {
-    if let Some(item) = thinking.remove(&format!("{project}#{old_id}")) {
-        thinking.insert(format!("{project}#{new_id}"), item);
-    }
-}
 const TREE_CLICK_DELAY: Duration = Duration::from_millis(220);
 
 impl Deck {
@@ -743,28 +712,6 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
 mod tests {
     use super::*;
 
-    fn item(id: u64, who: &str, to: Option<&str>) -> FeedItem {
-        FeedItem {
-            id,
-            kind: FeedKind::Thinking,
-            who: Some(who.into()),
-            to: to.map(Into::into),
-            text: String::new(),
-            time: String::new(),
-            color: Color32::WHITE,
-        }
-    }
-
-    #[test]
-    fn ctrl_b_goes_to_the_focused_terminal_unless_the_app_comes_first() {
-        // Terminal focado: Ctrl+B é do tmux; Ctrl+T continua do app.
-        assert!(!app_claims_ctrl("b", true, false));
-        assert!(app_claims_ctrl("t", true, false));
-        // Fora do terminal, ou com a opção ligada, todos são do app.
-        assert!(app_claims_ctrl("b", false, false));
-        assert!(app_claims_ctrl("b", true, true));
-    }
-
     #[test]
     fn a_drag_resizes_the_pty_once_when_the_mouse_is_released() {
         let at = Instant::now();
@@ -772,28 +719,5 @@ mod tests {
         assert!(!resize_due(at - Duration::from_millis(1), at, false), "tamanho ainda mudando");
         assert!(!resize_due(later, at, true), "arrastando: espera soltar o mouse");
         assert!(resize_due(later, at, false), "parado e solto: aplica");
-    }
-
-    #[test]
-    fn only_our_copies_in_the_attachments_folder_are_deleted() {
-        let data = Path::new("/dados");
-        assert!(in_attachments_dir(data, &data.join("anexos").join("s_x_1-foto.png")));
-        assert!(!in_attachments_dir(data, &data.join("anexos").join("sub").join("a.png")));
-        assert!(!in_attachments_dir(data, Path::new("/home/ana/foto.png")));
-    }
-
-    #[test]
-    fn renaming_a_tab_renames_its_feed_items_and_thinking_entry() {
-        let mut feed = vec![item(1, "Claude", Some("Antigravity")), item(2, "Antigravity", Some("Claude")), item(3, "Codex", None)];
-        rename_in_feed(&mut feed, "Claude", "Claude@dev");
-        let names: Vec<_> = feed.iter().map(|f| (f.who.as_deref().unwrap(), f.to.as_deref())).collect();
-        assert_eq!(names, [("Claude@dev", Some("Antigravity")), ("Antigravity", Some("Claude@dev")), ("Codex", None)]);
-
-        let mut thinking = HashMap::from([("p#claude".to_owned(), 1), ("q#claude".to_owned(), 9)]);
-        rename_thinking(&mut thinking, "p", "claude", "claude@dev");
-        assert_eq!(thinking.get("p#claude@dev"), Some(&1));
-        assert!(!thinking.contains_key("p#claude"));
-        // O mesmo id em outro projeto não é dele.
-        assert_eq!(thinking.get("q#claude"), Some(&9));
     }
 }
