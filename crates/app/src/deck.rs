@@ -159,6 +159,9 @@ pub struct Tab {
     busy_output: bool,
     spec: Option<SpawnSpec>,
     pending_resize: Option<(GridSize, Instant)>,
+    /// Quando o PTY desta aba foi redimensionado por último: o próximo só sai depois que o CLI
+    /// terminar de reimprimir a conversa (ver [`Tab::resize_blocked_until`]).
+    last_resize: Option<Instant>,
     /// Quando o processo atual foi iniciado (a regra de entrega dá tempo de a TUI subir).
     spawned_at: Option<Instant>,
 }
@@ -168,6 +171,16 @@ impl Tab {
     #[cfg(test)]
     pub(crate) fn resize_pending(&self) -> bool {
         self.pending_resize.is_some()
+    }
+
+    /// O redimensionamento pendente ainda não pode sair porque o CLI está reimprimindo a conversa do
+    /// anterior: só depois da saída parada por [`RESIZE_SETTLE`], com teto de [`RESIZE_SETTLE_MAX`]
+    /// para um agente que não para de escrever. `None` = pode sair agora.
+    fn resize_blocked_until(&self, now: Instant) -> Option<Instant> {
+        let last = self.last_resize?;
+        let quiet = (*self.session.shared.last_output.lock()).map_or(last, |at| at.max(last));
+        let ready = (quiet + RESIZE_SETTLE).min(last + RESIZE_SETTLE_MAX);
+        (now < ready).then_some(ready)
     }
 }
 
@@ -308,6 +321,9 @@ pub struct Deck {
     pub panes: Vec<PaneSlot>,
     /// Janela sendo arrastada pela alça para trocar de lugar com outra.
     pub pane_drag: Option<usize>,
+    /// Até quando o tamanho das janelas mudou por uma troca de aba no Destaque (ver `Deck::activate`):
+    /// nesse prazo o PTY espera `HIGHLIGHT_RESIZE_DEBOUNCE` em vez de `RESIZE_DEBOUNCE`.
+    highlight_switch_until: Option<Instant>,
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=split-drag`): janela-alvo fictícia do arrasto.
     pub debug_pane_drop: Option<usize>,
     show_seq: u64,
@@ -435,6 +451,14 @@ const HOOK_STALE: Duration = Duration::from_secs(600);
 /// anterior fica no histórico. Por isso o PTY só muda com o tamanho parado e o mouse solto
 /// (ver [`resize_due`]): um arrasto do divisor ou da borda vira um redimensionamento só.
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(150);
+/// Trocar de aba no Destaque muda a largura das janelas sem o usuário arrastar nada; o CLI pode
+/// ainda estar reimprimindo a conversa da troca anterior, então o PTY espera mais.
+const HIGHLIGHT_RESIZE_DEBOUNCE: Duration = Duration::from_millis(600);
+/// Depois de um redimensionamento aplicado, o próximo da mesma aba espera a saída dela ficar parada
+/// por este tempo (o CLI acabou de reimprimir a conversa)…
+const RESIZE_SETTLE: Duration = Duration::from_millis(300);
+/// …mas um agente que não para de escrever não pode segurar o redimensionamento para sempre.
+const RESIZE_SETTLE_MAX: Duration = Duration::from_secs(3);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
 /// Enter (ou envio) que não produziu saída nenhuma (prompt vazio, menu): a aba é liberada depois
 /// deste tempo, em silêncio. Sem isso ela ficava "trabalhando" para sempre e prendia a fila da ponte.
@@ -559,6 +583,7 @@ impl Deck {
                 .unwrap_or(split::Ratios { rows: Vec::new(), cols: Vec::new() }),
             panes: Vec::new(),
             pane_drag: None,
+            highlight_switch_until: None,
             debug_pane_drop: None,
             show_seq: 0,
             debug_usage: None,
@@ -1031,16 +1056,18 @@ impl Deck {
                 want(at);
             }
             if let Some((size, at)) = tab.pending_resize {
-                if resize_due(now, at, dragging) {
+                if !resize_due(now, at, dragging) {
+                    // Mouse ainda pressionado ou tamanho ainda mudando: soltar já pede um quadro; isto é só a garantia.
+                    want(if now < at { at } else { now + RESIZE_DEBOUNCE });
+                } else if let Some(ready) = tab.resize_blocked_until(now) {
+                    // O CLI ainda está reimprimindo a conversa do redimensionamento anterior.
+                    want(ready);
+                } else {
                     tab.pending_resize = None;
                     if let Some(m) = &metrics {
+                        tab.last_resize = Some(now);
                         tab.session.resize(size, m.cell_w, m.cell_h);
                     }
-                } else if now < at {
-                    want(at);
-                } else {
-                    // Mouse ainda pressionado: soltar já pede um quadro; isto é só a garantia.
-                    want(now + RESIZE_DEBOUNCE);
                 }
             }
         }
@@ -1432,6 +1459,7 @@ impl Deck {
             busy_output: false,
             spec: None,
             pending_resize: None,
+            last_resize: None,
             spawned_at: None,
         };
         self.next_uid += 1;
@@ -1512,6 +1540,11 @@ impl Deck {
         self.active = Some(idx);
         self.show_seq += 1;
         self.tabs[idx].shown = self.show_seq;
+        // No Destaque a janela grande segue a aba ativa: a troca muda a largura das janelas, e o PTY
+        // espera mais para o CLI terminar de reimprimir (ver `Deck::fit_tab`).
+        if self.organization == Organization::Highlight {
+            self.highlight_switch_until = Some(Instant::now() + HIGHLIGHT_RESIZE_DEBOUNCE);
+        }
         // Lendo documentos, a aba ativada continua fora da vista: o selo da chave segue valendo.
         if self.docs.view == CenterView::Agents {
             self.tabs[idx].done = false;
@@ -1855,14 +1888,24 @@ impl Deck {
         });
     }
 
-    /// Ajusta a grade de uma aba visível à área dela (debounce de 60 ms ao PTY).
+    /// Ajusta a grade de uma aba visível à área dela, quando o tamanho parar (ver [`resize_due`]).
+    /// Trocar de aba no Destaque muda o tamanho das janelas sem o usuário arrastar nada, e ali o PTY
+    /// ganha mais folga (ver [`HIGHLIGHT_RESIZE_DEBOUNCE`]).
     pub fn fit_tab(&mut self, idx: usize, rect: egui::Rect) {
         let Some(m) = self.metrics.clone() else { return };
         let size = m.grid_size_for(rect);
+        let now = Instant::now();
+        let delay = if self.highlight_switch_until.is_some_and(|until| now < until) { HIGHLIGHT_RESIZE_DEBOUNCE } else { RESIZE_DEBOUNCE };
         let tab = &mut self.tabs[idx];
+        // Voltou ao tamanho que o PTY já tem (A→B→A dentro do prazo): não há o que redimensionar, e o
+        // pendente do meio do caminho é cancelado em vez de virar um redimensionamento à toa.
+        if size == tab.session.size() {
+            tab.pending_resize = None;
+            return;
+        }
         let current = tab.pending_resize.map(|p| p.0).unwrap_or(tab.session.size());
         if size != current {
-            tab.pending_resize = Some((size, Instant::now() + RESIZE_DEBOUNCE));
+            tab.pending_resize = Some((size, now + delay));
         }
     }
 

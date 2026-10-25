@@ -926,6 +926,156 @@ fn the_highlight_follows_the_active_tab_and_the_pty_resizes_once_per_switch() {
 }
 
 #[test]
+fn switching_there_and_back_inside_the_delay_resizes_nothing() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    use agentdeck_core::Organization;
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    let frame = |env: &mut Env| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 860.0))),
+            ..Default::default()
+        };
+        let Env { deck, ctx, .. } = env;
+        let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+        out.textures_delta.clear();
+    };
+    let tab_of = |env: &Env, kind: &str| env.deck.tabs.iter().position(|t| t.kind == kind).expect("aba");
+    env.deck.open_tab("claude", false);
+    env.deck.open_tab("shell", false);
+    env.deck.set_organization(Organization::Highlight);
+    frame(&mut env);
+    env.pump("o PTY de cada janela ter o tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+    let (claude, shell) = (tab_of(&env, "claude"), tab_of(&env, "shell"));
+    let before = (env.deck.tabs[claude].session.size(), env.deck.tabs[shell].session.size());
+
+    // Aba trocada e trocada de volta: as duas janelas mudaram e voltaram dentro do prazo, e o PTY
+    // continua no tamanho que já tinha (o pendente do meio do caminho é cancelado).
+    env.deck.activate(claude);
+    frame(&mut env);
+    assert!(env.deck.tabs[claude].resize_pending() && env.deck.tabs[shell].resize_pending(), "as janelas trocaram de tamanho");
+    env.deck.activate(shell);
+    frame(&mut env);
+    assert!(!env.deck.tabs.iter().any(|t| t.resize_pending()), "voltar ao tamanho atual cancela o redimensionamento");
+    std::thread::sleep(Duration::from_millis(800));
+    frame(&mut env);
+    frame(&mut env);
+    assert_eq!((env.deck.tabs[claude].session.size(), env.deck.tabs[shell].session.size()), before, "ir e voltar não reimprime nada");
+}
+
+#[test]
+fn five_quick_switches_resize_each_tab_at_most_once_to_the_final_size() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    use agentdeck_core::Organization;
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    let frame = |env: &mut Env| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 860.0))),
+            ..Default::default()
+        };
+        let Env { deck, ctx, .. } = env;
+        let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+        out.textures_delta.clear();
+    };
+    let tab_of = |env: &Env, kind: &str| env.deck.tabs.iter().position(|t| t.kind == kind).expect("aba");
+    env.deck.open_tab("claude", false);
+    env.deck.open_tab("shell", false);
+    env.deck.set_organization(Organization::Highlight);
+    frame(&mut env);
+    env.pump("o PTY de cada janela ter o tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+    let (claude, shell) = (tab_of(&env, "claude"), tab_of(&env, "shell"));
+
+    // Cinco trocas seguidas (cada uma dentro do prazo do redimensionamento): o pendente é sempre
+    // substituído pelo tamanho novo, então cada aba muda de tamanho uma vez só, para o tamanho final.
+    let started = Instant::now();
+    for _ in 0..5 {
+        let next = if env.deck.active == Some(claude) { shell } else { claude };
+        env.deck.activate(next);
+        frame(&mut env);
+    }
+    assert!(started.elapsed() < Duration::from_millis(600), "as cinco trocas precisam caber no prazo de uma");
+    let mut changes = [0u32; 2];
+    let mut last: Vec<_> = [claude, shell].iter().map(|&i| env.deck.tabs[i].session.size()).collect();
+    let limit = Instant::now() + Duration::from_secs(30);
+    while env.deck.tabs.iter().any(|t| t.resize_pending()) {
+        assert!(Instant::now() < limit, "tempo esgotado esperando o PTY se ajustar");
+        env.deck.before_frame(&env.ctx);
+        for (n, &i) in [claude, shell].iter().enumerate() {
+            let size = env.deck.tabs[i].session.size();
+            if size != last[n] {
+                changes[n] += 1;
+                last[n] = size;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    assert!(changes.iter().all(|&n| n <= 1), "cada aba muda de tamanho no máximo uma vez, não {changes:?}");
+    assert!(changes.contains(&1), "as cinco trocas terminam num tamanho diferente do inicial: {changes:?}");
+    let metrics = env.deck.metrics.clone().expect("as fontes instaladas");
+    for pane in &env.deck.panes {
+        let idx = env.deck.tabs.iter().position(|t| t.uid == pane.shown_uid).expect("aba da janela");
+        assert_eq!(env.deck.tabs[idx].session.size(), metrics.grid_size_for(pane.body), "o PTY fica no tamanho final da janela");
+    }
+}
+
+#[test]
+fn a_tab_that_never_stops_printing_gets_resized_at_the_three_second_ceiling() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    let frame = |env: &mut Env, w: f32, h: f32| {
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, h))), ..Default::default() };
+        let Env { deck, ctx, .. } = env;
+        let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+        out.textures_delta.clear();
+    };
+    env.deck.open_tab("shell", false);
+    frame(&mut env, 1400.0, 860.0);
+    env.pump("o PTY ter o tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+    let tab = env.deck.tabs.len() - 1;
+
+    // A janela muda de tamanho e a aba não para de escrever: o próximo redimensionamento espera a
+    // saída parar por 300 ms, mas um agente que imprime sem parar não pode segurá-lo para sempre: sai no teto de 3 s.
+    frame(&mut env, 1000.0, 700.0);
+    assert!(env.deck.tabs[tab].resize_pending(), "a janela mudou de tamanho e o PTY ainda espera");
+    let started = Instant::now();
+    while env.deck.tabs[tab].resize_pending() {
+        assert!(started.elapsed() < Duration::from_secs(10), "o redimensionamento não saiu nem no teto de 3 s");
+        *env.deck.tabs[tab].session.shared.last_output.lock() = Some(Instant::now());
+        env.deck.before_frame(&env.ctx);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(2500) && elapsed <= Duration::from_secs(4),
+        "com saída sem parar o redimensionamento sai no teto de 3 s, não em {elapsed:?}"
+    );
+}
+
+#[test]
 fn editing_a_file_saves_it_as_it_was_and_asks_before_losing_what_was_typed() {
     if !git_available() {
         eprintln!("git não instalado: teste pulado");
