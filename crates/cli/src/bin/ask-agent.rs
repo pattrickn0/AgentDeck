@@ -813,6 +813,15 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
         (true, _) => {
             println!("Tarefa {id} criada: {}", field(&task, "title"));
             println!("  agente: {} · base: {} · branch: {}", who(&task), field(&task, "base"), field(&task, "branch"));
+            if let Some(events) = task.get("events").and_then(Value::as_array) {
+                for event in events {
+                    if let Some(text) = event.get("text").and_then(Value::as_str) {
+                        if text.starts_with("agente escolhido automaticamente") || text.starts_with("aviso de cota:") {
+                            println!("  {text}");
+                        }
+                    }
+                }
+            }
             let scope = paths_of(&task, "scope");
             if !scope.is_empty() {
                 println!("  escopo: {scope}");

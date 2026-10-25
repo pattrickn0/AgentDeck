@@ -596,6 +596,8 @@ pub struct NewForm {
     pub attachments: Vec<PathBuf>,
     /// Agente (`claude`); vazio até o formulário abrir.
     pub kind: String,
+    /// O agente atual veio da recomendação automática, não de uma escolha do usuário.
+    pub kind_is_auto: bool,
     /// `None` = "Padrão".
     pub model: Option<String>,
     /// `None` = "Padrão" (nada vai ao CLI). Só vale onde `models::effort_unavailable` não objeta.
@@ -622,6 +624,7 @@ impl Default for NewForm {
             brief: String::new(),
             attachments: Vec::new(),
             kind: String::new(),
+            kind_is_auto: true,
             model: None,
             effort: None,
             provider: None,
@@ -852,16 +855,14 @@ impl Deck {
     /// Abre o formulário: agente padrão `claude` (ou o primeiro disponível) e a branch atual de base.
     pub fn tasks_open_new(&mut self) {
         let choices = self.tasks_agent_choices();
+        let recommended = self.core.best_agent_by_quota(&choices).map(|choice| choice.kind);
         let form = &mut self.tasks.form;
         form.menu = None;
         form.provider = None;
         form.error = None;
-        if form.kind.is_empty() || (!choices.is_empty() && !choices.contains(&form.kind)) {
-            form.kind = if choices.iter().any(|k| k == "claude") {
-                "claude".into()
-            } else {
-                choices.first().cloned().unwrap_or_else(|| "claude".into())
-            };
+        if form.kind_is_auto || form.kind.is_empty() || (!choices.is_empty() && !choices.contains(&form.kind)) {
+            form.kind = recommended.or_else(|| choices.first().cloned()).unwrap_or_else(|| "claude".into());
+            form.kind_is_auto = true;
             form.model = None;
             form.effort = None;
         }
@@ -882,6 +883,7 @@ impl Deck {
             self.tasks.form.effort = None;
             self.tasks.form.kind = kind.clone();
         }
+        self.tasks.form.kind_is_auto = false;
         self.tasks.form.menu = None;
         self.tasks.form.provider = None;
         self.request_models(&kind);

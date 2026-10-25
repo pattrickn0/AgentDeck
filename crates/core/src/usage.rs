@@ -272,6 +272,57 @@ pub fn agent_used(u: &AgentUsage, now_ms: u64) -> Option<f32> {
         .fold(None, |a: Option<f32>, u| Some(a.map_or(u, |a| a.max(u))))
 }
 
+const OFFICIAL_AGENTS: [&str; 4] = ["claude", "antigravity", "codex", "opencode"];
+
+/// Candidato elegível para a escolha de agente. A capacidade da tarefa pode filtrar esta lista antes da seleção.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentQuotaCandidate {
+    pub kind: String,
+    pub used: Option<f32>,
+}
+
+/// Escolha e motivo, prontos para registrar na tarefa ou explicar ao usuário.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentQuotaChoice {
+    pub kind: String,
+    pub used: Option<f32>,
+    pub reason: String,
+}
+
+/// Escolhe o candidato com menor uso de cota. Sem leituras, mantém a ordem recebida; o chamador usa a ordem
+/// oficial para obter um fallback previsível. A função é pura para permitir filtrar candidatos por capacidade.
+pub fn select_agent_by_quota(candidates: &[AgentQuotaCandidate]) -> Option<AgentQuotaChoice> {
+    let candidate = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| candidate.used.is_some())
+        .min_by(|(a_index, a), (b_index, b)| a.used.unwrap().total_cmp(&b.used.unwrap()).then_with(|| a_index.cmp(b_index)))
+        .map(|(_, candidate)| candidate)
+        .or_else(|| candidates.first())?;
+    let reason = match candidate.used {
+        Some(used) => format!("menor uso de cota disponível ({:.0}% usada)", used * 100.0),
+        None => "sem leituras de cota; mantida a ordem oficial".to_owned(),
+    };
+    Some(AgentQuotaChoice { kind: candidate.kind.clone(), used: candidate.used, reason })
+}
+
+/// Avisa quando o agente escolhido passou de 80% e outro CLI oficial tem uma leitura melhor.
+pub fn quota_advisory(kind: &str, choices: &[String], used: &HashMap<String, f32>) -> Option<String> {
+    let current = *used.get(kind)?;
+    if current <= 0.80 {
+        return None;
+    }
+    let alternative = OFFICIAL_AGENTS
+        .iter()
+        .copied()
+        .filter(|other| *other != kind)
+        .filter(|other| choices.iter().any(|choice| choice == other))
+        .filter_map(|other| used.get(other).map(|value| (other, *value)))
+        .filter(|(_, value)| *value < current)
+        .min_by(|a, b| a.1.total_cmp(&b.1))?;
+    Some(format!("{} está com {:.0}% da cota usada; {} está com {:.0}%", kind, current * 100.0, alternative.0, alternative.1 * 100.0))
+}
+
 impl Core {
     /// A cota de `model` do agente `kind` (`claude`, `antigravity`…), pela última leitura; `None` sem dado.
     pub fn model_quota(&self, kind: &str, model: Option<&str>) -> Option<ModelQuota> {
@@ -315,6 +366,22 @@ impl Core {
     pub fn quota_used(&self) -> HashMap<String, f32> {
         let now = util::now_ms();
         self.inner.usage.snapshot().iter().filter_map(|(kind, u)| Some((kind.clone(), agent_used(u, now)?))).collect()
+    }
+
+    /// Melhor CLI oficial disponível e a sua cota usada, quando há leitura.
+    pub fn best_agent_by_quota(&self, choices: &[String]) -> Option<AgentQuotaChoice> {
+        let used = self.quota_used();
+        let candidates: Vec<AgentQuotaCandidate> = OFFICIAL_AGENTS
+            .iter()
+            .filter(|kind| choices.iter().any(|choice| choice == **kind))
+            .map(|kind| AgentQuotaCandidate { kind: (*kind).to_owned(), used: used.get(*kind).copied() })
+            .collect();
+        select_agent_by_quota(&candidates)
+    }
+
+    /// Aviso sem bloqueio para uma delegação acima de 80% quando outra CLI oficial está mais folgada.
+    pub fn quota_advisory(&self, kind: &str, choices: &[String]) -> Option<String> {
+        quota_advisory(kind, choices, &self.quota_used())
     }
 
     /// O erro para uma pergunta a `id` (agente `kind`, modelo `model`) quando a cota do modelo acabou, por uma

@@ -307,7 +307,7 @@ pub struct TaskSpec {
     pub title: String,
     /// O pedido (markdown). Pode ficar vazio: o título vai no lugar ao entregar ao agente.
     pub brief: String,
-    /// Agente; vazio = `claude`. Aceita os apelidos (`agy`).
+    /// Agente; vazio = escolher o CLI oficial com mais cota disponível. Aceita os apelidos (`agy`).
     pub kind: String,
     /// Modelo pedido; `None` = o padrão do cargo ou do CLI.
     pub model: Option<String>,
@@ -890,10 +890,18 @@ impl Core {
         let _op = self.inner.tasks.op.lock();
         let title = clean_title(&spec.title)?;
         let brief = cap_text(spec.brief.trim(), MAX_TEXT);
+        let kinds = self.inner.agents.peers();
 
         // Agente: instalado, com aba (nada de `shell`) e sem `@` (o cargo é o id da tarefa).
+        let automatic_choice = spec.kind.trim().is_empty();
+        let selected_by_quota = automatic_choice.then(|| self.best_agent_by_quota(&kinds)).flatten();
         let asked = match spec.kind.trim().to_lowercase() {
-            k if k.is_empty() => "claude".to_owned(),
+            k if k.is_empty() => selected_by_quota
+                .as_ref()
+                .map(|choice| choice.kind.clone())
+                .or_else(|| kinds.iter().find(|kind| kind.as_str() == "claude").cloned())
+                .or_else(|| kinds.first().cloned())
+                .unwrap_or_else(|| "claude".to_owned()),
             k => k,
         };
         if asked.contains('@') {
@@ -902,7 +910,6 @@ impl Core {
                 asked.escape_debug()
             )));
         }
-        let kinds = self.inner.agents.peers();
         let kind = crate::agents::resolve_alias(&asked).to_owned();
         if !kinds.contains(&kind) || Ident::parse(&kind).is_none() {
             return Err(TaskError::Invalid(format!(
@@ -978,6 +985,15 @@ impl Core {
             Some(c) => format!("criada por {c}"),
             None => "criada".to_owned(),
         });
+        if automatic_choice {
+            if let Some(choice) = selected_by_quota {
+                task.log(format!("agente escolhido automaticamente: {} ({})", choice.kind, choice.reason));
+            } else {
+                task.log(format!("agente escolhido automaticamente: {} (sem leitura de cota)", task.kind));
+            }
+        } else if let Some(note) = self.quota_advisory(&task.kind, &kinds) {
+            task.log(format!("aviso de cota: {note}"));
+        }
         self.with_tasks(project, true, |p| {
             p.next = number + 1;
             p.tasks.push(task.clone());

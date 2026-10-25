@@ -1561,6 +1561,8 @@ enum Detail {
     Free,
     /// "N modelos": quantos o provedor tem.
     Count(usize),
+    /// Uso atual da cota do CLI oficial; `None` significa que ainda não há leitura.
+    Quota(Option<u8>),
 }
 
 /// Itens de um menu do formulário ou do filtro.
@@ -1630,6 +1632,8 @@ fn dropdown_menu(
                     let (text, dcolor) = match detail {
                         Detail::Free => ("grátis".to_owned(), p.success),
                         Detail::Count(n) => (format!("{n} modelo{}", if *n == 1 { "" } else { "s" }), p.text_2),
+                        Detail::Quota(Some(used)) => (format!("{used}% usada"), if *used >= 80 { p.warning } else { p.success }),
+                        Detail::Quota(None) => ("sem leitura".to_owned(), p.text_3),
                     };
                     let g = galley(ui.painter(), &text, theme::ui(11.0), dcolor);
                     let w = g.size().x;
@@ -1665,6 +1669,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     // O que os menus e o botão precisam do Deck, antes de a closure pegar emprestados os campos.
     let kind = deck.tasks.form.kind.clone();
     let choices = deck.tasks_agent_choices();
+    let quota_used = deck.core.quota_used();
     let agent_label = deck.agents.name(&kind);
     let agent_dot = deck.agents.tab_color(&kind);
     let picks_model = super::menus::picks_model(&kind);
@@ -1679,7 +1684,11 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             dot: Some(deck.agents.tab_color(k)),
             selected: *k == kind,
             enabled: true,
-            detail: None,
+            detail: if ["claude", "antigravity", "codex", "opencode"].contains(&k.as_str()) {
+                Some(Detail::Quota(quota_used.get(k).map(|used| (used * 100.0).round().clamp(0.0, 100.0) as u8)))
+            } else {
+                None
+            },
             submenu: false,
         })
         .collect();
@@ -1824,6 +1833,10 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             anchors[0] = Some(r);
             if click {
                 acts.push(Act::ToggleMenu(FormMenu::Agent));
+            }
+            if let Some(note) = deck.core.quota_advisory(&kind, &choices) {
+                ui.add_space(3.0);
+                notice_box(ui, &format!("Aviso de cota: {note}. A escolha continua disponível."), false, false);
             }
             ui.add_space(8.0);
             field_label(ui, "Modelo");
