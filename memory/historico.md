@@ -21,7 +21,7 @@ o estado atual em [ARCHITECTURE.md](ARCHITECTURE.md).
 - [x] **Worktree que não sai: o log diz quem segura** (2026-10-24): `file_lock.rs` lista no log e no aviso da tarefa os arquivos restantes e, no Windows, os processos que os mantêm abertos (Restart Manager).
 - [x] **`config.json` editado no PowerShell** (2026-10-24): a leitura da configuração aceita UTF-8 com BOM e UTF-16, preservando os projetos quando o arquivo é salvo pelo PowerShell 5.1.
 - [x] **A `main` passou a ser a reescrita em Rust** (2026-10-24): a branch `main` antiga em TypeScript foi substituída pela `dev` em Rust, com CI verde em Windows, Ubuntu e Fedora.
-- [x] **Cota por modelo para os agentes** (2026-10-24, `t47`): `/ask` recusa com 409 modelo esgotado; `--models` ordena os agentes por folga e mostra a cota por grupo, e `--team`/`--list` avisam ao lado do modelo.
+- [x] **Cota por modelo para os agentes** (2026-10-24): `/ask` recusa com 409 modelo esgotado; `--models` ordena os agentes por folga e mostra a cota por grupo, e `--team`/`--list` avisam ao lado do modelo.
 - [x] **Mesclagem com stash e ditado: três achados da revisão da `t35` e da `t34`** (2026-10-23): aviso de onde ficou o stash no conflito, devolução do stash pelo hash SHA e aviso claro num build sem áudio.
 - [x] **Memória, fase 2: `ask-agent --outline <arquivo>…`** (2026-10-23, `t40`): devolve o esqueleto do arquivo (assinaturas e linha, sem corpos, em Rust e Markdown) para o agente ler só o trecho necessário.
 - [x] **Memória, fase 2: situação atual em qualquer aba e aviso de arquivo em uso** (2026-10-23, `t41`): `ask-agent --learn` sem argumentos inclui as tarefas em andamento, e com arquivos avisa se outra tarefa mexe neles.

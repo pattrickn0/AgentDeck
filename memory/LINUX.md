@@ -197,8 +197,8 @@ verdes no Ubuntu até o `run 46`.
 8. **Versão do runner**: o rótulo `ubuntu-latest` migra para Ubuntu 26 a partir de 19/10/2026; o job pode mudar de
    base sem aviso. Se aparecer dependência nova, conferir o log do passo “Dependências de sistema”.
 9. **Formatação**: se `cargo fmt --all -- --check` voltar a falhar, nenhum job chega a rodar os testes — inclusive o
-   Fedora. Não é para “resolver” reformatando arquivos de outras tarefas (ver
-   [aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md](aprendizados/cargo-fmt-all-reformata-arquivos-alheios.md)).
+   Fedora. A base toda está no rustfmt: rode `cargo fmt --all` e inclua no commit o que ele mudar (ver
+   [aprendizados/base-toda-no-rustfmt.md](aprendizados/base-toda-no-rustfmt.md)).
 10. **WSLg**: o X11 foi forçado (seção 2.8), mas ninguém abriu o app dentro de um WSLg. Faltam: janela maximizada
     (deslocamento de 32 px), escala (sempre 1, interface pequena em 4K), arrastar/redimensionar, cursor e a cota do
     Antigravity lida do chaveiro de lá. Um `WINIT_UNIX_BACKEND=wayland` reproduz o caminho quebrado, para comparar.

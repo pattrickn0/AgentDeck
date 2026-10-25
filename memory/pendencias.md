@@ -20,8 +20,8 @@ teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGEN
    `Deck::background` roda a partir do laço com a janela escondida ou minimizada. T1b (`t48`, feito, falta validar no uso):
    o X esconde a janela na bandeja, sem perguntar (Windows: `tray-icon`; Linux: `ksni`; sem `StatusNotifierWatcher` o X
    minimiza); a bandeja tem Abrir e Encerrar (Encerrar pergunta com edição não salva ou aba no meio de um turno); abrir o
-   programa de novo traz a instância de volta (`POST /activate`, ver ARCHITECTURE.md, "Uma janela por pasta de dados" e
-   "Bandeja"). Falta ver no uso: o roteiro está em testes.md ("Bandeja e segunda abertura"), em especial o turno longo
+   programa de novo traz a instância de volta (`POST /activate`, ver ARCHITECTURE.md, "Instância única e
+   bandeja"). Falta ver no uso: o roteiro está em testes.md ("Bandeja e segunda abertura"), em especial o turno longo
    terminando com a janela escondida e o ícone no Linux (a bandeja do GNOME puro não tem `StatusNotifierWatcher`; precisa
    da extensão AppIndicator), que só foi compilado, não rodado.
 3. [ ] **Retomar a conversa de cada aba** depois de fechar o app ou de um crash (T4). Id por aba em `ProjectCfg`, gravado
