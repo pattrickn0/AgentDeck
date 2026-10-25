@@ -1,8 +1,8 @@
-//! Fake UI states used for screenshots and interface inspection.
+//! Estados fictícios da interface para capturas de tela (`AGENTDECK_DEBUG_UI`) e conferência visual. SOMENTE DEPURAÇÃO.
 
 use crate::{deck::Deck, theme};
 
-/// Three agents (one busy), then one agent, then an empty project.
+/// SOMENTE DEPURAÇÃO: projetos fictícios na barra lateral (`AGENTDECK_DEBUG_UI=projects-demo`): um ativo com três agentes (um ocupado), outro com um, outro vazio.
 fn debug_projects() -> Vec<crate::deck::ProjectView> {
     use crate::deck::{AgentBadge, ProjectView};
     let agent = |id: &str, parent: Option<&str>, kind: &str, label: &str, color, busy| AgentBadge {

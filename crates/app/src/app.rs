@@ -637,7 +637,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// SOMENTE DEPURAÇÃO: projetos fictícios na barra lateral (`AGENTDECK_DEBUG_UI=projects-demo`): um ativo com
 /// O ícone da janela (barra de tarefas e Alt+Tab): a marca do app, a partir do mesmo desenho do `.ico`.
 fn window_icon() -> Option<winit::window::Icon> {
     const SIZE: usize = 64;

@@ -136,6 +136,6 @@ AGENTDECK_HOME=<scratch>/home AGENTDECK_SMOKE=<scratch>/shot AGENTDECK_DEBUG_UI=
   ./target/debug/agentdeck.exe        # salva <scratch>/shot/screen.png e sai
 ```
 
-Outros estados em `AGENTDECK_DEBUG_UI` (lista em `apply_debug_ui`, `app.rs`): `settings`, `newtab`,
+Outros estados em `AGENTDECK_DEBUG_UI` (lista em `debug_ui::apply`, `crates/app/src/debug_ui.rs`): `settings`, `newtab`,
 `usage-demo`, `git-demo`, `split-drag`... Abra a imagem e confira alinhamento, truncamento e contraste antes de
 dizer que terminou; interação (clique, arrasto) não aparece na captura — diga ao usuário o que falta testar à mão.
