@@ -38,8 +38,19 @@ que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia �
   usuário e dos CLIs, que nunca vai para o git).
 - Licença **MIT**. Hoje só o usuário desenvolve; contribuições de outras pessoas, talvez depois de publicado.
 - **Depois da `main`** (revisto em 2026-10-24): estabilidade e a linha do tempo por tarefa primeiro, depois o
-  **instalador** e o inglês na interface; temas deixados de lado ([pendencias.md](pendencias.md)). **Bem mais para frente**, com o app bem estável: acompanhar e falar com os agentes **pelo celular**.
+  **instalador**; o inglês na interface e os temas foram deixados de lado (o inglês saiu da lista em 2026-10-24, para os itens de Windows e Linux decididos abaixo) ([pendencias.md](pendencias.md)). **Bem mais para frente**, com o app bem estável: acompanhar e falar com os agentes **pelo celular**.
 - Não fazer por enquanto: comentários linha a linha no diff para devolver ao agente (o "devolver com texto" basta).
+- **CLIs com suporte oficial** (usuário, 2026-10-24): **Claude Code, Codex, Antigravity e OpenCode**. São os testados e
+  com tudo funcionando (hooks, uso, retomar). Os outros continuam abrindo e funcionando, mas sem garantia (a barra de uso
+  ou os hooks podem falhar) até entrarem no suporte, como o Orca, que aceita qualquer CLI.
+- **Decidido em 2026-10-24** (comparação com o MonoCode e o Orca; plano revisto com o `claude@arquiteto`): o X manda
+  para a bandeja e abrir de novo traz a instância de volta (como o Discord); cada aba retoma a sua conversa depois de
+  fechar ou de um crash; a fase da tarefa vem só dos hooks (nunca declarada pelo agente); correio durável (mensagem
+  curta digitada, longa por aviso); escopo de escrita por tarefa com fila; a memória ganha um grafo como índice (os
+  markdown continuam sendo a fonte), medido contra o que já existe. Os itens estão em [pendencias.md](pendencias.md).
+- Skills de terceiros: só as que não brigam com as regras acima. Do Superpowers vieram 4 (`.claude/skills/`, com
+  `ORIGEM.md`); as que mandam abrir subagentes, criar worktrees por fora da mesa ou gravar planos à parte ficaram de
+  fora. O OpenSpec não foi adotado (seria um segundo lugar para o plano).
 
 ## Rumo (ordem decidida pelo orquestrador)
 

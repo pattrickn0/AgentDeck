@@ -8,9 +8,8 @@ description: Regras visuais e de código da interface do AgentDeck (egui, crates
 O app é egui puro, sem widgets prontos na maior parte: cada componente é **pintado à mão** com o `Painter` e
 recebe interação por `ui.interact`/`clickable`. Siga o que já existe antes de inventar.
 
-Referências de apoio (instaladas no projeto): `game-ui-design` (HUD lido de relance, estados visíveis,
-densidade) e `rust-desktop-applications` (`references/native-gui-frameworks.md` para egui). Quando divergirem
-destas regras, valem estas.
+Referência de apoio (instalada no projeto): `rust-desktop-applications` (`references/native-gui-frameworks.md`
+para egui). Quando divergir destas regras, valem estas.
 
 ## Princípios do produto
 

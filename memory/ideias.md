@@ -11,6 +11,11 @@ Uma limitação que passar a incomodar no uso também sobe para lá.
 - **Mensagens ao agente não citam a validação:** `start_message` não conta que, depois de mesclada, a tarefa ainda pode
   voltar reprovada; ele só descobre quando `reject_message` chega. Conferir no uso se faz falta.
 - **Rodar os testes do projeto ao receber o relatório**; **editar uma tarefa em rascunho**.
+- **"Como validar" no pedido** (do OpenSpec, 2026-10-24): uma seção opcional com cenários QUANDO/ENTÃO; o relatório diz
+  qual teste cobre cada um, e "aguardando validação" os mostra como caixas de marcar (o formato do `testes.md`).
+  Opcional: obrigatório viraria burocracia nas tarefas pequenas.
+- **Skills do projeto para os 4 CLIs oficiais** (2026-10-24): cada CLI procura skills numa pasta (`.claude/skills`,
+  a do Antigravity a confirmar, `.agents/skills` no Codex, `.opencode/skills`); o AgentDeck entregaria uma pasta só a todos.
 - **Seletor de modelos só com os que o plano permite** (`t14`): a lista vem de `agy models`/`opencode models` (o que o CLI
   conhece, não o que o plano permite). Em 2026-10-24 o usuário disse que, na prática, já funciona assim; reabrir se um
   modelo sem acesso aparecer. Se for feito, o mesmo filtro vale para `Core::models_inventory`.
@@ -31,6 +36,7 @@ Uma limitação que passar a incomodar no uso também sobe para lá.
 
 ### Interface
 
+- **Inglês na interface** (estava em `pendencias.md`; saiu em 2026-10-24 para os itens de Windows e Linux caberem).
 - **Temas** (pedido do usuário, 18/10; deixado de lado em 2026-10-24): trocar as constantes de `theme.rs` por uma paleta
   em tempo de execução, escolhida nas configurações, incluindo o fundo e as 16 cores do terminal (`terminal/colors.rs`).
 - Emojis coloridos (o egui só tem monocromáticos); animação de hover no estado vazio.
