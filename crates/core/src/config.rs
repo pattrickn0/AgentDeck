@@ -57,15 +57,56 @@ impl ProjectCfg {
     /// Projeto novo na pasta `path`, com um id que não está em `taken`. Sem `name`, o nome é o
     /// da pasta.
     pub fn new(path: PathBuf, name: Option<&str>, taken: &[ProjectCfg]) -> Self {
+        Self::with_id(path, name, None, taken)
+    }
+
+    /// Como [`ProjectCfg::new`], mas com `id` de um projeto removido (a mesma pasta readicionada
+    /// reaproveita o id). Se o id já é de algum projeto de `taken` ou está vazio, gera outro.
+    fn with_id(path: PathBuf, name: Option<&str>, id: Option<String>, taken: &[ProjectCfg]) -> Self {
         let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned).unwrap_or_else(|| folder_name(&path));
-        let id = loop {
+        let id = id.filter(|id| !id.is_empty() && !taken.iter().any(|p| p.id == *id)).unwrap_or_else(|| loop {
             let id = new_project_id();
             if !taken.iter().any(|p| p.id == id) {
                 break id;
             }
-        };
+        });
         Self { id, name, path, ..Self::default() }
     }
+}
+
+/// Um projeto que saiu da lista: o id e a pasta, para readicionar a mesma pasta reaproveitar o id
+/// (e as tarefas em `dados/tarefas/<id>.json` voltarem à mesa).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemovedProject {
+    pub id: String,
+    pub path: PathBuf,
+}
+
+impl Default for RemovedProject {
+    fn default() -> Self {
+        Self { id: String::new(), path: PathBuf::new() }
+    }
+}
+
+/// Quantos projetos removidos a config lembra (`removedProjects`).
+const REMOVED_PROJECTS_MAX: usize = 50;
+
+/// `true` se as duas pastas são a mesma coisa para a pessoa: `\` e `/` valem o mesmo, sem barra
+/// no fim e, só no Windows, sem diferenciar maiúsculas de minúsculas.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    fn norm(p: &Path) -> String {
+        let mut s = crate::util::strip_verbatim(p).to_string_lossy().replace('\\', "/");
+        while s.len() > 1 && s.ends_with('/') {
+            s.pop();
+        }
+        if cfg!(windows) {
+            s.to_lowercase()
+        } else {
+            s
+        }
+    }
+    norm(a) == norm(b)
 }
 
 /// `p` + 8 hex aleatórios.
@@ -132,6 +173,10 @@ pub enum DictationChoice {
 pub struct Config {
     /// Projetos do usuário, na ordem da barra lateral.
     pub project_list: Vec<ProjectCfg>,
+    /// Os últimos projetos que saíram da lista (ver [`RemovedProject`]): readicionar a mesma pasta
+    /// reaproveita o id. Ausente nos arquivos antigos.
+    #[serde(default)]
+    pub removed_projects: Vec<RemovedProject>,
     /// Id do projeto ativo (vazio = nenhum projeto).
     pub active_project: String,
     /// Pasta do projeto ativo (vazia = nenhum). Derivada de `active_project`, não é gravada.
@@ -193,6 +238,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             project_list: Vec::new(),
+            removed_projects: Vec::new(),
             active_project: String::new(),
             workspace: PathBuf::new(),
             whisper_lang: "pt".into(),
@@ -396,6 +442,41 @@ impl Config {
     /// O projeto ativo.
     pub fn active(&self) -> Option<&ProjectCfg> {
         self.project(&self.active_project)
+    }
+
+    /// Cria um projeto na pasta `path` e o põe no fim da lista. Se a pasta é a de um projeto
+    /// removido (ver [`Config::remove_project`]), reaproveita o id dele e tira o item de
+    /// `removed_projects` — desde que nenhum projeto da lista já use esse id. Sem `name`, o nome é
+    /// o da pasta.
+    pub fn add_project(&mut self, path: PathBuf, name: Option<&str>) -> ProjectCfg {
+        let removed = match self.removed_projects.iter().position(|r| same_folder(&r.path, &path)) {
+            Some(i) => Some(self.removed_projects.remove(i)),
+            None => None,
+        };
+        let project = ProjectCfg::with_id(path, name, removed.map(|r| r.id), &self.project_list);
+        self.project_list.push(project.clone());
+        project
+    }
+
+    /// Tira o projeto `id` da lista e guarda o par id + pasta em `removed_projects`, para a mesma
+    /// pasta readicionada reaproveitar o id (e achar as tarefas antigas). A lista guarda os
+    /// [`REMOVED_PROJECTS_MAX`] últimos. Se era o ativo, ativa o primeiro que sobrar (ou nenhum) e
+    /// acerta o `workspace`. `false` se o projeto não existe.
+    pub fn remove_project(&mut self, id: &str) -> bool {
+        let Some(pos) = self.project_list.iter().position(|p| p.id == id) else {
+            return false;
+        };
+        let project = self.project_list.remove(pos);
+        // Uma entrada velha do mesmo id ou da mesma pasta não diz mais nada.
+        self.removed_projects.retain(|r| r.id != project.id && !same_folder(&r.path, &project.path));
+        self.removed_projects.push(RemovedProject { id: project.id, path: project.path });
+        let extra = self.removed_projects.len().saturating_sub(REMOVED_PROJECTS_MAX);
+        self.removed_projects.drain(..extra);
+        if self.active_project == id {
+            self.active_project = self.project_list.first().map(|p| p.id.clone()).unwrap_or_default();
+            self.workspace = self.active().map(|p| p.path.clone()).unwrap_or_default();
+        }
+        true
     }
 
     /// Persiste em JSON indentado (2 espaços, como `JSON.stringify(config, null, 2)`).
@@ -616,6 +697,101 @@ mod tests {
         let b = ProjectCfg::new(PathBuf::from("/x/outro"), Some("  Outro nome "), std::slice::from_ref(&a));
         assert_ne!(a.id, b.id);
         assert_eq!(b.name, "Outro nome");
+    }
+
+    /// Remover o projeto e readicionar a mesma pasta devolve o mesmo id (as tarefas em
+    /// `dados/tarefas/<id>.json` voltam à mesa).
+    #[test]
+    fn reading_the_same_folder_after_removing_it_reuses_the_id() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut cfg = Config::default();
+        let a = cfg.add_project(tmp.path().join("proj"), None);
+        assert!(cfg.remove_project(&a.id));
+        assert_eq!(cfg.removed_projects, [RemovedProject { id: a.id.clone(), path: a.path.clone() }]);
+        assert!(cfg.project_list.is_empty());
+
+        let again = cfg.add_project(tmp.path().join("proj"), None);
+        assert_eq!(again.id, a.id, "a mesma pasta é o mesmo projeto");
+        assert_eq!(again.name, "proj");
+        assert!(cfg.removed_projects.is_empty(), "o item sai da lista ao ser reaproveitado");
+        assert_eq!(cfg.project_list, [again]);
+        assert!(!cfg.remove_project("pnada"), "projeto que não existe não entra na lista");
+        assert!(cfg.removed_projects.is_empty());
+    }
+
+    /// A pasta vale como a pessoa a digita: outra barra, barra no fim e, no Windows, outra caixa.
+    #[test]
+    fn the_folder_comparison_ignores_the_kind_of_slash_and_the_trailing_one() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let folder = if cfg!(windows) { tmp.path().join("Projeto") } else { tmp.path().join("projeto") };
+        let same = if cfg!(windows) { tmp.path().join("PROJETO") } else { tmp.path().join("projeto") };
+        let variants = [
+            PathBuf::from(format!("{}/", same.display())),
+            PathBuf::from(format!("{}\\", same.display())),
+            PathBuf::from(format!("{}/", same.display().to_string().replace('\\', "/"))),
+        ];
+        for variant in variants {
+            let mut cfg = Config::default();
+            let a = cfg.add_project(folder.clone(), None);
+            assert!(cfg.remove_project(&a.id));
+            assert_eq!(cfg.add_project(variant.clone(), None).id, a.id, "{}", variant.display());
+        }
+    }
+
+    #[test]
+    fn a_different_or_unavailable_id_still_gets_a_new_one() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut cfg = Config::default();
+        let a = cfg.add_project(tmp.path().join("a"), None);
+        assert!(cfg.remove_project(&a.id));
+        // Outra pasta: id novo, e o par removido continua guardado.
+        let b = cfg.add_project(tmp.path().join("b"), None);
+        assert_ne!(b.id, a.id);
+        assert_eq!(cfg.removed_projects.len(), 1);
+        // Um projeto ativo já com esse id (config editada à mão): id novo em vez de dois iguais.
+        cfg.project_list.push(ProjectCfg { id: a.id.clone(), path: tmp.path().join("outro"), ..ProjectCfg::default() });
+        let c = cfg.add_project(a.path.clone(), None);
+        assert_ne!(c.id, a.id);
+        assert_eq!(cfg.project_list.iter().filter(|p| p.id == a.id).count(), 1);
+        assert!(cfg.removed_projects.is_empty(), "a pasta foi readicionada: o item velho sai");
+    }
+
+    /// A lista guarda os últimos 50 pares; a config antiga, sem `removedProjects`, abre normalmente.
+    #[test]
+    fn the_removed_projects_are_bounded_and_optional() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        let mut cfg = Config::default();
+        for i in 0..55 {
+            let a = cfg.add_project(tmp.path().join(format!("p{i}")), None);
+            assert!(cfg.remove_project(&a.id));
+        }
+        assert_eq!(cfg.removed_projects.len(), 50);
+        assert_eq!(cfg.removed_projects.first().expect("primeiro").path, tmp.path().join("p5"));
+        assert_eq!(cfg.removed_projects.last().expect("último").path, tmp.path().join("p54"));
+        let first_id = cfg.removed_projects[0].id.clone();
+
+        let old = Config::from_json_over_defaults(r#"{"projectList":[{"id":"p1","name":"x","path":"/x"}]}"#, &p);
+        assert!(old.removed_projects.is_empty(), "arquivo sem o campo continua abrindo");
+        let saved = Config { removed_projects: cfg.removed_projects.clone(), ..Config::default() };
+        let text = serde_json::to_string(&saved).expect("json");
+        assert!(text.contains(&format!(r#""removedProjects":[{{"id":"{first_id}","path":"#)), "{text}");
+        let back = Config::from_json_over_defaults(&text, &p);
+        assert_eq!(back.removed_projects, cfg.removed_projects);
+    }
+
+    #[test]
+    fn removing_the_active_project_activates_the_first_left() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut cfg = Config::default();
+        let a = cfg.add_project(tmp.path().join("a"), None);
+        let b = cfg.add_project(tmp.path().join("b"), None);
+        cfg.active_project = b.id.clone();
+        assert!(cfg.remove_project(&b.id));
+        assert_eq!(cfg.active_project, a.id);
+        assert_eq!(cfg.workspace, a.path);
+        assert!(cfg.remove_project(&a.id));
+        assert!(cfg.active_project.is_empty() && cfg.workspace.as_os_str().is_empty());
     }
 
     #[test]

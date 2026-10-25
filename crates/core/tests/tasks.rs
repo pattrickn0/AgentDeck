@@ -1069,6 +1069,20 @@ fn removing_a_project_keeps_its_tasks_file() {
     env.core.shutdown();
 }
 
+/// Readicionar a mesma pasta reaproveita o id: a mesa do projeto volta com as tarefas antigas.
+#[test]
+fn reading_the_project_again_brings_its_tasks_back() {
+    need_git!();
+    let env = start();
+    let t = env.core.task_create(&env.project, spec("Volta")).expect("create");
+    assert!(env.core.remove_project(&env.project));
+    let again = env.core.create_project(&env.ws, None);
+    assert_eq!(again.id, env.project, "readicionar a mesma pasta é o mesmo projeto");
+    assert_eq!(env.core.active_project_id(), again.id, "sem projeto ativo, o readicionado assume");
+    assert_eq!(env.core.tasks(&again.id).iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [t.id.as_str()]);
+    env.core.shutdown();
+}
+
 /// O `Deliver` de tarefa (request 0) mais recente: `(instância, prompt, boot)`.
 fn last_task_delivery(evs: &[CoreEvent]) -> (String, String, Option<String>) {
     evs.iter()
