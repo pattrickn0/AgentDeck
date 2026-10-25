@@ -6,7 +6,7 @@
 - [Rust stable](https://rustup.rs), 1.89 ou mais novo: `rustup update` de vez em quando.
 - Linux: `sudo apt install build-essential pkg-config libasound2-dev libxkbcommon-dev` (Ubuntu/Debian) ou
   `sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel libxkbcommon-devel` (Fedora). Para rodar com
-  janela e diálogos, veja também `xdg-utils` e `xdg-desktop-portal` no [README](README.md#compilar-e-rodar-linux).
+  janela e diálogos, veja também `xdg-utils` e `xdg-desktop-portal` no [README](README.md#linux).
   Não precisa de GTK3.
 
 ```bash

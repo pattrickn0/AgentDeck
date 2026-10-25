@@ -1,78 +1,114 @@
 # ⚡ AgentDeck
 
-Terminal desktop nativo (Rust + winit) que conecta agentes de IA: **Claude Code**, **Antigravity CLI**,
-**Codex**, **OpenCode** e outros CLIs (um modelo local entra por um CLI que o suporte, como o OpenCode). Os agentes conversam entre si (`ask-agent`) e
-trabalham na pasta do projeto, enquanto você acompanha tudo na **Conversa integrada**.
+**Um terminal desktop onde os seus agentes de IA trabalham em equipe.** Claude Code, Codex, Antigravity e OpenCode
+rodam lado a lado, conversam entre si e recebem tarefas isoladas que você revisa e mescla, sem perder nada de vista.
 
-![Tela principal](docs/screenshots/main.png)
+![AgentDeck com Claude, Codex e OpenCode no modo Destaque e a mesa de tarefas à direita](docs/screenshots/main.png)
 
-## Funções
+Feito 100% em Rust, nativo para **Windows** e **Linux**. Licença MIT.
+
+---
+
+## Por que existe
+
+Cada CLI de agente é bom sozinho, mas trabalhar com vários ao mesmo tempo vira uma pilha de terminais soltos: você
+copia texto de um para o outro, perde o que cada um está fazendo e torce para dois agentes não mexerem no mesmo
+arquivo.
+
+O AgentDeck junta tudo numa janela e dá aos agentes o que falta para colaborar:
+
+- **Um jeito de conversar.** Dentro de qualquer aba, o agente roda `ask-agent codex "revise isto"`. A mensagem é
+  digitada no terminal do outro agente, e a resposta volta para quem perguntou. Você vê tudo acontecendo e pode
+  intervir em qualquer aba.
+- **Trabalho isolado e revisável.** Uma tarefa ganha branch e pasta (git worktree) próprias. O agente trabalha lá,
+  entrega um relatório, e você lê o diff e decide se mescla, devolve com ajustes ou descarta.
+- **Memória do projeto.** O que o projeto já aprendeu (armadilhas, decisões, convenções) fica em arquivos versionados,
+  e o agente recebe o pedaço que vale para os arquivos em que vai mexer.
+
+Nada de trabalho invisível: todo agente tem uma aba de terminal de verdade, e nenhum abre subagentes escondidos.
+
+## O que dá para fazer
+
+### Agentes
+
+- **Abas de terminal reais** (ConPTY no Windows) para cada agente, restauradas quando o app reabre.
+- **Várias instâncias por agente**, com cargo e nome: `claude`, `claude@dev`, `claude@dev@ana`. Cada uma tem o seu
+  **modelo** (`opus`, `sonnet`, `gpt-6-luna`, `opencode/deepseek-v4.1-flash-free`…), mostrado ao lado do nome.
+- **Equipe**: arraste um agente sobre outro na barra lateral para definir chefe e subordinados.
+- **Uso dos planos** na barra de título: a sessão de 5 h e a semana de cada agente, com aviso a partir de 80%. Um modelo
+  esgotado não recebe pergunta.
+- **Instruções do AgentDeck em toda aba**, entregues pelo canal de cada CLI, sem depender do `AGENTS.md` do seu projeto.
+- **Sem perguntas que travam**: a pasta aberta como projeto já é registrada como confiável no Claude, no Codex e no
+  Antigravity, para uma aba aberta em segundo plano não parar em "Do you trust this folder?".
+
+### Mesa de tarefas
+
+A aba **Tarefas** da barra direita é onde o trabalho grande acontece:
+
+```
+rascunho ─→ em andamento ─→ em revisão ─→ aguardando validação ─→ concluída
+   │              ↑              │                  │
+   └→ na fila ────┘              └ devolver ↺       └ reprovar ↺ (volta ao mesmo agente)
+```
+
+Em qualquer etapa antes de concluída, a tarefa pode ser descartada, e a branch e a pasta somem junto.
+
+- **Escolha do agente pela capacidade e pela cota.** Diga o tamanho do trabalho (`simples`, `media` ou `complexa`). A
+  mesa filtra os modelos que dão conta, por benchmarks públicos e pelo histórico das tarefas já feitas, e entre eles
+  escolhe o de mais folga de cota.
+- **Escopo com fila.** A tarefa pode declarar os caminhos que vai mexer. Outra que precise dos mesmos caminhos espera
+  **na fila** e começa sozinha quando a primeira termina.
+- **Revisão de verdade**: relatório, diff com realce de sintaxe e a linha do tempo das mensagens que o agente trocou.
+- **Mesclagem assistida**: se a mesclagem é recusada (alterações pendentes, conflito), a própria janela explica o
+  motivo e oferece a saída.
+
+### Interface
 
 - **Projetos**: cada projeto é uma pasta com os seus agentes. Trocar de projeto esconde as abas do anterior, que
-  continuam rodando; a árvore, o Git e a Conversa são do projeto ativo.
-- Abas de terminal reais (ConPTY no Windows) para cada agente, com cores próprias, restauradas ao reabrir. Cada aba é uma
-  instância (`claude`, `claude@dev`…) e tem o **modelo de LLM** dela, mostrado ao lado do nome.
-- **Mesa de tarefas** (aba Tarefas da barra direita): dê um pedido a um agente e ele trabalha numa branch e numa pasta
-  (worktree) só dele; você revisa o relatório e o diff e **mescla**, **devolve** com ajustes ou **descarta**; depois de
-  mesclar, a tarefa espera a sua **validação** (**validar** ou **reprovar**, e ela volta ao mesmo agente).
-  - Sem agente escolhido, a mesa escolhe pela **capacidade do modelo** para o tamanho do trabalho (nível `simples`,
-    `media` ou `complexa`; tabela de benchmarks somada ao histórico das tarefas já feitas) e, entre os capazes, pela
-    **folga de cota**, com o motivo registrado na tarefa.
-  - **Escopo de escrita**: a tarefa pode declarar os caminhos que vai mexer; outra com escopo sobreposto espera **Na
-    fila** e começa sozinha quando a primeira é mesclada ou descartada.
-  - Quando a mesclagem é recusada (alterações pendentes ou conflito), a própria janela explica e oferece a saída
-    (guardar as alterações, por exemplo). O detalhe da tarefa mostra a linha do tempo das mensagens trocadas pelo agente.
-- **Memória do projeto**: o que o projeto já aprendeu (`memory/aprendizados/`, versionado) e a situação atual (as outras
-  tarefas em andamento e os últimos commits) chegam ao agente no início de cada tarefa e em cada devolução; o agente
-  também consulta com `ask-agent --learn`.
-- **Tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Codex…) ganha uma janela com as próprias
-  abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar. Na barra lateral, a
-  organização alterna entre **Abas** (uma janela só), **Dividida** e **Destaque** (a janela da aba ativa fica grande e as
-  outras empilham ao lado).
-- **Uso dos planos** na barra de título: a cota da sessão de 5 h e da semana de cada agente (âmbar a partir de 80 %,
-  vermelho em 100 %), com o painel de quando renova. A ponte recusa perguntar a um modelo esgotado.
-- **Instruções do AgentDeck em toda aba**, pelo canal próprio de cada CLI (`--append-system-prompt` no Claude,
-  `developer_instructions` no Codex…), sem depender do `AGENTS.md` do seu projeto.
-- **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real (somente leitura).
-  Quando as abas de uma janela não cabem, setas ‹ › e o menu ▾ levam às escondidas.
-- **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
-- **GitHub** do projeto noutra aba: PRs abertos com os checks, issues, execuções do Actions e o fim do log do job que
-  falhou; um clique manda o PR ou a falha para um agente.
-- Explorador de arquivos do workspace: clique insere o caminho do arquivo na aba ativa, duplo clique abre o arquivo no modo **Documentos** do centro, onde ele se **edita** (botão Editar, `Ctrl+S` grava com o mesmo fim de linha, `Ctrl+F` busca, realce de sintaxe, aviso quando um agente muda o arquivo com edição não salva) e onde também se leem, com a largura toda, o diff de uma tarefa (com o código realçado, que se seleciona e copia), de um commit ou de um arquivo e o pedido e o relatório das tarefas.
-- Anexos por botão no cabeçalho de cada janela de agente (e no formulário "Nova tarefa"), arrastar e soltar sobre a janela/formulário ou colar imagem (Ctrl+V).
-- Ditado por voz **opcional**, com **whisper.cpp** local (CUDA / Vulkan / CPU) no cabeçalho de cada janela de agente (e `Ctrl+Shift+M`), preso à aba visível daquela janela (com indicador de gravação/transcrição na aba); o áudio é apagado logo após transcrever. Na primeira abertura o app **pergunta** se você quer o ditado e avisa do download (cerca de 1,6 GB); "Agora não" não baixa nada, e dá para baixar ou remover depois em Configurações (☰).
-- Som de notificação quando um agente termina.
-- **Bandeja do sistema**: o × esconde a janela e os agentes seguem trabalhando; "Encerrar" fica no menu do ícone.
-  Abrir o app de novo traz de volta a janela que já está rodando.
+  continuam rodando.
+- **Três organizações** do centro: **Abas** (uma janela só), **Dividida** (uma janela por tipo de agente, em grade) e
+  **Destaque** (a janela da aba ativa grande, as outras empilhadas ao lado).
+- **Conversa integrada**: as mensagens entre agentes em tempo real, só leitura.
+- **Documentos**: o centro alterna para ler e **editar** arquivos com realce de sintaxe e busca, e para ler diffs e
+  relatórios com a largura toda (`Ctrl+Shift+D`).
+- **Git** (alterações, stage por trecho, commit, branches, merge e rebase, conflitos, stash) e **GitHub** (PRs com os
+  checks, issues, Actions e o log do job que falhou; um clique manda a falha para um agente).
+- **Anexos** por botão, arrastar e soltar ou `Ctrl+V` com imagem, e **ditado por voz opcional** com whisper.cpp local
+  (CUDA, Vulkan ou CPU). O áudio é apagado logo depois de transcrever.
+- **Bandeja do sistema**: o × esconde a janela e os agentes seguem trabalhando; abrir o app de novo traz a mesma janela.
 
-Atalhos: `Ctrl+T` nova aba · `Ctrl+Tab` / `Ctrl+Shift+Tab` alternar · `Ctrl+B` barra lateral ·
-`Ctrl+Shift+M` ditar na aba · `Ctrl+Shift+D` alterna o centro entre Agentes e Documentos · `Ctrl+S` grava e `Ctrl+F` busca no documento aberto ·
-`Ctrl+/` lista os atalhos.
-Com o terminal focado, `Ctrl+B` vai para o terminal (tmux); a opção
-"Atalhos do app acima do terminal" (☰) o devolve ao app.
+## CLIs suportados
 
-## Compilar e rodar (Windows)
+Instale os que quiser usar. O AgentDeck usa o que encontrar instalado.
 
-Pré-requisito: [Rust](https://rustup.rs) (stable).
+| CLI | Instalação |
+| :-- | :-- |
+| Claude Code | `npm install -g @anthropic-ai/claude-code` |
+| Codex | `npm install -g @openai/codex` |
+| Antigravity | Windows: `irm https://antigravity.google/cli/install.ps1 \| iex` · Linux: instalador em https://antigravity.google |
+| OpenCode | `npm install -g opencode-ai` (inclui modelos gratuitos; também roda modelos locais) |
+
+Também abrem como aba, com menos integração: Aider, Goose, GitHub Copilot CLI, Amazon Q, Open Interpreter e o terminal
+comum do sistema.
+
+## Instalar e rodar
+
+Não há instalador ainda: o app roda da pasta onde foi compilado.
+
+### Windows
+
+Pré-requisito: [Rust](https://rustup.rs) 1.89 ou mais novo.
 
 ```powershell
+git clone https://github.com/pattrickn0/AgentDeck.git
+cd AgentDeck
 cargo build --workspace --release
 .\target\release\agentdeck.exe
 ```
 
-Os dois executáveis (`agentdeck` e `ask-agent`) precisam ficar **na mesma pasta**.
-As pastas `dados/`, `workspace/` e `whisper/` são procuradas subindo a partir do executável
-(ou defina `AGENTDECK_HOME`). Configuração em `%APPDATA%\AgentDeck\config.json`.
+### Linux
 
-CLIs suportados (instale os que quiser usar):
-- Claude Code: `npm install -g @anthropic-ai/claude-code`
-- Antigravity: `irm https://antigravity.google/cli/install.ps1 | iex`
-- Codex: `npm install -g @openai/codex`
-- OpenCode: `npm install -g opencode-ai`
-
-## Compilar e rodar (Linux)
-
-Pré-requisito: [Rust](https://rustup.rs) 1.89 ou mais novo e as bibliotecas de sistema abaixo.
+Pré-requisitos: [Rust](https://rustup.rs) 1.89 ou mais novo e as bibliotecas de som e teclado.
 
 ```bash
 # Ubuntu / Debian
@@ -80,88 +116,111 @@ sudo apt install build-essential pkg-config libasound2-dev libxkbcommon-dev
 # Fedora
 sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel libxkbcommon-devel
 
+git clone https://github.com/pattrickn0/AgentDeck.git
+cd AgentDeck
 cargo build --workspace --release
 ./target/release/agentdeck
 ```
 
-Não há pacote nem instalador: o app roda da pasta onde foi compilado (ou de uma pasta portátil para onde você copie
-o executável e as pastas dele).
-
+- Para abrir pastas e links e escolher arquivos: `xdg-utils` e `xdg-desktop-portal` com um backend
+  (`xdg-desktop-portal-gtk` no GNOME/XFCE, `xdg-desktop-portal-kde` no KDE).
 - Sem som nem microfone (dispensa a ALSA): `cargo build -p agentdeck --no-default-features --release`.
-- Para abrir pastas e links e escolher arquivos, o sistema precisa do `xdg-utils` (`xdg-open`), do `xdg-desktop-portal`
-  e de um backend (`xdg-desktop-portal-gtk` no GNOME/XFCE, `xdg-desktop-portal-kde` no KDE). Sem o portal, os
-  diálogos de arquivo não abrem.
-- Os dois executáveis ficam juntos em `target/release/`; para usar o `ask-agent` fora do app, ponha essa pasta no
-  `PATH` (dentro das abas o app já resolve).
-- Os dados (`dados/`, `workspace/` e `whisper/`) ficam ao lado do executável, como no Windows, ou em
-  `AGENTDECK_HOME`. Se essa pasta não for gravável (app instalado em `/usr/local/bin`, por exemplo), vão para
-  `~/.local/share/AgentDeck`. Configuração em `~/.config/AgentDeck/config.json`.
-- Ditado (opcional, o app pergunta antes de baixar): o motor de CPU e o modelo são baixados quando você aceita (os binários do Linux pedem `libgomp` e `libstdc++`, que
-  já vêm nas instalações desktop). Para usar a GPU, deixe no `PATH` um `whisper-cli` compilado com CUDA ou Vulkan;
-  o app não baixa esses motores no Linux. `pciutils` (`lspci`) e `nvidia-smi` ajudam a detectar a GPU.
-- CLIs: os mesmos `npm install -g …` acima; o Antigravity tem instalador de Linux no site
-  (https://antigravity.google).
-- Testado em X11 (Ubuntu). Wayland é suportado pela biblioteca de janelas, mas ainda não foi validado a fundo; se a
-  janela não abrir, force o X11 com `WINIT_UNIX_BACKEND=x11 ./target/release/agentdeck`.
-- **WSL (WSLg)**: o app detecta o WSLg e abre pelo X11, porque o Wayland de lá quebra a janela; a escala do WSLg é
-  sempre 1 (a interface fica pequena em tela de alta densidade). Para quem está no Windows, o caminho é o app nativo.
-- O Fedora é verificado na CI (build e testes num contêiner). O roteiro de verificação e as limitações conhecidas
-  estão em [`memory/LINUX.md`](memory/LINUX.md).
+- Testado em X11 (Ubuntu); o Fedora é conferido na CI, e no WSLg o app abre pelo X11 sozinho. Wayland ainda não foi
+  validado a fundo: se a janela não abrir, use `WINIT_UNIX_BACKEND=x11`. Detalhes e limitações em
+  [memory/LINUX.md](memory/LINUX.md).
 
-## Comunicação entre agentes
+### Os dois executáveis
 
-Dentro de qualquer aba:
+O build gera o `agentdeck` (o app) e o `ask-agent` (o comando que os agentes usam). Eles precisam ficar **na mesma
+pasta**. Dentro das abas o app já põe o `ask-agent` no `PATH`.
+
+## Primeiros passos
+
+1. Abra o app e clique em **Abrir pasta…** para criar o primeiro projeto (a pasta do seu código).
+2. Em **+ Novo agente**, na barra lateral, abra um Claude, um Codex ou outro CLI instalado. No Claude, no Antigravity e
+   no OpenCode, a seta `›` escolhe o modelo.
+3. Converse com o agente no terminal da aba. Para ele chamar outro agente, basta pedir: ele sabe usar o `ask-agent`.
+4. Para um trabalho maior, use **+ Nova tarefa** na aba Tarefas: escreva o pedido, escolha o nível e deixe a mesa
+   escolher o agente. Quando ele entregar, revise o diff e mescle.
+
+## `ask-agent`: a linha de comando dos agentes
+
+Os agentes usam estes comandos sozinhos (as instruções chegam a cada aba). Você também pode rodá-los numa aba de
+terminal comum.
 
 ```bash
-ask-agent antigravity "Revise a estrutura de pastas proposta"
-ask-agent --reply 7 "Feito: a pasta src/ foi dividida"   # responde à pergunta nº 7
-ask-agent --model sonnet claude@dev "Implemente a tarefa"   # abre claude@dev com o modelo sonnet
-ask-agent --list                                        # agentes e instâncias abertas, com o modelo
-ask-agent --models                                      # modelos de cada agente, com a cota e a capacidade
-ask-agent --team                                        # seu chefe e sua equipe
-ask-agent --boss "Terminei a revisão"                   # reporta ao chefe
-ask-agent --inbox                                       # respostas que chegaram depois (--all: as 20 últimas)
-cat relatorio.txt | ask-agent claude -
+# Conversar
+ask-agent codex "Revise a função parse_config em src/config.rs"
+ask-agent --model sonnet claude@dev "Implemente o item 3"   # abre claude@dev com o modelo sonnet
+ask-agent --reply 7 "Feito: a pasta src/ foi dividida"      # responde à pergunta nº 7
+ask-agent --boss "Terminei a revisão"                       # reporta ao chefe
+ask-agent --inbox                                           # respostas que chegaram depois
 
-# Tarefas (cada uma numa branch e pasta próprias; o pedido e o relatório vão num arquivo, que preserva os acentos)
-ask-agent --task new "Corrigir o login" --agent claude --model sonnet --effort high --start --file pedido.md
-ask-agent --task new "Tela de login" --level complexa --scope crates/app/src/ui --start --file pedido.md   # agente escolhido pela capacidade e pela cota; espera na fila se outra tarefa mexe no mesmo caminho
-ask-agent --task list                                   # as tarefas do projeto, com estado e agente
-ask-agent --task done t3 --file relatorio.md            # (o agente da tarefa) entrega o relatório
-ask-agent --task merge t3                               # mescla e deixa aguardando validação
-ask-agent --task validate t3                            # conclui e limpa; ou: --task reject t3 --file motivo.md
+# Quem está aí
+ask-agent --list                                            # agentes e instâncias abertas
+ask-agent --team                                            # seu chefe e sua equipe
+ask-agent --models                                          # modelos de cada agente, cota e capacidade
+
+# Tarefas
+ask-agent --task new "Tela de login" --level complexa --scope src/ui --start --file pedido.md
+ask-agent --task list
+ask-agent --task merge t3                                   # mescla e deixa aguardando validação
+ask-agent --task validate t3                                # conclui e limpa a worktree
 
 # Memória do projeto
-ask-agent --learn                                       # aprendizados globais e o índice dos demais
-ask-agent --learn crates/core/src/tasks.rs              # o que o projeto já aprendeu sobre esse arquivo (e se outra tarefa mexe nele)
-ask-agent --outline crates/core/src/tasks.rs            # as assinaturas do arquivo com a linha, para ler só o trecho necessário
+ask-agent --learn src/config.rs                             # o que o projeto já aprendeu sobre esse arquivo
+ask-agent --outline src/config.rs                           # as assinaturas com a linha, para ler só o trecho certo
 ```
 
-O `ask-agent` conversa com **abas de verdade**: a mensagem é digitada no terminal do agente e você vê o
-raciocínio dele, podendo intervir. Se o agente não tem aba, ela é aberta em segundo plano. Cada aba é
-uma instância com nome `modelo[@cargo[@nome]]` (`claude`, `claude@dev`, `claude@dev@ana`), então dá para
-ter várias do mesmo modelo e delegar por cargo: `ask-agent claude@dev "tarefa"` (use `--new` para outra
-instância). Cada instância também tem o **modelo de LLM** dela (`--model sonnet`, ou o padrão de `roleModels` na
-configuração), mostrado ao lado do nome na aba e na barra lateral. Se o outro agente demorar mais de 90 s (`AGENTDECK_ASK_WAIT`), o `ask-agent` termina avisando e a
-resposta é digitada depois no terminal de quem perguntou. Dá para desligar em Configurações.
+Texto com acento vai melhor por arquivo (`--file`): no Windows, a entrada padrão do PowerShell troca acentos por `?`.
+A referência completa está em [memory/GERAL.md](memory/GERAL.md#2-o-que-dá-para-fazer).
 
-Detalhes do protocolo e da arquitetura em [memory/ARCHITECTURE.md](memory/ARCHITECTURE.md).
+## Atalhos
+
+| Atalho | Ação |
+| :-- | :-- |
+| `Ctrl+T` | nova aba do tipo focado |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | próxima / anterior aba da janela |
+| `Ctrl+Alt+setas` | foco na janela vizinha |
+| `Ctrl+B` | mostra ou esconde a barra lateral |
+| `Ctrl+Shift+D` | alterna o centro entre Agentes e Documentos |
+| `Ctrl+Shift+M` | ditado na aba visível |
+| `Ctrl+S` / `Ctrl+F` | grava / busca no documento aberto |
+| `Ctrl+/` | lista os atalhos |
+
+Com o terminal focado, `Ctrl+B` vai para o programa da aba (útil no tmux). A opção "Atalhos do app acima do terminal",
+no menu ☰, inverte isso.
+
+## Dados e privacidade
+
+- **Nada passa por um servidor do AgentDeck**, porque ele não tem um. Quem fala com a nuvem são os próprios CLIs; a
+  leitura de cota usa as credenciais que eles já guardam na máquina.
+- A comunicação entre agentes é uma ponte HTTP local, só em `127.0.0.1`, com um token por aba: um agente não consegue se
+  passar por outro.
+- O áudio do ditado é apagado logo depois da transcrição. Anexos e prompts longos ficam só das últimas 5 sessões.
+- Abrir uma pasta como projeto conta como confiar nela: o app a registra como confiável no Claude Code
+  (`~/.claude.json`) e no Antigravity (`~/.gemini/antigravity-cli/settings.json`). Sua pasta pessoal e a raiz de um
+  disco nunca são registradas.
+- Os dados de execução ficam em `dados/`, ao lado do executável (ou em `AGENTDECK_HOME`). A configuração fica em
+  `%APPDATA%\AgentDeck\config.json` no Windows e em `~/.config/AgentDeck/config.json` no Linux.
 
 ## Documentação
 
-A documentação do projeto fica em **[memory/](memory/GERAL.md)**. Comece por **[memory/GERAL.md](memory/GERAL.md)**:
-como o AgentDeck funciona por dentro, o que dá para fazer nele e quais regras cada documento define.
+A documentação do projeto mora em [`memory/`](memory/GERAL.md), versionada junto com o código:
 
-- [memory/ARCHITECTURE.md](memory/ARCHITECTURE.md): arquitetura e protocolo entre agentes.
-- [memory/MANUTENCAO.md](memory/MANUTENCAO.md): guia de manutenção, com introdução prática ao Rust.
-- [memory/AGENTDECK.md](memory/AGENTDECK.md): para onde o produto vai e quem decide.
-- [memory/pendencias.md](memory/pendencias.md): os próximos passos, na ordem em que serão feitos.
-- [memory/ideias.md](memory/ideias.md): ideias sem data e limitações conhecidas.
-- [memory/historico.md](memory/historico.md): o que já foi feito.
-- [memory/testes.md](memory/testes.md): roteiro de testes manuais (Windows, agentes reais).
-- [memory/LINUX.md](memory/LINUX.md): verificação e limitações no Linux.
-- [CONTRIBUTING.md](CONTRIBUTING.md): como contribuir.
+- [GERAL.md](memory/GERAL.md): o ponto de partida, com como o app funciona, o que dá para fazer e o mapa dos documentos.
+- [ARCHITECTURE.md](memory/ARCHITECTURE.md): crates, fluxos e o contrato da ponte entre agentes.
+- [MANUTENCAO.md](memory/MANUTENCAO.md): como compilar, testar e manter, com uma introdução prática ao Rust.
+- [AGENTDECK.md](memory/AGENTDECK.md): visão e rumo do produto.
+- [pendencias.md](memory/pendencias.md) e [historico.md](memory/historico.md): o que vem a seguir e o que já foi feito.
+- [aprendizados/](memory/aprendizados/README.md): as armadilhas e decisões que o código não mostra.
+
+## Contribuir
+
+Veja [CONTRIBUTING.md](CONTRIBUTING.md). Antes de enviar, rode `cargo fmt --all`,
+`cargo clippy --workspace --all-targets -- -D warnings` e `cargo test --workspace`; a CI confere os três em Windows,
+Ubuntu e Fedora.
 
 ## Licença
 
-MIT — veja [LICENSE](LICENSE).
+MIT. Veja [LICENSE](LICENSE).
