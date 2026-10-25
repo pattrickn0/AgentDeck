@@ -2,22 +2,37 @@
 
 Terminal desktop nativo (Rust + winit) que conecta agentes de IA: **Claude Code**, **Antigravity CLI**,
 **Codex**, **OpenCode** e outros CLIs (um modelo local entra por um CLI que o suporte, como o OpenCode). Os agentes conversam entre si (`ask-agent`) e
-trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada**.
+trabalham na pasta do projeto, enquanto você acompanha tudo na **Conversa integrada**.
 
 ![Tela principal](docs/screenshots/main.png)
 
 ## Funções
 
+- **Projetos**: cada projeto é uma pasta com os seus agentes. Trocar de projeto esconde as abas do anterior, que
+  continuam rodando; a árvore, o Git e a Conversa são do projeto ativo.
 - Abas de terminal reais (ConPTY no Windows) para cada agente, com cores próprias, restauradas ao reabrir. Cada aba é uma
   instância (`claude`, `claude@dev`…) e tem o **modelo de LLM** dela, mostrado ao lado do nome.
 - **Mesa de tarefas** (aba Tarefas da barra direita): dê um pedido a um agente e ele trabalha numa branch e numa pasta
   (worktree) só dele; você revisa o relatório e o diff e **mescla**, **devolve** com ajustes ou **descarta**; depois de
   mesclar, a tarefa espera a sua **validação** (**validar** ou **reprovar**, e ela volta ao mesmo agente).
+  - Sem agente escolhido, a mesa escolhe pela **capacidade do modelo** para o tamanho do trabalho (nível `simples`,
+    `media` ou `complexa`; tabela de benchmarks somada ao histórico das tarefas já feitas) e, entre os capazes, pela
+    **folga de cota**, com o motivo registrado na tarefa.
+  - **Escopo de escrita**: a tarefa pode declarar os caminhos que vai mexer; outra com escopo sobreposto espera **Na
+    fila** e começa sozinha quando a primeira é mesclada ou descartada.
+  - Quando a mesclagem é recusada (alterações pendentes ou conflito), a própria janela explica e oferece a saída
+    (guardar as alterações, por exemplo). O detalhe da tarefa mostra a linha do tempo das mensagens trocadas pelo agente.
 - **Memória do projeto**: o que o projeto já aprendeu (`memory/aprendizados/`, versionado) e a situação atual (as outras
   tarefas em andamento e os últimos commits) chegam ao agente no início de cada tarefa e em cada devolução; o agente
   também consulta com `ask-agent --learn`.
 - **Tela dividida por tipo de agente**: cada tipo (Claude, Antigravity, Codex…) ganha uma janela com as próprias
-  abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar ou desligar a divisão.
+  abas, numa grade automática com divisores arrastáveis; dá para trocar janelas de lugar. Na barra lateral, a
+  organização alterna entre **Abas** (uma janela só), **Dividida** e **Destaque** (a janela da aba ativa fica grande e as
+  outras empilham ao lado).
+- **Uso dos planos** na barra de título: a cota da sessão de 5 h e da semana de cada agente (âmbar a partir de 80 %,
+  vermelho em 100 %), com o painel de quando renova. A ponte recusa perguntar a um modelo esgotado.
+- **Instruções do AgentDeck em toda aba**, pelo canal próprio de cada CLI (`--append-system-prompt` no Claude,
+  `developer_instructions` no Codex…), sem depender do `AGENTS.md` do seu projeto.
 - **Conversa integrada** numa barra fixa à direita: perguntas e respostas entre agentes em tempo real (somente leitura).
   Quando as abas de uma janela não cabem, setas ‹ › e o menu ▾ levam às escondidas.
 - **Git** do projeto numa aba da barra direita: alterações, diff, commit, branches, buscar/puxar/enviar.
@@ -27,6 +42,8 @@ trabalham na mesma pasta, enquanto você acompanha tudo na **Conversa integrada*
 - Anexos por botão no cabeçalho de cada janela de agente (e no formulário "Nova tarefa"), arrastar e soltar sobre a janela/formulário ou colar imagem (Ctrl+V).
 - Ditado por voz **opcional**, com **whisper.cpp** local (CUDA / Vulkan / CPU) no cabeçalho de cada janela de agente (e `Ctrl+Shift+M`), preso à aba visível daquela janela (com indicador de gravação/transcrição na aba); o áudio é apagado logo após transcrever. Na primeira abertura o app **pergunta** se você quer o ditado e avisa do download (cerca de 1,6 GB); "Agora não" não baixa nada, e dá para baixar ou remover depois em Configurações (☰).
 - Som de notificação quando um agente termina.
+- **Bandeja do sistema**: o × esconde a janela e os agentes seguem trabalhando; "Encerrar" fica no menu do ícone.
+  Abrir o app de novo traz de volta a janela que já está rodando.
 
 Atalhos: `Ctrl+T` nova aba · `Ctrl+Tab` / `Ctrl+Shift+Tab` alternar · `Ctrl+B` barra lateral ·
 `Ctrl+Shift+M` ditar na aba · `Ctrl+Shift+D` alterna o centro entre Agentes e Documentos · `Ctrl+S` grava e `Ctrl+F` busca no documento aberto ·
@@ -100,13 +117,15 @@ ask-agent antigravity "Revise a estrutura de pastas proposta"
 ask-agent --reply 7 "Feito: a pasta src/ foi dividida"   # responde à pergunta nº 7
 ask-agent --model sonnet claude@dev "Implemente a tarefa"   # abre claude@dev com o modelo sonnet
 ask-agent --list                                        # agentes e instâncias abertas, com o modelo
-ask-agent --models                                      # modelos que cada agente instalado aceita
+ask-agent --models                                      # modelos de cada agente, com a cota e a capacidade
 ask-agent --team                                        # seu chefe e sua equipe
 ask-agent --boss "Terminei a revisão"                   # reporta ao chefe
+ask-agent --inbox                                       # respostas que chegaram depois (--all: as 20 últimas)
 cat relatorio.txt | ask-agent claude -
 
 # Tarefas (cada uma numa branch e pasta próprias; o pedido e o relatório vão num arquivo, que preserva os acentos)
 ask-agent --task new "Corrigir o login" --agent claude --model sonnet --effort high --start --file pedido.md
+ask-agent --task new "Tela de login" --level complexa --scope crates/app/src/ui --start --file pedido.md   # agente escolhido pela capacidade e pela cota; espera na fila se outra tarefa mexe no mesmo caminho
 ask-agent --task list                                   # as tarefas do projeto, com estado e agente
 ask-agent --task done t3 --file relatorio.md            # (o agente da tarefa) entrega o relatório
 ask-agent --task merge t3                               # mescla e deixa aguardando validação
@@ -114,7 +133,8 @@ ask-agent --task validate t3                            # conclui e limpa; ou: -
 
 # Memória do projeto
 ask-agent --learn                                       # aprendizados globais e o índice dos demais
-ask-agent --learn crates/core/src/tasks.rs              # o que o projeto já aprendeu sobre esse arquivo
+ask-agent --learn crates/core/src/tasks.rs              # o que o projeto já aprendeu sobre esse arquivo (e se outra tarefa mexe nele)
+ask-agent --outline crates/core/src/tasks.rs            # as assinaturas do arquivo com a linha, para ler só o trecho necessário
 ```
 
 O `ask-agent` conversa com **abas de verdade**: a mensagem é digitada no terminal do agente e você vê o
@@ -135,9 +155,11 @@ como o AgentDeck funciona por dentro, o que dá para fazer nele e quais regras c
 - [memory/ARCHITECTURE.md](memory/ARCHITECTURE.md): arquitetura e protocolo entre agentes.
 - [memory/MANUTENCAO.md](memory/MANUTENCAO.md): guia de manutenção, com introdução prática ao Rust.
 - [memory/AGENTDECK.md](memory/AGENTDECK.md): para onde o produto vai e quem decide.
-- [memory/pendencias.md](memory/pendencias.md): o que falta desenvolver, na ordem em que será feito.
+- [memory/pendencias.md](memory/pendencias.md): os próximos passos, na ordem em que serão feitos.
+- [memory/ideias.md](memory/ideias.md): ideias sem data e limitações conhecidas.
 - [memory/historico.md](memory/historico.md): o que já foi feito.
 - [memory/testes.md](memory/testes.md): roteiro de testes manuais (Windows, agentes reais).
+- [memory/LINUX.md](memory/LINUX.md): verificação e limitações no Linux.
 - [CONTRIBUTING.md](CONTRIBUTING.md): como contribuir.
 
 ## Licença
