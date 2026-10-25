@@ -26,6 +26,7 @@ mod tasks_flow_tests;
 mod tasks_ui;
 mod terminal;
 mod theme;
+mod tray;
 mod ui;
 mod util;
 mod window;
@@ -48,6 +49,13 @@ fn main() -> anyhow::Result<()> {
         .target(env_logger::Target::Pipe(Box::new(logfile::LogFile::open(&data_dir))))
         .init();
     crash::install(&data_dir);
+
+    // Segunda abertura: a janela da instância viva volta (pode estar escondida na bandeja) e esta sai em silêncio. Se ela
+    // não responder (travada), segue o início normal, que mostra o erro da trava.
+    if agentdeck_core::activation::activate_running(&data_dir) {
+        log::info!("outra instância do AgentDeck já está aberta: pedi a ela que mostre a janela");
+        return Ok(());
+    }
 
     let mut event_loop_builder = EventLoop::<app::UserEvent>::with_user_event();
     // No WSLg o Wayland (Weston 9 + rdprail) quebra a janela e chega a derrubar o Weston: o XWayland

@@ -148,7 +148,7 @@ Equipe e agentes em árvore ★
 
 Segurança, ambiente e agentes novos
 
-- [ ] Abrir **uma segunda janela** do AgentDeck: aparece a mensagem "outra janela já está usando a pasta de dados" e ela fecha.
+- [ ] Abrir **uma segunda janela** do AgentDeck: ela sai em silêncio e a primeira vem para a frente (ver "Bandeja e segunda abertura"). Só se a primeira estiver travada aparece "outra janela já está usando a pasta de dados".
 - [ ] Com `AGENTDECK_HOME` apontando para outra pasta, a segunda janela abre (instância separada).
 - [ ] Abrir o AgentDeck **de dentro de uma aba** de outro AgentDeck: a aba de origem não cai.
 - [ ] Pasta de dados com `&` no caminho (`AGENTDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.
@@ -381,6 +381,24 @@ GitHub:
 - [ ] "Enviar para agente ▾" num PR, issue ou job vermelho: escolher uma aba aberta digita a mensagem pronta quando ela fica livre (não no meio da sua digitação); escolher modelo + cargo (ex.: claude@review) abre a aba se não existir e entrega; a mensagem aparece na Conversa integrada.
 - [ ] Trocar de projeto com a aba aberta limpa a lista e lê o repositório do novo projeto.
 - [ ] Barra direita no mínimo (280 px): nada corta além das reticências; janela baixa não derruba o app.
+
+## Bandeja e segunda abertura ★
+
+Windows, com o app aberto e uma aba de agente:
+
+- [ ] Clicar no × (ou Alt+F4): a janela some sem perguntar nada e o ícone do AgentDeck fica na bandeja; o processo `AgentDeck`
+  segue no Gerenciador de Tarefas e os CLIs das abas continuam rodando.
+- [ ] Antes do X, pedir um turno longo a uma aba (ex.: "conte até 200 devagar com sleep"): com a janela escondida o turno termina
+  sozinho; ao abrir de novo a resposta está lá, e o terminal está no tamanho certo (nada de 0×0 nem linhas duplicadas).
+- [ ] Clique esquerdo no ícone: a janela volta, focada. Clique direito: menu com **Abrir** e **Encerrar**; Abrir faz o mesmo.
+- [ ] Minimizar (botão da barra) e depois **Abrir** no ícone: restaura e foca.
+- [ ] Com a janela escondida (ou minimizada), abrir o `agentdeck.exe` de novo: não aparece segundo processo nem mensagem de
+  erro; a mesma janela volta para a frente (e não só pisca na barra de tarefas).
+- [ ] **Encerrar** sem nada pendente: fecha tudo (ícone some, processo sai, CLIs das abas encerram).
+- [ ] **Encerrar** com um arquivo editado e não salvo: a janela aparece sozinha com a pergunta "Há alterações não salvas".
+- [ ] **Encerrar** com um agente no meio de um turno: a janela aparece com "Há agentes trabalhando" (Cancelar mantém o app).
+- [ ] Linux com bandeja (KDE, ou GNOME com AppIndicator): o mesmo roteiro com `ksni`. Sem `StatusNotifierWatcher` (GNOME
+  puro): o × **minimiza**, e o app nunca fica invisível e sem ícone.
 
 ## Migração do nome (CommandDeck → AgentDeck) ★
 

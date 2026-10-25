@@ -321,8 +321,13 @@ pub struct Deck {
     pub debug_projects: Option<Vec<ProjectView>>,
     /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=project:<id>`): troca para este projeto logo depois de restaurar as abas.
     pub debug_switch_project: Option<String>,
-    /// O botão de fechar da barra de título foi clicado (o `App` encerra depois do quadro).
+    /// O app deve encerrar (o `App` encerra depois do quadro, ou do trabalho sem quadro com a janela escondida).
     pub quit_requested: bool,
+    /// O botão de fechar da barra de título foi clicado: o mesmo que o fechar do sistema (o `App` esconde na bandeja
+    /// ou minimiza, depois do quadro).
+    pub close_requested: bool,
+    /// Uma segunda abertura do app pediu a janela (`CoreEvent::Activate`): o `App` a mostra e foca.
+    pub activate_requested: bool,
 
     /// Aba Git (ver `git_ui.rs`).
     pub git: crate::git_ui::GitUi,
@@ -561,6 +566,8 @@ impl Deck {
             debug_projects: None,
             debug_switch_project: None,
             quit_requested: false,
+            close_requested: false,
+            activate_requested: false,
             git: crate::git_ui::GitUi::default(),
             github: crate::github_ui::GithubUi::default(),
             tasks: crate::tasks_ui::TasksUi::default(),
@@ -746,7 +753,7 @@ impl Deck {
         }
     }
 
-    fn on_core_event(&mut self, ev: CoreEvent) {
+    pub(crate) fn on_core_event(&mut self, ev: CoreEvent) {
         match ev {
             CoreEvent::Feed(entry) => {
                 let chime = entry.kind == FeedKind::Answer;
@@ -769,6 +776,7 @@ impl Deck {
             CoreEvent::Deliver(d) => self.on_deliver(d),
             CoreEvent::AgentSignal { project, id, busy } => self.on_agent_signal(&project, &id, busy),
             CoreEvent::UsageChanged => {}
+            CoreEvent::Activate => self.activate_requested = true,
             CoreEvent::TasksChanged { project } => self.tasks_changed(&project),
             CoreEvent::CloseInstance { project, id } => {
                 // Tarefa mesclada ou descartada: o core já esqueceu a instância; a aba (se aberta) fecha aqui.

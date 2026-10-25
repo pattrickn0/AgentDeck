@@ -49,6 +49,9 @@ winresource = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # Markdown renderizado no modo Documentos (ui/docs.rs); sem os recursos de realce, imagem e link.
 egui_commonmark = { version = "0.25", default-features = false }
+# Ícone na bandeja: Windows (Win32, sem GTK) e Linux (StatusNotifierItem por D-Bus, sem GTK nem tokio).
+tray-icon = { version = "0.24", default-features = false }
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 
 [profile.release]
 opt-level = 3

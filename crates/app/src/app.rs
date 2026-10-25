@@ -17,6 +17,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use crate::deck::Deck;
 use crate::smoke::{self, Smoke};
 use crate::terminal::Wake;
+use crate::tray::{self, CloseAction, Tray, TrayCommand};
 use crate::window::GlWindow;
 use crate::{theme, ui};
 
@@ -26,6 +27,8 @@ pub enum UserEvent {
     Wake,
     /// Pedido de repintura do egui após `delay`.
     Repaint(Duration),
+    /// O usuário usou o ícone da bandeja.
+    Tray(TrayCommand),
 }
 
 /// Resultado de `Core::start` (feito numa thread: pode levar alguns segundos).
@@ -54,6 +57,8 @@ pub struct App {
     viewport_stale: bool,
     /// O trabalho do `Deck` que roda sem quadro, enquanto a janela está escondida ou minimizada.
     background: Background,
+    /// O ícone da bandeja; `None` = indisponível (o × passa a minimizar em vez de esconder).
+    tray: Option<Tray>,
 }
 
 /// Agenda do `Deck::background`: com a janela escondida ou minimizada não há `RedrawRequested` (no Windows, nem
@@ -108,6 +113,9 @@ fn is_hidden(w: &Window) -> bool {
     hidden_by(w.is_minimized(), w.is_visible(), w.inner_size().into())
 }
 
+/// Lado (px) do ícone da bandeja.
+const TRAY_ICON_SIZE: usize = 32;
+
 /// Menor tamanho gravado/restaurado: abaixo disso é janela minimizada (0x0 no Windows) ou lixo.
 const MIN_SAVED_SIZE: (f32, f32) = (640.0, 480.0);
 
@@ -138,6 +146,7 @@ impl App {
             viewport_first: true,
             viewport_stale: true,
             background: Background::default(),
+            tray: None,
         }
     }
 
@@ -192,6 +201,14 @@ impl App {
         if self.smoke.is_some() || agentdeck_core::env_var_os("DEBUG_UI").is_some() {
             core.disable_config_writes();
         }
+        // Capturas e estados fictícios não deixam ícone na bandeja do usuário.
+        if self.smoke.is_none() && agentdeck_core::env_var_os("DEBUG_UI").is_none() && agentdeck_core::env_var_os("SMOKE").is_none() {
+            let proxy = self.proxy.clone();
+            let on_command: tray::OnCommand = Arc::new(move |cmd| {
+                let _ = proxy.lock().send_event(UserEvent::Tray(cmd));
+            });
+            self.tray = Tray::start(crate::icons::logo_rgba(TRAY_ICON_SIZE, theme::pal().bg), TRAY_ICON_SIZE as u32, on_command);
+        }
         let mut deck = Deck::new(core.clone(), events, Self::waker(&self.proxy));
         apply_debug_ui(&mut deck);
         self.deck = Some(deck);
@@ -224,17 +241,88 @@ impl App {
         self.frames > 0 && self.window().is_some_and(is_hidden)
     }
 
-    /// O `Deck` trabalha sem quadro e a agenda guarda quando voltar.
-    fn run_background(&mut self) {
+    /// O `Deck` trabalha sem quadro e a agenda guarda quando voltar. Com a janela escondida, é também aqui que se vê o
+    /// que só o trabalho sem quadro decide: encerrar (gravação concluída) e a segunda abertura pedindo a janela.
+    fn run_background(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let next = self.deck.as_mut().and_then(Deck::background);
         self.background.ran(now, next);
+        if self.quit_if_requested(event_loop) {
+            return;
+        }
+        if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.activate_requested)) {
+            self.show_window();
+        }
+    }
+
+    /// O app foi mandado encerrar (o "Encerrar" da bandeja, ou o "Sair" depois da pergunta): encerra tudo.
+    fn quit_if_requested(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        if !self.deck.as_ref().is_some_and(|d| d.quit_requested) {
+            return false;
+        }
+        self.shutdown();
+        event_loop.exit();
+        true
+    }
+
+    /// Traz a janela de volta: mostra, restaura se minimizada e foca. Quem a esconde não é avisado pelo winit, e quem a
+    /// mostra de novo precisa de um quadro (o `request_redraw`).
+    fn show_window(&mut self) {
+        let Some(w) = self.window() else { return };
+        Self::show(w);
+        self.viewport_stale = true;
+    }
+
+    fn show(w: &Window) {
+        w.set_visible(true);
+        if w.is_minimized() == Some(true) {
+            w.set_minimized(false);
+        }
+        w.focus_window();
+        w.request_redraw();
+    }
+
+    /// O × da janela (e o da barra de título): esconde na bandeja, sem perguntar; sem bandeja, minimiza. Os CLIs, a
+    /// ponte e as entregas seguem rodando pelo `Deck::background`.
+    fn close_window(&mut self) {
+        let Some(w) = self.gl_window.as_ref().map(|g| &g.window) else { return };
+        if let Some(core) = self.core.as_ref() {
+            persist_window(core, w);
+        }
+        match tray::close_action(self.tray.is_some()) {
+            CloseAction::Hide => {
+                w.set_visible(false);
+                // O winit não avisa quando a janela é escondida por código: o trabalho sem quadro começa daqui.
+                self.background.wake();
+            }
+            CloseAction::Minimize => w.set_minimized(true),
+        }
+    }
+
+    /// O usuário usou o ícone da bandeja.
+    fn on_tray(&mut self, event_loop: &ActiveEventLoop, cmd: TrayCommand) {
+        match cmd {
+            TrayCommand::Open => self.show_window(),
+            TrayCommand::Quit => {
+                let Some(deck) = self.deck.as_mut() else {
+                    // O backend ainda nem iniciou: não há CLI a perder.
+                    event_loop.exit();
+                    return;
+                };
+                deck.request_quit();
+                // Para perguntar, a janela precisa aparecer primeiro.
+                if deck.docs.confirm.is_some() {
+                    self.show_window();
+                }
+                self.quit_if_requested(event_loop);
+            }
+        }
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
         // Um pedido de quadro que chega com a janela escondida (a minimizada informa 0×0) vira trabalho sem quadro.
         if self.hidden() {
-            self.run_background();
+            self.run_background(event_loop);
             return;
         }
         self.background.clear();
@@ -265,10 +353,19 @@ impl App {
         }
         egui.paint(&glw.window);
 
-        // O "×" da barra de título: o mesmo caminho do fechar do sistema.
+        // A segunda abertura do app pediu a janela (já visível: só foca).
+        if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.activate_requested)) {
+            Self::show(&glw.window);
+        }
+        // Encerrar (depois da pergunta, quando havia o que perguntar).
         if self.deck.as_ref().is_some_and(|d| d.quit_requested) {
             self.shutdown();
             event_loop.exit();
+            return;
+        }
+        // O "×" da barra de título: o mesmo caminho do fechar do sistema.
+        if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.close_requested)) {
+            self.close_window();
             return;
         }
 
@@ -388,6 +485,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.try_init_core(event_loop);
                 self.request_work();
             }
+            UserEvent::Tray(cmd) => self.on_tray(event_loop, cmd),
             UserEvent::Repaint(delay) => {
                 if delay.is_zero() {
                     self.request_work();
@@ -428,20 +526,14 @@ impl ApplicationHandler<UserEvent> for App {
             }
             return;
         }
+        // O × (e Alt+F4, e fechar pela barra de tarefas) não encerra: esconde na bandeja. Encerrar é o menu dela.
+        if matches!(event, WindowEvent::CloseRequested) {
+            self.close_window();
+            return;
+        }
         let (Some(glw), Some(egui), Some(deck)) = (self.gl_window.as_ref(), self.egui.as_mut(), self.deck.as_mut()) else { return };
         let mut forward = true;
         match &event {
-            WindowEvent::CloseRequested => {
-                // Com edição não salva o app pergunta antes (o quadro seguinte sai, se o usuário mandar).
-                deck.request_quit();
-                // Fechar pela barra de tarefas com a janela minimizada: a pergunta (ou a saída) precisa de um quadro.
-                if is_hidden(&glw.window) {
-                    glw.window.set_visible(true);
-                    glw.window.set_minimized(false);
-                }
-                glw.window.request_redraw();
-                return;
-            }
             WindowEvent::RedrawRequested => {
                 self.redraw(event_loop);
                 return;
@@ -528,7 +620,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let hidden = self.hidden();
         if hidden && self.background.due(now) {
-            self.run_background();
+            self.run_background(event_loop);
         }
         let background = self.background.deadline(now).filter(|_| hidden);
         let deadlines = [self.repaint_at, self.size_persist_at, self.smoke.as_ref().filter(|s| !s.armed).map(|s| s.at), background];

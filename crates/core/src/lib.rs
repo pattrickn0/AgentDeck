@@ -8,6 +8,7 @@
 //! `agents.rs` (tipos `AgentInfo`/`SpawnSpec`), `config.rs` (`Config`) e
 //! `workspace.rs` (`DirEntry`) são consumidos pela UI. Não mude sem alinhar com o lead.
 
+pub mod activation;
 pub mod activity;
 pub mod agents;
 pub mod attachments;
@@ -243,6 +244,8 @@ impl Core {
     /// Como [`Core::start`], com opções (testes / uso embutido).
     pub fn start_with(paths: paths::AppPaths, opts: StartOptions) -> anyhow::Result<(Core, Receiver<CoreEvent>)> {
         let data_lock = lock_data_dir(&paths.data_dir)?;
+        // Quem pega a trava é a única instância: o que sobrou de uma que travou não vale.
+        activation::forget(&paths.data_dir);
         let (tx, rx) = crossbeam_channel::unbounded();
         let home = opts.home_dir.clone().unwrap_or_else(util::home_dir);
         let mut config = match opts.config {
@@ -295,6 +298,7 @@ impl Core {
         let (server, port) = bridge::start(&core)?;
         *core.inner.bridge_server.lock() = Some(server);
         *core.inner.state.bridge_port.lock() = port;
+        activation::publish(&core.paths().data_dir, port, core.bridge_token());
 
         usage::start_poller(&core);
 
@@ -960,6 +964,7 @@ impl Core {
     /// Encerra processos filhos headless (chamado ao fechar a janela), a ponte e o watcher.
     pub fn shutdown(&self) {
         self.inner.state.shutdown.store(true, Ordering::SeqCst);
+        activation::forget(&self.paths().data_dir);
         self.inner.processes.kill_all();
         if let Some(server) = self.inner.bridge_server.lock().take() {
             server.unblock();

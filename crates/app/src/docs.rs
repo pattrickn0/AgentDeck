@@ -657,6 +657,8 @@ pub enum Unsaved {
     Tab(u64),
     /// Fechar o app.
     Quit,
+    /// Fechar o app com agentes no meio de um turno (o fechamento mata o processo e o turno se perde).
+    Busy,
     /// Descartar a edição e ler o arquivo do disco (o botão Recarregar).
     Revert(u64),
 }
@@ -1038,11 +1040,12 @@ impl Deck {
         }
     }
 
-    /// O pedido de fechar o app (o × da janela): com edição não salva, pergunta antes.
+    /// O pedido de encerrar o app (o "Encerrar" da bandeja; o × da janela só a esconde): com edição não salva ou
+    /// com agente no meio de um turno, pergunta antes.
     pub fn request_quit(&mut self) {
         let first = self.docs.unsaved().first().map(|t| (t.uid, t.project.clone()));
         let Some((uid, project)) = first else {
-            self.quit_requested = true;
+            self.quit_unless_working();
             return;
         };
         // Mostra o primeiro documento com edição, se é do projeto à vista.
@@ -1051,6 +1054,20 @@ impl Deck {
             self.docs.view = CenterView::Docs;
         }
         self.docs.confirm = Some(Unsaved::Quit);
+    }
+
+    /// Sai, ou pergunta antes se algum agente está no meio de um turno.
+    fn quit_unless_working(&mut self) {
+        if self.tabs.iter().any(|t| t.busy) {
+            self.docs.confirm = Some(Unsaved::Busy);
+        } else {
+            self.quit_requested = true;
+        }
+    }
+
+    /// Nomes das abas com agente no meio de um turno.
+    pub fn working_tabs(&self) -> Vec<String> {
+        self.tabs.iter().filter(|t| t.busy).map(|t| t.label.clone()).collect()
     }
 
     /// Lê o documento de novo (botão de recarregar). Um arquivo aberto como código não passa por "Carregando…": se tem
@@ -1191,6 +1208,10 @@ impl Deck {
                 self.docs_save_all_and_quit();
             }
             (Unsaved::Quit, Answer::Discard) => {
+                self.docs.confirm = None;
+                self.quit_unless_working();
+            }
+            (Unsaved::Busy, Answer::Discard | Answer::Save) => {
                 self.docs.confirm = None;
                 self.quit_requested = true;
             }

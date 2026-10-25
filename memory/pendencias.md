@@ -14,14 +14,14 @@ teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGEN
    "Gravar o terminal (diagnóstico)" no menu da aba e mandar `dados/pty/`), o editor de documentos (`t39`) e a recusa por
    cota (`ask-agent --models antigravity`, `--team`). Também do usuário: renomear a pasta local `commanddeck-dev` (o
    repositório no GitHub já se chama `AgentDeck`).
-2. [ ] **Segundo plano e bandeja** (decidido em 2026-10-24). Primeiro (T1a, feito na `t44`), o `Deck::tick` saiu de dentro da
-   pintura: `Deck::background` roda a partir do laço do winit com a janela escondida ou minimizada (ver ARCHITECTURE.md,
-   "Trabalho com e sem quadro"; `app::is_hidden` decide). A T1b precisa, ao esconder a janela com `set_visible(false)`, pedir
-   uma rodada (`Background::wake`), porque o winit não avisa. Depois (T1b), o X
-   esconde a janela na bandeja, sem perguntar (Windows: `tray-icon`/Win32; Linux: `ksni`, sem GTK; sem
-   `StatusNotifierWatcher` no D-Bus, o X minimiza); a bandeja tem Abrir e Encerrar (Encerrar pergunta só com aba no meio de
-   um turno); abrir o programa de novo traz a instância de volta, como o Discord (a segunda abertura lê a porta da ponte
-   na trava, faz `POST /activate` e sai; no Windows, `AllowSetForegroundWindow`).
+2. [ ] **Segundo plano e bandeja** (decidido em 2026-10-24). T1a (`t44`): o `Deck::tick` saiu de dentro da pintura e
+   `Deck::background` roda a partir do laço com a janela escondida ou minimizada. T1b (`t48`, feito, falta validar no uso):
+   o X esconde a janela na bandeja, sem perguntar (Windows: `tray-icon`; Linux: `ksni`; sem `StatusNotifierWatcher` o X
+   minimiza); a bandeja tem Abrir e Encerrar (Encerrar pergunta com edição não salva ou aba no meio de um turno); abrir o
+   programa de novo traz a instância de volta (`POST /activate`, ver ARCHITECTURE.md, "Uma janela por pasta de dados" e
+   "Bandeja"). Falta ver no uso: o roteiro está em testes.md ("Bandeja e segunda abertura"), em especial o turno longo
+   terminando com a janela escondida e o ícone no Linux (a bandeja do GNOME puro não tem `StatusNotifierWatcher`; precisa
+   da extensão AppIndicator), que só foi compilado, não rodado.
 3. [ ] **Retomar a conversa de cada aba** depois de fechar o app ou de um crash (T4). Id por aba em `ProjectCfg`, gravado
    assim que é conhecido, nunca `--continue`. Claude: `--session-id`/`--resume` com id nosso (o hook atualiza depois de
    `/clear`); OpenCode: `--session <id>` (cria se não existe); Antigravity: `--conversation <id>`, com o id lido do

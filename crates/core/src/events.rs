@@ -121,6 +121,8 @@ pub enum CoreEvent {
         project: String,
         id: String,
     },
+    /// Uma segunda abertura do app pediu (`POST /activate`) que esta instância mostre a janela.
+    Activate,
 }
 
 /// Mensagem a digitar no terminal de uma instância de agente.
