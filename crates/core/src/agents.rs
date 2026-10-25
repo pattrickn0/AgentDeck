@@ -409,7 +409,7 @@ impl Registry {
             first,
             format!("Para falar com outro agente, rode no shell: ask-agent <agente> \"mensagem\"{listed}. Precisando de outro agente, abra-o no AgentDeck (ask-agent <agente>, ask-agent <agente>@<cargo> ou ask-agent --task new): NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça."),
             "A resposta sai no stdout e pode levar minutos (timeout de até 600000 ms). Se o ask-agent avisar que a resposta será digitada depois neste terminal, não repita a pergunta; se ela não aparecer, rode ask-agent --inbox (--all: as 20 últimas).".to_owned(),
-            "ask-agent --models [<agente>] lista os agentes, os modelos desta máquina e a cota de cada um (do mais folgado ao mais gasto): antes de delegar ou de abrir tarefas, veja a cota de todos e distribua o trabalho, preferindo quem tem mais folga em vez de ir sempre no mesmo (a ponte recusa o que está esgotado). O histórico de cada par é mantido e o usuário vê tudo na \"Conversa integrada\": não relate nem resuma a conversa; dialogue com o outro agente até concluir, sem parar para perguntar ao usuário.".to_owned(),
+            "ask-agent --models [<agente>] lista os agentes, os modelos desta máquina e a cota de cada um (do mais folgado ao mais gasto): antes de delegar ou de abrir tarefas, veja a cota de todos e escolha entre os modelos capazes do tamanho do trabalho e, entre eles, o de mais folga, em vez de ir sempre no mesmo (a ponte recusa o que está esgotado). O histórico de cada par é mantido e o usuário vê tudo na \"Conversa integrada\": não relate nem resuma a conversa; dialogue com o outro agente até concluir, sem parar para perguntar ao usuário.".to_owned(),
             "Cada aba é uma instância <modelo>[@<cargo>[@<nome>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev \"tarefa\" abre a aba se não existir; --new abre outra do mesmo cargo; --model <modelo> escolhe o LLM ao abrir. Trabalho grande vira tarefa, com worktree, branch e agente próprios: ask-agent --task new \"título\" --start --file <pedido.md>.".to_owned(),
             "Texto com acento vai num arquivo (--file <arquivo>): pela entrada padrão o shell do Windows troca os acentos por \"?\".".to_owned(),
             "Quando outro agente lhe mandar uma mensagem, responda com o comando indicado nela (ask-agent --reply <número> \"resposta\" ou --file <arquivo>): só assim a resposta chega a ele.".to_owned(),
@@ -771,7 +771,7 @@ mod tests {
         for needle in [
             "NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça",
             "ask-agent <agente>@<cargo> ou ask-agent --task new",
-            "antes de delegar ou de abrir tarefas, veja a cota de todos e distribua o trabalho, preferindo quem tem mais folga",
+            "escolha entre os modelos capazes do tamanho do trabalho e, entre eles, o de mais folga",
             "memory/aprendizados/",
             "titulo:",
             "resumo:",

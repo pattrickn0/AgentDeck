@@ -1430,3 +1430,44 @@ fn validate_completes_with_a_warning_when_the_base_branch_is_gone() {
     assert!(!branches(&env.ws).contains(&t.branch), "a branch da tarefa foi removida");
     core.shutdown();
 }
+
+#[test]
+fn the_task_level_is_recorded_and_the_choice_warns_when_the_model_falls_short() {
+    use agentdeck_core::capability::Level;
+    need_git!();
+    let env = start();
+    let log = |t: &agentdeck_core::Task| t.events.iter().map(|e| e.text.clone()).collect::<Vec<_>>().join("\n");
+    // Sem nível informado vale media; o pedido é gravado.
+    let plain = env.core.task_create(&env.project, spec("Sem nível")).expect("create");
+    assert_eq!(plain.level, Level::Medium);
+    assert!(!log(&plain).contains("aviso de capacidade"), "{}", log(&plain));
+    let big = env
+        .core
+        .task_create(&env.project, TaskSpec { level: Level::Complex, model: Some("haiku".into()), ..spec("Uma engine") })
+        .expect("create");
+    assert_eq!(big.level, Level::Complex);
+    assert_eq!(env.core.task(&env.project, &big.id).map(|t| t.level), Some(Level::Complex));
+    assert!(log(&big).contains("aviso de capacidade: a tarefa é complexa e claude haiku só vai até simples"), "{}", log(&big));
+    // Esforço baixo derruba um nível: o sonnet (complexa) passa a média.
+    let low = env
+        .core
+        .task_create(
+            &env.project,
+            TaskSpec { level: Level::Complex, model: Some("sonnet".into()), effort: Some(agentdeck_core::models::Effort::Low), ..spec("Rápido") },
+        )
+        .expect("create");
+    assert!(log(&low).contains("claude sonnet só vai até media"), "{}", log(&low));
+    // Agente automático: o capaz do nível, com o motivo registrado.
+    let auto = env.core.task_create(&env.project, TaskSpec { kind: String::new(), level: Level::Complex, ..spec("Automático") }).expect("create");
+    assert_eq!(auto.kind, "claude");
+    assert!(log(&auto).contains("pela capacidade e pela cota: complexa: claude sonnet, capaz"), "{}", log(&auto));
+}
+
+#[test]
+fn the_models_inventory_lists_the_capacity_of_each_model() {
+    need_git!();
+    let env = start();
+    let lines = env.core.capability_lines(&env.core.models_inventory(None).expect("inventário"));
+    let sonnet = lines.iter().find(|l| l.starts_with("Claude Sonnet 5.5")).expect("sonnet");
+    assert!(sonnet.contains("complexa, Coding Agent Index 59.3 (2026-10)"), "{sonnet}");
+}

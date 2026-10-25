@@ -45,6 +45,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
+use crate::capability::{self, Level};
 use crate::events::{CoreEvent, Delivery, FeedEntry, FeedKind};
 use crate::git::{run, GitError, Repo, RepoState, COMMIT_TIMEOUT, WRITE_TIMEOUT};
 use crate::instances::Ident;
@@ -184,6 +185,9 @@ pub struct Task {
     pub branch: String,
     /// Pasta (absoluta) da worktree: `<raiz do repositório>/.agentdeck/worktrees/<id>`.
     pub worktree: PathBuf,
+    /// O tamanho do trabalho (`simples`, `media`, `complexa`), que decide quais modelos dão conta; não é o esforço.
+    /// Tarefas antigas, sem o campo, valem `media`.
+    pub level: Level,
     /// Agente (`claude`, `antigravity`, `opencode`, `codex`…).
     pub kind: String,
     /// Modelo de LLM (pelas regras de `models.rs`); `None` = o padrão do CLI.
@@ -285,6 +289,7 @@ impl Task {
             "status": self.status,
             "base": self.base,
             "branch": self.branch,
+            "level": self.level,
             "kind": self.kind,
             "model": self.model,
             "effort": self.effort,
@@ -313,6 +318,8 @@ pub struct TaskSpec {
     pub model: Option<String>,
     /// Esforço pedido; `None` = o padrão do CLI. Só vale onde [`models::effort_unavailable`] não objeta.
     pub effort: Option<models::Effort>,
+    /// O tamanho do trabalho ([`Task::level`]); sem ele vale `media`.
+    pub level: Level,
     /// Branch de partida e de mesclagem; `None` = a branch atual do repositório do projeto.
     pub base: Option<String>,
     /// Quem pediu (id de agente ou `usuário`).
@@ -894,9 +901,11 @@ impl Core {
 
         // Agente: instalado, com aba (nada de `shell`) e sem `@` (o cargo é o id da tarefa).
         let automatic_choice = spec.kind.trim().is_empty();
-        let selected_by_quota = automatic_choice.then(|| self.best_agent_by_quota(&kinds)).flatten();
+        let selected = automatic_choice
+            .then(|| capability::select(&self.capability_candidates(&kinds, spec.effort), spec.level))
+            .flatten();
         let asked = match spec.kind.trim().to_lowercase() {
-            k if k.is_empty() => selected_by_quota
+            k if k.is_empty() => selected
                 .as_ref()
                 .map(|choice| choice.kind.clone())
                 .or_else(|| kinds.iter().find(|kind| kind.as_str() == "claude").cloned())
@@ -973,6 +982,7 @@ impl Core {
             status: TaskStatus::Draft,
             scope,
             base,
+            level: spec.level,
             kind,
             model,
             effort,
@@ -986,13 +996,21 @@ impl Core {
             None => "criada".to_owned(),
         });
         if automatic_choice {
-            if let Some(choice) = selected_by_quota {
-                task.log(format!("agente escolhido automaticamente pela cota: {}", choice.reason));
+            if let Some(choice) = selected {
+                task.log(format!("agente escolhido automaticamente pela capacidade e pela cota: {}", choice.reason));
+                if let Some(warning) = choice.warning {
+                    task.log(format!("aviso de capacidade: {warning}"));
+                }
             } else {
                 task.log(format!("agente escolhido automaticamente: {} (sem leitura de cota)", task.kind));
             }
-        } else if let Some(note) = self.quota_advisory(&task.kind, &kinds) {
-            task.log(format!("aviso de cota: {note}"));
+        } else {
+            if let Some(note) = self.quota_advisory(&task.kind, &kinds) {
+                task.log(format!("aviso de cota: {note}"));
+            }
+            if let Some(note) = self.capability_advisory(&task.kind, task.model.as_deref(), task.level, task.effort) {
+                task.log(format!("aviso de capacidade: {note}"));
+            }
         }
         self.with_tasks(project, true, |p| {
             p.next = number + 1;

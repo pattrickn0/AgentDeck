@@ -12,7 +12,9 @@ teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGEN
 
 1. [ ] **Validação no uso (usuário).** O terminal sem as linhas em branco depois de mudar o tamanho (`t37`; se voltar,
    "Gravar o terminal (diagnóstico)" no menu da aba e mandar `dados/pty/`), o editor de documentos (`t39`) e a recusa por
-   cota (`ask-agent --models antigravity`, `--team`). Também do usuário: renomear a pasta local `commanddeck-dev` (o
+   cota (`ask-agent --models antigravity`, `--team`) e a escolha pela capacidade do modelo (`t52`: nível da tarefa, bloco
+   "capacidade" do `--models`; ver testes.md). Quando a medida tiver tarefas suficientes, rever a tabela `capability.json` e os
+   modelos presumidos por agente (`defaults`). Também do usuário: renomear a pasta local `commanddeck-dev` (o
    repositório no GitHub já se chama `AgentDeck`).
 2. [ ] **Segundo plano e bandeja** (decidido em 2026-10-24). T1a (`t44`): o `Deck::tick` saiu de dentro da pintura e
    `Deck::background` roda a partir do laço com a janela escondida ou minimizada. T1b (`t48`, feito, falta validar no uso):

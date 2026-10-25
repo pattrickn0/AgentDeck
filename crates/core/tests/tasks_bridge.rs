@@ -303,6 +303,24 @@ fn the_bridge_reads_the_effort_of_a_new_task() {
 }
 
 #[test]
+fn the_bridge_reads_the_level_of_a_new_task() {
+    need_git!();
+    let env = start();
+    let token = tab_token(&env, "claude");
+    let post = |body: &str| http(&env.core, "POST", "/tasks", &token, body);
+    let (status, body) = post(r#"{"title":"Grande","kind":"claude","level":"complexa"}"#);
+    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("complexa")), "{body}");
+    let (status, body) = post(r#"{"title":"Padrão","kind":"claude"}"#);
+    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("media")));
+    let (status, body) = post(r#"{"title":"Média","kind":"claude","level":"Média"}"#);
+    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("media")));
+    let (status, body) = post(r#"{"title":"Enorme","kind":"claude","level":"enorme"}"#);
+    assert_eq!(status, 400);
+    assert!(body["error"].as_str().is_some_and(|e| e.contains("nível inválido")), "{body}");
+    env.core.shutdown();
+}
+
+#[test]
 fn the_bridge_reads_the_scope_of_a_new_task_and_queues_on_start() {
     need_git!();
     let env = start();

@@ -5,6 +5,7 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
+use agentdeck_core::capability::Level;
 use agentdeck_core::models::{self, Effort};
 use agentdeck_core::{FeedKind, MergeBlock, Task, TaskMessage, TaskStatus};
 
@@ -74,6 +75,7 @@ enum Act {
     SetKind(String),
     SetModel(Option<String>),
     SetEffort(Option<Effort>),
+    SetLevel(Level),
     /// Passo do menu de modelo: o provedor cujos modelos estão à mostra (`None` = lista de provedores).
     SetProvider(Option<String>),
     ToggleStartNow,
@@ -153,13 +155,18 @@ fn apply(deck: &mut Deck, act: Act) {
             deck.tasks.form.provider = None;
         }
         Act::SetKind(k) => deck.tasks_form_set_kind(k),
+        Act::SetLevel(l) => deck.tasks_form_set_level(l),
         Act::SetProvider(p) => deck.tasks.form.provider = p,
         Act::SetModel(m) => {
             deck.tasks.form.provider = None;
             deck.tasks.form.model = m;
             deck.tasks.form.menu = None;
+            deck.tasks_form_refresh();
         }
-        Act::SetEffort(e) => deck.tasks.form.effort = e,
+        Act::SetEffort(e) => {
+            deck.tasks.form.effort = e;
+            deck.tasks_form_refresh();
+        }
         Act::ToggleStartNow => deck.tasks.form.start_now = !deck.tasks.form.start_now,
         Act::PickAttachments => deck.tasks_pick_attachments(),
         Act::RemoveAttachment(i) => deck.tasks_remove_attachment(i),
@@ -1820,6 +1827,18 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             text_field(ui, brief_id, &mut deck.tasks.form.brief, "Detalhes, arquivos, critérios de aceite… (opcional)", Some(6));
             form_attachments(deck, ui, acts);
             ui.add_space(8.0);
+            field_label(ui, "Nível");
+            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
+            let level_labels = Level::ALL.map(Level::label);
+            let level_at = Level::ALL.iter().position(|l| *l == deck.tasks.form.level).unwrap_or(1);
+            if let Some(i) = segmented(ui, r, Id::new("tasks-new-level"), &level_labels, level_at, true) {
+                acts.push(Act::SetLevel(Level::ALL[i]));
+            }
+            tip(
+                ui.interact(r, Id::new("tasks-new-level-tip"), Sense::hover()),
+                "O tamanho do trabalho (não é o esforço): decide quais modelos dão conta. Sem escolher, vale Média",
+            );
+            ui.add_space(8.0);
             field_label(ui, "Agente");
             let (r, click) = dropdown_button(
                 ui,
@@ -1837,6 +1856,10 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             if let Some(note) = deck.core.quota_advisory(&kind, &choices) {
                 ui.add_space(3.0);
                 notice_box(ui, &format!("Aviso de cota: {note}. A escolha continua disponível."), false, false);
+            }
+            if let Some(note) = deck.tasks.form.capacity_note.clone() {
+                ui.add_space(3.0);
+                notice_box(ui, &format!("Aviso de capacidade: {note}. A escolha continua disponível."), false, false);
             }
             ui.add_space(8.0);
             field_label(ui, "Modelo");
