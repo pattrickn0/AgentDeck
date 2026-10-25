@@ -32,6 +32,25 @@ pub const TYPING_QUIET: Duration = Duration::from_secs(20);
 pub const BOOT_GRACE: Duration = Duration::from_secs(5);
 /// Intervalo para conferir de novo enquanto a aba está ocupada.
 pub const POLL: Duration = Duration::from_millis(300);
+/// No Codex do Windows, quanto o Enter espera a mais por caractere colado (ver [`enter_delay`]).
+pub const CODEX_ENTER_PER_CHAR: Duration = Duration::from_millis(1);
+/// Teto da espera do Enter: um texto enorme não segura a aba para sempre.
+pub const MAX_ENTER_DELAY: Duration = Duration::from_secs(10);
+
+/// Quanto o Enter espera depois de colar `text` na aba do CLI `kind` (`base` para quase todos).
+///
+/// No Windows o Codex não recebe a colagem como colagem: lê tecla por tecla e trata o Enter que chega
+/// antes de terminar como quebra de linha, e a mensagem fica parada no campo ("[Pasted Content N
+/// chars]"). Medido em 2026-10-25 (Codex 0.164.0): 1.735 caracteres perdem o Enter em 600 ms e
+/// pegam em 1.200 ms; 3.593 perdem em 1.200 e pegam em 2.400. A espera cresce 1 ms por caractere,
+/// com folga de ~1,5×.
+pub fn enter_delay(kind: &str, text: &str, base: Duration) -> Duration {
+    if kind != "codex" || !cfg!(windows) {
+        return base;
+    }
+    let chars = u32::try_from(text.chars().count()).unwrap_or(u32::MAX);
+    (base + CODEX_ENTER_PER_CHAR.saturating_mul(chars)).min(MAX_ENTER_DELAY)
+}
 
 /// O que a UI sabe da aba agora.
 #[derive(Debug, Clone, Copy)]
@@ -158,6 +177,21 @@ mod tests {
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    #[test]
+    fn the_codex_enter_waits_for_the_paste_on_windows() {
+        let base = ms(250);
+        let long = "x".repeat(1735);
+        assert_eq!(enter_delay("claude", &long, base), base, "só o Codex espera mais");
+        if cfg!(windows) {
+            assert_eq!(enter_delay("codex", "oi", base), ms(252));
+            assert!(enter_delay("codex", &long, base) > ms(1200), "1.735 caracteres pegaram com 1.200 ms");
+            assert!(enter_delay("codex", &"x".repeat(3593), base) > ms(2400), "3.593 caracteres pegaram com 2.400 ms");
+            assert_eq!(enter_delay("codex", &"x".repeat(200_000), base), MAX_ENTER_DELAY);
+        } else {
+            assert_eq!(enter_delay("codex", &long, base), base, "fora do Windows a colagem chega inteira");
+        }
     }
 
     fn idle_tab(t0: Instant) -> TabState {

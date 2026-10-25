@@ -145,7 +145,8 @@ impl Deck {
         tab.done = false;
         tab.session.write(&input::submit_paste(text));
         let double = text.contains('@') && tab.spec.as_ref().is_some_and(|s| s.double_enter_on_mention);
-        let mut times = vec![now + FIRST_ENTER];
+        let kind = tab.spec.as_ref().map_or("", |s| s.kind.as_str());
+        let mut times = vec![now + delivery::enter_delay(kind, text, FIRST_ENTER)];
         if double {
             times.push(now + SECOND_ENTER);
         }
