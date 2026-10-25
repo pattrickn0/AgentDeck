@@ -1,7 +1,7 @@
 ---
 titulo: Aba que precisa abrir recebe o pedido por arquivo, não digitado
 resumo: Digitar num CLI que ainda sobe perde o texto; o prompt inicial é uma linha ASCII que manda ler um arquivo.
-touches: [crates/core/src/tasks.rs, crates/core/src/agents.rs, crates/core/src/models.rs, crates/core/src/delivery.rs]
+touches: [crates/core/src/tasks/**, crates/core/src/agents.rs, crates/core/src/models.rs, crates/core/src/delivery.rs]
 ---
 Digitar o texto numa aba que ainda está abrindo (nova, ou processo encerrado) o perde: o CLI está subindo (visto no
 Antigravity). Então o brief, a devolução ou a reprovação vão para `dados/tarefas/<projeto>-<id>-brief.md` (ou

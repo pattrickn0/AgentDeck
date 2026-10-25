@@ -1,7 +1,7 @@
 ---
 titulo: Cada CLI guarda a confiança da pasta num lugar e com uma regra diferente
 resumo: Claude herda da pasta-mãe (~/.claude.json), Codex da raiz do repositório e aceita -c, Antigravity só pelo caminho exato (settings.json).
-touches: [crates/core/src/trust.rs, crates/core/src/agents.rs, crates/core/src/tasks.rs]
+touches: [crates/core/src/trust.rs, crates/core/src/agents.rs, crates/core/src/tasks/**]
 ---
 Conferido em 2026-10-25 (Claude Code 2.1.310, Codex 0.164.0, `agy` 1.4.7), abrindo cada CLI num PTY numa pasta nova:
 

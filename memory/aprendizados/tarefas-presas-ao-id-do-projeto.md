@@ -1,7 +1,7 @@
 ---
 titulo: As tarefas ficam presas ao id do projeto, não à pasta
 resumo: Remover e adicionar o projeto de novo gerava outro id e deixava as tarefas órfãs em dados/tarefas/<id antigo>.json; readicionar a mesma pasta agora reaproveita o id.
-touches: [crates/core/src/tasks.rs, crates/core/src/config.rs, crates/core/src/lib.rs]
+touches: [crates/core/src/tasks/**, crates/core/src/config.rs, crates/core/src/lib.rs]
 ---
 A mesa grava as tarefas em `dados/tarefas/<id do projeto>.json` (e os pedidos em `<id>-tNN-brief.md`). Remover o
 projeto da lista não apaga esse arquivo, mas adicionar a mesma pasta de novo criava um id novo (`p` + hexadecimal) e a
