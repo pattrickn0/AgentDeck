@@ -53,3 +53,9 @@ path = "tests/support/fake_agent.rs"
 test = false
 bench = false
 doc = false
+
+# Régua da memória (mede as estratégias de entrega de aprendizados sobre o histórico do git). `test = true` faz o
+# `cargo test` rodar os testes unitários do exemplo.
+[[example]]
+name = "memeval"
+test = true
