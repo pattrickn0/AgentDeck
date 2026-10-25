@@ -11,9 +11,11 @@ e a alça de trocar janelas de lugar não existe no Destaque (a ordem das pequen
 
 **Por quê:** guardar "o destaque" separado da aba ativa dá dois estados que se desencontram (ativar uma aba por atalho, por
 tarefa ou por `ask-agent` precisaria atualizar os dois). Trocar o destaque muda o tamanho das janelas uma vez; o PTY segue a
-regra de sempre (`fit_tab` + 150 ms de tamanho parado, ver `claude-code-sem-esc3j-no-windows.md`), e o teste
-`the_highlight_follows_the_active_tab_and_the_pty_resizes_once_per_switch` (`tasks_flow_tests.rs`) confere que quadros parados não
-pedem redimensionamento. Não anime o tamanho das janelas: cada quadro da animação seria um tamanho novo para o PTY.
+regra de sempre (`fit_tab` + tamanho parado, ver `claude-code-sem-esc3j-no-windows.md`), com 600 ms numa troca de aba no
+Destaque em vez dos 150 ms do arrasto, e o próximo redimensionamento da aba só sai depois que ela termina de reimprimir
+(300 ms de saída parada, teto de 3 s). O teste `the_highlight_follows_the_active_tab_and_the_pty_resizes_once_per_switch`
+(`tasks_flow_tests.rs`) confere que quadros parados não pedem redimensionamento. Não anime o tamanho das janelas: cada quadro
+da animação seria um tamanho novo para o PTY.
 
 **Organização na Config:** `organization` (`Option<Organization>`: `tabs`, `split`, `highlight`) é o campo que vale; o antigo
 `splitEnabled` continua sendo lido (arquivo sem `organization` → `Config::organization()` deduz dele) e gravado junto
