@@ -1,257 +1,133 @@
 # Arquitetura do AgentDeck
 
-Visão geral e mapa dos documentos: [GERAL.md](GERAL.md).
+Visão geral e mapa dos documentos: [GERAL.md](GERAL.md). Guia prático e mapa de arquivos: [MANUTENCAO.md](MANUTENCAO.md).
 
-Aplicação nativa em Rust. (Origem: reescrita da antiga versão Electron, com as mesmas funções e o mesmo visual.)
+Aplicação desktop nativa em Rust (reescrita da antiga versão Electron, sem Node em tempo de execução).
 
-## Stack (decisões do Lead)
+## Stack e decisões de base
 
 | Camada | Escolha | Por quê |
 | :-- | :-- | :-- |
-| Janela/eventos | **winit 0.30** (loop próprio, `ApplicationHandler`) | pedido do projeto; controle total do loop e de DnD |
-| Render | **glutin + glow** com **egui** (`egui-winit` + `egui_glow`) | widgets prontos e estilização fina para reproduzir o CSS; OpenGL leve (roda até em Xvfb/llvmpipe para testes) |
-| Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação madura; o render da grade é nosso (pintado no egui) |
-| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | API `/agents`, `/models`, `/team`, `/ask`, `/reply`, `/signal`, `/usage`, `/learn`, `/outline`, `/tasks`; token por processo de agente + validação de Host |
-| Cliente HTTP | **ureq** (GitHub, cota do Antigravity, downloads) | bloqueante e simples, roda em threads |
-| Arquivos | **notify** (watcher), **rfd** (diálogos), **open** (abrir no SO), **arboard** (clipboard texto/imagem) | |
-| Áudio | **cpal** (microfone, feature `audio`) + whisper.cpp (binários em `whisper/`) | |
+| Janela e eventos | **winit 0.30** (`ApplicationHandler`) | controle total do loop de eventos, arrastar e soltar e janela sem decoração; sob WSLg força X11 (`app/src/wslg.rs`) |
+| Renderização e UI | **glutin + glow** com **egui 0.36** (`egui-winit` + `egui_glow`) | modo imediato estilizado à mão (`theme.rs`); OpenGL leve que roda até em `Xvfb`/llvmpipe no CI |
+| Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação VT madura; pintura própria da grade no egui (`app/src/terminal/`) e resize com debounce para compensar a repintura do ConPTY |
+| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | servidor local em `127.0.0.1:0` para o `ask-agent`, autenticado por token de processo + validação de `Host` |
+| Cliente HTTP | **ureq** (com rustls) | síncrono e sem OpenSSL; roda em threads para GitHub, cota do Antigravity e downloads |
+| Sistema e arquivos | **notify**, **rfd** (portal no Linux), **open**, **arboard**, **tray-icon** / **ksni**, **secret-service** (D-Bus no Linux) | integrações nativas sem puxar GTK3 |
+| Áudio e ditado | **cpal** (feature `audio`) + **whisper.cpp** (`whisper/`) | transcrição local opcional; áudio apagado logo após transcrever |
 
-Sem Node/Electron em runtime: `ask-agent` vira um binário Rust ao lado do app.
-
-## Crates
+## Crates e fronteiras
 
 ```
-(raiz)
-├── crates/core   agentdeck-core   backend sem GUI
-├── crates/app    agentdeck        UI winit+egui
-└── crates/cli    agentdeck-cli    bin ask-agent
+crates/
+├── core   (agentdeck-core)   backend sem interface gráfica
+├── app    (agentdeck)        janela winit + egui e emulador de terminal
+└── cli    (agentdeck-cli)    binário ask-agent
 ```
 
-A UI fala com o backend apenas via `agentdeck_core::Core` (métodos ≈ canais IPC) e recebe
-`CoreEvent` por um `crossbeam_channel::Receiver`, com um `Waker` que acorda o loop do winit
-(`EventLoopProxy`). Operações bloqueantes (listar agentes, transcrição) rodam em threads.
+- **Fronteira `app` ↔ `core`:** a interface só fala com o backend pelos métodos de `agentdeck_core::Core` (`crates/core/src/lib.rs`) e recebe eventos por canal (`events.rs`), acordando o loop do winit via `EventLoopProxy`. Operações bloqueantes (git, GitHub, listagem de modelos, transcrição, leitura/gravação de documentos) rodam sempre em threads fora da UI.
+- **Trabalho com e sem quadro (`crates/app/src/app.rs`, `crates/app/src/deck/`):** o que não depende de desenhar (eventos do core, respostas de threads, entregas de `ask-agent` nos terminais, respostas atrasadas, Enter agendado, fim de turno e temporizadores) roda antes de cada quadro com a janela visível e, quando a janela está na bandeja, minimizada ou com área 0×0 (no Windows não há `WM_PAINT`), num passo de segundo plano no loop de eventos a cada ≥ 50 ms (`ControlFlow::WaitUntil`). Sem quadro o PTY nunca é redimensionado às cegas.
+- **Extensão para RAG (`crates/core/src/context.rs`):** trait `ContextProvider`, consultado pelo executor headless antes de enviar o prompt.
 
-**Trabalho com e sem quadro** (`app/src/app.rs`, `Deck::before_frame`/`Deck::background`). O que a interface faz que não
-depende de pintar (eventos do core, respostas das threads, entregas de `ask-agent` aos terminais, respostas "digitadas
-depois", Enter agendado, fim de turno, temporizadores) é `Deck::work`, chamado de dois jeitos: com a janela à vista, dentro
-do quadro (`before_frame`, que devolve o próximo prazo ao `request_repaint_after` do egui); com a janela escondida,
-minimizada ou sem área (`app::is_hidden`; o Windows informa 0×0 e não manda `WM_PAINT`), por `Deck::background`, a partir de
-`user_event`/`about_to_wait`, sem egui. `app::Background` agenda: roda quando algo acorda o laço (no mínimo 50 ms entre
-rodadas, porque a saída de um terminal acorda o laço a cada pedaço) ou no prazo que a rodada anterior devolveu; sem prazo, o
-laço dorme (`ControlFlow::Wait`). Nunca roda nas duas formas no mesmo instante: `redraw` com a janela escondida só faz o
-`background`, e um quadro desenhado zera a agenda. Sem quadro também não há `fit_tab` (o PTY só muda de tamanho com a janela
-à vista) nem cópia OSC 52 (precisa do `Context`; fica para o próximo quadro).
+---
 
-## Ponto de extensão para RAG (futuro)
+## Protocolo entre agentes e contrato da ponte (`ask-agent`)
 
-`core::context::ContextProvider` — hoje vazio. O executor headless
-consulta os provedores registrados antes de enviar o prompt; plugar RAG local/remoto
-não exige alterar o resto do sistema.
+### Ambiente de cada processo de agente (`crates/core/src/agents.rs`, `env.rs`)
 
-## Protocolo entre agentes (`ask-agent`)
+Cada aba interativa (e execução headless) recebe um ambiente higienizado:
 
-Cada aba recebe no ambiente: `AGENTDECK_PORT` (porta da ponte), `AGENTDECK_TOKEN` (token de 128 bits **da
-própria aba**), `AGENTDECK_AGENT` (nome do agente da aba), `AGENTDECK_DEPTH` (profundidade de chamadas) e a
-pasta dos executáveis no início do `PATH`. Nenhuma outra `AGENTDECK_*` do ambiente do app passa para os
-agentes (exceto `AGENTDECK_ASK_WAIT`, configuração do usuário).
+- **Injetadas:** `AGENTDECK_PORT` (porta TCP em `127.0.0.1`), `AGENTDECK_TOKEN` (token de 128 bits **exclusivo da aba ou execução**), `AGENTDECK_AGENT` (id da instância, ex.: `claude@dev`), `AGENTDECK_ROLE` (quando há cargo), `AGENTDECK_DEPTH` (profundidade de delegação), `PATH` (com a pasta dos executáveis na frente), `TERM=xterm-256color`, `COLORTERM=truecolor` e, no Windows, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `MSYS_NO_PATHCONV=1` e `MSYS2_ARG_CONV_EXCL=*` (impede o Git Bash de converter `/comando` em caminho).
+- **Filtradas:** qualquer `AGENTDECK_*` herdada do ambiente externo (exceto `AGENTDECK_ASK_WAIT`, configuração do usuário), variáveis de sessão aninhada do Claude (`CLAUDECODE`, `CLAUDE_CODE_*`), `ELECTRON_RUN_AS_NODE` e `OPENCODE_CONFIG_CONTENT` (inserida depois só para a aba do OpenCode a que pertence).
 
-**Instruções do AgentDeck em toda aba.** O texto (`Registry::bridge_instructions`, `agents.rs`) é a "memória geral",
-igual para todos: como falar com outro agente, a regra de **não usar subagentes internos do CLI** (Task/Agent tool,
-sub-agents) a menos que o usuário peça, e a memória do projeto (`memory/aprendizados/`, o formato do arquivo e o
-`--learn`, para valer também num projeto que começa sem memória). Chega a cada CLI pelo canal dele, **sem depender do
-`AGENTS.md` do usuário** (`spawn_spec_for`, `instruction_args`):
+### Instruções do AgentDeck e confiança da pasta (`agents.rs`, `trust.rs`, `workspace.rs`)
 
-| CLI | canal |
-|---|---|
-| Claude | `--append-system-prompt` (texto com o nome e o cargo da instância) |
-| Codex | `-c developer_instructions=<TOML>` (num shim `.cmd` as aspas não sobrevivem: o texto vai cru, que o Codex aceita como texto) |
-| OpenCode | `instructions: ["dados/agentdeck-instructions.md"]` em `OPENCODE_CONFIG_CONTENT`, junto com o modelo; só o servidor próprio da aba (`--standalone`, agora sempre) lê a variável (`models::opencode_tui`) |
+As instruções da ponte (uso do `ask-agent`, proibição de subagentes internos do CLI sem pedido do usuário, `--models`/`--team`/`--learn`/`--outline` e `memory/aprendizados/`) chegam pelo canal próprio de cada CLI, sem depender de um `AGENTS.md` prévio:
+
+| CLI | Canal de entrega das instruções |
+| :-- | :-- |
+| Claude | `--append-system-prompt <texto>` (inclui nome e cargo), `--allowedTools "Bash(ask-agent:*)"` e `--settings dados/hooks/claude-settings.json` |
+| Codex | `-c developer_instructions=<TOML>` (ou texto cru em shim `.cmd`) e, fora de shim, `-c notify=["ask-agent","--signal","idle"]` |
+| OpenCode | `--standalone` + `OPENCODE_CONFIG_CONTENT={"model":…,"instructions":["dados/agentdeck-instructions.md"]}` (`models.rs`) |
 | Aider | `--read dados/agentdeck-instructions.md` |
 | Open Interpreter | `--custom_instructions <texto>` |
-| Antigravity, Goose, Copilot | só leem o `AGENTS.md` da pasta: o app o **cria só com o bloco dele** se a pasta não tem um (`Core::ensure_agents_file`, `workspace::ensure_agent_context(.., create = true)`), avisa na Conversa e não o toca se já existe |
-| Amazon Q, Terminal | sem canal (o Q lê `.amazonq/rules`, que o app não escreve) |
+| Antigravity | `--add-dir dados/agy/<instância>` (onde o app grava um `AGENTS.md` com nome e cargo da instância, somado ao do projeto pelo `agy`) |
+| Goose, Copilot | leem apenas o `AGENTS.md` da pasta: se não existir, o app cria um só com o bloco `<!-- agentdeck:start/end -->` e avisa na Conversa; se já existir, atualiza só o bloco |
+| Amazon Q, Terminal | sem canal de instruções |
 
-O arquivo `dados/agentdeck-instructions.md` e o bloco do `AGENTS.md` levam o texto genérico (`bridge_instructions(None)`):
-nome e cargo vêm de `AGENTDECK_AGENT`/`AGENTDECK_ROLE`, e a lista de agentes instalados fica de fora para o arquivo não
-mudar de máquina para máquina. Ver [aprendizados/instrucoes-por-cli.md](aprendizados/instrucoes-por-cli.md). A execução
-headless (`ask-agent <agente>` sem aba) só leva as instruções no Claude (como antes).
+O texto em arquivo compartilhado (`dados/agentdeck-instructions.md` e bloco de `AGENTS.md`) não lista os agentes instalados na máquina, para não sujar o `git status` entre computadores.
 
-**Confiança da pasta.** Claude, Codex e Antigravity perguntam "Do you trust this folder?" numa pasta nova, e a aba aberta em
-segundo plano ficava parada ali. Abrir a pasta como projeto já é a decisão do usuário: antes de cada aba, `trust::prepare`
-(chamado em `spawn_spec_for`) registra a confiança da pasta da aba (e da do projeto) no lugar que cada CLI lê: o Claude em
-`~/.claude.json` (vale para as subpastas, então só grava sem pasta-mãe aceita), o Codex por `-c projects={...}` na linha de
-comando, sem arquivo, e o Antigravity nos `trustedWorkspaces` de `~/.gemini/antigravity-cli/settings.json` (caminho exato; a
-entrada da worktree sai com ela, em `remove_task_worktree`). A pasta pessoal e a raiz de um disco nunca entram. Ver
-[aprendizados/confianca-da-pasta-por-cli.md](aprendizados/confianca-da-pasta-por-cli.md).
+**Confiança da pasta (`crates/core/src/trust.rs`):** antes de abrir uma aba, o app registra a confiança da pasta de trabalho e da pasta do projeto para que abas abertas em segundo plano não travem em *"Do you trust this folder?"*: no Claude em `~/.claude.json` (se não houver pasta-mãe já aceita), no Codex via `-c projects={…}` na linha de comando e no Antigravity em `trustedWorkspaces` de `~/.gemini/antigravity-cli/settings.json` (caminho exato, removido junto com a worktree da tarefa). Pasta pessoal e raiz de disco nunca são adicionadas.
 
-**Identidade pelo token.** Cada processo de agente tem um token próprio: o da aba vale enquanto a instância
-existir (`Core::tab_token`); o de uma execução headless, só durante ela (`Core::headless_token`). A ponte
-descobre **quem** pergunta pelo token, e o campo `from` do corpo é ignorado. Assim uma aba não consegue se
-passar por outra nem responder no lugar dela. O token mestre (`Core::bridge_token`) não vai para nenhum
-agente: serve a testes e ferramentas de depuração, e com ele o `from` do corpo é aceito se for um id válido.
+### Identidade por token e isolamento por projeto (`bridge.rs`, `instances.rs`)
 
-**Projetos.** Cada aba (instância) pertence a um projeto (`ProjectCfg`: uma pasta, com id `p` + 8 hex), e a
-ponte só enxerga o projeto de quem chama: cada projeto pode ter o seu `claude`, e um `ask-agent claude@dev`
-cria `claude@dev` no projeto de quem perguntou. O projeto vai **no token**: `Core::tab_token(projeto, id)` dá
-um token por par projeto + instância (o mesmo vale para os tokens headless). Com o token mestre, o projeto
-vem do campo `"project"` do corpo (id de um projeto existente; 400 se desconhecido) ou, sem ele, é o
-projeto ativo (400 se não há nenhum). Por dentro, as chaves das perguntas pendentes, da atividade, das
-filas por par e das sessões headless têm escopo: `instances::scoped(projeto, id)` = `"<projeto>#<id>"`
-(`#` nunca aparece num id), então ciclos e profundidade nunca misturam projetos. O que agentes e pessoas
-veem é sempre o id **sem** o projeto: o texto digitado, as mensagens de erro (lista de "Disponíveis"), os
-`FeedEntry.from/to` e `PendingInfo { project, asker, target }` (pergunta pendente entre abas).
-Os eventos levam o projeto: `Delivery.project`, `AgentSignal { project, id, busy }` e `FeedEntry.project`
-(`None` = global, como os avisos do Whisper). As abas de agentes rodam na pasta do projeto, e o AGENTS.md
-de um projeto que não é o ativo é escrito na primeira aba aberta nele.
+- **Identidade:** a ponte identifica quem chama pelo cabeçalho `x-agentdeck-token` (token por instância aberta ou por execução headless). O campo `"from"` do JSON é ignorado para tokens de agente; só o token mestre do próprio app pode informar `"from"` e `"project"`.
+- **Escopo de projeto:** o token carrega o projeto (`p` + 8 hex). Internamente, perguntas pendentes, filas por par, atividade e caixa de entrada usam a chave `<projeto>#<id>`, permitindo que dois projetos tenham cada um o seu `claude@dev` sem cruzar mensagens nem ciclos. Para agentes e usuários, os ids aparecem sem o prefixo.
 
-| Rota | Descrição |
-| :-- | :-- |
-| `GET /agents` | `{"agents": [...], "models": {id: modelo}, "quota": {id: cota}}` com os agentes instalados e as instâncias abertas no projeto de quem chama, o modelo de LLM das instâncias que têm um e a cota dele (porcentagem e renovação, ou `"cota: sem leitura"` / `"cota: última leitura há …"` nos quatro CLIs oficiais) |
-| `GET /models`, `GET /models?agent=<id>` | `{"text"}`: o inventário de `ask-agent --models` (um bloco por agente instalado, com os quatro CLIs oficiais ordenados por quem tem mais folga de cota primeiro quando sem `agent`, e sempre com a linha `"  cota: …"` neles; ver "Inventário para os agentes" abaixo); 400 para `agent` fora de `[A-Za-z0-9:._/#@+-]{1,128}` e 404 para um agente que não está instalado |
-| `GET /team` | `{"id","boss","crew","models","quota"}`: a posição de quem chama na equipe (só token de aba); `models` e `quota` trazem o modelo e a cota de quem aparece na resposta |
-| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"]}` (+ `"from"`, `"project"` só com o token mestre) → `{"answer"}`; 202 `{"pending","answer"}` quando a resposta vai chegar depois (ver abaixo); 400 para agente desconhecido, auto-pergunta, remetente inválido, profundidade `>= 2`, `model` fora de `[A-Za-z0-9:._/#@+-]{1,128}` ou agente que não escolhe modelo (`o agente X não aceita escolher modelo`); 404 para `reply_to` que não está pendente; 409 para ciclo de espera ou para `model` diferente do da instância já aberta (`claude@dev já está aberta com sonnet; use --new para abrir outra com opus`); 413 para corpo acima de 16 MB; 500 em erro/timeout (10 min) |
-| `POST /learn` | `{"paths": [...]}` (até 50 caminhos; vazio = sem arquivos) → `{"text"}`: o que o projeto já aprendeu (`memory/aprendizados/`) sobre esses arquivos (`ask-agent --learn`); sem caminhos, os globais por inteiro e o índice dos demais; 400 se não acha o repositório do projeto (ver "Memória em duas camadas") |
-| `POST /outline` | `{"paths": [...]}` (até 50 arquivos) → `{"text"}`: o esqueleto de cada arquivo, com assinaturas e linha, sem os corpos (`ask-agent --outline`); mesmo controle de identidade do `/learn`; 400 sem arquivos ou sem repositório do projeto (ver "Memória em duas camadas") |
-| `GET /inbox`, `GET /inbox?all=1` | `{"answers":[{"request","from","text","failed","ts","delivered"}]}`: as respostas que o chamador recebeu (só token de aba; 400 com o mestre). Sem `all`, as ainda não entregues; com `all`, as 20 últimas. Ler marca todas como entregues (`ask-agent --inbox`) |
-| `POST /reply` | `{"to","message"[,"reply_to"]}`: conclui uma pergunta pendente (404 se não há); nunca cria pergunta |
-| `POST /signal` | `{"state":"busy"\|"idle"}`: hook do agente avisando início/fim de turno (só tokens de aba) |
-| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}`: uso do plano do modelo da aba (`used` em 0..=1; só tokens de aba; `shell` recusado) |
-| `GET /tasks`, `GET /tasks/<id>` | as tarefas do projeto de quem chama (`{"tasks": […]}`, sem brief, relatório nem histórico; com `scope` e `waiting_for`) ou uma tarefa completa (`{"task": {…}}`); com o token mestre, `?project=<id>` escolhe o projeto. Qualquer token pode ler |
-| `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"effort"][,"base"][,"scope"][,"start"]}` → `{"task"}`: cria a tarefa (`kind` padrão `claude`; `start: true` já a inicia) e grava quem pediu como criador; `scope` é a lista de caminhos que a tarefa vai mexer (um texto por caminho, ou um texto só com um caminho por linha; vazio = sem escopo; ver "Escopo e fila"); 400 para título vazio, agente ou modelo inválidos, escopo com curinga/caminho absoluto/`..`, base que não é branch local ou projeto sem git/commit; se `start` falha, devolve o erro com a tarefa criada; se o escopo está ocupado, devolve 200 com a tarefa em `queued` |
-| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` → `{"task"}`: inicia (ou põe na fila, se o escopo está ocupado: a resposta traz `status: "queued"` e `waiting_for`), mescla (a tarefa fica aguardando validação), valida (conclui e limpa) ou descarta (409 se o estado não permite, se o repositório principal não está pronto, se há conflito ou se a validação não pode limpar; 500 em erro do git) |
-| `POST /tasks/<id>/done` | `{"report"}` → `{"task"}`: o agente da tarefa entrega o relatório (só o dono da tarefa, ou o token mestre) |
-| `POST /tasks/<id>/return` | `{"feedback"}` → `{"task"}`: devolve a tarefa em revisão ao agente, com o feedback |
-| `POST /tasks/<id>/reject` | `{"feedback"}` → `{"task"}`: reprova a tarefa aguardando validação: volta ao mesmo agente, na mesma worktree, com o motivo (400 para motivo vazio; 409 fora de `Validating` ou com as abas dos agentes desligadas) |
+### Contrato HTTP da ponte (`crates/core/src/bridge.rs`)
 
-Toda requisição exige o cabeçalho `x-agentdeck-token` (comparado em tempo constante) e um `Host`
-`127.0.0.1:<porta>` ou `localhost:<porta>` (sem `Host`, recusa). No máximo 128 requisições são atendidas ao
-mesmo tempo (503 além disso; uma pergunta com resposta atrasada continua ocupando a vaga até a resposta chegar), e
-os corpos sendo lidos ou atendidos somam no máximo 64 MB (503 além disso). Pedidos ao mesmo par `de->para` são serializados, e o histórico de cada par é
-mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no Antigravity; os demais CLIs começam sem histórico no headless.
+Toda requisição exige `x-agentdeck-token` (comparado em tempo constante) e `Host: 127.0.0.1:<porta>` ou `localhost:<porta>` (outro valor ou ausente → **403**). Limites globais: até **128** requisições simultâneas (**503** acima; perguntas em HTTP 202 ocupam vaga até a resposta atrasada terminar), corpo individual até **16 MB** (**413** acima) e soma dos corpos em leitura/atendimento até **64 MB** (**503** acima).
 
-**Opções do `ask-agent`** (cada uma é só um cliente da rota ao lado; `ask-agent --help`/`-h` imprime o resumo): `[--new] [--model <m>] <agente> "msg"` (`/ask`), `--reply <n> "msg"` (`/reply`), `--list` (`/agents`), `--team` (`/team`), `--models [agente]` (`/models`), `--boss "msg"` (`/ask` ao chefe), `--learn [arquivo…]` (`/learn`), `--outline <arquivo…>` (`/outline`), `--inbox [--all]` (`/inbox`), `--task new|list|show|start|merge|validate|reject|discard|done|return` (`/tasks…`; `new` aceita `--agent`, `--model`, `--effort`, `--base`, `--scope <caminho>…` e `--start`), `--file <arq>` (o texto vem de um arquivo, em vez do argumento ou da entrada padrão `-`), `--usage` (a statusline do Claude, `/usage`) e `--signal busy|idle` (`/signal`).
+| Rota | Corpo / parâmetros | Resposta e códigos HTTP |
+| :-- | :-- | :-- |
+| `POST /activate` | `{}` (só token mestre) | **200** `{"ok":true}` e traz a janela à frente; **403** para token de agente |
+| `GET /agents` | — | **200** `{"agents":[…],"models":{id:modelo},"quota":{id:cota}}` do projeto do chamador |
+| `GET /models[?agent=<id>]` | `agent` opcional | **200** `{"text"}` com o inventário (`ask-agent --models`): os 4 CLIs oficiais do mais folgado ao mais gasto, linha `cota:` por grupo e bloco `capacidade`; **400** se inválido; **404** se não instalado |
+| `GET /team` | — (só token de aba) | **200** `{"id","boss","crew","models","quota"}` e consome aviso de mudança de equipe; **400** com token mestre |
+| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"][,"ack"]}` (+ `"from"`, `"project"` com token mestre) | **200** `{"answer","request"}` no prazo; **202** `{"pending":true,"answer","request"}` após `wait` (resposta digitada depois na aba); **400** destino desconhecido, auto-pergunta, `depth >= 2`, `model` inválido ou CLI sem escolha de modelo; **404** `reply_to` inexistente; **409** ciclo de espera, instância já aberta com outro modelo (sugere `--new`) ou cota esgotada (≥ 99,5%); **413** > 16 MB; **500** erro ou timeout (10 min) |
+| `POST /reply` | `{"to","message"[,"reply_to"]}` | **200** `{"answer"}` concluindo a pergunta pendente; **400** argumentos inválidos; **404** sem pergunta pendente daquele remetente |
+| `GET /inbox[?all=1]` | — (só token de aba) | **200** `{"answers":[{"request","from","text","failed","ts","delivered"}]}` (sem `all`, não entregues; `all=1`, 20 últimas) e marca como entregues; **400** com token mestre |
+| `POST /inbox/delivered` | `{"request":<n>}` (só token de aba) | **200** `{"ok":true}` confirmando entrega da resposta `<n>` após imprimir no stdout (quando `/ask` enviou `"ack":true`); **400** inválido/token mestre; **404** não pertence ao chamador |
+| `POST /learn` | `{"paths":[…]}` (até 50 caminhos) | **200** `{"text"}` com aprendizados e situação atual (sem caminhos) ou avisos de choque + aprendizados que casam (com caminhos); **400** sem repositório |
+| `POST /outline` | `{"paths":[…]}` (1 a 50 arquivos) | **200** `{"text"}` com assinaturas e linhas de cada arquivo; **400** sem arquivos ou sem repositório |
+| `POST /signal` | `{"state":"busy"\|"idle"}` | **200** `{"ok":true}` atualizando o estado de turno da aba (só token de aba) |
+| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}` | **200** `{"ok":true}` registrando uso do plano (`0.0..=1.0`, só token de aba; `shell` → **400**) |
+| `GET /tasks`, `GET /tasks/<id>` | `?project=<id>` opcional com token mestre | **200** `{"tasks":[…]}` (resumo com `scope` e `waiting_for`) ou `{"task":{…}}` completo; **404** não existe |
+| `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"effort"][,"level"][,"base"][,"scope"][,"start"]}` | **200** `{"task"}` (com `start:true`, em `running` ou `queued`); **400** dados inválidos, escopo inválido ou sem git; **403** agente de tarefa ativa |
+| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` | **200** `{"task"}`; **403** agente de tarefa; **404** não existe; **409** estado incompatível, árvore suja, conflito de merge ou worktree presa; **500** falha do git |
+| `POST /tasks/<id>/done` | `{"report"}` | **200** `{"task"}` passando a `review` (só dono da tarefa ou token mestre; vale em `running` ou `validating` com commits novos); **400** vazio; **403** outro agente; **409** estado inválido |
+| `POST /tasks/<id>/return`, `/reject` | `{"feedback"}` | **200** `{"task"}` devolvendo de `review` (`return`) ou reprovando de `validating` (`reject`) para `running`; **400** vazio; **403** agente de tarefa; **409** estado inválido |
 
-`ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
-`ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
+**Códigos de saída do `ask-agent` (`crates/cli/src/bin/ask-agent.rs`):** `0` sucesso, `1` erro da ponte/agente, `2` erro de argumentos ou ambiente fora do AgentDeck (`--signal` sai sempre com `0` para não quebrar hooks).
 
-**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` ao iniciar. Uma segunda abertura na mesma pasta
-não é recusada: `main` chama `activation::activate_running` antes de tudo, que vê a trava pega por outro processo, lê porta
-e token da ponte em `dados/.agentdeck.bridge` (gravado depois que a ponte sobe, apagado no `shutdown` e por quem pega a
-trava, porque o de um travamento é velho), faz `POST /activate` com o token mestre e sai em silêncio. A ponte só aceita o
-`/activate` do token mestre (um agente não traz a janela do usuário para a frente) e emite `CoreEvent::Activate`; o
-`Deck` marca `activate_requested` e o `App` mostra e foca a janela. No Windows a segunda instância chama
-`AllowSetForegroundWindow(ASFW_ANY)` antes do POST, senão a janela só pisca na barra. Se o POST falha (instância travada),
-segue o início normal, que mostra a mensagem de erro da trava (defina `AGENTDECK_HOME` para abrir outra instância isolada).
+### Instância única e bandeja (`activation.rs`, `app/src/tray.rs`)
 
-**Bandeja** (`app/src/tray.rs`). O × da janela (e Alt+F4, e a barra de título desenhada pela interface, que só marca
-`Deck::close_requested`) não encerra: `App::close_window` grava o tamanho e faz `set_visible(false)` + `Background::wake`
-(o winit não avisa da janela escondida por código), e os CLIs, a ponte e as entregas seguem pelo `Deck::background`. O ícone
-é `tray-icon` no Windows e `ksni` (StatusNotifierItem por D-Bus, sem GTK nem tokio) no Linux; `tray::close_action` decide:
-sem bandeja (o `ksni` não achou `StatusNotifierWatcher`, outro sistema) o × **minimiza**, para o app nunca ficar invisível e
-sem ícone. Clique esquerdo ou **Abrir** = `App::show_window` (mostra, restaura, foca); **Encerrar** =
-`Deck::request_quit`, que pergunta só com edição não salva (`Unsaved::Quit`) ou aba no meio de um turno (`Unsaved::Busy`,
-pelo `busy` que a aba já mostra), mostrando a janela antes de perguntar; sem pergunta, `App::quit_if_requested` encerra
-mesmo com a janela escondida. Capturas e `AGENTDECK_DEBUG_UI` não criam o ícone.
+- **Segunda abertura:** o core mantém a trava `dados/.agentdeck.lock` e grava porta + token mestre em `dados/.agentdeck.bridge`. Uma segunda abertura detecta a trava ocupada, chama `AllowSetForegroundWindow` (no Windows) + `POST /activate` e encerra; a instância em execução restaura e foca a janela.
+- **Bandeja:** fechar a janela (×, `Alt+F4` ou botão da barra de título) esconde a janela na bandeja (`tray-icon` no Windows, `ksni`/StatusNotifierItem no Linux) mantendo agentes e ponte ativos em segundo plano; sem bandeja no Linux, minimiza. Só **Encerrar** no menu da bandeja fecha o app, pedindo confirmação na janela se houver documento não salvo ou agente em turno.
 
-### Instâncias (abas) e perguntas entre elas
+---
 
-Cada aba é uma **instância** com identidade própria, usada em `AGENTDECK_AGENT` e como destino do
-`ask-agent`: `<modelo>[@<cargo>[@<nome>]]`.
+## Instâncias, equipe, modelos, cota e capacidade
 
-| Id | Significado |
-| :-- | :-- |
-| `claude` | a instância principal (sem cargo), a que o usuário abre pelo "+ Novo agente" |
-| `claude@dev`, `claude@design` | instâncias com cargo, abertas por um agente (ou pelo usuário) |
-| `claude@dev@ana` | quando já existe outra do mesmo modelo **e** cargo, a nova ganha um nome |
-| `claude@main@bia` | segunda instância principal (sem cargo) aberta à mão |
+- **Identidade e equipe (`instances.rs`, `team.rs`):** instâncias usam `<modelo>[@<cargo>[@<nome>]]` (`claude`, `claude@dev`, `claude@dev@ana`, `claude@main@bia`). Quando um agente cria outra instância via `ask-agent`, torna-se chefe dela; o usuário reorganiza arrastando na barra lateral (ciclos são recusados). Fechar uma aba repassa os subordinados ao chefe dela; renomear preserva a árvore. Mudanças de posição geram aviso anexado à próxima mensagem entregue na aba (ou consumido por `ask-agent --team`). A equipe orienta, mas não bloqueia chamadas diretas.
+- **Modelo de LLM e esforço (`models.rs`):** resolvido ao abrir a aba na ordem: (1) pedido explícito (`--model` ou menu), (2) modelo já salvo para a instância no projeto, (3) padrão do cargo/CLI na configuração, (4) padrão do próprio CLI. Só `claude`, `antigravity`, `codex` e `opencode` aceitam modelo; pedir outro modelo para aba já aberta retorna **409**. Passado como `--model <m>` em `claude`, `agy` e `codex` (e `opencode run -m` no headless); na TUI do OpenCode vai via `--standalone` + `OPENCODE_CONFIG_CONTENT`. Modelos de `agy` e `opencode` são listados em thread (timeout de 15 s, cache de 10 min, `-free` primeiro). O esforço (`low`, `medium`, `high`) vira `--effort` no Claude e sufixo `-low|medium|high` no Antigravity (recusado com 400 nos demais).
+- **Uso dos planos e cota (`usage.rs`, `usage/codex.rs`, `usage/antigravity.rs`):** acompanha sessão (5 h) e semana (`0.0..=1.0` + horário de renovação) e salva em `dados/usage.json`. No Claude vem do hook de `statusLine` (`ask-agent --usage` lê `rate_limits` do stdin, envia `POST /usage` e repassa o stdin à statusline do usuário); no Codex lê a cada 60 s o `rollout-*.jsonl` mais recente de `~/.codex/sessions`; no Antigravity consulta a cada 3 min `retrieveUserQuotaSummary` (fallback `fetchAvailableModels`) com a versão e o token OAuth do `agy` (Credenciais do Windows, Secret Service D-Bus no Linux ou arquivo), separando por grupo (`Gemini 4 Argon`, `Gemini Models`, `Claude and GPT models`). Na ponte, `/ask` recusa com **409** destinos com grupo ≥ 99,5% (leitura < 1 h) e avisa quando o destino passa de 80% havendo outro CLI oficial < 50%.
+- **Capacidade e seleção para tarefas (`capability.rs`, `capability.json`):** cruza o nível da tarefa (`simples`, `media`, `complexa`) com o *AA Coding Agent Index v2.0* (`≥ 53` complexa, `40..53` média, `< 40` simples; esforço `low` desce um nível; sobreponível por `dados/capacidade.json`). Com ≥ 3 tarefas avaliadas de um modelo num nível (`dados/tarefas/*.json`), o histórico real prevalece (mais da metade descartada ou ≥ 2 devoluções desce um nível; 3 últimas do nível seguinte aprovadas de primeira sobem um nível). Sem agente explícito, a criação de tarefa escolhe entre os CLIs instalados capazes do nível o de menor cota usada; escolha explícita abaixo do nível gera aviso sem bloquear.
 
-A aba aparece como `Claude`, `Claude · Dev`, `Claude · Dev · Ana`. O id é gerado pelo core
-(`crates/core/src/instances.rs`), único dentro do projeto, e salvo em `ProjectCfg.open_tabs` do projeto
-(`Config.projectList`), então as abas voltam com o mesmo nome.
-**Equipe (chefe e subordinados).** O core guarda o chefe de cada instância em `ProjectCfg.tab_parents`
-(lógica pura em `crates/core/src/team.rs`). Quando um agente abre uma instância nova pelo `ask-agent`, vira
-o chefe dela; o usuário reorganiza arrastando agentes na barra lateral (`Core::set_boss`, que recusa ciclos).
-Fechar uma instância passa a equipe dela ao chefe dela; renomear leva a equipe junto. Os agentes sabem da
-equipe sem turno extra: as instruções mandam consultar `ask-agent --team` (`GET /team`, pelo token) e quem
-mudou de posição recebe o aviso anexado à **próxima** mensagem digitada na aba dele (a interface chama
-`Core::take_team_notice` na hora de digitar, então uma entrega descartada não gasta o aviso; consultar o `--team`
-já dá o aviso por lido). O chefe de quem fecha também é avisado, mesmo que a equipe dela fosse vazia. `ask-agent --boss "msg"` pergunta ao chefe. A barra lateral desenha a árvore
-(`ui/projects.rs::agent_tree`). A equipe orienta, não restringe: qualquer agente continua podendo chamar qualquer outro.
-O cargo também vai em `AGENTDECK_ROLE` e no prompt de sistema.
+---
 
-**Modelo de LLM da instância** (`crates/core/src/models.rs`). O modelo (`sonnet`, `opencode/glm-5.3-flash-free`…) é uma
-propriedade da instância, **não** parte do id (que continua `modelo[@cargo[@nome]]`): fica em
-`ProjectCfg.tab_models` (id → modelo), no mesmo molde de `tab_parents` (renomear leva o modelo, fechar o esquece).
-Ao abrir a instância vale, na ordem: o pedido (`ask-agent --model` → `"model"` do `/ask`; o menu "+ Novo agente"),
-o gravado em `tab_models` (reabrir o app mantém), o padrão de `Config.role_models` (chave `modelo@cargo` ou só
-`modelo`; `modelo@cargo` vence) e, por fim, o do próprio CLI (nenhum argumento). O resultado é gravado em
-`tab_models` por `Core::assign_model` (idempotente; chamado pela ponte ao criar a instância e por `spawn_spec_for`).
-Só aceitam modelo `claude`, `antigravity`, `codex` e `opencode` ; o nome é
-validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims `.cmd` ainda passam por `cmd_safe_arg`.
-- **Nas abas** (`spawn_spec_for`): `claude`, `agy` e `codex` recebem `--model <m>`. O TUI do **OpenCode** não tem
-  `--model` (só `run` e `mini` têm `-m`): a aba abre `opencode --standalone` com `OPENCODE_CONFIG_CONTENT={"model":"<m>"}`
-  no ambiente. A configuração por variável só é lida por quem sobe o servidor, e o TUI normal usa o serviço em segundo
-  plano compartilhado, que ignora o nosso ambiente; por isso o servidor próprio (`--standalone`). A variável vale por
-  cima da configuração do usuário e do projeto (verificado no OpenCode 2.0.32: a linha de status do TUI mostra o modelo
-  pedido). Sem modelo, o OpenCode abre como sempre. A variante (`modelo#alta`) só existe no `run -m`: no TUI vai só o modelo.
-- **No headless** (`headless.rs`): `--model` no `claude`, `agy` e `codex exec`; `opencode run -m <m>`.
-- **Conflito explícito:** `/ask` com `model` para uma instância já aberta com **outro** modelo (ou com o padrão do CLI)
-  devolve 409 com a saída pelo `--new`; o mesmo modelo, ou nenhum pedido, entrega normalmente; `--new` + `--model` abre
-  outra instância com aquele modelo.
-- **Lista de modelos** (`Core::known_models`, para o menu "+ Novo agente" e o formulário de nova tarefa):
-  `claude` = os apelidos `opus, sonnet, haiku, fable`; `antigravity` = `agy models` (primeira coluna);
-  `opencode` = `opencode models`. As duas últimas rodam numa thread (a interface chama por
-  `Deck::request_models`), com limite de 15 s e cache de 10 min (60 s se falhou); sem lista o menu mostra
-  só "Padrão". Como o `opencode models` mistura todos os provedores conectados, os dois menus usam
-  `models::by_provider` e pedem o **provedor antes do modelo** (`opencode`, `opencode-go`…, o
-  prefixo antes da `/`); os modelos `-free` levam a marca "grátis" (`models::is_free`) e vêm primeiro em
-  cada lista. Com um provedor só, `models::sole_provider` pula o passo do provedor e mostra os modelos
-  dele direto.
-- **Inventário para os agentes** (`ask-agent --models [agente]`, `GET /models[?agent=<id>]`, `Core::models_inventory`):
-  imprime, por agente instalado, o nome como vale no `--agent` e os modelos como o `--model` aceita, com os `-free`
-  primeiro e marcados "(grátis)"; o OpenCode sai agrupado por provedor, uma linha cada (`models::by_provider`);
-  o Codex não tem lista e os CLIs sem escolha de modelo
-  (aider…) saem como tal. Sem `agent`, os quatro CLIs oficiais (`claude`, `antigravity`, `codex`, `opencode`) vêm
-  primeiro, ordenados por **quem tem mais folga** (`models::sort_by_quota`, `Core::quota_used`: menor fração usada
-  primeiro; quem não tem leitura vem depois de quem tem folga e antes de quem está esgotado), e cada um deles traz
-  **sempre** a linha `"  cota: …"` (`Core::quota_lines`): quanto foi usado e quando renova, mesmo abaixo de 80%
-  (`"Gemini 4 Argon 4% usada (renova em 6 dias)"`, por grupo no Antigravity), ou `"cota: última leitura há N min"` /
-  `"cota: sem leitura"` quando não há leitura viva. Agente não instalado não aparece (e `--models <agente>` dele dá
-  404); uma listagem que falha vira uma linha ("não consegui listar") sem derrubar o resto. Usa o cache de
-  `known_models` e consulta os CLIs em paralelo, então demora no máximo o `LIST_TIMEOUT`. A formatação é a função pura
-  `models::format_inventory`. As instruções da ponte mandam consultar a cota de todos e escolher, entre os modelos capazes do tamanho
-  do trabalho, o de mais folga antes de delegar ou de abrir tarefas. O `--models` termina com o bloco de capacidade.
-- **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet; cota 39% usada, renova em 2 h)` ou
-  `…; cota: sem leitura`, pelos campos `models` e `quota` de `/agents` e `/team`, `Core::quota_notes`), o
-  cabeçalho da aba, a barra lateral e o menu de contexto da aba (só leitura: trocar o modelo de uma aba aberta exige
-  reiniciar o agente e não existe ainda).
+## Fluxo de perguntas entre abas e entrega nos terminais
 
-`ask-agent <id> "msg"` (e `--new` para forçar outra instância) funciona assim:
+### Pergunta, resposta e detecção de ciclos (`exchange.rs`, `inbox.rs`)
 
-1. O core resolve o destino: o id exato, a instância principal do modelo ou a única que existe;
-   se nenhuma existe, **cria** (`claude@dev` abre uma aba nova). Destino ambíguo ou desconhecido dá erro.
-2. A pergunta vira `CoreEvent::Deliver`. A interface abre a aba (em segundo plano, sem roubar o foco),
-   espera o terminal ficar parado e **digita a mensagem nele**, uma por vez por aba (fila).
-3. A mensagem digitada ensina a responder: `ask-agent --reply <n> "resposta"`, com o número da pergunta.
-   Só a instância que recebeu a pergunta consegue respondê-la (`crates/core/src/exchange.rs`). A forma
-   antiga, `ask-agent <quem-perguntou> "resposta"` (o nome passa pelos apelidos, como `agy`), continua valendo
-   enquanto o `ask-agent` de quem perguntou ainda espera: uma pergunta nova para ele fecharia um ciclo de espera,
-   então só pode ser resposta. Depois do 202 (item 4) quem perguntou está livre, e a forma antiga vira uma
-   pergunta nova; a resposta vai pelo número. Quem perguntou e o destino são lidos pelo número na hora de usar,
-   então renomear uma aba no meio da pergunta não perde a resposta. Nada de raspar a tela.
-4. **Resposta síncrona ou atrasada.** O `ask-agent` de quem perguntou espera até `AGENTDECK_ASK_WAIT`
-   segundos (padrão 90, abaixo do timeout padrão do Bash do Claude Code). Se a resposta não chegou, ele
-   termina com HTTP 202 e um aviso, e a resposta, quando chegar (até 10 minutos), é **digitada no terminal
-   de quem perguntou** como uma mensagem nova (`Delivery { answer: true }`). Isso só vale para abas de
-   agentes: num terminal comum (`shell`) o texto seria executado como comando, então ali o `ask-agent`
-   espera até o fim, assim como nas execuções headless.
-5. Fechar a aba ou o processo terminar libera quem esperava, com erro; fechar a aba de **quem perguntou**
-   descarta as perguntas dela. Ciclos de espera (A espera B, B espera C, C espera A) são recusados na hora
-   (HTTP 409). A profundidade também vale entre abas: como ela não viaja pelo ambiente (a pergunta é
-   digitada), é medida pela cadeia de perguntas pendentes (`Exchange::chain_depth`).
+1. **Resolução e fila:** `POST /ask` resolve o destino no projeto do chamador (ou cria a instância e abre a aba em segundo plano, até 8 abas automáticas). Chamadas do mesmo par `de->para` seguem fila FIFO; no headless, sessões do par são retomadas no Claude (`--session-id`/`--resume`) e no Antigravity (`--conversation`).
+2. **Ciclos e profundidade:** se o destino já espera direta ou indiretamente por quem pergunta, `/ask` recusa com **409**. A cadeia de perguntas pendentes entre abas é recusada a partir de profundidade 2.
+3. **Resposta síncrona ou atrasada (HTTP 202):** o `ask-agent` espera até `AGENTDECK_ASK_WAIT` (padrão 90 s). Se `ask-agent --reply <n>` chegar no prazo, sai no stdout com HTTP 200 e o cliente confirma o recebimento em `POST /inbox/delivered` (pois o `tiny_http` não detecta se o cliente morreu antes de ler o 200). Se passar de 90 s, `/ask` devolve **202** liberando o `ask-agent` (a pergunta deixa de bloquear ciclos, mas segue contando na profundidade) e, quando o destino responder (em até 10 min), a resposta é digitada no terminal de quem perguntou. Abas `shell` e execuções headless esperam sempre até os 10 min.
+4. **Caixa de entrada (`inbox.rs`):** toda resposta (até 20 por instância) fica como "não entregue" até o `/inbox/delivered` ou a digitação na aba. Se a aba que perguntou fechou ou morreu, o app avisa na Conversa e a resposta fica disponível em `ask-agent --inbox`.
 
-**Tarefas** (`crates/core/src/tasks.rs` e `scope.rs`; ponte em `bridge.rs`, `ask-agent --task`). A unidade de trabalho do AgentDeck: um
-pedido (brief), um agente com modelo, uma worktree + branch próprias, um relatório, um diff e um ciclo de vida.
+### Quando digitar no terminal (`crates/core/src/delivery.rs`, `crates/app/src/deck/`)
+
+A política em `delivery.rs` evita atropelar o usuário ou a TUI:
+- **Respeito ao usuário:** não digita nos 2 s após tecla do usuário nem nos 20 s enquanto há texto digitado ainda sem Enter.
+- **Prontidão da aba:** aguarda 5 s na abertura de abas sem hooks; com hooks (Claude e Codex), aguarda o sinal `idle` + 300 ms sem saída (fallback de 10 min); sem hooks, 1,5 s sem saída ou 30 s esperando na fila.
+- **Colagem e Enter:** limpa `ESC` e controles C0/C1 (protegendo o *bracketed paste*) e envia pela thread de escrita do PTY. O Enter vai 250 ms depois (mais um segundo Enter em 600 ms quando há `@menção` no Claude/Antigravity; no Codex do Windows soma 1 ms por caractere colado, até 10 s). Teclas do usuário durante a espera do Enter saem logo após ele.
+- **Shims `.cmd` e processos no Windows (`agents.rs`, `headless.rs`, `process.rs`):** abas interativas abrem shims via `cmd.exe /d /e:on /v:off /c` com argumentos escapados; prompts livres nunca vão na linha de comando de um shim (no headless vão por arquivo em `dados/prompts/`). Processos headless e o `whisper-cli` entram num Job Object com `KILL_ON_JOB_CLOSE`.
+
+---
+
+## Mesa de tarefas (`crates/core/src/tasks/`, `scope.rs`, `crates/app/src/tasks_ui.rs`)
+
+Cada tarefa (`t1`, `t2`…, contador por projeto nunca reaproveitado) isola um trabalho num agente (`<modelo>@tN`), numa branch (`tarefa/<id>-<slug>`) e numa worktree própria.
 
 ```
 Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged ("concluída")
@@ -262,340 +138,24 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
   └─ erro ao iniciar ▶ Failed ──start de novo──▶ Running
 ```
 
-Mesclar quer dizer "o diff parecia certo"; o teste de verdade o usuário faz depois, no app compilado. Por isso mesclar **não**
-encerra o agente: a tarefa espera em `Validating` ("aguardando validação") com a aba, a worktree e a branch vivas. O valor
-`Merged` continua no enum e no JSON (tarefas antigas), mas para o usuário é "concluída".
+- **Armazenamento e worktrees (`tasks/store.rs`, `tasks/git_ops.rs`):** salvas em `dados/tarefas/<projeto>.json` (fora do repo; remover e readicionar a pasta preserva o id do projeto). As worktrees ficam em `<raiz do repo>/.agentdeck/worktrees/<id>` — dentro do repositório para que agentes confinados ao workspace (como o Antigravity) tenham acesso — e `/.agentdeck/` é registrado em `<git comum>/info/exclude` (nunca no `.gitignore`).
+- **Início e entrega (`tasks/lifecycle.rs`, `tasks/text.rs`):** cria worktree e branch a partir da base, registra `<modelo>@<id>` subordinado a quem criou e entrega o pedido com memória e regras. Quando a aba precisa ser aberta, grava o pedido (ou feedback) em `dados/tarefas/<projeto>-<id>-brief.md` (ou `-feedback.md`) e passa uma linha curta em ASCII como argumento inicial do CLI (`claude "<linha>"`, `agy -i "<linha>"`, `opencode --prompt "<linha>"`), evitando perder texto enquanto a TUI inicializa.
+- **Escopo e fila (`scope.rs`, `tasks/lifecycle.rs`):** o escopo lista caminhos relativos (sem globs); dois escopos colidem quando um é igual ou prefixo por componente do outro (`memory/` e `Cargo.lock` não reservam nada). Se colidir com tarefa em `Running`, `Review` ou na fila antes dela, entra em `Queued` sem criar worktree nem aba. Quando a tarefa bloqueante é mesclada, descartada ou falha ao iniciar, a fila avança sozinha criando a worktree a partir do topo atual da base (`Validating` não segura a fila). No `done`, arquivos tocados fora do escopo geram aviso na revisão.
+- **Mesclagem (`tasks/merge.rs`, `tasks/stash.rs`):** exige repo principal na branch base e limpo (ignorando e restaurando o bloco automático do `AGENTS.md`) e worktree limpa. Faz `git merge --no-ff`, alinha a branch da tarefa (`git merge --ff-only`) e passa a `Validating` mantendo aba, worktree e branch vivas. Na UI, bloqueios oferecem resolução num clique — incluindo guardar alterações locais num `git stash`, mesclar e reaplicar pelo hash SHA após pré-verificar com `git merge-tree --write-tree`.
+- **Validação, reprovação, descarte e permissões (`tasks/finish.rs`, `file_lock.rs`, `bridge.rs`):** `validate` exige ausência de commits não mesclados, fecha a aba, remove a worktree (diagnosticando processos que prendam a pasta no Windows) e a branch e marca `Merged`. `reject` reabre aba/worktree se preciso e volta a `Running` com o motivo. `discard` limpa aba, worktree e branch de qualquer estado não final. Na ponte, o agente de uma tarefa ativa só pode consultar tarefas e chamar `/done` da própria tarefa (demais rotas de tarefa → **403**).
 
-- **Dados.** `Task { id (t1, t2…: contador por projeto, nunca reaproveitado), title, brief, status, base, branch
-  (tarefa/<id>-<slug>), worktree, kind, model, instance (<modelo>@<id>, ex.: claude@t3), creator, created_ms, started_ms,
-  finished_ms, report, diff_stat, error, merge_commit, scope, queued_ms, waiting_for, outside_scope, events (últimos 200) }`. `merge_commit` é o hash completo do commit da última mesclagem (`git rev-parse HEAD` logo depois do `merge --no-ff`; `None` se nunca foi mesclada; uma nova mesclagem, depois de reprovar, sobrescreve; `#[serde(default)]`: tarefas antigas carregam com `None`). Ficam em `dados/tarefas/<projeto>.json`
-  (`{"version","next","tasks"}`), gravados por arquivo temporário + `rename`, uma gravação por vez, **fora do repositório do
-  usuário**; um arquivo ilegível é copiado para `….json.ilegivel-<ms>` antes de recomeçar. Remover o projeto não apaga o arquivo.
-- **Worktrees.** Em `<raiz do repositório>/.agentdeck/worktrees/<id>` (dentro do repositório de propósito: agentes confinados
-  ao workspace, como o Antigravity, conseguem chegar lá). Na primeira tarefa iniciada, `/.agentdeck/` entra uma vez em
-  `<git comum>/info/exclude` (nunca no `.gitignore`); o explorador e o watcher ignoram a pasta. O core só apaga pastas que
-  estejam mesmo dentro de `.agentdeck/worktrees`.
-- **Iniciar** (`Core::task_start`, só com as abas dos agentes ligadas: tarefas não rodam em headless). `git worktree add -b
-  <branch> <pasta> <base>`; registra a instância `<modelo>@<id>` com o modelo da tarefa (`models.rs`); quem criou a tarefa,
-  se for um agente aberto, vira o chefe da instância (`ask-agent --boss` chega nele); `agents::spawn_spec_for` abre o terminal
-  **na worktree** (`Core::task_cwd`: tarefa em andamento, em revisão ou aguardando validação); o brief mais as regras da tarefa (trabalhar só na
-  worktree, commits pequenos, nada de merge nem push, o relatório em um arquivo com `ask-agent --task done <id> --file <arq>`, dúvidas ao chefe) vão
-  para a aba por `CoreEvent::Deliver { request: 0 }`, o mesmo caminho das mensagens entre agentes (fila e regras de `delivery.rs`,
-  sem esperar resposta). **Aba que precisa abrir** (nova, ou processo encerrado): digitar o texto num CLI que ainda sobe o perde (visto no Antigravity, que mostra um aviso na abertura). Então o texto completo (brief, devolução ou reprovação) vai para `dados/tarefas/<projeto>-<id>-brief.md` (ou `-feedback.md`) e `Delivery::boot` leva só uma linha curta em ASCII (`tasks::boot_line`: "Tarefa t11: … Leia o arquivo <caminho> e comece agora…"); a interface a guarda com `Core::set_boot_prompt` e `agents::spawn_spec_for` a põe na linha de comando, uma vez: Claude `claude "<linha>"` (posicional, **antes** das opções, porque `--add-dir`/`--allowedTools` aceitam vários valores), Antigravity `agy -i "<linha>"`, OpenCode `opencode --prompt "<linha>"` (`models::boot_prompt_flag`). Os demais CLIs, a aba já viva e o caminho com não-ASCII seguem digitando. Erro ao iniciar = `Failed` com a mensagem; `start` de novo tenta outra vez.
-- **Escopo e fila** (`crates/core/src/scope.rs`, funções puras; a fila em `tasks.rs`). `Task::scope` é uma **lista de caminhos**
-  (arquivos e pastas relativos à raiz do repositório, **não globs**; `task_create` normaliza: separador `/`, sem `./` nem barra no
-  fim, sem repetidos, e recusa curinga `*`/`?`, caminho absoluto e `..` com 400). Dois escopos se sobrepõem quando um caminho é igual ao
-  outro ou é prefixo dele **por componente** (`crates/core` cobre `crates/core/src/git.rs`; `crates/co` não cobre `crates/core`), sem
-  diferenciar maiúsculas e com `/` e `\` equivalentes. `scope::UNRESERVED` (`memory`, `Cargo.lock`) é a lista, num lugar só, do que
-  **nenhuma tarefa reserva** (toda tarefa mexe nisso e se resolve na mesclagem): fica fora da sobreposição e do aviso de "fora do
-  escopo". Sem escopo (ou só com esses caminhos) a tarefa **nunca entra na fila nem segura ninguém**, como antes. **Fila:** em
-  `task_start` (também ao sair do rascunho, pelo botão e por `--start`), se o escopo se sobrepõe ao de uma tarefa `Running` ou
-  `Review` (ou de uma que já espera na fila e entrou antes: ninguém fura a fila), a tarefa vai a `Queued` (`queued_ms` ordena a fila,
-  `waiting_for` diz por qual tarefa espera, cada uma com um evento no histórico), sem worktree, branch, instância nem entrega ao agente; o
-  `Ok` traz a tarefa já na fila. `Failed` sem relatório (nova tentativa) não entra na fila: recusa com 409 enquanto o escopo está
-  ocupado. **Começar sozinha:** `Core::advance_queue_locked` percorre a fila na ordem e chama o mesmo `start_locked` do botão Iniciar
-  (cria a worktree **a partir da base daquele momento**, já com a mesclagem da que saiu, e emite o mesmo `Deliver`, então a interface abre
-  a aba sem mudança no `Deck::tick`); roda ao fim de `merge_task` (sucesso), `task_discard` e de um `task_start` que falhou (a tarefa
-  `Failed` deixou de segurar), com a trava das operações já tomada. `Core::tasks_advance_queue(projeto)` faz o mesmo sob demanda: a
-  interface o chama na primeira leitura do projeto se há tarefa `Queued`, para cobrir um fechamento do app no meio. A fila é só o campo
-  `status` no JSON em `dados/tarefas/`: **sobrevive ao fechamento do app**. **`Validating` não segura a fila:** o código já foi mesclado
-  na base, a seguinte parte dele, e esperar o teste do usuário (que pode demorar) travaria o paralelismo; se a tarefa for reprovada e
-  voltar a `Running` sobreposta a outra, só ganha um evento de aviso (a próxima mesclagem pode conflitar, como sempre). No `task_done`,
-  os arquivos do diff (`changed_files` + o que está sem commit) fora do escopo vão para `Task::outside_scope` e para o histórico
-  ("mexeu fora do escopo: …"); a revisão mostra como **aviso**, nunca bloqueia.
-- **Relatório** (`task_done`): `Running`, ou `Validating` **com commits novos** na branch (`base..branch` > 0: o usuário corrigiu algo na aba
-  enquanto a tarefa esperava validação e o agente entrega o que falta; evento "o agente entregou mais trabalho depois da mesclagem; em
-  revisão"). Em `Validating` sem commits novos dá 409 ("já foi mesclada e espera a validação do usuário… quem decide é o usuário (Reprovar)").
-  Guarda o relatório e `git diff --stat base...branch`, vai a `Review` e avisa se a worktree tem trabalho sem commit. **Devolver** (`task_return`): `Review → Running`, entrega o feedback (a aba é reaberta
-  se foi fechada).
-- **Mesclar** (`task_merge`): só `Review` (ou `Failed` com relatório, para repetir). No repositório principal recusa, sem mudar
-  nada e com a explicação, se ele não está na base, está no meio de outra operação, tem alterações sem commit em arquivos
-  rastreados (o `AGENTS.md`, que o app reescreve, não conta; o git ainda protege o arquivo se a mesclagem o tocar), se a worktree da
-  tarefa tem trabalho sem commit ou se a branch não tem commits novos. **Exceção:** sem commits novos mas com `merge_commit` (a tarefa já
-  foi mesclada, foi reprovada e o agente concluiu que não havia o que mudar) não recusa: vai direto a `Validating`, sem novo commit de
-  mesclagem, com o evento "sem commits novos desde a última mesclagem (<hash>); aguardando validação de novo" (as outras checagens
-  continuam valendo antes). Depois `git merge --no-ff -m "Merge tarefa <id>: <título>"`.
-  Conflito: `git merge --abort`, a tarefa continua em `Review` e a mensagem lista os arquivos. Sucesso: **não** fecha a aba nem
-  remove worktree/branch; guarda o hash completo em `merge_commit`; alinha a branch da tarefa com a base já mesclada (na worktree, `git merge --ff-only <base>`: a branch é
-  ancestral do commit de mesclagem) e vai a `Validating` ("mesclada em <base> (<hash>); aguardando validação"). Se o alinhamento
-  falhar, só registra um aviso (o merge já aconteceu); a reprovação tenta de novo. Erro inesperado do git = `Failed`.
-- **Validar** (`task_validate`): só `Validating`. Recusa, sem mudar nada, se a worktree tem trabalho sem commit ou se a branch tem
-  commits que a base não tem (o agente seguiu trabalhando: reprove ou descarte). Senão fecha a aba (`CoreEvent::CloseInstance`),
-  `git worktree remove --force` (com tentativas, porque no Windows o terminal ainda segura a pasta logo depois de a aba fechar),
-  `git branch -D` e vai a `Merged`. Se a base (`refs/heads/<base>`) foi apagada, pula a checagem de commits fora dela, registra o aviso
-  "a base <base> não existe mais; não conferi se a branch tinha commits fora dela" e limpa normalmente. Se a pasta não sai, a tarefa continua em `Validating` com a explicação (dá para tentar de novo).
-- **Reprovar** (`task_reject(feedback)`): só `Validating`, com o motivo e as abas dos agentes ligadas. Recria a pasta da worktree se
-  foi apagada à mão (a partir da branch, ou da base se a branch também sumiu), alinha a branch com a base, volta a `Running` na
-  mesma worktree e entrega ao mesmo agente `tasks::reject_message` (o trabalho anterior já foi mesclado em <base>, o usuário testou e
-  reprovou pelo motivo X, corrija na mesma branch e avise com `--task done` de novo); a aba é reaberta se foi fechada. O ciclo
-  segue: done → revisão → mesclar → aguardando validação.
-- **Descartar** (`task_discard`): qualquer estado não final (inclusive `Validating`: o que já foi mesclado continua na base, descartar
-  não desfaz o merge); fecha a aba, remove a worktree à força (mesmo que a pasta já tenha sumido) e a branch (`-D`),
-  `git worktree prune`, `Discarded`. Sem repositório disponível, só o registro muda.
-- **Permissões na ponte** (`bridge::task_permission`). O **agente de uma tarefa** (a instância `<modelo>@<id>` de uma tarefa
-  que ainda não terminou) só consulta (`GET`) e entrega o relatório da **própria** tarefa; criar, iniciar, devolver, mesclar,
-  validar, reprovar e descartar dão 403, e entregar o relatório de outra tarefa também. Qualquer outro agente faz o resto, menos entregar relatório
-  por outro. O token mestre (nenhum agente o recebe) pode tudo. O projeto vem do token.
-- **Erros** (`TaskError` → HTTP): `Invalid` 400, `NotFound` 404, `Conflict` 409, `Failed` 500.
-- **Para a interface** (`Core`, tudo bloqueante: chame numa thread): `tasks(projeto)`, `task(projeto, id)`,
-  `task_of_instance(projeto, instância)`, `task_create(projeto, TaskSpec)`, `task_start`, `task_done`, `task_return`,
-  `task_merge`, `task_validate`, `task_reject`, `task_discard`, e `task_diff(projeto, id)` (só leitura, no mesmo `GitDiff` da aba Git: o `git diff base...branch`; em `Validating` e `Merged` com `merge_commit`, o
-  `git diff <hash>^1 <hash>`, o que a mesclagem trouxe, porque depois do alinhamento a branch é a própria base e o intervalo ficaria vazio;
-  `Conflict` se o commit não existe mais).
-  Eventos: `CoreEvent::TasksChanged { project }` a cada gravação (também as vindas da ponte) e
-  `CoreEvent::CloseInstance { project, id }` quando o core encerra a instância (a interface fecha a aba). Reabrir a aba de uma
-  tarefa em andamento, em revisão ou aguardando validação é abrir a instância dela (`restore_instance` + aba): o terminal já abre na worktree.
-- **Interface** (`crates/app/src/tasks_ui.rs`, `ui/tasks.rs`): a aba Tarefas da barra direita. Cada chamada acima roda numa thread
-  (`Deck::spawn_bg`) e volta como `UiMsg::Tasks`; a lista é relida a cada `TasksChanged` do projeto ativo. Grupos da lista: Em
-  revisão, **Aguardando validação**, Em andamento, **Na fila**, Rascunho, Falhou, Concluídas, Canceladas; o selo do ícone conta revisão + validação.
-  O formulário "+ Nova" tem o campo Escopo (um caminho por linha ou separados por vírgula; `tasks_ui::parse_scope`); o cartão da tarefa
-  na fila diz "na fila · espera tN" e o detalhe mostra o escopo, a faixa "Na fila: o escopo se sobrepõe ao da tarefa tN…" e, em revisão, o
-  aviso "Mexeu fora do escopo: …". Na fila só há o botão Descartar. Botões por estado (`actions_for`): em revisão Mesclar/Devolver; aguardando validação **Validar** (sem confirmação) e **Reprovar**
-  (reaproveita o formulário de feedback do Devolver). Descartar em `Validating` avisa que o que foi mesclado continua na base. O botão do diff (`can_show_diff`) vale também em `Validating`/`Merged` com
-  `merge_commit`, e aí diz **"Ver o que foi mesclado"** ("Ver diff completo" nos outros estados); o detalhe mostra o hash curto ao lado de
-  `branch → base`. O diff abre no centro, no modo Documentos (abaixo); o pedido e o relatório também (**Abrir em Documentos**).
+---
 
-**Modo Documentos (centro).** `crates/app/src/docs.rs` (estado e lógica pura) e `ui/docs.rs` (pintura). O centro mostra os agentes
-(`panes::draw`) ou os documentos do projeto ativo (`docs::draw`), conforme `Deck::docs.view` (`CenterView`); a chave (`docs::switch`) fica no topo de `ui/sidebar.rs` e, com a barra lateral recolhida, em `ui/titlebar.rs`
-e o atalho é Ctrl+Shift+D (`Action::ToggleCenter`). Cada documento é um `DocTab { uid, project, kind: DocKind, title, subtitle, state:
-DocState }` (`TaskDiff`, `CommitDiff`, `FileDiff`, `File`, `Markdown`); abrir um igual só o foca; não são gravados. A leitura roda fora da
-thread da interface e volta como `UiMsg::Doc(uid, Loaded)`. Do core só entram o que já existia (`task_diff`, `git_commit_detail`,
-`git_diff`, `parse_diff`) e `Core::read_text(rel)` (`workspace::read_text`: caminho relativo e seguro, links simbólicos resolvidos
-para dentro da pasta, até 1 MB, `TextFile::{Text, TooLarge, Binary}`). Terminais escondidos: o PTY não é redimensionado nem recebe teclado.
+## Memória em duas camadas (`learnings.rs`, `situation.rs`, `outline.rs`)
 
-**Editor (t39).** Um arquivo de texto que cabe (`Source::fits`: até 256 KB, linhas até 4 000 bytes) vira `DocState::Source(Source)`: o
-texto da tela (`\n`, sem BOM), o que está no disco (`disk`; sujo = `text != disk`), `Eol`/`bom` para gravar de volta igual, `editing`,
-`raw` (markdown como código), `locked` (CRLF+LF misturados ou não UTF-8: só leitura), `external` (o disco mudou com edição não salva),
-`gone`, `saving`/`save_error` e `version` (a chave do que depende do texto). `DocTab::apply` **nunca troca** um `Source` sujo por uma
-leitura: ela vira `Source::reload`, que só guarda o texto novo em `external`. Gravar é `Deck::docs_save` → thread → `Core::write_text` →
-`workspace::write_text` (`write_atomic`) → `UiMsg::DocSaved` → `on_doc_saved` (`After::{Nothing, Close, Quit}`). Fechar uma aba suja ou o
-app passa por `Docs::confirm` (`Unsaved::{Tab, Quit, Revert}`; `request_quit` no ×, em `CloseRequested` e em `quit_requested`) e pelo modal
-`ui/docs.rs::unsaved_modal`. A pintura do código é `ui/code.rs`: um `TextEdit` multilinha (sobre `&str` na leitura, `String` na edição)
-cujo `layouter` devolve o galley de `docs::Shaped` — realce (`highlight::Cache`) e galley guardados por impressão digital do texto,
-largura de quebra, escala da tela e busca, de modo que repintar não refaz nada; as linhas quebram na largura (o `TextEdit` multilinha do egui
-não rola na horizontal) e a coluna dos números fica à parte, alinhada às linhas do galley. O realce é o tokenizador próprio
-`highlight.rs` (o léxico — `Tok`, `Span`, `Lang`, `Carry`, `highlight_line(s)` — mora em `crates/core/src/highlight.rs` e o app o reexporta; busca, `pieces` e `Cache` ficam no app; sem `syntect`, ver `memory/aprendizados/editor-de-documentos.md`); as cores são `Palette::syn_*`. O que se pinta à mão (o
-diff, `ui/diff_view.rs`, e o arquivo grande, `ui/code.rs::text_body`) usa a seleção de `ui/select.rs` (posição = linha + byte; arrastar,
-Ctrl+A, Ctrl+C) e `highlight::pieces` para juntar realce e marcas da busca por linha. `Find` (por documento) guarda a consulta e os
-achados (bytes para o código; linhas para o diff e o arquivo grande).
+1. **Longo prazo — Aprendizados (`learnings.rs`):** arquivos `memory/aprendizados/*.md` com frontmatter `titulo`, `resumo` e `touches` (globs relativos à raiz; vazio = global), lidos da worktree da tarefa ou do repo principal. No início da tarefa, o agente recebe os globais e os que casam com caminhos citados no pedido por inteiro (até 6 000 caracteres) mais o índice dos demais (até 2 500); em devoluções/reprovações, recebe os que casam com arquivos novos citados no feedback (até 3 000).
+2. **Curto prazo — Situação atual e histórico (`situation.rs`, `tasks/`):** entrega as outras tarefas ativas com os arquivos que tocam (commits da branch + sujos da worktree via `git --no-optional-locks status`) e os últimos 8 commits da base (até 1 500 caracteres). Devoluções e reprovações repetem os últimos 5 feedbacks, e a tarefa guarda até 300 mensagens (6 000 caracteres cada) trocadas pelo agente.
+3. **Consulta sob demanda (`--learn` e `--outline`):** `ask-agent --learn [<arquivo>…]` (`POST /learn`, até 12 000 caracteres) devolve globais + índice + situação atual (sem argumentos) ou avisos `ATENÇÃO:` de choque com outras tarefas + aprendizados que casam (com arquivos). `ask-agent --outline <arquivo>…` (`POST /outline`, `outline.rs`, até 6 000 caracteres/arquivo e 16 000/chamada) extrai assinaturas e linhas (itens e membros de `impl`/`trait`/`mod` em Rust, títulos em Markdown) sobre o léxico de `highlight.rs`.
 
-**Memória em duas camadas** (fase 1 do passo 3 do roadmap; `learnings.rs`, `situation.rs` e `tasks.rs`). O app entrega ao
-agente de uma tarefa o que o projeto já aprendeu e o que está acontecendo agora, no `start_message`:
-- **Longo prazo: aprendizados.** Um `.md` por aprendizado em `memory/aprendizados/` (versionado no git; formato no `README.md` da
-  pasta): frontmatter `titulo`, `resumo` e `touches` (globs relativos à raiz do repositório; `*` não cruza pasta, `**` cruza, padrão sem
-  `/` vale para o nome do arquivo em qualquer pasta; vazio = projeto todo). `learnings::load` lê a pasta (arquivo inválido, grande demais
-  ou ilegível é ignorado com `log::warn!`; nunca derruba a tarefa), `glob_match`/`matching` casam os `touches` com um conjunto de
-  caminhos (os específicos antes dos globais), `paths_in_text` extrai do brief só os arquivos que existem no repositório (sem `..` nem
-  caminho absoluto) e `render` monta o texto: os que valem por inteiro até `START_BUDGET` (6 000 caracteres); o que passar do orçamento
-  e os demais viram uma linha de índice (`arquivo — resumo`), com teto de 2 500 caracteres e "e mais N". Os arquivos são lidos da
-  **worktree da tarefa** (já tem a base), então um aprendizado que o agente cria na branch dele é visível a ele mesmo.
-- **Sob demanda: `ask-agent --learn [<arquivo>…]`** (`POST /learn` na ponte → `Core::learn`): imprime os que valem para esses
-  arquivos (até `LEARN_BUDGET`, 12 000 caracteres); sem arquivos, os globais por inteiro e o índice de todos os outros
-  (`learnings::learn_report`). As instruções da ponte (`agents.rs`) mandam rodá-lo antes de mexer em arquivos. Caminhos absolutos dentro da worktree ou do repositório viram caminhos do
-  repositório (`learnings::relativize`). Lê a pasta da worktree da tarefa de quem pergunta ou, sem tarefa, do repositório do projeto.
-  **Traz também a situação atual, para a aba de qualquer agente** (nada é empurrado no início da aba, que ficaria velho em minutos).
-  Sem arquivos, acrescenta no fim a seção "Situação atual" (`situation::render`: as tarefas em andamento com os arquivos delas e os
-  últimos commits da base; a base é a da tarefa de quem pergunta ou, numa aba normal, a branch do repositório principal); o agente
-  de uma tarefa não se vê nela. Aprendizados e situação dividem **um teto só** (`LEARN_BUDGET`, `learnings::learn_with_situation`):
-  se não couber, corta primeiro os commits da situação, depois o índice dos aprendizados e por último os globais. Com arquivos, põe no
-  topo um `ATENÇÃO:` com uma linha por arquivo que **outra** tarefa em andamento também mexe (`situation::clash_warnings`), dizendo
-  de onde veio: `já mexeu` (o arquivo está na branch ou sem commit na worktree dela) ou `o pedido cita` (`OtherTask::cited`:
-  `paths_in_text` do pedido dela, que cobre a tarefa recém-criada, ainda sem commit). Não avisa do arquivo da própria tarefa, de
-  `memory/historico.md` (mescla por união) nem de tarefa aguardando validação (já está na base); sem choque, nada a mais. A situação
-  do início da tarefa (`task_situation`) e o `--learn` usam a mesma `Core::busy_tasks` (`situation.rs`), que lê cada tarefa em
-  uma thread (diff da branch + `status --no-optional-locks`): ~220 ms com 3 tarefas abertas, sem cache (um cache de segundos
-  serviria a lista velha justo para a tarefa que acabou de nascer). O aviso casa o caminho exato (sem pasta nem glob) e o caminho
-  absoluto de **outra** worktree não é relativizado.
-- **Sob demanda: `ask-agent --outline <arquivo>…`** (`POST /outline` → `Core::outline`, `outline.rs`; fase 2): o esqueleto do arquivo, com a
-  **assinatura** e o **número da linha** de cada item e sem os corpos, para o agente ler só o trecho de que precisa (com offset) em vez do
-  arquivo inteiro. O léxico é o de `highlight::highlight_lines` (que por isso mora no core, sem a parte de interface): as faixas de texto entre aspas e de comentário saem do
-  código antes de contar chaves, então `"{"`, `'}'`, raw string e `// fn x() {` não enganam. Não é um analisador: o item é achado pela
-  profundidade das chaves e pela palavra que abre a linha. Rust: itens de topo e, sob `impl`/`trait`/`mod`, os membros (recuo = nível);
-  assinatura que quebra linhas vira uma só; campos de `struct` e variantes de `enum` entram numa linha só com os nomes (cortada na
-  largura); `#[cfg(test)] mod tests` vira "— N testes" (N conta os `#[test]` do arquivo inteiro). Markdown: os títulos `#`–`###`. As demais
-  linguagens (JS/TS, Python, PowerShell e shell ficaram para depois) ganham uma linha dizendo que não há resumo e quantas linhas o arquivo tem.
-  Orçamento de 6 000 caracteres por arquivo e 16 000 por chamada (`FILE_BUDGET`, `OUTLINE_BUDGET`); o que passar vira "… e mais N itens
-  (linhas X–Y)". Caminhos e raiz como no `--learn` (worktree da tarefa de quem pergunta ou, sem tarefa, o repositório); `..`, caminho fora da
-  raiz (também por link simbólico), pasta, arquivo inexistente, binário ou acima de 1 MB viram uma linha de aviso, não erro. As instruções da
-  ponte citam o comando numa frase.
-- **Escrita.** A regra da tarefa manda criar um arquivo em `memory/aprendizados/` na própria branch para algo não óbvio e citá-lo no
-  relatório: o aprendizado passa pela mesma revisão e mescla que o código.
-- **Curto prazo: "Situação atual"** (`situation::render`, orçamento de 1 500 caracteres): as **outras tarefas em andamento** do projeto
-  (em andamento, em revisão e aguardando validação; id, título, instância, estado e os arquivos dela: os da branch via
-  `git diff --name-only base...branch` **mais** os ainda sem commit na worktree, lidos por `worktree_dirty_unlocked`
-  (`git --no-optional-locks status`, sem tomar o `index.lock` do outro agente), sem repetição, em ordem alfabética e sem o `AGENTS.md`;
-  em `Validating` a lista é vazia; com um aviso quando algum deles é citado no pedido desta tarefa) e os **últimos 8 commits da
-  base** (`git log --oneline -8`). O que não couber é cortado do fim (primeiro os commits). `Core::task_memory` junta as duas
-  camadas (`tasks::memory_block`) e entra entre o pedido e as regras; qualquer falha deixa só aquela parte de fora.
-- **Histórico de feedbacks.** `Task::feedbacks` (`Vec<Feedback { at_ms, origin, text }>`, `serde(default)`: tarefas gravadas antes
-  continuam abrindo; no máximo 20) guarda cada devolução da revisão e cada reprovação da validação. `return_message` e
-  `reject_message` repetem os anteriores (os últimos 5, cada um cortado em 700 caracteres) antes das regras, para o agente não
-  repetir o que já lhe foi pedido; o feedback que está sendo entregue não entra na lista.
-- **Linha do tempo das mensagens.** `Core::feed` (por onde passa tudo o que a ponte mostra na Conversa integrada) também chama
-  `record_task_message`: a pergunta, resposta ou erro (`Ask`/`Answer`/`Error`) em que a instância de uma tarefa do projeto é quem
-  manda ou recebe vai para `Task::messages` (`TaskMessage { at_ms, kind, from, to, text }`, `serde(default)`), no mesmo JSON
-  das tarefas, e por isso sobrevive a reabrir o app. Teto: 300 mensagens por tarefa (as mais antigas saem) e 6 000 caracteres
-  cada (`tasks::MAX_MESSAGES`, `MAX_MESSAGE_CHARS`); uma pergunta entre duas tarefas entra nas duas. O detalhe da tarefa mostra
-  a seção MENSAGENS (`ui/tasks.rs::timeline`, do mais antigo ao mais novo, recolhida em 280 caracteres/4 linhas, o clique abre
-  inteira). A Conversa integrada em si continua só na memória (`Deck::feed`, 1000 entradas).
-- **Aprendizados na devolução e na reprovação.** `Core::feedback_learnings` pega os arquivos que o feedback novo cita
-  (`paths_in_text` na worktree), tira os que já apareciam no pedido (`brief`, ou o título) ou nos feedbacks anteriores e entrega
-  só os aprendizados **específicos** que casam (`learnings::render_specific`, até `FEEDBACK_BUDGET`, 3 000 caracteres; sem índice
-  e sem globais, que o agente já recebeu no início). O texto pronto entra em `return_message`/`reject_message` (que continuam
-  puras, sem ler disco) como "O que o projeto já aprendeu sobre os arquivos citados", depois do histórico; sem nada novo, a
-  mensagem fica como antes.
-- **Fase 2 (2026-10-23, `t40` e `t41`):** o `--outline` e a situação atual no `--learn` de qualquer aba, as duas **por demanda**:
-  o agente pede quando vai mexer, e recebe o estado de agora. Um `ContextProvider` geral que empurrasse esse contexto em todos os
-  canais foi recusado por ora (ver `ideias.md`, "Memória"); RAG/embeddings continuam adiados.
+---
 
-**Git** (`crates/core/src/git.rs`, aba Git da interface). Usa o `git` instalado (`Core::git_*`, todos
-bloqueantes; a UI chama numa thread):
-- sempre `Command::new(git).args([...])`, nunca um shell; caminhos e a mensagem de commit vão pela entrada padrão
-  (`--pathspec-from-file=- --pathspec-file-nul`, `commit -F -`), e todo caminho passa por `safe_rel`;
-- ambiente que não trava: `GIT_TERMINAL_PROMPT=0`, ssh em `BatchMode` nas operações de rede (a menos que o
-  usuário tenha ssh próprio configurado), `GIT_OPTIONAL_LOCKS=0` (o status não regrava o índice),
-  `GIT_LITERAL_PATHSPECS=1`, `LC_ALL=C` (os erros são reconhecidos em `classify_error`);
-- limites de tempo (status/diff 5 s, commit 120 s, rede 60 s) e de saída (diff de até 1 MiB / 10 000 linhas,
-  5000 entradas de status); uma operação de escrita por vez (`index.lock`);
-- o watcher do workspace separa as mudanças de estado do repositório (`.git/HEAD`, `index`, `refs/…`, sem os
-  `*.lock`) e emite `CoreEvent::GitChanged`; a interface relê o status 400 ms depois. Se o repositório fica
-  acima da pasta de trabalho (o `.git` não é vigiado), a aba relê a cada 10 s enquanto está aberta;
-- pull só por avanço direto (`--ff-only`); push sem upstream publica no único remoto (`push -u`).
+## Interface: Organização, Modo Documentos, Git e GitHub
 
-**GitHub** (`crates/core/src/github.rs`, aba GitHub da interface). PRs abertos (com o estado dos checks), issues
-abertas (sem os PRs) e execuções do Actions do repositório do remoto `origin` (`https://`, `git@github.com:` e
-`ssh://`; outro host = a aba explica e não faz nada):
-- API REST (`ureq`, só `https://api.github.com`) em threads de segundo plano; o resultado volta por
-  `CoreEvent::Github` (`GithubPayload::Overview`, `PrDetail`, `RunJobs`, `JobLog`), com cache em memória de 60 s
-  por repositório/PR/execução/job e atualização manual (`force`) pelo botão da aba;
-- **sem guardar token**: o token vem de `git credential fill` (`protocol=https`, `host=github.com`, com
-  `GCM_INTERACTIVE=never` e `GIT_TERMINAL_PROMPT=0`: nunca abre janela nem trava) ou, se o `gh` existir, de
-  `gh auth token`; vive só na memória (`SecretToken`, cujo `Debug` não o mostra) e nunca vai para log, config ou
-  mensagem de erro. Sem credencial, repositório público funciona (60 consultas/h; o log dos jobs exige login). Um
-  token recusado (401) é esquecido e a leitura tenta de novo sem ele;
-- o fim do log de um job que falhou: no máximo 200 linhas / 32 KiB (lê no máximo 8 MiB do fluxo); o redirecionamento
-  do GitHub para o armazenamento do log é seguido sem o cabeçalho `Authorization`;
-- erros 401/403/404/limite/rede viram `GithubError` com mensagem em português que diz o que fazer;
-- "Abrir no navegador" só aceita `https://github.com/…` (`Core::open_github_url`).
-
-**Janela e barra de título.** A janela é criada sem decoração (`with_decorations(false)`, com a sombra de volta
-no Windows por `with_undecorated_shadow`); `ui/titlebar.rs` desenha a barra e manda ao winit os comandos do egui
-(`ViewportCommand::StartDrag`, `Minimized`, `Maximized`, `BeginResize` nas faixas de 5 px das bordas), que o
-`EguiGlow::run` já executa. O "×" liga `Deck::quit_requested`, e o `App` encerra como no `CloseRequested`.
-
-**Uso dos planos** (`crates/core/src/usage.rs`, barra de título e painel em `ui/usage.rs`). `Core::usage_snapshot()`
-devolve o último uso de cada modelo (`AgentUsage`: sessão e semana em 0..=1, quando renovam); mudanças emitem
-`CoreEvent::UsageChanged`. O `UsageStore` grava o retrato em `dados/usage.json` (fora do cadeado que a UI lê; uma
-leitura que só renova o horário vai ao disco no máximo a cada 5 min) e o lê ao criar o `Core`: a barra mostra todos os
-agentes com cota, com ou sem aba aberta, na ordem do menu de agentes (`ordered_models`). Na barra, por agente, o logo,
-a sessão numa barra fina e a semana numa grossa; passar o mouse abre o painel de uso (todos os agentes, "lido há",
-quando renova cada janela, "bloqueado até").
-- **Claude**: os hooks gravam `statusLine: ask-agent --usage`. O Claude Code passa `rate_limits.five_hour/seven_day`
-  no stdin; o `ask-agent` manda à ponte (`POST /usage`) e imprime "sessão 34% · semana 12%" (ou repassa o stdin à
-  statusline do próprio usuário, se houver, e mostra a dela).
-- **Codex** (`usage/codex.rs`): a thread `cd-usage` relê a cada 60 s o fim do `rollout-*.jsonl` mais novo em
-  `~/.codex/sessions` (`rate_limits.primary/secondary`), com aba do Codex aberta ou o CLI instalado (conferido a cada 10 min).
-- **Antigravity** (`usage/antigravity.rs`): a cada 3 min, com aba aberta ou o CLI instalado (sem aba, uma falha volta no
-  intervalo normal, não nos 20 s), `v1internal:retrieveUserQuotaSummary`
-  (janelas `5h` e `weekly`; alternativa: `fetchAvailableModels`) com o token do CLI (Gerenciador de Credenciais do
-  Windows `gemini:antigravity` ou `~/.gemini/oauth_creds.json`) enquanto ele vale; quem o renova é o próprio CLI. API interna: qualquer falha
-  vira "sem dados" (o agente fica com o último valor lido, ou fora da barra se nunca houve leitura). O token nunca vai para log, Feed ou interface.
-- **Cota de um modelo, para os agentes** (`usage::model_quota`, `Core::quota_refusal`): cada modelo conta no seu grupo
-  (`group_of`: Argon no "Gemini 4 Argon", os outros Gemini em "Gemini Models", Claude/GPT em "Claude and GPT models"; sem
-  grupos, o plano todo), ignorando janelas já renovadas. O `/ask` recusa com 409, antes de criar a aba, a pergunta a
-  uma instância cujo modelo está esgotado (uso ≥ 99,5%) por uma leitura de até 1 h; sem modelo num agente com grupos,
-  ou sem dado, a pergunta segue. `--models` ganha a linha "cota:" por agente (`quota_line`) e `--team`/`--list` o aviso ao
-  lado do modelo (campo `quota` de `/team` e `/agents`, só de quem está acima de 85% ou esgotado).
-- **Escolha para tarefas** (`capability::select`, que usa `usage::select_agent_by_quota`): primeiro a capacidade, depois a
-  cota (ver "Capacidade do modelo" abaixo). Entre os candidatos oficiais instalados (Claude, Antigravity e Codex; OpenCode
-  não fornece leitura de cota) ficam os capazes do nível da tarefa e, entre eles, `select_agent_by_quota` escolhe a menor
-  fração usada. Sem leituras, preserva a ordem recebida (Claude primeiro). O
-  formulário `+ Nova tarefa` mostra as leituras e mantém a recomendação (que muda com o nível) até o usuário escolher
-  manualmente; `ask-agent --task new` sem `--agent` aplica a mesma escolha e grava o motivo no histórico. O envio `ask-agent <agente> <mensagem>`
-  lê a saída de `GET /models` e avisa sem bloquear quando o destino passa de 80% e outro CLI oficial instalado está abaixo
-  de 50%; a mesma regra é `usage::quota_advisory`.
-
-- **Capacidade do modelo** (`crates/core/src/capability.rs`, t52): escolher só pela cota manda o modelo mais folgado
-  fazer o que ele não dá conta, então a escolha tem duas peças.
-  - **Nível da tarefa** (`Task::level`, `capability::Level`: `simples`, `media`, `complexa`; `--level` no `--task new`,
-    campo `level` de `POST /tasks`, "Nível" no formulário; sem informar vale `media`, e tarefa antiga sem o campo
-    também). Não é o esforço, que continua sendo o raciocínio do modelo.
-  - **Tabela de benchmarks** (`capability.json`, embutida por `include_str!`; `dados/capacidade.json` a sobrepõe por
-    `name`, relida a cada uso): por modelo, os apelidos (`opus`, `claude-opus-5-5`; o id do CLI sem provedor nem
-    `#variante` é igual ao apelido ou continua depois de um `-`), a nota, a fonte, a data e o nível. A régua é o
-    Artificial Analysis Coding Agent Index v2.0 (out/2026, esforço máximo): `complexa` a partir de 53, `media` de 40 a
-    53, `simples` abaixo; fora da tabela, `simples`. O GPT-5.6 Terra não tem nota v2.0 (nível `media` estimado, marcado
-    `estimated`). `defaults` diz que modelo se presume para um agente aberto sem `--model` (o CLI não informa o seu
-    padrão): claude→sonnet, antigravity→gemini-4-argon-high, codex→gpt-6-luna, opencode→deepseek flash free; `role_models`
-    vence. Esforço `low` (ou modelo `…-low` do Antigravity) desce um nível: a nota é do esforço máximo.
-  - **Medida** (`capability::measure`, `Core::capability_records`): lê as tarefas de todos os projetos
-    (`dados/tarefas/*.json`) que o agente executou e já têm desfecho (mesclada, em validação ou descartada), por modelo (a
-    chave é o nome da linha da tabela) e por nível: concluídas de primeira (sem feedback), concluídas depois de
-    devolvidas (e quantas devoluções, da revisão ou da validação), descartadas e reprovadas na validação. Com pelo menos
-    3 tarefas num nível, a medida manda: mais da metade descartada ou devolvida 2 vezes ou mais **desce** um nível; as 3
-    últimas do nível acima do que o modelo alcança todas de primeira **sobem** um. A decisão é `capability::capacity`.
-  - **Escolha** (`capability::select`): entre os capazes do nível, o de mais folga na cota. Sem nenhum capaz com cota
-    (uso ≥ 99,5%), o capaz menos gasto, com aviso; sem nenhum capaz, o que mais alcança, com aviso. O motivo vai ao
-    histórico: "complexa: claude sonnet, capaz e com 26% livre; codex gpt-6-luna só vai até simples". Escolha explícita
-    (`--agent`/formulário) ganha o aviso "aviso de capacidade: a tarefa é complexa e … só vai até …"
-    (`Core::capability_advisory`), nunca bloqueia; o formulário guarda o aviso em `NewForm::capacity_note` e o refaz por
-    `Deck::tasks_form_refresh` (não a cada quadro: lê as tarefas e o arquivo da tabela).
-  - **`--models`** acrescenta, depois dos agentes, o bloco "capacidade" (`Core::capability_lines`, uma linha por modelo):
-    "Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10) · medida media: 4 de 5 de primeira, …"
-    e, se a medida mudou o nível, "vale media (…)".
-
-**Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
-(`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (o próprio tipo; `claude@dev@ana` fica no grupo `claude`). A cada quadro,
-`Deck::plan_panes` calcula a grade (`grid_shape` → `layout` com as proporções salvas, que voltam a iguais quando
-o formato muda), distribui os grupos (`assign`: os que não cabem dividem a última janela) e escolhe a aba
-visível de cada janela (a de `shown` mais alto). `Deck::active` continua sendo a aba que recebe o teclado: é a
-visível da janela focada, por isso o resto do código (teclado, IME, cores) não mudou. O cabeçalho de cada janela leva, além das
-abas (`ui/tabs.rs`), a alça de arrastar, o microfone, o anexo e o "+" (`ui/panes.rs`): o microfone e o anexo agem na aba visível da
-janela (`PanePlan::shown`, em `deck.rs`), e a aba guarda só o indicador de gravação/transcrição (`dictation.rs`); arquivos soltos na janela vão para a
-aba visível da janela sob o ponteiro ou para o formulário "Nova tarefa" (`Deck::resolve_drop_zone`). Quando as abas não cabem, a faixa
-rola: o lado com aba escondida ganha um degradê e uma seta ‹ / › e o fim da faixa, o menu ▾ com todas as abas (contas puras em
-`ui/tabs.rs`: `hidden_tabs`, `scroll_to_show`). Cada aba
-visível é redimensionada para a sua janela (`fit_tab`, com o debounce de 60 ms); as escondidas mantêm o tamanho
-até aparecerem. O retrato das janelas do último quadro (`Deck::panes`) serve aos atalhos (Ctrl+Tab dentro da
-janela, Ctrl+Alt+setas) e ao tamanho inicial das abas novas. Ordem, proporções e organização ficam em
-`Config` (`paneOrder`, `splitRows`, `splitCols`, `organization`, `highlightRatio`; o `splitEnabled` antigo ainda é lido).
-
-**Organização** (`agentdeck_core::Organization`: `Tabs`, `Split`, `Highlight`; `Deck::organization`, `set_organization`). Em
-`Highlight`, `plan_panes` usa `split::highlight_order` (o grupo da aba ativa primeiro), `highlight_windows` (quantas janelas
-cabem: a grande mais as pequenas de altura mínima, ou uma só se a largura não comporta duas colunas), `highlight_layout` (a
-grande com `highlight_ratio` da largura e as pequenas empilhadas, alturas iguais) e `assign` (os grupos que sobram dividem a
-última pequena). O destaque é derivado da aba ativa, sem estado próprio (ver `aprendizados/destaque-e-derivado-do-selecionado.md`);
-`ui/panes.rs` pinta o botão "Trazer para o destaque" nas janelas pequenas e o divisor (`highlight_divider`), e, com mais de uma
-janela, o realce (borda + halo na janela da aba ativa, película `bg` a 38% nas outras, `theme::PANE_DIM_OPACITY`).
-
-**Caixa de entrada de respostas** (`core/src/inbox.rs`, `CoreInner::inbox`). Todo desfecho de uma pergunta a uma aba (resposta no prazo, atrasada ou falha) entra, ainda "não entregue", na caixa de quem perguntou (chave com o projeto, até 20, na memória). Quem entrega marca depois: a ponte, quando o 200 do `/ask` (que leva `"request"` no corpo) foi escrito sem erro (`reply_checked`), e a interface, quando digita a resposta atrasada (`Core::answer_typed`, no laço de entregas de `deck.rs`). Se a entrega no terminal falha (aba fechada, encerrada, parada, ou a conexão já abandonada), `Core::answer_lost` põe um aviso de erro na Conversa integrada e a resposta continua em `ask-agent --inbox`. O app também grava o log em `dados/agentdeck.log` (`app/src/logfile.rs`).
-
-**Perguntas com resposta atrasada.** Uma pergunta com resposta atrasada (`detached`: o `ask-agent` já voltou
-com 202) não entra na detecção de ciclos (quem perguntou não está bloqueado), mas continua contando na
-profundidade. As perguntas pendentes entre abas viram `PendingInfo` (id, quem perguntou, a quem, profundidade,
-desde quando e se está `detached`; ver `exchange::snapshot`, usado por `remove_project`).
-
-**Quando digitar** (`crates/core/src/delivery.rs`, regra pura com testes; a interface só consulta):
-
-- nunca logo depois de uma tecla do usuário na aba (2 s), nem com texto começado e não enviado (20 s);
-- com **hooks** (Claude: `UserPromptSubmit`/`Stop` via `--settings dados/hooks/claude-settings.json`;
-  Codex: `notify`), a aba só fica livre depois do aviso de fim de turno, mais 300 ms de saída parada;
-- sem hooks, quando o terminal fica parado por 1,5 s; se nunca sossegar, depois de 30 s **na fila**
-  (antes contava desde que a aba abriu, o que fazia digitar no meio de uma resposta);
-- a colagem vai entre `ESC[200~ … ESC[201~` sem ESC nem caracteres de controle no texto (uma mensagem
-  não consegue fechar a colagem e virar teclas), e o Enter sai da thread da interface, na ordem certa em
-  relação ao que o usuário digitar nesse meio-tempo.
-
-**Windows e shims `.cmd`.** Um agente instalado como shim do npm/pip roda como `cmd.exe /d /c <nome>`, e o
-cmd interpreta `& | < > ^ % "` e quebras de linha. No headless o shim é chamado direto (a std do Rust aplica
-o escape de arquivos em lote) e o prompt vai por arquivo em `dados/prompts`, nunca na linha de comando; nas
-abas, os argumentos (gerados pelo app) passam por `cmd_safe_arg`, que os escapa para as duas passagens do cmd
-(`cmd.exe /d /e:on /v:off /c` e o `%*` do shim) em vez de apagar caracteres: um perfil `C:\Users\Ana&Bia` funciona.
-No Windows, os processos headless entram num Job Object com `KILL_ON_JOB_CLOSE` e morrem junto com o app, mesmo se ele cair.
-
-Tudo fica visível nas abas (raciocínio, ferramentas, aprovações) e o usuário pode intervir digitando.
-O Claude abre com `--allowedTools "Bash(ask-agent:*)"`, para responder sem pedir aprovação.
-
-O **modo headless** (`claude -p`, `agy -p`) continua quando a
-interface não ligou a entrega em abas ou o usuário desligou "Abrir abas dos agentes" nas Configurações.
-Limites: no máximo 8 abas abertas automaticamente.
+- **Organização do centro (`crates/app/src/split.rs`, `ui/panes.rs`, `ui/tabs.rs`):** agrupa abas do projeto por tipo de CLI. Em `Split`, monta uma grade automática com proporções salvas; em `Highlight` (Destaque), põe o grupo da aba ativa em 2/3 à esquerda (trocar a aba ativa troca o destaque) e empilha os demais à direita; em `Tabs`, usa janela única. O PTY só é redimensionado quando o tamanho estabiliza e o mouse é solto (debounce de 150 ms no arrasto, 600 ms na troca de Destaque e 300 ms após saída do resize anterior, teto de 3 s).
+- **Modo Documentos e editor (`crates/app/src/docs.rs`, `ui/docs.rs`, `ui/code.rs`, `ui/diff_view.rs`, `highlight.rs`):** alterna o centro (`Ctrl+Shift+D`) entre terminais e abas de documentos (`TaskDiff`, `CommitDiff`, `FileDiff`, `File`, `Markdown`). Com terminais ocultos, nenhum resize ou tecla chega a eles e fins de turno viram selo em "Agentes". Arquivos até 256 KB (linhas ≤ 4 000 bytes, UTF-8 sem mistura CRLF/LF) abrem no editor com cache de layout/realce e gravação atômica que preserva CRLF/LF e BOM; alterações externas detectadas pelo watcher com edição não salva não sobrescrevem o buffer e abrem a faixa de resolução. Arquivos até 1 MB e diffs usam pintura linha a linha com seleção própria (`ui/select.rs`) e busca (`Ctrl+F`); Markdown usa `egui_commonmark`.
+- **Git local e GitHub (`crates/core/src/git.rs`, `github.rs`, `crates/app/src/git_ui.rs`, `github_ui.rs`):** o Git local roda o binário `git` sem shell, passando caminhos e mensagem de commit via stdin com ambiente não interativo (`GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`), enquanto o watcher observa `.git/` (`HEAD`, `index`, `refs/`). O painel GitHub lê o remoto `origin`, obtém o token só em memória (`git credential fill` ou `gh auth token`, descartado em 401), consulta `api.github.com` em threads (cache de 60 s) e baixa os 32 KiB finais de logs de jobs falhos sem reenviar `Authorization` após redirecionamento.
