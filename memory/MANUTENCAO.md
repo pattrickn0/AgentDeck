@@ -35,17 +35,22 @@ crates/
 │   ├── lib.rs        Core: a API que a interface usa (como os canais IPC)
 │   ├── events.rs     CoreEvent: o que o backend avisa à interface
 │   ├── agents.rs     lista de agentes, onde achar cada CLI, comando de cada aba, instruções da ponte
-│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /models, /team, /ask, /reply, /signal, /usage, /learn, /tasks)
+│   ├── trust.rs      confiança da pasta por CLI antes de abrir a aba (Claude, Codex, Antigravity)
+│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /models, /team, /ask, /reply, /signal, /usage, /learn, /outline, /inbox, /tasks, /activate)
 │   ├── exchange.rs   perguntas entre abas esperando resposta (ciclos, profundidade, resposta por número)
+│   ├── inbox.rs      caixa de entrada das respostas por instância (`ask-agent --inbox`)
 │   ├── instances.rs  nomes das instâncias (modelo@cargo@nome) e resolução do destino
 │   ├── team.rs       equipe: quem é chefe de quem (funções puras)
 │   ├── activity.rs   última atividade de cada aba (o que a entrega nas abas consulta)
 │   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos e o inventário do `ask-agent --models`
-│   ├── tasks.rs      mesa de tarefas: Task, ciclo de vida (criar/iniciar/relatório/devolver/mesclar/validar/reprovar/descartar), worktrees, mensagens ao agente, armazenamento em dados/tarefas
+│   ├── capability.rs + capability.json   capacidade de cada modelo: tabela de benchmarks, medida pelas tarefas concluídas e escolha por capacidade + cota
+│   ├── scope.rs      escopo de escrita por tarefa e sobreposição por componente
+│   ├── tasks/        mesa de tarefas: mod.rs (Task, TaskStatus, erros, constantes), text.rs (slug, id, mensagens ao agente), store.rs (armazenamento em dados/tarefas e consultas), lifecycle.rs (criar, iniciar, fila, relatório, devolver), merge.rs, finish.rs (validar, reprovar, descartar), git_ops.rs e stash.rs
+│   ├── file_lock.rs  diagnóstico de arquivos e processos que seguram uma worktree
 │   ├── highlight.rs  léxico do realce de sintaxe (tokenizador próprio por linguagem: `Tok`, `Span`, `Lang`, `highlight_lines`); mora no core porque o `outline.rs` o usa, e `app/src/highlight.rs` o reexporta e acrescenta a busca, `pieces` e `Cache`
 │   ├── outline.rs    `ask-agent --outline`: esqueleto de um arquivo (assinaturas com a linha, sem corpos) por linguagem, com orçamento
 │   ├── learnings.rs  memória de longo prazo: aprendizados de memory/aprendizados/ (frontmatter, globs, caminhos do brief, entrega com orçamento, `ask-agent --learn`)
-│   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa (outras tarefas, arquivos delas e commits da base)
+│   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa e do `--learn` (outras tarefas, arquivos delas, avisos de choque e commits da base)
 │   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
 │   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
 │   ├── whisper.rs    transcrição de voz (whisper.cpp); download.rs baixa o motor e o modelo
@@ -53,20 +58,27 @@ crates/
 │   ├── context.rs    ponto de extensão para RAG (ContextProvider; o headless o consulta)
 │   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
 │   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
-│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher, `resolve_workspace_path` e `read_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
-│   ├── attachments.rs, sessions.rs, config.rs, paths.rs, process.rs, util.rs
+│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher, `resolve_workspace_path`, `read_text` e `write_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
+│   ├── activation.rs ativação da instância viva na segunda abertura (`dados/.agentdeck.bridge` → `POST /activate`)
+│   ├── attachments.rs, sessions.rs, config.rs, env.rs, paths.rs, process.rs, util.rs
+│   ├── examples/memeval.rs   mede recall/precisão/tamanho da entrega de aprendizados nas tarefas já feitas
 │   ├── tests/bridge.rs   testes de ponta a ponta da ponte
+│   ├── tests/instructions.rs   canais de instruções de cada CLI
+│   ├── tests/learn_situation.rs   `--learn` com situação atual e aviso de arquivo em uso
 │   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
 │   ├── tests/tasks.rs    ciclo de vida das tarefas com o git real (pula se o git não estiver instalado)
 │   ├── tests/tasks_bridge.rs   rotas /tasks e permissões do agente de uma tarefa
-│   ├── tests/support/tasks_env.rs   cenário compartilhado dos dois (repositório, agente falso, git isolado)
+│   ├── tests/tasks_queue.rs    escopo de escrita e avanço automático da fila
+│   ├── tests/support/tasks_env.rs, fake_agent.rs   cenário compartilhado e binário do agente falso
 │   └── tests/github.rs   remoto origin com o git real; um teste `--ignored` com a rede e a credencial reais
 ├── app/    (agentdeck)        interface gráfica (o .exe principal)
-│   ├── main.rs / app.rs / window.rs   janela winit, OpenGL, loop de eventos
+│   ├── main.rs / app.rs / window.rs / tray.rs / wslg.rs   janela winit, OpenGL, loop de eventos, bandeja do sistema e detecção do WSLg
+│   ├── debug_ui.rs   cenários fictícios de captura (`AGENTDECK_DEBUG_UI=…`: `debug_ui::apply`, `debug_tasks`…)
 │   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
 │   ├── icons.rs      ícones SVG rasterizados em tempo de execução
 │   ├── util.rs       funções puras compartilhadas pela interface
 │   ├── agents.rs     cores, nomes e menus dos agentes do lado da interface
+│   ├── highlight.rs  reexporta o léxico do core e acrescenta busca, `pieces` e `Cache` para o modo Documentos
 │   ├── terminal/     emulador de terminal: mod.rs (pty + alacritty_terminal), view.rs (desenho e mouse), input.rs (teclado), colors.rs (paleta), record.rs (gravação do PTY para depurar: menu da aba ou `AGENTDECK_DEBUG_PTY=1`), resize.rs (mudança de tamanho como o ConPTY espera)
 │   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
 │   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
@@ -76,20 +88,20 @@ crates/
 │   ├── docs_demo.rs  documentos fictícios do `AGENTDECK_DEBUG_UI=docs-demo*`
 │   ├── dictation.rs  ditado por voz: estados do microfone e destino fixo na aba onde a gravação começou (funções puras, com testes)
 │   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
-│   ├── deck.rs       estado das abas e lógica de envio (consulta `delivery.rs` para digitar nas abas), anexos e arquivos soltos
+│   ├── deck/         estado das abas e lógica da interface: mod.rs (tipos, `Deck`, constantes), frame.rs (quadro, `work`/`background`, entregas, eventos), tabs.rs, keyboard.rs, sidebar.rs, projects.rs, feed.rs, attachments.rs (anexos e arquivos soltos) e dictation.rs
 │   ├── audio.rs      som de notificação e microfone (cpal)
 │   ├── crash.rs      registro de quedas em dados/crash.log; logfile.rs, o log do app em dados/agentdeck.log; smoke.rs, a captura de tela (AGENTDECK_SMOKE)
-│   └── ui/           mod.rs (pintura, modais)
+│   └── ui/           mod.rs (pintura, modais) + background.rs (fundo com brilhos radiais)
 │       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
 │       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾; pinta uma lista de `Item`, serve às abas dos agentes e às dos documentos)
 │       ├── docs.rs (modo Documentos: a chave Agentes | Documentos (`switch`, desenhada pela barra lateral ou, recolhida, pela barra de título), a faixa de documentos, o diff com a lista de arquivos, o arquivo de texto, o aviso de edição, a busca e a pergunta de salvar, e o markdown)
-│       ├── code.rs (o arquivo como código: o editor sobre `TextEdit` e o arquivo grande pintado linha a linha), select.rs (seleção de texto das telas pintadas à mão)
+│       ├── code.rs (o arquivo como código: o editor sobre `TextEdit` e o arquivo grande pintado linha a linha), diff_view.rs (desenho do diff com quebra de linha, realce e busca), select.rs (seleção de texto das telas pintadas à mão)
 │       ├── sidebar.rs (a chave, ORGANIZAÇÃO e ARQUIVOS) + projects.rs (projetos e agentes em árvore; `model_tag` encurta o modelo)
 │       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
 │       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
 │       └── menus.rs (nova aba, configurações), shortcuts.rs (atalhos), overlay.rs (arrastar arquivos), empty_state.rs (nenhum agente aberto)
 └── cli/    (agentdeck-cli)    ask-agent
-    ├── src/bin/ask-agent.rs     o comando dos agentes (`parse_task`, `learn_command`, `models_command`, com testes)
+    ├── src/bin/ask-agent.rs     o comando dos agentes (`parse_task`, `learn_command`, `outline_command`, `models_command`, `inbox_command`, com testes)
     └── tests/ask_agent.rs, tests/tasks.rs   o `ask-agent` de verdade contra uma ponte real
 ```
 
@@ -130,10 +142,10 @@ ativada mais recentemente, `Tab::shown`); a pintura fica em `crates/app/src/ui/p
 arrasto) e `ui/tabs.rs` (faixa de abas). Para ver o arrasto sem mouse: `AGENTDECK_DEBUG_UI=split-drag`.
 
 **Mexer no ditado e nos anexos.** Os botões de microfone e de anexo ficam no cabeçalho de cada janela (`ui/panes.rs`) e agem na
-aba visível dela; o estado do microfone e o destino fixo da transcrição são funções puras e testadas em `crates/app/src/dictation.rs`;
-o que acontece com o arquivo (copiar para `dados/anexos`, digitar `@caminho` ou o caminho, `input::paste_bytes` sem Enter) e a zona de soltar
-(`resolve_drop_zone`, `attach_dropped_files`) ficam em `deck.rs`, e o destaque ao arrastar, em `ui/overlay.rs`. O formulário "Nova
-tarefa" anexa pelo mesmo caminho (`util::append_brief_attachments` junta os caminhos ao pedido).
+aba visível dela; o estado do microfone e o destino fixo da transcrição são funções puras e testadas em `crates/app/src/dictation.rs`
+(métodos do `Deck` em `deck/dictation.rs`); o que acontece com o arquivo (copiar para `dados/anexos`, digitar `@caminho` ou o caminho,
+`input::paste_bytes` sem Enter) e a zona de soltar (`resolve_drop_zone`, `attach_dropped_files`) ficam em `deck/attachments.rs`, e o
+destaque ao arrastar, em `ui/overlay.rs`. O formulário "Nova tarefa" anexa pelo mesmo caminho (`util::append_brief_attachments` junta os caminhos ao pedido).
 
 **Mexer na aba Git.** As operações ficam em `crates/core/src/git.rs` (`impl Core`, com o ambiente seguro em
 `base_command`); o estado e as releituras, em `crates/app/src/git_ui.rs`; a pintura, em `crates/app/src/ui/git.rs`
@@ -157,12 +169,12 @@ agente, com `request: 0`). Para ver sem rede: `AGENTDECK_DEBUG_UI=github-demo` (
 ignorado com um aviso no log, e o teste `every_learning_in_the_repository_is_valid` (`learnings.rs`) falha se algum arquivo da pasta não
 passar na validação ou se um `touches` literal apontar para um arquivo que não existe.
 
-**Mexer nas tarefas.** O modelo e o ciclo de vida ficam em `crates/core/src/tasks.rs` (`impl Core`: `task_create`, `task_start`,
-`task_done`, `task_return`, `task_merge`, `task_validate`, `task_reject`, `task_discard`; o git usa o executor seguro de `git.rs`); as rotas e as permissões, em
-`bridge.rs` (`tasks_route`, `task_permission`); o comando, em `crates/cli/src/bin/ask-agent.rs` (`parse_task`, com testes). Textos
-puros (slug, branch, mensagens ao agente, `exclude`) têm testes no próprio `tasks.rs`; o fluxo com o git real, em
-`tests/tasks.rs` e `tests/tasks_bridge.rs` (cenário em `tests/support/tasks_env.rs`; a identidade do git vem de um
-`GIT_CONFIG_GLOBAL` do teste). Mudou o que o agente recebe ao iniciar? É `tasks::start_message`.
+**Mexer nas tarefas.** O modelo e o ciclo de vida ficam em `crates/core/src/tasks/` (`mod.rs`, `lifecycle.rs`, `merge.rs`, `finish.rs`,
+`store.rs`, `text.rs`, `git_ops.rs` e `stash.rs`, além de `scope.rs` e `capability.rs`; o git usa o executor seguro de `git.rs`); as rotas
+e as permissões, em `bridge.rs` (`tasks_route`, `task_permission`); o comando, em `crates/cli/src/bin/ask-agent.rs` (`parse_task`, com
+testes). Textos puros (slug, branch, mensagens ao agente, `exclude`) têm testes em `tasks/mod.rs` e `tasks/text.rs`; o fluxo com o git
+real, em `tests/tasks.rs`, `tests/tasks_bridge.rs` e `tests/tasks_queue.rs` (cenário em `tests/support/tasks_env.rs`; a identidade do git
+vem de um `GIT_CONFIG_GLOBAL` do teste). Mudou o que o agente recebe ao iniciar? É `tasks::start_message` (em `tasks/text.rs`).
 
 **Mexer na aba Tarefas (interface).** O estado e as ações ficam em `crates/app/src/tasks_ui.rs`; a pintura, em
 `crates/app/src/ui/tasks.rs` (a pintura só *coleta* o que foi clicado em `Act`; `apply` aplica no fim do quadro).
@@ -171,10 +183,10 @@ Toda chamada de tarefa do core roda git, então vai para `Deck::spawn_bg` e volt
 `CoreEvent::TasksChanged` e depois de cada ação. `tasks_flow_tests.rs` roda esse fluxo com o core e o git reais. O número do ícone da aba é `TasksUi::review_count`. Quais botões cada
 estado tem é `actions_for` (função pura, com testes); o agrupamento da lista, o resumo do diff (`parse_diff_stat`) e os
 textos de tempo também. O diff completo vem de `Core::task_diff` e abre no centro (`Deck::docs_open_task_diff`, ver "Mexer no modo
-Documentos"), desenhado por `ui::git::diff_lines_at`, o mesmo desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
+Documentos"), desenhado por `ui::git::diff_lines_at` (`ui/diff_view.rs`), o mesmo desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
 de novo; o terminal abre na worktree sozinho). Para ver sem git nem agentes: `AGENTDECK_DEBUG_UI=tasks-demo` (ou
 `tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-confirm`, `tasks-discard`,
-`tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` em `app.rs`).
+`tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` em `debug_ui.rs`).
 Para a largura mínima da barra, ponha `{"rightPanelWidth": 280}` em `cfg/config.json` da pasta de `AGENTDECK_HOME`.
 
 **Mexer no modo Documentos.** O estado e a lógica pura ficam em `crates/app/src/docs.rs` (`Docs`: abrir/focar/fechar por projeto, sem
@@ -189,7 +201,7 @@ nem IME (`handle_key`, `handle_ime`) e o fim de turno marca `Tab.done` mesmo na 
 os arquivos abertos (`docs_reload_files`). `tasks_flow_tests.rs` cobre o fluxo com o core e o git reais. Para ver sem nada disso:
 `AGENTDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`, `-edit`, `-find`, `-diff-find`,
 `-external`, `-confirm`, `-large`, `-md-code`; `docs_demo.rs`).
-O arquivo editável (`Source`), a gravação (`docs_save`, `write_text`) e a pergunta ao fechar estão em `ARCHITECTURE.md`, "Editor (t39)".
+O arquivo editável (`Source`), a gravação (`docs_save`, `write_text`) e a pergunta ao fechar estão em `ARCHITECTURE.md` ("Modo Documentos e editor") e em `memory/aprendizados/editor-de-documentos.md`.
 
 **Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O executor headless já consulta os provedores registrados.
 
@@ -203,7 +215,7 @@ Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident)
 - Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
 - Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
 - O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows, no Ubuntu e no Fedora (este num contêiner, só build e testes), e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro. O que já foi verificado no Linux está em [LINUX.md](LINUX.md).
-- Para depurar visualmente sem abrir a janela: `AGENTDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `AGENTDECK_DEBUG_FEED=1`, `AGENTDECK_DEBUG_FAKE_SHELL=1`, `AGENTDECK_DEBUG_PTY=1` (grava a saída crua de cada aba em `dados/pty/`, ver `terminal/record.rs`; o menu da aba, botão direito, liga a mesma gravação sem variável) e `AGENTDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `apply_debug_ui`, `app.rs`). No Linux, rode sob `xvfb-run`.
+- Para depurar visualmente sem abrir a janela: `AGENTDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `AGENTDECK_DEBUG_FEED=1`, `AGENTDECK_DEBUG_FAKE_SHELL=1`, `AGENTDECK_DEBUG_PTY=1` (grava a saída crua de cada aba em `dados/pty/`, ver `terminal/record.rs`; o menu da aba, botão direito, liga a mesma gravação sem variável) e `AGENTDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `debug_ui::apply`, `crates/app/src/debug_ui.rs`). No Linux, rode sob `xvfb-run`.
 - Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
 
 ## 5. Limitações conhecidas
