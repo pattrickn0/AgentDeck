@@ -36,6 +36,8 @@ const REPORT_MAX_H: f32 = 240.0;
 /// Linhas do `git diff --stat` mostradas no detalhe.
 const STAT_MAX_LINES: usize = 40;
 /// Eventos do histórico mostrados no detalhe.
+/// Arquivos citados no aviso de "mexeu fora do escopo".
+const OUTSIDE_SHOWN: usize = 8;
 const EVENTS_MAX: usize = 50;
 
 /// O que foi clicado neste quadro.
@@ -174,7 +176,7 @@ fn apply(deck: &mut Deck, act: Act) {
 fn status_color(deck: &Deck, task: &Task) -> Color32 {
     let p = theme::pal();
     match task.status {
-        TaskStatus::Draft | TaskStatus::Merged => p.text_2,
+        TaskStatus::Draft | TaskStatus::Queued | TaskStatus::Merged => p.text_2,
         TaskStatus::Running => deck.agents.tab_color(&task.kind),
         TaskStatus::Review | TaskStatus::Validating => theme::accent(),
         TaskStatus::Discarded => p.text_3,
@@ -612,7 +614,11 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     } else {
         p.text_2
     };
-    let state_g = galley(&painter, card_state_label(task.status), theme::ui_semibold(10.5), state_color);
+    let state_text = match (task.status, task.waiting_for.as_deref()) {
+        (TaskStatus::Queued, Some(holder)) => format!("{} · espera {holder}", card_state_label(task.status)),
+        _ => card_state_label(task.status).to_owned(),
+    };
+    let state_g = galley(&painter, &state_text, theme::ui_semibold(10.5), state_color);
     place(
         &painter,
         Rect::from_min_size(Pos2::new(x0 + id_w + 6.0, y1), Vec2::new(state_g.size().x, l1_h)),
@@ -915,7 +921,25 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
             let g = galley_trunc(ui.painter(), &who, theme::ui(12.0), p.text, (r.max.x - x).max(10.0));
             place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), r.max), Align2::LEFT_CENTER, g, p.text);
         });
+        if !task.scope.is_empty() {
+            paragraph(ui, &format!("Escopo: {}", task.scope.join(", ")), theme::mono(11.0), p.text_2);
+        }
         ui.add_space(6.0);
+
+        // Na fila: por quem espera. Mexeu fora do escopo: aviso da revisão, não bloqueia nada.
+        if let (TaskStatus::Queued, Some(holder)) = (task.status, task.waiting_for.as_deref()) {
+            let text = format!(
+                "Na fila: o escopo se sobrepõe ao da tarefa {holder}. Começa sozinha quando ela for mesclada, descartada ou falhar, partindo de {} nesse momento.",
+                task.base
+            );
+            notice_box(ui, &text, false, false);
+        }
+        if task.status == TaskStatus::Review && !task.outside_scope.is_empty() {
+            let shown: Vec<&str> = task.outside_scope.iter().take(OUTSIDE_SHOWN).map(String::as_str).collect();
+            let more = task.outside_scope.len().saturating_sub(OUTSIDE_SHOWN);
+            let tail = if more > 0 { format!(" e mais {more}") } else { String::new() };
+            notice_box(ui, &format!("Mexeu fora do escopo: {}{tail}", shown.join(", ")), false, false);
+        }
 
         // O erro da tarefa (Failed) e o da última ação.
         if let Some(err) = task.error.as_deref().filter(|_| task.status == TaskStatus::Failed) {
@@ -1761,7 +1785,8 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     let model_items: Vec<MenuItem> = rows.iter().map(|(item, _)| item.clone()).collect();
     let open_menu = deck.tasks.form.menu;
     let (title_id, brief_id, base_id) = (Id::new("tasks-new-title"), Id::new("tasks-new-brief"), Id::new("tasks-new-base"));
-    let any_focus = [title_id, brief_id, base_id].iter().any(|id| ctx.memory(|m| m.has_focus(*id)));
+    let scope_id = Id::new("tasks-new-scope");
+    let any_focus = [title_id, brief_id, base_id, scope_id].iter().any(|id| ctx.memory(|m| m.has_focus(*id)));
     let ctrl_enter = any_focus && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
     let focus_title = std::mem::take(&mut deck.tasks.form.focus_title);
     let can_submit = !deck.tasks.form.busy && !deck.tasks.form.title.trim().is_empty() && !choices.is_empty();
@@ -1846,6 +1871,9 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             ui.add_space(8.0);
             field_label(ui, "Base");
             text_field(ui, base_id, &mut deck.tasks.form.base, "branch atual", None);
+            ui.add_space(8.0);
+            field_label(ui, "Escopo");
+            text_field(ui, scope_id, &mut deck.tasks.form.scope, "Arquivos ou pastas que vai mexer, um por linha (opcional)", Some(3));
             ui.add_space(10.0);
             // "Iniciar agora".
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::hover());

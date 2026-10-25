@@ -24,6 +24,8 @@ pub enum Group {
     /// Mescladas, esperando o usuário testar.
     Validating,
     Running,
+    /// Iniciadas, mas esperando o escopo liberar (ver `agentdeck_core::scope`).
+    Queued,
     Draft,
     Failed,
     /// Validadas (concluídas).
@@ -33,8 +35,8 @@ pub enum Group {
 }
 
 impl Group {
-    pub const ORDER: [Group; 7] =
-        [Group::Review, Group::Validating, Group::Running, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
+    pub const ORDER: [Group; 8] =
+        [Group::Review, Group::Validating, Group::Running, Group::Queued, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
 
     #[cfg(test)]
     pub fn title(self) -> &'static str {
@@ -42,6 +44,7 @@ impl Group {
             Group::Review => "Em revisão",
             Group::Validating => "Aguardando validação",
             Group::Running => "Em andamento",
+            Group::Queued => "Na fila",
             Group::Draft => "Rascunho",
             Group::Failed => "Falhou",
             Group::Done => "Concluídas",
@@ -54,6 +57,7 @@ impl Group {
             TaskStatus::Review => Group::Review,
             TaskStatus::Validating => Group::Validating,
             TaskStatus::Running => Group::Running,
+            TaskStatus::Queued => Group::Queued,
             TaskStatus::Draft => Group::Draft,
             TaskStatus::Failed => Group::Failed,
             TaskStatus::Merged => Group::Done,
@@ -66,6 +70,7 @@ impl Group {
 pub fn status_name(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Draft => "Rascunho",
+        TaskStatus::Queued => "Na fila",
         TaskStatus::Running => "Em andamento",
         TaskStatus::Review => "Em revisão",
         TaskStatus::Validating => "Aguardando validação",
@@ -79,6 +84,7 @@ pub fn status_name(status: TaskStatus) -> &'static str {
 pub fn card_state_label(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Draft => "rascunho",
+        TaskStatus::Queued => "na fila",
         TaskStatus::Running => "em andamento",
         TaskStatus::Review => "em revisão",
         TaskStatus::Validating => "aguarda validação",
@@ -96,7 +102,7 @@ pub fn is_focused_card(status: TaskStatus) -> bool {
 /// Etapa atual da barra de progresso de 5 segmentos (`1..=5`; `0` para descartada).
 pub fn task_step(status: TaskStatus) -> usize {
     match status {
-        TaskStatus::Draft => 1,
+        TaskStatus::Draft | TaskStatus::Queued => 1,
         TaskStatus::Running | TaskStatus::Failed => 2,
         TaskStatus::Review => 3,
         TaskStatus::Validating => 4,
@@ -287,6 +293,7 @@ pub fn age_text(now_ms: u64, then_ms: u64) -> String {
 pub fn status_age(task: &Task, now_ms: u64) -> String {
     let (verb, at) = match task.status {
         TaskStatus::Draft => ("criada", task.created_ms),
+        TaskStatus::Queued => ("na fila", task.queued_ms.unwrap_or(task.created_ms)),
         TaskStatus::Running => ("iniciada", task.started_ms.unwrap_or(task.created_ms)),
         TaskStatus::Review => ("pronta", task.finished_ms.unwrap_or_else(|| last_activity(task))),
         TaskStatus::Failed => ("falhou", last_activity(task)),
@@ -319,6 +326,12 @@ pub fn effort_text(task: &Task) -> Option<&'static str> {
 pub fn model_effort_text(task: &Task) -> Option<String> {
     let parts: Vec<&str> = [model_text(task), effort_text(task)].into_iter().flatten().collect();
     (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// O escopo digitado no formulário: um caminho por linha ou separados por vírgula; linhas vazias somem. A
+/// normalização e a recusa do que não é caminho (curingas, absolutos, `..`) são do core, ao criar a tarefa.
+pub fn parse_scope(text: &str) -> Vec<String> {
+    text.split(['\n', ',']).map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned).collect()
 }
 
 /// Botões do detalhe de uma tarefa. A ordem é a da tela (o primeiro botão é a ação principal).
@@ -385,6 +398,8 @@ pub fn actions_for(task: &Task, tab_open: bool) -> Vec<TaskAct> {
     let tab = if tab_open { TaskAct::GoToTab } else { TaskAct::ReopenTab };
     match task.status {
         TaskStatus::Draft => vec![TaskAct::Start, TaskAct::Discard],
+        // Começa sozinha quando o escopo liberar; sem aba nem worktree ainda.
+        TaskStatus::Queued => vec![TaskAct::Discard],
         TaskStatus::Running => vec![tab, TaskAct::Discard],
         TaskStatus::Review => vec![TaskAct::Merge, TaskAct::Return, tab, TaskAct::Discard],
         TaskStatus::Validating => vec![TaskAct::Validate, TaskAct::Reject, tab, TaskAct::Discard],
@@ -589,6 +604,8 @@ pub struct NewForm {
     /// primeiro. Só vale enquanto o menu está aberto (o OpenCode mistura vários provedores).
     pub provider: Option<String>,
     pub base: String,
+    /// Escopo de escrita: um caminho por linha (ou separados por vírgula). Vazio = sem escopo. Ver [`parse_scope`].
+    pub scope: String,
     pub start_now: bool,
     pub error: Option<String>,
     /// Criando (o botão fica desligado).
@@ -609,6 +626,7 @@ impl Default for NewForm {
             effort: None,
             provider: None,
             base: String::new(),
+            scope: String::new(),
             start_now: true,
             error: None,
             busy: false,
@@ -902,6 +920,7 @@ impl Deck {
             effort: f.effort.filter(|_| models::effort_unavailable(&f.kind, f.model.as_deref()).is_none()),
             base: Some(f.base.trim().to_owned()).filter(|b| !b.is_empty()),
             creator: None,
+            scope: parse_scope(&f.scope),
         };
         let start_now = f.start_now;
         let (generation, project) = (self.tasks.generation, self.active_project.clone());
@@ -1017,6 +1036,15 @@ impl Deck {
         match reply {
             TaskReply::List(list) => {
                 self.tasks.refreshing = false;
+                // Na primeira leitura do projeto: se algo ficou na fila (o app fechou entre a vez da tarefa chegar
+                // e ela começar), o core confere se já pode começar.
+                if !self.tasks.loaded && list.iter().any(|t| t.status == TaskStatus::Queued) {
+                    let project = self.active_project.clone();
+                    self.spawn_bg("tasks-queue", move |core| {
+                        core.tasks_advance_queue(&project);
+                        None
+                    });
+                }
                 self.tasks.loaded = true;
                 self.tasks.tasks = list;
                 if std::mem::take(&mut self.tasks.dirty) {
@@ -1042,6 +1070,7 @@ impl Deck {
                         let form = &mut self.tasks.form;
                         form.title.clear();
                         form.brief.clear();
+                        form.scope.clear();
                         form.attachments.clear();
                         form.error = None;
                         let notice = self.tasks.notice.take();
@@ -1174,7 +1203,17 @@ pub fn demo_tasks() -> Vec<Task> {
         started_ms: Some(now - 24 * min),
         events: vec![ev(25, "criada"), ev(24, "iniciada: worktree … na branch tarefa/t6")],
         effort: Some(Effort::Medium),
+        scope: vec!["crates/core".into(), "memory/ARCHITECTURE.md".into()],
         ..base("t6", "Documentar as rotas /tasks da ponte", TaskStatus::Running, "claude", Some("claude-sonnet-5-5"))
+    };
+    let queued = Task {
+        brief: "Trocar o executor de git por um que reaproveite o processo.".into(),
+        created_ms: now - 12 * min,
+        queued_ms: Some(now - 12 * min),
+        waiting_for: Some("t6".into()),
+        scope: vec!["crates/core/src/git.rs".into()],
+        events: vec![ev(12, "criada"), ev(12, "na fila: o escopo se sobrepõe ao da t6; começa quando ela terminar")],
+        ..base("t9", "Reaproveitar o processo do git", TaskStatus::Queued, "claude", Some("claude-sonnet-5-5"))
     };
     let draft = Task {
         brief: "Rodar o clippy com -D warnings e corrigir o que aparecer.".into(),
@@ -1223,7 +1262,7 @@ pub fn demo_tasks() -> Vec<Task> {
         events: vec![ev(48 * 60, "descartada; worktree e branch removidas")],
         ..base("t1", "Experimento com cache de galleys", TaskStatus::Discarded, "claude", None)
     };
-    vec![discarded, merged, failed, review, running, draft, review2, validating]
+    vec![discarded, merged, failed, review, running, queued, draft, review2, validating]
 }
 
 #[cfg(test)]
@@ -1433,6 +1472,39 @@ mod tests {
     }
 
     #[test]
+    fn a_queued_task_is_its_own_group_with_only_the_discard_button() {
+        let q = Task {
+            status: TaskStatus::Queued,
+            waiting_for: Some("t2".into()),
+            queued_ms: Some(5_000),
+            created_ms: 1_000,
+            ..Task::default()
+        };
+        assert_eq!(actions_for(&q, false), [TaskAct::Discard]);
+        assert_eq!((Group::of(TaskStatus::Queued), Group::Queued.title()), (Group::Queued, "Na fila"));
+        // Entre "Em andamento" e "Rascunho": já pediu para começar, mas ainda espera.
+        let order: Vec<Group> = Group::ORDER.to_vec();
+        let at = |g| order.iter().position(|x| *x == g).expect("grupo");
+        assert!(at(Group::Running) < at(Group::Queued) && at(Group::Queued) < at(Group::Draft));
+        assert_eq!(
+            (status_name(TaskStatus::Queued), card_state_label(TaskStatus::Queued), task_step(TaskStatus::Queued)),
+            ("Na fila", "na fila", 1)
+        );
+        assert!(!is_focused_card(TaskStatus::Queued));
+        // Quanto tempo está na fila conta da entrada nela, não da criação.
+        assert_eq!(status_age(&q, 65_000), "na fila há 1 min");
+    }
+
+    #[test]
+    fn the_scope_field_takes_one_path_per_line_or_commas() {
+        assert!(parse_scope("").is_empty() && parse_scope(" \n , \n").is_empty());
+        assert_eq!(
+            parse_scope(" crates/core \n\nmemory/GERAL.md, crates/cli\r\nCargo.lock"),
+            ["crates/core", "memory/GERAL.md", "crates/cli", "Cargo.lock"]
+        );
+    }
+
+    #[test]
     fn each_status_has_its_buttons() {
         let t = |status, report: bool| Task { status, base: "dev".into(), report: report.then(|| "feito".to_owned()), ..Task::default() };
         assert_eq!(actions_for(&t(TaskStatus::Draft, false), false), [TaskAct::Start, TaskAct::Discard]);
@@ -1562,6 +1634,7 @@ mod tests {
         let tasks = demo_tasks();
         for status in [
             TaskStatus::Draft,
+            TaskStatus::Queued,
             TaskStatus::Running,
             TaskStatus::Review,
             TaskStatus::Validating,
@@ -1578,8 +1651,8 @@ mod tests {
         let tasks = demo_tasks();
         let active = active_tasks(&tasks);
         let active_ids: Vec<&str> = active.iter().map(|t| t.id.as_str()).collect();
-        // Só as não encerradas (Review, Validating, Running, Draft, Failed), na ordem de prioridade e recência.
-        assert_eq!(active_ids, ["t4", "t5", "t8", "t6", "t7", "t3"]);
+        // Só as não encerradas (Review, Validating, Running, Queued, Draft, Failed), na ordem de prioridade e recência.
+        assert_eq!(active_ids, ["t4", "t5", "t8", "t6", "t9", "t7", "t3"]);
         assert!(active.iter().all(|t| !matches!(t.status, TaskStatus::Merged | TaskStatus::Discarded)));
 
         // Histórico: todas (Merged + Discarded), da mais recente (t2, há 24h) para a mais antiga (t1, há 48h).

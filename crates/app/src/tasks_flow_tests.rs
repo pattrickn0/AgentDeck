@@ -287,6 +287,72 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
 }
 
 #[test]
+fn a_task_whose_scope_overlaps_waits_in_the_queue_and_starts_by_itself_when_the_other_is_merged() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+
+    // O escopo do formulário (um caminho por linha ou separado por vírgula) vai para o core.
+    env.deck.tasks_open_new();
+    env.deck.tasks.form.scope = " crates/core \n\nmemory/GERAL.md, crates\\cli ".into();
+    env.deck.tasks.form.title = "Mexe no core".into();
+    env.deck.tasks_submit_form();
+    env.pump("a criação", |d| !d.tasks.form.busy);
+    assert_eq!(env.task("t1").scope, ["crates/core", "memory/GERAL.md", "crates/cli"]);
+    assert_eq!(env.task("t1").status, TaskStatus::Running);
+    assert!(env.deck.tasks.form.scope.is_empty(), "o formulário volta vazio");
+    env.pump("a aba do agente", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+
+    // Um escopo inválido aparece no formulário, sem criar nada.
+    env.deck.tasks_open_new();
+    env.deck.tasks.form.title = "Curinga".into();
+    env.deck.tasks.form.scope = "crates/*.rs".into();
+    env.deck.tasks_submit_form();
+    env.pump("o erro do escopo", |d| !d.tasks.form.busy);
+    assert!(env.deck.tasks.form.error.as_deref().is_some_and(|e| e.contains("não de padrões")), "{:?}", env.deck.tasks.form.error);
+    assert_eq!(env.core.tasks(&env.project()).len(), 1);
+
+    // A segunda, com escopo dentro do da primeira, entra na fila: sem aba, só o botão de descartar.
+    env.deck.tasks.form.title = "Mexe no git.rs".into();
+    env.deck.tasks.form.scope = "crates/core/src/git.rs".into();
+    env.deck.tasks_submit_form();
+    env.pump("a criação da segunda", |d| !d.tasks.form.busy && d.tasks.task("t2").is_some());
+    let queued = env.task("t2");
+    assert_eq!((queued.status, queued.waiting_for.as_deref()), (TaskStatus::Queued, Some("t1")));
+    assert_eq!(env.deck.tasks.view, TasksView::Detail("t2".into()));
+    assert!(!env.tab_open("t2") && !queued.worktree.exists());
+    assert_eq!(actions_for(&queued, false), [TaskAct::Discard]);
+    assert_eq!(crate::tasks_ui::Group::of(queued.status), crate::tasks_ui::Group::Queued);
+    // A lista e o detalhe da tarefa na fila desenham sem problema.
+    draw_frame(&mut env, vec![]);
+    env.deck.tasks_back();
+    draw_frame(&mut env, vec![]);
+
+    // A primeira entrega e é mesclada pelo botão: a segunda começa sozinha, com a mesclagem na base.
+    env.agent_commits("t1", "core.txt", "dois\n");
+    env.core.task_done(&env.project(), "t1", "Feito.").expect("done");
+    env.pump("a revisão", |d| d.tasks.task("t1").is_some_and(|t| t.status == TaskStatus::Review));
+    // O arquivo está fora do escopo declarado: a revisão mostra o aviso (e a mesclagem segue livre).
+    assert_eq!(env.task("t1").outside_scope, ["core.txt"]);
+    env.deck.tasks_open_detail("t1");
+    draw_frame(&mut env, vec![]);
+    env.deck.tasks_act("t1", TaskAct::Merge);
+    env.deck.tasks_confirm_accepted();
+    env.pump("a mesclagem", |d| d.tasks.busy.is_none());
+    env.pump("a tarefa da fila começar", |d| d.tasks.task("t2").is_some_and(|t| t.status == TaskStatus::Running));
+    let started = env.task("t2");
+    assert!(started.waiting_for.is_none() && started.worktree.join("core.txt").is_file(), "parte da base já com a mesclagem da t1");
+    env.pump("a aba da tarefa que saiu da fila", |d| d.tasks.task("t2").is_some_and(|t| d.tasks_tab_open(t)));
+    assert_eq!(actions_for(&started, true), [TaskAct::GoToTab, TaskAct::Discard]);
+    draw_frame(&mut env, vec![]);
+}
+
+#[test]
 fn a_refused_merge_shows_the_core_message_and_discard_asks_first() {
     if !git_available() {
         eprintln!("git não instalado: teste pulado");
