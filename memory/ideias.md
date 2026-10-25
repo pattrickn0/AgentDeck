@@ -81,8 +81,10 @@ Uma limitação que passar a incomodar no uso também sobe para lá.
 Para quem for mexer no código; não são tarefas.
 
 - **Claude Code duplica a conversa no histórico a cada mudança de largura** (Windows): ele limpa só a tela e reimprime,
-  sem `ESC[3J`. O PTY só muda com o tamanho parado por 150 ms (um arrasto = uma cópia). Sobra também a repetição de 1 a
-  3 linhas no histórico nas mudanças de largura. Ver `memory/aprendizados/claude-code-sem-esc3j-no-windows.md`.
+  sem `ESC[3J`. O PTY só muda com o tamanho parado por 150 ms (um arrasto = uma cópia); numa troca de aba no Destaque,
+  por 600 ms, e o próximo redimensionamento da aba espera ela terminar de reimprimir (300 ms de saída parada, teto de 3 s).
+  Sobra também a repetição de 1 a 3 linhas no histórico nas mudanças de largura. Ver
+  `memory/aprendizados/claude-code-sem-esc3j-no-windows.md`.
 - **A ponte não percebe o cliente (`ask-agent`) cair** no meio da espera (`tiny_http`); a pergunta fica pendente até ser
   respondida ou expirar em 10 min. A resposta não entregue fica em `ask-agent --inbox`.
 - **Agente da aba que não responde por `ask-agent`** (modelo fraco, ou o usuário assumiu o terminal): a pergunta expira em
