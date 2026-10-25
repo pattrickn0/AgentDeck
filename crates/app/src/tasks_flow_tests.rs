@@ -822,6 +822,41 @@ fn reading_documents_keeps_the_terminals_running_unresized_and_marks_finished_tu
     assert_eq!(env.deck.docs.view, CenterView::Agents);
 }
 
+/// "Encerrar" da bandeja: com um agente no meio de um turno o app pergunta antes (sem a pergunta o turno se perderia), e o
+/// pedido da segunda abertura chega como `CoreEvent::Activate`.
+#[test]
+fn quitting_asks_while_an_agent_is_in_the_middle_of_a_turn_and_the_second_launch_asks_for_the_window() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    let id = env.create_from_form("Agente que trabalha", true);
+    env.pump("a aba do agente", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+    let (project, instance) = (env.project(), env.task(&id).instance);
+
+    env.deck.on_agent_signal(&project, &instance, true);
+    assert_eq!(env.deck.working_tabs().len(), 1);
+    env.deck.request_quit();
+    assert!(!env.deck.quit_requested, "no meio de um turno o app pergunta antes de sair");
+    assert_eq!(env.deck.docs.confirm, Some(crate::docs::Unsaved::Busy));
+    env.deck.docs_answer(crate::docs::Answer::Cancel);
+    assert!(!env.deck.quit_requested && env.deck.docs.confirm.is_none());
+    env.deck.request_quit();
+    env.deck.docs_answer(crate::docs::Answer::Discard);
+    assert!(env.deck.quit_requested, "\"Encerrar mesmo assim\"");
+
+    env.deck.quit_requested = false;
+    env.deck.on_agent_signal(&project, &instance, false);
+    env.deck.request_quit();
+    assert!(env.deck.quit_requested, "sem turno em andamento não há o que perguntar");
+
+    assert!(!env.deck.activate_requested);
+    env.deck.on_core_event(agentdeck_core::CoreEvent::Activate);
+    assert!(env.deck.activate_requested);
+}
+
 #[test]
 fn the_highlight_follows_the_active_tab_and_the_pty_resizes_once_per_switch() {
     if !git_available() {

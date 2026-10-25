@@ -382,6 +382,24 @@ GitHub:
 - [ ] Trocar de projeto com a aba aberta limpa a lista e lê o repositório do novo projeto.
 - [ ] Barra direita no mínimo (280 px): nada corta além das reticências; janela baixa não derruba o app.
 
+## Bandeja e segunda abertura ★
+
+Windows, com o app aberto e uma aba de agente:
+
+- [ ] Clicar no × (ou Alt+F4): a janela some sem perguntar nada e o ícone do AgentDeck fica na bandeja; o processo `AgentDeck`
+  segue no Gerenciador de Tarefas e os CLIs das abas continuam rodando.
+- [ ] Antes do X, pedir um turno longo a uma aba (ex.: "conte até 200 devagar com sleep"): com a janela escondida o turno termina
+  sozinho; ao abrir de novo a resposta está lá, e o terminal está no tamanho certo (nada de 0×0 nem linhas duplicadas).
+- [ ] Clique esquerdo no ícone: a janela volta, focada. Clique direito: menu com **Abrir** e **Encerrar**; Abrir faz o mesmo.
+- [ ] Minimizar (botão da barra) e depois **Abrir** no ícone: restaura e foca.
+- [ ] Com a janela escondida (ou minimizada), abrir o `agentdeck.exe` de novo: não aparece segundo processo nem mensagem de
+  erro; a mesma janela volta para a frente (e não só pisca na barra de tarefas).
+- [ ] **Encerrar** sem nada pendente: fecha tudo (ícone some, processo sai, CLIs das abas encerram).
+- [ ] **Encerrar** com um arquivo editado e não salvo: a janela aparece sozinha com a pergunta "Há alterações não salvas".
+- [ ] **Encerrar** com um agente no meio de um turno: a janela aparece com "Há agentes trabalhando" (Cancelar mantém o app).
+- [ ] Linux com bandeja (KDE, ou GNOME com AppIndicator): o mesmo roteiro com `ksni`. Sem `StatusNotifierWatcher` (GNOME
+  puro): o × **minimiza**, e o app nunca fica invisível e sem ícone.
+
 ## Migração do nome (CommandDeck → AgentDeck) ★
 
 Com a pasta de dados e a configuração de quem usava o CommandDeck (`%APPDATA%\CommandDeck\config.json`), sem `AGENTDECK_HOME`:

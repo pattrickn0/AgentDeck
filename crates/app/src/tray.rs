@@ -1,0 +1,170 @@
+//! Ícone na bandeja do sistema: o × da janela esconde o app aqui (como o Discord) em vez de encerrá-lo, e o ícone traz a
+//! janela de volta ou encerra de vez. Windows: `tray-icon` (Win32). Linux: `ksni` (StatusNotifierItem por D-Bus, sem GTK).
+//! Sem bandeja (nenhum `StatusNotifierWatcher` no D-Bus, outro sistema), o × minimiza: o app nunca fica invisível e sem ícone.
+
+use std::sync::Arc;
+
+/// O que o menu da bandeja (ou o clique no ícone) pede.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayCommand {
+    /// Mostra a janela (restaura se minimizada) e a traz para a frente.
+    Open,
+    /// Encerra o app, pelo mesmo caminho que o encerramento sempre usou (`Deck::request_quit`).
+    Quit,
+}
+
+/// Chamada de qualquer thread quando o usuário usa o ícone.
+pub type OnCommand = Arc<dyn Fn(TrayCommand) + Send + Sync>;
+
+/// O que o × da janela faz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseAction {
+    /// Esconde a janela; o ícone da bandeja a traz de volta.
+    Hide,
+    /// Minimiza: sem ícone na bandeja, esconder deixaria o app sem como voltar.
+    Minimize,
+}
+
+pub fn close_action(tray_up: bool) -> CloseAction {
+    if tray_up {
+        CloseAction::Hide
+    } else {
+        CloseAction::Minimize
+    }
+}
+
+/// O ícone na bandeja; some quando é solto.
+pub struct Tray {
+    _icon: imp::Icon,
+}
+
+impl Tray {
+    /// Cria o ícone com a marca `rgba` (`size`×`size`). `None`: a bandeja não está disponível (o × passa a minimizar).
+    /// Chame da thread do laço de eventos (no Windows o ícone vive nela).
+    pub fn start(rgba: Vec<u8>, size: u32, on: OnCommand) -> Option<Tray> {
+        match imp::start(rgba, size, on) {
+            Ok(icon) => Some(Tray { _icon: icon }),
+            Err(e) => {
+                log::warn!("bandeja indisponível ({e}): o × da janela vai minimizar");
+                None
+            }
+        }
+    }
+}
+
+/// RGBA (como o winit e o `tray-icon` querem) → ARGB32 em ordem de rede (o `IconPixmap` do StatusNotifierItem).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
+    rgba.as_chunks::<4>().0.iter().flat_map(|[r, g, b, a]| [*a, *r, *g, *b]).collect()
+}
+
+#[cfg(windows)]
+mod imp {
+    use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+    use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+
+    use super::{OnCommand, TrayCommand};
+
+    pub type Icon = TrayIcon;
+
+    pub fn start(rgba: Vec<u8>, size: u32, on: OnCommand) -> Result<Icon, String> {
+        let (open, quit) = (MenuItem::with_id("open", "Abrir", true, None), MenuItem::with_id("quit", "Encerrar", true, None));
+        let menu = Menu::new();
+        menu.append_items(&[&open, &quit]).map_err(|e| e.to_string())?;
+        let icon = tray_icon::Icon::from_rgba(rgba, size, size).map_err(|e| e.to_string())?;
+        let tray = TrayIconBuilder::new()
+            .with_icon(icon)
+            .with_tooltip("AgentDeck")
+            .with_menu(Box::new(menu))
+            // O clique esquerdo abre a janela; o menu fica no direito.
+            .with_menu_on_left_click(false)
+            .build()
+            .map_err(|e| e.to_string())?;
+        let click = on.clone();
+        TrayIconEvent::set_event_handler(Some(move |ev| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                click(TrayCommand::Open);
+            }
+        }));
+        MenuEvent::set_event_handler(Some(move |ev: MenuEvent| match ev.id.as_ref() {
+            "open" => on(TrayCommand::Open),
+            "quit" => on(TrayCommand::Quit),
+            _ => {}
+        }));
+        Ok(tray)
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod imp {
+    use ksni::blocking::{Handle, TrayMethods};
+    use ksni::menu::StandardItem;
+    use ksni::MenuItem;
+
+    use super::{rgba_to_argb, OnCommand, TrayCommand};
+
+    pub struct Sni {
+        argb: Vec<u8>,
+        size: i32,
+        on: OnCommand,
+    }
+
+    impl ksni::Tray for Sni {
+        fn id(&self) -> String {
+            "agentdeck".into()
+        }
+
+        fn title(&self) -> String {
+            "AgentDeck".into()
+        }
+
+        fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+            vec![ksni::Icon { width: self.size, height: self.size, data: self.argb.clone() }]
+        }
+
+        fn activate(&mut self, _x: i32, _y: i32) {
+            (self.on)(TrayCommand::Open);
+        }
+
+        fn menu(&self) -> Vec<MenuItem<Self>> {
+            let item = |label: &str, cmd| {
+                StandardItem { label: label.into(), activate: Box::new(move |t: &mut Sni| (t.on)(cmd)), ..Default::default() }.into()
+            };
+            vec![item("Abrir", TrayCommand::Open), item("Encerrar", TrayCommand::Quit)]
+        }
+    }
+
+    pub type Icon = Handle<Sni>;
+
+    pub fn start(rgba: Vec<u8>, size: u32, on: OnCommand) -> Result<Icon, String> {
+        // Sem `StatusNotifierWatcher` no D-Bus o `spawn` devolve erro (não usamos `assume_sni_available`).
+        Sni { argb: rgba_to_argb(&rgba), size: size as i32, on }.spawn().map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+mod imp {
+    use super::OnCommand;
+
+    pub struct Icon;
+
+    pub fn start(_rgba: Vec<u8>, _size: u32, _on: OnCommand) -> Result<Icon, String> {
+        Err("sem bandeja neste sistema".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closing_hides_only_when_there_is_a_tray_to_come_back_from() {
+        assert_eq!(close_action(true), CloseAction::Hide);
+        assert_eq!(close_action(false), CloseAction::Minimize, "sem bandeja o app nunca fica invisível e sem ícone");
+    }
+
+    #[test]
+    fn the_status_notifier_wants_argb_in_network_order() {
+        assert_eq!(rgba_to_argb(&[1, 2, 3, 4, 10, 20, 30, 255]), vec![4, 1, 2, 3, 255, 10, 20, 30]);
+    }
+}

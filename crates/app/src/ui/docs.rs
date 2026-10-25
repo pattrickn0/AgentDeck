@@ -629,6 +629,16 @@ pub fn unsaved_modal(deck: &mut Deck, ctx: &egui::Context) {
             "O arquivo volta a ser lido do disco; o que você digitou se perde.".to_owned(),
             vec![("Descartar", Answer::Discard), ("Cancelar", Answer::Cancel)],
         ),
+        Unsaved::Busy => {
+            let tabs = deck.working_tabs();
+            let shown = tabs.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
+            let more = if tabs.len() > 4 { format!(" e mais {}", tabs.len() - 4) } else { String::new() };
+            (
+                "Há agentes trabalhando".to_owned(),
+                format!("{shown}{more}. Se encerrar agora, o turno em andamento se perde."),
+                vec![("Encerrar mesmo assim", Answer::Discard), ("Cancelar", Answer::Cancel)],
+            )
+        }
         Unsaved::Quit => {
             let files: Vec<String> = deck.docs.unsaved().iter().map(|t| t.subtitle.clone()).collect();
             let shown = files.iter().take(4).cloned().collect::<Vec<_>>().join(", ");

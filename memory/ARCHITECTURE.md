@@ -126,8 +126,24 @@ mantido entre chamadas: `--session-id`/`--resume` no Claude, `--conversation` no
 `ask-agent` sai com código 0 (resposta no stdout), 1 (erro do agente) ou 2 (uso incorreto ou fora do AgentDeck).
 `ask-agent --signal` sai sempre com 0: um hook que falha não pode atrapalhar o agente.
 
-**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` ao iniciar; uma segunda janela
-na mesma pasta é recusada com uma mensagem (defina `AGENTDECK_HOME` para abrir outra instância isolada).
+**Uma janela por pasta de dados.** O core trava `dados/.agentdeck.lock` ao iniciar. Uma segunda abertura na mesma pasta
+não é recusada: `main` chama `activation::activate_running` antes de tudo, que vê a trava pega por outro processo, lê porta
+e token da ponte em `dados/.agentdeck.bridge` (gravado depois que a ponte sobe, apagado no `shutdown` e por quem pega a
+trava, porque o de um travamento é velho), faz `POST /activate` com o token mestre e sai em silêncio. A ponte só aceita o
+`/activate` do token mestre (um agente não traz a janela do usuário para a frente) e emite `CoreEvent::Activate`; o
+`Deck` marca `activate_requested` e o `App` mostra e foca a janela. No Windows a segunda instância chama
+`AllowSetForegroundWindow(ASFW_ANY)` antes do POST, senão a janela só pisca na barra. Se o POST falha (instância travada),
+segue o início normal, que mostra a mensagem de erro da trava (defina `AGENTDECK_HOME` para abrir outra instância isolada).
+
+**Bandeja** (`app/src/tray.rs`). O × da janela (e Alt+F4, e a barra de título desenhada pela interface, que só marca
+`Deck::close_requested`) não encerra: `App::close_window` grava o tamanho e faz `set_visible(false)` + `Background::wake`
+(o winit não avisa da janela escondida por código), e os CLIs, a ponte e as entregas seguem pelo `Deck::background`. O ícone
+é `tray-icon` no Windows e `ksni` (StatusNotifierItem por D-Bus, sem GTK nem tokio) no Linux; `tray::close_action` decide:
+sem bandeja (o `ksni` não achou `StatusNotifierWatcher`, outro sistema) o × **minimiza**, para o app nunca ficar invisível e
+sem ícone. Clique esquerdo ou **Abrir** = `App::show_window` (mostra, restaura, foca); **Encerrar** =
+`Deck::request_quit`, que pergunta só com edição não salva (`Unsaved::Quit`) ou aba no meio de um turno (`Unsaved::Busy`,
+pelo `busy` que a aba já mostra), mostrando a janela antes de perguntar; sem pergunta, `App::quit_if_requested` encerra
+mesmo com a janela escondida. Capturas e `AGENTDECK_DEBUG_UI` não criam o ícone.
 
 ### Instâncias (abas) e perguntas entre elas
 
