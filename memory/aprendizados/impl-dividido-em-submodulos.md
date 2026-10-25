@@ -1,7 +1,7 @@
 ---
 titulo: `impl` dividido em módulos filhos: método privado e nome sombreado
 resumo: Ao quebrar um `impl` em módulos filhos, `fn` privado de uma seção não é visto pela outra (`pub(super)`) e um submódulo com o nome de um `use crate::x::{self, …}` esconde o import.
-touches: [crates/app/src/deck/**, crates/core/src/tasks/**, crates/app/src/tasks.rs]
+touches: [crates/app/src/deck/**, crates/core/src/tasks.rs]
 ---
 O `impl Deck` de `crates/app/src/deck.rs` virou um `impl` por arquivo de `crates/app/src/deck/` (t54). Quem repetir a
 divisão em outro `impl` grande (a `t53` faz o mesmo com `crates/core/src/tasks.rs`) esbarra em duas coisas que o
