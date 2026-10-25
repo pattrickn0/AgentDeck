@@ -627,11 +627,13 @@ fn report(cases: &[Prepared], sample: Sample, detail: bool) {
     line("(b) hoje + índice de todos os outros", &b);
     line("    referência: (a) sem teto de caracteres", &a_free);
     line("    referência: todos os específicos por inteiro", &all_full);
-    println!(
-        "  (b): {} dos {} certos que (a) não entregou inteiros estavam como linha do índice (o agente teria de pedir com --learn).",
-        b.in_index_only,
-        b.truth - b.hits
-    );
+    for (name, t) in [("(a') hoje de verdade", &a_real), ("(b)", &b)] {
+        println!(
+            "  {name}: {} dos {} certos que (a) não entregou inteiros estavam como linha do índice (o agente teria de pedir com --learn).",
+            t.in_index_only,
+            t.truth - t.hits
+        );
+    }
     println!("  recall = certos entregues por inteiro ÷ certos (todos os casos juntos); recall* = média do recall de cada caso;");
     println!("  precisão = certos ÷ específicos entregues por inteiro. Tamanho = média por caso, com os globais e o índice.");
 
