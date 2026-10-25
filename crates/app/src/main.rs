@@ -10,6 +10,7 @@ mod agents;
 mod app;
 mod audio;
 mod crash;
+mod debug_ui;
 mod deck;
 mod dictation;
 mod docs;
