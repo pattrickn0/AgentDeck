@@ -66,7 +66,7 @@ impl Learning {
     }
 
     /// O texto completo: título, arquivo e corpo.
-    fn full_text(&self) -> String {
+    pub fn full_text(&self) -> String {
         format!("### {} ({})\n{}", self.titulo, self.file, self.body)
     }
 }
@@ -254,6 +254,12 @@ pub fn matching<'a>(all: &'a [Learning], paths: &[String]) -> Vec<&'a Learning> 
 /// Os arquivos que `text` cita e que existem em `root` (só arquivos, dentro do repositório), sem repetição, na
 /// ordem em que aparecem. Aceita `/` e `\`; ignora `..` e caminhos absolutos.
 pub fn paths_in_text(text: &str, root: &Path) -> Vec<String> {
+    paths_in_text_where(text, |path| root.join(path).is_file())
+}
+
+/// Como [`paths_in_text`], com `exists` no lugar da checagem no disco (recebe o caminho já normalizado, relativo à raiz).
+/// Serve a quem confere os caminhos contra outra fonte, como a árvore de um commit.
+pub fn paths_in_text_where(text: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
     use std::sync::OnceLock;
     static TOKEN: OnceLock<Regex> = OnceLock::new();
     let token = TOKEN.get_or_init(|| Regex::new(r"[A-Za-z0-9_.\-]+(?:[/\\][A-Za-z0-9_.\-]+)*").expect("regex fixa"));
@@ -270,7 +276,7 @@ pub fn paths_in_text(text: &str, root: &Path) -> Vec<String> {
         if path.is_empty() || !path.contains(['/', '.']) || path.split('/').any(|s| s.is_empty() || s == "." || s == "..") {
             continue;
         }
-        if out.contains(&path) || !root.join(&path).is_file() {
+        if out.contains(&path) || !exists(&path) {
             continue;
         }
         out.push(path);
@@ -305,7 +311,7 @@ const INDEX_HEADER: &str =
     "Outros aprendizados (abra o arquivo, ou rode ask-agent --learn <arquivo> antes de mexer num arquivo relacionado):\n";
 
 /// Como [`render`], com o teto das linhas do índice em `index_budget` caracteres; `0` tira o índice.
-fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budget: usize) -> String {
+pub fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budget: usize) -> String {
     if all.is_empty() {
         return String::new();
     }
