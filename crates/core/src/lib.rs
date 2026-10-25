@@ -627,15 +627,11 @@ impl Core {
         let path = util::absolutize(path);
         let mut out = None;
         self.update_config(|c| {
-            let project = match c.project_list.iter().find(|p| util::same_path(&p.path, &path)) {
-                Some(p) => p.clone(),
-                None => {
-                    let p = ProjectCfg::new(path, name, &c.project_list);
-                    c.project_list.push(p.clone());
-                    p
-                }
-            };
-            out = Some(project);
+            let existing = c.project_list.iter().find(|p| util::same_path(&p.path, &path)).cloned();
+            out = Some(match existing {
+                Some(p) => p,
+                None => c.add_project(path, name),
+            });
         });
         let project = out.expect("update_config roda o fechamento");
         if self.active_project().is_none() {
@@ -681,11 +677,7 @@ impl Core {
         self.inner.callers.lock().retain(|_, c| c.project != id);
         let was_active = self.active_project_id() == id;
         self.update_config(|c| {
-            c.project_list.retain(|p| p.id != id);
-            if c.active_project == id {
-                c.active_project = c.project_list.first().map(|p| p.id.clone()).unwrap_or_default();
-                c.workspace = c.active().map(|p| p.path.clone()).unwrap_or_default();
-            }
+            c.remove_project(id);
         });
         let ids = self.inner.instances.lock().remove(id).map(|list| list.ids()).unwrap_or_default();
         for instance in &ids {
