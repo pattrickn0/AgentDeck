@@ -1,7 +1,7 @@
 ---
 titulo: Resposta de ask-agent --reply que some - onde olhar
 resumo: O app grava dados/agentdeck.log; a resposta que não chegou fica em ask-agent --inbox e a Conversa integrada avisa.
-touches: [crates/core/src/bridge.rs, crates/core/src/inbox.rs, crates/app/src/deck.rs, crates/app/src/logfile.rs]
+touches: [crates/core/src/bridge.rs, crates/core/src/inbox.rs, crates/app/src/deck/**, crates/app/src/logfile.rs]
 ---
 Uma resposta atrasada (depois do 202) só chega a quem perguntou se a interface a digita na aba dele; ela se perde sem
 erro se a aba não está aberta ou viva, e a resposta do 200 também se perde se o cliente já foi embora (o `tiny_http` não

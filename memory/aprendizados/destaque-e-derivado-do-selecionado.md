@@ -1,7 +1,7 @@
 ---
 titulo: No Destaque, a janela grande é derivada da aba ativa (sem estado) e a organização tem dois campos na Config
 resumo: Nada guarda "quem está em destaque"; trocar de aba troca as janelas, e o PTY só muda de tamanho com o tamanho parado. `organization` manda, `splitEnabled` só serve de herança.
-touches: [crates/app/src/split.rs, crates/app/src/deck.rs, crates/app/src/ui/panes.rs, crates/app/src/ui/sidebar.rs, crates/core/src/config.rs]
+touches: [crates/app/src/split.rs, crates/app/src/deck/**, crates/app/src/ui/panes.rs, crates/app/src/ui/sidebar.rs, crates/core/src/config.rs]
 ---
 O modo **Destaque** (`Organization::Highlight`) não tem estado próprio além da proporção (`Config::highlight_ratio`, global,
 não por projeto): `Deck::plan_panes` põe o grupo da **aba ativa** primeiro (`split::highlight_order`), e `assign` +

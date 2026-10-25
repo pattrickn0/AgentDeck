@@ -1,7 +1,7 @@
 ---
 titulo: Janela escondida ou minimizada não pinta, e a minimizada tem tamanho 0×0
 resumo: O trabalho do Deck sem quadro roda por Deck::background; nenhuma pintura nem fit_tab com a janela escondida.
-touches: [crates/app/src/app.rs, crates/app/src/deck.rs]
+touches: [crates/app/src/app.rs, crates/app/src/deck/**]
 ---
 Com a janela minimizada (no Windows) ou escondida, o winit não entrega `RedrawRequested` (o sistema não manda `WM_PAINT`) e a
 janela minimizada informa `inner_size` 0×0. Duas consequências que já mordem: (1) tudo o que ficava dentro do quadro

@@ -1,7 +1,7 @@
 ---
 titulo: Com os terminais escondidos (modo Documentos), nada os toca
 resumo: Sem fit_tab, sem teclado nem IME, e o fim de turno conta como não visto; a troca de lado só é percebida um quadro depois.
-touches: [crates/app/src/deck.rs, crates/app/src/docs.rs, crates/app/src/ui/mod.rs, crates/app/src/ui/panes.rs, crates/app/src/ui/docs.rs]
+touches: [crates/app/src/deck/**, crates/app/src/docs.rs, crates/app/src/ui/mod.rs, crates/app/src/ui/panes.rs, crates/app/src/ui/docs.rs]
 ---
 Com o centro em Documentos, `ui::draw` não chama `panes::draw`; os terminais continuam rodando, mas ninguém os desenha, redimensiona
 ou alimenta. Três regras seguem disso: (1) **nenhum `fit_tab`** enquanto o centro mostra documentos, senão o PTY muda de tamanho
