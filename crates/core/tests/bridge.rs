@@ -1491,12 +1491,19 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let text = body["text"].as_str().expect("text");
     assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n"), "{text}");
     assert!(text.contains("opencode: não consegui listar os modelos"), "{text}");
-    assert!(text.ends_with("\n  cota: sem leitura"), "{text}");
+    assert!(text.contains("\n  cota: sem leitura\n\ncapacidade ("), "a capacidade vem depois dos agentes: {text}");
+    assert!(text.contains("Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10)"), "{text}");
     assert!(!text.contains("antigravity"), "o que não está instalado não aparece: {text}");
 
     // Um agente só (com apelido); o não instalado e o inválido são recusados.
     let (st, body) = get("/models?agent=claudecode");
-    assert_eq!((st, body["text"].as_str()), (200, Some("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura")));
+    assert_eq!(st, 200);
+    assert!(
+        body["text"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n\ncapacidade (")),
+        "{body}"
+    );
     let (st, body) = get("/models?agent=agy");
     assert_eq!(st, 404);
     assert!(body["error"].as_str().expect("error").contains("não está instalado"), "{body}");

@@ -230,7 +230,15 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             return reply(req, 400, json!({ "error": "agente inválido" }));
         }
         return match core.models_inventory(only) {
-            Ok(items) => reply(req, 200, json!({ "text": crate::models::format_inventory(&items, &core.quota_lines()) })),
+            Ok(items) => {
+                let mut text = crate::models::format_inventory(&items, &core.quota_lines());
+                let capacity = core.capability_lines(&items);
+                if !capacity.is_empty() {
+                    text.push_str("\n\ncapacidade (nível que o modelo alcança: simples, media, complexa; --level na tarefa):\n  ");
+                    text.push_str(&capacity.join("\n  "));
+                }
+                reply(req, 200, json!({ "text": text }))
+            }
             Err(e) => reply(req, 404, json!({ "error": e })),
         };
     }
@@ -1065,8 +1073,19 @@ fn task_spec(msg: &Value, creator: &str) -> Result<crate::tasks::TaskSpec, (u16,
             }
         },
     };
+    let level = match body_text(msg, "level")? {
+        None => crate::capability::Level::default(),
+        Some(l) => match crate::capability::Level::parse(&l) {
+            Some(l) => l,
+            None => {
+                let error = format!("nível inválido: \"{}\" (use simples, media ou complexa)", l.chars().take(20).collect::<String>().escape_debug());
+                return Err((400, json!({ "error": error })));
+            }
+        },
+    };
     Ok(crate::tasks::TaskSpec {
         effort,
+        level,
         title: body_text(msg, "title")?.unwrap_or_default(),
         brief: body_text(msg, "brief")?.unwrap_or_default(),
         kind: body_text(msg, "kind")?.unwrap_or_default(),

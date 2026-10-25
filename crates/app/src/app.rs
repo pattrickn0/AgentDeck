@@ -718,7 +718,7 @@ fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage
     ])
 }
 
-/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agente>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` abre menus/estados
+/// SOMENTE DEPURAÇÃO: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-level,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agente>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agente>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` abre menus/estados
 /// para capturas de tela no modo smoke.
 fn apply_debug_ui(deck: &mut Deck) {
     let Some(v) = agentdeck_core::env_var("DEBUG_UI") else { return };
@@ -900,6 +900,7 @@ fn apply_debug_ui(deck: &mut Deck) {
             | "tasks-new"
             | "tasks-new-attach"
             | "tasks-new-effort"
+            | "tasks-new-level"
             | "tasks-new-opencode"
             | "tasks-new-agent"
             | "tasks-new-model"
@@ -1046,6 +1047,7 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
         "tasks-new"
         | "tasks-new-attach"
         | "tasks-new-effort"
+        | "tasks-new-level"
         | "tasks-new-opencode"
         | "tasks-new-agent"
         | "tasks-new-model"
@@ -1058,6 +1060,11 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             if item == "tasks-new-effort" {
                 f.model = Some("sonnet".into());
                 f.effort = Some(agentdeck_core::models::Effort::High);
+            }
+            if item == "tasks-new-level" {
+                f.kind_is_auto = false;
+                f.model = Some("haiku".into());
+                f.level = agentdeck_core::capability::Level::Complex;
             }
             f.base = "dev".into();
             f.title = "Documentar as rotas /tasks da ponte".into();
@@ -1076,6 +1083,9 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             };
             if item == "tasks-new-provider-models" {
                 f.provider = Some("opencode".into());
+            }
+            if item == "tasks-new-level" {
+                deck.tasks_form_refresh();
             }
             if item.starts_with("tasks-new-provider") {
                 deck.request_models("opencode");

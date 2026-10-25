@@ -211,8 +211,8 @@ validado (`valid_model`) antes de chegar a qualquer linha de comando, e os shims
   `"cota: sem leitura"` quando não há leitura viva. Agente não instalado não aparece (e `--models <agente>` dele dá
   404); uma listagem que falha vira uma linha ("não consegui listar") sem derrubar o resto. Usa o cache de
   `known_models` e consulta os CLIs em paralelo, então demora no máximo o `LIST_TIMEOUT`. A formatação é a função pura
-  `models::format_inventory`. As instruções da ponte mandam consultar a cota de todos e distribuir o trabalho antes de
-  delegar ou de abrir tarefas.
+  `models::format_inventory`. As instruções da ponte mandam consultar a cota de todos e escolher, entre os modelos capazes do tamanho
+  do trabalho, o de mais folga antes de delegar ou de abrir tarefas. O `--models` termina com o bloco de capacidade.
 - **Onde aparece:** `ask-agent --list` e `--team` (`claude@dev (sonnet; cota 39% usada, renova em 2 h)` ou
   `…; cota: sem leitura`, pelos campos `models` e `quota` de `/agents` e `/team`, `Core::quota_notes`), o
   cabeçalho da aba, a barra lateral e o menu de contexto da aba (só leitura: trocar o modelo de uma aba aberta exige
@@ -498,14 +498,43 @@ quando renova cada janela, "bloqueado até").
   uma instância cujo modelo está esgotado (uso ≥ 99,5%) por uma leitura de até 1 h; sem modelo num agente com grupos,
   ou sem dado, a pergunta segue. `--models` ganha a linha "cota:" por agente (`quota_line`) e `--team`/`--list` o aviso ao
   lado do modelo (campo `quota` de `/team` e `/agents`, só de quem está acima de 85% ou esgotado).
-- **Escolha para tarefas** (`usage::select_agent_by_quota`, `Core::best_agent_by_quota`): filtra os candidatos oficiais
-  instalados (Claude, Antigravity e Codex; OpenCode não fornece leitura de cota), depois escolhe a menor fração usada.
-  A função pura recebe a lista já elegível e devolve o agente com a justificativa e os números dos demais, para poder
-  filtrar capacidade antes da ordem por cota no futuro. Sem leituras, preserva a ordem recebida (Claude primeiro). O
-  formulário `+ Nova tarefa` mostra as leituras e mantém a recomendação até o usuário escolher manualmente; `ask-agent
-  --task new` sem `--agent` aplica a mesma escolha e grava o motivo no histórico. O envio `ask-agent <agente> <mensagem>`
+- **Escolha para tarefas** (`capability::select`, que usa `usage::select_agent_by_quota`): primeiro a capacidade, depois a
+  cota (ver "Capacidade do modelo" abaixo). Entre os candidatos oficiais instalados (Claude, Antigravity e Codex; OpenCode
+  não fornece leitura de cota) ficam os capazes do nível da tarefa e, entre eles, `select_agent_by_quota` escolhe a menor
+  fração usada. Sem leituras, preserva a ordem recebida (Claude primeiro). O
+  formulário `+ Nova tarefa` mostra as leituras e mantém a recomendação (que muda com o nível) até o usuário escolher
+  manualmente; `ask-agent --task new` sem `--agent` aplica a mesma escolha e grava o motivo no histórico. O envio `ask-agent <agente> <mensagem>`
   lê a saída de `GET /models` e avisa sem bloquear quando o destino passa de 80% e outro CLI oficial instalado está abaixo
   de 50%; a mesma regra é `usage::quota_advisory`.
+
+- **Capacidade do modelo** (`crates/core/src/capability.rs`, t52): escolher só pela cota manda o modelo mais folgado
+  fazer o que ele não dá conta, então a escolha tem duas peças.
+  - **Nível da tarefa** (`Task::level`, `capability::Level`: `simples`, `media`, `complexa`; `--level` no `--task new`,
+    campo `level` de `POST /tasks`, "Nível" no formulário; sem informar vale `media`, e tarefa antiga sem o campo
+    também). Não é o esforço, que continua sendo o raciocínio do modelo.
+  - **Tabela de benchmarks** (`capability.json`, embutida por `include_str!`; `dados/capacidade.json` a sobrepõe por
+    `name`, relida a cada uso): por modelo, os apelidos (`opus`, `claude-opus-5-5`; o id do CLI sem provedor nem
+    `#variante` é igual ao apelido ou continua depois de um `-`), a nota, a fonte, a data e o nível. A régua é o
+    Artificial Analysis Coding Agent Index v2.0 (out/2026, esforço máximo): `complexa` a partir de 53, `media` de 40 a
+    53, `simples` abaixo; fora da tabela, `simples`. O GPT-5.6 Terra não tem nota v2.0 (nível `media` estimado, marcado
+    `estimated`). `defaults` diz que modelo se presume para um agente aberto sem `--model` (o CLI não informa o seu
+    padrão): claude→sonnet, antigravity→gemini-4-argon-high, codex→gpt-6-luna, opencode→deepseek flash free; `role_models`
+    vence. Esforço `low` (ou modelo `…-low` do Antigravity) desce um nível: a nota é do esforço máximo.
+  - **Medida** (`capability::measure`, `Core::capability_records`): lê as tarefas de todos os projetos
+    (`dados/tarefas/*.json`) que o agente executou e já têm desfecho (mesclada, em validação ou descartada), por modelo (a
+    chave é o nome da linha da tabela) e por nível: concluídas de primeira (sem feedback), concluídas depois de
+    devolvidas (e quantas devoluções, da revisão ou da validação), descartadas e reprovadas na validação. Com pelo menos
+    3 tarefas num nível, a medida manda: mais da metade descartada ou devolvida 2 vezes ou mais **desce** um nível; as 3
+    últimas do nível acima do que o modelo alcança todas de primeira **sobem** um. A decisão é `capability::capacity`.
+  - **Escolha** (`capability::select`): entre os capazes do nível, o de mais folga na cota. Sem nenhum capaz com cota
+    (uso ≥ 99,5%), o capaz menos gasto, com aviso; sem nenhum capaz, o que mais alcança, com aviso. O motivo vai ao
+    histórico: "complexa: claude sonnet, capaz e com 26% livre; codex gpt-6-luna só vai até simples". Escolha explícita
+    (`--agent`/formulário) ganha o aviso "aviso de capacidade: a tarefa é complexa e … só vai até …"
+    (`Core::capability_advisory`), nunca bloqueia; o formulário guarda o aviso em `NewForm::capacity_note` e o refaz por
+    `Deck::tasks_form_refresh` (não a cada quadro: lê as tarefas e o arquivo da tabela).
+  - **`--models`** acrescenta, depois dos agentes, o bloco "capacidade" (`Core::capability_lines`, uma linha por modelo):
+    "Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10) · medida media: 4 de 5 de primeira, …"
+    e, se a medida mudou o nível, "vale media (…)".
 
 **Tela dividida** (`crates/app/src/split.rs` + `ui/panes.rs`). As abas continuam numa lista só
 (`Deck::tabs`); o grupo de cada uma é `split::group_key(kind)` (o próprio tipo; `claude@dev@ana` fica no grupo `claude`). A cada quadro,

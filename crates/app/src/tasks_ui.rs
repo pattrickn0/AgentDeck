@@ -8,6 +8,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use agentdeck_core::capability::{self, Level};
 use agentdeck_core::models::{self, Effort};
 use agentdeck_core::{FeedKind, MergeBlock, Task, TaskError, TaskEvent, TaskMessage, TaskSpec, TaskStatus};
 
@@ -602,6 +603,11 @@ pub struct NewForm {
     pub model: Option<String>,
     /// `None` = "Padrão" (nada vai ao CLI). Só vale onde `models::effort_unavailable` não objeta.
     pub effort: Option<Effort>,
+    /// O tamanho do trabalho; decide quais modelos dão conta e, no agente automático, quem é recomendado.
+    pub level: Level,
+    /// O aviso de capacidade do agente e do modelo escolhidos (a tarefa está acima do que alcançam); recalculado
+    /// por `tasks_form_refresh`, não a cada quadro (lê as tarefas e a tabela de capacidade).
+    pub capacity_note: Option<String>,
     /// Provedor do passo do menu de modelo (`opencode`): `None` = a lista de provedores aparece
     /// primeiro. Só vale enquanto o menu está aberto (o OpenCode mistura vários provedores).
     pub provider: Option<String>,
@@ -627,6 +633,8 @@ impl Default for NewForm {
             kind_is_auto: true,
             model: None,
             effort: None,
+            level: Level::default(),
+            capacity_note: None,
             provider: None,
             base: String::new(),
             scope: String::new(),
@@ -855,25 +863,51 @@ impl Deck {
     /// Abre o formulário: agente padrão `claude` (ou o primeiro disponível) e a branch atual de base.
     pub fn tasks_open_new(&mut self) {
         let choices = self.tasks_agent_choices();
-        let recommended = self.core.best_agent_by_quota(&choices).map(|choice| choice.kind);
         let form = &mut self.tasks.form;
         form.menu = None;
         form.provider = None;
         form.error = None;
         if form.kind_is_auto || form.kind.is_empty() || (!choices.is_empty() && !choices.contains(&form.kind)) {
-            form.kind = recommended.or_else(|| choices.first().cloned()).unwrap_or_else(|| "claude".into());
+            form.kind = choices.first().cloned().unwrap_or_else(|| "claude".into());
             form.kind_is_auto = true;
             form.model = None;
             form.effort = None;
+            form.level = Level::default();
         }
         if form.base.trim().is_empty() {
             form.base = self.git.status().and_then(|st| st.branch.clone()).unwrap_or_default();
         }
+        self.tasks_form_refresh();
         let kind = self.tasks.form.kind.clone();
         self.request_models(&kind);
         self.tasks.form.focus_title = true;
         self.tasks.view = TasksView::New;
         self.tasks_clear_notice();
+    }
+
+    /// Recalcula o que depende do nível, do agente, do modelo e do esforço do formulário: o agente recomendado
+    /// (enquanto o agente é o automático: o capaz do nível com mais folga na cota) e o aviso de capacidade.
+    pub fn tasks_form_refresh(&mut self) {
+        let choices = self.tasks_agent_choices();
+        let (level, effort) = (self.tasks.form.level, self.tasks.form.effort);
+        if self.tasks.form.kind_is_auto {
+            let recommended = capability::select(&self.core.capability_candidates(&choices, effort), level).map(|s| s.kind);
+            if let Some(kind) = recommended.filter(|k| *k != self.tasks.form.kind) {
+                self.tasks.form.kind = kind.clone();
+                self.tasks.form.model = None;
+                self.request_models(&kind);
+            }
+        }
+        let f = &self.tasks.form;
+        let effort = f.effort.filter(|_| models::effort_unavailable(&f.kind, f.model.as_deref()).is_none());
+        let note = self.core.capability_advisory(&f.kind, f.model.as_deref(), f.level, effort);
+        self.tasks.form.capacity_note = note;
+    }
+
+    /// Escolheu outro tamanho de trabalho no formulário.
+    pub fn tasks_form_set_level(&mut self, level: Level) {
+        self.tasks.form.level = level;
+        self.tasks_form_refresh();
     }
 
     /// Escolheu outro agente no formulário: o modelo e o esforço voltam ao padrão.
@@ -887,6 +921,7 @@ impl Deck {
         self.tasks.form.menu = None;
         self.tasks.form.provider = None;
         self.request_models(&kind);
+        self.tasks_form_refresh();
     }
 
     /// Botão "Anexar arquivos" do formulário "Nova tarefa".
@@ -917,6 +952,7 @@ impl Deck {
             title: f.title.clone(),
             brief: crate::util::append_brief_attachments(&f.brief, &f.attachments),
             kind: f.kind.clone(),
+            level: f.level,
             model: f.model.clone(),
             // O esforço escolhido antes de trocar de modelo pode já não valer (Antigravity sem versões por esforço).
             effort: f.effort.filter(|_| models::effort_unavailable(&f.kind, f.model.as_deref()).is_none()),
