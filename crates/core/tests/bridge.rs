@@ -1419,16 +1419,19 @@ fn the_roster_and_the_team_show_the_models() {
     let (st, body) = http(port, "GET", "/agents", &host, &tab_token(&env, "claude"), "");
     assert_eq!(st, 200);
     assert_eq!(body["models"], json!({"claude@dev": "sonnet", "claude@main@ana": "opus"}));
+    assert_eq!(body["quota"], json!({"claude@dev": "cota: sem leitura", "claude@main@ana": "cota: sem leitura"}));
     let (st, body) = http(port, "GET", "/team", &host, &tab_token(&env, "claude@dev"), "");
     assert_eq!(st, 200);
     // Só quem aparece na resposta (ele; o chefe e a equipe, se tivessem modelo).
     assert_eq!(body["models"], json!({"claude@dev": "sonnet"}));
+    assert_eq!(body["quota"], json!({"claude@dev": "cota: sem leitura"}));
     assert_eq!(body["boss"], "claude");
     env.core.shutdown();
 }
 
 #[test]
 fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listing() {
+    use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
     let env = start(&[]);
     // O `opencode` instalado não lista nada (o falso sai sem saída): uma linha de falha, o resto segue.
     fake_cli(&env, "claude");
@@ -1440,17 +1443,40 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let (st, body) = get("/models");
     assert_eq!(st, 200, "{body}");
     let text = body["text"].as_str().expect("text");
-    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n"), "{text}");
+    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n"), "{text}");
     assert!(text.contains("opencode: não consegui listar os modelos"), "{text}");
+    assert!(text.ends_with("\n  cota: sem leitura"), "{text}");
     assert!(!text.contains("antigravity"), "o que não está instalado não aparece: {text}");
 
     // Um agente só (com apelido); o não instalado e o inválido são recusados.
     let (st, body) = get("/models?agent=claudecode");
-    assert_eq!((st, body["text"].as_str()), (200, Some("claude --model: opus, sonnet, haiku, fable")));
+    assert_eq!((st, body["text"].as_str()), (200, Some("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura")));
     let (st, body) = get("/models?agent=agy");
     assert_eq!(st, 404);
     assert!(body["error"].as_str().expect("error").contains("não está instalado"), "{body}");
     assert_eq!(get("/models?agent=a%20b").0, 400);
+
+    // Com o Antigravity instalado e renovado (4%) e o Claude em 60%, o Antigravity vem antes do Claude.
+    fake_cli(&env, "agy");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("relógio").as_millis() as u64;
+    let w = |used, h: u64| Some(UsageWindow { used, resets_at_ms: Some(now + h * 3_600_000) });
+    env.core.set_usage("claude", AgentUsage { weekly: w(0.60, 4 * 24), updated_ms: now, ..Default::default() });
+    env.core.set_usage(
+        "antigravity",
+        AgentUsage {
+            groups: vec![UsageGroup { name: "Gemini 4 Argon".into(), session: None, weekly: w(0.04, 6 * 24) }],
+            updated_ms: now,
+            ..Default::default()
+        },
+    );
+    let (st, body) = get("/models");
+    assert_eq!(st, 200, "{body}");
+    let text = body["text"].as_str().expect("text");
+    let agy_pos = text.find("antigravity").expect("agy");
+    let claude_pos = text.find("claude --model").expect("claude");
+    assert!(agy_pos < claude_pos, "o mais folgado vem primeiro:\n{text}");
+    assert!(text.contains("  cota: Gemini 4 Argon 4% usada (renova em 6 dias)"), "{text}");
+    assert!(text.contains("  cota: 60% usada (renova em 4 dias)"), "{text}");
     env.core.shutdown();
 }
 
