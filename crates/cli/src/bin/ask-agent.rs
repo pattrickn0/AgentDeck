@@ -13,7 +13,7 @@
 //!      ask-agent --learn [<arquivo>...]   (o que o projeto já aprendeu, no geral ou sobre esses arquivos)
 //!      ask-agent --outline <arquivo>...   (as assinaturas de cada arquivo com a linha, sem os corpos)
 //!      ask-agent --inbox [--all]          (respostas às suas perguntas ainda não entregues; --all: as 20 últimas)
-//!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--effort low|medium|high] [--base <branch>] [--start] -|"pedido"|--file <arq>
+//!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--effort low|medium|high] [--base <branch>] [--start] -|"pedido"|--file <arq> [--scope <caminho>...]
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
 //!      ask-agent --task done <id> -|"relatório"|--file <arq>   (só o agente da própria tarefa)
 //!      ask-agent --task return <id> "feedback"|--file <arq>   (devolve uma tarefa em revisão)
@@ -44,7 +44,7 @@ use agentdeck_core::AgentUsage;
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --outline <arquivo>...   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task; o esforço de uma tarefa: --task new \"título\" --effort low|medium|high)";
+    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --outline <arquivo>...   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task; o esforço de uma tarefa: --task new \"título\" --effort low|medium|high; o escopo de escrita, com fila: --task new \"título\" \"pedido\" --scope <caminho>...)";
 
 /// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
 const DEFAULT_WAIT: u64 = 90;
@@ -454,7 +454,7 @@ fn inbox_command(bridge: &Bridge, flags: &[String]) -> ExitCode {
 
 // ---------- Tarefas (`--task`) ----------
 
-const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--effort low|medium|high] [--base <branch>] [--start] -|\"pedido\"|--file <arq>   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|validate|discard <id>   |   ask-agent --task done <id> -|\"relatório\"|--file <arq>   |   ask-agent --task return|reject <id> \"feedback\"|--file <arq>|-";
+const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--effort low|medium|high] [--base <branch>] [--start] -|\"pedido\"|--file <arq> [--scope <caminho> [<caminho>...]]   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|validate|discard <id>   |   ask-agent --task done <id> -|\"relatório\"|--file <arq>   |   ask-agent --task return|reject <id> \"feedback\"|--file <arq>|-   |   --scope lista os caminhos (arquivos ou pastas, relativos à raiz do repositório, sem curingas) que a tarefa vai mexer e vale até a próxima opção: ponha o pedido antes dela ou use --file; tarefa com escopo sobreposto ao de outra em andamento espera na fila e começa sozinha (memory/ e Cargo.lock não contam)";
 
 /// De onde vem um texto longo (pedido, relatório, feedback).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -480,6 +480,7 @@ enum TaskCmd {
         effort: Option<String>,
         base: Option<String>,
         start: bool,
+        scope: Vec<String>,
     },
     List,
     Show(String),
@@ -567,9 +568,24 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
         "new" => {
             let (mut agent, mut model, mut effort, mut base, mut start) = (None, None, None, None, false);
             let mut brief_file: Option<String> = None;
+            let mut scope: Vec<String> = Vec::new();
             let mut words: Vec<String> = Vec::new();
-            let mut it = rest.iter();
+            let mut it = rest.iter().peekable();
             while let Some(a) = it.next() {
+                // `--scope` leva todos os caminhos até a próxima opção (ou um `-`, a entrada padrão do pedido).
+                if a == "--scope" || a.starts_with("--scope=") {
+                    let before = scope.len();
+                    scope.extend(a.strip_prefix("--scope=").filter(|p| !p.is_empty()).map(str::to_owned));
+                    if a == "--scope" {
+                        while let Some(p) = it.next_if(|n| !n.starts_with("--") && n.as_str() != "-") {
+                            scope.push(p.clone());
+                        }
+                    }
+                    if scope.len() == before {
+                        return Err("--scope precisa de pelo menos um caminho.".into());
+                    }
+                    continue;
+                }
                 let mut value = |name: &str, inline: Option<&str>| -> Result<String, String> {
                     let v = match inline {
                         Some(v) => Some(v.to_owned()),
@@ -601,7 +617,7 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                 Some(path) => Body::File(path),
                 None => body_of(&words)?,
             };
-            Ok(TaskCmd::New { title, brief, agent, model, effort, base, start })
+            Ok(TaskCmd::New { title, brief, agent, model, effort, base, start, scope })
         }
         other => Err(format!("subcomando desconhecido de --task: {other}")),
     }
@@ -643,6 +659,7 @@ fn field<'a>(task: &'a Value, key: &str) -> &'a str {
 fn status_label(status: &str) -> &str {
     match status {
         "draft" => "rascunho",
+        "queued" => "na fila",
         "running" => "andamento",
         "review" => "revisão",
         "validating" => "validação",
@@ -670,14 +687,35 @@ fn who(task: &Value) -> String {
 
 /// Uma linha de `--task list`: id, estado, agente com modelo e título.
 fn task_line(task: &Value) -> String {
-    format!("{:<5} {:<10} {:<26} {}", field(task, "id"), status_label(field(task, "status")), who(task), field(task, "title"))
+    let waiting = match field(task, "waiting_for") {
+        "" => String::new(),
+        id => format!(" (espera {id})"),
+    };
+    format!("{:<5} {:<10} {:<26} {}{waiting}", field(task, "id"), status_label(field(task, "status")), who(task), field(task, "title"))
+}
+
+/// Os caminhos de uma lista de textos do JSON (`scope`, `outside_scope`), separados por vírgula.
+fn paths_of(task: &Value, key: &str) -> String {
+    let list = task.get(key).and_then(Value::as_array);
+    list.map(|l| l.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default()
 }
 
 /// `--task show`: tudo o que a pessoa (ou o agente) precisa para revisar.
 fn task_detail(task: &Value) -> String {
     let mut out = format!("Tarefa {}: {}\n", field(task, "id"), field(task, "title"));
     out.push_str(&format!("Estado: {}\n", status_label(field(task, "status"))));
+    if let Some(id) = task.get("waiting_for").and_then(Value::as_str) {
+        out.push_str(&format!("Na fila: espera a tarefa {id} (o escopo se sobrepõe); começa sozinha quando ela sair\n"));
+    }
     out.push_str(&format!("Agente: {}\n", who(task)));
+    let scope = paths_of(task, "scope");
+    if !scope.is_empty() {
+        out.push_str(&format!("Escopo: {scope}\n"));
+    }
+    let outside = paths_of(task, "outside_scope");
+    if !outside.is_empty() {
+        out.push_str(&format!("Aviso: mexeu fora do escopo: {outside}\n"));
+    }
     out.push_str(&format!("Base: {} · branch: {}\n", field(task, "base"), field(task, "branch")));
     let wt = field(task, "worktree");
     if !wt.is_empty() {
@@ -734,9 +772,12 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
             Ok(f) => ("POST", format!("/tasks/{id}/reject"), Some(json!({ "feedback": f }))),
             Err(e) => return fail(e, 2),
         },
-        TaskCmd::New { title, brief, agent, model, effort, base, start } => match read_body(brief, "o pedido da tarefa") {
+        TaskCmd::New { title, brief, agent, model, effort, base, start, scope } => match read_body(brief, "o pedido da tarefa") {
             Ok(b) => {
                 let mut body = json!({ "title": title, "brief": b, "start": start });
+                if !scope.is_empty() {
+                    body["scope"] = json!(scope);
+                }
                 for (key, value) in [("kind", agent), ("model", model), ("effort", effort), ("base", base)] {
                     if let Some(v) = value {
                         body[key] = json!(v);
@@ -772,7 +813,16 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
         (true, _) => {
             println!("Tarefa {id} criada: {}", field(&task, "title"));
             println!("  agente: {} · base: {} · branch: {}", who(&task), field(&task, "base"), field(&task, "branch"));
-            if field(&task, "status") == "running" {
+            let scope = paths_of(&task, "scope");
+            if !scope.is_empty() {
+                println!("  escopo: {scope}");
+            }
+            if field(&task, "status") == "queued" {
+                println!(
+                    "  na fila: o escopo se sobrepõe ao da {}; começa sozinha quando ela for mesclada, descartada ou falhar",
+                    field(&task, "waiting_for")
+                );
+            } else if field(&task, "status") == "running" {
                 println!("  iniciada na worktree {}", field(&task, "worktree"));
                 println!(
                     "  o agente avisa com: ask-agent --task done {id} --file <arquivo>  (o relatório fica em: ask-agent --task show {id})"
@@ -781,6 +831,10 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
                 println!("  inicie com: ask-agent --task start {id}");
             }
         }
+        (_, "start") if field(&task, "status") == "queued" => println!(
+            "Tarefa {id} na fila: o escopo se sobrepõe ao da {}; começa sozinha quando ela for mesclada, descartada ou falhar.",
+            field(&task, "waiting_for")
+        ),
         (_, "start") => println!("Tarefa {id} iniciada: {} trabalha na worktree {}", who(&task), field(&task, "worktree")),
         (_, "merge") => {
             println!("Tarefa {id} mesclada em {}; aguardando validação (o agente, a worktree e a branch continuam).", field(&task, "base"))
@@ -983,6 +1037,7 @@ pronto"
             effort: None,
             base: base.map(String::from),
             start,
+            scope: Vec::new(),
         };
         assert_eq!(task(&["new", "Corrigir login", "-"]), Ok(new("Corrigir login", Body::Stdin, None, None, None, false)));
         assert_eq!(task(&["new", "Corrigir login"]), Ok(new("Corrigir login", Body::Missing, None, None, None, false)));
@@ -1010,8 +1065,26 @@ pronto"
         assert_eq!(effort.as_deref(), Some("high"));
         let TaskCmd::New { effort, .. } = task(&["new", "--effort=low", "T", "-"]).expect("effort=") else { panic!("new") };
         assert_eq!(effort.as_deref(), Some("low"));
+        // `--scope` leva os caminhos até a próxima opção ou um `-`; pode repetir e vale com `=`.
+        let scope_of = |args: &[&str]| match task(args).expect("scope") {
+            TaskCmd::New { scope, brief, .. } => (scope, brief),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            scope_of(&["new", "T", "pedido", "--scope", "crates/core", "crates/cli/src/lib.rs", "--start"]),
+            (vec!["crates/core".to_owned(), "crates/cli/src/lib.rs".to_owned()], Body::Inline("pedido".into()))
+        );
+        assert_eq!(scope_of(&["new", "T", "--scope", "a", "b", "-"]), (vec!["a".to_owned(), "b".to_owned()], Body::Stdin));
+        assert_eq!(
+            scope_of(&["new", "--scope=a", "T", "--scope", "b", "--file", "p.md"]),
+            (vec!["a".to_owned(), "b".to_owned()], Body::File("p.md".into()))
+        );
+        assert!(scope_of(&["new", "T", "-"]).0.is_empty());
         for bad in [
             &["new"][..],
+            &["new", "T", "--scope"],
+            &["new", "T", "--scope", "--start"],
+            &["new", "T", "--scope="],
             &["new", "T", "--effort"],
             &["new", "T", "--effort", "--start"],
             &["new", "-"],
@@ -1102,6 +1175,22 @@ pronto"
         }
         let draft = json!({ "id": "t4", "title": "T", "status": "draft", "instance": "opencode@t4" });
         assert_eq!(task_line(&draft), "t4    rascunho   opencode@t4                T");
+        let queued = json!({
+            "id": "t5", "title": "U", "status": "queued", "instance": "claude@t5", "waiting_for": "t3",
+            "scope": ["crates/core", "crates/cli"], "outside_scope": ["crates/app/x.rs"]
+        });
+        assert_eq!(task_line(&queued), "t5    na fila    claude@t5                  U (espera t3)");
+        let d = task_detail(&queued);
+        for needle in
+            ["Estado: na fila", "Na fila: espera a tarefa t3", "Escopo: crates/core, crates/cli", "mexeu fora do escopo: crates/app/x.rs"]
+        {
+            assert!(
+                d.contains(needle),
+                "{needle}
+{d}"
+            );
+        }
+        assert!(!task_detail(&draft).contains("Escopo:"));
     }
 
     #[test]
