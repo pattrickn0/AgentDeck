@@ -52,6 +52,60 @@ pub struct App {
     /// A janela mudou (tamanho, posição, foco, escala): relê o `viewport_info` no próximo quadro. Ler a cada quadro
     /// custaria várias chamadas ao sistema de janelas, e o terminal pede muitos quadros.
     viewport_stale: bool,
+    /// O trabalho do `Deck` que roda sem quadro, enquanto a janela está escondida ou minimizada.
+    background: Background,
+}
+
+/// Agenda do `Deck::background`: com a janela escondida ou minimizada não há `RedrawRequested` (no Windows, nem
+/// `WM_PAINT`), então entregas, saída dos processos e temporizadores rodam a partir dos eventos do laço. Sem laço
+/// contínuo: roda quando algo acorda o app (`dirty`) ou no prazo que o próprio trabalho devolveu (`next`).
+#[derive(Default)]
+struct Background {
+    /// Algo mudou desde a última vez (evento do core, saída de PTY, prazo do quadro anterior).
+    dirty: bool,
+    /// Próximo prazo devolvido por `Deck::background`.
+    next: Option<Instant>,
+    last: Option<Instant>,
+}
+
+/// Menor intervalo entre duas rodadas por `dirty`: um terminal que despeja saída acorda o app a cada pedaço.
+const BACKGROUND_GAP: Duration = Duration::from_millis(50);
+
+impl Background {
+    fn wake(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Um quadro desenhado faz o mesmo trabalho: a agenda recomeça quando a janela esconder de novo.
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    fn ran(&mut self, now: Instant, next: Option<Instant>) {
+        self.dirty = false;
+        self.last = Some(now);
+        self.next = next;
+    }
+
+    fn due(&self, now: Instant) -> bool {
+        self.deadline(now).is_some_and(|t| now >= t)
+    }
+
+    /// Quando o laço precisa acordar para rodar de novo (`None`: só um evento acorda).
+    fn deadline(&self, now: Instant) -> Option<Instant> {
+        let woken = self.dirty.then(|| self.last.map_or(now, |l| l + BACKGROUND_GAP));
+        [woken, self.next].into_iter().flatten().min()
+    }
+}
+
+/// A janela não recebe quadros: minimizada (0×0 no Windows), com área zero ou escondida. Desenhar assim é pior que inútil:
+/// o `fit_tab` de um terminal de 0×0 estraga o CLI (ver `claude-code-sem-esc3j-no-windows.md`).
+fn hidden_by(minimized: Option<bool>, visible: Option<bool>, size: (u32, u32)) -> bool {
+    minimized == Some(true) || visible == Some(false) || size.0 == 0 || size.1 == 0
+}
+
+fn is_hidden(w: &Window) -> bool {
+    hidden_by(w.is_minimized(), w.is_visible(), w.inner_size().into())
 }
 
 /// Menor tamanho gravado/restaurado: abaixo disso é janela minimizada (0x0 no Windows) ou lixo.
@@ -83,6 +137,7 @@ impl App {
             viewport_info: egui::ViewportInfo::default(),
             viewport_first: true,
             viewport_stale: true,
+            background: Background::default(),
         }
     }
 
@@ -155,7 +210,34 @@ impl App {
         }
     }
 
+    /// Algo mudou: um quadro (que faz o trabalho do `Deck` e desenha) ou, sem quadros, só o trabalho.
+    fn request_work(&mut self) {
+        if self.hidden() {
+            self.background.wake();
+        } else {
+            self.request_redraw();
+        }
+    }
+
+    /// Sem quadros (ver `is_hidden`). Antes do primeiro quadro a janela ainda nasce invisível e precisa ser desenhada.
+    fn hidden(&self) -> bool {
+        self.frames > 0 && self.window().is_some_and(is_hidden)
+    }
+
+    /// O `Deck` trabalha sem quadro e a agenda guarda quando voltar.
+    fn run_background(&mut self) {
+        let now = Instant::now();
+        let next = self.deck.as_mut().and_then(Deck::background);
+        self.background.ran(now, next);
+    }
+
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
+        // Um pedido de quadro que chega com a janela escondida (a minimizada informa 0×0) vira trabalho sem quadro.
+        if self.hidden() {
+            self.run_background();
+            return;
+        }
+        self.background.clear();
         let (Some(glw), Some(gl), Some(egui)) = (self.gl_window.as_ref(), self.gl.as_ref(), self.egui.as_mut()) else { return };
         let mut deck = self.deck.as_mut();
         // Sem isto `viewport().maximized` é sempre `None` (o `EguiGlow` não chama `update_viewport_info`).
@@ -304,11 +386,11 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::Wake => {
                 self.try_init_core(event_loop);
-                self.request_redraw();
+                self.request_work();
             }
             UserEvent::Repaint(delay) => {
                 if delay.is_zero() {
-                    self.request_redraw();
+                    self.request_work();
                 } else if let Some(t) = Instant::now().checked_add(delay) {
                     self.repaint_at = Some(self.repaint_at.map_or(t, |r| r.min(t)));
                 }
@@ -327,6 +409,10 @@ impl ApplicationHandler<UserEvent> for App {
                 | WindowEvent::Occluded(_)
         ) {
             self.viewport_stale = true;
+            // A janela acabou de sumir (minimizar chega como `Resized` 0×0): assume o que o quadro fazia.
+            if self.hidden() {
+                self.background.wake();
+            }
         }
         if self.deck.is_none() {
             match event {
@@ -348,6 +434,11 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CloseRequested => {
                 // Com edição não salva o app pergunta antes (o quadro seguinte sai, se o usuário mandar).
                 deck.request_quit();
+                // Fechar pela barra de tarefas com a janela minimizada: a pergunta (ou a saída) precisa de um quadro.
+                if is_hidden(&glw.window) {
+                    glw.window.set_visible(true);
+                    glw.window.set_minimized(false);
+                }
                 glw.window.request_redraw();
                 return;
             }
@@ -432,10 +523,15 @@ impl ApplicationHandler<UserEvent> for App {
         if let Some(t) = self.repaint_at {
             if now >= t {
                 self.repaint_at = None;
-                self.request_redraw();
+                self.request_work();
             }
         }
-        let deadlines = [self.repaint_at, self.size_persist_at, self.smoke.as_ref().filter(|s| !s.armed).map(|s| s.at)];
+        let hidden = self.hidden();
+        if hidden && self.background.due(now) {
+            self.run_background();
+        }
+        let background = self.background.deadline(now).filter(|_| hidden);
+        let deadlines = [self.repaint_at, self.size_persist_at, self.smoke.as_ref().filter(|s| !s.armed).map(|s| s.at), background];
         match deadlines.into_iter().flatten().min() {
             Some(t) => event_loop.set_control_flow(ControlFlow::WaitUntil(t)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
@@ -936,6 +1032,44 @@ mod tests {
     fn maximized_window_keeps_the_normal_size() {
         assert_eq!(size_to_persist(false, (1280.0, 860.0)), Some((1280.0, 860.0)));
         assert_eq!(size_to_persist(true, (1920.0, 1040.0)), None);
+    }
+
+    #[test]
+    fn a_window_without_area_or_visibility_gets_no_frames() {
+        assert!(!hidden_by(Some(false), Some(true), (1280, 860)));
+        assert!(!hidden_by(None, None, (1280, 860)), "sem resposta do sistema de janelas (Linux/X11): desenha");
+        assert!(hidden_by(Some(true), Some(true), (1280, 860)));
+        assert!(hidden_by(None, None, (0, 0)), "o Windows informa 0×0 para a minimizada");
+        assert!(hidden_by(Some(false), None, (1280, 0)));
+        assert!(hidden_by(Some(false), Some(false), (1280, 860)));
+    }
+
+    #[test]
+    fn the_background_runs_when_woken_or_at_its_deadline_and_never_in_a_loop() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let mut bg = Background::default();
+        assert!(!bg.due(t0) && bg.deadline(t0).is_none(), "nada pedido, nada agendado: o laço dorme");
+
+        // Acordado pela primeira vez: roda já; depois só uma rodada a cada BACKGROUND_GAP, por mais acordes que cheguem.
+        bg.wake();
+        assert!(bg.due(t0 + ms(1)));
+        bg.ran(t0 + ms(1), None);
+        assert!(!bg.due(t0 + ms(2)) && bg.deadline(t0).is_none(), "rodou e nada ficou agendado");
+        bg.wake();
+        bg.wake();
+        assert!(!bg.due(t0 + ms(10)), "acordes em rajada esperam o intervalo");
+        assert_eq!(bg.deadline(t0), Some(t0 + ms(1) + BACKGROUND_GAP));
+        assert!(bg.due(t0 + ms(1) + BACKGROUND_GAP));
+
+        // O prazo devolvido pelo trabalho acorda o laço sem ninguém pedir.
+        bg.ran(t0 + ms(100), Some(t0 + ms(400)));
+        assert!(!bg.due(t0 + ms(399)) && bg.due(t0 + ms(400)));
+        assert_eq!(bg.deadline(t0), Some(t0 + ms(400)));
+
+        // Um quadro desenhado faz esse trabalho e zera a agenda.
+        bg.clear();
+        assert!(!bg.due(t0 + ms(500)) && bg.deadline(t0).is_none());
     }
 
     #[test]

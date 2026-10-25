@@ -31,6 +31,17 @@ A UI fala com o backend apenas via `agentdeck_core::Core` (métodos ≈ canais I
 `CoreEvent` por um `crossbeam_channel::Receiver`, com um `Waker` que acorda o loop do winit
 (`EventLoopProxy`). Operações bloqueantes (listar agentes, transcrição) rodam em threads.
 
+**Trabalho com e sem quadro** (`app/src/app.rs`, `Deck::before_frame`/`Deck::background`). O que a interface faz que não
+depende de pintar (eventos do core, respostas das threads, entregas de `ask-agent` aos terminais, respostas "digitadas
+depois", Enter agendado, fim de turno, temporizadores) é `Deck::work`, chamado de dois jeitos: com a janela à vista, dentro
+do quadro (`before_frame`, que devolve o próximo prazo ao `request_repaint_after` do egui); com a janela escondida,
+minimizada ou sem área (`app::is_hidden`; o Windows informa 0×0 e não manda `WM_PAINT`), por `Deck::background`, a partir de
+`user_event`/`about_to_wait`, sem egui. `app::Background` agenda: roda quando algo acorda o laço (no mínimo 50 ms entre
+rodadas, porque a saída de um terminal acorda o laço a cada pedaço) ou no prazo que a rodada anterior devolveu; sem prazo, o
+laço dorme (`ControlFlow::Wait`). Nunca roda nas duas formas no mesmo instante: `redraw` com a janela escondida só faz o
+`background`, e um quadro desenhado zera a agenda. Sem quadro também não há `fit_tab` (o PTY só muda de tamanho com a janela
+à vista) nem cópia OSC 52 (precisa do `Context`; fica para o próximo quadro).
+
 ## Ponto de extensão para RAG (futuro)
 
 `core::context::ContextProvider` — hoje vazio. O executor headless

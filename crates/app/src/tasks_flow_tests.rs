@@ -1061,3 +1061,85 @@ fn every_document_state_draws_without_trouble() {
         draw_frame(&mut env, vec![]);
     }
 }
+
+/// Roda só o trabalho sem quadro (`Deck::background`, o que o laço faz com a janela escondida ou minimizada) até `done`.
+/// Devolve o último prazo pedido.
+fn background_until(env: &mut Env, what: &str, done: impl Fn(&Deck) -> bool) -> Option<Instant> {
+    let limit = Instant::now() + Duration::from_secs(30);
+    loop {
+        let next = env.deck.background();
+        if done(&env.deck) {
+            return next;
+        }
+        assert!(Instant::now() < limit, "tempo esgotado esperando: {what}");
+        std::thread::sleep(Duration::from_millis(15));
+    }
+}
+
+fn screen_has(deck: &Deck, tab: usize, needle: &str) -> bool {
+    crate::terminal::record::grid_text(&deck.tabs[tab].session.shared.emu.lock()).contains(needle)
+}
+
+#[test]
+fn a_hidden_window_still_types_the_queued_messages_and_the_late_answers_and_never_resizes_the_terminals() {
+    if !git_available() {
+        eprintln!("git não instalado: teste pulado");
+        return;
+    }
+    use agentdeck_core::Delivery;
+    let mut env = Env::start();
+    env.pump("os agentes e o status do git", |d| d.initialized && d.git.status().is_some());
+    crate::theme::install_fonts(&env.ctx);
+    crate::theme::install_style(&env.ctx);
+    let mut out = env.ctx.run_ui(egui::RawInput::default(), |_| {});
+    out.textures_delta.clear();
+    // Um terminal de verdade (o PTY, a saída e o eco são os do sistema) com a janela ainda à vista: um quadro o ajusta.
+    env.deck.open_tab("shell", false);
+    let input =
+        egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 860.0))), ..Default::default() };
+    let Env { deck, ctx, .. } = &mut env;
+    let mut out = ctx.run_ui(input, |ui| crate::ui::draw(deck, ui));
+    out.textures_delta.clear();
+    env.pump("o PTY ter o tamanho", |d| !d.tabs.iter().any(|t| t.resize_pending()));
+    let tab = env.deck.tabs.len() - 1;
+    let (project, ident) = (env.project(), env.deck.tabs[tab].ident.clone());
+    let size = env.deck.tabs[tab].session.size();
+    // O sinal do hook (como o Claude e o Codex fazem) tira a espera do "terminal parado" do caminho.
+    env.deck.on_agent_signal(&project, &ident.id(), true);
+    env.deck.on_agent_signal(&project, &ident.id(), false);
+    let delivery = |prompt: &str, answer: bool| Delivery {
+        request: 0,
+        project: project.clone(),
+        ident: ident.clone(),
+        create: false,
+        from: "outro".into(),
+        prompt: prompt.into(),
+        answer,
+        boot: None,
+    };
+
+    // Janela minimizada: nenhum quadro, só `background`. A mensagem de outro agente é digitada quando a aba fica livre.
+    background_until(&mut env, "o terminal falar", |d| {
+        d.tabs[tab].session.shared.output_seq.load(std::sync::atomic::Ordering::Relaxed) > 0
+    });
+    env.deck.on_deliver(delivery("echo mensagem-minimizada-1", false));
+    background_until(&mut env, "a mensagem ser digitada", |d| screen_has(d, tab, "mensagem-minimizada-1"));
+
+    // A resposta "digitada depois" sai do mesmo jeito. (A aba é de um shell, que a regra recusa por segurança: faz-se
+    // passar por um CLI só para a regra; o PTY continua o de um shell.)
+    env.deck.tabs[tab].kind = "claude".into();
+    background_until(&mut env, "a aba ficar livre", |d| !d.tabs[tab].busy);
+    env.deck.on_deliver(delivery("echo resposta-tardia-2", true));
+    background_until(&mut env, "a resposta ser digitada", |d| screen_has(d, tab, "resposta-tardia-2"));
+
+    // Sem nenhum quadro, o terminal não muda de tamanho nem pede para mudar.
+    assert!(!env.deck.tabs[tab].resize_pending(), "background não ajusta terminais ao tamanho da janela");
+    assert_eq!(env.deck.tabs[tab].session.size(), size);
+
+    // Sem atividade o trabalho acaba: nenhum prazo, e o laço dorme até um evento do core (nada de CPU à toa).
+    let limit = Instant::now() + Duration::from_secs(30);
+    while env.deck.background().is_some() {
+        assert!(Instant::now() < limit, "ainda há prazos agendados com a aba parada");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
