@@ -206,6 +206,15 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         return reply(req, 403, json!({ "error": "host inválido" }));
     }
 
+    // A segunda abertura do app pede que a janela volte (ver `activation`). Só o token mestre, que o app grava junto da
+    // trava da pasta de dados: um agente não traz a janela do usuário para a frente.
+    if *req.method() == Method::Post && req.url() == "/activate" {
+        if !matches!(auth, Auth::Master) {
+            return reply(req, 403, json!({ "error": "só o AgentDeck pode pedir isto" }));
+        }
+        core.emit(CoreEvent::Activate);
+        return reply(req, 200, json!({ "ok": true }));
+    }
     if *req.method() == Method::Get && req.url() == "/agents" {
         let project = match &auth {
             Auth::Agent(c) => c.project.clone(),

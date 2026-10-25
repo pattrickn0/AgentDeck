@@ -160,6 +160,52 @@ fn the_old_token_header_is_refused() {
     assert_eq!(http(port, "GET", "/agents", &host, &token, "").0, 200);
 }
 
+/// Espera o `CoreEvent::Activate` (os outros eventos que chegarem antes são ignorados).
+fn got_activate(env: &Env) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+        match env.rx.recv_timeout(left) {
+            Ok(CoreEvent::Activate) => return true,
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
+/// `/activate` (a segunda abertura do app) só vale com o token mestre: sem token ou com o de um agente a janela
+/// do usuário não vai para a frente.
+#[test]
+fn activate_needs_the_master_token() {
+    let env = start(&[("claude", says("ok"))]);
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+
+    assert_eq!(http(port, "POST", "/activate", &host, "", "").0, 403, "sem token");
+    assert_eq!(http(port, "POST", "/activate", &host, "errado", "").0, 403, "token errado");
+    assert_eq!(http(port, "POST", "/activate", &host, &tab_token(&env, "claude"), "").0, 403, "token de agente");
+    assert!(!got_activate(&env), "nenhuma das recusadas pede a janela");
+
+    assert_eq!(http(port, "POST", "/activate", &host, env.core.bridge_token(), "").0, 200);
+    assert!(got_activate(&env));
+    assert_eq!(http(port, "GET", "/activate", &host, env.core.bridge_token(), "").0, 404, "só POST");
+}
+
+/// A segunda instância acha a ponte da primeira pelo arquivo ao lado da trava e a faz mostrar a janela.
+#[test]
+fn a_second_launch_activates_the_running_instance() {
+    let env = start(&[("claude", says("ok"))]);
+    let data_dir = paths_in(&env.root).data_dir;
+    assert!(agentdeck_core::activation::activate_running(&data_dir));
+    assert!(got_activate(&env));
+
+    // Encerrada, ela solta a trava e apaga o arquivo: não há mais a quem pedir.
+    env.core.shutdown();
+    let Env { core, _tmp, .. } = env;
+    drop(core);
+    assert!(!agentdeck_core::activation::activate_running(&data_dir));
+}
+
 #[test]
 fn auth_and_validation() {
     let env = start(&[("claude", says("ok"))]);
