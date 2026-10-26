@@ -161,7 +161,10 @@ pub(crate) fn start(core: &Core) -> anyhow::Result<(Arc<Server>, u16)> {
             let slot = Active(active.clone());
             let (weak, bodies) = (weak.clone(), bodies.clone());
             // Se a thread não subir, o fechamento é descartado e `slot` libera a vaga.
-            let _ = std::thread::Builder::new().name("cd-bridge-req".into()).spawn(move || handle(weak, req, port, slot, &bodies));
+            // Agents always read English, whatever language the user picked for the app.
+            let _ = std::thread::Builder::new()
+                .name("cd-bridge-req".into())
+                .spawn(move || crate::i18n::english(|| handle(weak, req, port, slot, &bodies)));
         }
     })?;
     Ok((server, port))
@@ -767,18 +770,21 @@ fn detach(
     let core2 = core.clone();
     let project = project.to_owned();
     let target = unscoped(&target_key).1.to_owned();
+    // The late answer goes to an agent too: English, like the request threads.
     let spawned = std::thread::Builder::new().name("cd-bridge-late".into()).spawn(move || {
-        let _slot = slot;
-        let core = core2;
-        let waited = wait_reply(&core, &rx, || reply_deadline(&core, &target_now(&core, request, &target_key), sent));
-        let parties = core.inner.exchange.parties(request);
-        let (asker, target) = match &parties {
-            Some((a, t)) => (Ident::parse(unscoped(a).1).unwrap_or(asker), unscoped(t).1.to_owned()),
-            None => (asker, unscoped(&target_key).1.to_owned()),
-        };
-        let outcome = waited.unwrap_or_else(|| give_up(&core, request, &rx, format!("\"{target}\" não respondeu em 10 minutos")));
-        core.inner.exchange.remove(request);
-        deliver_late(&core, &project, asker, &target, request, outcome);
+        crate::i18n::english(|| {
+            let _slot = slot;
+            let core = core2;
+            let waited = wait_reply(&core, &rx, || reply_deadline(&core, &target_now(&core, request, &target_key), sent));
+            let parties = core.inner.exchange.parties(request);
+            let (asker, target) = match &parties {
+                Some((a, t)) => (Ident::parse(unscoped(a).1).unwrap_or(asker), unscoped(t).1.to_owned()),
+                None => (asker, unscoped(&target_key).1.to_owned()),
+            };
+            let outcome = waited.unwrap_or_else(|| give_up(&core, request, &rx, format!("\"{target}\" não respondeu em 10 minutos")));
+            core.inner.exchange.remove(request);
+            deliver_late(&core, &project, asker, &target, request, outcome);
+        })
     });
     if spawned.is_err() {
         core.inner.exchange.fail(request, "falha interna da ponte");

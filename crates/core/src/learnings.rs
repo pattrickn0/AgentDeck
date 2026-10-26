@@ -4,12 +4,14 @@
 //!
 //! ```text
 //! ---
-//! titulo: Acentos se perdem na entrada padrão do Windows
-//! resumo: PowerShell 5.1 manda stdin em ASCII; texto com acento vai por --file.
+//! title: Acentos se perdem na entrada padrão do Windows
+//! summary: PowerShell 5.1 manda stdin em ASCII; texto com acento vai por --file.
 //! touches: [crates/core/src/bridge.rs, crates/cli/**]
 //! ---
 //! O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
 //! ```
+//!
+//! The old Portuguese keys `titulo:`/`resumo:` are still accepted; `title:`/`summary:` are preferred.
 //!
 //! `touches` são globs relativos à raiz do repositório (`*` não cruza `/`, `**` cruza; um padrão sem `/`
 //! vale para o nome do arquivo em qualquer pasta). Vazio ou ausente = o aprendizado vale para o projeto todo.
@@ -129,8 +131,9 @@ pub fn parse(file: &str, text: &str) -> Result<Learning, String> {
         let Some((key, value)) = line.split_once(':') else { continue };
         let value = value.trim();
         match key.trim() {
-            "titulo" => titulo = unquote(value).to_owned(),
-            "resumo" => resumo = unquote(value).to_owned(),
+            // English keys are the preferred ones; the Portuguese ones from before keep working.
+            "title" | "titulo" => titulo = unquote(value).to_owned(),
+            "summary" | "resumo" => resumo = unquote(value).to_owned(),
             "touches" if value.is_empty() => in_list = true,
             "touches" => {
                 let inner = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')).unwrap_or(value);
@@ -144,7 +147,7 @@ pub fn parse(file: &str, text: &str) -> Result<Learning, String> {
     }
     let (titulo, resumo) = (one_line(&titulo), one_line(&resumo));
     if titulo.is_empty() || resumo.is_empty() {
-        return Err("titulo e resumo são obrigatórios".into());
+        return Err("title e summary (ou titulo e resumo) são obrigatórios".into());
     }
     // Valida antes de normalizar: `normalize_path` tira a `/` inicial e esconderia um caminho absoluto.
     let touches: Vec<String> = touches.iter().map(|g| g.trim().replace('\\', "/")).filter(|g| !g.is_empty()).collect();
@@ -360,8 +363,8 @@ pub fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budg
 const FORMAT_HELP: &str = "Para criar um, grave memory/aprendizados/<nome-curto>.md (um por armadilha, decisão ou convenção que custou tempo e o código não mostra):
 
 ---
-titulo: uma linha
-resumo: uma linha (é o que aparece no índice)
+title: uma linha
+summary: uma linha (é o que aparece no índice)
 touches: [globs/dos/arquivos/**, outro.rs]   # opcional; sem ele vale para o projeto todo
 ---
 O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
@@ -532,6 +535,16 @@ mod tests {
     }
 
     #[test]
+    fn the_header_takes_english_or_portuguese_keys() {
+        for text in ["---\ntitle: A\nsummary: B\n---\nbody", "---\ntitulo: A\nresumo: B\n---\nbody", "---\ntitle: A\nresumo: B\n---\nbody"]
+        {
+            let l = parse("a.md", text).unwrap_or_else(|e| panic!("{text:?}: {e}"));
+            assert_eq!((l.titulo.as_str(), l.resumo.as_str()), ("A", "B"), "{text:?}");
+        }
+        assert!(parse("a.md", "---\ntitle: A\n---\nbody").unwrap_err().contains("summary"));
+    }
+
+    #[test]
     fn touches_can_be_missing_empty_or_a_dash_list() {
         let global = "---\ntitulo: A\nresumo: B\n---\ncorpo";
         assert!(parse("a.md", global).unwrap().is_global());
@@ -669,7 +682,7 @@ mod tests {
         let empty = learn_report(&[], &strings(&["a.rs"]));
         assert!(empty.contains("ainda não tem aprendizados"));
         // Sem aprendizados (projeto novo), o relatório ensina o formato: lá não há `memory/aprendizados/README.md`.
-        assert!(empty.contains("memory/aprendizados/<nome-curto>.md") && empty.contains("titulo:") && empty.contains("resumo:"), "{empty}");
+        assert!(empty.contains("memory/aprendizados/<nome-curto>.md") && empty.contains("title:") && empty.contains("summary:"), "{empty}");
     }
 
     #[test]

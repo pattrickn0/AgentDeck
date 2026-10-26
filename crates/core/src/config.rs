@@ -211,6 +211,8 @@ pub struct Config {
     /// Com o terminal focado, Ctrl+B é do app (barra lateral) em vez de ir ao terminal (prefixo
     /// do tmux); desligado, vai ao terminal. Ctrl+T é sempre do app.
     pub app_shortcuts_first: bool,
+    /// Language of the app's text (`"en"` or `"pt-BR"`); absent or unknown = English. Agents always get English.
+    pub language: crate::i18n::Lang,
     /// Modelo padrão das instâncias novas, por `modelo@cargo` (`claude@dev`) ou só por `modelo`
     /// (`opencode`); o `modelo@cargo` vale mais. Sem entrada, vale o padrão do próprio CLI.
     pub role_models: BTreeMap<String, String>,
@@ -255,6 +257,7 @@ impl Default for Config {
             window_maximized: false,
             auto_open_agent_tabs: true,
             app_shortcuts_first: false,
+            language: crate::i18n::Lang::En,
             role_models: BTreeMap::new(),
             usage_pins: BTreeMap::new(),
             projects: Vec::new(),
@@ -589,6 +592,20 @@ mod tests {
         assert_eq!(read("{\"dictation\": \"no\"}").dictation, DictationChoice::No);
         let text = serde_json::to_string(&Config { dictation: DictationChoice::No, ..Config::default() }).expect("json");
         assert!(text.contains("\"dictation\":\"no\""), "{text}");
+    }
+
+    /// The language: absent (every config saved before it existed) or unknown = English; `"pt-BR"` = Portuguese.
+    #[test]
+    fn the_language_defaults_to_english_and_saves_its_code() {
+        use crate::i18n::Lang;
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        assert_eq!(Config::from_json_over_defaults("{}", &p).language, Lang::En);
+        assert_eq!(Config::from_json_over_defaults("{\"language\": \"pt-BR\"}", &p).language, Lang::PtBr);
+        let odd = Config::from_json_over_defaults("{\"language\": 7, \"whisperLang\": \"es\"}", &p);
+        assert_eq!((odd.language, odd.whisper_lang.as_str()), (Lang::En, "es"), "a bad value keeps the rest of the file");
+        let text = serde_json::to_string(&Config { language: Lang::PtBr, ..Config::default() }).expect("json");
+        assert!(text.contains("\"language\":\"pt-BR\""), "{text}");
     }
 
     #[test]

@@ -118,8 +118,9 @@ fn walk_agy(v: &Value, text: &mut Option<String>, id: &mut Option<String>) {
 impl Core {
     /// Executa `agent` em modo headless e devolve a resposta limpa. BLOQUEANTE.
     /// Equivalente a `runHeadless`.
+    /// The answer and its errors go to an agent: always English (see `i18n::english`), whatever thread calls it.
     pub fn run_headless(&self, agent: &str, prompt: &str, opts: HeadlessOptions) -> anyhow::Result<String> {
-        self.run_headless_with(agent, prompt, opts, &self.inner.state.shutdown)
+        crate::i18n::english(|| self.run_headless_with(agent, prompt, opts, &self.inner.state.shutdown))
     }
 
     pub(crate) fn run_headless_with(
