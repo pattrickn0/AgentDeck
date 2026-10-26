@@ -33,7 +33,10 @@ verificado no Linux, o que falta e como testar à mão estão em [`memory/LINUX.
 2. **Pasta isolada:** cada agente trabalha na pasta do **projeto** em que a aba foi aberta (ou, numa tarefa, na worktree própria dela, `<repo>/.agentdeck/worktrees/<id>`), nunca nos arquivos do app. O app só cria `AGENTS.md` dentro da própria pasta do app (`workspace/`); nas pastas dos projetos só atualiza o bloco de um `AGENTS.md` que já exista, e nunca escreve na pasta pessoal do usuário.
 3. **Ponte local segura:** só `127.0.0.1`, um token aleatório **por processo de agente** (a ponte sabe quem pergunta pelo token) e validação do cabeçalho `Host`. Texto vindo de outro agente nunca vai cru para um terminal (`util::terminal_text`) nem para a linha de comando de um shim `.cmd`.
 4. **UI nunca trava:** tudo que pode bloquear (processos, rede, transcrição) roda em thread.
-5. Textos para o usuário em pt-BR; comentários de código em português.
+5. **Language:** code comments, docs and commit messages in English. User-facing text goes through `t!("English text")`
+   with a pt-BR entry in `crates/core/src/i18n/pt_br/<area>.rs` (the app is English by default, Portuguese is an
+   option). Agent-facing text (`ask-agent` output, instructions, briefs, bridge responses) is English only and never goes
+   through `t!`. See [`memory/aprendizados/i18n-english-key-and-area-files.md`](memory/aprendizados/i18n-english-key-and-area-files.md).
 
 6. **Documentação junto com o código:** mudou comportamento, protocolo ou uma pendência? Atualize o documento
    correspondente em [memory/](memory/GERAL.md) no mesmo commit. Pendência concluída sai de `pendencias.md` e vai para

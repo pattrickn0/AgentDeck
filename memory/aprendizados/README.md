@@ -8,14 +8,15 @@ mesma revisão e mescla que o código. Este `README.md` não conta como aprendiz
 
 ```
 ---
-titulo: Acentos se perdem na entrada padrão do Windows
-resumo: PowerShell 5.1 manda stdin em ASCII; texto com acento vai por --file.
+title: Accents are lost on the Windows standard input
+summary: PowerShell 5.1 sends stdin as ASCII; text with accents goes through --file.
 touches: [crates/core/src/bridge.rs, crates/cli/**]
 ---
-O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
+The fact, then **Why:** and **How to apply:** in a few lines.
 ```
 
-- `titulo` e `resumo`: uma linha cada, obrigatórios. O resumo é o que aparece no índice.
+- `title` and `summary` (preferred, in English) or the old `titulo` and `resumo`: one line each, required. The summary is
+  what shows in the index. New learnings are written in English.
 - `touches`: globs relativos à raiz do repositório, em lista (`[a, b]`) ou em itens `- a`. `*` não cruza pasta, `**`
   cruza; um padrão sem `/` (`*.rs`) vale para o nome do arquivo em qualquer pasta. Vazio ou ausente = vale para o
   projeto todo.
