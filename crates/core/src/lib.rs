@@ -26,6 +26,7 @@ pub mod git;
 pub mod github;
 pub mod headless;
 pub mod highlight;
+pub mod i18n;
 pub mod inbox;
 pub mod instances;
 pub mod learnings;
@@ -255,6 +256,8 @@ impl Core {
             None => Config::load_from(&config::config_candidates(&paths), &paths, &home),
         };
         config.fix_workspace(&paths, &home);
+        // Before the first frame: the UI reads the language on every `t!`.
+        i18n::set_lang(config.language);
         let providers = context::Providers::default();
         let inner = CoreInner {
             config: RwLock::new(config),
@@ -365,6 +368,8 @@ impl Core {
         let snapshot = {
             let mut cfg = self.inner.config.write();
             f(&mut cfg);
+            // The language switches the moment the config changes (the UI is redrawn every frame).
+            i18n::set_lang(cfg.language);
             cfg.clone()
         };
         if self.inner.config_read_only.load(Ordering::SeqCst) {

@@ -234,6 +234,7 @@ mínima do Rust).
 4. Nada que bloqueia roda na thread da interface. (CONTRIBUTING)
 5. Privacidade: áudio apagado logo após a transcrição; anexos e prompts guardados só para as últimas 5 sessões;
    nunca criar `AGENTS.md` na pasta pessoal do usuário. (CONTRIBUTING, dados/README)
-6. Textos para o usuário e comentários de código em português. (CONTRIBUTING)
+6. Code comments, docs and commit messages in English; user-facing text through `t!` with a pt-BR entry; agent-facing
+   text in English only. (CONTRIBUTING, aprendizados/i18n-english-key-and-area-files.md)
 7. Documentação junto com o código: mudou comportamento, protocolo ou pendência, atualize o `.md`
    correspondente em `memory/` no mesmo commit; item concluído de `pendencias.md` vai para `historico.md`. (este documento)

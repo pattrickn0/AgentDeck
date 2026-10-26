@@ -1,6 +1,6 @@
-//! Barra de título própria (a janela não tem decoração do sistema e a barra não tem fundo): menu ☰,
-//! botão da barra lateral, marca, a chave Agentes | Documentos (só com a barra lateral recolhida),
-//! projeto e branch, o uso das assinaturas e minimizar/maximizar/fechar.
+//! The app's own title bar (the window has no system decoration and the bar has no background): ☰ menu,
+//! sidebar button, logo, the Agents | Documents switch (only with the sidebar collapsed),
+//! project and branch, subscription usage and minimize/maximize/close.
 
 use egui::{Align2, CursorIcon, Id, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand};
 
@@ -8,31 +8,32 @@ use super::{chip, clickable, galley, galley_spaced, place, tip};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
+use agentdeck_core::t;
 
 pub struct Anchors {
     pub settings_anchor: Rect,
-    /// Âncora do menu de novo agente quando a linha da barra lateral não está à vista (Ctrl+T com a barra recolhida).
+    /// Anchor of the new-agent menu when the sidebar's row is not in view (Ctrl+T with the sidebar collapsed).
     pub fallback_anchor: Rect,
 }
 
-/// Largura de cada botão da janela (minimizar, maximizar, fechar).
+/// Width of each window button (minimize, maximize, close).
 const WIN_BTN_W: f32 = 40.0;
-/// Tamanho dos glifos dos botões da janela.
+/// Size of the window buttons' glyphs.
 const WIN_GLYPH: f32 = 9.0;
-/// Espessura das faixas de redimensionar nas bordas da janela.
+/// Thickness of the resize strips on the window edges.
 const RESIZE_EDGE: f32 = 5.0;
-/// Botões de ícone da esquerda (menu, barra lateral).
+/// Icon buttons on the left (menu, sidebar).
 const ICON_BTN: Vec2 = Vec2::new(26.0, 24.0);
-/// Espaço entre os itens da esquerda.
+/// Space between the items on the left.
 const GAP: f32 = 8.0;
 
-/// A branch a mostrar na etiqueta: o nome, ou o início do commit com o HEAD solto.
+/// The branch to show on the chip: its name, or the start of the commit with a detached HEAD.
 fn branch_label(deck: &Deck) -> Option<String> {
     let st = deck.git.status()?;
     st.branch.clone().or_else(|| st.head.as_deref().map(|h| h.chars().take(7).collect()))
 }
 
-/// Botão de ícone da barra (26×24, cantos 5, fundo `hover`). Devolve a resposta e se está aceso.
+/// Icon button of the bar (26×24, corners 5, `hover` background). Returns the response and whether it is lit.
 fn icon_button(ui: &Ui, painter: &egui::Painter, rect: Rect, id: &str, lit: bool) -> (egui::Response, bool) {
     let r = clickable(ui, rect, Id::new(id));
     let hot = r.hovered() || lit;
@@ -49,7 +50,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
     let cy = rect.center().y;
 
-    // ---------- Área de arrastar (por baixo de tudo: os botões, criados depois, ganham o clique) ----------
+    // ---------- Drag area (under everything: the buttons, created later, win the click) ----------
     let drag = ui.interact(rect, Id::new("titlebar-drag"), Sense::click_and_drag());
     if drag.double_clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
@@ -57,7 +58,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
     }
 
-    // ---------- ☰ Menu (configurações) ----------
+    // ---------- ☰ Menu (settings) ----------
     let mut x = rect.min.x + theme::ISLAND_GAP + 2.0;
     let menu = Rect::from_min_size(Pos2::new(x, cy - ICON_BTN.y / 2.0), ICON_BTN);
     let (r, hot) = icon_button(ui, &painter, menu, "settings-btn", deck.settings_open);
@@ -66,24 +67,24 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         let y = menu.center().y + dy;
         painter.line_segment([Pos2::new(menu.center().x - 5.5, y), Pos2::new(menu.center().x + 5.5, y)], Stroke::new(1.5, c));
     }
-    if tip(r, "Menu").clicked() {
+    if tip(r, t!("Menu")).clicked() {
         deck.settings_open = !deck.settings_open;
         deck.new_tab_menu_open = false;
     }
     x = menu.max.x + GAP;
 
-    // ---------- Barra lateral (recolher/expandir) ----------
+    // ---------- Sidebar (collapse/expand) ----------
     let toggle = Rect::from_min_size(Pos2::new(x, cy - ICON_BTN.y / 2.0), ICON_BTN);
     let (r, hovered) = icon_button(ui, &painter, toggle, "sidebar-toggle", false);
     let expanded = 1.0 - ctx.animate_bool_with_time(Id::new("sidebar-toggle-anim"), deck.sidebar_collapsed, 0.15);
     paint_sidebar_icon(&painter, toggle.center(), if hovered { p.text } else { p.text_2 }, expanded);
-    let title = if deck.sidebar_collapsed { "Expandir barra lateral (Ctrl+B)" } else { "Recolher barra lateral (Ctrl+B)" };
+    let title = if deck.sidebar_collapsed { t!("Expand sidebar (Ctrl+B)") } else { t!("Collapse sidebar (Ctrl+B)") };
     if tip(r, title).clicked() {
         deck.toggle_sidebar();
     }
     x = toggle.max.x + GAP;
 
-    // ---------- Separador, marca, nome do app, projeto e branch ----------
+    // ---------- Separator, logo, app name, project and branch ----------
     super::separator(&painter, Pos2::new(x + 0.5, cy - 8.0), Pos2::new(x + 0.5, cy + 8.0));
     x += 1.0 + GAP;
     deck.icons.paint(&painter, Icon::AgentDeck, Pos2::new(x + 8.0, cy), 16.0, p.text_strong, 0.0);
@@ -103,15 +104,15 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
             x = chip(&painter, Pos2::new(x, cy), &branch, 10.5, p.text_soft).max.x;
         }
     }
-    // Com a barra lateral recolhida a chave Agentes | Documentos volta para cá, compacta e depois do nome do
-    // projeto (aberta, ela é a primeira coisa da barra lateral).
+    // With the sidebar collapsed the Agents | Documents switch comes back here, compact and after the
+    // project name (expanded, it is the first thing in the sidebar).
     if deck.sidebar_collapsed {
         let size = Vec2::new(super::docs::switch_compact_width(&painter, deck), super::docs::SWITCH_COMPACT_H);
         super::docs::switch(deck, ui, Rect::from_min_size(Pos2::new(x + GAP, cy - size.y / 2.0), size), "title-center");
         x += GAP + size.x + GAP;
     }
 
-    // ---------- Botões da janela ----------
+    // ---------- Window buttons ----------
     let close = Rect::from_min_max(Pos2::new(rect.max.x - WIN_BTN_W, rect.min.y), rect.max);
     let max_btn = close.translate(Vec2::new(-WIN_BTN_W, 0.0));
     let min_btn = max_btn.translate(Vec2::new(-WIN_BTN_W, 0.0));
@@ -126,7 +127,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         deck.close_requested = true;
     }
 
-    // ---------- Uso das assinaturas (à esquerda dos botões da janela) ----------
+    // ---------- Subscription usage (left of the window buttons) ----------
     let usage = Rect::from_min_max(Pos2::new(x + 12.0, rect.min.y), Pos2::new(min_btn.min.x - 6.0, rect.max.y));
     if usage.width() > 0.0 {
         super::usage::draw(deck, ui, usage);
@@ -139,8 +140,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     Anchors { settings_anchor: menu, fallback_anchor: Rect::from_min_size(Pos2::new(toggle.max.x, rect.max.y), Vec2::new(34.0, 0.0)) }
 }
 
-/// Ícone "painel lateral": janela arredondada (12×10) com a coluna da esquerda, preenchida conforme a
-/// barra está aberta (`expanded` de 0 a 1, animado).
+/// "Side panel" icon: a rounded window (12×10) with the left column, filled as far as the
+/// bar is open (`expanded` from 0 to 1, animated).
 fn paint_sidebar_icon(painter: &egui::Painter, center: Pos2, color: egui::Color32, expanded: f32) {
     let frame = Rect::from_center_size(center, Vec2::new(12.0, 10.0));
     let col = Rect::from_min_max(frame.min, Pos2::new(frame.min.x + 4.0, frame.max.y));
@@ -161,7 +162,7 @@ enum Glyph {
     Close,
 }
 
-/// Botão da janela (largura `WIN_BTN_W`, altura da barra). Devolve `true` no clique.
+/// Window button (`WIN_BTN_W` wide, as tall as the bar). Returns `true` on a click.
 fn window_button(ui: &Ui, painter: &egui::Painter, rect: Rect, id: &str, glyph: Glyph, danger: bool) -> bool {
     let r = ui.interact(rect, Id::new(id), Sense::click());
     let hot = r.hovered();
@@ -186,7 +187,7 @@ fn window_button(ui: &Ui, painter: &egui::Painter, rect: Rect, id: &str, glyph: 
             painter.rect_stroke(Rect::from_center_size(ctr, Vec2::splat(WIN_GLYPH)), 1.0, s, egui::StrokeKind::Inside);
         }
         Glyph::Restore => {
-            // Dois quadrados sobrepostos: o de trás só aparece acima e à direita.
+            // Two overlapping squares: the one behind only shows above and to the right.
             let front = Rect::from_center_size(ctr + Vec2::new(-1.0, 1.0), Vec2::splat(WIN_GLYPH - 2.0));
             painter.rect_stroke(front, 1.0, s, egui::StrokeKind::Inside);
             let (x0, y0, x1, y1) = (front.min.x + 2.0, front.min.y - 2.0, front.max.x + 2.0, front.max.y - 2.0);
@@ -201,16 +202,16 @@ fn window_button(ui: &Ui, painter: &egui::Painter, rect: Rect, id: &str, glyph: 
         }
     }
     let label = match glyph {
-        Glyph::Minimize => "Minimizar",
-        Glyph::Maximize => "Maximizar",
-        Glyph::Restore => "Restaurar",
-        Glyph::Close => "Fechar",
+        Glyph::Minimize => t!("Minimize"),
+        Glyph::Maximize => t!("Maximize"),
+        Glyph::Restore => t!("Restore"),
+        Glyph::Close => t!("Close"),
     };
     tip(r, label).clicked()
 }
 
-/// Faixas nas bordas e cantos da janela para redimensionar (sem decoração, o sistema não oferece).
-/// Cada uma numa camada de primeiro plano: ficam acima da barra direita e dos terminais.
+/// Strips on the window's edges and corners to resize it (without decoration, the system offers none).
+/// Each one on a foreground layer: they sit above the right bar and the terminals.
 fn resize_edges(ctx: &egui::Context) {
     let s = ctx.content_rect();
     let e = RESIZE_EDGE;

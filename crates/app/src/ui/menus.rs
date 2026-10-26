@@ -1,18 +1,19 @@
-//! Menus suspensos: nova aba (+) e configurações (☰).
+//! Drop-down menus: new tab (+) and settings (☰).
 
 use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
 
-use agentdeck_core::models;
+use agentdeck_core::i18n::{self, Lang};
+use agentdeck_core::{models, t};
 
 use super::{button, button_danger, button_width, dot, frame, section_label, separator, shadow, text_in, text_w, ButtonKind};
 use crate::deck::Deck;
 use crate::dictation::Setup;
 use crate::theme;
 
-/// Posição do canto superior esquerdo para um menu `size` não sair da tela (pelos lados e por
-/// baixo: ancorado embaixo na barra lateral, um menu comprido sobe).
-/// (Não usar `Area::constrain`: ele desloca o menu depois que `closes_on_outside` já calculou o
-/// retângulo, e o clique num item passa a contar como "fora", fechando o menu antes de escolher.)
+/// Top-left corner that keeps a menu of `size` on screen (on the sides and at the bottom: anchored
+/// low in the sidebar, a long menu goes up).
+/// (Do not use `Area::constrain`: it moves the menu after `closes_on_outside` has computed the
+/// rectangle, and a click on an item then counts as "outside", closing the menu before the choice.)
 pub(super) fn keep_on_screen(ctx: &egui::Context, pos: Pos2, size: Vec2) -> Pos2 {
     let screen = ctx.content_rect();
     Pos2::new(
@@ -21,32 +22,32 @@ pub(super) fn keep_on_screen(ctx: &egui::Context, pos: Pos2, size: Vec2) -> Pos2
     )
 }
 
-/// Fecha o menu se houve clique fora dele e da âncora (`document.addEventListener('click')`).
+/// Closes the menu on a click outside it and outside the anchor (`document.addEventListener('click')`).
 pub(super) fn closes_on_outside(ctx: &egui::Context, menu: Rect, anchor: Rect) -> bool {
     ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !menu.contains(p) && !anchor.contains(p)))
 }
 
-/// O agente deixa escolher o modelo no menu de novo agente (o Codex não tem lista para mostrar).
+/// The agent lets the new-agent menu pick its model (Codex has no list to show).
 pub fn picks_model(kind: &str) -> bool {
     matches!(kind, "claude" | "antigravity" | "opencode")
 }
 
-/// Aviso no lugar da lista quando não há modelos para mostrar.
+/// Notice in place of the list when there are no models to show.
 fn models_status(loading: bool, empty: bool) -> Option<&'static str> {
     match (loading, empty) {
-        (true, true) => Some("Carregando modelos…"),
-        (false, true) => Some("Sem lista de modelos: só o padrão"),
+        (true, true) => Some(t!("Loading models…")),
+        (false, true) => Some(t!("No model list: default only")),
         _ => None,
     }
 }
 
-/// Altura máxima da lista de modelos (a do OpenCode tem dezenas).
+/// Maximum height of the model list (OpenCode's has dozens).
 const MODELS_MAX_H: f32 = 300.0;
-/// Largura da seta "›" que abre a escolha de modelo na linha do agente.
+/// Width of the "›" arrow that opens the model choice on the agent's row.
 const CHEVRON_W: f32 = 28.0;
 
-/// `#new-tab-menu`: os agentes; nos que escolhem modelo, a seta à direita abre o segundo passo
-/// (padrão + modelos conhecidos). Clicar no nome abre o agente com o modelo padrão.
+/// `#new-tab-menu`: the agents; on those that pick a model, the arrow on the right opens the second step
+/// (default + known models). Clicking the name opens the agent with the default model.
 pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     if !deck.new_tab_menu_open {
         deck.new_tab_models_for = None;
@@ -58,7 +59,7 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     }
     let items = deck.agents.new_tab_menu.clone();
     let items = if items.is_empty() {
-        // Antes da primeira listagem: só o terminal (fallback do renderer).
+        // Before the first listing: only the terminal (the renderer's fallback).
         vec![crate::agents::MenuItem { kind: "shell".into(), label: crate::agents::shell_label(None), color: theme::SHELL }]
     } else {
         items
@@ -111,7 +112,7 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             if let Some(a) = arrow_resp {
                 let ar = Rect::from_min_max(Pos2::new(r.max.x - CHEVRON_W, r.min.y), r.max);
                 text_in(p, ar, Align2::CENTER_CENTER, "›", theme::ui(14.0), if arrow_hot { pal.text } else { pal.text_2 });
-                if super::tip(a, format!("Escolher o modelo de {}", m.label)).clicked() {
+                if super::tip(a, t!("Choose the model for {agent}", agent = &m.label)).clicked() {
                     pick_model_of = Some(m.kind.clone());
                 }
             }
@@ -134,14 +135,14 @@ pub fn new_tab_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     }
 }
 
-/// Uma linha de um passo do menu de modelo.
+/// One row of a step of the model menu.
 struct StepRow {
     label: String,
-    /// Modelo sem custo por token ("grátis", em verde).
+    /// Model with no per-token cost ("free", in green).
     free: bool,
-    /// Quantos modelos o provedor tem ("N modelos", em cinza); 0 = nada.
+    /// How many models the provider has ("N models", in gray); 0 = nothing.
     count: usize,
-    /// Abre o passo seguinte ("›").
+    /// Opens the next step ("›").
     submenu: bool,
     enabled: bool,
 }
@@ -151,20 +152,22 @@ impl StepRow {
         Self { label: label.into(), free: false, count: 0, submenu: false, enabled: true }
     }
 
-    /// O texto discreto à direita e a cor.
+    /// The quiet text on the right and its color.
     fn detail(&self) -> Option<(String, Color32)> {
         if self.count > 0 {
-            Some((format!("{} modelo{}", self.count, if self.count == 1 { "" } else { "s" }), theme::pal().text_2))
+            let count = self.count;
+            let text = if count == 1 { t!("1 model").to_owned() } else { t!("{count} models", count) };
+            Some((text, theme::pal().text_2))
         } else if self.free {
-            Some(("grátis".to_owned(), theme::pal().success))
+            Some((t!("free").to_owned(), theme::pal().success))
         } else {
             None
         }
     }
 }
 
-/// O que aconteceu num passo do menu: escolheu uma linha, voltou ao passo anterior, fechou tudo ou
-/// nada (o menu continua aberto).
+/// What happened in a menu step: a row was chosen, it went back to the previous step, everything closed, or
+/// nothing (the menu stays open).
 enum StepOutcome {
     Chosen(usize),
     Back,
@@ -172,7 +175,7 @@ enum StepOutcome {
     Pending,
 }
 
-/// Um passo do menu: o cabeçalho "‹ título" volta ao passo anterior e as linhas são as escolhas.
+/// One menu step: the "‹ title" header goes back to the previous step and the rows are the choices.
 fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title: &str, rows: &[StepRow]) -> StepOutcome {
     let font = theme::ui(12.0);
     let painter = ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::new("measure")));
@@ -197,7 +200,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, pal.shadow);
         frame(ui.painter(), rect, 8.0, pal.popup, pal.glass_border);
-        // Cabeçalho: "‹ título" volta um passo.
+        // Header: "‹ title" goes back one step.
         let head = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, rect.min.y + 4.0), Vec2::new(w - 8.0, head_h));
         let resp = super::clickable(ui, head, Id::new((id, "back")));
         if resp.hovered() {
@@ -220,7 +223,7 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
             theme::ui_semibold(12.0),
             pal.text_strong,
         );
-        if super::tip(resp, "Voltar").clicked() {
+        if super::tip(resp, t!("Back")).clicked() {
             back = true;
         }
         separator(ui.painter(), Pos2::new(rect.min.x + 8.0, head.max.y + 0.5), Pos2::new(rect.max.x - 8.0, head.max.y + 0.5));
@@ -280,11 +283,11 @@ fn step_menu(ctx: &egui::Context, anchor: Rect, id: &str, color: Color32, title:
     StepOutcome::Pending
 }
 
-/// Segundo passo do menu de novo agente: "Padrão" e os modelos conhecidos de `kind`. Quando o CLI
-/// mistura provedores (`opencode models`), o primeiro passo é o provedor e o segundo, os modelos dele;
-/// com um provedor só, os modelos aparecem direto.
+/// Second step of the new-agent menu: "Default" and the known models of `kind`. When the CLI
+/// mixes providers (`opencode models`), the first step is the provider and the second, its models;
+/// with a single provider, the models show up directly.
 fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
-    // A lista chega de uma thread: pede de novo se ainda não veio (ou venceu).
+    // The list comes from a thread: ask again if it has not arrived yet (or expired).
     deck.request_models(kind);
     let (models, loading) = deck.models_of(kind);
     let models: Vec<String> = models.to_vec();
@@ -297,15 +300,15 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
         deck.new_tab_provider = None;
     };
 
-    // Claude e Antigravity: a lista de sempre ("Padrão" + modelos).
+    // Claude and Antigravity: the usual list ("Default" + models).
     if groups.is_empty() {
         let flat = models::free_first(&models);
-        let mut rows = vec![StepRow::new("Padrão")];
+        let mut rows = vec![StepRow::new(t!("Default"))];
         rows.extend(flat.iter().map(|m| StepRow { free: models::is_free(m), ..StepRow::new(m.as_str()) }));
         if let Some(text) = models_status(loading, models.is_empty()) {
             rows.push(StepRow { enabled: false, ..StepRow::new(text) });
         }
-        match step_menu(ctx, anchor, "new-tab-models", color, &format!("{name} · modelo"), &rows) {
+        match step_menu(ctx, anchor, "new-tab-models", color, &t!("{agent} · model", agent = name), &rows) {
             StepOutcome::Chosen(0) => {
                 close_all(deck);
                 deck.open_tab_with_model(kind, None, false);
@@ -322,8 +325,8 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
         return;
     }
 
-    // OpenCode: o provedor escolhido fica no estado do menu; sem ele, o passo é a lista de provedores.
-    // Com um provedor só não há o que escolher: os modelos dele aparecem direto (sem "‹ Provedores").
+    // OpenCode: the chosen provider lives in the menu state; without it, the step is the list of providers.
+    // With a single provider there is nothing to choose: its models show up directly (no "‹ Providers").
     let sole = models::sole_provider(&groups).map(str::to_owned);
     let chosen = deck.new_tab_provider.clone().filter(|p| groups.iter().any(|(g, _)| g == p)).or(sole.clone());
     if let Some(provider) = chosen {
@@ -338,7 +341,7 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
             }
             StepOutcome::Back => {
                 if sole.is_some() {
-                    // Não houve passo dos provedores: o cabeçalho volta à lista de agentes.
+                    // There was no providers step: the header goes back to the list of agents.
                     deck.new_tab_models_for = None;
                 } else {
                     deck.new_tab_provider = None;
@@ -351,7 +354,7 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
     }
     let rows: Vec<StepRow> =
         groups.iter().map(|(provider, list)| StepRow { count: list.len(), submenu: true, ..StepRow::new(provider.as_str()) }).collect();
-    match step_menu(ctx, anchor, "new-tab-providers", color, &format!("{name} · provedor"), &rows) {
+    match step_menu(ctx, anchor, "new-tab-providers", color, &t!("{agent} · provider", agent = name), &rows) {
         StepOutcome::Chosen(i) => deck.new_tab_provider = Some(groups[i].0.clone()),
         StepOutcome::Back => deck.new_tab_models_for = None,
         StepOutcome::Closed => close_all(deck),
@@ -362,7 +365,7 @@ fn models_step(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, kind: &str) {
 /// `#settings-menu`
 pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     if !deck.settings_open {
-        // A confirmação de remover o ditado vale só enquanto o menu está aberto.
+        // The confirmation to remove dictation only lasts while the menu is open.
         deck.dictation_confirm_remove = false;
         return;
     }
@@ -370,21 +373,24 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     let title_h = super::SECTION_LABEL_H;
     let item_h = 26.0;
     let btn_h = 28.0;
-    // O ditado por voz é opcional: uma linha de estado e um botão para baixar ou remover.
-    let h = 6.0 + title_h + 2.0 + item_h * 3.0 + 13.0 + btn_h + 13.0 + item_h + btn_h + 8.0;
-    // O botão ☰ fica no canto esquerdo da barra de título: o menu abre alinhado a ele.
+    // Four rows (three switches and the language), then the test button; voice dictation is optional: a
+    // status row and a button to download or remove it.
+    let h = 6.0 + title_h + 2.0 + item_h * 4.0 + 13.0 + btn_h + 13.0 + item_h + btn_h + 8.0;
+    // The ☰ button sits in the left corner of the title bar: the menu opens aligned with it.
     let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x + 4.0, anchor.max.y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut toggle = false;
     let mut toggle_tabs = false;
     let mut toggle_keys = false;
     let mut test = false;
+    let mut language = None;
     let mut dictation_click = false;
     let setup = deck.dictation_setup();
     let confirm_remove = deck.dictation_confirm_remove;
     let sound = deck.sound_enabled;
     let auto_tabs = deck.auto_open_agent_tabs;
     let app_keys = deck.app_shortcuts_first;
+    let current_lang = i18n::lang();
     let pal = theme::pal();
     Area::new(Id::new("settings-menu")).order(Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
@@ -392,64 +398,82 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         shadow(p, rect, 8, 8, 24, pal.shadow);
         frame(p, rect, 8.0, pal.popup, pal.glass_border);
         let inner = rect.shrink2(Vec2::new(6.0, 6.0));
-        section_label(p, Rect::from_min_size(Pos2::new(rect.min.x, inner.min.y), Vec2::new(rect.width(), title_h)), "CONFIGURAÇÕES");
+        section_label(p, Rect::from_min_size(Pos2::new(rect.min.x, inner.min.y), Vec2::new(rect.width(), title_h)), t!("SETTINGS"));
 
-        // Item 1: Sons de notificação
+        // Item 1: notification sounds
         let item = Rect::from_min_size(Pos2::new(inner.min.x, inner.min.y + title_h + 2.0), Vec2::new(inner.width(), item_h));
         let r = super::clickable(ui, item, Id::new("setting-sound"));
         if r.hovered() {
             p.rect_filled(item, 5.0, pal.hover);
         }
-        text_in(p, item.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Sons de notificação", theme::ui(12.0), pal.text);
+        text_in(p, item.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Notification sounds"), theme::ui(12.0), pal.text);
         let cb = Rect::from_center_size(Pos2::new(item.max.x - 15.0, item.center().y), Vec2::splat(14.0));
         checkbox(p, cb, sound);
         if r.clicked() {
             toggle = true;
         }
 
-        // Item 2: Abrir abas dos agentes
+        // Item 2: open agent tabs
         let item2 = Rect::from_min_size(Pos2::new(inner.min.x, item.max.y), Vec2::new(inner.width(), item_h));
         let r = super::clickable(ui, item2, Id::new("setting-auto-tabs"));
         if r.hovered() {
             p.rect_filled(item2, 5.0, pal.hover);
         }
-        text_in(p, item2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Abrir abas dos agentes", theme::ui(12.0), pal.text);
+        text_in(p, item2.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Open agent tabs"), theme::ui(12.0), pal.text);
         let cb2 = Rect::from_center_size(Pos2::new(item2.max.x - 15.0, item2.center().y), Vec2::splat(14.0));
         checkbox(p, cb2, auto_tabs);
         if r.clicked() {
             toggle_tabs = true;
         }
 
-        // Item 3: Atalhos do app acima do terminal
+        // Item 3: app shortcuts above the terminal
         let item3 = Rect::from_min_size(Pos2::new(inner.min.x, item2.max.y), Vec2::new(inner.width(), item_h));
         let r = super::clickable(ui, item3, Id::new("setting-app-keys"));
         if r.hovered() {
             p.rect_filled(item3, 5.0, pal.hover);
         }
-        text_in(p, item3.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Atalhos do app acima do terminal", theme::ui(12.0), pal.text);
+        text_in(
+            p,
+            item3.shrink2(Vec2::new(8.0, 0.0)),
+            Align2::LEFT_CENTER,
+            t!("App shortcuts above the terminal"),
+            theme::ui(12.0),
+            pal.text,
+        );
         let cb3 = Rect::from_center_size(Pos2::new(item3.max.x - 15.0, item3.center().y), Vec2::splat(14.0));
         checkbox(p, cb3, app_keys);
         if r.clicked() {
             toggle_keys = true;
         }
-        super::tip(r, "Ligado: Ctrl+B é do app mesmo com o terminal focado. Desligado: vai para o terminal (prefixo do tmux).");
+        super::tip(r, t!("On: Ctrl+B belongs to the app even when the terminal is focused. Off: it goes to the terminal (tmux prefix)."));
 
-        separator(p, Pos2::new(inner.min.x + 4.0, item3.max.y + 6.5), Pos2::new(inner.max.x - 4.0, item3.max.y + 6.5));
+        // Item 4: language. The language names stay in their own language, so anyone can find theirs.
+        let item4 = Rect::from_min_size(Pos2::new(inner.min.x, item3.max.y), Vec2::new(inner.width(), item_h));
+        text_in(p, item4.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Language"), theme::ui(12.0), pal.text);
+        let seg =
+            Rect::from_min_max(Pos2::new(item4.max.x - 4.0 - 140.0, item4.min.y + 2.0), Pos2::new(item4.max.x - 4.0, item4.max.y - 2.0));
+        const LANGS: [Lang; 2] = [Lang::En, Lang::PtBr];
+        let selected = LANGS.iter().position(|&l| l == current_lang).unwrap_or(0);
+        if let Some(i) = super::segmented(ui, seg, Id::new("setting-language"), &["English", "Português"], selected, false) {
+            language = Some(LANGS[i]);
+        }
 
-        // ▶ Testar som
-        let btn = Rect::from_min_size(Pos2::new(inner.min.x + 2.0, item3.max.y + 13.0), Vec2::new(inner.width() - 4.0, btn_h));
-        if button(ui, btn, Id::new("setting-test-sound"), "▶ Testar som", ButtonKind::Secondary).clicked() {
+        separator(p, Pos2::new(inner.min.x + 4.0, item4.max.y + 6.5), Pos2::new(inner.max.x - 4.0, item4.max.y + 6.5));
+
+        // ▶ Test sound
+        let btn = Rect::from_min_size(Pos2::new(inner.min.x + 2.0, item4.max.y + 13.0), Vec2::new(inner.width() - 4.0, btn_h));
+        if button(ui, btn, Id::new("setting-test-sound"), t!("▶ Test sound"), ButtonKind::Secondary).clicked() {
             test = true;
         }
 
-        // Ditado por voz (Whisper local): baixar depois, ou apagar para liberar o espaço.
+        // Voice dictation (local Whisper): download it later, or delete it to free the space.
         separator(p, Pos2::new(inner.min.x + 4.0, btn.max.y + 6.5), Pos2::new(inner.max.x - 4.0, btn.max.y + 6.5));
         let row = Rect::from_min_size(Pos2::new(inner.min.x, btn.max.y + 13.0), Vec2::new(inner.width(), item_h));
-        text_in(p, row.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Ditado por voz", theme::ui(12.0), pal.text);
+        text_in(p, row.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Voice dictation"), theme::ui(12.0), pal.text);
         let (status, status_color) = match setup {
-            Setup::Ready => ("instalado", pal.success),
-            Setup::Downloading => ("baixando…", pal.text_3),
-            Setup::NotInstalled => ("não instalado", pal.text_3),
+            Setup::Ready => (t!("installed"), pal.success),
+            Setup::Downloading => (t!("downloading…"), pal.text_3),
+            Setup::NotInstalled => (t!("not installed"), pal.text_3),
         };
         text_in(p, row.shrink2(Vec2::new(8.0, 0.0)), Align2::RIGHT_CENTER, status, theme::meta(10.5), status_color);
         let action = Rect::from_min_size(Pos2::new(inner.min.x + 2.0, row.max.y), Vec2::new(inner.width() - 4.0, btn_h));
@@ -461,23 +485,23 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
                     p,
                     action.shrink2(Vec2::new(6.0, 0.0)),
                     Align2::LEFT_CENTER,
-                    "O progresso está na barra direita.",
+                    t!("Progress is shown in the right bar."),
                     theme::ui(11.5),
                     pal.text_3,
                 );
             }
             Setup::NotInstalled => {
-                let r = button(ui, action, id, &format!("Baixar ({size})"), ButtonKind::Secondary);
-                dictation_click |= super::tip(r, "Baixa o Whisper para ditar por voz; o áudio fica no computador.").clicked();
+                let r = button(ui, action, id, &t!("Download ({size})", size), ButtonKind::Secondary);
+                dictation_click |= super::tip(r, t!("Downloads Whisper for voice dictation; the audio stays on this computer.")).clicked();
             }
             Setup::Ready if confirm_remove => {
-                let r = button_danger(ui, action, id, "Confirmar: apagar do disco");
-                dictation_click |= super::tip(r, "Apaga o modelo e o motor CUDA. Dá para baixar de novo depois.").clicked();
+                let r = button_danger(ui, action, id, t!("Confirm: delete from disk"));
+                dictation_click |= super::tip(r, t!("Deletes the model and the CUDA engine. You can download them again later.")).clicked();
             }
             Setup::Ready => {
-                let r = button(ui, action, id, "Remover do disco", ButtonKind::Secondary);
+                let r = button(ui, action, id, t!("Remove from disk"), ButtonKind::Secondary);
                 dictation_click |=
-                    super::tip(r, format!("Apaga o Whisper ({size}) para liberar espaço; dá para baixar de novo.")).clicked();
+                    super::tip(r, t!("Deletes Whisper ({size}) to free up space; you can download it again.", size)).clicked();
             }
         }
     });
@@ -496,6 +520,10 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         let v = deck.app_shortcuts_first;
         deck.core.update_config(|c| c.app_shortcuts_first = v);
     }
+    if let Some(lang) = language {
+        // `update_config` applies the language at once: the next frame is already in it.
+        deck.core.update_config(|c| c.language = lang);
+    }
     if test {
         deck.play_sound(true);
     }
@@ -512,7 +540,7 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     }
 }
 
-/// Checkbox com `accent-color` dinâmico.
+/// Checkbox with a dynamic `accent-color`.
 fn checkbox(p: &egui::Painter, r: Rect, checked: bool) {
     let pal = theme::pal();
     if checked {
@@ -528,31 +556,31 @@ fn checkbox(p: &egui::Painter, r: Rect, checked: bool) {
     }
 }
 
-/// Menu de contexto ao clicar com botão direito numa aba.
+/// Context menu on a right click on a tab.
 pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     let Some((idx, pos)) = deck.tab_context_menu else { return };
     if idx >= deck.tabs.len() {
         deck.tab_context_menu = None;
         return;
     }
-    // Quando a instância tem modelo de LLM, ele aparece no alto (só leitura: trocar com a aba aberta
-    // exigiria reiniciar o agente).
+    // When the instance has an LLM model, it shows at the top (read only: changing it with the tab open
+    // would require restarting the agent).
     let model = deck.tabs[idx].model.clone();
     let recording = deck.tabs[idx].session.recording();
-    // (ação, texto, dica): "Gravar" e "Foto" são o diagnóstico do terminal (ver `terminal/record.rs`).
+    // (action, text, hint): "Record" and "Snapshot" are the terminal diagnostics (see `terminal/record.rs`).
     let items: [(TabAction, &str, Option<&str>); 4] = [
-        (TabAction::Rename, "Renomear", None),
+        (TabAction::Rename, t!("Rename"), None),
         (
             TabAction::Record,
-            if recording { "Parar de gravar o terminal" } else { "Gravar o terminal (diagnóstico)" },
-            Some("Guarda o que o programa desta aba escreve no terminal, para achar defeitos de tela. Ocupa disco enquanto ligado."),
+            if recording { t!("Stop recording the terminal") } else { t!("Record the terminal (diagnostics)") },
+            Some(t!("Keeps what this tab's program writes to the terminal, to track down display bugs. Uses disk space while on.")),
         ),
         (
             TabAction::Snapshot,
-            "Salvar foto da grade agora",
-            Some("Salva o texto que o terminal tem agora (tela e histórico) e abre a pasta. Use quando a tela ficar errada."),
+            t!("Save a snapshot of the grid now"),
+            Some(t!("Saves the text the terminal holds now (screen and history) and opens the folder. Use it when the screen goes wrong.")),
         ),
-        (TabAction::Close, "Fechar", None),
+        (TabAction::Close, t!("Close"), None),
     ];
     let w = 250.0;
     let item_h = 26.0;
@@ -572,7 +600,7 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         if let Some(m) = &model {
             let r0 = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, top), Vec2::new(w - 8.0, item_h));
             top += item_h;
-            let g = super::galley_trunc(p, &format!("Modelo: {m}"), theme::meta(10.5), pal.text_3, r0.width() - 16.0);
+            let g = super::galley_trunc(p, &t!("Model: {model}", model = m), theme::meta(10.5), pal.text_3, r0.width() - 16.0);
             super::place(p, r0.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, g, pal.text_3);
             separator(p, Pos2::new(r0.min.x + 4.0, r0.max.y - 0.5), Pos2::new(r0.max.x - 4.0, r0.max.y - 0.5));
         }
@@ -585,7 +613,7 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
             if resp.hovered() {
                 p.rect_filled(r, 5.0, pal.hover);
             }
-            // O diagnóstico ligado fica visível no próprio item: bolinha na cor de perigo, como um "REC".
+            // Diagnostics on show in the item itself: danger color, like a "REC".
             let color = if *what == TabAction::Record && recording { pal.danger_text } else { pal.text };
             text_in(p, r.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, label, font.clone(), color);
             if resp.clicked() {
@@ -620,7 +648,7 @@ enum TabAction {
     Close,
 }
 
-/// Modal para renomear um agente / instância (formato modelo@cargo@nome).
+/// Modal to rename an agent / instance (format model@role@name).
 pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
     let Some((idx, mut buffer, error)) = deck.rename_tab.clone() else { return };
     if idx >= deck.tabs.len() {
@@ -645,8 +673,8 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         frame(&p, r, 10.0, pal.popup, pal.glass_border);
 
         let mut y = r.min.y + 14.0;
-        // Título (13 px 600)
-        let title_g = super::galley(&p, "Renomear Agente", theme::ui_semibold(13.0), pal.text_strong);
+        // Title (13 px 600)
+        let title_g = super::galley(&p, t!("Rename Agent"), theme::ui_semibold(13.0), pal.text_strong);
         super::place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 16.0, y), Vec2::new(w - 32.0, 18.0)),
@@ -656,8 +684,8 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         );
         y += 22.0;
 
-        // Explicação
-        let hint_g = super::galley(&p, "Formato: modelo@cargo@nome (ex: claude@dev ou antigravity@lead)", theme::ui(11.5), pal.text_2);
+        // Explanation
+        let hint_g = super::galley(&p, t!("Format: model@role@name (e.g. claude@dev or antigravity@lead)"), theme::ui(11.5), pal.text_2);
         super::place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 16.0, y), Vec2::new(w - 32.0, 16.0)),
@@ -667,7 +695,7 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         );
         y += 22.0;
 
-        // Caixa de texto (recess, borda separator e accent no foco)
+        // Text box (recess, separator border and accent on focus)
         let input_id = Id::new("rename-tab-input");
         let focused = ui.ctx().memory(|m| m.has_focus(input_id));
         let input_r = Rect::from_min_size(Pos2::new(r.min.x + 16.0, y), Vec2::new(w - 32.0, 28.0));
@@ -693,7 +721,7 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
         }
         y += 34.0;
 
-        // Erro se houver
+        // The error, if any
         if let Some(err) = &error {
             let err_g = super::galley_trunc(&p, err, theme::ui(11.5), pal.danger_text, w - 32.0);
             super::place(
@@ -706,17 +734,17 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
             y += 20.0;
         }
 
-        // Botões Cancelar e Salvar
+        // Cancel and Save buttons
         let btn_h = 26.0;
-        let save_w = button_width(&p, "Salvar", ButtonKind::Primary);
-        let cancel_w = button_width(&p, "Cancelar", ButtonKind::Secondary);
+        let save_w = button_width(&p, t!("Save"), ButtonKind::Primary);
+        let cancel_w = button_width(&p, t!("Cancel"), ButtonKind::Secondary);
         let save_r = Rect::from_min_size(Pos2::new(r.max.x - 16.0 - save_w, y), Vec2::new(save_w, btn_h));
         let cancel_r = Rect::from_min_size(Pos2::new(save_r.min.x - 8.0 - cancel_w, y), Vec2::new(cancel_w, btn_h));
 
-        if button(ui, cancel_r, Id::new("rename-cancel-btn"), "Cancelar", ButtonKind::Secondary).clicked() {
+        if button(ui, cancel_r, Id::new("rename-cancel-btn"), t!("Cancel"), ButtonKind::Secondary).clicked() {
             close = true;
         }
-        if button(ui, save_r, Id::new("rename-save-btn"), "Salvar", ButtonKind::Primary).clicked() {
+        if button(ui, save_r, Id::new("rename-save-btn"), t!("Save"), ButtonKind::Primary).clicked() {
             apply = true;
         }
     });
@@ -735,8 +763,8 @@ pub fn rename_tab_modal(deck: &mut Deck, ctx: &egui::Context) {
     }
 }
 
-/// A pergunta do ditado por voz: na primeira abertura (sem Whisper baixado) e quando se clica no microfone sem ele.
-/// "Agora não" (ou Esc) grava o "não" e nada é baixado; só o botão de baixar começa o download.
+/// The voice dictation question: on the first launch (no Whisper downloaded) and on a click on the microphone without it.
+/// "Not now" (or Esc) saves the "no" and nothing is downloaded; only the download button starts the download.
 pub fn dictation_modal(deck: &mut Deck, ctx: &egui::Context) {
     if !deck.dictation_prompt {
         return;
@@ -746,16 +774,18 @@ pub fn dictation_modal(deck: &mut Deck, ctx: &egui::Context) {
     let w = 400.0;
     let pad = 20.0;
     let size = crate::dictation::DOWNLOAD_SIZE;
-    let intro = "Fale em vez de digitar: o AgentDeck transcreve a sua voz aqui no computador, sem enviar o áudio para a internet.";
-    let detail = format!(
-        "Para isso ele baixa o Whisper (modelo e motor de transcrição): {size}, e mais uns 700 MB do motor CUDA se houver uma placa NVIDIA. \
-         O download roda em segundo plano e o progresso aparece na barra direita."
+    let intro =
+        t!("Speak instead of typing: AgentDeck transcribes your voice on this computer, without sending the audio over the internet.");
+    let detail = t!(
+        "To do that it downloads Whisper (transcription model and engine): {size}, plus about 700 MB of the CUDA engine if there is an NVIDIA card. \
+         The download runs in the background and progress appears in the right bar.",
+        size
     );
-    let later = "Você pode baixar ou remover o ditado depois, em Configurações.";
+    let later = t!("You can download or remove dictation later, in Settings.");
     let mut accept = false;
     let mut decline = ctx.input(|i| i.key_pressed(Key::Escape));
 
-    // O texto quebra em linhas: mede antes para saber a altura do cartão.
+    // The text wraps: measure it first to know the card's height.
     let measure = ctx.fonts_mut(|f| {
         let mut lay = |t: &str, font: egui::FontId| f.layout(t.to_owned(), font, pal.text_2, w - pad * 2.0).size().y;
         (lay(intro, theme::ui(12.0)), lay(&detail, theme::ui(12.0)), lay(later, theme::ui(11.5)))
@@ -768,7 +798,7 @@ pub fn dictation_modal(deck: &mut Deck, ctx: &egui::Context) {
         shadow(&p, r, 10, 8, 24, pal.shadow);
         frame(&p, r, 10.0, pal.popup, pal.glass_border);
         let mut y = r.min.y + 14.0;
-        let title = super::galley(&p, "Ditado por voz (opcional)", theme::ui_semibold(13.0), pal.text_strong);
+        let title = super::galley(&p, t!("Voice dictation (optional)"), theme::ui_semibold(13.0), pal.text_strong);
         super::place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + pad, y), Vec2::new(w - pad * 2.0, 18.0)),
@@ -786,12 +816,12 @@ pub fn dictation_modal(deck: &mut Deck, ctx: &egui::Context) {
             y += h + 8.0;
         }
         y += 10.0;
-        let download = format!("Baixar ({size})");
+        let download = t!("Download ({size})", size);
         let accept_w = button_width(&p, &download, ButtonKind::Primary);
-        let decline_w = button_width(&p, "Agora não", ButtonKind::Secondary);
+        let decline_w = button_width(&p, t!("Not now"), ButtonKind::Secondary);
         let accept_r = Rect::from_min_size(Pos2::new(r.max.x - pad - accept_w, y), Vec2::new(accept_w, 28.0));
         let decline_r = Rect::from_min_size(Pos2::new(accept_r.min.x - 8.0 - decline_w, y), Vec2::new(decline_w, 28.0));
-        if button(ui, decline_r, Id::new("dictation-decline-btn"), "Agora não", ButtonKind::Secondary).clicked() {
+        if button(ui, decline_r, Id::new("dictation-decline-btn"), t!("Not now"), ButtonKind::Secondary).clicked() {
             decline = true;
         }
         if button(ui, accept_r, Id::new("dictation-accept-btn"), &download, ButtonKind::Primary).clicked() {
@@ -821,9 +851,11 @@ mod tests {
 
     #[test]
     fn the_status_line_explains_an_empty_list() {
-        assert_eq!(models_status(true, true), Some("Carregando modelos…"));
-        assert_eq!(models_status(false, true), Some("Sem lista de modelos: só o padrão"));
-        assert_eq!(models_status(false, false), None);
-        assert_eq!(models_status(true, false), None, "com a lista antiga na tela, atualiza em silêncio");
+        i18n::english(|| {
+            assert_eq!(models_status(true, true), Some("Loading models…"));
+            assert_eq!(models_status(false, true), Some("No model list: default only"));
+            assert_eq!(models_status(false, false), None);
+            assert_eq!(models_status(true, false), None, "with the old list on screen, it updates silently");
+        });
     }
 }
