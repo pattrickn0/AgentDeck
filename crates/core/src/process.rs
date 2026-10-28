@@ -1,5 +1,5 @@
-//! Execução de processos filhos com captura de saída, timeout, cancelamento e registro
-//! para encerramento em massa (fechamento da janela).
+//! Child process execution with output capture, timeout, cancellation and registry
+//! for bulk termination (window closing).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
-/// Processos headless em execução (equivalente ao `Set running` do main.js).
+/// Running headless processes (equivalent to main.js `Set running`).
 #[derive(Default)]
 pub(crate) struct ProcessRegistry {
     next_id: AtomicU64,
@@ -29,7 +29,7 @@ impl ProcessRegistry {
         self.children.lock().remove(&id);
     }
 
-    /// Mata todos os processos registrados (e seus descendentes).
+    /// Kills all registered processes (and their descendants).
     pub fn kill_all(&self) {
         let list: Vec<Arc<Mutex<Child>>> = self.children.lock().values().cloned().collect();
         for child in list {
@@ -38,10 +38,10 @@ impl ProcessRegistry {
     }
 }
 
-/// Como o processo terminou.
+/// How the process terminated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Exit {
-    /// Saiu sozinho (código `None` = encerrado por sinal / morto externamente).
+    /// Exited on its own (`None` code = terminated by signal / killed externally).
     Code(Option<i32>),
     TimedOut,
     Cancelled,
@@ -54,8 +54,8 @@ pub(crate) struct Captured {
     pub exit: Exit,
 }
 
-/// Configura flags de plataforma: sem janela de console no Windows; grupo de processos
-/// próprio no Unix (para matar a árvore e não receber o Ctrl+C do terminal).
+/// Configures platform flags: no console window on Windows; own process group
+/// on Unix (to kill the tree without receiving terminal Ctrl+C).
 pub(crate) fn platform_flags(cmd: &mut Command) {
     #[cfg(windows)]
     {
@@ -70,9 +70,9 @@ pub(crate) fn platform_flags(cmd: &mut Command) {
     }
 }
 
-/// Windows: Job Object com `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` para os processos headless. O
-/// handle só fecha quando o app termina (inclusive se cair), e aí o sistema mata o job inteiro
-/// (o agente e o que ele abriu): nada fica órfão rodando sem a interface.
+/// Windows: Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` for headless processes. The
+/// handle only closes when the app terminates (even if it crashes), and the system kills the whole job
+/// (the agent and whatever it launched): nothing is left running orphaned without the UI.
 #[cfg(windows)]
 mod job {
     use std::os::windows::io::AsRawHandle;
@@ -85,23 +85,23 @@ mod job {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
 
-    /// Handle de um job (só usado por chamadas do sistema, que aceitam qualquer thread).
+    /// Job handle (only used by system calls, which accept any thread).
     pub(super) struct Job(pub(super) HANDLE);
-    // SAFETY: um handle de job é um valor opaco do kernel, válido em qualquer thread.
+    // SAFETY: a job handle is an opaque kernel value, valid on any thread.
     unsafe impl Send for Job {}
     unsafe impl Sync for Job {}
 
     impl Drop for Job {
         fn drop(&mut self) {
-            // SAFETY: o handle é deste `Job` e fecha uma vez só (o do app é estático e nunca cai aqui).
+            // SAFETY: the handle belongs to this `Job` and closes once (the app's job is static and never dropped here).
             unsafe { CloseHandle(self.0) };
         }
     }
 
-    /// Cria um job que mata os processos dele quando o último handle fecha.
+    /// Creates a job that kills its processes when the last handle closes.
     pub(super) fn kill_on_close() -> Option<Job> {
-        // SAFETY: chamadas Win32 com ponteiros nulos (sem nome, segurança padrão) e uma estrutura
-        // zerada do tamanho informado; o handle é fechado se a configuração falhar.
+        // SAFETY: Win32 calls with null pointers (unnamed, default security) and a
+        // zeroed struct of the reported size; the handle is closed if configuration fails.
         unsafe {
             let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if h.is_null() {
@@ -119,21 +119,21 @@ mod job {
     }
 
     pub(super) fn assign(job: &Job, child: &Child) -> bool {
-        // SAFETY: o handle do processo vale enquanto `child` existe; o do job, enquanto `job` existe.
+        // SAFETY: process handle is valid while `child` exists; job handle while `job` exists.
         unsafe { AssignProcessToJobObject(job.0, child.as_raw_handle() as HANDLE) != 0 }
     }
 
-    /// Põe o processo no job do app (criado na primeira vez e nunca fechado).
+    /// Puts the process in the app job (created on first use and never closed).
     pub(super) fn adopt(child: &Child) {
         static APP_JOB: OnceLock<Option<Job>> = OnceLock::new();
         match APP_JOB.get_or_init(kill_on_close) {
             Some(job) if assign(job, child) => {}
-            _ => log::warn!("não consegui pôr o processo {} no job do app", child.id()),
+            _ => log::warn!("could not assign process {} to the app job", child.id()),
         }
     }
 }
 
-/// Mata o processo e seus descendentes (melhor esforço).
+/// Kills the process and its descendants (best effort).
 pub(crate) fn kill_tree(child: &mut Child) {
     #[cfg(windows)]
     {
@@ -145,7 +145,7 @@ pub(crate) fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
     {
         if let Ok(pid) = i32::try_from(child.id()) {
-            // SAFETY: `kill` só envia um sinal ao grupo de processos criado por `process_group(0)`.
+            // SAFETY: `kill` only sends a signal to the process group created by `process_group(0)`.
             unsafe {
                 libc::kill(-pid, libc::SIGKILL);
             }
@@ -154,8 +154,8 @@ pub(crate) fn kill_tree(child: &mut Child) {
     let _ = child.kill();
 }
 
-/// Lê `r` até o fim guardando no máximo `max` bytes (o resto é lido e descartado, para o
-/// processo não travar com o pipe cheio).
+/// Reads `r` to the end keeping at most `max` bytes (the rest is read and discarded, so the
+/// process does not hang on a full pipe).
 fn spawn_reader<R: Read + Send + 'static>(mut r: R, buf: Arc<Mutex<Vec<u8>>>, max: usize) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut chunk = [0u8; 8192];
@@ -172,7 +172,7 @@ fn spawn_reader<R: Read + Send + 'static>(mut r: R, buf: Arc<Mutex<Vec<u8>>>, ma
     })
 }
 
-/// Saída em bytes (ver [`run_captured_raw`]).
+/// Byte output (see [`run_captured_raw`]).
 #[derive(Debug)]
 pub(crate) struct CapturedRaw {
     pub stdout: Vec<u8>,
@@ -180,8 +180,8 @@ pub(crate) struct CapturedRaw {
     pub exit: Exit,
 }
 
-/// Executa `cmd` capturando stdout/stderr. `stdin`: `Some` = escreve e fecha; `None` = nulo.
-/// Encerra a árvore do processo no timeout ou quando `cancel` vira `true`.
+/// Executes `cmd` capturing stdout/stderr. `stdin`: `Some` = writes and closes; `None` = null.
+/// Terminates process tree on timeout or when `cancel` becomes `true`.
 pub(crate) fn run_captured(
     cmd: Command,
     stdin: Option<Vec<u8>>,
@@ -195,8 +195,8 @@ pub(crate) fn run_captured(
     Ok(Captured { stdout, stderr, exit: raw.exit })
 }
 
-/// Como [`run_captured`], com a saída em bytes e no máximo `max_out` bytes de cada fluxo (ex.: o
-/// diff de um arquivo enorme não ocupa a memória toda).
+/// Like [`run_captured`], with output in bytes and at most `max_out` bytes from each stream (e.g. a
+/// massive file diff does not consume all memory).
 pub(crate) fn run_captured_raw(
     mut cmd: Command,
     stdin: Option<Vec<u8>>,
@@ -209,7 +209,7 @@ pub(crate) fn run_captured_raw(
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     platform_flags(&mut cmd);
     let mut child = cmd.spawn()?;
-    // Processos registrados (headless) morrem com o app, mesmo se ele cair.
+    // Registered (headless) processes die with the app, even if it crashes.
     #[cfg(windows)]
     if registry.is_some() {
         job::adopt(&child);
@@ -225,7 +225,7 @@ pub(crate) fn run_captured_raw(
         readers.push(spawn_reader(err, err_buf.clone(), max_out.max(64 * 1024)));
     }
     if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
-        // Thread própria: um prompt grande não pode travar a leitura da saída.
+        // Dedicated thread: a large prompt must not block output reading.
         std::thread::spawn(move || {
             let _ = pipe.write_all(&data);
         });
@@ -256,7 +256,7 @@ pub(crate) fn run_captured_raw(
         r.remove(id);
     }
 
-    // Netos podem manter os pipes abertos; não esperamos por eles indefinidamente.
+    // Grandchildren may hold pipes open; we do not wait for them indefinitely.
     let deadline = Instant::now() + Duration::from_secs(2);
     for h in readers {
         while !h.is_finished() && Instant::now() < deadline {
@@ -279,14 +279,14 @@ mod windows_tests {
     fn closing_the_job_kills_its_processes() {
         let job = job::kill_on_close().expect("job");
         let mut cmd = Command::new("cmd");
-        // ~60 s de ping: terminar em menos de 10 s só acontece se o job o matou.
+        // ~60 s ping: finishing in under 10 s only happens if the job killed it.
         cmd.args(["/d", "/c", "ping -n 60 127.0.0.1 >nul"]).stdout(Stdio::null()).stderr(Stdio::null());
         platform_flags(&mut cmd);
         let mut child = cmd.spawn().expect("spawn");
         assert!(job::assign(&job, &child));
-        assert!(child.try_wait().expect("try_wait").is_none(), "ainda rodando");
+        assert!(child.try_wait().expect("try_wait").is_none(), "still running");
 
-        drop(job); // como o app caindo: o último handle do job fecha
+        drop(job); // like the app crashing: the last job handle closes
         let deadline = Instant::now() + Duration::from_secs(10);
         let status = loop {
             if let Some(s) = child.try_wait().expect("try_wait") {
@@ -298,8 +298,8 @@ mod windows_tests {
             std::thread::sleep(Duration::from_millis(20));
         };
         let _ = child.kill();
-        // (o sistema encerra os processos de um job fechado com o código 0)
-        assert!(status.is_some(), "o processo deveria morrer com o job");
+        // (the system terminates processes of a closed job with code 0)
+        assert!(status.is_some(), "process should die with the job");
     }
 
     #[test]
@@ -333,7 +333,7 @@ mod tests {
         cmd.args(["-c", "head -c 300000 /dev/zero; echo fim >&2"]);
         let c = run_captured_raw(cmd, None, Duration::from_secs(10), None, None, 1000).expect("run");
         assert_eq!(c.stdout.len(), 1000);
-        assert_eq!(c.exit, Exit::Code(Some(0)), "o processo terminou: o resto foi lido e descartado");
+        assert_eq!(c.exit, Exit::Code(Some(0)), "process terminated: the rest was read and discarded");
         assert_eq!(String::from_utf8_lossy(&c.stderr).trim(), "fim");
     }
 
