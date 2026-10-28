@@ -272,7 +272,7 @@ fn the_scope_flag_queues_an_overlapping_task_and_shows_it() {
     // Escopo inválido: a ponte recusa e nada é criado.
     let out = run(&core, None, &["--task", "new", "Ruim", "pedido", "--scope", "crates/*.rs"], "");
     assert_eq!(out.status.code(), Some(1));
-    assert!(text(&out.stderr).contains("não de padrões"), "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("not patterns (glob)"), "{}", text(&out.stderr));
     assert_eq!(run(&core, None, &["--task", "new", "Ruim", "--scope"], "").status.code(), Some(2));
     assert_eq!(core.tasks(&project).len(), 2);
     core.shutdown();
