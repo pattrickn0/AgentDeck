@@ -1,240 +1,238 @@
-# AgentDeck: visão geral
+# AgentDeck: overview
 
-Ponto de partida da documentação, para pessoas e para agentes de IA que trabalham no projeto. Ele explica
-**como o AgentDeck funciona por dentro** (a "ambientação" em que os agentes rodam), **o que dá para fazer**
-com ele e **quais regras cada documento define**. Os detalhes técnicos ficam nos outros arquivos desta pasta.
+Starting point of the documentation, for humans and for AI agents working on the project. It explains
+**how AgentDeck works under the hood** (the "environment" where agents run), **what you can do**
+with it, and **which rules each document defines**. Technical details are in the other files in this folder.
 
-| Documento | Leia quando |
+| Document | Read when |
 | :-- | :-- |
-| [AGENTDECK.md](AGENTDECK.md) | quiser saber para onde o produto vai, os princípios e a ordem do que vem a seguir |
-| [GERAL.md](GERAL.md) (este) | quiser o mapa geral e o que dá para fazer no app |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | for mexer na ponte, nas abas, nas instâncias, nas tarefas ou no protocolo entre agentes |
-| [MANUTENCAO.md](MANUTENCAO.md) | for compilar, testar, achar um arquivo ou seguir uma receita (ex.: novo agente) |
-| [pendencias.md](pendencias.md) | quiser saber os próximos passos (no máximo 10, na ordem em que serão feitos) |
-| [ideias.md](ideias.md) | quiser ver as ideias sem data e as limitações conhecidas (o que não está entre os próximos passos) |
-| [historico.md](historico.md) | quiser saber o que já foi feito (o destino de todo item concluído de pendencias.md) |
-| [testes.md](testes.md) | for testar à mão, no Windows, com os agentes reais (roteiro com caixas de marcar) |
-| [LINUX.md](LINUX.md) | for compilar, rodar ou testar no Linux (Ubuntu e Fedora) e quiser saber o que já foi verificado e o que falta |
+| [AGENTDECK.md](AGENTDECK.md) | you want to know where the product is headed, principles, and the order of what comes next |
+| [GERAL.md](GERAL.md) (this file) | you want the general map and what can be done in the app |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | you are going to work on the bridge, tabs, instances, tasks, or the inter-agent protocol |
+| [MANUTENCAO.md](MANUTENCAO.md) | you are going to compile, test, find a file, or follow a recipe (e.g., new agent) |
+| [pendencias.md](pendencias.md) | you want to know the next steps (at most 10, in the order they will be done) |
+| [ideias.md](ideias.md) | you want to see undated ideas and known limitations (what is not among the next steps) |
+| [historico.md](historico.md) | you want to know what has already been done (the destination of every completed item from pendencias.md) |
+| [testes.md](testes.md) | you are testing by hand on Windows with real agents (checklist walkthrough) |
+| [LINUX.md](LINUX.md) | you are compiling, running, or testing on Linux (Ubuntu and Fedora) and want to know what has been verified and what is pending |
 
 ---
 
-## 1. Ambientação: como o AgentDeck funciona
+## 1. Environment: how AgentDeck works
 
-### O app
+### The app
 
-Terminal desktop nativo em Rust (winit + egui). São dois executáveis, que precisam ficar **na mesma pasta**:
+Native desktop terminal in Rust (winit + egui). There are two executables, which must remain **in the same folder**:
 
-- `agentdeck` (crate `app`): a janela, as abas de terminal e a barra lateral direita (mesa de tarefas, Conversa
-  integrada, Git e GitHub);
-- `ask-agent` (crate `cli`): o comando que os agentes usam para conversar entre si e operar tarefas.
+- `agentdeck` (crate `app`): the window, the terminal tabs, and the right sidebar (tasks desk, integrated Conversation,
+  Git, and GitHub);
+- `ask-agent` (crate `cli`): the command agents use to talk to each other and operate tasks.
 
-O "backend" é a crate `core`, sem interface. A interface só fala com ele pelos métodos de `Core` e recebe de
-volta eventos `CoreEvent`.
+The "backend" is the `core` crate, with no UI. The UI only talks to it via `Core` methods and receives
+`CoreEvent` events back.
 
-### Pastas
+### Folders
 
-| Pasta | Conteúdo |
+| Folder | Contents |
 | :-- | :-- |
-| `workspace/` | o workspace antigo, do tempo em que havia uma pasta global. Hoje cada **projeto** tem a sua pasta (o `cwd` das abas dele); `workspace/` só serve de destino na migração de uma config antiga |
-| `dados/` | dados de execução: anexos (`anexos/`), prompts (`prompts/`), hooks (`hooks/`), instruções (`agentdeck-instructions.md`, `agy/<instância>/AGENTS.md`), tarefas (`tarefas/<projeto>.json` e `*-brief.md`/`-feedback.md`), sessões, `usage.json`, `crash.log`, `agentdeck.log` (gira acima de 2 MB), trava `.agentdeck.lock` e `.agentdeck.bridge` |
-| `whisper/` | motor e modelos do ditado por voz (whisper.cpp) |
-| `%APPDATA%\AgentDeck\config.json` | configuração (na primeira abertura, copiada de `%APPDATA%\CommandDeck\config.json`, se existir). Com `AGENTDECK_HOME`, tudo fica dentro dessa pasta |
+| `workspace/` | the legacy workspace, from the time when there was a global folder. Today each **project** has its own folder (the `cwd` of its tabs); `workspace/` only serves as a migration target from an old config |
+| `dados/` | runtime data: attachments (`anexos/`), prompts (`prompts/`), hooks (`hooks/`), instructions (`agentdeck-instructions.md`, `agy/<instance>/AGENTS.md`), tasks (`tarefas/<projeto>.json` and `*-brief.md`/`-feedback.md`), sessions, `usage.json`, `crash.log`, `agentdeck.log` (rotates above 2 MB), lock `.agentdeck.lock` and `.agentdeck.bridge` |
+| `whisper/` | engine and models for voice dictation (whisper.cpp) |
+| `%APPDATA%\AgentDeck\config.json` | configuration (on first run, copied from `%APPDATA%\CommandDeck\config.json` if it exists). With `AGENTDECK_HOME`, everything stays inside that folder |
 
-**Uma janela por pasta de dados:** abrir o app de novo com o mesmo `dados/` traz a instância viva de volta (`POST /activate`)
-e sai em silêncio; o × da janela esconde na bandeja (ou minimiza sem bandeja) e quem encerra é o menu do ícone. Para outra
-instância isolada, use `AGENTDECK_HOME`.
+**One window per data folder:** opening the app again with the same `dados/` brings the live instance back (`POST /activate`)
+and exits silently; the window × hides to the system tray (or minimizes without a tray) and exit is handled by the icon menu. For another
+isolated instance, use `AGENTDECK_HOME`.
 
-### Abas são instâncias
+### Tabs are instances
 
-Cada aba é uma **instância** com nome `modelo[@cargo[@nome]]`:
+Each tab is an **instance** named `model[@role[@name]]`:
 
-- `claude`: a instância principal do modelo;
-- `claude@dev`: uma instância com cargo;
-- `claude@dev@ana`: a segunda instância do mesmo modelo e cargo, que ganha um nome.
+- `claude`: the main instance of the model;
+- `claude@dev`: an instance with a role;
+- `claude@dev@ana`: a second instance of the same model and role, which gets a name.
 
-Além do nome, cada instância tem o **modelo de LLM** (`sonnet`, `opus`…), que não faz parte do id: aparece ao lado
-do nome na aba e na barra lateral, e escolhe-se por `ask-agent --model`, pelo menu "+ Novo agente" (a seta `›` do
-Claude, do Antigravity e do OpenCode lista os modelos; no OpenCode, por provedor) ou pelo padrão `roleModels` da
-configuração (`{"claude@dev": "sonnet"}`; `modelo@cargo` vale mais que `modelo`).
+In addition to the name, each instance has an **LLM model** (`sonnet`, `opus`…), which is not part of the id: it appears next to
+the name on the tab and in the sidebar, and is chosen via `ask-agent --model`, the "+ New agent" menu (the `›` arrow for
+Claude, Antigravity, and OpenCode lists models; in OpenCode, by provider), or by the `roleModels` default in the
+configuration (`{"claude@dev": "sonnet"}`; `model@role` takes precedence over `model`).
 
-O nome é o endereço usado pelo `ask-agent`. As abas voltam com o mesmo nome e modelo quando o app reabre.
+The name is the address used by `ask-agent`. Tabs return with the same name and model when the app reopens.
 
-### O ambiente de cada aba
+### The environment of each tab
 
-| Variável | O que é |
+| Variable | What it is |
 | :-- | :-- |
-| `AGENTDECK_AGENT` | o nome da instância (`claude@dev`) |
-| `AGENTDECK_ROLE` | o cargo, quando há |
-| `AGENTDECK_PORT` | porta da ponte HTTP local (só em `127.0.0.1`) |
-| `AGENTDECK_TOKEN` | token **próprio da aba**: é por ele que a ponte sabe quem está perguntando e de qual projeto |
-| `AGENTDECK_DEPTH` | profundidade da conversa (usada no modo headless) |
-| `AGENTDECK_ASK_WAIT` | quantos segundos o `ask-agent` espera a resposta (padrão 90; `0` = até o fim). O usuário pode definir |
-| `PATH` | a pasta dos executáveis vem primeiro, então o `ask-agent` sempre é encontrado |
+| `AGENTDECK_AGENT` | instance name (`claude@dev`) |
+| `AGENTDECK_ROLE` | role, when present |
+| `AGENTDECK_PORT` | local HTTP bridge port (only on `127.0.0.1`) |
+| `AGENTDECK_TOKEN` | **tab-specific** token: how the bridge knows who is asking and from which project |
+| `AGENTDECK_DEPTH` | conversation depth (used in headless mode) |
+| `AGENTDECK_ASK_WAIT` | how many seconds `ask-agent` waits for a response (default 90; `0` = until completion). User-configurable |
+| `PATH` | executable directory comes first, so `ask-agent` is always found |
 
-Nenhuma outra variável `AGENTDECK_*` do ambiente do app passa para os agentes. As instruções do AgentDeck (com a regra
-de não usar subagentes internos do CLI) chegam pelo canal próprio de cada CLI, sem depender de um `AGENTS.md` do usuário
-(só Goose e Copilot criam o `AGENTS.md` se a pasta não tiver um), e a confiança da pasta é registrada antes de abrir a
-aba. Detalhes em [ARCHITECTURE.md](ARCHITECTURE.md).
+No other `AGENTDECK_*` variable from the app environment is passed to agents. AgentDeck instructions (with the rule
+not to use CLI-internal subagents) arrive through each CLI's dedicated channel, without depending on a user's `AGENTS.md`
+(only Goose and Copilot create `AGENTS.md` if the folder does not have one), and folder trust is registered before opening the
+tab. Details in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-### O caminho de uma pergunta entre agentes
+### The path of an inter-agent question
 
-1. Um agente roda `ask-agent claude@dev "tarefa"`.
-2. A ponte resolve o destino no projeto de quem chamou. Se a instância não existe, a aba dela é aberta em segundo plano.
-3. A mensagem é **digitada no terminal da aba de destino** quando ela fica livre (nunca logo após tecla do usuário;
-   com hooks no Claude e no Codex, após o fim de turno; sem hooks, após 1,5 s parado ou 30 s na fila).
-4. O agente de destino responde com `ask-agent --reply <n> "resposta"`. Só ele consegue responder àquela pergunta.
-5. A resposta volta para quem perguntou: em até 90 s sai no stdout do `ask-agent`; passando disso, o `ask-agent` termina
-   avisando (HTTP 202) e a resposta é **digitada depois** no terminal de quem perguntou (e fica em `ask-agent --inbox`).
-   Numa aba `shell` ou no modo headless, o `ask-agent` espera até o fim.
+1. An agent runs `ask-agent claude@dev "task"`.
+2. The bridge resolves the destination in the caller's project. If the instance does not exist, its tab is opened in the background.
+3. The message is **typed into the destination tab's terminal** when it becomes free (never immediately after a user keypress;
+   with hooks in Claude and Codex, after turn end; without hooks, after 1.5 s idle or 30 s in queue).
+4. The destination agent replies with `ask-agent --reply <n> "response"`. Only that agent can reply to that question.
+5. The response returns to the caller: within 90 s it outputs to stdout of `ask-agent`; past that, `ask-agent` finishes
+   with a notice (HTTP 202) and the response is **typed later** into the caller's terminal (and remains in `ask-agent --inbox`).
+   In a `shell` tab or in headless mode, `ask-agent` waits until completion.
 
-Tudo aparece na **Conversa integrada**, e o usuário pode intervir em qualquer aba.
+Everything appears in the **integrated Conversation**, and the user can intervene in any tab.
 
-### A janela
+### The window
 
-| Área | O que tem |
+| Area | What it has |
 | :-- | :-- |
-| Barra de título | própria (sem a barra do sistema): ☰ (configurações), recolher barra esquerda, marca e "AgentDeck", `/ <projeto>` e chip da branch (com a barra lateral recolhida, a **chave Agentes \| Documentos** compacta aparece logo depois); à direita, o **uso de cada agente com cota** (logo + barras de sessão de 5 h e semanal; âmbar a partir de 80 %, vermelho em 100 %; passar o mouse abre o **painel de uso** com grupos e horários de renovação) e minimizar/maximizar/fechar |
-| Barra esquerda | a **chave Agentes \| Documentos** no topo, **PROJETOS** (cada projeto com os seus agentes em árvore e o modelo à direita; o ativo tem "+ Novo agente"; "+" no cabeçalho abre uma pasta como projeto; clique direito renomeia, abre a pasta ou remove), **ORGANIZAÇÃO** (`Abas \| Dividida \| Destaque`) e **ARQUIVOS**, o explorador (com a letra do Git, atualizar e recolher tudo); recolhe com `Ctrl+B` |
-| Centro | duas visões (`Ctrl+Shift+D`): **Agentes** (terminais organizados em Abas, Dividida ou Destaque; no cabeçalho de cada janela ficam as abas, a alça `⋮⋮`, o microfone, o anexo e o "+") e **Documentos** (diff, arquivos editáveis e markdown ocupando todo o centro) |
-| Barra direita | **fixa, não recolhe**; largura ajustável pela borda. Quatro abas no topo: **Tarefas** (a primeira; o selo conta revisão + validação), **Conversa** (só leitura: o feed das mensagens entre agentes, com contador de não lidas), **Git** e **GitHub** (com o número de PRs abertos) |
+| Title bar | custom (no system title bar): ☰ (settings), collapse sidebar, brand and "AgentDeck", `/ <project>` and branch chip (with the sidebar collapsed, the compact **Agents \| Documents toggle** appears right after); on the right, **usage for each agent with quota** (logo + 5h session and weekly bars; amber starting at 80%, red at 100%; hovering opens the **usage panel** with groups and renewal times) and minimize/maximize/close |
+| Left sidebar | the **Agents \| Documents toggle** at the top, **PROJECTS** (each project with its agents in a tree and model on the right; the active one has "+ New agent"; "+" in the header opens a folder as a project; right-click renames, opens folder, or removes), **ORGANIZATION** (`Tabs \| Split \| Highlight`), and **FILES**, the explorer (with Git status letter, refresh, and collapse all); collapses with `Ctrl+B` |
+| Center | two views (`Ctrl+Shift+D`): **Agents** (terminals organized in Tabs, Split, or Highlight; in each pane header are tabs, `⋮⋮` handle, microphone, attachment, and "+") and **Documents** (diff, editable files, and markdown occupying the entire center) |
+| Right sidebar | **fixed, does not collapse**; width adjustable via border. Four tabs at the top: **Tasks** (the first; badge counts review + validation), **Conversation** (read-only: the feed of inter-agent messages, with unread counter), **Git**, and **GitHub** (with open PR count) |
 
-- **Projetos:** cada projeto é uma pasta com os seus agentes. Trocar de projeto esconde as abas do anterior, que
-  **continuam rodando**. A árvore, Tarefas, Git, GitHub e Conversa são do projeto ativo; o uso na barra de título é global.
-  Remover e readicionar a mesma pasta reaproveita o id do projeto e recupera suas tarefas.
-- **Organização (`Abas | Dividida | Destaque`):** em **Dividida**, abas do mesmo tipo de CLI dividem a mesma janela numa
-  grade automática (2 lado a lado, 2+1, 2×2, 3+2, 3×2), com divisores arrastáveis e alça `⋮⋮` para trocar janelas de
-  lugar; em **Destaque**, a janela do tipo da aba ativa ocupa 2/3 à esquerda e as outras empilham à direita; em **Abas**,
-  todas ficam numa janela só. A janela ativa ganha borda e halo na cor do agente e as outras esmaecem; faixas de abas que
-  não cabem mostram setas `‹`/`›` e menu `▾`. Atalhos: `Ctrl+Tab` / `Ctrl+Shift+Tab` na janela, `Ctrl+Alt+setas` entre
-  janelas, `Ctrl+T` nova aba.
-- **Documentos (`Ctrl+Shift+D`):** abrir um diff, arquivo (duplo clique no explorador; clique simples insere `@arquivo` no
-  terminal) ou relatório traz **Documentos** ao centro; fechar o último ou clicar num agente volta para **Agentes**. O selo
-  de "Agentes" conta turnos concluídos não vistos (ou pulsa se houver agente trabalhando) e os terminais escondidos não são
-  redimensionados. Arquivos de texto até 256 KB têm **realce de sintaxe** (9 linguagens), busca (`Ctrl+F`) e **edição**
-  (`Ctrl+S` preservando CRLF/LF e BOM, com confirmação ao fechar sem salvar e aviso se o disco mudar por fora); até 1 MB
-  abrem só para leitura. Diffs trazem lista de arquivos à esquerda, realce, busca e cópia só do código; `.md`, Pedido e
-  Relatório abrem formatados.
-- **Aba Tarefas:** cada tarefa roda num agente com branch e worktree próprias (`.agentdeck/worktrees/tN`). Ciclo:
-  *Em andamento* → (`--task done`) *Em revisão* → (mesclar) *Aguardando validação* (aba, worktree e branch seguem vivas
-  para testar o app) → (validar) *Concluída*; *Reprovar* devolve ao mesmo agente. O formulário **+ Nova** recebe título,
-  pedido, **nível** (*Simples*, *Média*, *Complexa*), agente/modelo (recomendados por capacidade + folga de cota), esforço,
-  base, **escopo** (se coincidir com outra tarefa ativa, entra **na fila** e começa sozinha quando liberar) e anexos. O
-  detalhe mostra pedido, relatório, diff (**Ver diff completo** / **Ver o que foi mesclado**), seção **MENSAGENS** e
-  histórico, e oferece botões para resolver recusas de mesclagem ali mesmo (guardar alterações em stash e mesclar, pedir
-  commit ou resolução de conflito ao agente).
-- **Aba Git e Aba GitHub:** a aba **Git** opera o repositório local (Alterações com stage/discard por arquivo ou por
-  trecho/hunk, commit, Histórico paginado, Stash, branches com merge/rebase e resolução de Conflitos), atualizando sozinha
-  quando `.git/` muda. A aba **GitHub** lista PRs (com checks), Issues e Actions (com o fim do log de jobs falhos) do
-  remoto `origin`, usando o login do Git Credential Manager ou do `gh`, e permite **Enviar para agente**.
+- **Projects:** each project is a folder with its agents. Switching projects hides tabs of the previous one, which
+  **keep running**. The tree, Tasks, Git, GitHub, and Conversation belong to the active project; usage in the title bar is global.
+  Removing and re-adding the same folder reuses the project id and recovers its tasks.
+- **Organization (`Tabs | Split | Highlight`):** in **Split**, tabs of the same CLI type share the same pane in an
+  automatic grid (2 side-by-side, 2+1, 2×2, 3+2, 3×2), with draggable dividers and a `⋮⋮` handle to rearrange panes;
+  in **Highlight**, the pane for the active tab's type occupies 2/3 on the left and the others stack on the right; in **Tabs**,
+  all stay in a single pane. The active pane gets a border and halo in the agent's color and the others fade; tab strips that
+  do not fit show `‹`/`›` arrows and a `▾` menu. Shortcuts: `Ctrl+Tab` / `Ctrl+Shift+Tab` within the pane, `Ctrl+Alt+arrows` between
+  panes, `Ctrl+T` new tab.
+- **Documents (`Ctrl+Shift+D`):** opening a diff, file (double click in explorer; single click inserts `@file` into
+  terminal), or report brings **Documents** to the center; closing the last one or clicking an agent returns to **Agents**. The "Agents"
+  badge counts unseen completed turns (or pulses if an agent is working) and hidden terminals are not
+  resized. Text files up to 256 KB have **syntax highlighting** (9 languages), search (`Ctrl+F`), and **editing**
+  (`Ctrl+S` preserving CRLF/LF and BOM, with confirmation on close without saving and notification if disk changes externally); up to 1 MB
+  open read-only. Diffs feature a file list on the left, highlighting, search, and copy of code only; `.md`, Brief, and
+  Report open formatted.
+- **Tasks tab:** each task runs in an agent with its own branch and worktree (`.agentdeck/worktrees/tN`). Lifecycle:
+  *Running* → (`--task done`) *In review* → (merge) *Waiting for validation* (tab, worktree, and branch remain alive
+  to test the app) → (validate) *Completed*; *Reject* returns it to the same agent. The **+ New** form takes title,
+  brief, **level** (*Simple*, *Medium*, *Complex*), agent/model (recommended by capability + quota headroom), effort,
+  base, **scope** (if it overlaps another active task, it enters **the queue** and starts automatically when cleared), and attachments. The
+  detail view displays brief, report, diff (**View full diff** / **View merged diff**), **MESSAGES** section, and
+  history, and offers buttons to resolve merge rejections right there (stash changes and merge, ask
+  agent to commit or resolve conflict).
+- **Git tab and GitHub tab:** the **Git** tab operates the local repository (Changes with stage/discard per file or per
+  chunk/hunk, commit, paginated History, Stash, branches with merge/rebase, and Conflict resolution), updating automatically
+  when `.git/` changes. The **GitHub** tab lists PRs (with checks), Issues, and Actions (with tail of failed job logs) from the
+  `origin` remote, using login credentials from Git Credential Manager or `gh`, and allows **Send to agent**.
 
-### Limites, proteções e modo headless
+### Limits, protections, and headless mode
 
-| Regra | Valor |
+| Rule | Value |
 | :-- | :-- |
-| Profundidade máxima de delegação (A → B → C; a terceira pergunta encadeada é recusada) | 2 |
-| Ciclo de espera (A espera B, que espera A) | recusado na hora (HTTP 409) |
-| Abas abertas automaticamente pelo `ask-agent` | 8 |
-| Tempo máximo de uma pergunta | 10 min |
-| Tamanho de uma mensagem / requisições simultâneas / orçamento total de corpos na ponte | 16 MB / 128 / 64 MB |
-| Texto de outro agente digitado num terminal | sem ESC nem caracteres de controle |
-| Prompt para um shim `.cmd` no Windows | vai por arquivo, nunca na linha de comando |
-| Arquivo aberto no modo Documentos | até 1 MB (editável até 256 KB / linhas de 4 000 bytes), sem bytes nulos |
+| Maximum delegation depth (A → B → C; the third chained question is rejected) | 2 |
+| Wait cycle (A waits for B, which waits for A) | rejected immediately (HTTP 409) |
+| Tabs opened automatically by `ask-agent` | 8 |
+| Maximum question time | 10 min |
+| Message size / concurrent requests / total bridge body budget | 16 MB / 128 / 64 MB |
+| Text from another agent typed into a terminal | no ESC or control characters |
+| Prompt for a `.cmd` shim on Windows | passed via file, never on command line |
+| File opened in Documents mode | up to 1 MB (editable up to 256 KB / 4,000-byte lines), no null bytes |
 
-Quando "Abrir abas dos agentes" está desligado nas Configurações, o `ask-agent` roda os agentes em **modo headless**
-(`claude -p`, `agy -p`, `codex exec`, `opencode run`…) com token temporário (tarefas exigem abas ligadas). O contrato HTTP
-completo da ponte está em [ARCHITECTURE.md](ARCHITECTURE.md).
+When "Open agent tabs" is turned off in Settings, `ask-agent` runs agents in **headless mode**
+(`claude -p`, `agy -p`, `codex exec`, `opencode run`…) with a temporary token (tasks require tabs turned on). The full HTTP contract
+of the bridge is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
-## 2. O que dá para fazer
+## 2. What you can do
 
-**Como usuário:**
+**As a user:**
 
-- Abrir abas de agentes (Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q, Open Interpreter) e
-  de terminal comum, escolhendo o modelo de LLM por instância.
-- Organizar o trabalho em **projetos** (uma pasta cada), ver os agentes de todos os projetos **em árvore** na barra lateral
-  e reorganizar a **equipe** (chefe e subordinados) arrastando um agente sobre outro.
-- Ver vários agentes ao mesmo tempo na **tela dividida** ou em **destaque** (`Abas | Dividida | Destaque`).
-- Acompanhar o **uso** de cada agente com cota (sessão e semana) na barra de título e no painel de uso.
-- Falar com um agente pelo terminal da aba dele, citar arquivos (`@arquivo`), anexar arquivos/imagens (botão, arrastar e
-  soltar ou `Ctrl+V`) e usar **ditado por voz** (`Ctrl+Shift+M` ou ícone de microfone, via whisper.cpp local).
-- Acompanhar as conversas entre agentes na Conversa integrada (só leitura) e intervir direto nos terminais.
-- Ler e editar arquivos do projeto com realce de sintaxe e busca, ou ler diffs e relatórios em tela cheia no modo
-  **Documentos** (`Ctrl+Shift+D`).
-- Criar e gerir **tarefas** na aba Tarefas (com nível, modelo, esforço, escopo com fila automática, revisão de diff,
-  mesclagem assistida e etapa de validação).
-- Operar o **Git** local (stage por arquivo ou trecho, commit, branches, merge/rebase, conflitos, stash) e consultar
-  **GitHub** (PRs, issues, Actions e envio de falhas de CI para um agente).
-- Fechar a janela no × para continuar rodando os agentes na **bandeja do sistema**, ou encerrar pelo menu da bandeja.
+- Open agent tabs (Claude Code, Antigravity, Codex, OpenCode, Aider, Goose, Copilot, Amazon Q, Open Interpreter) and
+  regular terminal tabs, choosing the LLM model per instance.
+- Organize work into **projects** (one folder each), view agents from all projects **in a tree** in the sidebar,
+  and reorganize the **team** (lead and crew) by dragging one agent onto another.
+- View multiple agents at the same time in **split screen** or **highlight** (`Tabs | Split | Highlight`).
+- Track **usage** for each agent with quota (session and week) in the title bar and usage panel.
+- Talk to an agent via its tab's terminal, reference files (`@file`), attach files/images (button, drag-and-drop,
+  or `Ctrl+V`), and use **voice dictation** (`Ctrl+Shift+M` or microphone icon, via local whisper.cpp).
+- Follow inter-agent conversations in the integrated Conversation (read-only) and intervene directly in terminals.
+- Read and edit project files with syntax highlighting and search, or read diffs and reports full-width in
+  **Documents** mode (`Ctrl+Shift+D`).
+- Create and manage **tasks** in the Tasks tab (with level, model, effort, scope with automatic queue, diff review,
+  assisted merge, and validation step).
+- Operate local **Git** (stage per file or hunk, commit, branches, merge/rebase, conflicts, stash) and inspect
+  **GitHub** (PRs, issues, Actions, and sending CI failures to an agent).
+- Close the window via × to keep agents running in the **system tray**, or exit via the tray menu.
 
-**Como agente, dentro de uma aba:**
+**As an agent, inside a tab:**
 
-| Comando | Faz |
+| Command | Does |
 | :-- | :-- |
-| `ask-agent <agente> "mensagem"` | pergunta a outro agente ou instância (`claude@dev`), abrindo a aba se não existir |
-| `ask-agent --new <agente> "mensagem"` | abre outra instância do mesmo cargo (`claude@dev@ana`) |
-| `ask-agent --model <modelo> <agente> "mensagem"` | escolhe o LLM da instância ao abri-la (`sonnet`, `opencode/glm-5.3-flash-free`…); combina com `--new`; erro 409 se a aba já está aberta com outro modelo |
-| `ask-agent --reply <n> "resposta"` | responde à pergunta número `n` |
-| `ask-agent --file <arquivo> …` | lê a mensagem, o pedido, o relatório ou o feedback de um arquivo (preserva acentos, que o PowerShell 5.1 troca por `?` no stdin `-`) |
-| `ask-agent --list` | lista os agentes disponíveis e as instâncias abertas no projeto, com modelo e aviso de cota |
-| `ask-agent --team` | mostra o seu chefe e a sua equipe atuais, com modelo e aviso de cota |
-| `ask-agent --models [<agente>]` | lista, por agente instalado (os quatro oficiais em ordem de mais folga de cota primeiro), os modelos aceitos em `--model` (`-free` primeiro e marcados "(grátis)"; OpenCode por provedor), a linha `cota:` de cada grupo e a tabela de **capacidade** (`simples`, `media`, `complexa`). A ponte recusa (409) pergunta a modelo esgotado |
-| `ask-agent --boss "mensagem"` | pergunta ou reporta ao seu chefe |
-| `ask-agent --learn [<arquivo>...]` | sem argumentos, mostra os aprendizados globais (`memory/aprendizados/`), o índice dos demais e a **Situação atual** (tarefas em andamento e últimos commits); com arquivos, mostra os aprendizados que casam com eles e avisa no topo se outra tarefa em andamento mexe neles |
-| `ask-agent --outline <arquivo>...` | mostra o esqueleto de cada arquivo (assinaturas e número da linha, sem os corpos, em Rust e Markdown) para ler só o trecho necessário com offset |
-| `ask-agent --inbox [--all]` | mostra as respostas às suas perguntas que ainda não foram entregues (ou as 20 últimas com `--all`), marcando-as como entregues |
-| `ask-agent --task new "título" [--agent <m>] [--model <m>] [--effort low\|medium\|high] [--level simples\|media\|complexa] [--base <branch>] [--start] -\|"pedido"\|--file <arq> [--scope <caminho>…]` | cria uma tarefa (worktree + branch + agente próprios; sem `--agent`, escolhe entre os modelos capazes do nível o de mais folga de cota); `--start` já a inicia (ou põe na fila se `--scope` sobrepuser outra em andamento/revisão) |
-| `ask-agent --task list` / `show <id>` | lista as tarefas do projeto / mostra o detalhe completo de uma tarefa |
-| `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | inicia rascunho / mescla tarefa em revisão na base (`--no-ff`, indo a aguardando validação) / conclui validação e limpa / descarta e limpa |
-| `ask-agent --task done <id> -\|"relatório"\|--file <arq>` | o agente da tarefa entrega o relatório e a põe em revisão (vale também em validação se houver commits novos) |
-| `ask-agent --task return <id> "feedback"\|--file <arq>` | devolve a tarefa em revisão ao agente com ajustes (incluindo aprendizados dos arquivos citados no feedback) |
-| `ask-agent --task reject <id> "motivo"\|--file <arq>\|-` | reprova a tarefa aguardando validação e a devolve ao mesmo agente na mesma worktree |
-| `ask-agent --signal busy\|idle` | uso interno dos hooks de início/fim de turno (sai sempre com 0) |
-| `ask-agent --usage` | uso interno da statusline do Claude (envia o uso do plano à ponte) |
-| `ask-agent --help` (`-h`) | imprime o resumo de todos os comandos acima |
+| `ask-agent <agent> "message"` | asks another agent or instance (`claude@dev`), opening its tab if it does not exist |
+| `ask-agent --new <agent> "message"` | opens another instance of the same role (`claude@dev@ana`) |
+| `ask-agent --model <model> <agent> "message"` | chooses the instance's LLM when opening it (`sonnet`, `opencode/glm-5.3-flash-free`…); combines with `--new`; error 409 if tab is already open with a different model |
+| `ask-agent --reply <n> "reply"` | replies to question number `n` |
+| `ask-agent --file <file> …` | reads message, brief, report, or feedback from a file (preserves accented characters, which PowerShell 5.1 converts to `?` on stdin `-`) |
+| `ask-agent --list` | lists available agents and open instances in the project, with model and quota notice |
+| `ask-agent --team` | shows your current lead and crew, with model and quota notice |
+| `ask-agent --models [<agent>]` | lists, per installed agent (the four official ones in order of greatest quota headroom first), models accepted by `--model` (`-free` first and marked "(free)"; OpenCode by provider), the `cota:` line for each group, and the **capability** table (`simples`, `media`, `complexa`). Bridge rejects (409) questions to exhausted models |
+| `ask-agent --boss "message"` | asks or reports to your lead |
+| `ask-agent --learn [<file>...]` | without arguments, shows global learnings (`memory/aprendizados/`), index of remaining ones, and **Current situation** (running tasks and latest commits); with files, shows learnings matching them and warns at the top if another running task touches them |
+| `ask-agent --outline <file>...` | shows the outline of each file (signatures and line numbers, without bodies, in Rust and Markdown) to read only the necessary snippet with offset |
+| `ask-agent --inbox [--all]` | shows replies to your questions that have not yet been delivered (or the last 20 with `--all`), marking them as delivered |
+| `ask-agent --task new "title" [--agent <m>] [--model <m>] [--effort low\|medium\|high] [--level simples\|media\|complexa] [--base <branch>] [--start] -\|"brief"\|--file <file> [--scope <path>…]` | creates a task (dedicated worktree + branch + agent; without `--agent`, chooses the one with the most quota headroom among capable models for the level); `--start` starts it immediately (or queues it if `--scope` overlaps another running/in-review task) |
+| `ask-agent --task list` / `show <id>` | lists project tasks / shows full detail of a task |
+| `ask-agent --task start <id>` / `merge <id>` / `validate <id>` / `discard <id>` | starts draft / merges task in review into base (`--no-ff`, moving to waiting for validation) / finishes validation and cleans up / discards and cleans up |
+| `ask-agent --task done <id> -\|"report"\|--file <file>` | task agent submits report and puts it in review (also valid in validation if new commits exist) |
+| `ask-agent --task return <id> "feedback"\|--file <file>` | returns task in review to agent with adjustments (including learnings from files mentioned in feedback) |
+| `ask-agent --task reject <id> "reason"\|--file <file>\|-` | rejects task waiting for validation and returns it to the same agent in the same worktree |
+| `ask-agent --signal busy\|idle` | internal use by turn start/end hooks (always exits 0) |
+| `ask-agent --usage` | internal use by Claude's statusline (sends plan usage to bridge) |
+| `ask-agent --help` (`-h`) | prints summary of all commands above |
 
 ---
 
-## 3. Documentos e as regras de cada um
+## 3. Documents and their rules
 
-Cada documento cuida de um assunto. Mudou o assunto? Atualize o documento **no mesmo commit**.
+Each document covers a specific topic. Changed the topic? Update the document **in the same commit**.
 
-| Arquivo | Para que serve | Regras que define / como manter |
+| File | Purpose | Rules it defines / how to maintain |
 | :-- | :-- | :-- |
-| `memory/GERAL.md` | visão geral e este mapa | atualizar quando surgir um documento, uma pasta, um comando ou um limite novo |
-| `memory/AGENTDECK.md` | visão e rumo do produto | quem decide a ordem do que vem a seguir é o orquestrador; atualizar quando o rumo mudar |
-| `memory/aprendizados/` | a memória de longo prazo: um arquivo por armadilha, decisão ou convenção que não é óbvia no código | formato e quando criar em `aprendizados/README.md`; os `touches` precisam existir (o teste `every_learning_in_the_repository_is_valid` confere) |
-| `memory/ARCHITECTURE.md` | stack, crates, protocolo da ponte, instâncias, entrega nas abas, tarefas e memória | **contrato**: rotas, códigos HTTP, variáveis de ambiente e limites da ponte. Mudou o protocolo? Atualize aqui |
-| `memory/MANUTENCAO.md` | guia prático: Rust, comandos, mapa do código, receitas | mapa do código e receitas (ex.: novo agente: prompt nunca cru na linha de comando, hooks se o CLI tiver) |
-| `memory/pendencias.md` | os próximos passos, numerados, no máximo 10 ("Agora" e "Depois") | item concluído sai de `pendencias.md` e vai para `historico.md` com uma linha do que foi feito; um item novo só entra se couber nos 10 (senão vai para `ideias.md`); só desenvolvimento (testes manuais ficam em `testes.md`); o arquivo não guarda `[x]` |
-| `memory/ideias.md` | ideias sem data, por área, e as limitações conhecidas | ideia que entra em `pendencias.md` sai daqui; limitação nova entra aqui; não guarda item concluído |
-| `memory/historico.md` | o que já foi feito, do mais recente para o mais antigo (inclui a auditoria de 15/10) | só recebe o que saiu de `pendencias.md`; uma linha por item; o detalhe fica no commit |
-| `memory/testes.md` | roteiro de testes manuais (Windows, agentes reais), por área (as mesmas de `pendencias.md`) | marcar `[x]` o que passou; o que falhar vira item em `pendencias.md`; funcionalidade nova que só dá para validar à mão ganha um item na área dela; função removida leva os itens dela embora |
-| `memory/LINUX.md` | dependências, o que foi verificado e o roteiro manual do Linux (Ubuntu e Fedora) | atualizar no mesmo commit em que mudar dependência de sistema, caminho de fonte/pasta de dados ou suporte a GPU; falha de Linux vira item em `pendencias.md` |
-| `README.md` (raiz) | apresentação, como compilar e rodar, exemplos de `ask-agent` | fica na raiz porque o GitHub mostra na página do repositório |
-| `CONTRIBUTING.md` (raiz) | como contribuir e os **princípios do projeto** | rodar `cargo fmt`, `clippy -D warnings` e `cargo test` antes do PR; privacidade; UI nunca trava; textos em pt-BR. Fica na raiz porque o GitHub o mostra ao abrir PRs |
-| `AGENTS.md` (raiz) e `workspace/AGENTS.md` | instruções lidas pelos CLIs de agentes | **gerados pelo app**: o bloco entre `<!-- agentdeck:start -->` e `<!-- agentdeck:end -->` é reescrito a cada início; edite só fora dele. Ficam na raiz da pasta de trabalho porque é lá que os CLIs os procuram |
-| `workspace/README.md` | o que é a pasta `workspace/` (o workspace antigo e o `AGENTS.md` do app) | isolamento: os agentes trabalham na pasta do projeto ou da tarefa, não nos arquivos do app |
-| `dados/README.md` | o que vai em `dados/` (anexos, prompts, tarefas, hooks, `crash.log`) | privacidade: áudio apagado após transcrever, retenção só das últimas sessões, nada versionado |
-| `whisper/README.md`, `whisper/models/README.md` | motor e modelos do ditado | ficam ao lado dos binários e modelos que descrevem |
-| `LICENSE` | licença MIT | não editar |
+| `memory/GERAL.md` | overview and this map | update when a new document, folder, command, or limit is introduced |
+| `memory/AGENTDECK.md` | product vision and direction | the orchestrator decides the order of what comes next; update when direction changes |
+| `memory/aprendizados/` | long-term memory: one file per pitfall, decision, or convention that is not obvious from the code | format and when to create in `aprendizados/README.md`; `touches` must exist (verified by test `every_learning_in_the_repository_is_valid`) |
+| `memory/ARCHITECTURE.md` | stack, crates, bridge protocol, instances, tab delivery, tasks, and memory | **contract**: routes, HTTP codes, environment variables, and bridge limits. Changed the protocol? Update here |
+| `memory/MANUTENCAO.md` | practical guide: Rust, commands, code map, recipes | code map and recipes (e.g., new agent: prompt never raw on command line, hooks if CLI supports them) |
+| `memory/pendencias.md` | next steps, numbered, at most 10 ("Now" and "Later") | completed item leaves `pendencias.md` and goes to `historico.md` with one line describing what was done; a new item only enters if it fits within the 10 (otherwise goes to `ideias.md`); development only (manual tests stay in `testes.md`); file does not keep `[x]` |
+| `memory/ideias.md` | undated ideas by area, and known limitations | idea that enters `pendencias.md` leaves here; new limitation enters here; does not keep completed items |
+| `memory/historico.md` | what has already been done, newest to oldest (includes the 2026-10-15 audit) | only receives items that left `pendencias.md`; one line per item; technical details stay in the commit |
+| `memory/testes.md` | manual test script (Windows, real agents), by area (same areas as `pendencias.md`) | check `[x]` what passed; what fails becomes an item in `pendencias.md`; new feature testable only by hand gets an item in its area; removed feature removes its items |
+| `memory/LINUX.md` | dependencies, verified items, and manual script for Linux (Ubuntu and Fedora) | update in the same commit that changes a system dependency, font path, data folder, or GPU support; Linux failures become items in `pendencias.md` |
+| `README.md` (root) | overview, how to build and run, `ask-agent` examples | stays in the root because GitHub displays it on the repository page |
+| `CONTRIBUTING.md` (root) | how to contribute and **project principles** | run `cargo fmt`, `clippy -D warnings`, and `cargo test` before PR; privacy; UI never hangs; texts in pt-BR. Stays in the root because GitHub displays it when opening PRs |
+| `AGENTS.md` (root) and `workspace/AGENTS.md` | instructions read by agent CLIs | **generated by the app**: block between `<!-- agentdeck:start -->` and `<!-- agentdeck:end -->` is rewritten on each start; edit only outside it. Located in working folder root because CLIs look for them there |
+| `workspace/README.md` | what the `workspace/` folder is (legacy workspace and app's `AGENTS.md`) | isolation: agents work in the project or task folder, not in app files |
+| `dados/README.md` | what goes into `dados/` (attachments, prompts, tasks, hooks, `crash.log`) | privacy: audio deleted after transcription, retention of only recent sessions, nothing versioned |
+| `whisper/README.md`, `whisper/models/README.md` | engine and models for dictation | located next to the binaries and models they describe |
+| `LICENSE` | MIT license | do not edit |
 
-Arquivos de regra que não são `.md`: `rustfmt.toml` (estilo do código, conferido na CI),
-`.github/workflows/ci.yml` (o que precisa passar em todo push) e `Cargo.toml` (`rust-version` 1.89 é a versão
-mínima do Rust).
+Rule files that are not `.md`: `rustfmt.toml` (code style, checked in CI), `.github/workflows/ci.yml` (what must pass on every push), and `Cargo.toml` (`rust-version` 1.89 is the minimum Rust version).
 
-### Regras gerais, em resumo
+### General rules, in summary
 
-1. A interface (`app`) só fala com o backend pelos métodos de `Core`; o backend responde com `CoreEvent`.
+1. The UI (`app`) only talks to the backend via `Core` methods; the backend responds with `CoreEvent`.
    (ARCHITECTURE, MANUTENCAO)
-2. Antes de concluir qualquer mudança: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
+2. Before finishing any change: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
    `cargo test --workspace`. (CONTRIBUTING)
-3. A ponte só escuta em `127.0.0.1`, identifica quem chama pelo token e nunca confia no `from` do corpo.
-   Texto de outro agente nunca vai cru para um terminal nem para a linha de comando. (ARCHITECTURE, CONTRIBUTING)
-4. Nada que bloqueia roda na thread da interface. (CONTRIBUTING)
-5. Privacidade: áudio apagado logo após a transcrição; anexos e prompts guardados só para as últimas 5 sessões;
-   nunca criar `AGENTS.md` na pasta pessoal do usuário. (CONTRIBUTING, dados/README)
-6. Code comments, docs and commit messages in English; user-facing text through `t!` with a pt-BR entry; agent-facing
+3. The bridge only listens on `127.0.0.1`, identifies callers by token, and never trusts `from` in the body.
+   Text from another agent never goes raw to a terminal or to the command line. (ARCHITECTURE, CONTRIBUTING)
+4. Nothing blocking runs on the UI thread. (CONTRIBUTING)
+5. Privacy: audio deleted right after transcription; attachments and prompts kept only for the last 5 sessions;
+   never create `AGENTS.md` in the user's home folder. (CONTRIBUTING, dados/README)
+6. Code comments, docs, and commit messages in English; user-facing text through `t!` with a pt-BR entry; agent-facing
    text in English only. (CONTRIBUTING, aprendizados/i18n-english-key-and-area-files.md)
-7. Documentação junto com o código: mudou comportamento, protocolo ou pendência, atualize o `.md`
-   correspondente em `memory/` no mesmo commit; item concluído de `pendencias.md` vai para `historico.md`. (este documento)
+7. Documentation alongside code: changed behavior, protocol, or pending work, update the corresponding `.md`
+   in `memory/` in the same commit; completed item from `pendencias.md` moves to `historico.md`. (this document)
