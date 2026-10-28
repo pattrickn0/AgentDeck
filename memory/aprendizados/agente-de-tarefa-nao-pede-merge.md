@@ -1,12 +1,12 @@
 ---
-titulo: O agente de uma tarefa não pede merge
-resumo: O trabalho do agente termina no --task done; mesclar é de quem revisa.
+title: A task agent does not request a merge
+summary: The agent's work ends at --task done; merging belongs to whoever reviews.
 touches: []
 ---
-O agente de uma tarefa só consulta tarefas e entrega o relatório da própria (`ask-agent --task done`). Não pede a
-ninguém, agente ou usuário, que mescle nem roda `--task merge`; a ponte recusa (403) qualquer outra ação de tarefa
-vinda dele (`task_permission`, `bridge.rs`).
+A task agent only queries tasks and delivers the report for its own task (`ask-agent --task done`). It does not ask
+anyone, agent or user, to merge nor does it run `--task merge`; the bridge rejects (403) any other task action
+coming from it (`task_permission`, `bridge.rs`).
 
-**Por quê:** no primeiro uso real da mesa o `opencode@t2` pediu ao Claude que mesclasse a própria tarefa; a decisão
-de mesclar é de quem revisa o diff, não de quem o escreveu.
-**Como aplicar:** termine com o relatório e espere. Se faltar algo, pergunte ao chefe com `ask-agent --boss`.
+**Why:** on the first real use of the board, `opencode@t2` asked Claude to merge its own task; the decision to merge
+belongs to whoever reviews the diff, not whoever wrote it.
+**How to apply:** finish with the report and wait. If something is missing, ask the boss with `ask-agent --boss`.
