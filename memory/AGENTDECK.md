@@ -1,86 +1,86 @@
-# AgentDeck: visão e rumo
+# AgentDeck: vision and direction
 
-O **AgentDeck** é o ambiente de desenvolvimento dos agentes de IA. Desde 2026-10-17 o
-produto é conduzido pelo Claude (o orquestrador); o usuário acompanha como cliente e colaborador e é quem aprova o
-que vai para a `main` (a `main` é a versão estável; o trabalho do dia a dia é na `dev`).
+**AgentDeck** is the development environment for AI agents. Since 2026-10-17 the
+product has been driven by Claude (the orchestrator); the user follows along as client and collaborator and is the one who approves
+what goes into `main` (`main` is the stable version; day-to-day work happens on `dev`).
 
-## Para quem é
+## Who it is for
 
-1. **Para os agentes**, primeiro. Um agente aqui deve conseguir receber uma tarefa, trabalhar isolado sem pisar nos
-   outros, saber o que o projeto já decidiu, pedir ajuda a outro agente e entregar algo revisável. O explorador, o
-   Git, o GitHub e a memória existem para isso.
-2. **Para o humano**, que precisa enxergar o que está acontecendo sem ler terminais inteiros: o que cada agente está
-   fazendo, o que ficou pronto, o que espera revisão e o que deu errado.
+1. **For agents**, first. An agent here must be able to receive a task, work in isolation without stepping on
+   others, know what the project has already decided, ask another agent for help, and deliver something reviewable. The explorer,
+   Git, GitHub, and memory exist for this.
+2. **For the human**, who needs to see what is happening without reading entire terminals: what each agent is
+   doing, what is ready, what awaits review, and what went wrong.
 
-## Princípios
+## Principles
 
-- **A unidade de trabalho é a tarefa, não a mensagem.** Uma tarefa tem um pedido, um agente com um modelo, uma
-  branch isolada, um relatório, um diff e testes. Conversa entre agentes é meio, não fim.
-- **Tudo visível.** Agente que trabalha aparece numa aba; nada de trabalho invisível que o humano não consegue acompanhar.
-- **Isolamento por padrão.** Cada tarefa numa worktree própria: agentes em paralelo não se atrapalham, e descartar
-  uma tentativa não custa nada.
-- **O modelo certo para cada trabalho.** Opus para orquestrar e decidir, Sonnet para desenvolver, modelos gratuitos
-  (OpenCode) para revisão e perguntas, sempre com os achados conferidos. A cota das assinaturas é o recurso escasso.
-- **A memória mora em arquivos.** O que o projeto decidiu e aprendeu fica em markdown versionado (esta pasta), e o
-  app entrega o pedaço certo a cada agente na hora certa.
-- **Nada de mágica que trava.** Sem prompts escondidos, sem diálogo que congela, sem processo órfão; erro com explicação.
+- **The unit of work is the task, not the message.** A task has a brief, an agent with a model, an
+  isolated branch, a report, a diff, and tests. Conversation between agents is a means, not the end.
+- **Everything visible.** An agent working appears in a tab; no invisible work that the human cannot follow.
+- **Isolation by default.** Each task in its own worktree: parallel agents do not interfere with each other, and discarding
+  an attempt costs nothing.
+- **The right model for each job.** Opus to orchestrate and decide, Sonnet to develop, free models
+  (OpenCode) for review and questions, always with findings verified. Subscription quota is the scarce resource.
+- **Memory lives in files.** What the project decided and learned stays in versioned markdown (this folder), and the
+  app delivers the right piece to each agent at the right time.
+- **No freezing magic.** No hidden prompts, no frozen dialogs, no orphan processes; errors with explanation.
 
-## O que o AgentDeck é e não é (usuário, 2026-10-23)
+## What AgentDeck is and is not (user, 2026-10-23)
 
-- **100% Rust**, sem outra tecnologia (nada de Electron, Tauri ou web). Sistemas: **Windows e Linux**; macOS não está no rumo.
-- **Gira em volta dos CLIs de agente** (Claude Code, Antigravity, Codex, OpenCode e os que existirem), de nuvem ou não: o
-  que estiver instalado é usado. **Não é um app de modelo local**: o agente Ollama próprio (`ollama-agent`) sai; um modelo
-  local continua possível através de um CLI que o suporte (ex.: o OpenCode).
-- **Agentes visíveis**: quando um agente precisa de outro, abre uma instância no AgentDeck (aba) pelo `ask-agent` ou pela
-  mesa de tarefas, **não um subagente interno do CLI**, a não ser que o usuário peça explicitamente.
-- **Três memórias**: a **geral** (como usar o AgentDeck, igual para todo mundo, entregue pelo app a todo CLI em qualquer
-  projeto); a **do projeto** (`memory/aprendizados/` do repositório do usuário, versionada nele); e a **local** (a do
-  usuário e dos CLIs, que nunca vai para o git).
-- Licença **MIT**. Hoje só o usuário desenvolve; contribuições de outras pessoas, talvez depois de publicado.
-- **Depois da `main`** (revisto em 2026-10-24): estabilidade e a linha do tempo por tarefa primeiro, depois o
-  **instalador**; o inglês na interface e os temas foram deixados de lado (o inglês saiu da lista em 2026-10-24, para os itens de Windows e Linux decididos abaixo) ([pendencias.md](pendencias.md)). **Bem mais para frente**, com o app bem estável: acompanhar e falar com os agentes **pelo celular**.
-- Não fazer por enquanto: comentários linha a linha no diff para devolver ao agente (o "devolver com texto" basta).
-- **CLIs com suporte oficial** (usuário, 2026-10-24): **Claude Code, Codex, Antigravity e OpenCode**. São os testados e
-  com tudo funcionando (hooks, uso, retomar). Os outros continuam abrindo e funcionando, mas sem garantia (a barra de uso
-  ou os hooks podem falhar) até entrarem no suporte, como o Orca, que aceita qualquer CLI.
-- **Decidido em 2026-10-24** (comparação com o MonoCode e o Orca; plano revisto com o `claude@arquiteto`): o X manda
-  para a bandeja e abrir de novo traz a instância de volta (como o Discord); cada aba retoma a sua conversa depois de
-  fechar ou de um crash; a fase da tarefa vem só dos hooks (nunca declarada pelo agente); correio durável (mensagem
-  curta digitada, longa por aviso); escopo de escrita por tarefa com fila; a memória ganha um grafo como índice (os
-  markdown continuam sendo a fonte), medido contra o que já existe. Os itens estão em [pendencias.md](pendencias.md).
-- Skills de terceiros: só as que não brigam com as regras acima. Do Superpowers vieram 4 (`.claude/skills/`, com
-  `ORIGEM.md`); as que mandam abrir subagentes, criar worktrees por fora da mesa ou gravar planos à parte ficaram de
-  fora. O OpenSpec não foi adotado (seria um segundo lugar para o plano).
+- **100% Rust**, no other technology (no Electron, Tauri, or web). Systems: **Windows and Linux**; macOS is not on the roadmap.
+- **Revolves around agent CLIs** (Claude Code, Antigravity, Codex, OpenCode, and whatever exists), cloud or not:
+  whatever is installed is used. **It is not a local model app**: the dedicated Ollama agent (`ollama-agent`) is removed; a local
+  model remains possible through a CLI that supports it (e.g. OpenCode).
+- **Visible agents**: when an agent needs another, it opens an instance in AgentDeck (tab) via `ask-agent` or the
+  tasks desk, **not a CLI-internal subagent**, unless the user explicitly asks.
+- **Three memories**: **general** (how to use AgentDeck, identical for everyone, delivered by the app to every CLI in any
+  project); **project** (`memory/aprendizados/` in the user's repository, versioned in it); and **local** (the
+  user's and CLIs', which never goes into git).
+- **MIT** license. Currently only the user develops; contributions from others, perhaps after release.
+- **After `main`** (revised on 2026-10-24): stability and per-task timeline first, then the
+  **installer**; English UI and themes were set aside (English left the list on 2026-10-24, in favor of the Windows and Linux items decided below) ([pendencias.md](pendencias.md)). **Much further ahead**, with the app very stable: monitor and talk to agents **via mobile**.
+- Do not do for now: line-by-line comments on diffs to return to the agent ("return with text" is sufficient).
+- **Officially supported CLIs** (user, 2026-10-24): **Claude Code, Codex, Antigravity, and OpenCode**. These are tested and
+  fully functional (hooks, usage, resume). Others continue opening and working, but without warranty (usage bar
+  or hooks may fail) until they enter official support, like Orca, which accepts any CLI.
+- **Decided on 2026-10-24** (comparison with MonoCode and Orca; plan revised with `claude@arquiteto`): the X sends
+  to the tray and opening again brings the instance back (like Discord); each tab resumes its conversation after
+  closing or a crash; task phase comes solely from hooks (never self-declared by agent); durable mail (short
+  message typed, long via notice); write scope per task with queue; memory gains a graph as an index (markdown
+  files remain the source), measured against what already exists. Items are in [pendencias.md](pendencias.md).
+- Third-party skills: only those that do not conflict with the rules above. From Superpowers 4 were brought in (`.claude/skills/`, with
+  `ORIGEM.md`); those that instruct opening subagents, creating worktrees outside the desk, or storing separate plans were
+  excluded. OpenSpec was not adopted (would be a second place for the plan).
 
-## Rumo (ordem decidida pelo orquestrador)
+## Direction (order decided by the orchestrator)
 
-1. ~~Modelo de LLM por instância~~ (feito em 2026-10-17).
-2. ~~**Mesa de tarefas**~~ (fases A e B feitas em 2026-10-17; a etapa "aguardando validação" veio na `t10`; o que sobrou está em
-   [ideias.md](ideias.md); a linha do tempo por tarefa está em [pendencias.md](pendencias.md)) no lugar da Conversa integrada: criar, iniciar (worktree + branch + aba do agente com modelo),
-   acompanhar, receber o relatório, revisar o diff, mesclar, validar (ou reprovar) ou descartar com um botão. É o fluxo que o
-   orquestrador fazia à mão.
-3. **Memória em duas camadas, nossa.** **Fase 1 feita** (tarefas `t13`, `t15` e `t16`): `memory/aprendizados/*.md` com `touches`, entregues
-   no início de cada tarefa e por `ask-agent --learn`; seção "Situação atual" (outras tarefas, os arquivos delas, inclusive os ainda sem commit, e os commits da base); histórico de
-   feedbacks e aprendizados dos arquivos citados nas devoluções e reprovações; `ask-agent --learn` com e sem arquivos. Como funciona: [ARCHITECTURE.md](ARCHITECTURE.md) ("Memória em duas camadas"). **Fase 2 feita**
-   (2026-10-23, `t40` e `t41`), **por demanda**: `ask-agent --outline <arquivo>` (as assinaturas com a linha) e, no `--learn` de
-   qualquer aba, a situação atual e o aviso de arquivo que outra tarefa em andamento também mexe. O `ContextProvider` geral, que
-   empurraria o contexto em todos os canais, ficou adiado: [ideias.md](ideias.md), "Memória".
-   O plano original, para referência: Longo prazo: "aprendizados" em markdown versionado no repositório, com
-   frontmatter que diz que arquivos tocam (`touches`), entregues ao agente quando a tarefa dele mexe nesses arquivos;
-   e um resumo da API de um arquivo (estilo `skeleton`) para o agente ler menos. Curto prazo: o pedido da tarefa, as
-   decisões e a atividade recente entregues pelo app (o "ponto único de injeção de contexto", adiado; ver "Memória" de
+1. ~~LLM model per instance~~ (done on 2026-10-17).
+2. ~~**Tasks desk**~~ (phases A and B done on 2026-10-17; "waiting for validation" stage arrived in `t10`; remaining items in
+   [ideias.md](ideias.md); per-task timeline is in [pendencias.md](pendencias.md)) in place of integrated Conversation: create, start (worktree + branch + agent tab with model),
+   monitor, receive report, review diff, merge, validate (or reject), or discard with a button. It is the workflow the
+   orchestrator used to do by hand.
+3. **Two-layer memory, our own.** **Phase 1 done** (tasks `t13`, `t15`, and `t16`): `memory/aprendizados/*.md` with `touches`, delivered
+   at the start of each task and via `ask-agent --learn`; "Current situation" section (other tasks, their files, including uncommitted ones, and base commits); history of
+   feedbacks and learnings for files cited in returns and rejections; `ask-agent --learn` with and without files. How it works: [ARCHITECTURE.md](ARCHITECTURE.md) ("Two-layer memory"). **Phase 2 done**
+   (2026-10-23, `t40` and `t41`), **on demand**: `ask-agent --outline <file>` (signatures with line number) and, in `--learn` from
+   any tab, the current situation and warning for files that another running task also touches. The general `ContextProvider`, which
+   would push context across all channels, was postponed: [ideias.md](ideias.md), "Memory".
+   The original plan, for reference: Long term: versioned markdown "learnings" in the repository, with
+   frontmatter specifying touched files (`touches`), delivered to an agent when its task touches those files;
+   and a file API summary (`skeleton` style) so the agent reads less. Short term: task brief,
+   decisions, and recent activity delivered by the app (the "single context injection point", postponed; see "Memory" in
    [ideias.md](ideias.md)).
-   - **Trail-Code avaliado em 2026-10-17 e não adotado como dependência.** O `skeleton` é bom (−87% de tokens), mas
-     o `ask` é léxico e não ganhou do `grep`, o `callers` não resolve chamadas de método entre crates em Rust, o `init`
-     escreve hooks no `~/.claude` global (afeta todos os repositórios) mesmo com `--no-global`, e toda saída dele
-     manda o agente anunciar ao usuário os tokens economizados (texto de terceiro dirigindo o agente). Ficamos com as
-     ideias: aprendizados versionados com `touches` e o resumo de API.
-4. **Diff legível para o usuário validar** (combinado em 2026-10-21): hoje o diff mora espremido na barra direita. O centro
-   passa a ter "abas de documento" ao lado das abas de terminal, e o diff de uma tarefa (e depois o editor de arquivos e um
-   explorador mais útil) abre nelas, em largura de tela cheia. É o que falta para o humano validar sem sair do app.
-   A fase 2 (diff lado a lado, extras do editor, explorador) está em [ideias.md](ideias.md).
-5. **Renomear para AgentDeck e identidade visual** (combinado em 2026-10-22). **Feitos**: o nome (tarefa `t20`, com migração
-   dos nomes antigos: ver [MANUTENCAO.md](MANUTENCAO.md), seção 6) e o visual (`t21`–`t23`). Os **temas** foram deixados de
-   lado em 2026-10-24 ([ideias.md](ideias.md)).
-6. **Substituir a `main` pela `dev`**: **feito em 2026-10-24**. A `main` é a reescrita em Rust; o piloto em TypeScript
-   foi apagado. O passo seguinte é o bloco "Depois da `main`" acima.
+   - **Trail-Code evaluated on 2026-10-17 and not adopted as a dependency.** `skeleton` is good (−87% tokens), but
+     `ask` is lexical and did not beat `grep`, `callers` does not resolve cross-crate method calls in Rust, `init`
+     writes hooks into global `~/.claude` (affects all repositories) even with `--no-global`, and all its output
+     instructs the agent to announce saved tokens to the user (third-party text steering the agent). We kept the
+     ideas: versioned learnings with `touches` and API summary.
+4. **Readable diff for the user to validate** (agreed on 2026-10-21): today the diff lives squeezed in the right sidebar. The center
+   gains "document tabs" alongside terminal tabs, and a task diff (and later file editor and a more
+   useful explorer) opens in them, in full-screen width. It is what was missing for the human to validate without leaving the app.
+   Phase 2 (side-by-side diff, editor extras, explorer) is in [ideias.md](ideias.md).
+5. **Rename to AgentDeck and visual identity** (agreed on 2026-10-22). **Done**: the name (task `t20`, with migration
+   of legacy names: see [MANUTENCAO.md](MANUTENCAO.md), section 6) and visual design (`t21`–`t23`). **Themes** were set
+   aside on 2026-10-24 ([ideias.md](ideias.md)).
+6. **Replace `main` with `dev`**: **done on 2026-10-24**. `main` is the Rust rewrite; the TypeScript pilot
+   was deleted. The next step is the "After `main`" block above.
