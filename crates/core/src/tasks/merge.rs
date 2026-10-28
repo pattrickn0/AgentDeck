@@ -6,31 +6,33 @@ use super::text::short_list;
 use super::{dirty_paths, git_error, MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskStatus, AGENTDECK_DIR};
 use crate::events::{CoreEvent, FeedEntry};
 use crate::git::{run, RepoState, COMMIT_TIMEOUT};
+use crate::t;
 use crate::util::{self, now_ms};
 use crate::Core;
 
 impl Core {
-    // ---------- Mesclar ----------
+    // ---------- Merge ----------
 
-    /// Mescla a branch da tarefa na base (`git merge --no-ff`) no repositório principal e põe a tarefa em
-    /// `Validating`: a aba, a worktree e a branch ficam (o usuário ainda vai testar) e a branch da tarefa é
-    /// alinhada com a base já mesclada (`git merge --ff-only`). Exige `Review` (ou `Failed` com relatório,
-    /// para tentar de novo). Recusa, sem mudar nada, se o repositório principal não está na base ou tem alterações
-    /// sem commit em arquivos rastreados (o `AGENTS.md`, que o app reescreve, não conta), ou se a worktree
-    /// da tarefa tem trabalho sem commit. Em conflito, desfaz a mesclagem (`merge --abort`) e a tarefa continua em
-    /// `Review`, com os arquivos em conflito na mensagem. Se o git falha por outro motivo, a tarefa também fica em
-    /// `Review`, com o erro no histórico e devolvido a quem chamou. Se o `AGENTS.md` da pasta principal só difere
-    /// pelo bloco do app e a branch o altera, ele volta ao do HEAD durante a mesclagem e o bloco é regravado depois.
+    /// Merges the task's branch into the base (`git merge --no-ff`) in the main repository and puts the task in
+    /// `Validating`: the tab, the worktree and the branch stay (the user will still test it) and the task's branch is
+    /// aligned with the already merged base (`git merge --ff-only`). Requires `Review` (or `Failed` with a report,
+    /// to try again). Refuses, changing nothing, if the main repository is not on the base or has uncommitted
+    /// changes in tracked files (`AGENTS.md`, which the app rewrites, does not count), or if the task's worktree has
+    /// uncommitted work. On a conflict, it undoes the merge (`merge --abort`) and the task stays in `Review`, with
+    /// the conflicting files in the message. If git fails for another reason, the task also stays in `Review`, with
+    /// the error in the history and returned to the caller. If the main folder's `AGENTS.md` differs only by the
+    /// app's block and the branch changes it, it goes back to the HEAD's during the merge and the block is rewritten
+    /// afterwards.
     pub fn task_merge(&self, project: &str, id: &str) -> Result<Task, TaskError> {
         self.merge_task(project, id, false).map(|o| o.task).map_err(|r| r.error)
     }
 
-    /// Como [`Core::task_merge`], para a interface: a recusa que tem saída vem com o motivo estruturado
-    /// ([`MergeRefusal::block`], para a tela oferecer o botão), e `stash_main` liga o "guardar minhas alterações,
-    /// mesclar e devolvê-las": as alterações sem commit do repositório principal vão para um `git stash`
-    /// (identificado pela tarefa) e voltam (`stash pop`) depois da mesclagem, qualquer que seja o desfecho. Se
-    /// não voltam limpas (conflito com o que a tarefa trouxe), ficam no stash, intactas, e o aviso diz como
-    /// recuperá-las. Só o clique do usuário liga isso: a linha de comando (`task_merge`) nunca guarda nada.
+    /// Like [`Core::task_merge`], for the interface: the refusal that has a way out comes with the structured reason
+    /// ([`MergeRefusal::block`], for the screen to offer the button), and `stash_main` turns on "stash my changes,
+    /// merge and give them back": the uncommitted changes of the main repository go to a `git stash` (identified by
+    /// the task) and come back (`stash pop`) after the merge, whatever the outcome. If they do not come back clean
+    /// (conflict with what the task brought), they stay in the stash, intact, and the notice says how to recover
+    /// them. Only the user's click turns this on: the command line (`task_merge`) never stashes anything.
     pub fn task_merge_assisted(&self, project: &str, id: &str, stash_main: bool) -> Result<MergeOutcome, MergeRefusal> {
         self.merge_task(project, id, stash_main)
     }
@@ -40,123 +42,126 @@ impl Core {
         let task = self.task_or_404(project, id)?;
         let retry = task.status == TaskStatus::Failed && task.report.is_some();
         if task.status != TaskStatus::Review && !retry {
-            return Err(TaskError::Conflict(format!(
-                "a tarefa {} está {}: só se mescla uma tarefa em revisão",
-                task.id,
-                task.status.label()
+            return Err(TaskError::Conflict(t!(
+                "task {id} is {status}: only a task in review can be merged",
+                id = &task.id,
+                status = task.status.label()
             ))
             .into());
         }
         let repo = self.task_repo(project)?;
         let refuse_with = |t: &Task, msg: String, block: Option<MergeBlock>| -> MergeRefusal {
-            self.update_task(project, &t.id, |t| t.log(format!("mesclagem recusada: {msg}")));
+            self.update_task(project, &t.id, |t| t.log(t!("merge refused: {reason}", reason = &msg)));
             MergeRefusal { error: TaskError::Conflict(msg), block, stash_note: None }
         };
         let refuse = |t: &Task, msg: String| -> MergeRefusal { refuse_with(t, msg, None) };
         let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
         if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &expected) {
-            return Err(TaskError::Failed(format!("dados da tarefa {} fora do esperado; não mesclei nada", task.id)).into());
+            return Err(TaskError::Failed(t!("data of task {id} outside what was expected; I merged nothing", id = &task.id)).into());
         }
         let _git = self.inner.git.op.lock();
 
-        // O repositório principal precisa estar pronto para receber a mesclagem.
+        // The main repository must be ready to receive the merge.
         match repo.read(&["symbolic-ref", "--short", "-q", "HEAD"]) {
             Ok(out) if String::from_utf8_lossy(&out.stdout).trim() == task.base => {}
             Ok(out) => {
                 let now = String::from_utf8_lossy(&out.stdout).trim().to_owned();
                 return Err(refuse(
                     &task,
-                    format!(
-                        "o repositório principal está na branch \"{now}\", não em \"{base}\": troque para \"{base}\" e tente de novo",
-                        base = task.base
+                    t!(
+                        "the main repository is on the branch \"{now}\", not \"{base}\": switch to \"{base}\" and try again",
+                        now,
+                        base = &task.base
                     ),
                 ));
             }
             Err(_) => {
                 return Err(refuse(
                     &task,
-                    format!("o repositório principal está com o HEAD solto: troque para \"{}\" e tente de novo", task.base),
+                    t!("the main repository has a detached HEAD: switch to \"{base}\" and try again", base = &task.base),
                 ))
             }
         }
         if repo.state() != RepoState::Normal {
             return Err(refuse(
                 &task,
-                "o repositório principal está no meio de outra operação (mesclagem, rebase…): termine ou aborte antes".into(),
+                t!("the main repository is in the middle of another operation (merge, rebase…): finish or abort it first").into(),
             ));
         }
         let status = git_out(&repo, &["status", "--porcelain=v1", "--untracked-files=no"]).map_err(git_error)?;
-        // O app reescreve o bloco do AGENTS.md; o git protege o arquivo se a mesclagem o tocar.
+        // The app rewrites the AGENTS.md block; git protects the file if the merge touches it.
         let dirty: Vec<String> = dirty_paths(&status).into_iter().filter(|p| p != "AGENTS.md").collect();
         if !dirty.is_empty() && !stash_main {
             return Err(refuse_with(
                 &task,
-                format!(
-                    "o repositório principal tem alterações sem commit ({}): faça o commit ou guarde-as e tente de novo",
-                    short_list(&dirty)
-                ),
+                t!("the main repository has uncommitted changes ({files}): commit or stash them and try again", files = short_list(&dirty)),
                 Some(MergeBlock::MainDirty(dirty)),
             ));
         }
         if let Some(d) = worktree_dirty(&repo, &task.worktree).filter(|d| !d.is_empty()) {
             return Err(refuse_with(
                 &task,
-                format!(
-                    "a worktree da tarefa tem trabalho sem commit ({}): devolva a tarefa pedindo o commit, ou descarte-a",
-                    short_list(&d)
+                t!(
+                    "the task's worktree has uncommitted work ({files}): return the task asking for the commit, or discard it",
+                    files = short_list(&d)
                 ),
                 Some(MergeBlock::TaskDirty(d)),
             ));
         }
         if repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{}", task.branch)]).is_err() {
-            return Err(refuse(&task, format!("a branch {} não existe mais: descarte a tarefa", task.branch)));
+            return Err(refuse(&task, t!("the branch {branch} no longer exists: discard the task", branch = &task.branch)));
         }
         let ahead = git_out(&repo, &["rev-list", "--count", &format!("{}..{}", task.base, task.branch)]).map_err(git_error)?;
         if ahead.trim() == "0" {
-            // Reprovada e entregue sem commit novo: o agente concluiu que não havia o que mudar. O que a
-            // última mesclagem trouxe já está na base; volta a esperar a validação, sem novo commit de mesclagem.
+            // Rejected and delivered without a new commit: the agent concluded there was nothing to change. What the
+            // last merge brought is already in the base; it goes back to waiting for validation, with no new merge commit.
             if let Some(last) = task.merge_commit.as_deref() {
                 let short = short_hash(last).to_owned();
                 let updated = self.update_task(project, &task.id, |t| {
                     t.status = TaskStatus::Validating;
                     t.finished_ms = Some(now_ms());
                     t.error = None;
-                    t.log(format!("sem commits novos desde a última mesclagem ({short}); aguardando validação de novo"));
+                    t.log(t!("no new commits since the last merge ({hash}); awaiting validation again", hash = &short));
                     t.clone()
                 });
-                let task = updated.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+                let task = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;
                 self.feed(
-                    FeedEntry::system(format!("Tarefa {} sem commits novos, aguardando validação de novo: {}", task.id, task.title))
-                        .in_project(project),
+                    FeedEntry::system(t!(
+                        "Task {id} has no new commits, awaiting validation again: {title}",
+                        id = &task.id,
+                        title = &task.title
+                    ))
+                    .in_project(project),
                 );
                 return Ok(MergeOutcome { task, note: None });
             }
             return Err(refuse(
                 &task,
-                format!(
-                    "a branch {} não tem commits novos em relação a \"{}\": não há o que mesclar (descarte a tarefa)",
-                    task.branch, task.base
+                t!(
+                    "the branch {branch} has no new commits relative to \"{base}\": there is nothing to merge (discard the task)",
+                    branch = &task.branch,
+                    base = &task.base
                 ),
             ));
         }
         if let Err(e) = repo.check_gpg_ready() {
             return Err(refuse(&task, e.to_string()));
         }
-        // Arquivo novo (não rastreado) do usuário que a branch também cria: o git recusaria no meio da mesclagem. Vale
-        // com ou sem "guardar": o stash não leva arquivos não rastreados, e aqui ainda não se guardou nada.
+        // A new (untracked) file of the user's that the branch also creates: git would refuse in the middle of the merge.
+        // It applies with or without "stash": the stash does not take untracked files, and here nothing was stashed yet.
         let clash = untracked_clash(&repo, &task.base, &task.branch);
         if !clash.is_empty() {
             return Err(refuse(
                 &task,
-                format!(
-                    "o repositório principal tem arquivos novos seus, sem commit, que a tarefa também cria ({}): mova-os para outra pasta (ou apague-os) e tente de novo",
-                    short_list(&clash)
+                t!(
+                    "the main repository has new files of yours, uncommitted, that the task also creates ({files}): move them to another folder (or delete them) and try again",
+                    files = short_list(&clash)
                 ),
             ));
         }
 
-        // "Guardar minhas alterações": o que está sem commit vai para o stash (menos o AGENTS.md, que o app
-        // trata à parte, abaixo). Daqui em diante todo desfecho passa por `give_back`, que devolve o stash.
+        // "Stash my changes": what is uncommitted goes to the stash (except AGENTS.md, which the app handles
+        // separately, below). From here on every outcome goes through `give_back`, which returns the stash.
         let mut stashed: Option<Stash> = None;
         if stash_main && !dirty.is_empty() {
             match stash_push(&repo, &task) {
@@ -164,13 +169,13 @@ impl Core {
                 Err(e) => {
                     return Err(refuse(
                         &task,
-                        format!("não consegui guardar as alterações do repositório principal ({e}); nada foi mudado"),
+                        t!("could not stash the main repository's changes ({error}); nothing was changed", error = e),
                     ))
                 }
             }
             if stashed.is_some() {
                 self.update_task(project, &task.id, |t| {
-                    t.log(format!("guardei {} arquivo(s) sem commit do repositório principal no stash", dirty.len()))
+                    t.log(t!("stashed {count} uncommitted file(s) of the main repository", count = dirty.len()))
                 });
             }
         }
@@ -178,15 +183,15 @@ impl Core {
             let stash = stashed.as_ref()?;
             let (note, kept) = stash_pop(&repo, stash);
             self.update_task(project, &task.id, |t| {
-                t.log(format!("alterações guardadas: {}", if kept { "continuam no stash" } else { "devolvidas" }))
+                t.log(if kept { t!("stashed changes: still in the stash") } else { t!("stashed changes: given back") })
             });
             Some(note)
         };
 
-        // O app reescreve o bloco do AGENTS.md da pasta principal, e o git recusa mesclar sobre um arquivo
-        // alterado que a branch também mexe. Se a alteração é só o bloco do app, o arquivo volta ao do HEAD
-        // para a mesclagem e o bloco é regravado depois (com sucesso, conflito desfeito ou falha). Se o usuário
-        // editou o texto fora do bloco, nada é descartado: recusa.
+        // The app rewrites the AGENTS.md block in the main folder, and git refuses to merge over a changed file that
+        // the branch also touches. If the change is only the app's block, the file goes back to the HEAD's for the
+        // merge and the block is rewritten afterwards (on success, undone conflict or failure). If the user edited the
+        // text outside the block, nothing is discarded: it refuses.
         let mut app_block: Option<String> = None;
         let agents_dirty = dirty_paths(&status).iter().any(|p| p == "AGENTS.md");
         if agents_dirty && changed_files(&repo, &task.base, &task.branch).iter().any(|f| f == "AGENTS.md") {
@@ -198,9 +203,9 @@ impl Core {
                 return Err(refuse(
                     &task,
                     with_note(
-                        format!(
-                            "o AGENTS.md do repositório principal tem alterações suas sem commit, e a branch {} também mexe nele: faça o commit ou guarde-as e tente de novo",
-                            task.branch
+                        t!(
+                            "the main repository's AGENTS.md has uncommitted changes of yours, and the branch {branch} also touches it: commit or stash them and try again",
+                            branch = &task.branch
                         ),
                         note,
                     ),
@@ -210,7 +215,7 @@ impl Core {
                 let note = give_back();
                 return Err(refuse(
                     &task,
-                    with_note(format!("não consegui preparar o AGENTS.md do repositório principal para a mesclagem: {e}"), note),
+                    with_note(t!("could not prepare the main repository's AGENTS.md for the merge: {error}", error = e), note),
                 ));
             }
             app_block = Some(current);
@@ -218,12 +223,14 @@ impl Core {
         let restore_block = || {
             let Some(saved) = &app_block else { return };
             if let Err(e) = crate::workspace::restore_marker_block(&repo.root.join("AGENTS.md"), saved) {
-                log::warn!("falha ao regravar o bloco do AGENTS.md depois da mesclagem: {e}");
-                self.update_task(project, &task.id, |t| t.log(format!("aviso: não consegui regravar o bloco do app no AGENTS.md: {e}")));
+                log::warn!("failed to rewrite the AGENTS.md block after the merge: {e}");
+                self.update_task(project, &task.id, |t| {
+                    t.log(t!("warning: could not rewrite the app's block in AGENTS.md: {error}", error = &e))
+                });
             }
         };
 
-        // A mesclagem.
+        // The merge. (The commit subject stays in Portuguese: `examples/memeval.rs` parses `Merge tarefa tN` in the history.)
         let message = format!("Merge tarefa {}: {}", task.id, task.title);
         if let Err(e) = run(repo.cmd(&["merge", "--no-ff", "-m", &message, &task.branch]), None, COMMIT_TIMEOUT) {
             if repo.state() == RepoState::Merging {
@@ -233,72 +240,86 @@ impl Core {
                     Ok(_) => {
                         restore_block();
                         let note = give_back();
-                        let msg = format!(
-                            "conflito ao mesclar {} em \"{}\" (arquivos: {}); a mesclagem foi desfeita e a tarefa continua em revisão. Devolva-a ao agente pedindo para atualizar a branch com a base, ou resolva à mão",
-                            task.branch,
-                            task.base,
-                            if files.is_empty() { "não identificados".to_owned() } else { short_list(&files) }
+                        let msg = t!(
+                            "conflict while merging {branch} into \"{base}\" (files: {files}); the merge was undone and the task is still in review. Return it to the agent asking it to update the branch with the base, or resolve it by hand",
+                            branch = &task.branch,
+                            base = &task.base,
+                            files = if files.is_empty() { t!("not identified").to_owned() } else { short_list(&files) }
                         );
-                        self.update_task(project, &task.id, |t| t.log(format!("conflito na mesclagem ({}); desfeita", short_list(&files))));
+                        self.update_task(project, &task.id, |t| t.log(t!("conflict in the merge ({files}); undone", files = short_list(&files))));
                         Err(MergeRefusal {
                             error: TaskError::Conflict(with_note(msg, note.clone())),
                             block: Some(MergeBlock::Conflict(files)),
                             stash_note: note,
                         })
                     }
-                    // Sem conseguir desfazer, a pasta está no meio da mesclagem: o stash não é devolvido por cima.
+                    // If it cannot be undone, the folder is in the middle of the merge: the stash is not given back on top.
                     Err(abort) => Err(self
                         .fail_merge(
                             project,
                             &task.id,
-                            format!(
-                                "conflito ao mesclar e não consegui desfazer ({abort}): rode git merge --abort em {}{}",
-                                repo.root.display(),
-                                if stashed.is_some() {
-                                    "; as suas alterações sem commit continuam guardadas (git stash list)"
-                                } else {
-                                    ""
-                                }
-                            ),
+                            if stashed.is_some() {
+                                t!(
+                                    "conflict while merging and could not undo it ({abort}): run git merge --abort in {folder}; your uncommitted changes are still stashed (git stash list)",
+                                    abort,
+                                    folder = repo.root.display()
+                                )
+                            } else {
+                                t!(
+                                    "conflict while merging and could not undo it ({abort}): run git merge --abort in {folder}",
+                                    abort,
+                                    folder = repo.root.display()
+                                )
+                            },
                         )
                         .into()),
                 };
             }
             restore_block();
             let note = give_back();
-            return Err(self.fail_merge(project, &task.id, with_note(format!("a mesclagem falhou: {e}"), note)).into());
+            return Err(self.fail_merge(project, &task.id, with_note(t!("the merge failed: {error}", error = e), note)).into());
         }
         restore_block();
         let note = give_back();
         let full_head = git_out(&repo, &["rev-parse", "HEAD"]).map(|s| s.trim().to_owned()).unwrap_or_default();
         let head = short_hash(&full_head).to_owned();
 
-        // A branch da tarefa passa a ser a própria base: se for reprovada, o agente continua dali.
+        // The task's branch becomes the base itself: if rejected, the agent continues from there.
         let aligned = align_with_base(&repo, &task);
         let merged = self.update_task(project, &task.id, |t| {
             t.status = TaskStatus::Validating;
             t.finished_ms = Some(now_ms());
             t.error = None;
             t.merge_commit = Some(full_head.clone()).filter(|h| !h.is_empty());
-            t.log(format!("mesclada em {} ({head}); aguardando validação", t.base));
+            t.log(t!("merged into {base} ({hash}); awaiting validation", base = &t.base, hash = &head));
             if let Err(e) = &aligned {
-                t.log(format!("aviso: não consegui alinhar a branch {} com {}: {e}", t.branch, t.base));
+                t.log(t!(
+                    "warning: could not align the branch {branch} with {base}: {error}",
+                    branch = &t.branch,
+                    base = &t.base,
+                    error = e
+                ));
             }
             t.clone()
         });
-        let task = merged.ok_or_else(|| TaskError::NotFound(format!("tarefa {id} sumiu")))?;
+        let task = merged.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;
         self.emit(CoreEvent::GitChanged);
         self.feed(
-            FeedEntry::system(format!("Tarefa {} mesclada em {}, aguardando validação: {}", task.id, task.base, task.title))
-                .in_project(project),
+            FeedEntry::system(t!(
+                "Task {id} merged into {base}, awaiting validation: {title}",
+                id = &task.id,
+                base = &task.base,
+                title = &task.title
+            ))
+            .in_project(project),
         );
-        // A tarefa deixou de segurar o escopo: quem esperava por ela parte da base já com esta mesclagem.
+        // The task no longer holds the scope: whoever waited for it departs from the base already with this merge.
         self.advance_queue_locked(project);
         Ok(MergeOutcome { task, note })
     }
 }
 
-/// A mensagem seguida do aviso do stash, se houve.
+/// The message followed by the stash notice, if there was one.
 fn with_note(msg: String, note: Option<String>) -> String {
     match note {
         Some(n) => format!("{msg} {n}"),

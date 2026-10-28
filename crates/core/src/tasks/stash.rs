@@ -2,21 +2,22 @@ use super::git_ops::git_out;
 use super::text::short_list;
 use super::Task;
 use crate::git::{run, Repo, COMMIT_TIMEOUT};
+use crate::t;
 
-/// O stash que o app criou para guardar as alterações do repositório principal (o hash identifica a entrada:
-/// a pilha do stash é compartilhada com as outras worktrees, `stash@{0}` pode não ser a nossa na hora de devolver).
+/// The stash the app created to keep the main repository's changes (the hash identifies the entry: the stash stack
+/// is shared with the other worktrees, `stash@{0}` may not be ours at the time of giving back).
 pub(super) struct Stash {
     sha: String,
     message: String,
 }
 
-/// O topo do stash (`refs/stash`), se há.
+/// The top of the stash (`refs/stash`), if there is one.
 fn stash_top(repo: &Repo) -> Option<String> {
     repo.read(&["rev-parse", "-q", "--verify", "refs/stash"]).ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
 }
 
-/// Guarda no stash as alterações sem commit dos arquivos rastreados do repositório principal, menos o `AGENTS.md`
-/// (o app trata dele à parte). Não leva arquivos não rastreados. `Ok(None)` = não havia o que guardar.
+/// Stashes the uncommitted changes of the main repository's tracked files, except `AGENTS.md` (the app handles it
+/// separately). Does not take untracked files. `Ok(None)` = there was nothing to stash.
 pub(super) fn stash_push(repo: &Repo, task: &Task) -> Result<Option<Stash>, String> {
     let listed = git_out(repo, &["diff", "--name-only", "-z", "--no-renames", "HEAD", "--"]).map_err(|e| e.to_string())?;
     let mut stdin = Vec::new();
@@ -28,21 +29,22 @@ pub(super) fn stash_push(repo: &Repo, task: &Task) -> Result<Option<Stash>, Stri
         return Ok(None);
     }
     let before = stash_top(repo);
-    let message = format!("agentdeck: guardado antes de mesclar a tarefa {}", task.id);
+    // The entry's name is what the user sees in `git stash list`, and the notices quote it: plain English.
+    let message = format!("agentdeck: stashed before merging task {}", task.id);
     let args = ["stash", "push", "-m", message.as_str(), "--pathspec-from-file=-", "--pathspec-file-nul"];
     run(repo.cmd(&args), Some(stdin), COMMIT_TIMEOUT).map_err(|e| e.to_string())?;
     let after = stash_top(repo);
     Ok(after.filter(|a| Some(a) != before.as_ref()).map(|sha| Stash { sha, message }))
 }
 
-/// A posição atual (`stash@{n}`) da entrada do stash, se ela ainda existe.
+/// The current position (`stash@{n}`) of the stash entry, if it still exists.
 fn stash_ref(repo: &Repo, sha: &str) -> Option<String> {
     let list = git_out(repo, &["stash", "list", "--format=%H %gd"]).ok()?;
     list.lines().find_map(|l| l.split_once(' ').filter(|(h, _)| *h == sha).map(|(_, r)| r.trim().to_owned()))
 }
 
-/// Os arquivos em que devolver o stash por cima de `HEAD` daria conflito, sem tocar na pasta
-/// (`git merge-tree --write-tree`, git 2.38+). `None` = não deu para conferir (git antigo, erro).
+/// The files where giving the stash back on top of `HEAD` would conflict, without touching the folder
+/// (`git merge-tree --write-tree`, git 2.38+). `None` = could not check (old git, error).
 fn stash_pop_conflicts(repo: &Repo, sha: &str) -> Option<Vec<String>> {
     let base = format!("--merge-base={sha}^1");
     let out = repo.cmd(&["merge-tree", "--write-tree", "--name-only", "--no-messages", &base, "HEAD", sha]).output().ok()?;
@@ -50,54 +52,57 @@ fn stash_pop_conflicts(repo: &Repo, sha: &str) -> Option<Vec<String>> {
         Some(0) => Some(Vec::new()),
         Some(1) => {
             let text = String::from_utf8_lossy(&out.stdout);
-            // A primeira linha é o tree; os arquivos em conflito vêm depois, até uma linha vazia.
+            // The first line is the tree; the conflicting files come after it, up to an empty line.
             Some(text.lines().skip(1).take_while(|l| !l.is_empty()).map(str::to_owned).collect())
         }
         _ => None,
     }
 }
 
-/// Devolve o stash à pasta principal depois da mesclagem. Só faz o `stash pop` quando a conferência diz que não há
-/// conflito; na dúvida, ou em conflito, deixa no stash (intacto) e o aviso explica como recuperar. Devolve o aviso
-/// e se o stash continua guardado.
+/// Gives the stash back to the main folder after the merge. Only does `stash pop` when the check says there is no
+/// conflict; when in doubt, or on a conflict, it leaves it in the stash (intact) and the notice explains how to
+/// recover it. Returns the notice and whether the stash is still kept.
 pub(super) fn stash_pop(repo: &Repo, stash: &Stash) -> (String, bool) {
-    let recover = "Para recuperá-las: abra um terminal na pasta do projeto, rode git stash list para achar a entrada e git stash pop para devolvê-la (resolvendo o que chocar).";
     let kept = |why: String| {
         (
-            format!(
-                "Suas alterações sem commit continuam guardadas no stash do git (\"{}\"): {why} Nada se perdeu. {recover}",
-                stash.message
+            t!(
+                "Your uncommitted changes are still kept in git's stash (\"{message}\"): {why} Nothing was lost. To recover them: open a terminal in the project folder, run git stash list to find the entry and git stash pop to give it back (resolving whatever clashes).",
+                message = &stash.message,
+                why
             ),
             true,
         )
     };
     if stash_ref(repo, &stash.sha).is_none() {
         return (
-            "O stash com as suas alterações não está mais na lista do git (alguém o usou ou apagou?); confira com git stash list.".into(),
+            t!("The stash with your changes is no longer in git's list (did someone use or delete it?); check with git stash list.").into(),
             true,
         );
     }
     match stash_pop_conflicts(repo, &stash.sha) {
         Some(files) if files.is_empty() => {}
-        Some(files) => return kept(format!("ao devolvê-las elas se chocariam com o que a tarefa trouxe em {}.", short_list(&files))),
-        None => return kept("não consegui conferir se elas se chocam com o que a tarefa trouxe.".into()),
+        Some(files) => {
+            return kept(t!("giving them back, they would clash with what the task brought in {files}.", files = short_list(&files)))
+        }
+        None => return kept(t!("I could not check whether they clash with what the task brought.").into()),
     }
-    // Aplica pelo sha, não por `stash@{n}`: a pilha é de todas as worktrees, e um `stash push` de outro entre a conferência
-    // e a devolução mudaria a posição (o `pop` devolveria e apagaria a entrada de outra pessoa). A entrada só sai depois,
-    // procurada de novo pelo sha.
+    // Applies by sha, not by `stash@{n}`: the stack belongs to all worktrees, and another `stash push` between the check
+    // and the giving back would change the position (the `pop` would give back and delete someone else's entry). The
+    // entry only leaves afterwards, looked up again by its sha.
     match repo.write(&["stash", "apply", &stash.sha], None) {
         Ok(_) => {
             if let Some(reference) = stash_ref(repo, &stash.sha) {
                 if let Err(e) = repo.write(&["stash", "drop", &reference], None) {
-                    log::warn!("as alterações voltaram, mas a entrada do stash ficou ({e})");
+                    log::warn!("the changes came back, but the stash entry remained ({e})");
                 }
             }
-            ("Suas alterações sem commit foram guardadas durante a mesclagem e já voltaram para a pasta.".to_owned(), false)
+            (t!("Your uncommitted changes were stashed during the merge and are already back in the folder.").to_owned(), false)
         }
         Err(e) => {
             let unmerged = git_out(repo, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
-            let mess = if unmerged.trim().is_empty() { "" } else { " A pasta ficou com arquivos em conflito: confira com git status." };
-            kept(format!("o git não conseguiu devolvê-las ({e}).{mess}"))
+            let mess =
+                if unmerged.trim().is_empty() { "" } else { t!(" The folder was left with conflicting files: check with git status.") };
+            kept(t!("git could not give them back ({error}).{mess}", error = e, mess))
         }
     }
 }
