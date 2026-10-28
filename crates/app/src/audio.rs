@@ -1,26 +1,26 @@
-//! Áudio: chime de notificação (síntese igual ao `playNotificationSound` do renderer) e
-//! captura do microfone para transcrição (16 kHz mono). Tudo atrás da feature `audio` (cpal);
-//! sem ela, o som é mudo e o microfone aparece como indisponível.
+//! Audio: notification chime (synthesized to match `playNotificationSound` in the renderer) and
+//! microphone capture for transcription (16 kHz mono). All gated behind the `audio` feature (cpal);
+//! without it, audio is silent and the microphone appears as unavailable.
 
-// Sem a feature, os auxiliares de síntese/reamostragem só são usados pelos testes.
+// Without the feature, synthesis and resampling helpers are only used by tests.
 #![cfg_attr(not(feature = "audio"), allow(dead_code))]
 
-/// Taxa exigida pelo whisper.cpp.
+/// Sample rate required by whisper.cpp.
 pub const WHISPER_RATE: u32 = 16_000;
 
-/// Duração máxima de uma gravação: a interface para e transcreve ao chegar nela, e a captura
-/// não guarda mais do que isso (48 kHz estéreo ≈ 115 MB), mesmo se a interface não parar.
+/// Maximum duration of a recording: the UI stops and transcribes upon reaching it, and capture
+/// keeps no more than this (48 kHz stereo ≈ 115 MB), even if the UI does not stop.
 pub const MAX_RECORDING_SECS: u32 = 300;
 
-/// Acrescenta amostras sem passar de `max` no total (o resto é descartado).
+/// Appends samples without exceeding `max` in total (the remainder is discarded).
 pub fn push_capped(buf: &mut Vec<f32>, data: impl Iterator<Item = f32>, max: usize) {
     let room = max.saturating_sub(buf.len());
     buf.extend(data.take(room));
 }
 
-/// Sintetiza o chime de 2 tons (D5 587 Hz → A5 880 Hz) em mono, na taxa `rate`:
-/// seno 587,33→880 Hz (rampa exponencial em 0,12 s) + triângulo 880 Hz a partir de 0,06 s,
-/// ganho 0,001 → 0,2 (0,04 s) → 0,001 (0,45 s), exatamente como no Web Audio.
+/// Synthesizes the 2-tone chime (D5 587 Hz → A5 880 Hz) in mono, at `rate`:
+/// sine 587.33→880 Hz (exponential ramp over 0.12 s) + triangle 880 Hz starting at 0.06 s,
+/// gain 0.001 → 0.2 (0.04 s) → 0.001 (0.45 s), exactly as in Web Audio.
 pub fn chime_samples(rate: u32) -> Vec<f32> {
     let rate = rate.max(1) as f64;
     let total = (0.45 * rate).ceil() as usize;
@@ -28,14 +28,14 @@ pub fn chime_samples(rate: u32) -> Vec<f32> {
     let (mut ph1, mut ph2) = (0.0f64, 0.0f64);
     for i in 0..total {
         let t = i as f64 / rate;
-        // Frequência do seno: rampa exponencial até 0,12 s, depois constante.
+        // Sine frequency: exponential ramp up to 0.12 s, constant thereafter.
         let f1 = if t < 0.12 { 587.33 * (880.0f64 / 587.33).powf(t / 0.12) } else { 880.0 };
         ph1 += f1 / rate;
         let s1 = (std::f64::consts::TAU * ph1).sin();
         let s2 = if t >= 0.06 {
             ph2 += 880.0 / rate;
             let p = ph2.fract();
-            // Onda triangular (começa em 0, sobe até 1 em 1/4 do período).
+            // Triangular wave (starts at 0, ramps to 1 in 1/4 of the period).
             if p < 0.25 {
                 4.0 * p
             } else if p < 0.75 {
@@ -52,7 +52,7 @@ pub fn chime_samples(rate: u32) -> Vec<f32> {
     out
 }
 
-/// Mistura canais intercalados em mono.
+/// Downmixes interleaved channels to mono.
 pub fn downmix(interleaved: &[f32], channels: usize) -> Vec<f32> {
     if channels <= 1 {
         return interleaved.to_vec();
@@ -60,8 +60,8 @@ pub fn downmix(interleaved: &[f32], channels: usize) -> Vec<f32> {
     interleaved.chunks(channels).map(|f| f.iter().sum::<f32>() / f.len() as f32).collect()
 }
 
-/// Reamostra mono `from_rate` → `to_rate`. Ao reduzir a taxa, faz média na janela de cada
-/// amostra de saída (filtro anti-aliasing simples); ao aumentar, interpola linearmente.
+/// Resamples mono `from_rate` → `to_rate`. When downsampling, averages the window of each
+/// output sample (simple anti-aliasing filter); when upsampling, interpolates linearly.
 pub fn resample(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if input.is_empty() || from_rate == 0 || to_rate == 0 {
         return Vec::new();
@@ -90,7 +90,7 @@ pub fn resample(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     out
 }
 
-/// Converte captura (intercalada, `channels`, `rate`) para 16 kHz mono f32 −1..1.
+/// Converts capture (interleaved, `channels`, `rate`) to 16 kHz mono f32 −1..1.
 pub fn to_whisper_pcm(interleaved: &[f32], channels: usize, rate: u32) -> Vec<f32> {
     resample(&downmix(interleaved, channels), rate, WHISPER_RATE).into_iter().map(|s| s.clamp(-1.0, 1.0)).collect()
 }
@@ -108,18 +108,18 @@ mod imp {
 
     pub const AVAILABLE: bool = true;
 
-    /// Toca o chime numa thread própria (o stream do cpal não é `Send` em todas as plataformas).
+    /// Plays chime on a dedicated thread (cpal stream is not `Send` on all platforms).
     pub fn play_chime() {
         let _ = std::thread::Builder::new().name("chime".into()).spawn(|| {
             if let Err(e) = play_blocking() {
-                log::warn!("Erro ao reproduzir notificação sonora: {e}");
+                log::warn!("error playing notification sound: {e}");
             }
         });
     }
 
     fn play_blocking() -> anyhow::Result<()> {
         let host = cpal::default_host();
-        let device = host.default_output_device().ok_or_else(|| anyhow::anyhow!("sem dispositivo de saída"))?;
+        let device = host.default_output_device().ok_or_else(|| anyhow::anyhow!("no output device"))?;
         let supported = device.default_output_config()?;
         let format = supported.sample_format();
         let config: StreamConfig = supported.into();
@@ -130,7 +130,7 @@ mod imp {
             SampleFormat::U16 => build_out::<u16>(&device, config, samples)?,
             SampleFormat::I32 => build_out::<i32>(&device, config, samples)?,
             SampleFormat::F64 => build_out::<f64>(&device, config, samples)?,
-            other => anyhow::bail!("formato de saída não suportado: {other}"),
+            other => anyhow::bail!("unsupported output format: {other}"),
         };
         stream.play()?;
         std::thread::sleep(Duration::from_millis(600));
@@ -155,13 +155,13 @@ mod imp {
                     }
                 }
             },
-            |e| log::warn!("stream de saída: {e}"),
+            |e| log::warn!("output stream: {e}"),
             None,
         )?;
         Ok(stream)
     }
 
-    /// Gravação em andamento.
+    /// Recording in progress.
     pub struct Recorder {
         stop_tx: mpsc::Sender<()>,
         handle: Option<JoinHandle<()>>,
@@ -171,7 +171,7 @@ mod imp {
     }
 
     impl Recorder {
-        /// Abre o microfone padrão e começa a capturar.
+        /// Opens the default microphone and starts capture.
         pub fn start() -> Result<Recorder, String> {
             let (ready_tx, ready_rx) = mpsc::channel::<Result<(usize, u32), String>>();
             let (stop_tx, stop_rx) = mpsc::channel::<()>();
@@ -197,11 +197,11 @@ mod imp {
             match ready_rx.recv_timeout(Duration::from_secs(5)) {
                 Ok(Ok((channels, rate))) => Ok(Recorder { stop_tx, handle: Some(handle), buf, channels, rate }),
                 Ok(Err(e)) => Err(e),
-                Err(_) => Err("tempo esgotado ao abrir o microfone".into()),
+                Err(_) => Err("timed out opening microphone".into()),
             }
         }
 
-        /// Para a captura e devolve PCM 16 kHz mono.
+        /// Stops capture and returns 16 kHz mono PCM.
         pub fn stop(mut self) -> Vec<f32> {
             let _ = self.stop_tx.send(());
             if let Some(h) = self.handle.take() {
@@ -211,7 +211,7 @@ mod imp {
             super::to_whisper_pcm(&raw, self.channels, self.rate)
         }
 
-        /// Descarta a gravação.
+        /// Discards the recording.
         pub fn cancel(mut self) {
             let _ = self.stop_tx.send(());
             if let Some(h) = self.handle.take() {
@@ -222,7 +222,7 @@ mod imp {
 
     fn open_input(buf: Arc<Mutex<Vec<f32>>>) -> Result<(cpal::Stream, usize, u32), String> {
         let host = cpal::default_host();
-        let device = host.default_input_device().ok_or_else(|| "nenhum dispositivo de entrada encontrado".to_string())?;
+        let device = host.default_input_device().ok_or_else(|| "no input device found".to_string())?;
         let supported = device.default_input_config().map_err(|e| e.to_string())?;
         let format = supported.sample_format();
         let config: StreamConfig = supported.into();
@@ -236,7 +236,7 @@ mod imp {
             SampleFormat::I8 => build_in::<i8>(&device, config, buf, max),
             SampleFormat::U8 => build_in::<u8>(&device, config, buf, max),
             SampleFormat::F64 => build_in::<f64>(&device, config, buf, max),
-            other => Err(format!("formato de captura não suportado: {other}")),
+            other => Err(format!("unsupported capture format: {other}")),
         }?;
         stream.play().map_err(|e| e.to_string())?;
         Ok((stream, ch, rate))
@@ -254,7 +254,7 @@ mod imp {
                     let mut b = buf.lock();
                     super::push_capped(&mut b, data.iter().map(|s| s.to_sample::<f32>()), max);
                 },
-                |e| log::warn!("stream de entrada: {e}"),
+                |e| log::warn!("input stream: {e}"),
                 None,
             )
             .map_err(|e| e.to_string())
@@ -271,7 +271,7 @@ mod imp {
 
     impl Recorder {
         pub fn start() -> Result<Recorder, String> {
-            Err("recurso de áudio desativado nesta compilação".into())
+            Err("audio feature disabled in this build".into())
         }
         pub fn stop(self) -> Vec<f32> {
             Vec::new()
@@ -291,8 +291,8 @@ mod tests {
         let s = chime_samples(48_000);
         assert_eq!(s.len(), (0.45f64 * 48_000.0).ceil() as usize);
         let peak = s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-        assert!(peak > 0.15 && peak <= 0.41, "pico {peak}");
-        // Começa quase mudo e termina quase mudo.
+        assert!(peak > 0.15 && peak <= 0.41, "peak {peak}");
+        // Starts nearly silent and ends nearly silent.
         assert!(s[..10].iter().all(|v| v.abs() < 0.01));
         assert!(s[s.len() - 10..].iter().all(|v| v.abs() < 0.01));
     }
@@ -327,11 +327,11 @@ mod tests {
 
     #[test]
     fn resample_keeps_low_frequency_sine() {
-        // 440 Hz a 44,1 kHz → 16 kHz preserva amplitude.
+        // 440 Hz at 44.1 kHz → 16 kHz preserves amplitude.
         let input: Vec<f32> = (0..44_100).map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / 44_100.0).sin()).collect();
         let out = to_whisper_pcm(&input, 1, 44_100);
         assert_eq!(out.len(), 16_000);
         let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-        assert!(peak > 0.9 && peak <= 1.0, "pico {peak}");
+        assert!(peak > 0.9 && peak <= 1.0, "peak {peak}");
     }
 }

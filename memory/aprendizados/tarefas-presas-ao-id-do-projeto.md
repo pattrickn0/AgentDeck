@@ -1,26 +1,26 @@
 ---
-titulo: As tarefas ficam presas ao id do projeto, não à pasta
-resumo: Remover e adicionar o projeto de novo gerava outro id e deixava as tarefas órfãs em dados/tarefas/<id antigo>.json; readicionar a mesma pasta agora reaproveita o id.
+title: Tasks are bound to project id, not directory path
+summary: Removing and re-adding a project used to generate a new id and orphaned tasks in dados/tarefas/<old id>.json; re-adding the same directory now reuses the id.
 touches: [crates/core/src/tasks/**, crates/core/src/config.rs, crates/core/src/lib.rs]
 ---
-A mesa grava as tarefas em `dados/tarefas/<id do projeto>.json` (e os pedidos em `<id>-tNN-brief.md`). Remover o
-projeto da lista não apaga esse arquivo, mas adicionar a mesma pasta de novo criava um id novo (`p` + hexadecimal) e a
-mesa aparecia vazia. As worktrees (`.agentdeck/worktrees/`) mudam junto com a pasta, mas o campo `worktree` de cada
-tarefa e o registro do git (`.git/worktrees/*/gitdir`) continuam no caminho velho.
+The task board stores tasks in `dados/tarefas/<project id>.json` (and task descriptions in `<id>-tNN-brief.md`). Removing a
+project from the list does not delete this file, but re-adding the same directory used to generate a new id (`p` + hex) and the
+board appeared empty. Worktrees (`.agentdeck/worktrees/`) move along with the folder, but each task's `worktree` field
+and git's internal records (`.git/worktrees/*/gitdir`) still referenced the old path.
 
-**Por quê:** em 2026-10-24 a pasta `commanddeck-dev` virou `agentdeck`, o projeto foi removido e readicionado, e as 47
-tarefas sumiram da mesa (o id foi de `pfdaeded2` para `p76d8a279`).
+**Why:** on 2026-10-24, directory `commanddeck-dev` was renamed to `agentdeck`, the project was removed and re-added, and 47
+tasks vanished from the board (id changed from `pfdaeded2` to `p76d8a279`).
 
-**Como aplicar:** desde a `t50` (2026-10-24), remover um projeto guarda o par id + pasta em `Config.removed_projects`
-(`removedProjects` no `config.json`, camelCase, últimos 50; `Config::remove_project`) e `Config::add_project`
-(`Core::create_project`) reaproveita o id quando a pasta volta, desde que nenhum projeto ativo já use esse id. A
-comparação de pastas é própria (`same_folder`): `\` e `/` valem o mesmo, sem barra no fim e, só no Windows, sem
-diferenciar maiúsculas. Por isso **não** compare pastas de projeto com `util::same_path` quando o que importa é "a
-pasta que a pessoa digitou".
+**How to apply:** since `t50` (2026-10-24), removing a project preserves the id + path pair in `Config.removed_projects`
+(`removedProjects` in `config.json`, camelCase, last 50; `Config::remove_project`), and `Config::add_project`
+(`Core::create_project`) reuses the id when the path returns, provided no active project currently uses that id.
+Path comparison uses custom logic (`same_folder`): `\` and `/` are treated equally, trailing slashes are trimmed, and on
+Windows only, comparison is case-insensitive. Therefore, do **not** compare project paths with `util::same_path` when the
+intent is "the path entered by the user".
 
-A recuperação manual (o parágrafo abaixo) fica só para projetos removidos antes dessa mudança, que não têm o par
-guardado. Com o app fechado (ele guarda a lista em memória e regrava ao mexer numa tarefa): copie `<id antigo>.json`
-para `<id novo>.json` (o id está em `projectList` do `%APPDATA%\AgentDeck\config.json`), troque o caminho velho no
-campo `worktree`, renomeie os `<id antigo>-tNN-*.md` e rode `git worktree repair <worktrees>`; ou acrescente
-`{"id": "<id antigo>", "path": "<a pasta>"}` a `removedProjects` e readicione a pasta pelo app, que é o caminho da
-`t50`.
+Manual recovery (the paragraph below) is only needed for projects removed prior to this change that lack a saved pair.
+With the app closed (it keeps the project list in memory and writes it when modifying tasks): copy `<old id>.json`
+to `<new id>.json` (the id is found in `projectList` in `%APPDATA%\AgentDeck\config.json`), update the old path in the
+`worktree` field, rename `<old id>-tNN-*.md` files, and run `git worktree repair <worktrees>`; or add
+`{"id": "<old id>", "path": "<the folder>"}` to `removedProjects` and re-add the folder via the app, which is the path
+implemented in `t50`.

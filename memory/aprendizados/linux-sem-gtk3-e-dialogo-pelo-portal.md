@@ -1,21 +1,21 @@
 ---
-titulo: No Linux o AgentDeck não usa GTK3, e os diálogos dependem do portal
-resumo: O rfd 0.17 usa xdg-portal (sem gtk-sys); não peça gtk3-devel — mas sem xdg-desktop-portal o diálogo não abre.
+title: On Linux AgentDeck does not use GTK3, and dialogs depend on the portal
+summary: rfd 0.17 uses xdg-portal (no gtk-sys); do not require gtk3-devel — but without xdg-desktop-portal dialogs will not open.
 touches: [README.md, CONTRIBUTING.md, .github/workflows/ci.yml, crates/app/Cargo.toml]
 ---
-A lista de dependências do Linux citava `libgtk-3-dev` (Ubuntu) e `gtk3-devel` (Fedora), que **não são usados**: o
-`Cargo.lock` não tem `gtk-sys`/`glib-sys`, e o `rfd 0.17` tem `default = ["xdg-portal", "wayland"]` (a feature `gtk3`
-existe, mas não está ligada). O `ureq` usa rustls, então também não há OpenSSL no build.
+The Linux dependency list previously cited `libgtk-3-dev` (Ubuntu) and `gtk3-devel` (Fedora), which **are not used**:
+`Cargo.lock` does not contain `gtk-sys`/`glib-sys`, and `rfd 0.17` has `default = ["xdg-portal", "wayland"]` (the `gtk3` feature
+exists, but is not enabled). `ureq` uses rustls, so there is also no OpenSSL build dependency.
 
-O que o Linux realmente pede além do compilador e da ALSA: `xdg-utils` (`xdg-open`, para abrir pastas/links) e
-`xdg-desktop-portal` com um backend (`xdg-desktop-portal-gtk` ou `-kde`) para os diálogos de arquivo. Sem o portal o
-diálogo não abre e o app não avisa.
+What Linux actually requires beyond the compiler and ALSA: `xdg-utils` (`xdg-open`, to open folders/links) and
+`xdg-desktop-portal` with a backend (`xdg-desktop-portal-gtk` or `-kde`) for file dialogs. Without the portal, the file
+dialog does not open and the app provides no warning.
 
-**Por quê:** a documentação do rfd fala de GTK3 e é fácil copiar isso para o README; o resultado é uma dependência de
-build grande que não muda nada no binário. Do outro lado, o portal é invisível no `Cargo.toml` (é serviço D-Bus) e
-esqueceram dele.
+**Why:** rfd's documentation mentions GTK3, making it easy to copy into the README; the result is a heavy build
+dependency that alters nothing in the compiled binary. On the other hand, the portal is invisible in `Cargo.toml` (being a D-Bus service)
+and was overlooked.
 
-**Como aplicar:** antes de acrescentar biblioteca de sistema, confira `Cargo.lock` (o crate está lá?) e as features
-ligadas. Ao testar diálogo de arquivo num ambiente mínimo, confira `systemctl --user status xdg-desktop-portal`. Se um
-dia o portal virar problema em ambiente sem D-Bus, a alternativa é ligar a feature `gtk3` do rfd e voltar a pedir o
-GTK — decisão de produto, não “conserto” silencioso.
+**How to apply:** before adding a system library, check `Cargo.lock` (is the crate present?) and enabled features.
+When testing file dialogs in a minimal environment, check `systemctl --user status xdg-desktop-portal`. If the portal ever
+becomes an issue in headless/D-Bus-less environments, the alternative is enabling rfd's `gtk3` feature and requiring
+GTK again — a product decision, not a silent "fix".

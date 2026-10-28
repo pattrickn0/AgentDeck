@@ -314,7 +314,7 @@ fn a_task_whose_scope_overlaps_waits_in_the_queue_and_starts_by_itself_when_the_
     env.deck.tasks.form.scope = "crates/*.rs".into();
     env.deck.tasks_submit_form();
     env.pump("o erro do escopo", |d| !d.tasks.form.busy);
-    assert!(env.deck.tasks.form.error.as_deref().is_some_and(|e| e.contains("não de padrões")), "{:?}", env.deck.tasks.form.error);
+    assert!(env.deck.tasks.form.error.as_deref().is_some_and(|e| e.contains("not patterns (glob)")), "{:?}", env.deck.tasks.form.error);
     assert_eq!(env.core.tasks(&env.project()).len(), 1);
 
     // A segunda, com escopo dentro do da primeira, entra na fila: sem aba, só o botão de descartar.

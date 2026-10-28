@@ -1,31 +1,31 @@
 ---
-titulo: O editor do modo Documentos: decisões e armadilhas
-resumo: Realce por tokenizador próprio (sem syntect); o TextEdit pede o galley todo quadro (cache por impressão digital); edição suja nunca é trocada por leitura.
+title: The Documents mode editor: decisions and pitfalls
+summary: Highlighting via custom tokenizer (no syntect); TextEdit requests the galley every frame (fingerprint cache); dirty edits are never replaced by disk reads.
 touches: [crates/app/src/docs.rs, crates/core/src/highlight.rs, crates/app/src/ui/code.rs, crates/app/src/ui/select.rs, crates/app/src/ui/diff_view.rs, crates/app/src/ui/docs.rs]
 ---
-O arquivo de texto pequeno do modo Documentos é um `DocState::Source` pintado por um `egui::TextEdit` (`ui/code.rs`); o diff e o
-arquivo grande são pintados à mão (`ui/diff_view.rs`, `ui/code.rs::text_body`) com a seleção de `ui/select.rs`.
+A small text file in Documents mode is a `DocState::Source` rendered via an `egui::TextEdit` (`ui/code.rs`); diffs and
+large files are rendered manually (`ui/diff_view.rs`, `ui/code.rs::text_body`) using selection logic from `ui/select.rs`.
 
-- **Realce sem `syntect`.** `egui_extras::syntax_highlighting` (o `syntect`) traria o motor de regex, as definições e os temas:
-  alguns MB no executável e minutos a mais na compilação das três plataformas da CI, para nove linguagens. `highlight.rs` é uma tabela
-  por linguagem (palavras-chave, comentários, aspas) e uma função por linha, com o estado que passa de uma linha à seguinte em `Carry`.
-  Se faltar linguagem, acrescente uma entrada em `spec()` (ou `Lang::from_path`); só pense em `syntect` se precisar de gramática de verdade.
-- **O `TextEdit` pede o galley a cada quadro.** O `layouter` roda todo quadro (e de novo a cada tecla), então montar o realce ali sem cache
-  refaria o arquivo inteiro 60 vezes por segundo. `docs::Shaped` guarda o galley por impressão digital do texto, largura de quebra, escala da
-  tela e busca (`Find::stamp`), e `highlight::Cache` guarda as faixas por texto e linguagem: digitar refaz, repintar não. Ao mexer na chave,
-  confira o teste `the_shaped_text_is_rebuilt_only_when_…`. O limite do editor (`EDIT_MAX` 256 KB, linha de 4 000 bytes) existe por isso.
-- **O `TextEdit` multilinha do egui 0.36 não rola na horizontal** (o texto passa da largura e é cortado): o editor quebra a linha na
-  largura, e a coluna dos números pinta o número só na primeira linha de cada parágrafo (`ends_with_newline` do galley). O arquivo grande,
-  que não passa pelo `TextEdit`, rola nos dois sentidos.
-- **Edição suja nunca é trocada por uma leitura.** `DocTab::apply` manda a leitura de um `Source` para `Source::reload`, que só guarda o texto
-  do disco em `external` (a faixa pergunta). Quem acrescentar outro caminho que escreva em `DocState` deve respeitar isso; é também por isso
-  que `docs_reload` de um `Source` não passa por "Carregando…". O watcher relê depois de cada gravação nossa: `Source::is_disk` evita o falso
-  aviso.
-- **Fim de linha e BOM voltam como eram.** A tela trabalha com `\n` e sem BOM; `Eol`/`bom` do arquivo original são aplicados em
-  `workspace::write_text`. CRLF+LF misturados ou texto não UTF-8 travam a edição (`Source::locked`): gravar de volta mudaria linhas que o usuário
-  não tocou.
-- **Seleção própria só onde o egui não alcança.** `select::drive` cria a área de interação antes de qualquer botão desenhado por cima (os botões
-  de trecho do diff da aba Git), senão a área toma o clique deles. A posição é (linha, byte do texto que se vê); o texto copiado desfaz a
-  troca de tabulação por espaços (`diff_view::unexpanded`).
-- **Teste de interface com o egui**: um `Context` novo não tem fontes até o primeiro `run_ui`, e o `TexturesDelta` precisa de `.clear()` antes de
-  ser descartado (veja `draw_frame` em `tasks_flow_tests.rs`, que também injeta teclas, texto e mouse).
+- **Highlighting without `syntect`.** `egui_extras::syntax_highlighting` (syntect) would bring in regex engines, syntaxes, and themes:
+  several MBs in executable size and minutes added to CI compilation across three platforms, all for nine languages. `highlight.rs` is a table
+  per language (keywords, comments, quotes) and a per-line function, with state passed between lines in `Carry`.
+  If a language is missing, add an entry to `spec()` (or `Lang::from_path`); only consider `syntect` if true grammar parsing is required.
+- **`TextEdit` requests the galley every frame.** The `layouter` runs every frame (and again on each keypress), so computing syntax highlighting there without a cache
+  would rebuild the whole file 60 times a second. `docs::Shaped` caches the galley keyed by text fingerprint, wrap width, display scale,
+  and search state (`Find::stamp`), while `highlight::Cache` caches styled spans by text and language: typing invalidates, redrawing does not. When touching keys,
+  verify the test `the_shaped_text_is_rebuilt_only_when_...`. The editor limit (`EDIT_MAX` 256 KB, 4,000-byte line) exists for this reason.
+- **The multiline `TextEdit` in egui 0.36 does not scroll horizontally** (text overflows and is clipped): the editor wraps lines at the
+  available width, and the line numbers column only renders a number on the first line of each paragraph (`ends_with_newline` on the galley). Large files,
+  which bypass `TextEdit`, scroll in both directions.
+- **Dirty edits are never replaced by a disk read.** `DocTab::apply` routes disk reads for a `Source` to `Source::reload`, which only preserves disk text
+  in `external` (a banner prompts the user). Any new code path writing to `DocState` must respect this; it is also why
+  `docs_reload` for a `Source` does not show "Loading...". The file watcher re-reads after our own saves: `Source::is_disk` prevents false
+  warnings.
+- **Line endings and BOM are preserved as originally found.** The UI operates on `\n` without BOM; `Eol`/`bom` from the original file are applied in
+  `workspace::write_text`. Mixed CRLF+LF or non-UTF-8 text locks the editor (`Source::locked`): saving back would alter lines the user
+  never touched.
+- **Custom selection only where egui cannot handle it.** `select::drive` registers the interaction area before any overlapping buttons are painted (such as chunk buttons
+  in Git tab diffs), otherwise the area intercepts their clicks. The position is (line, visual text byte); copied text unexpands
+  tabs (`diff_view::unexpanded`).
+- **UI testing with egui**: a fresh `Context` has no fonts until the first `run_ui`, and `TexturesDelta` requires `.clear()` before
+  being dropped (see `draw_frame` in `tasks_flow_tests.rs`, which also injects key events, text, and mouse actions).

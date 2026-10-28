@@ -1,26 +1,26 @@
-//! Confiança da pasta. Claude, Codex e Antigravity perguntam "Do you trust this folder?" na primeira vez que abrem
-//! numa pasta, e uma aba aberta em segundo plano (por `ask-agent` ou por uma tarefa) fica parada na pergunta, sem
-//! ninguém ver. Abrir a pasta como projeto no AgentDeck já é a decisão do usuário, então o app registra a confiança
-//! antes de abrir o CLI (conferido em 2026-10-25 com Claude Code 2.1.310, Codex 0.164.0 e `agy` 1.4.7):
+//! Folder trust. Claude, Codex and Antigravity ask "Do you trust this folder?" the first time they open
+//! in a folder, and a tab opened in the background (by `ask-agent` or by a task) hangs on the question, without
+//! anyone seeing it. Opening the folder as a project in AgentDeck is already the user's decision, so the app records trust
+//! before opening the CLI (verified on 2026-10-25 with Claude Code 2.1.310, Codex 0.164.0 and `agy` 1.4.7):
 //!
-//! - **Claude:** `projects["C:/pasta"].hasTrustDialogAccepted` em `~/.claude.json`; vale para as subpastas (a worktree de
-//!   uma tarefa herda a do projeto), então só grava quando nem a pasta nem uma pasta-mãe foi aceita;
-//! - **Codex:** `-c projects={'<pasta>'={trust_level='trusted'}}` na linha de comando, sem gravar o `config.toml`;
-//! - **Antigravity:** `trustedWorkspaces` em `~/.gemini/antigravity-cli/settings.json`, por **caminho exato** (nem a
-//!   pasta-mãe nem outra grafia valem), por isso cada worktree pedia de novo; a entrada sai quando a worktree sai.
+//! - **Claude:** `projects["C:/pasta"].hasTrustDialogAccepted` in `~/.claude.json`; applies to subfolders (a task's
+//!   worktree inherits the project's), so it only writes when neither the folder nor a parent folder was accepted;
+//! - **Codex:** `-c projects={'<pasta>'={trust_level='trusted'}}` on the command line, without writing `config.toml`;
+//! - **Antigravity:** `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`, by **exact path** (neither parent
+//!   folder nor different casing works), which is why each worktree asked again; the entry is removed when the worktree is removed.
 //!
-//! A pasta pessoal e a raiz de um disco nunca são registradas: confiar nelas valeria para tudo lá dentro.
+//! The home folder and a drive root are never recorded: trusting them would apply to everything inside them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};
 
-/// As gravações nos arquivos dos CLIs são ler, mudar e trocar: duas abas abrindo juntas não podem se atropelar.
+/// Writes to CLI files are read, modify and replace: two tabs opening together must not race.
 static WRITES: Mutex<()> = Mutex::new(());
 
-/// Prepara a confiança de `cwd` (e de `project_dir`, se for outra pasta) para o CLI `kind` e devolve os argumentos que
-/// vão na linha de comando (só o Codex usa). Falha ao gravar só fica no log: no pior caso, o CLI pergunta como antes.
+/// Prepares trust for `cwd` (and `project_dir` if different) for the CLI `kind` and returns command-line arguments
+/// (only Codex uses them). Write failures are only logged: in the worst case, the CLI prompts as before.
 pub(crate) fn prepare(kind: &str, cwd: &Path, project_dir: &Path, home: &Path) -> Vec<String> {
     let mut dirs: Vec<&Path> = vec![cwd];
     if !same_path(cwd, project_dir) {
@@ -31,14 +31,14 @@ pub(crate) fn prepare(kind: &str, cwd: &Path, project_dir: &Path, home: &Path) -
     match kind {
         "claude" => {
             if let Err(e) = trust_claude(&claude_file(home), first) {
-                log::warn!("confiança da pasta para o Claude ({}): {e}", first.display());
+                log::warn!("folder trust for Claude ({}): {e}", first.display());
             }
             Vec::new()
         }
         "codex" => codex_args(&dirs),
         "antigravity" if first == cwd => {
             if let Err(e) = trust_agy(&agy_file(home), cwd) {
-                log::warn!("confiança da pasta para o Antigravity ({}): {e}", cwd.display());
+                log::warn!("folder trust for Antigravity ({}): {e}", cwd.display());
             }
             Vec::new()
         }
@@ -46,14 +46,14 @@ pub(crate) fn prepare(kind: &str, cwd: &Path, project_dir: &Path, home: &Path) -
     }
 }
 
-/// Tira `dir` (a worktree de uma tarefa que acabou de sair) da lista do Antigravity, para ela não crescer a cada tarefa.
+/// Removes `dir` (the worktree of a task that just completed) from Antigravity's list, so it does not grow with each task.
 pub(crate) fn forget(dir: &Path, home: &Path) {
     if let Err(e) = forget_agy(&agy_file(home), dir) {
-        log::warn!("confiança da pasta do Antigravity ({}): {e}", dir.display());
+        log::warn!("folder trust for Antigravity ({}): {e}", dir.display());
     }
 }
 
-/// A pasta pessoal e a raiz de um disco ficam de fora.
+/// The home folder and a drive root are excluded.
 fn may_trust(dir: &Path, home: &Path) -> bool {
     dir.parent().is_some() && !same_path(dir, home)
 }
@@ -71,7 +71,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// `~/.claude.json` (ou `$CLAUDE_CONFIG_DIR/.claude.json`, onde o Claude Code o procura quando a variável existe).
+/// `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`, where Claude Code looks for it when the variable is set).
 fn claude_file(home: &Path) -> PathBuf {
     match std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()) {
         Some(dir) => PathBuf::from(dir).join(".claude.json"),
@@ -83,12 +83,12 @@ fn agy_file(home: &Path) -> PathBuf {
     home.join(".gemini").join("antigravity-cli").join("settings.json")
 }
 
-/// A chave do Claude: barras normais, sem a barra do fim (`C:/Users/voce/projeto`).
+/// Claude's key: forward slashes, without trailing slash (`C:/Users/user/project`).
 fn claude_key(dir: &Path) -> String {
     dir.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_owned()
 }
 
-/// `dir` ou uma pasta-mãe dele já tem a confiança aceita no Claude.
+/// `dir` or a parent directory already has accepted trust in Claude.
 fn claude_trusted(projects: &Map<String, Value>, dir: &Path) -> bool {
     let mut cur = Some(dir);
     while let Some(d) = cur {
@@ -103,8 +103,8 @@ fn claude_trusted(projects: &Map<String, Value>, dir: &Path) -> bool {
     false
 }
 
-/// Marca `dir` como aceita no `~/.claude.json`. Sem o arquivo (Claude Code nunca aberto), não cria: o primeiro uso tem
-/// outras perguntas (login, tema) que o usuário precisa ver de qualquer jeito.
+/// Marks `dir` as accepted in `~/.claude.json`. Without the file (Claude Code never opened), does not create it: first run has
+/// other prompts (login, theme) that the user needs to see anyway.
 fn trust_claude(file: &Path, dir: &Path) -> std::io::Result<()> {
     let _guard = WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let Some(mut root) = read_json(file)? else { return Ok(()) };
@@ -119,11 +119,11 @@ fn trust_claude(file: &Path, dir: &Path) -> std::io::Result<()> {
         entry.insert("hasTrustDialogAccepted".into(), Value::Bool(true));
     }
     write_json(file, &root)?;
-    log::info!("confiança da pasta registrada para o Claude: {}", dir.display());
+    log::info!("folder trust recorded for Claude: {}", dir.display());
     Ok(())
 }
 
-/// O caminho como o `agy` o vê na pasta atual: no Windows, com `\` (o processo recebe a pasta normalizada).
+/// The path as `agy` sees it in current folder: on Windows, with `\` (the process receives normalized folder).
 fn agy_key(dir: &Path) -> String {
     let s = dir.to_string_lossy();
     let s = if cfg!(windows) { s.replace('/', "\\") } else { s.into_owned() };
@@ -135,8 +135,8 @@ fn agy_key(dir: &Path) -> String {
     }
 }
 
-/// Acrescenta `dir` aos `trustedWorkspaces` do Antigravity. Sem a pasta `antigravity-cli` (o `agy` nunca abriu), não cria
-/// nada; sem o arquivo, cria só com a lista.
+/// Adds `dir` to Antigravity's `trustedWorkspaces`. Without the `antigravity-cli` folder (`agy` never opened), creates
+/// nothing; without the file, creates it with just the list.
 fn trust_agy(file: &Path, dir: &Path) -> std::io::Result<()> {
     if !file.parent().is_some_and(Path::is_dir) {
         return Ok(());
@@ -152,7 +152,7 @@ fn trust_agy(file: &Path, dir: &Path) -> std::io::Result<()> {
     }
     list.push(Value::String(key));
     write_json(file, &root)?;
-    log::info!("confiança da pasta registrada para o Antigravity: {}", dir.display());
+    log::info!("folder trust recorded for Antigravity: {}", dir.display());
     Ok(())
 }
 
@@ -169,9 +169,9 @@ fn forget_agy(file: &Path, dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `-c projects={'<pasta>'={trust_level='trusted'}}`. O valor é TOML com aspas simples, que sobrevivem ao shim `.cmd`
-/// (as duplas o `cmd_safe_arg` tira). Uma pasta com `'` não cabe numa string literal do TOML e fica de fora. Para o
-/// Codex a confiança vale pela raiz do repositório; a worktree e o projeto vão juntos e qualquer um basta.
+/// `-c projects={'<folder>'={trust_level='trusted'}}`. The value is TOML with single quotes, which survive the `.cmd` shim
+/// (double quotes are removed by `cmd_safe_arg`). A folder with `'` cannot fit in a TOML string literal and is excluded. For
+/// Codex trust applies by repository root; the worktree and the project are passed together and either is enough.
 fn codex_args(dirs: &[&Path]) -> Vec<String> {
     let entries: Vec<String> = dirs
         .iter()
@@ -185,7 +185,7 @@ fn codex_args(dirs: &[&Path]) -> Vec<String> {
     vec!["-c".into(), format!("projects={{{}}}", entries.join(","))]
 }
 
-/// `None` quando o arquivo não existe. Um arquivo que não é JSON é erro: não se regrava o que não se entendeu.
+/// `None` when file does not exist. A file that is not JSON is an error: never rewrite what was not understood.
 fn read_json(file: &Path) -> std::io::Result<Option<Value>> {
     let bytes = match std::fs::read(file) {
         Ok(b) => b,
@@ -196,7 +196,7 @@ fn read_json(file: &Path) -> std::io::Result<Option<Value>> {
     serde_json::from_str(&text).map(Some).map_err(std::io::Error::other)
 }
 
-/// Grava ao lado e troca: o CLI nunca lê o arquivo pela metade.
+/// Writes to a temporary file alongside and renames: the CLI never reads a half-written file.
 fn write_json(file: &Path, value: &Value) -> std::io::Result<()> {
     let text = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
     let tmp = file.with_extension(format!("agentdeck-{}.tmp", std::process::id()));
@@ -231,10 +231,10 @@ mod tests {
             args,
             ["-c", "projects={'/p/projeto/.agentdeck/worktrees/t1'={trust_level='trusted'},'/p/projeto'={trust_level='trusted'}}"]
         );
-        assert!(codex_args(&[Path::new("/p/o'brien")]).is_empty(), "aspas simples não cabem na string literal");
+        assert!(codex_args(&[Path::new("/p/o'brien")]).is_empty(), "single quotes do not fit in string literal");
     }
 
-    /// A aba do projeto (pasta = projeto) leva uma chave só: chave repetida não é TOML e o Codex nem abre.
+    /// Project tab (folder = project) passes a single key: repeated key is invalid TOML and Codex will not open.
     #[test]
     fn codex_never_repeats_a_folder() {
         let home = Path::new("/home/voce");
@@ -246,12 +246,12 @@ mod tests {
     fn claude_marks_a_new_folder_and_respects_a_trusted_parent() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join(".claude.json");
-        // Sem o arquivo, nada é criado.
+        // Without the file, nothing is created.
         trust_claude(&file, Path::new("/p/novo")).unwrap();
         assert!(!file.exists());
 
         std::fs::write(&file, r#"{"numStartups": 3, "projects": {"/p/projeto": {"hasTrustDialogAccepted": true, "x": 1}}}"#).unwrap();
-        // A worktree dentro do projeto herda: o arquivo não muda.
+        // Worktree inside project inherits: file does not change.
         let before = std::fs::read_to_string(&file).unwrap();
         trust_claude(&file, Path::new("/p/projeto/.agentdeck/worktrees/t1")).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
@@ -259,7 +259,7 @@ mod tests {
         trust_claude(&file, Path::new("/p/novo")).unwrap();
         let v = json(&file);
         assert_eq!(v["projects"]["/p/novo"]["hasTrustDialogAccepted"], true);
-        assert_eq!(v["projects"]["/p/projeto"]["x"], 1, "o resto fica como estava");
+        assert_eq!(v["projects"]["/p/projeto"]["x"], 1, "the rest stays as it was");
         assert_eq!(v["numStartups"], 3);
     }
 
@@ -280,7 +280,7 @@ mod tests {
         let dir = tmp.path().join("antigravity-cli");
         let file = dir.join("settings.json");
         let wt = tmp.path().join("projeto").join("wt");
-        // Sem a pasta do agy, nada é criado.
+        // Without the agy directory, nothing is created.
         trust_agy(&file, &wt).unwrap();
         assert!(!file.exists());
 
@@ -290,7 +290,7 @@ mod tests {
         trust_agy(&file, &wt).unwrap();
         let v = json(&file);
         let key = agy_key(&wt);
-        assert_eq!(v["trustedWorkspaces"], serde_json::json!(["/outra", key]), "uma vez só");
+        assert_eq!(v["trustedWorkspaces"], serde_json::json!(["/outra", key]), "only once");
         assert_eq!(v["model"], "Flash");
 
         forget_agy(&file, &wt).unwrap();
@@ -301,9 +301,9 @@ mod tests {
     fn a_file_that_is_not_json_is_left_alone() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("settings.json");
-        std::fs::write(&file, "{ isto não é json").unwrap();
+        std::fs::write(&file, "{ this is not json").unwrap();
         assert!(trust_agy(&file, Path::new("/p/x")).is_err());
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ isto não é json");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ this is not json");
     }
 
     #[cfg(windows)]

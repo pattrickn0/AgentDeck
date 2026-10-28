@@ -1,8 +1,8 @@
-//! Download resiliente de arquivos grandes (modelo e binários do Whisper).
+//! Resilient download of large files (Whisper model and binaries).
 //!
-//! - retoma de onde parou com `Range` (inclusive entre execuções do app, via arquivo `.part`);
-//! - tenta de novo com backoff exponencial quando a conexão cai ou trava;
-//! - reporta o progresso e confere o SHA-256 antes de entregar o arquivo.
+//! - resumes where it left off using `Range` (including across app restarts, via `.part` file);
+//! - retries with exponential backoff when the connection drops or stalls;
+//! - reports progress and checks SHA-256 before delivering the file.
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -14,6 +14,7 @@ use crossbeam_channel::{bounded, RecvTimeoutError};
 use sha2::{Digest, Sha256};
 
 use crate::events::{DownloadProgress, DownloadState};
+use crate::t;
 
 const CHUNK: usize = 64 * 1024;
 const REPORT_INTERVAL: Duration = Duration::from_millis(250);
@@ -21,7 +22,7 @@ const REPORT_INTERVAL: Duration = Duration::from_millis(250);
 #[derive(Debug, Clone)]
 pub struct DownloadError {
     pub message: String,
-    /// Vale uma nova tentativa (queda de rede, 5xx…). Erros de disco, TLS e 4xx não valem.
+    /// Eligible for retry (network drop, 5xx…). Disk, TLS and 4xx errors are not eligible.
     pub retryable: bool,
 }
 
@@ -45,14 +46,14 @@ impl std::error::Error for DownloadError {}
 
 #[derive(Debug, Clone)]
 pub struct DownloadOpts<'a> {
-    /// SHA-256 esperado (hex). Sem ele o arquivo é aceito como veio.
+    /// Expected SHA-256 (hex). Without it the file is accepted as received.
     pub sha256: Option<&'a str>,
     pub label: &'a str,
-    /// Novas tentativas seguidas sem progresso antes de desistir.
+    /// Consecutive retries without progress before giving up.
     pub retries: u32,
     pub base_delay: Duration,
     pub max_delay: Duration,
-    /// Tempo sem receber dados que conta como conexão caída.
+    /// Time without receiving data that counts as a dropped connection.
     pub stall_timeout: Duration,
 }
 
@@ -69,7 +70,7 @@ impl<'a> DownloadOpts<'a> {
     }
 }
 
-/// Limita a frequência dos eventos e calcula a velocidade (média suavizada).
+/// Throttles event frequency and calculates speed (smoothed average).
 struct Reporter<'a> {
     label: String,
     sink: &'a mut dyn FnMut(DownloadProgress),
@@ -141,13 +142,13 @@ impl<'a> Reporter<'a> {
         self.state(DownloadState::Verifying);
     }
 
-    /// `true` se a tentativa que acabou de falhar chegou a baixar algo (zera o contador de falhas).
+    /// `true` if the attempt that just failed managed to download something (resets failure count).
     fn take_progress(&mut self) -> bool {
         std::mem::take(&mut self.progressed)
     }
 }
 
-/// SHA-256 (hex minúsculo) de um arquivo, avisando o progresso.
+/// SHA-256 (lowercase hex) of a file, reporting progress.
 pub fn sha256_file(path: &Path, on_progress: &mut dyn FnMut(u64, u64)) -> std::io::Result<String> {
     let mut f = File::open(path)?;
     let size = f.metadata()?.len();
@@ -233,10 +234,10 @@ fn agent(url: &str, stall: Duration) -> ureq::Agent {
         .user_agent("agentdeck")
         .timeout_connect(Some(Duration::from_secs(30)))
         .timeout_recv_response(Some(Duration::from_secs(30).max(stall)))
-        // Teto global do corpo; cada leitura individual no socket tem timeout perto de `stall`
-        // (via `StallConnector`), evitando que a thread `cd-download` fique órfã por horas.
+        // Global body ceiling; each individual socket read has a timeout close to `stall`
+        // (via `StallConnector`), preventing the `cd-download` thread from being orphaned for hours.
         .timeout_recv_body(Some(Duration::from_secs(4 * 3600)))
-        // HTTPS nunca é rebaixado para HTTP num redirecionamento.
+        // HTTPS is never downgraded to HTTP on redirect.
         .https_only(url.starts_with("https://"))
         .build();
     let connector = DefaultConnector::default().chain(StallConnector(read_timeout));
@@ -254,14 +255,14 @@ fn classify(e: ureq::Error) -> DownloadError {
     }
 }
 
-/// Mensagem lida pelo worker de rede.
+/// Message read by network worker.
 enum Msg {
     Data(Vec<u8>),
     Eof,
     Failed(String),
 }
 
-/// Baixa o que falta para dentro do `.part`, continuando do tamanho atual dele.
+/// Downloads the remaining bytes into `.part`, resuming from its current size.
 fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) -> Result<(), DownloadError> {
     let offset = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
     let mut req = agent(url, stall).get(url).header("Accept-Encoding", "identity");
@@ -273,17 +274,17 @@ fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) ->
     let header = |name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
 
     if status == 416 {
-        // Pediram além do fim: o .part já está completo (total == offset) ou é lixo.
+        // Requested past end: .part is already complete (total == offset) or is corrupted.
         let total = header("content-range").and_then(|v| v.rsplit('/').next().and_then(|n| n.trim().parse::<u64>().ok()));
         if offset > 0 && total == Some(offset) {
             return Ok(());
         }
         let _ = std::fs::remove_file(part);
-        return Err(DownloadError::retry("arquivo parcial inválido; recomeçando do zero"));
+        return Err(DownloadError::retry(t!("invalid partial file; restarting from scratch")));
     }
     if status != 200 && status != 206 {
         return Err(DownloadError {
-            message: format!("HTTP {status} ao baixar {url}"),
+            message: t!("HTTP {status} downloading {url}", status, url),
             retryable: status == 408 || status == 429 || status >= 500,
         });
     }
@@ -300,21 +301,21 @@ fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) ->
             Some((s, total)) if s == offset => (offset, total),
             _ => {
                 let _ = std::fs::remove_file(part);
-                return Err(DownloadError::retry("resposta parcial inconsistente; recomeçando do zero"));
+                return Err(DownloadError::retry(t!("inconsistent partial response; restarting from scratch")));
             }
         }
     } else {
-        // 200: o servidor ignorou o Range (ou é o primeiro pedido). Vale o corpo inteiro.
+        // 200: the server ignored Range (or this is the first request). Use entire body.
         (0, header("content-length").and_then(|v| v.trim().parse::<u64>().ok()))
     };
 
     let mut file = if start == 0 { File::create(part) } else { OpenOptions::new().append(true).open(part) }
-        .map_err(|e| DownloadError::fatal(format!("não foi possível gravar {}: {e}", part.display())))?;
+        .map_err(|e| DownloadError::fatal(t!("could not write {path}: {error}", path = part.display(), error = e)))?;
 
     rep.begin(start, total);
 
-    // A leitura da rede roda numa thread à parte: a principal só espera os pedaços com prazo,
-    // e assim detecta conexão parada (o ureq não tem prazo de inatividade por leitura).
+    // Network read runs on a separate thread: the main thread only awaits chunks with a deadline,
+    // thus detecting stalled connections (ureq lacks an inactivity deadline per read).
     let (tx, rx) = bounded::<Msg>(8);
     let mut reader = resp.into_body().into_reader();
     std::thread::Builder::new()
@@ -329,7 +330,7 @@ fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) ->
                 Ok(n) => {
                     buf.truncate(n);
                     if tx.send(Msg::Data(buf)).is_err() {
-                        return; // a principal desistiu (conexão parada)
+                        return; // main thread gave up (stalled connection)
                     }
                 }
                 Err(e) => {
@@ -338,28 +339,29 @@ fn fetch_to_part(url: &str, part: &Path, stall: Duration, rep: &mut Reporter) ->
                 }
             }
         })
-        .map_err(|e| DownloadError::fatal(format!("não foi possível iniciar o download: {e}")))?;
+        .map_err(|e| DownloadError::fatal(t!("could not start download: {error}", error = e)))?;
 
     loop {
         match rx.recv_timeout(stall) {
             Ok(Msg::Data(chunk)) => {
-                file.write_all(&chunk).map_err(|e| DownloadError::fatal(format!("falha ao gravar {}: {e}", part.display())))?;
+                file.write_all(&chunk)
+                    .map_err(|e| DownloadError::fatal(t!("failed to write {path}: {error}", path = part.display(), error = e)))?;
                 rep.bytes(chunk.len());
             }
             Ok(Msg::Eof) => break,
-            Ok(Msg::Failed(e)) => return Err(DownloadError::retry(format!("conexão interrompida: {e}"))),
+            Ok(Msg::Failed(e)) => return Err(DownloadError::retry(t!("connection interrupted: {error}", error = e))),
             Err(RecvTimeoutError::Timeout) => {
-                return Err(DownloadError::retry(format!("conexão parada (sem dados por {}s)", stall.as_secs().max(1))));
+                return Err(DownloadError::retry(t!("connection stalled (no data for {seconds}s)", seconds = stall.as_secs().max(1))));
             }
-            Err(RecvTimeoutError::Disconnected) => return Err(DownloadError::retry("conexão interrompida")),
+            Err(RecvTimeoutError::Disconnected) => return Err(DownloadError::retry(t!("connection interrupted"))),
         }
     }
-    file.flush().map_err(|e| DownloadError::fatal(format!("falha ao gravar {}: {e}", part.display())))?;
+    file.flush().map_err(|e| DownloadError::fatal(t!("failed to write {path}: {error}", path = part.display(), error = e)))?;
     drop(file);
 
     if let Some(t) = total {
         if std::fs::metadata(part).map(|m| m.len()).unwrap_or(0) != t {
-            return Err(DownloadError::retry("download incompleto"));
+            return Err(DownloadError::retry(t!("incomplete download")));
         }
     }
     Ok(())
@@ -380,13 +382,13 @@ fn retry_io<T>(delays_ms: &[u64], mut op: impl FnMut() -> std::io::Result<T>) ->
     Err(last_err)
 }
 
-/// Move `from` para `to`, insistindo algumas vezes (antivírus no Windows pode segurar o `.part`
-/// recém-fechado por alguns milissegundos).
+/// Moves `from` to `to`, retrying a few times (Windows antivirus may hold newly closed `.part`
+/// for a few milliseconds).
 pub(crate) fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     retry_io(&[25, 50, 100, 200, 400], || std::fs::rename(from, to))
 }
 
-/// Uma tentativa completa: baixa o que falta, confere o hash e publica o arquivo.
+/// A full attempt: downloads remaining data, verifies hash, and publishes the file.
 fn attempt(
     url: &str,
     dest: &Path,
@@ -400,23 +402,26 @@ fn attempt(
         let size = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
         rep.verifying(0, size);
         let actual = sha256_file(part, &mut |done, total| rep.verifying(done, total))
-            .map_err(|e| DownloadError::fatal(format!("falha ao ler {} para verificar o hash: {e}", part.display())))?;
+            .map_err(|e| DownloadError::fatal(t!("failed to read {path} to verify hash: {error}", path = part.display(), error = e)))?;
         let expected = expected.to_lowercase();
         if actual != expected {
             let _ = std::fs::remove_file(part);
             *mismatches += 1;
-            let msg = format!("SHA-256 não confere (esperado {expected}, obtido {actual})");
             return Err(if *mismatches > 1 {
-                DownloadError::fatal(format!("{msg}; arquivo descartado"))
+                DownloadError::fatal(t!("SHA-256 does not match (expected {expected}, got {actual}); file discarded", expected, actual,))
             } else {
-                DownloadError::retry(format!("{msg}; baixando de novo do zero"))
+                DownloadError::retry(t!(
+                    "SHA-256 does not match (expected {expected}, got {actual}); retrying from scratch",
+                    expected,
+                    actual,
+                ))
             });
         }
     }
-    rename_with_retry(part, dest).map_err(|e| DownloadError::fatal(format!("não foi possível gravar {}: {e}", dest.display())))
+    rename_with_retry(part, dest).map_err(|e| DownloadError::fatal(t!("could not write {path}: {error}", path = dest.display(), error = e)))
 }
 
-/// Baixa `url` para `dest`. Só entrega o arquivo depois de conferir o SHA-256 (quando informado).
+/// Downloads `url` to `dest`. Only delivers file after verifying SHA-256 (when provided).
 pub fn download_file(
     url: &str,
     dest: &Path,
@@ -469,19 +474,19 @@ mod tests {
 
     #[derive(Default, Clone)]
     struct Behavior {
-        /// Bytes enviados antes de derrubar a conexão (nas primeiras `drop_times` respostas com corpo).
+        /// Bytes sent before dropping connection (for first `drop_times` body responses).
         drop_after: Option<usize>,
         drop_times: usize,
         ignore_range: bool,
-        /// Códigos de status devolvidos nas primeiras respostas (sem corpo).
+        /// Status codes returned in first responses (no body).
         statuses: Vec<u16>,
-        /// Depois de `stall_after` bytes do corpo, a resposta trava por `stall_for` (nas primeiras `stall_times` respostas).
+        /// After `stall_after` body bytes, response hangs for `stall_for` (for first `stall_times` responses).
         stall_after: usize,
         stall_for: Option<Duration>,
         stall_times: usize,
     }
 
-    /// Leitor que entrega `limit` bytes e então falha, fazendo o servidor cortar a conexão.
+    /// Reader that delivers `limit` bytes and then fails, causing server to reset connection.
     struct Breaking {
         inner: Cursor<Vec<u8>>,
         limit: usize,
@@ -491,7 +496,7 @@ mod tests {
     impl Read for Breaking {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
             if self.sent >= self.limit {
-                return Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "corte de teste"));
+                return Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "test disconnect"));
             }
             let max = buf.len().min(self.limit - self.sent);
             let n = self.inner.read(&mut buf[..max])?;
@@ -500,7 +505,7 @@ mod tests {
         }
     }
 
-    /// Leitor que trava por um tempo depois de `at` bytes (conexão aberta, mas sem dados).
+    /// Reader that hangs for a duration after `at` bytes (open connection, but no data).
     struct Stalling {
         inner: Cursor<Vec<u8>>,
         at: usize,
@@ -522,7 +527,7 @@ mod tests {
         }
     }
 
-    /// (url, cabeçalho Range) de cada pedido recebido.
+    /// (url, Range header) of each received request.
     type RequestLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
     struct Fixture {
@@ -587,7 +592,7 @@ mod tests {
                     (200, Vec::new())
                 };
                 headers.push(header("Content-Type", "application/octet-stream"));
-                // Como GitHub e Hugging Face: sempre com Content-Length (nunca chunked).
+                // Like GitHub and Hugging Face: always with Content-Length (never chunked).
                 let never_chunked = usize::MAX;
                 if let (Some(n), true) = (b.drop_after, drops < b.drop_times) {
                     drops += 1;
@@ -624,39 +629,39 @@ mod tests {
     }
 
     #[test]
-    fn baixa_confere_hash_e_reporta_progresso() {
+    fn downloads_verifies_hash_and_reports_progress() {
         let data = body();
         let fx = serve(data.clone(), Behavior::default());
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
         let digest = sha(&data);
-        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("teste", Some(&digest)));
+        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("test", Some(&digest)));
         r.expect("download");
         assert_eq!(std::fs::read(&dest).expect("read"), data);
         assert!(!part_path(&dest).exists());
         let states: Vec<_> = ev.iter().map(|e| e.state).collect();
         assert!(states.contains(&DownloadState::Downloading) && states.contains(&DownloadState::Verifying));
-        assert_eq!(ev.last().expect("evento").state, DownloadState::Done);
+        assert_eq!(ev.last().expect("event").state, DownloadState::Done);
         assert_eq!(ev.iter().find(|e| e.state == DownloadState::Downloading).expect("dl").total, Some(data.len() as u64));
     }
 
     #[test]
-    fn segue_redirecionamentos() {
+    fn follows_redirects() {
         let data = body();
         let fx = serve(data.clone(), Behavior::default());
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
-        run(&format!("{}/redirect", fx.base), &dest, &fast("teste", Some(&sha(&data)))).0.expect("download");
+        run(&format!("{}/redirect", fx.base), &dest, &fast("test", Some(&sha(&data)))).0.expect("download");
         assert_eq!(std::fs::read(&dest).expect("read"), data);
     }
 
     #[test]
-    fn retoma_com_range_quando_a_conexao_cai() {
+    fn resumes_with_range_when_connection_drops() {
         let data = body();
         let fx = serve(data.clone(), Behavior { drop_after: Some(200 * 1024), drop_times: 1, ..Default::default() });
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
-        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("teste", Some(&sha(&data))));
+        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("test", Some(&sha(&data))));
         r.expect("download");
         assert_eq!(std::fs::read(&dest).expect("read"), data);
         let ranged: Vec<_> = fx.log.lock().expect("log").iter().filter_map(|(_, r)| r.clone()).collect();
@@ -667,64 +672,64 @@ mod tests {
     }
 
     #[test]
-    fn recomeca_do_zero_se_o_servidor_ignora_o_range() {
+    fn restarts_from_scratch_if_server_ignores_range() {
         let data = body();
         let fx = serve(data.clone(), Behavior { drop_after: Some(150 * 1024), drop_times: 1, ignore_range: true, ..Default::default() });
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
-        run(&format!("{}/file", fx.base), &dest, &fast("teste", Some(&sha(&data)))).0.expect("download");
+        run(&format!("{}/file", fx.base), &dest, &fast("test", Some(&sha(&data)))).0.expect("download");
         assert_eq!(std::fs::read(&dest).expect("read"), data);
     }
 
     #[test]
-    fn continua_um_part_de_execucao_anterior() {
+    fn resumes_a_part_from_previous_run() {
         let data = body();
         let fx = serve(data.clone(), Behavior::default());
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
         std::fs::write(part_path(&dest), &data[..100 * 1024]).expect("part");
-        run(&format!("{}/file", fx.base), &dest, &fast("teste", Some(&sha(&data)))).0.expect("download");
+        run(&format!("{}/file", fx.base), &dest, &fast("test", Some(&sha(&data)))).0.expect("download");
         assert_eq!(std::fs::read(&dest).expect("read"), data);
         assert_eq!(fx.log.lock().expect("log")[0].1.as_deref(), Some(format!("bytes={}-", 100 * 1024).as_str()));
     }
 
     #[test]
-    fn aceita_um_part_que_ja_esta_completo() {
+    fn accepts_a_part_that_is_already_complete() {
         let data = body();
         let fx = serve(data.clone(), Behavior::default());
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
         std::fs::write(part_path(&dest), &data).expect("part");
-        run(&format!("{}/file", fx.base), &dest, &fast("teste", Some(&sha(&data)))).0.expect("download");
+        run(&format!("{}/file", fx.base), &dest, &fast("test", Some(&sha(&data)))).0.expect("download");
         assert_eq!(std::fs::read(&dest).expect("read"), data);
     }
 
     #[test]
-    fn tenta_de_novo_em_503() {
+    fn retries_on_503() {
         let data = body();
         let fx = serve(data.clone(), Behavior { statuses: vec![503, 503], ..Default::default() });
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
-        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("teste", Some(&sha(&data))));
+        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("test", Some(&sha(&data))));
         r.expect("download");
         assert_eq!(ev.iter().filter(|e| e.state == DownloadState::Retrying).count(), 2);
         assert_eq!(fx.log.lock().expect("log").len(), 3);
     }
 
     #[test]
-    fn nao_insiste_em_404() {
+    fn does_not_retry_on_404() {
         let fx = serve(body(), Behavior { statuses: vec![404], ..Default::default() });
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
-        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("teste", None));
+        let (r, ev) = run(&format!("{}/file", fx.base), &dest, &fast("test", None));
         assert!(r.expect_err("404").message.contains("HTTP 404"));
         assert_eq!(fx.log.lock().expect("log").len(), 1);
         assert!(!dest.exists());
-        assert_eq!(ev.last().expect("evento").state, DownloadState::Error);
+        assert_eq!(ev.last().expect("event").state, DownloadState::Error);
     }
 
     #[test]
-    fn desiste_ao_esgotar_as_tentativas_sem_progresso() {
+    fn gives_up_when_retries_without_progress_are_exhausted() {
         let fx = serve(body(), Behavior { statuses: vec![500, 500, 500, 500], ..Default::default() });
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
@@ -736,18 +741,18 @@ mod tests {
     }
 
     #[test]
-    fn hash_errado_descarta_tenta_uma_vez_do_zero_e_falha() {
+    fn bad_hash_discards_retries_once_from_scratch_and_fails() {
         let fx = serve(body(), Behavior::default());
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
-        let err = run(&format!("{}/file", fx.base), &dest, &fast("teste", Some(&"a".repeat(64)))).0.expect_err("hash");
-        assert!(err.message.contains("SHA-256 não confere") && err.message.contains("descartado"), "{err}");
+        let err = run(&format!("{}/file", fx.base), &dest, &fast("test", Some(&"a".repeat(64)))).0.expect_err("hash");
+        assert!(err.message.contains("SHA-256 does not match") && err.message.contains("discarded"), "{err}");
         assert!(!dest.exists() && !part_path(&dest).exists());
         assert_eq!(fx.log.lock().expect("log").len(), 2);
     }
 
     #[test]
-    fn detecta_conexao_parada_e_tenta_de_novo() {
+    fn detects_stalled_connection_and_retries() {
         let data = body();
         let fx = serve(
             data.clone(),
@@ -762,41 +767,41 @@ mod tests {
         r.expect("download");
         assert!(
             ev.iter().any(|e| e.state == DownloadState::Retrying
-                && e.message.as_deref().is_some_and(|m| m.contains("parada") || m.contains("tempo") || m.contains("timeout"))),
+                && e.message.as_deref().is_some_and(|m| m.contains("stalled") || m.contains("timeout"))),
             "{ev:?}"
         );
         assert_eq!(std::fs::read(&dest).expect("read"), data);
     }
 
-    /// Opt-in (`cargo test -p agentdeck-core -- --ignored`): usa GitHub e Hugging Face de verdade.
+    /// Opt-in (`cargo test -p agentdeck-core -- --ignored`): uses actual GitHub and Hugging Face.
     #[test]
-    #[ignore = "usa a rede"]
-    fn rede_real_github_retoma_e_huggingface_honra_range() {
+    #[ignore = "uses network"]
+    fn real_network_github_resumes_and_huggingface_honors_range() {
         const URL: &str = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip";
         const SHA: &str = "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb";
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("cpu.zip");
 
-        // Semeia o .part com os primeiros 3 MB (pedido com Range através do redirect do GitHub).
+        // Seeds .part with first 3 MB (Range request through GitHub redirect).
         let seed = ureq::get(URL).header("Range", "bytes=0-2999999").call().expect("seed");
         assert_eq!(seed.status().as_u16(), 206);
         let mut bytes = Vec::new();
-        seed.into_body().into_reader().read_to_end(&mut bytes).expect("ler seed");
+        seed.into_body().into_reader().read_to_end(&mut bytes).expect("read seed");
         assert_eq!(bytes.len(), 3_000_000);
         std::fs::write(part_path(&dest), &bytes).expect("part");
 
         let mut opts = DownloadOpts::new("cpu", Some(SHA));
         opts.stall_timeout = Duration::from_secs(30);
         let (r, ev) = run(URL, &dest, &opts);
-        r.expect("download real");
+        r.expect("real download");
         assert_eq!(
             ev.iter().find(|e| e.state == DownloadState::Downloading).expect("dl").received,
             3_000_000,
-            "deveria retomar do byte 3.000.000"
+            "should resume from byte 3,000,000"
         );
         assert_eq!(std::fs::metadata(&dest).expect("meta").len(), 8_928_640);
 
-        // Hugging Face: Range precisa sobreviver ao redirect para o CDN.
+        // Hugging Face: Range must survive redirect to CDN.
         let hf = ureq::get("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")
             .header("Range", "bytes=1000000-1000999")
             .call()
@@ -806,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn sha256_de_vetor_conhecido() {
+    fn sha256_of_known_vector() {
         let dir = tempfile::tempdir().expect("tmp");
         let f = dir.path().join("abc");
         std::fs::write(&f, b"abc").expect("write");
@@ -814,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn leitura_do_socket_expira_perto_do_stall_timeout() {
+    fn socket_read_expires_near_stall_timeout() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         let srv = std::thread::spawn(move || {
@@ -822,30 +827,30 @@ mod tests {
             let mut req = [0u8; 512];
             let _ = stream.read(&mut req);
             stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n").expect("write");
-            // Segurar a conexão aberta sem mandar o corpo: o leitor deve desistir pelo timeout do socket.
+            // Hold connection open without sending body: reader should fail due to socket timeout.
             std::thread::sleep(Duration::from_secs(3));
         });
         let started = Instant::now();
         let resp = agent(&format!("http://{addr}/x"), Duration::from_millis(200)).get(&format!("http://{addr}/x")).call().expect("headers");
         let mut buf = [0u8; 64];
         let res = resp.into_body().into_reader().read(&mut buf);
-        assert!(res.is_err(), "leitura deveria falhar por timeout");
-        assert!(started.elapsed() < Duration::from_millis(2500), "demorou {:?}", started.elapsed());
+        assert!(res.is_err(), "read should fail due to timeout");
+        assert!(started.elapsed() < Duration::from_millis(2500), "took {:?}", started.elapsed());
         let _ = srv.join();
     }
 
     #[test]
-    fn retry_io_supera_falhas_transitorias_no_rename() {
+    fn retry_io_survives_transient_failures_in_rename() {
         let mut tries = 0;
         let r = retry_io(&[5, 5, 5], || {
             tries += 1;
             if tries < 3 {
-                Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "antivírus"))
+                Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "antivirus"))
             } else {
                 Ok(42)
             }
         });
-        assert_eq!(r.expect("ok na 3ª tentativa"), 42);
+        assert_eq!(r.expect("ok on 3rd attempt"), 42);
         assert_eq!(tries, 3);
 
         let dir = tempfile::tempdir().expect("tmp");

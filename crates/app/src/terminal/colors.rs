@@ -1,5 +1,5 @@
-//! Paleta do terminal: tema do xterm.js usado na versão Electron (fundo/fonte/cursor/seleção
-//! customizados) + paleta ANSI padrão do xterm.js (Tango) e cubo 256 cores.
+//! Terminal palette: xterm.js theme used in the Electron version (custom background/font/
+//! cursor/selection) + standard xterm.js ANSI palette (Tango) and 256-color cube.
 
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
@@ -8,13 +8,13 @@ use egui::Color32;
 
 use crate::theme;
 
-/// As 16 cores ANSI padrão do xterm.js.
+/// The standard 16 xterm.js ANSI colors.
 pub const ANSI16: [u32; 16] = [
-    0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, // normais
-    0x555753, 0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec, // brilhantes
+    0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, // normal
+    0x555753, 0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec, // bright
 ];
 
-/// Cor RGB do índice 0..=255 (16 ANSI + cubo 6×6×6 + rampa de cinza).
+/// RGB color for index 0..=255 (16 ANSI + 6×6×6 cube + grayscale ramp).
 pub fn indexed_rgb(i: u8) -> Rgb {
     let hex = |h: u32| Rgb { r: (h >> 16) as u8, g: (h >> 8) as u8, b: h as u8 };
     match i {
@@ -39,7 +39,7 @@ fn rgb_of(c: Color32) -> Rgb {
     Rgb { r: c.r(), g: c.g(), b: c.b() }
 }
 
-/// Cor padrão (sem override OSC) do índice usado por `ColorRequest`.
+/// Default color (without OSC override) for the index used by `ColorRequest`.
 pub fn default_for_index(index: usize) -> Rgb {
     match index {
         0..=255 => indexed_rgb(index as u8),
@@ -49,12 +49,12 @@ pub fn default_for_index(index: usize) -> Rgb {
     }
 }
 
-/// Resolve uma cor de célula considerando overrides OSC 4/10/11 feitos pelo programa.
+/// Resolves a cell color considering OSC 4/10/11 overrides made by the program.
 pub fn resolve(color: Color, overrides: &Colors, bold: bool, is_fg: bool) -> Color32 {
     match color {
         Color::Spec(rgb) => c32(rgb),
         Color::Indexed(i) => {
-            // xterm.js: texto em negrito usa a variante brilhante das 8 cores básicas.
+            // xterm.js: bold text uses the bright variant of the 8 basic colors.
             let i = if bold && is_fg && i < 8 { i + 8 } else { i };
             c32(overrides[i as usize].unwrap_or_else(|| indexed_rgb(i)))
         }
@@ -83,8 +83,8 @@ fn named(n: NamedColor, overrides: &Colors, bright_bold: bool) -> Color32 {
     }
 }
 
-/// Cores finais (frente, fundo) de uma célula, aplicando inverse/dim/hidden.
-/// O fundo `None` significa "fundo padrão" (não precisa pintar).
+/// Final colors (foreground, background) for a cell, applying inverse/dim/hidden.
+/// Background `None` means "default background" (no need to paint).
 pub fn cell_colors(fg: Color, bg: Color, flags: Flags, overrides: &Colors) -> (Color32, Option<Color32>) {
     let bold = flags.contains(Flags::BOLD);
     let mut f = resolve(fg, overrides, bold, true);

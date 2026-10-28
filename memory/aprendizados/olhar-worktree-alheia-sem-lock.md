@@ -1,13 +1,13 @@
 ---
-titulo: Olhar a worktree de outra tarefa sem tomar o lock do git
-resumo: Para ler o status da pasta de outro agente use worktree_dirty_unlocked (--no-optional-locks), não worktree_dirty.
+title: Inspecting another task's worktree without taking git locks
+summary: To read status from another agent's worktree, use worktree_dirty_unlocked (--no-optional-locks), not worktree_dirty.
 touches: [crates/core/src/tasks/**, crates/core/src/situation.rs]
 ---
-`git status` comum atualiza o índice e cria `index.lock` na worktree. Se for a pasta de outro agente e ele rodar
-`git add`/`commit` no mesmo instante, o comando dele falha com erro de `index.lock`. A "Situação atual" olha as
-worktrees alheias (`task_situation`), então usa `worktree_dirty_unlocked` (`git --no-optional-locks status`).
-`worktree_dirty` continua nos pontos que mexem na própria tarefa (`task_done`, `task_merge`, `task_validate`).
+A standard `git status` updates the index and creates `index.lock` in the worktree. If that directory belongs to another agent
+running `git add`/`commit` at the same instant, their command fails with an `index.lock` error. "Current situation" inspects
+other agents' worktrees (`task_situation`), so it uses `worktree_dirty_unlocked` (`git --no-optional-locks status`).
+`worktree_dirty` remains in places that modify the current task (`task_done`, `task_merge`, `task_validate`).
 
-**Por quê:** a leitura é só informativa e não pode atrapalhar o trabalho de quem está commitando.
-**Como aplicar:** ao ler o estado de uma worktree que não é da tarefa em curso, use a variante sem lock. O
-`git::base_command` já define `GIT_OPTIONAL_LOCKS=0`; o argumento explícito deixa a intenção visível e não depende do ambiente.
+**Why:** status queries are purely informational and must never interfere with concurrent commits.
+**How to apply:** when reading state from a worktree that does not belong to the running task, use the unlock variant.
+`git::base_command` already sets `GIT_OPTIONAL_LOCKS=0`; the explicit flag keeps the intent obvious and independent of environment setup.
