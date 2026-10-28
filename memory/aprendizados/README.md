@@ -1,10 +1,10 @@
-# Aprendizados do projeto
+# Project learnings
 
-Memória de longo prazo do AgentDeck: um arquivo `.md` por coisa que o projeto já aprendeu e que um próximo agente
-não deveria precisar descobrir de novo (uma armadilha, uma decisão, uma convenção). Versionados no git, passam pela
-mesma revisão e mescla que o código. Este `README.md` não conta como aprendizado.
+AgentDeck's long-term memory: one `.md` file per item the project has learned that a future agent should not
+need to rediscover (a pitfall, a decision, a convention). Versioned in git, learnings go through the same review
+and merge workflow as code. This `README.md` does not count as a learning.
 
-## Formato
+## Format
 
 ```
 ---
@@ -17,23 +17,22 @@ The fact, then **Why:** and **How to apply:** in a few lines.
 
 - `title` and `summary` (preferred, in English) or the old `titulo` and `resumo`: one line each, required. The summary is
   what shows in the index. New learnings are written in English.
-- `touches`: globs relativos à raiz do repositório, em lista (`[a, b]`) ou em itens `- a`. `*` não cruza pasta, `**`
-  cruza; um padrão sem `/` (`*.rs`) vale para o nome do arquivo em qualquer pasta. Vazio ou ausente = vale para o
-  projeto todo.
-- O corpo é obrigatório. Seja curto: o app entrega o texto inteiro até um orçamento de caracteres; o que passar vira
-  só a linha do índice.
-- Arquivo com frontmatter inválido é ignorado (com aviso no log do app); nunca derruba a tarefa.
+- `touches`: globs relative to repository root, as a list (`[a, b]`) or as list items `- a`. `*` does not cross folders,
+  `**` crosses; a pattern without `/` (`*.rs`) matches the filename across any directory. Empty or omitted = applies to
+  the entire project.
+- The body is required. Keep it short: the app delivers full content up to a character budget; anything beyond that is truncated
+  to an index summary line.
+- Files with invalid frontmatter are ignored (with a warning logged in the app log); they never fail a task.
 
-## Como chegam ao agente
+## How they reach the agent
 
-- No início de cada tarefa: o texto dos globais e dos que casam com arquivos citados no pedido, mais o índice dos
-  outros.
-- Na devolução e na reprovação de uma tarefa: os específicos dos arquivos que o feedback novo cita e que o agente ainda
-  não tinha visto.
-- Sob demanda: `ask-agent --learn [<arquivo>...]` imprime os que valem para esses arquivos; sem argumentos, mostra
-  os globais por inteiro e o índice de todos os outros.
+- At the start of each task: full text of global learnings and those matching files cited in the task description, plus an index
+  of remaining learnings.
+- Upon return or rejection of a task: specific learnings for files newly cited in feedback that the agent had not yet seen.
+- On demand: `ask-agent --learn [<file>...]` prints learnings relevant to those files; without arguments, prints global
+  learnings in full along with an index of all others.
 
-## Quando criar um
+## When to create one
 
-Só para o que **não é óbvio** no código e custou tempo ou causou erro. Nada de resumir o que o código já diz. Crie o
-arquivo na branch da tarefa e cite-o no relatório. Nome: curto, em minúsculas, com hífens.
+Only for things that are **not obvious** from the code and cost time or caused bugs. Do not summarize what code already clearly shows.
+Create the file on the task branch and reference it in the report. File naming: short, lowercase, hyphenated.

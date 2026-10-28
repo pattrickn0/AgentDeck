@@ -1,27 +1,27 @@
 ---
-titulo: A régua da memória (memeval): o teto de caracteres pesa mais que a co-mudança
-resumo: cargo run -p agentdeck-core --example memeval mede recall/precisão/tamanho da entrega de aprendizados; em 24/10 a co-mudança não ganhou do controle dos arquivos mais mudados e o teto de 6000 caracteres era o gargalo.
+title: Memory benchmark (memeval): character budget matters more than co-change
+summary: cargo run -p agentdeck-core --example memeval measures recall/precision/size of learning delivery; on 24/10 co-change did not beat the baseline of most-changed files, and the 6000-character ceiling was the bottleneck.
 touches: [crates/core/examples/memeval.rs, crates/core/src/learnings.rs, crates/core/src/situation.rs]
 ---
-`crates/core/examples/memeval.rs` mede, nas tarefas mescladas (e nos commits diretos da `dev`), o que cada jeito de
-entregar aprendizados teria acertado. Rode com o caminho **do Windows** do arquivo de tarefas (o binário não entende
-`/c/Users/...` do Git Bash):
+`crates/core/examples/memeval.rs` evaluates across merged tasks (and direct commits to `dev`) what each learning delivery
+strategy would have predicted accurately. Run with the **Windows path** of the tasks file (the binary does not parse
+`/c/Users/...` from Git Bash):
 
-`cargo run --release -p agentdeck-core --example memeval -- . "C:\...\dados\tarefas\<projeto>.json" [--detalhe]`
+`cargo run --release -p agentdeck-core --example memeval -- . "C:\...\dados\tarefas\<project>.json" [--detalhe]`
 
-O certo = aprendizados com `touches` que casam com o que a tarefa mudou, lidos **na base** da tarefa (o ponto em que a
-branch saiu, não o `merge-base` da mesclagem: quem mesclou a `dev` na branch moveria a base). Os globais ficam fora da conta.
+Ground truth = learnings with `touches` matching files modified by the task, evaluated **at the base commit** of the task (the point where the
+branch was created, not the merge's `merge-base`: merging `dev` into the branch would shift the base). Global learnings are excluded from scoring.
 
-**O que a medição de 24/10 ensinou** (39 tarefas, 28 com aprendizado na base, histórico de 12 dias):
-- O gargalo da entrega de hoje é o **teto de 6000 caracteres**, não a falta de palpite: a estratégia (a) acerta 46% dos
-  certos com o teto e 60% sem ele (9000 caracteres já dão 56%), a ~+500 tokens por tarefa.
-- A **co-mudança não ganhou do controle** "sugerir os arquivos que mais mudaram antes da base" (os centrais: `deck.rs`,
-  `tasks.rs`, `app.rs`), nem para a memória nem para a previsão de arquivos (precisão dos vizinhos ~30% contra ~28%).
-  Ordenar por lift (corrigir pela frequência) piorou a precisão. O decaimento pela idade (7 e 3 dias) não mudou nada.
-- Os pedidos citam caminhos (36 de 39 tarefas); as mensagens dos commits quase nunca (12 de 58): a amostra de commits
-  é fraca para (a) e (c).
+**Findings from 24/10 evaluation** (39 tasks, 28 with base learnings, 12-day history):
+- The current delivery bottleneck is the **6000-character budget**, not ranking quality: strategy (a) achieves 46% recall
+  under the budget vs. 60% without it (9000 characters already reaches 56%), at ~+500 tokens per task.
+- **Co-change did not beat the baseline control** "suggest files most frequently changed prior to the base" (core files: `deck.rs`,
+  `tasks.rs`, `app.rs`), neither for memory delivery nor file prediction (neighbor precision ~30% vs. ~28%).
+  Sorting by lift (frequency weighting) degraded precision. Age decay (7 and 3 days) showed no effect.
+- Task descriptions frequently reference paths (36 of 39 tasks); commit messages rarely do (12 of 58): the commit sample
+  is weak for strategies (a) and (c).
 
-**Por quê:** num repositório pequeno e jovem os mesmos poucos arquivos mudam em quase toda tarefa, então "mudou junto"
-vira "é um arquivo central".
-**Como aplicar:** antes de construir o grafo, refaça a medição quando houver mais histórico (hoje os resultados mudam
-com 1 ou 2 tarefas a mais) e compare sempre com o controle `ctrl` da grade; só vale a co-mudança se ganhar dele.
+**Why:** in a small, young repository, the same handful of files are modified in almost every task, so "changed together"
+degenerates into "is a central hub file".
+**How to apply:** before building dependency graphs, re-run evaluation once more history is recorded (currently results shift
+with just 1 or 2 tasks) and always compare against the baseline grid control `ctrl`; co-change is only worthwhile if it outperforms it.
