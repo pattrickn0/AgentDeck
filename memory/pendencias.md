@@ -1,53 +1,53 @@
-# Pendências
+# Pending items
 
-Os **próximos passos**, no máximo 10, na ordem em que serão feitos (revisados com o usuário em 2026-10-24). Ao concluir
-um item, **tire-o daqui** e acrescente uma linha do que foi feito em [historico.md](historico.md) (regras dos documentos em
-[GERAL.md](GERAL.md)). Este arquivo não guarda item concluído.
+The **next steps**, at most 10, in the order they will be done (reviewed with the user on 2026-10-24). When completing
+an item, **remove it from here** and add a line of what was done to [historico.md](historico.md) (document rules in
+[GERAL.md](GERAL.md)). This file does not keep completed items.
 
-O que não está entre os próximos fica em [ideias.md](ideias.md): ideias sem data e as limitações conhecidas. Uma ideia
-só entra aqui quando sai outro item (a lista não passa de 10). Os **testes manuais** ficam em [testes.md](testes.md); um
-teste que falhar vira item aqui. O rumo do produto e quem decide estão em [AGENTDECK.md](AGENTDECK.md).
+What is not among the next steps stays in [ideias.md](ideias.md): undated ideas and known limitations. An idea
+only enters here when another item leaves (the list never exceeds 10). **Manual tests** stay in [testes.md](testes.md); a
+test that fails becomes an item here. Product direction and decision-makers are in [AGENTDECK.md](AGENTDECK.md).
 
-## Agora
+## Now
 
-1. [ ] **Validação no uso (usuário).** O terminal sem as linhas em branco depois de mudar o tamanho (`t37`; se voltar,
-   "Gravar o terminal (diagnóstico)" no menu da aba e mandar `dados/pty/`), o editor de documentos (`t39`) e a recusa por
-   cota (`ask-agent --models antigravity`, `--team`) e a escolha pela capacidade do modelo (`t52`: nível da tarefa, bloco
-   "capacidade" do `--models`; ver testes.md). Quando a medida tiver tarefas suficientes, rever a tabela `capability.json` e os
-   modelos presumidos por agente (`defaults`). Também do usuário: renomear a pasta local `commanddeck-dev` (o
-   repositório no GitHub já se chama `AgentDeck`).
-2. [ ] **Segundo plano e bandeja** (decidido em 2026-10-24). T1a (`t44`): o `Deck::tick` saiu de dentro da pintura e
-   `Deck::background` roda a partir do laço com a janela escondida ou minimizada. T1b (`t48`, feito, falta validar no uso):
-   o X esconde a janela na bandeja, sem perguntar (Windows: `tray-icon`; Linux: `ksni`; sem `StatusNotifierWatcher` o X
-   minimiza); a bandeja tem Abrir e Encerrar (Encerrar pergunta com edição não salva ou aba no meio de um turno); abrir o
-   programa de novo traz a instância de volta (`POST /activate`, ver ARCHITECTURE.md, "Instância única e
-   bandeja"). Falta ver no uso: o roteiro está em testes.md ("Bandeja e segunda abertura"), em especial o turno longo
-   terminando com a janela escondida e o ícone no Linux (a bandeja do GNOME puro não tem `StatusNotifierWatcher`; precisa
-   da extensão AppIndicator), que só foi compilado, não rodado.
-3. [ ] **Retomar a conversa de cada aba** depois de fechar o app ou de um crash (T4). Id por aba em `ProjectCfg`, gravado
-   assim que é conhecido, nunca `--continue`. Claude: `--session-id`/`--resume` com id nosso (o hook atualiza depois de
-   `/clear`); OpenCode: `--session <id>` (cria se não existe); Antigravity: `--conversation <id>`, com o id lido do
-   `--log-file` da aba; Codex: `codex resume <id>`, com o id do `notify`, e no Windows resolver o shim do npm até o
-   executável para o Codex ter hooks. Retomada que falha logo reabre do zero e avisa uma vez.
-4. [ ] **Memória medida, depois o grafo** (T3, depois T7). Medição automática sobre as tarefas já feitas: o certo são os
-   aprendizados dos arquivos que a tarefa de fato mudou; o palpite é o que cada jeito entregaria lendo só o pedido (hoje;
-   hoje + o índice de uma linha de todos; grafo); nota = acertos e tamanho entregue, com os aprendizados como estavam na
-   base da tarefa. O grafo começa pela co-mudança do `git log` (sem merges, sem commits grandes, sem `memory/**`), que
-   também sugere o escopo das tarefas; só vale para a memória se ganhar do índice.
-5. [ ] **Fase da tarefa e "parado há N min"** (T5), só pelos hooks: `PostToolUse` do Claude (a última ferramenta usada
-   vira "editando", "testando"…); os outros CLIs mostram trabalhando/parado e há quanto tempo.
-6. [ ] **Correio durável** (T6). Mensagem de até ~200 caracteres, numa linha, continua digitada; a longa fica guardada em
-   disco e no terminal vai só o aviso (`ask-agent --read <n>`); o aviso é repetido no fim de turno se ninguém leu; o prazo
-   de resposta conta a partir da leitura; as mensagens pendentes sobrevivem ao fechamento do app.
-7. [ ] **Pasta da worktree que não sai ao validar: achar a causa.** O log já existe (2026-10-24, `file_lock.rs`): a cada
-   falha de `remove_task_worktree`, o `agentdeck.log` e o aviso da tarefa dizem que arquivos ficaram e que processo os tem
-   aberto (Restart Manager), ou que só pastas vazias ficaram (um processo com o diretório atual dentro dela). Falta a
-   próxima ocorrência real: ler o aviso (procure "não saiu" no log) e corrigir a causa.
-8. [ ] **Aposentar a Conversa integrada.** A linha do tempo por tarefa já existe (t43, seção MENSAGENS do detalhe, guardada em
-   `Task::messages`); falta validá-la no uso e então tirar a Conversa. O que a linha do tempo não tem: as mensagens do usuário
-   à aba (`FeedKind::User`) e os avisos do sistema.
+1. [ ] **Validation in use (user).** The terminal without blank lines after resizing (`t37`; if it returns,
+   "Record the terminal (diagnostics)" in the tab menu and send `dados/pty/`), the document editor (`t39`), quota refusal
+   (`ask-agent --models antigravity`, `--team`), and choice by model capability (`t52`: task level,
+   "capability" block in `--models`; see testes.md). When the metric has enough tasks, review the `capability.json` table and
+   default models per agent (`defaults`). Also from the user: rename the local `commanddeck-dev` folder (the
+   GitHub repository is already named `AgentDeck`).
+2. [ ] **Background and system tray** (decided on 2026-10-24). T1a (`t44`): `Deck::tick` was moved out of rendering and
+   `Deck::background` runs from the event loop with the window hidden or minimized. T1b (`t48`, done, needs validation in use):
+   the X hides the window to the tray, without asking (Windows: `tray-icon`; Linux: `ksni`; without `StatusNotifierWatcher` the X
+   minimizes); the tray has Open and Exit (Exit prompts if there is an unsaved edit or a tab mid-turn); opening the
+   program again brings the instance back (`POST /activate`, see ARCHITECTURE.md, "Single instance and
+   system tray"). Remaining to verify in use: the walkthrough is in testes.md ("Tray and second launch"), especially a long turn
+   ending with the window hidden and the icon on Linux (vanilla GNOME tray lacks `StatusNotifierWatcher`; requires
+   AppIndicator extension), which was only compiled, not run.
+3. [ ] **Resume each tab's conversation** after closing the app or a crash (T4). Id per tab in `ProjectCfg`, saved
+   as soon as known, never `--continue`. Claude: `--session-id`/`--resume` with our id (hook updates after
+   `/clear`); OpenCode: `--session <id>` (creates if missing); Antigravity: `--conversation <id>`, with the id read from
+   the tab's `--log-file`; Codex: `codex resume <id>`, with the id from `notify`, and on Windows resolve the npm shim to the
+   executable so Codex gets hooks. Resumption that fails immediately reopens from scratch and warns once.
+4. [ ] **Measured memory, then the graph** (T3, then T7). Automatic measurement over completed tasks: ground truth is
+   learnings from files the task actually changed; prediction is what each method would deliver reading only the brief (today;
+   today + one-line index of all; graph); score = hits and delivered size, with learnings as they were at the
+   task's base. The graph begins with co-changes from `git log` (no merges, no large commits, no `memory/**`), which
+   also suggests task scopes; only adopted for memory if it outperforms the index.
+5. [ ] **Task phase and "idle for N min"** (T5), solely through hooks: Claude's `PostToolUse` (the last tool used
+   becomes "editing", "testing"…); other CLIs display working/idle and for how long.
+6. [ ] **Durable mail** (T6). Messages up to ~200 characters on a single line continue being typed; long ones are saved to
+   disk and only a notice is sent to the terminal (`ask-agent --read <n>`); the notice is repeated at turn end if unread;
+   reply deadline counts from when read; pending messages survive app exit.
+7. [ ] **Worktree folder not removed upon validation: find root cause.** Logging already exists (2026-10-24, `file_lock.rs`): on
+   every `remove_task_worktree` failure, `agentdeck.log` and the task warning report which files remained and which process holds
+   them open (Restart Manager), or if only empty directories remained (a process with its current directory inside it). Awaiting
+   the next real occurrence: read the notice (search for "worktree" in log) and fix the cause.
+8. [ ] **Retire integrated Conversation.** The per-task timeline already exists (t43, MESSAGES section in detail view, stored in
+   `Task::messages`); needs validation in use and then removal of Conversation. What the timeline lacks: user messages to the
+   tab (`FeedKind::User`) and system notices.
 
-## Depois (na lista, ainda não)
+## Later (on the list, not yet)
 
-9. [ ] **Instalador para Windows**, e na mesma versão tirar a migração da config `CommandDeck/` (`config::legacy_config_files`;
-   lista e razão em [MANUTENCAO.md](MANUTENCAO.md), seção 6).
+9. [ ] **Installer for Windows**, and in the same version remove config migration from `CommandDeck/` (`config::legacy_config_files`;
+   list and rationale in [MANUTENCAO.md](MANUTENCAO.md), section 6).
