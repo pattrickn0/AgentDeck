@@ -323,7 +323,7 @@ mod tests {
         i18n::with_lang(Lang::PtBr, || {
             let off = mic_tooltip(ButtonVisual::Idle, true, Setup::NotInstalled, "indisponível", Some("Ctrl+Shift+M"));
             assert!(off.contains("não instalado") && off.contains("baixar") && off.contains("cerca de 1,6 GB"), "{off}");
-            assert!(!off.contains("transcrição:"), "não mostra o motor de um ditado que não existe: {off}");
+            assert!(!off.contains("transcrição:"), "does not show engine for nonexistent dictation: {off}");
             assert!(mic_tooltip(ButtonVisual::Idle, true, Setup::Downloading, "", None).contains("Baixando"));
             assert!(mic_tooltip(ButtonVisual::Recording, true, Setup::NotInstalled, "", None).contains("Parar gravação"));
         });

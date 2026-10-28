@@ -197,7 +197,7 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     /// Real recording (portable-pty + `claude.exe`, classic mode, `--model haiku`): Claude Code responds with a 40-line
-    /// table on a 120×58 screen that shrinks to 50×12 during the response (like a window no longer featured in Spotlight)
+    /// table on a 120×58 screen that shrinks to 50×12 during the response (like a window that leaves Highlight)
     /// and grows back to 120×58.
     const CLAUDE_BYTES: &[u8] = include_bytes!("testdata/claude-classico-encolhe-e-alarga.bin");
     const CLAUDE_EVENTS: &str = include_str!("testdata/claude-classico-encolhe-e-alarga.events.txt");
