@@ -1,8 +1,8 @@
-//! Estado da aba "GitHub" na barra direita e ponte entre [`Deck`] e [`agentdeck_core::github`].
+//! State of the "GitHub" tab in the right bar and bridge between [`Deck`] and [`agentdeck_core::github`].
 //!
-//! Toda chamada ao GitHub (`git remote`, `git credential fill`, `gh auth token` e API REST) roda
-//! fora da thread da interface e volta por [`CoreEvent::Github`]; aqui só ficam o estado da tela e
-//! o tratamento desses eventos. A pintura está em `ui/github.rs`.
+//! Every GitHub call (`git remote`, `git credential fill`, `gh auth token` and the REST API) runs
+//! outside the interface thread and comes back through [`CoreEvent::Github`]; here live only the
+//! screen state and the handling of those events. The painting is in `ui/github.rs`.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -11,12 +11,13 @@ use agentdeck_core::github::{
     CheckStatus, GithubError, GithubEvent, GithubOverview, GithubPayload, Issue, JobLog, PrChecksDetail, PullRequest, RateLimitInfo,
     RepoSlug, WorkflowJob, WorkflowRun,
 };
+use agentdeck_core::t;
 use agentdeck_core::Ident;
 use egui::Rect;
 
 use crate::deck::{Deck, RightView};
 
-/// Sub-aba ativa dentro da aba GitHub.
+/// Active sub-tab inside the GitHub tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GithubTab {
     #[default]
@@ -25,76 +26,76 @@ pub enum GithubTab {
     Actions,
 }
 
-/// O que a aba mostra para o projeto ativo.
+/// What the tab shows for the active project.
 #[derive(Debug, Clone, Default)]
 pub enum GithubView {
     #[default]
     Loading,
-    /// Nenhum projeto aberto no AgentDeck.
+    /// No project open in AgentDeck.
     NoProject,
-    /// Falha sem dados anteriores na tela (sem remoto do GitHub, rede, login recusado, limite...).
+    /// Failure with no previous data on screen (no GitHub remote, network, refused login, limit...).
     Error(GithubError),
-    /// Dados carregados do repositório.
+    /// Data loaded from the repository.
     Ready(GithubOverview),
 }
 
-/// Menu "Enviar para agente": o que será enviado e onde o menu ancora.
+/// "Send to agent" menu: what will be sent and where the menu anchors.
 #[derive(Debug, Clone)]
 pub struct AgentMenuTarget {
-    /// Retângulo do botão que abriu o menu.
+    /// Rectangle of the button that opened the menu.
     pub anchor: Rect,
-    /// Rótulo curto do que será enviado (ex.: `PR #42`).
+    /// Short label of what will be sent (e.g. `PR #42`).
     pub title: String,
-    /// Mensagem pronta.
+    /// Ready-made message.
     pub prompt: String,
 }
 
-/// Estado da aba GitHub no [`Deck`].
+/// State of the GitHub tab in the [`Deck`].
 #[derive(Default)]
 pub struct GithubUi {
     pub tab: GithubTab,
     pub view: GithubView,
-    /// Último repositório conhecido (para o título quando a leitura seguinte falha).
+    /// Last known repository (for the title when the next read fails).
     pub repo: Option<RepoSlug>,
-    /// Há uma leitura geral em andamento.
+    /// A general read is in progress.
     pub refreshing: bool,
-    /// A leitura em andamento é forçada (botão Atualizar): refaz também o detalhe aberto.
+    /// The read in progress is forced (Refresh button): it also redoes the open detail.
     pub forced: bool,
-    /// Aviso ou erro recente no topo da aba `(texto, é_erro)`.
+    /// Recent notice or error at the top of the tab `(text, is_error)`.
     pub notice: Option<(String, bool)>,
-    /// Quando a última leitura terminou.
+    /// When the last read finished.
     pub last_refresh: Option<Instant>,
 
     pub selected_pr: Option<u64>,
-    /// Checks e jobs por número de PR.
+    /// Checks and jobs per PR number.
     pub pr_details: HashMap<u64, PrChecksDetail>,
     pub pr_loading: Option<u64>,
 
     pub selected_issue: Option<u64>,
 
     pub selected_run: Option<u64>,
-    /// Jobs por execução.
+    /// Jobs per run.
     pub run_jobs: HashMap<u64, Vec<WorkflowJob>>,
     pub run_loading: Option<u64>,
 
-    /// Fim do log por job (ou o motivo de não ter vindo).
+    /// End of the log per job (or the reason it did not arrive).
     pub job_logs: HashMap<u64, Result<JobLog, GithubError>>,
     pub log_loading: Option<u64>,
-    /// Job cujo log está aberto `(job_id, nome, PR de origem)`.
+    /// Job whose log is open `(job_id, name, originating PR)`.
     pub open_log: Option<(u64, String, Option<u64>)>,
 
     pub agent_menu: Option<AgentMenuTarget>,
-    /// Modelo escolhido para abrir/usar uma instância com cargo.
+    /// Model chosen to open/use an instance with a role.
     pub new_role_kind: String,
-    /// Cargo digitado (ex.: `review`).
+    /// Role typed by the user (e.g. `review`).
     pub new_role_name: String,
 
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=github*`): ignora eventos reais e leituras.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=github*`): ignores real events and reads.
     pub debug_hold: bool,
 }
 
 impl GithubUi {
-    /// Dados carregados, se houver.
+    /// Loaded data, if any.
     pub fn overview(&self) -> Option<&GithubOverview> {
         match &self.view {
             GithubView::Ready(ov) => Some(ov),
@@ -102,34 +103,29 @@ impl GithubUi {
         }
     }
 
-    /// PRs abertos (selo da aba na barra direita).
+    /// Open PRs (tab badge in the right bar).
     pub fn open_prs_count(&self) -> u32 {
         self.overview().map(|o| o.prs.len() as u32).unwrap_or(0)
     }
 
-    /// Dica do ícone da aba.
+    /// Tooltip of the tab icon.
     pub fn tab_tooltip(&self) -> String {
         match &self.view {
             GithubView::Ready(ov) => {
                 let (prs, issues) = (ov.prs.len(), ov.issues.len());
-                format!(
-                    "GitHub · {} ({} PR{}, {} issue{})",
-                    ov.repo,
-                    prs,
-                    if prs == 1 { "" } else { "s" },
-                    issues,
-                    if issues == 1 { "" } else { "s" }
-                )
+                let prs_txt = if prs == 1 { t!("1 PR").to_owned() } else { t!("{count} PRs", count = prs) };
+                let issues_txt = if issues == 1 { t!("1 issue").to_owned() } else { t!("{count} issues", count = issues) };
+                t!("GitHub · {repo} ({prs}, {issues})", repo = ov.repo, prs = prs_txt, issues = issues_txt)
             }
             _ => match &self.repo {
                 Some(r) => format!("GitHub · {r}"),
-                None => "GitHub (PRs, issues e Actions)".to_string(),
+                None => t!("GitHub (PRs, issues and Actions)").to_string(),
             },
         }
     }
 }
 
-/// Cargo digitado pelo usuário vira palavra válida de instância (minúsculas, números, `-`, `_`).
+/// Role typed by the user becomes a valid instance word (lowercase, digits, `-`, `_`).
 pub fn normalize_role(text: &str) -> String {
     text.trim()
         .to_lowercase()
@@ -140,7 +136,7 @@ pub fn normalize_role(text: &str) -> String {
         .collect()
 }
 
-/// `modelo` ou `modelo@cargo` a partir do que o menu tem.
+/// `model` or `model@role` from what the menu has.
 pub fn instance_spec(kind: &str, role: &str) -> String {
     let role = normalize_role(role);
     if role.is_empty() {
@@ -151,7 +147,7 @@ pub fn instance_spec(kind: &str, role: &str) -> String {
 }
 
 impl Deck {
-    /// Limpa o estado ao trocar de projeto; com a aba aberta, já lê o novo.
+    /// Clears the state when switching projects; with the tab open, it already reads the new one.
     pub fn github_reset_for_project(&mut self) {
         if self.github.debug_hold {
             return;
@@ -167,12 +163,12 @@ impl Deck {
         }
     }
 
-    /// Lê os dados do projeto ativo em segundo plano (usa o cache de 60 s do core).
+    /// Reads the active project's data in the background (uses the core's 60 s cache).
     pub fn github_refresh(&mut self) {
         self.github_load(false);
     }
 
-    /// Botão Atualizar: ignora os caches e refaz também o detalhe aberto.
+    /// Refresh button: ignores the caches and redoes the open detail too.
     pub fn github_refresh_now(&mut self) {
         self.github_load(true);
     }
@@ -201,7 +197,7 @@ impl Deck {
         self.core.github_refresh(force);
     }
 
-    /// Seleciona (ou desseleciona) um PR e carrega os checks dele se ainda não os tem.
+    /// Selects (or deselects) a PR and loads its checks if they are not there yet.
     pub fn github_select_pr(&mut self, number: u64) {
         if self.github.selected_pr == Some(number) {
             self.github.selected_pr = None;
@@ -231,7 +227,7 @@ impl Deck {
         self.core.github_load_pr(number, sha, force);
     }
 
-    /// Seleciona (ou desseleciona) uma execução do Actions e carrega os jobs dela.
+    /// Selects (or deselects) an Actions run and loads its jobs.
     pub fn github_select_run(&mut self, run_id: u64) {
         if self.github.selected_run == Some(run_id) {
             self.github.selected_run = None;
@@ -258,7 +254,7 @@ impl Deck {
         self.core.github_load_run_jobs(run_id, force);
     }
 
-    /// Abre o painel com o fim do log de um job e o baixa se ainda não o tem.
+    /// Opens the panel with the end of a job's log and downloads it if it is not there yet.
     pub fn github_request_job_log(&mut self, job_id: u64, job_name: String, pr_number: Option<u64>) {
         self.github.open_log = Some((job_id, job_name, pr_number));
         if self.github.debug_hold || self.github.job_logs.contains_key(&job_id) {
@@ -268,7 +264,7 @@ impl Deck {
         self.core.github_load_job_log(job_id, false);
     }
 
-    /// Com jobs vermelhos na lista, abre o log do primeiro (se nenhum deles já está aberto).
+    /// With red jobs in the list, opens the log of the first one (if none of them is already open).
     fn auto_open_failed_job_log(&mut self, pr_number: Option<u64>, jobs: &[WorkflowJob]) {
         let Some(failed) = jobs.iter().find(|j| j.status == CheckStatus::Failure) else { return };
         let keep_current =
@@ -278,7 +274,7 @@ impl Deck {
         }
     }
 
-    /// Trata um evento do core. Eventos de outro projeto ou de uma leitura antiga são ignorados.
+    /// Handles a core event. Events from another project or from an old read are ignored.
     pub fn on_github_event(&mut self, ev: GithubEvent) {
         if self.github.debug_hold || ev.project != self.active_project {
             return;
@@ -291,7 +287,7 @@ impl Deck {
                 self.github.repo = Some(overview.repo.clone());
                 let forced = std::mem::take(&mut self.github.forced);
                 self.github.view = GithubView::Ready(overview);
-                // Forçado: recarrega o que estava aberto (os caches da tela foram limpos).
+                // Forced: reloads what was open (the screen caches were cleared).
                 if let Some(num) = self.github.selected_pr {
                     self.github_load_pr_detail(num, forced);
                 }
@@ -303,7 +299,7 @@ impl Deck {
                 self.github.refreshing = false;
                 self.github.forced = false;
                 if matches!(self.github.view, GithubView::Ready(_)) {
-                    // Mantém o que já estava na tela e avisa na faixa do topo.
+                    // Keeps what was already on screen and warns in the top strip.
                     self.github.notice = Some((error.to_string(), true));
                 } else {
                     self.github.view = GithubView::Error(error);
@@ -331,7 +327,7 @@ impl Deck {
                             self.auto_open_failed_job_log(Some(pr_number), &jobs);
                         }
                     }
-                    Err(e) => self.github.notice = Some((format!("PR #{pr_number}: {e}"), true)),
+                    Err(e) => self.github.notice = Some((t!("PR #{number}: {error}", number = pr_number, error = e), true)),
                 }
             }
             GithubPayload::RunJobs { run_id, result, failed_log } => {
@@ -346,7 +342,7 @@ impl Deck {
                             self.auto_open_failed_job_log(None, &jobs);
                         }
                     }
-                    Err(e) => self.github.notice = Some((format!("Execução #{run_id}: {e}"), true)),
+                    Err(e) => self.github.notice = Some((t!("Run #{id}: {error}", id = run_id, error = e), true)),
                 }
             }
             GithubPayload::JobLog { job_id, result } => {
@@ -358,7 +354,7 @@ impl Deck {
         }
     }
 
-    /// Guarda o log que o core já baixou junto com os jobs.
+    /// Stores the log the core already downloaded together with the jobs.
     fn store_preloaded_log(&mut self, log: Option<(u64, Result<JobLog, GithubError>)>, jobs: &[WorkflowJob]) {
         if let Some((job_id, result)) = log {
             if jobs.iter().any(|j| j.id == job_id) {
@@ -367,14 +363,14 @@ impl Deck {
         }
     }
 
-    /// Abre uma URL do GitHub no navegador padrão.
+    /// Opens a GitHub URL in the default browser.
     pub fn open_github_browser(&mut self, url: &str) {
         if let Err(e) = self.core.open_github_url(url) {
-            self.github.notice = Some((format!("Não foi possível abrir o navegador: {e}"), true));
+            self.github.notice = Some((t!("Could not open the browser: {error}", error = e), true));
         }
     }
 
-    /// Abre o menu "Enviar para agente" com a mensagem pronta.
+    /// Opens the "Send to agent" menu with the ready-made message.
     pub fn open_github_agent_menu(&mut self, anchor: Rect, title: String, suggested_role: &str, prompt: String) {
         if self.github.new_role_kind.is_empty() {
             self.github.new_role_kind =
@@ -384,23 +380,23 @@ impl Deck {
         self.github.agent_menu = Some(AgentMenuTarget { anchor, title, prompt });
     }
 
-    /// Envia a mensagem pronta para a instância `spec` (`claude`, `claude@review`...), abrindo a aba
-    /// se ela não existir. Fecha o menu e avisa o resultado na faixa do topo.
+    /// Sends the ready-made message to instance `spec` (`claude`, `claude@review`...), opening the
+    /// tab if it does not exist. Closes the menu and reports the result in the top strip.
     pub fn send_github_prompt_to_agent(&mut self, spec: &str, prompt: String) {
         self.github.agent_menu = None;
         let Some(want) = Ident::parse(spec) else {
-            self.github.notice = Some((format!("Nome de agente inválido: \"{spec}\"."), true));
+            self.github.notice = Some((t!("Invalid agent name: \"{spec}\".", spec = spec), true));
             return;
         };
         self.github.notice = Some(match self.send_to_instance(&want, false, prompt) {
-            Ok(label) => (format!("Enviado para {label}."), false),
+            Ok(label) => (t!("Sent to {agent}.", agent = label), false),
             Err(msg) => (msg, true),
         });
     }
 }
 
 // ---------------------------------------------------------------------------
-// Dados fictícios para capturas de tela (`AGENTDECK_DEBUG_UI=github-demo`)
+// Fake data for screenshots (`AGENTDECK_DEBUG_UI=github-demo`)
 // ---------------------------------------------------------------------------
 
 const DEMO_SHA_42: &str = "61621aa9c4f01b2e3d4a5f60718293a4b5c6d7e8";
@@ -445,10 +441,10 @@ pub fn demo_overview() -> GithubOverview {
         repo: RepoSlug::new("pattr", "agentdeck"),
         authenticated: true,
         prs: vec![
-            pr(42, "feat(github): integração com PRs, issues e Actions", "pattr", "feat/github", DEMO_SHA_42, false, CheckStatus::Failure),
+            pr(42, "feat(github): pull requests, issues and Actions", "pattr", "feat/github", DEMO_SHA_42, false, CheckStatus::Failure),
             pr(
                 39,
-                "feat(git): histórico de commits e seletor de branch",
+                "feat(git): commit history and branch selector",
                 "ana-dev",
                 "feat/git-panel",
                 "89ab12cd34ef56ab78cd90ef12ab34cd56ef7890",
@@ -457,45 +453,38 @@ pub fn demo_overview() -> GithubOverview {
             ),
             pr(
                 44,
-                "wip(terminal): busca incremental no scrollback",
+                "wip(terminal): incremental scrollback search",
                 "carlos",
                 "feat/term-search",
                 "11223344556677889900aabbccddeeff00112233",
                 true,
                 CheckStatus::Pending,
             ),
-            pr(45, "docs: guia de contribuição", "bia", "docs/contrib", "", false, CheckStatus::Neutral),
+            pr(45, "docs: contributing guide", "bia", "docs/contrib", "", false, CheckStatus::Neutral),
         ],
         issues: vec![
             issue(
                 38,
-                "Atalho para alternar entre as abas Git e GitHub",
+                "Shortcut to switch between the Git and GitHub tabs",
                 "pattr",
                 &["enhancement", "ui"],
                 3,
-                "Seria útil ter atalhos de teclado dedicados para abrir as abas da barra direita rapidamente, sem usar o mouse.",
+                "It would be useful to have dedicated keyboard shortcuts to open the right bar tabs quickly, without using the mouse.",
             ),
             issue(
                 31,
-                "ConPTY no Windows 11 24H2: cursor pisca ao redimensionar",
+                "ConPTY on Windows 11 24H2: cursor blinks on resize",
                 "marcos",
                 &["bug", "windows"],
                 5,
-                "Ao arrastar o divisor da barra direita rapidamente, o ConPTY emite sequências DECSCUSR extras e o cursor pisca.",
+                "When I drag the right bar divider quickly, ConPTY emits extra DECSCUSR sequences and the cursor blinks.",
             ),
         ],
         runs: vec![
-            run(
-                9001,
-                "feat(github): integração com PRs, issues e Actions",
-                "feat/github",
-                DEMO_SHA_42,
-                CheckStatus::Failure,
-                Some("failure"),
-            ),
+            run(9001, "feat(github): pull requests, issues and Actions", "feat/github", DEMO_SHA_42, CheckStatus::Failure, Some("failure")),
             run(
                 9000,
-                "feat(git): histórico de commits e seletor de branch",
+                "feat(git): commit history and branch selector",
                 "feat/git-panel",
                 "89ab12cd34ef56ab78cd90ef12ab34cd56ef7890",
                 CheckStatus::Success,
@@ -503,7 +492,7 @@ pub fn demo_overview() -> GithubOverview {
             ),
             run(
                 8999,
-                "wip(terminal): busca incremental no scrollback",
+                "wip(terminal): incremental scrollback search",
                 "feat/term-search",
                 "11223344556677889900aabbccddeeff00112233",
                 CheckStatus::Pending,
@@ -575,7 +564,7 @@ mod tests {
     fn instance_specs_parse_as_idents() {
         assert_eq!(instance_spec("claude", ""), "claude");
         assert_eq!(instance_spec("claude", "Review"), "claude@review");
-        let id = Ident::parse(&instance_spec("opencode", "ci")).expect("id válido");
+        let id = Ident::parse(&instance_spec("opencode", "ci")).expect("valid id");
         assert_eq!(id.kind, "opencode");
         assert_eq!(id.role.as_deref(), Some("ci"));
     }

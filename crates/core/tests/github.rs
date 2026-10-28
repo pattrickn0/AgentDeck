@@ -1,5 +1,5 @@
-//! Descoberta do repositório GitHub pelo remoto `origin` com o git real (pula com aviso se o `git`
-//! não estiver instalado). Sem rede: só `git remote get-url`.
+//! Discovery of the GitHub repository from the `origin` remote with the real git (skips with a warning if
+//! `git` is not installed). No network: only `git remote get-url`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -46,7 +46,7 @@ fn git(dir: &Path, args: &[&str]) {
 #[test]
 fn finds_the_repo_from_the_origin_remote() {
     if git_exe().is_none() {
-        eprintln!("git não instalado: teste pulado");
+        eprintln!("git not installed: test skipped");
         return;
     }
     let tmp = tempfile::tempdir().expect("tmp");
@@ -54,23 +54,23 @@ fn finds_the_repo_from_the_origin_remote() {
     let repo = tmp.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
 
-    // Fora de um repositório.
+    // Outside a repository.
     assert_eq!(core.github_repo_at(&repo), Err(GithubError::NotARepo));
 
     git(&repo, &["init", "-q"]);
-    // Sem remoto.
+    // No remote.
     assert_eq!(core.github_repo_at(&repo), Err(GithubError::NoRemote));
 
-    git(&repo, &["remote", "add", "origin", "git@github.com:dono/repo.git"]);
-    assert_eq!(core.github_repo_at(&repo), Ok(RepoSlug::new("dono", "repo")));
+    git(&repo, &["remote", "add", "origin", "git@github.com:owner/repo.git"]);
+    assert_eq!(core.github_repo_at(&repo), Ok(RepoSlug::new("owner", "repo")));
 
-    git(&repo, &["remote", "set-url", "origin", "https://github.com/outro/projeto"]);
-    assert_eq!(core.github_repo_at(&repo), Ok(RepoSlug::new("outro", "projeto")));
+    git(&repo, &["remote", "set-url", "origin", "https://github.com/other/project"]);
+    assert_eq!(core.github_repo_at(&repo), Ok(RepoSlug::new("other", "project")));
 
-    git(&repo, &["remote", "set-url", "origin", "https://gitlab.com/dono/repo.git"]);
+    git(&repo, &["remote", "set-url", "origin", "https://gitlab.com/owner/repo.git"]);
     assert!(matches!(core.github_repo_at(&repo), Err(GithubError::NotGithubRemote { .. })));
 
-    // Pasta vazia / inexistente: sem projeto.
+    // Empty / nonexistent folder: no project.
     assert_eq!(core.github_repo_at(Path::new("")), Err(GithubError::NoProject));
 }
 
@@ -86,18 +86,18 @@ fn opening_urls_is_limited_to_github() {
     assert!(core.open_github_url("https://github.com.evil.example/x").is_err());
 }
 
-/// Rede e credencial reais: `cargo test -p agentdeck-core --test github -- --ignored --nocapture`.
-/// Lê PRs, issues e execuções do repositório do `origin` desta cópia do projeto e imprime um resumo
-/// (nunca o token).
+/// Real network and credential: `cargo test -p agentdeck-core --test github -- --ignored --nocapture`.
+/// Reads PRs, issues and runs from the `origin` repository of this project copy and prints a summary
+/// (never the token).
 #[test]
-#[ignore = "usa a rede e a credencial do usuário"]
+#[ignore = "uses the network and the user's credential"]
 fn live_overview_of_this_repository() {
     use agentdeck_core::github::GithubPayload;
     use agentdeck_core::CoreEvent;
 
     let tmp = tempfile::tempdir().expect("tmp");
     let root = tmp.path();
-    // Pasta temporária com o mesmo `origin` desta cópia (o core reescreve o AGENTS.md da pasta de trabalho).
+    // Temporary folder with the same `origin` as this copy (the core rewrites the AGENTS.md of the workspace folder).
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));
     let url = Command::new("git").current_dir(here).args(["remote", "get-url", "origin"]).output().expect("git");
     let url = String::from_utf8_lossy(&url.stdout).trim().to_owned();
@@ -130,7 +130,7 @@ fn live_overview_of_this_repository() {
             Ok(CoreEvent::Github(ev)) => match ev.payload {
                 GithubPayload::Overview(Ok(ov)) => {
                     println!(
-                        "{}: autenticado={} PRs={} issues={} execuções={} limite={:?}",
+                        "{}: authenticated={} PRs={} issues={} runs={} limit={:?}",
                         ov.repo,
                         ov.authenticated,
                         ov.prs.len(),
@@ -142,9 +142,9 @@ fn live_overview_of_this_repository() {
                         println!("  PR #{} {} [{}]", pr.number, pr.title, pr.checks.label());
                     }
                     if let Some(run) = ov.runs.first() {
-                        println!("  última execução: {} ({}) {:?}", run.display_title, run.raw_status, run.conclusion);
+                        println!("  latest run: {} ({}) {:?}", run.display_title, run.raw_status, run.conclusion);
                         core.github_load_run_jobs(run.id, true);
-                        // Espera também os jobs (e o fim do log, se algum job falhou).
+                        // Also waits for the jobs (and the end of the log, if a job failed).
                         while let Ok(CoreEvent::Github(ev2)) = rx.recv_timeout(std::time::Duration::from_secs(60)) {
                             if let GithubPayload::RunJobs { result, failed_log, .. } = ev2.payload {
                                 let jobs = result.expect("jobs");
@@ -154,25 +154,25 @@ fn live_overview_of_this_repository() {
                                 );
                                 match failed_log {
                                     Some((id, Ok(log))) => {
-                                        println!("  log do job {id}: {} linhas (cortado: {})", log.lines.len(), log.truncated)
+                                        println!("  job log {id}: {} lines (truncated: {})", log.lines.len(), log.truncated)
                                     }
-                                    Some((id, Err(e))) => println!("  log do job {id}: {e}"),
-                                    None => println!("  nenhum job vermelho"),
+                                    Some((id, Err(e))) => println!("  job log {id}: {e}"),
+                                    None => println!("  no red job"),
                                 }
-                                // O download do log (com o redirecionamento para o armazenamento) também vale para job verde.
+                                // The log download (with the redirect to storage) also works for a green job.
                                 if let Some(job) = jobs.first() {
                                     core.github_load_job_log(job.id, true);
                                     while let Ok(CoreEvent::Github(ev3)) = rx.recv_timeout(std::time::Duration::from_secs(60)) {
                                         if let GithubPayload::JobLog { result, .. } = ev3.payload {
                                             match result {
                                                 Ok(log) => println!(
-                                                    "  log de {}: {} linhas (cortado: {}); última: {:?}",
+                                                    "  log of {}: {} lines (truncated: {}); last: {:?}",
                                                     job.name,
                                                     log.lines.len(),
                                                     log.truncated,
                                                     log.lines.last()
                                                 ),
-                                                Err(e) => println!("  log de {}: {e}", job.name),
+                                                Err(e) => println!("  log of {}: {e}", job.name),
                                             }
                                             break;
                                         }
@@ -184,11 +184,11 @@ fn live_overview_of_this_repository() {
                     }
                     return;
                 }
-                GithubPayload::Overview(Err(e)) => panic!("falha ao ler o GitHub: {e}"),
+                GithubPayload::Overview(Err(e)) => panic!("failed to read GitHub: {e}"),
                 _ => {}
             },
             Ok(_) => {}
-            Err(_) => panic!("sem resposta do GitHub em 60 s"),
+            Err(_) => panic!("no GitHub response in 60 s"),
         }
     }
 }

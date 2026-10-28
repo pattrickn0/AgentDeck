@@ -1,15 +1,16 @@
-//! Integração com o GitHub (PRs, issues e Actions) para o repositório do projeto ativo.
+//! GitHub integration (PRs, issues and Actions) for the active project's repository.
 //!
-//! - Descobre `dono/repo` pelo remoto `origin` (`git remote get-url origin`), aceitando URLs
-//!   HTTPS, `git@github.com:…` e `ssh://…`.
-//! - Autentica sem guardar token no app: consulta `git credential fill` (`protocol=https`,
-//!   `host=github.com`) com `GCM_INTERACTIVE=never` e `GIT_TERMINAL_PROMPT=0` (ou `gh auth token`,
-//!   se o GitHub CLI existir e estiver logado). O token vive só na memória e nunca vai para log,
-//!   configuração nem mensagens de erro. Sem credencial, repositórios públicos continuam
-//!   funcionando sem token (limite de 60 requisições/h).
-//! - Consulta a API REST do GitHub via `ureq` em threads de segundo plano e devolve o resultado
-//!   pela fila de [`CoreEvent::Github`], com cache em memória por repositório e controle de
-//!   *rate limit*.
+//! - Finds `owner/repo` from the `origin` remote (`git remote get-url origin`), accepting HTTPS
+//!   URLs, `git@github.com:…` and `ssh://…`.
+//! - Authenticates without storing a token in the app: it asks `git credential fill`
+//!   (`protocol=https`, `host=github.com`) with `GCM_INTERACTIVE=never` and
+//!   `GIT_TERMINAL_PROMPT=0` (or `gh auth token`, if the GitHub CLI exists and is signed in).
+//!   The token lives only in memory and never goes to logs, configuration or error messages.
+//!   Without a credential, public repositories keep working without a token (limit of 60
+//!   requests/h).
+//! - Queries the GitHub REST API through `ureq` on background threads and returns the result
+//!   through the [`CoreEvent::Github`] queue, with an in-memory cache per repository and
+//!   *rate limit* control.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -25,29 +26,30 @@ use serde_json::Value;
 
 use crate::events::CoreEvent;
 use crate::process::{run_captured_raw, Exit};
+use crate::t;
 use crate::util::{terminal_text, truncate_chars};
 use crate::Core;
 
-/// Timeout de comandos locais (`git remote`, `git credential fill`, `gh auth token`).
+/// Timeout of local commands (`git remote`, `git credential fill`, `gh auth token`).
 const CMD_TIMEOUT: Duration = Duration::from_secs(5);
-/// Timeout global de cada requisição HTTP à API do GitHub.
+/// Overall timeout of each HTTP request to the GitHub API.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
-/// Timeout de conexão HTTP.
+/// HTTP connection timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
-/// Validade do cache em memória quando a aba é aberta (o botão Atualizar força releitura).
+/// Validity of the in-memory cache when the tab is opened (the Refresh button forces a new read).
 const CACHE_TTL: Duration = Duration::from_secs(60);
-/// Validade do executável `git` / `gh` procurado no sistema.
+/// Validity of the `git` / `gh` executable looked up on the system.
 const EXE_TTL: Duration = Duration::from_secs(30);
-/// Máximo de linhas guardadas do fim do log de um job que falhou.
+/// Maximum number of lines kept from the end of a failed job's log.
 pub const LOG_MAX_LINES: usize = 200;
-/// Máximo de bytes guardados do fim do log de um job que falhou (32 KiB).
+/// Maximum number of bytes kept from the end of a failed job's log (32 KiB).
 pub const LOG_MAX_BYTES: usize = 32 * 1024;
-/// Limite de leitura total do stream de log (evita baixar dezenas de megabytes indefinidamente).
+/// Total read limit of the log stream (avoids downloading tens of megabytes indefinitely).
 const LOG_STREAM_LIMIT: usize = 8 * 1024 * 1024;
 
-// ---------- Tipos públicos ----------
+// ---------- Public types ----------
 
-/// Identificação `dono/repo` de um repositório no GitHub.
+/// `owner/repo` identification of a repository on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RepoSlug {
     pub owner: String,
@@ -59,12 +61,12 @@ impl RepoSlug {
         Self { owner: owner.into(), repo: repo.into() }
     }
 
-    /// `"dono/repo"`.
+    /// `"owner/repo"`.
     pub fn full_name(&self) -> String {
         format!("{}/{}", self.owner, self.repo)
     }
 
-    /// `"https://github.com/dono/repo"`.
+    /// `"https://github.com/owner/repo"`.
     pub fn html_url(&self) -> String {
         format!("https://github.com/{}/{}", self.owner, self.repo)
     }
@@ -76,7 +78,7 @@ impl fmt::Display for RepoSlug {
     }
 }
 
-/// Estado resumido de checks / execuções do Actions.
+/// Summary state of the checks / Actions runs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckStatus {
     #[default]
@@ -89,15 +91,15 @@ pub enum CheckStatus {
 impl CheckStatus {
     pub fn label(self) -> &'static str {
         match self {
-            CheckStatus::Success => "aprovado",
-            CheckStatus::Failure => "falhou",
-            CheckStatus::Pending => "em andamento",
-            CheckStatus::Neutral => "sem checks",
+            CheckStatus::Success => t!("passed"),
+            CheckStatus::Failure => t!("failed"),
+            CheckStatus::Pending => t!("in progress"),
+            CheckStatus::Neutral => t!("no checks"),
         }
     }
 }
 
-/// Pull Request aberto no repositório.
+/// Open Pull Request in the repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequest {
     pub number: u64,
@@ -112,7 +114,7 @@ pub struct PullRequest {
     pub checks: CheckStatus,
 }
 
-/// Issue aberta no repositório (sem PRs).
+/// Open issue in the repository (without PRs).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Issue {
     pub number: u64,
@@ -125,7 +127,7 @@ pub struct Issue {
     pub body_preview: String,
 }
 
-/// Execução de um workflow do GitHub Actions.
+/// Run of a GitHub Actions workflow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowRun {
     pub id: u64,
@@ -141,7 +143,7 @@ pub struct WorkflowRun {
     pub created_at: String,
 }
 
-/// Job individual dentro de uma execução do GitHub Actions.
+/// Individual job inside a GitHub Actions run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowJob {
     pub id: u64,
@@ -150,19 +152,19 @@ pub struct WorkflowJob {
     pub status: CheckStatus,
     pub conclusion: Option<String>,
     pub html_url: String,
-    /// Nomes dos passos (`steps`) que falharam neste job.
+    /// Names of the steps that failed in this job.
     pub failed_steps: Vec<String>,
 }
 
-/// Trecho final do log de um job que falhou.
+/// Final part of a failed job's log.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobLog {
     pub lines: Vec<String>,
-    /// Cortado por exceder [`LOG_MAX_LINES`] ou [`LOG_MAX_BYTES`].
+    /// Cut for exceeding [`LOG_MAX_LINES`] or [`LOG_MAX_BYTES`].
     pub truncated: bool,
 }
 
-/// Informações de limite de requisições (*rate limit*) da API do GitHub.
+/// Request limit (*rate limit*) information of the GitHub API.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RateLimitInfo {
     pub remaining: Option<u32>,
@@ -170,11 +172,11 @@ pub struct RateLimitInfo {
     pub reset_at_epoch_s: Option<u64>,
 }
 
-/// Visão geral do repositório no GitHub: PRs abertos, issues abertas e últimas execuções do Actions.
+/// Overview of the repository on GitHub: open PRs, open issues and the latest Actions runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubOverview {
     pub repo: RepoSlug,
-    /// `true` se as requisições usaram credencial (GCM ou `gh`); `false` = anônimo (60 req/h).
+    /// `true` if the requests used a credential (GCM or `gh`); `false` = anonymous (60 req/h).
     pub authenticated: bool,
     pub prs: Vec<PullRequest>,
     pub issues: Vec<Issue>,
@@ -182,25 +184,25 @@ pub struct GithubOverview {
     pub rate_limit: Option<RateLimitInfo>,
 }
 
-/// Detalhe de checks e jobs de um PR específico.
+/// Checks and jobs detail of a specific PR.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrChecksDetail {
     pub pr_number: u64,
     pub head_sha: String,
     pub runs: Vec<WorkflowRun>,
     pub jobs: Vec<WorkflowJob>,
-    /// Log pré-carregado do primeiro job que falhou (`(job_id, resultado)`), se houver.
+    /// Pre-loaded log of the first failed job (`(job_id, result)`), if any.
     pub failed_log: Option<(u64, Result<JobLog, GithubError>)>,
 }
 
 impl PrChecksDetail {
-    /// Resumo dos checks do PR: a execução mais recente de cada workflow.
+    /// PR checks summary: the latest run of each workflow.
     pub fn status(&self) -> CheckStatus {
         aggregate_check_status(latest_per_workflow(&self.runs).into_iter().map(|r| r.status))
     }
 }
 
-/// Erros claros da integração com o GitHub.
+/// Clear errors of the GitHub integration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GithubError {
     NoProject,
@@ -220,15 +222,15 @@ pub enum GithubError {
         repo: String,
         authenticated: bool,
     },
-    /// HTTP 410: o recurso foi desativado no repositório (ex.: issues desligadas).
+    /// HTTP 410: the feature was disabled in the repository (e.g. issues turned off).
     Gone,
     Network(String),
     Failed(String),
 }
 
-/// Tira usuário e senha/token de uma URL de remoto (`https://user:token@host/...` vira
-/// `https://***@host/...`) antes de ela ir para uma mensagem. A forma scp (`git@host:dono/repo`)
-/// não carrega segredo e fica como está.
+/// Strips user name and password/token from a remote URL (`https://user:token@host/...` becomes
+/// `https://***@host/...`) before it goes into a message. The scp form (`git@host:owner/repo`)
+/// carries no secret and stays as is.
 fn redact_remote_url(url: &str) -> String {
     let Some(scheme_end) = url.find("://") else { return url.to_owned() };
     let rest = &url[scheme_end + 3..];
@@ -242,47 +244,63 @@ fn redact_remote_url(url: &str) -> String {
 impl fmt::Display for GithubError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GithubError::NoProject => write!(f, "Abra uma pasta como projeto para ver o GitHub."),
-            GithubError::NoGit => write!(f, "O git não foi encontrado. Instale em git-scm.com e tente de novo."),
-            GithubError::NotARepo => write!(f, "Esta pasta não é um repositório git."),
+            GithubError::NoProject => write!(f, "{}", t!("Open a folder as a project to see GitHub.")),
+            GithubError::NoGit => write!(f, "{}", t!("Git was not found. Install it from git-scm.com and try again.")),
+            GithubError::NotARepo => write!(f, "{}", t!("This folder is not a git repository.")),
             GithubError::NoRemote => {
-                write!(f, "Este repositório não tem um remoto \"origin\" configurado.")
+                write!(f, "{}", t!("This repository has no \"origin\" remote configured."))
             }
             GithubError::NotGithubRemote { url } => {
-                write!(f, "O remoto \"origin\" ({url}) não aponta para github.com.")
+                write!(f, "{}", t!("The \"origin\" remote ({url}) does not point to github.com.", url = url))
             }
             GithubError::Unauthorized => write!(
                 f,
-                "Credencial do GitHub recusada (HTTP 401). Faça um push na aba Git para atualizar o login no Git Credential Manager, ou rode \"gh auth login\"."
+                "{}",
+                t!("GitHub credential refused (HTTP 401). Push from the Git tab to refresh the Git Credential Manager login, or run \"gh auth login\".")
             ),
             GithubError::RateLimited { reset_in_secs, authenticated } => {
                 let wait = match reset_in_secs {
-                    Some(s) if *s >= 60 => format!(" (renova em ~{} min)", (*s).div_ceil(60)),
-                    Some(s) if *s > 0 => format!(" (renova em {s}s)"),
+                    Some(s) if *s >= 60 => t!(" (renews in ~{minutes} min)", minutes = (*s).div_ceil(60)),
+                    Some(s) if *s > 0 => t!(" (renews in {seconds}s)", seconds = s),
                     _ => String::new(),
                 };
                 if *authenticated {
-                    write!(f, "Limite de requisições da API do GitHub atingido{wait}.")
+                    write!(f, "{}", t!("GitHub API rate limit reached{wait}.", wait = wait))
                 } else {
                     write!(
                         f,
-                        "Limite sem login atingido (60/h){wait}. Faça um push na aba Git para entrar pelo Git Credential Manager, ou instale o gh (5.000/h)."
+                        "{}",
+                        t!(
+                            "Anonymous rate limit reached (60/h){wait}. Push from the Git tab to sign in with the Git Credential Manager, or install gh (5,000/h).",
+                            wait = wait
+                        )
                     )
                 }
             }
-            GithubError::Forbidden(msg) => write!(f, "Acesso negado pelo GitHub (HTTP 403): {msg}"),
+            GithubError::Forbidden(msg) => write!(f, "{}", t!("Access denied by GitHub (HTTP 403): {message}", message = msg)),
             GithubError::NotFound { repo, authenticated } => {
                 if *authenticated {
-                    write!(f, "Não encontrado no GitHub (HTTP 404): verifique se {repo} existe e se a sua conta tem permissão.")
+                    write!(
+                        f,
+                        "{}",
+                        t!(
+                            "Not found on GitHub (HTTP 404): check that {repo} exists and that your account has permission.",
+                            repo = repo
+                        )
+                    )
                 } else {
                     write!(
                         f,
-                        "Repositório {repo} não encontrado ou privado (HTTP 404). Para acessar um repositório privado, faça um push na aba Git (abre o login do Git Credential Manager) ou instale o gh."
+                        "{}",
+                        t!(
+                            "Repository {repo} not found or private (HTTP 404). To access a private repository, push from the Git tab (opens the Git Credential Manager login) or install gh.",
+                            repo = repo
+                        )
                     )
                 }
             }
-            GithubError::Gone => write!(f, "Recurso desativado neste repositório do GitHub (HTTP 410)."),
-            GithubError::Network(msg) => write!(f, "Falha de conexão com o GitHub: {msg}"),
+            GithubError::Gone => write!(f, "{}", t!("Feature disabled in this GitHub repository (HTTP 410).")),
+            GithubError::Network(msg) => write!(f, "{}", t!("Connection to GitHub failed: {error}", error = msg)),
             GithubError::Failed(msg) => write!(f, "{msg}"),
         }
     }
@@ -290,10 +308,10 @@ impl fmt::Display for GithubError {
 
 impl std::error::Error for GithubError {}
 
-/// Evento emitido pelo backend para atualizar a aba GitHub da interface.
+/// Event emitted by the backend to update the GitHub tab of the interface.
 #[derive(Debug, Clone)]
 pub struct GithubEvent {
-    /// Id do projeto em que a consulta foi iniciada.
+    /// Id of the project where the query started.
     pub project: String,
     pub payload: GithubPayload,
 }
@@ -306,9 +324,9 @@ pub enum GithubPayload {
     JobLog { job_id: u64, result: Result<JobLog, GithubError> },
 }
 
-// ---------- Token protegido em memória ----------
+// ---------- Protected token in memory ----------
 
-/// Token de autenticação guardado apenas em memória (nunca impresso em `Debug`).
+/// Authentication token kept only in memory (never printed in `Debug`).
 #[derive(Clone)]
 struct SecretToken(String);
 
@@ -318,19 +336,19 @@ impl fmt::Debug for SecretToken {
     }
 }
 
-// ---------- Funções puras de parse e formatação ----------
+// ---------- Pure parse and formatting functions ----------
 
 fn valid_slug_part(s: &str) -> bool {
     !s.is_empty() && s.len() <= 100 && s != "." && s != ".." && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-/// Extrai `dono/repo` de uma URL do remoto `origin` se ela apontar para `github.com`.
+/// Extracts `owner/repo` from an `origin` remote URL if it points to `github.com`.
 ///
-/// Suporta:
-/// - `https://github.com/dono/repo(.git)` (com ou sem `usuario@`, `/` final ou `www.`)
-/// - `git@github.com:dono/repo(.git)`
-/// - `ssh://git@github.com(:22)/dono/repo(.git)`
-/// - `git://github.com/dono/repo(.git)`
+/// Supports:
+/// - `https://github.com/owner/repo(.git)` (with or without `user@`, trailing `/` or `www.`)
+/// - `git@github.com:owner/repo(.git)`
+/// - `ssh://git@github.com(:22)/owner/repo(.git)`
+/// - `git://github.com/owner/repo(.git)`
 pub fn parse_github_remote(raw: &str) -> Option<RepoSlug> {
     let s = raw.trim();
     if s.is_empty() {
@@ -353,7 +371,7 @@ pub fn parse_github_remote(raw: &str) -> Option<RepoSlug> {
         }
         path
     } else if let Some((left, right)) = s.split_once(':') {
-        // Formato SCP: `[user@]github.com:dono/repo(.git)`
+        // SCP format: `[user@]github.com:owner/repo(.git)`
         if left.contains('/') || left.contains('\\') {
             return None;
         }
@@ -380,7 +398,7 @@ pub fn parse_github_remote(raw: &str) -> Option<RepoSlug> {
     Some(RepoSlug { owner: owner.to_owned(), repo: repo.to_owned() })
 }
 
-/// Extrai o token da saída de `git credential fill` (`password=...`), sem nunca expor em logs.
+/// Extracts the token from the output of `git credential fill` (`password=...`), never exposing it in logs.
 pub fn parse_credential_fill(output: &str) -> Option<String> {
     for line in output.lines() {
         let line = line.trim_end_matches('\r');
@@ -394,7 +412,7 @@ pub fn parse_credential_fill(output: &str) -> Option<String> {
     None
 }
 
-/// Converte `status` + `conclusion` da API do GitHub num [`CheckStatus`].
+/// Converts the GitHub API `status` + `conclusion` into a [`CheckStatus`].
 pub fn map_check_status(status: &str, conclusion: Option<&str>) -> CheckStatus {
     match status {
         "queued" | "in_progress" | "waiting" | "requested" | "pending" => CheckStatus::Pending,
@@ -407,7 +425,7 @@ pub fn map_check_status(status: &str, conclusion: Option<&str>) -> CheckStatus {
     }
 }
 
-/// Combina vários estados de check num único resumo (falha > pendente > sucesso > neutro).
+/// Combines several check states into a single summary (failure > pending > success > neutral).
 pub fn aggregate_check_status(statuses: impl IntoIterator<Item = CheckStatus>) -> CheckStatus {
     let mut any_pending = false;
     let mut any_success = false;
@@ -428,14 +446,14 @@ pub fn aggregate_check_status(statuses: impl IntoIterator<Item = CheckStatus>) -
     }
 }
 
-/// Faz o parse da lista de Pull Requests (`GET /repos/{owner}/{repo}/pulls`).
+/// Parses the Pull Request list (`GET /repos/{owner}/{repo}/pulls`).
 pub fn parse_pulls(json: &Value) -> Vec<PullRequest> {
     let Some(arr) = json.as_array() else { return Vec::new() };
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
         let Some(number) = item.get("number").and_then(Value::as_u64) else { continue };
         let title = item.get("title").and_then(Value::as_str).unwrap_or("").trim().to_owned();
-        let author = item.get("user").and_then(|u| u.get("login")).and_then(Value::as_str).unwrap_or("desconhecido").to_owned();
+        let author = item.get("user").and_then(|u| u.get("login")).and_then(Value::as_str).unwrap_or(t!("unknown")).to_owned();
         let head = item.get("head");
         let head_branch = head.and_then(|h| h.get("ref")).and_then(Value::as_str).unwrap_or("").to_owned();
         let head_sha = head.and_then(|h| h.get("sha")).and_then(Value::as_str).unwrap_or("").to_owned();
@@ -459,18 +477,18 @@ pub fn parse_pulls(json: &Value) -> Vec<PullRequest> {
     out
 }
 
-/// Faz o parse da lista de Issues abertas (`GET /repos/{owner}/{repo}/issues`), descartando PRs.
+/// Parses the open Issue list (`GET /repos/{owner}/{repo}/issues`), discarding PRs.
 pub fn parse_issues(json: &Value) -> Vec<Issue> {
     let Some(arr) = json.as_array() else { return Vec::new() };
     let mut out = Vec::new();
     for item in arr {
-        // Na API REST do GitHub, todo PR também vem em `/issues` com a chave `"pull_request"`.
+        // In the GitHub REST API every PR also comes in `/issues` with the `"pull_request"` key.
         if item.get("pull_request").is_some() {
             continue;
         }
         let Some(number) = item.get("number").and_then(Value::as_u64) else { continue };
         let title = item.get("title").and_then(Value::as_str).unwrap_or("").trim().to_owned();
-        let author = item.get("user").and_then(|u| u.get("login")).and_then(Value::as_str).unwrap_or("desconhecido").to_owned();
+        let author = item.get("user").and_then(|u| u.get("login")).and_then(Value::as_str).unwrap_or(t!("unknown")).to_owned();
         let labels = item
             .get("labels")
             .and_then(Value::as_array)
@@ -488,7 +506,7 @@ pub fn parse_issues(json: &Value) -> Vec<Issue> {
     out
 }
 
-/// Faz o parse das execuções do GitHub Actions (`GET /repos/{owner}/{repo}/actions/runs`).
+/// Parses the GitHub Actions runs (`GET /repos/{owner}/{repo}/actions/runs`).
 pub fn parse_workflow_runs(json: &Value) -> Vec<WorkflowRun> {
     let arr = json.get("workflow_runs").and_then(Value::as_array).or_else(|| json.as_array());
     let Some(arr) = arr else { return Vec::new() };
@@ -522,7 +540,7 @@ pub fn parse_workflow_runs(json: &Value) -> Vec<WorkflowRun> {
     out
 }
 
-/// Faz o parse dos jobs de uma execução (`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`).
+/// Parses the jobs of a run (`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`).
 pub fn parse_workflow_jobs(json: &Value, default_run_id: u64) -> Vec<WorkflowJob> {
     let arr = json.get("jobs").and_then(Value::as_array).or_else(|| json.as_array());
     let Some(arr) = arr else { return Vec::new() };
@@ -553,7 +571,7 @@ pub fn parse_workflow_jobs(json: &Value, default_run_id: u64) -> Vec<WorkflowJob
     out
 }
 
-/// Faz o parse de `/repos/{owner}/{repo}/commits/{ref}/check-runs` para obter o estado combinado.
+/// Parses `/repos/{owner}/{repo}/commits/{ref}/check-runs` to get the combined status.
 pub fn parse_check_runs_status(json: &Value) -> CheckStatus {
     let Some(arr) = json.get("check_runs").and_then(Value::as_array) else {
         return CheckStatus::Neutral;
@@ -565,8 +583,8 @@ pub fn parse_check_runs_status(json: &Value) -> CheckStatus {
     }))
 }
 
-/// Mantém só a execução mais recente de cada workflow (a API devolve da mais nova para a mais
-/// antiga): uma reexecução que passou não deve ficar vermelha por causa da tentativa anterior.
+/// Keeps only the latest run of each workflow (the API returns newest to oldest): a rerun that
+/// passed must not stay red because of the previous attempt.
 pub fn latest_per_workflow(runs: &[WorkflowRun]) -> Vec<&WorkflowRun> {
     let mut seen: Vec<&str> = Vec::new();
     let mut out = Vec::new();
@@ -579,7 +597,7 @@ pub fn latest_per_workflow(runs: &[WorkflowRun]) -> Vec<&WorkflowRun> {
     out
 }
 
-/// Preenche `pr.checks` a partir das execuções do Actions (pelo `head_sha` ou, sem ele, pela branch).
+/// Fills `pr.checks` from the Actions runs (by `head_sha` or, without it, by the branch).
 pub fn attach_pr_checks(prs: &mut [PullRequest], runs: &[WorkflowRun]) {
     for pr in prs {
         let matching: Vec<WorkflowRun> = runs
@@ -595,10 +613,10 @@ pub fn attach_pr_checks(prs: &mut [PullRequest], runs: &[WorkflowRun]) {
     }
 }
 
-/// Remove sequências ANSI CSI (`\x1b[...m`) e caracteres de controle de uma linha de log.
+/// Removes ANSI CSI sequences (`\x1b[...m`) and control characters from a log line.
 fn clean_log_line(raw: &str) -> String {
     let s = raw.trim_end_matches('\r').trim_start_matches('\u{feff}');
-    // Remove prefixo de timestamp ISO do GitHub Actions (`2026-10-16T03:12:34.1234567Z `) se presente.
+    // Strips the GitHub Actions ISO timestamp prefix (`2026-10-16T03:12:34.1234567Z `) when present.
     let s = if s.len() > 29 && s.as_bytes().get(4) == Some(&b'-') && s.as_bytes().get(10) == Some(&b'T') {
         match s.split_once(' ') {
             Some((ts, rest)) if ts.ends_with('Z') && ts.len() >= 20 && ts.len() <= 35 => rest,
@@ -634,7 +652,7 @@ fn clean_log_line(raw: &str) -> String {
     }
 }
 
-/// Extrai só o fim de um log de job, respeitando o limite de bytes (`max_bytes`) e linhas (`max_lines`).
+/// Extracts only the end of a job log, respecting the byte limit (`max_bytes`) and line limit (`max_lines`).
 pub fn tail_log(raw: &str, max_lines: usize, max_bytes: usize) -> JobLog {
     if raw.is_empty() || max_lines == 0 || max_bytes == 0 {
         return JobLog::default();
@@ -646,7 +664,7 @@ pub fn tail_log(raw: &str, max_lines: usize, max_bytes: usize) -> JobLog {
         while idx < raw.len() && !raw.is_char_boundary(idx) {
             idx += 1;
         }
-        // Começa na próxima quebra de linha para não cortar uma linha ao meio.
+        // Starts at the next line break so a line is never cut in half.
         match raw[idx..].find('\n') {
             Some(nl) if idx + nl + 1 < raw.len() => &raw[idx + nl + 1..],
             _ => &raw[idx..],
@@ -661,12 +679,14 @@ pub fn tail_log(raw: &str, max_lines: usize, max_bytes: usize) -> JobLog {
     JobLog { lines: all_lines[start..].to_vec(), truncated: byte_truncated || line_truncated }
 }
 
-/// Monta a mensagem pronta para pedir a um agente que revise um PR.
+/// Builds the ready-made message asking an agent to review a PR.
 pub fn format_pr_prompt(repo: &RepoSlug, pr: &PullRequest) -> String {
     let sha: String = pr.head_sha.chars().take(7).collect();
-    let draft = if pr.draft { " (rascunho)" } else { "" };
+    let draft = if pr.draft { " (draft)" } else { "" };
+    // Agent-facing text is always English, whatever language the interface is in.
+    let checks = crate::i18n::english(|| pr.checks.label());
     terminal_text(&format!(
-        "Revise o PR #{}{} (\"{}\") do repositório {}.\nBranch: {} -> {} (commit {})\nChecks: {}\nLink: {}",
+        "Review PR #{}{} (\"{}\") in the {} repository.\nBranch: {} -> {} (commit {})\nChecks: {}\nLink: {}",
         pr.number,
         draft,
         pr.title,
@@ -674,30 +694,30 @@ pub fn format_pr_prompt(repo: &RepoSlug, pr: &PullRequest) -> String {
         pr.head_branch,
         pr.base_branch,
         if sha.is_empty() { "HEAD" } else { &sha },
-        pr.checks.label(),
+        checks,
         pr.html_url
     ))
 }
 
-/// Monta a mensagem pronta para pedir a um agente que resolva uma issue.
+/// Builds the ready-made message asking an agent to fix an issue.
 pub fn format_issue_prompt(repo: &RepoSlug, issue: &Issue) -> String {
     let mut msg = format!(
-        "Analise e resolva a issue #{} (\"{}\") do repositório {}.\nLink: {}",
+        "Analyze and fix issue #{} (\"{}\") in the {} repository.\nLink: {}",
         issue.number,
         issue.title,
         repo.full_name(),
         issue.html_url
     );
     if !issue.labels.is_empty() {
-        msg.push_str(&format!("\nRótulos: {}", issue.labels.join(", ")));
+        msg.push_str(&format!("\nLabels: {}", issue.labels.join(", ")));
     }
     if !issue.body_preview.is_empty() {
-        msg.push_str(&format!("\nResumo: {}", issue.body_preview));
+        msg.push_str(&format!("\nSummary: {}", issue.body_preview));
     }
     terminal_text(&msg)
 }
 
-/// Monta a mensagem pronta para pedir a um agente que corrija um job que falhou.
+/// Builds the ready-made message asking an agent to fix a job that failed.
 pub fn format_failed_job_prompt(
     repo: &RepoSlug,
     pr: Option<&PullRequest>,
@@ -706,32 +726,27 @@ pub fn format_failed_job_prompt(
     log: Option<&JobLog>,
 ) -> String {
     let context = match (pr, run) {
-        (Some(p), _) => format!("no PR #{} (\"{}\", branch {})", p.number, p.title, p.head_branch),
-        (None, Some(r)) => format!("na execução \"{}\" (branch {})", r.display_title, r.head_branch),
-        (None, None) => String::from("no GitHub Actions"),
+        (Some(p), _) => format!("in PR #{} (\"{}\", branch {})", p.number, p.title, p.head_branch),
+        (None, Some(r)) => format!("in the \"{}\" run (branch {})", r.display_title, r.head_branch),
+        (None, None) => String::from("in GitHub Actions"),
     };
-    let mut msg = format!(
-        "Corrija o job \"{}\" que falhou {} do repositório {}.\nLink do job: {}",
-        job.name,
-        context,
-        repo.full_name(),
-        job.html_url
-    );
+    let mut msg =
+        format!("Fix the job \"{}\" that failed {} in the {} repository.\nJob link: {}", job.name, context, repo.full_name(), job.html_url);
     if !job.failed_steps.is_empty() {
-        msg.push_str(&format!("\nPassos que falharam: {}", job.failed_steps.join(", ")));
+        msg.push_str(&format!("\nFailed steps: {}", job.failed_steps.join(", ")));
     }
     if let Some(log) = log.filter(|l| !l.lines.is_empty()) {
-        // Manda até as últimas 60 linhas / 4000 caracteres para caber com folga na colagem do terminal.
+        // Sends at most the last 60 lines / 4000 characters so it fits comfortably in the terminal paste.
         let tail_start = log.lines.len().saturating_sub(60);
         let joined = log.lines[tail_start..].join("\n");
         let (snippet, _) = truncate_chars(&joined, 4000);
-        msg.push_str("\n\nFim do log:\n");
+        msg.push_str("\n\nEnd of log:\n");
         msg.push_str(snippet);
     }
     terminal_text(&msg)
 }
 
-// ---------- Estado no Core e execução ----------
+// ---------- State in the Core and execution ----------
 
 type PrCacheKey = (RepoSlug, u64, String);
 type PrCacheMap = HashMap<PrCacheKey, (Instant, PrChecksDetail)>;
@@ -741,10 +756,10 @@ type RunJobsCacheMap = HashMap<(RepoSlug, u64), (Instant, Vec<WorkflowJob>)>;
 pub(crate) struct GithubState {
     git_exe: Mutex<Option<(Instant, Option<PathBuf>)>>,
     gh_exe: Mutex<Option<(Instant, Option<PathBuf>)>>,
-    /// Token em memória (`Some(None)` = já procurou recentemente e não havia).
+    /// Token in memory (`Some(None)` = looked it up recently and there was none).
     token: Mutex<Option<(Instant, Option<SecretToken>)>>,
-    /// Limite da API por cota: `[sem login (60/h), com login (5.000/h)]`. São cotas separadas no
-    /// GitHub: esgotar uma não pode barrar a outra (ex.: entrar depois de gastar as 60 sem login).
+    /// API limit per quota: `[anonymous (60/h), signed in (5,000/h)]`. These are separate quotas on
+    /// GitHub: exhausting one must not block the other (e.g. signing in after spending the 60 anonymous).
     rate_limit: Mutex<[Option<RateLimitInfo>; 2]>,
     overview_cache: Mutex<HashMap<RepoSlug, (Instant, GithubOverview)>>,
     pr_cache: Mutex<PrCacheMap>,
@@ -819,7 +834,7 @@ impl Core {
         exe
     }
 
-    /// Descobre o repositório `dono/repo` do remoto `origin` na pasta `ws`.
+    /// Finds the `owner/repo` repository of the `origin` remote in folder `ws`.
     pub fn github_repo_at(&self, ws: &Path) -> Result<RepoSlug, GithubError> {
         if ws.as_os_str().is_empty() {
             return Err(GithubError::NoProject);
@@ -831,7 +846,7 @@ impl Core {
                     if e.kind() == std::io::ErrorKind::NotFound {
                         GithubError::NoGit
                     } else {
-                        GithubError::Failed(format!("falha ao executar o git: {e}"))
+                        GithubError::Failed(t!("failed to run git: {error}", error = e))
                     }
                 })?;
 
@@ -840,7 +855,7 @@ impl Core {
                 let url = String::from_utf8_lossy(&out.stdout).trim().to_owned();
                 parse_github_remote(&url).ok_or_else(|| GithubError::NotGithubRemote { url: redact_remote_url(&url) })
             }
-            Exit::TimedOut => Err(GithubError::Failed("o git demorou demais ao ler o remoto origin.".into())),
+            Exit::TimedOut => Err(GithubError::Failed(t!("git took too long to read the origin remote.").to_owned())),
             _ => {
                 let err = String::from_utf8_lossy(&out.stderr).to_lowercase();
                 if err.contains("not a git repository") {
@@ -852,8 +867,8 @@ impl Core {
         }
     }
 
-    /// Obtém o token do GitHub em memória: primeiro via `git credential fill` (GCM), depois via
-    /// `gh auth token`. Nunca grava em disco nem loga o valor.
+    /// Gets the GitHub token in memory: first through `git credential fill` (GCM), then through
+    /// `gh auth token`. Never writes it to disk nor logs the value.
     fn github_token(&self, ws: &Path, force_refresh: bool) -> Option<SecretToken> {
         if !force_refresh {
             if let Some((at, tok)) = self.inner.github.token.lock().as_ref() {
@@ -865,7 +880,7 @@ impl Core {
         let cwd = if ws.is_dir() { ws } else { Path::new(".") };
         let mut found: Option<SecretToken> = None;
 
-        // 1. Caminho principal: `git credential fill` (usa o Git Credential Manager sem abrir janela).
+        // 1. Main path: `git credential fill` (uses the Git Credential Manager without opening a window).
         if let Some(git) = self.github_git_exe() {
             let cmd = non_interactive_git(&git, cwd, &["credential", "fill"]);
             let input = b"protocol=https\nhost=github.com\n\n".to_vec();
@@ -878,7 +893,7 @@ impl Core {
             }
         }
 
-        // 2. Alternativa: `gh auth token` se o GitHub CLI existir e estiver autenticado.
+        // 2. Alternative: `gh auth token` if the GitHub CLI exists and is authenticated.
         if found.is_none() {
             if let Some(gh) = self.github_gh_exe() {
                 let mut cmd = Command::new(gh);
@@ -931,7 +946,7 @@ impl Core {
         info
     }
 
-    /// Executa um `GET` JSON na API REST do GitHub (`https://api.github.com/...`).
+    /// Runs a JSON `GET` on the GitHub REST API (`https://api.github.com/...`).
     fn github_get_json(&self, repo: &RepoSlug, path: &str, token: Option<&SecretToken>) -> Result<Value, GithubError> {
         let authenticated = token.is_some();
         self.check_rate_limit(authenticated)?;
@@ -946,7 +961,10 @@ impl Core {
         let rl = self.record_rate_limit(resp.headers(), authenticated);
 
         match status {
-            200 => resp.body_mut().read_json::<Value>().map_err(|e| GithubError::Failed(format!("resposta JSON inválida do GitHub: {e}"))),
+            200 => resp
+                .body_mut()
+                .read_json::<Value>()
+                .map_err(|e| GithubError::Failed(t!("invalid JSON response from GitHub: {error}", error = e))),
             401 => {
                 self.clear_github_token();
                 Err(GithubError::Unauthorized)
@@ -963,27 +981,26 @@ impl Core {
                 if status == 429 || rl.remaining == Some(0) || body_msg.to_lowercase().contains("rate limit") {
                     Err(GithubError::RateLimited { reset_in_secs: reset_in, authenticated })
                 } else {
-                    Err(GithubError::Forbidden(if body_msg.is_empty() { "permissão insuficiente".into() } else { body_msg }))
+                    Err(GithubError::Forbidden(if body_msg.is_empty() { t!("insufficient permission").to_owned() } else { body_msg }))
                 }
             }
             404 => Err(GithubError::NotFound { repo: repo.full_name(), authenticated }),
             410 => Err(GithubError::Gone),
-            other => Err(GithubError::Failed(format!("o GitHub respondeu com HTTP {other}"))),
+            other => Err(GithubError::Failed(t!("GitHub answered with HTTP {status}", status = other))),
         }
     }
 
-    /// Baixa apenas o fim do log de um job (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`).
+    /// Downloads only the end of a job log (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`).
     fn github_fetch_job_log(&self, repo: &RepoSlug, job_id: u64, token: Option<&SecretToken>) -> Result<JobLog, GithubError> {
         let Some(tok) = token else {
-            return Err(GithubError::Failed(
-                "O download do log completo exige login no GitHub. Faça um push na aba Git (abre o Git Credential Manager) ou instale o gh."
-                    .into(),
-            ));
+            return Err(GithubError::Failed(t!(
+                "Downloading the full log requires signing in to GitHub. Push from the Git tab (opens the Git Credential Manager) or install gh."
+            ).to_owned()));
         };
         self.check_rate_limit(true)?;
         let url = format!("https://api.github.com/repos/{}/{}/actions/jobs/{job_id}/logs", repo.owner, repo.repo);
-        // Sem seguir redirecionamento automaticamente: o GitHub devolve 302 para uma URL pré-assinada
-        // do Azure Blob Storage que não aceita o cabeçalho `Authorization` do GitHub.
+        // Without following the redirect automatically: GitHub answers 302 to a pre-signed Azure Blob
+        // Storage URL that does not accept the GitHub `Authorization` header.
         let agent = http_agent(false);
         let resp = agent
             .get(&url)
@@ -1002,7 +1019,7 @@ impl Core {
                 .get("location")
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned)
-                .ok_or_else(|| GithubError::Failed("redirecionamento de log sem cabeçalho Location".into()))?;
+                .ok_or_else(|| GithubError::Failed(t!("log redirect without a Location header").to_owned()))?;
             http_agent(true).get(&loc).call().map_err(|e| GithubError::Network(e.to_string()))?
         } else {
             resp
@@ -1012,7 +1029,7 @@ impl Core {
         match final_status {
             200 => {
                 let raw = read_stream_tail(final_resp.into_body().into_reader(), LOG_MAX_BYTES * 2, LOG_STREAM_LIMIT)
-                    .map_err(|e| GithubError::Network(format!("erro ao ler o log: {e}")))?;
+                    .map_err(|e| GithubError::Network(t!("error reading the log: {error}", error = e)))?;
                 Ok(tail_log(&String::from_utf8_lossy(&raw), LOG_MAX_LINES, LOG_MAX_BYTES))
             }
             401 => {
@@ -1024,15 +1041,15 @@ impl Core {
                 if final_status == 429 || rl.remaining == Some(0) {
                     Err(GithubError::RateLimited { reset_in_secs: reset_in, authenticated: true })
                 } else {
-                    Err(GithubError::Forbidden("sem permissão para ler os logs do Actions".into()))
+                    Err(GithubError::Forbidden(t!("no permission to read the Actions logs").to_owned()))
                 }
             }
-            404 | 410 => Err(GithubError::Failed("O log deste job não está mais disponível no GitHub.".into())),
-            other => Err(GithubError::Failed(format!("falha ao baixar o log (HTTP {other})"))),
+            404 | 410 => Err(GithubError::Failed(t!("This job's log is no longer available on GitHub.").to_owned())),
+            other => Err(GithubError::Failed(t!("failed to download the log (HTTP {status})", status = other))),
         }
     }
 
-    /// Consulta sincrona da visão geral (PRs, issues, execuções do Actions) do projeto em `ws`.
+    /// Synchronous query of the overview (PRs, issues, Actions runs) of the project in `ws`.
     fn fetch_overview_blocking(&self, ws: &Path, force: bool) -> Result<GithubOverview, GithubError> {
         let repo = self.github_repo_at(ws)?;
         if !force {
@@ -1047,7 +1064,7 @@ impl Core {
 
         let pulls_url = format!("{base}/pulls?state=open&per_page=30");
         let pulls_json = match self.github_get_json(&repo, &pulls_url, token.as_ref()) {
-            // Credencial guardada vencida: um repositório público ainda responde sem ela.
+            // Stored credential expired: a public repository still answers without it.
             Err(GithubError::Unauthorized) if token.is_some() => {
                 token = None;
                 self.github_get_json(&repo, &pulls_url, None).map_err(|e| match e {
@@ -1057,7 +1074,7 @@ impl Core {
             }
             other => other?,
         };
-        // Issues desativadas no repositório respondem 410: a aba mostra a lista vazia em vez de falhar.
+        // Issues disabled in the repository answer 410: the tab shows the empty list instead of failing.
         let issues_json = match self.github_get_json(&repo, &format!("{base}/issues?state=open&per_page=50"), token.as_ref()) {
             Err(GithubError::Gone) => Value::Array(Vec::new()),
             other => other?,
@@ -1071,8 +1088,8 @@ impl Core {
         let runs = parse_workflow_runs(&runs_json);
         attach_pr_checks(&mut prs, &runs);
 
-        // Para os primeiros PRs abertos cujo commit não estava nas últimas 30 execuções, consulta
-        // os check-runs do commit se houver folga no rate limit.
+        // For the first open PRs whose commit was not in the last 30 runs, queries the check-runs
+        // of the commit when there is room left in the rate limit.
         let bucket = token.is_some() as usize;
         let remaining = self.inner.github.rate_limit.lock()[bucket].and_then(|r| r.remaining).unwrap_or(60);
         if remaining > 10 {
@@ -1097,7 +1114,7 @@ impl Core {
         Ok(overview)
     }
 
-    /// Carrega (em segundo plano) a visão geral do GitHub para o projeto ativo e emite [`CoreEvent::Github`].
+    /// Loads (in the background) the GitHub overview of the active project and emits [`CoreEvent::Github`].
     pub fn github_refresh(&self, force: bool) {
         let project = self.active_project_id();
         let ws = self.workspace();
@@ -1110,7 +1127,7 @@ impl Core {
         });
     }
 
-    /// Carrega (em segundo plano) as execuções, jobs e o log do primeiro job vermelho de um PR.
+    /// Loads (in the background) the runs, jobs and the log of the first red job of a PR.
     pub fn github_load_pr(&self, pr_number: u64, head_sha: String, force: bool) {
         let project = self.active_project_id();
         let ws = self.workspace();
@@ -1139,7 +1156,7 @@ impl Core {
         let runs = parse_workflow_runs(&runs_json);
 
         let mut jobs = Vec::new();
-        // Busca os jobs da execução mais recente de cada workflow deste commit (até 4).
+        // Fetches the jobs of the latest run of each workflow of this commit (up to 4).
         let mut seen_workflows = 0;
         for run in latest_per_workflow(&runs) {
             seen_workflows += 1;
@@ -1164,7 +1181,7 @@ impl Core {
         Ok(detail)
     }
 
-    /// Carrega (em segundo plano) os jobs de uma execução do Actions (e o log do primeiro job que falhou).
+    /// Loads (in the background) the jobs of an Actions run (and the log of the first failed job).
     pub fn github_load_run_jobs(&self, run_id: u64, force: bool) {
         let project = self.active_project_id();
         let ws = self.workspace();
@@ -1188,7 +1205,7 @@ impl Core {
         });
     }
 
-    /// Carrega (em segundo plano) o fim do log de um job específico.
+    /// Loads (in the background) the end of the log of a specific job.
     pub fn github_load_job_log(&self, job_id: u64, force: bool) {
         let project = self.active_project_id();
         let ws = self.workspace();
@@ -1243,19 +1260,19 @@ impl Core {
         Ok(log)
     }
 
-    /// Abre uma URL do GitHub (`https://github.com/...`) no navegador padrão do sistema.
+    /// Opens a GitHub URL (`https://github.com/...`) in the system's default browser.
     pub fn open_github_url(&self, url: &str) -> anyhow::Result<()> {
         let u = url.trim();
         if !u.starts_with("https://github.com/")
             || u.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, '"' | '<' | '>' | '^' | '`'))
         {
-            anyhow::bail!("URL recusada (apenas https://github.com/ é permitido): {u}");
+            anyhow::bail!(t!("URL refused (only https://github.com/ is allowed): {url}", url = u));
         }
-        open::that_detached(u).map_err(|e| anyhow::anyhow!("falha ao abrir o navegador: {e}"))
+        open::that_detached(u).map_err(|e| anyhow::anyhow!(t!("failed to open the browser: {error}", error = e)))
     }
 }
 
-/// Lê um fluxo mantendo apenas os últimos `keep_bytes` (até `max_stream` bytes lidos no total).
+/// Reads a stream keeping only the last `keep_bytes` (up to `max_stream` bytes read in total).
 fn read_stream_tail<R: Read>(mut reader: R, keep_bytes: usize, max_stream: usize) -> std::io::Result<Vec<u8>> {
     let mut ring = Vec::with_capacity(keep_bytes.min(64 * 1024));
     let mut chunk = [0u8; 8192];
@@ -1290,26 +1307,26 @@ mod tests {
 
     #[test]
     fn parses_github_remote_urls() {
-        let expected = Some(RepoSlug::new("dono", "repo"));
-        assert_eq!(parse_github_remote("https://github.com/dono/repo"), expected);
-        assert_eq!(parse_github_remote("https://github.com/dono/repo.git"), expected);
-        assert_eq!(parse_github_remote("https://github.com/dono/repo.git/"), expected);
-        assert_eq!(parse_github_remote("https://user:token@github.com/dono/repo.git\n"), expected);
-        assert_eq!(parse_github_remote("http://www.github.com/dono/repo"), expected);
-        assert_eq!(parse_github_remote("git@github.com:dono/repo.git"), expected);
-        assert_eq!(parse_github_remote("git@github.com:dono/repo"), expected);
-        assert_eq!(parse_github_remote("github.com:dono/repo.git"), expected);
-        assert_eq!(parse_github_remote("ssh://git@github.com/dono/repo.git"), expected);
-        assert_eq!(parse_github_remote("ssh://git@github.com:22/dono/repo.git"), expected);
-        assert_eq!(parse_github_remote("git://github.com/dono/repo.git"), expected);
-        assert_eq!(parse_github_remote("https://github.com/org-1/meu.repo_2.git"), Some(RepoSlug::new("org-1", "meu.repo_2")));
+        let expected = Some(RepoSlug::new("owner", "repo"));
+        assert_eq!(parse_github_remote("https://github.com/owner/repo"), expected);
+        assert_eq!(parse_github_remote("https://github.com/owner/repo.git"), expected);
+        assert_eq!(parse_github_remote("https://github.com/owner/repo.git/"), expected);
+        assert_eq!(parse_github_remote("https://user:token@github.com/owner/repo.git\n"), expected);
+        assert_eq!(parse_github_remote("http://www.github.com/owner/repo"), expected);
+        assert_eq!(parse_github_remote("git@github.com:owner/repo.git"), expected);
+        assert_eq!(parse_github_remote("git@github.com:owner/repo"), expected);
+        assert_eq!(parse_github_remote("github.com:owner/repo.git"), expected);
+        assert_eq!(parse_github_remote("ssh://git@github.com/owner/repo.git"), expected);
+        assert_eq!(parse_github_remote("ssh://git@github.com:22/owner/repo.git"), expected);
+        assert_eq!(parse_github_remote("git://github.com/owner/repo.git"), expected);
+        assert_eq!(parse_github_remote("https://github.com/org-1/some.repo_2.git"), Some(RepoSlug::new("org-1", "some.repo_2")));
 
-        // Não são do GitHub ou são malformadas.
+        // Not from GitHub, or malformed.
         assert_eq!(parse_github_remote(""), None);
-        assert_eq!(parse_github_remote("https://gitlab.com/dono/repo.git"), None);
-        assert_eq!(parse_github_remote("git@gitlab.com:dono/repo.git"), None);
-        assert_eq!(parse_github_remote("https://github.com/dono"), None);
-        assert_eq!(parse_github_remote("https://github.com/dono/repo/extra"), None);
+        assert_eq!(parse_github_remote("https://gitlab.com/owner/repo.git"), None);
+        assert_eq!(parse_github_remote("git@gitlab.com:owner/repo.git"), None);
+        assert_eq!(parse_github_remote("https://github.com/owner"), None);
+        assert_eq!(parse_github_remote("https://github.com/owner/repo/extra"), None);
         assert_eq!(parse_github_remote("C:\\repos\\local"), None);
         assert_eq!(parse_github_remote("/var/git/repo.git"), None);
     }
@@ -1320,10 +1337,10 @@ mod tests {
         assert_eq!(redact_remote_url("https://ghp_ABC@github.com/org"), "https://***@github.com/org");
         assert_eq!(redact_remote_url("https://gitlab.com/org/repo.git"), "https://gitlab.com/org/repo.git");
         assert_eq!(redact_remote_url("git@gitlab.com:org/repo.git"), "git@gitlab.com:org/repo.git");
-        // `@` no caminho não é credencial.
+        // `@` in the path is not a credential.
         assert_eq!(redact_remote_url("https://host/org/a@b.git"), "https://host/org/a@b.git");
-        let shown = GithubError::NotGithubRemote { url: redact_remote_url("https://u:segredo@gitlab.com/o/r") }.to_string();
-        assert!(!shown.contains("segredo"), "{shown}");
+        let shown = GithubError::NotGithubRemote { url: redact_remote_url("https://u:secret@gitlab.com/o/r") }.to_string();
+        assert!(!shown.contains("secret"), "{shown}");
     }
 
     #[test]
@@ -1351,21 +1368,21 @@ mod tests {
         headers.insert("x-ratelimit-reset", (now_epoch_s() + 3600).to_string().parse().unwrap());
         core.record_rate_limit(&headers, false);
         assert!(matches!(core.check_rate_limit(false), Err(GithubError::RateLimited { authenticated: false, .. })));
-        assert!(core.check_rate_limit(true).is_ok(), "a cota com login é outra");
+        assert!(core.check_rate_limit(true).is_ok(), "the signed-in quota is a different one");
         core.shutdown();
     }
 
     #[test]
     fn parses_credential_fill_output() {
-        let out = "protocol=https\r\nhost=github.com\r\nusername=pattr\r\npassword=gho_exemplo123456\r\n\r\n";
-        assert_eq!(parse_credential_fill(out), Some("gho_exemplo123456".into()));
+        let out = "protocol=https\r\nhost=github.com\r\nusername=pattr\r\npassword=gho_example123456\r\n\r\n";
+        assert_eq!(parse_credential_fill(out), Some("gho_example123456".into()));
 
         let empty_pw = "protocol=https\nhost=github.com\npassword=\n";
         assert_eq!(parse_credential_fill(empty_pw), None);
         assert_eq!(parse_credential_fill(""), None);
 
-        // O Debug de SecretToken nunca revela o conteúdo.
-        let secret = SecretToken("gho_segredo_super_secreto".into());
+        // The Debug of SecretToken never reveals the content.
+        let secret = SecretToken("gho_super_secret".into());
         assert_eq!(format!("{secret:?}"), "SecretToken(***)");
     }
 
@@ -1374,9 +1391,9 @@ mod tests {
         let sample = json!([
             {
                 "number": 42,
-                "title": "feat(github): aba de PRs, issues e Actions",
+                "title": "feat(github): PRs, issues and Actions tab",
                 "draft": false,
-                "html_url": "https://github.com/dono/repo/pull/42",
+                "html_url": "https://github.com/owner/repo/pull/42",
                 "updated_at": "2026-10-16T03:00:00Z",
                 "user": { "login": "ana" },
                 "head": { "ref": "feat/github", "sha": "abc1234567890" },
@@ -1384,12 +1401,12 @@ mod tests {
             },
             {
                 "number": 43,
-                "title": "wip: experimento",
+                "title": "wip: experiment",
                 "draft": true,
-                "html_url": "https://github.com/dono/repo/pull/43",
+                "html_url": "https://github.com/owner/repo/pull/43",
                 "updated_at": "2026-10-16T02:00:00Z",
                 "user": { "login": "bia" },
-                "head": { "ref": "wip/teste", "sha": "def9876543210" },
+                "head": { "ref": "wip/test", "sha": "def9876543210" },
                 "base": { "ref": "main" }
             }
         ]);
@@ -1407,13 +1424,13 @@ mod tests {
                 {
                     "id": 1001,
                     "name": "CI",
-                    "display_title": "feat(github): aba de PRs",
+                    "display_title": "feat(github): PR tab",
                     "head_branch": "feat/github",
                     "head_sha": "abc1234567890",
                     "event": "pull_request",
                     "status": "completed",
                     "conclusion": "failure",
-                    "html_url": "https://github.com/dono/repo/actions/runs/1001",
+                    "html_url": "https://github.com/owner/repo/actions/runs/1001",
                     "created_at": "2026-10-16T03:01:00Z"
                 }
             ]
@@ -1429,23 +1446,23 @@ mod tests {
         let sample = json!([
             {
                 "number": 10,
-                "title": "Bug ao redimensionar painel",
+                "title": "Bug when resizing the panel",
                 "user": { "login": "caio" },
                 "labels": [{ "name": "bug" }, { "name": "ui" }],
                 "comments": 3,
-                "html_url": "https://github.com/dono/repo/issues/10",
+                "html_url": "https://github.com/owner/repo/issues/10",
                 "updated_at": "2026-10-15T20:00:00Z",
-                "body": "Quando arrasto a borda\r\no painel pisca."
+                "body": "When I drag the border\r\nthe panel flickers."
             },
             {
                 "number": 42,
-                "title": "PR que aparece no endpoint de issues",
+                "title": "PR that shows up in the issues endpoint",
                 "user": { "login": "ana" },
                 "labels": [],
                 "comments": 0,
-                "html_url": "https://github.com/dono/repo/pull/42",
+                "html_url": "https://github.com/owner/repo/pull/42",
                 "updated_at": "2026-10-16T03:00:00Z",
-                "pull_request": { "url": "https://api.github.com/repos/dono/repo/pulls/42" }
+                "pull_request": { "url": "https://api.github.com/repos/owner/repo/pulls/42" }
             }
         ]);
         let issues = parse_issues(&sample);
@@ -1453,7 +1470,7 @@ mod tests {
         assert_eq!(issues[0].number, 10);
         assert_eq!(issues[0].labels, vec!["bug", "ui"]);
         assert_eq!(issues[0].comments, 3);
-        assert_eq!(issues[0].body_preview, "Quando arrasto a borda o painel pisca.");
+        assert_eq!(issues[0].body_preview, "When I drag the border the panel flickers.");
     }
 
     #[test]
@@ -1466,7 +1483,7 @@ mod tests {
                     "name": "clippy & test (windows-latest)",
                     "status": "completed",
                     "conclusion": "failure",
-                    "html_url": "https://github.com/dono/repo/actions/runs/1001/job/501",
+                    "html_url": "https://github.com/owner/repo/actions/runs/1001/job/501",
                     "steps": [
                         { "name": "Checkout", "status": "completed", "conclusion": "success" },
                         { "name": "cargo clippy", "status": "completed", "conclusion": "failure" }
@@ -1478,7 +1495,7 @@ mod tests {
                     "name": "fmt",
                     "status": "completed",
                     "conclusion": "success",
-                    "html_url": "https://github.com/dono/repo/actions/runs/1001/job/502",
+                    "html_url": "https://github.com/owner/repo/actions/runs/1001/job/502",
                     "steps": []
                 }
             ]
@@ -1504,22 +1521,22 @@ mod tests {
 
     #[test]
     fn formats_agent_prompts_cleanly() {
-        let repo = RepoSlug::new("dono", "agentdeck");
+        let repo = RepoSlug::new("owner", "agentdeck");
         let pr = PullRequest {
             number: 12,
-            title: "Integração GitHub".into(),
+            title: "GitHub integration".into(),
             author: "ana".into(),
             head_branch: "feat/github".into(),
             base_branch: "dev".into(),
             head_sha: "61621aa998877".into(),
             draft: false,
-            html_url: "https://github.com/dono/agentdeck/pull/12".into(),
+            html_url: "https://github.com/owner/agentdeck/pull/12".into(),
             updated_at: String::new(),
             checks: CheckStatus::Failure,
         };
         let p_prompt = format_pr_prompt(&repo, &pr);
-        assert!(p_prompt.contains("Revise o PR #12"));
-        assert!(p_prompt.contains("dono/agentdeck"));
+        assert!(p_prompt.contains("Review PR #12"));
+        assert!(p_prompt.contains("owner/agentdeck"));
         assert!(p_prompt.contains("feat/github -> dev"));
 
         let job = WorkflowJob {
@@ -1528,12 +1545,12 @@ mod tests {
             name: "clippy (windows)".into(),
             status: CheckStatus::Failure,
             conclusion: Some("failure".into()),
-            html_url: "https://github.com/dono/agentdeck/actions/runs/1001/job/501".into(),
+            html_url: "https://github.com/owner/agentdeck/actions/runs/1001/job/501".into(),
             failed_steps: vec!["cargo clippy".into()],
         };
         let log = JobLog { lines: vec!["error: unused variable `x`".into()], truncated: false };
         let j_prompt = format_failed_job_prompt(&repo, Some(&pr), None, &job, Some(&log));
-        assert!(j_prompt.contains("Corrija o job \"clippy (windows)\" que falhou no PR #12"));
+        assert!(j_prompt.contains("Fix the job \"clippy (windows)\" that failed in PR #12"));
         assert!(j_prompt.contains("error: unused variable `x`"));
     }
 
@@ -1566,7 +1583,7 @@ mod tests {
             checks: CheckStatus::Neutral,
         }];
         attach_pr_checks(&mut prs, &runs);
-        // CI passou na reexecução e o Lint ainda roda: o PR está em andamento, não vermelho.
+        // CI passed on the rerun and Lint is still running: the PR is in progress, not red.
         assert_eq!(prs[0].checks, CheckStatus::Pending);
         let detail = PrChecksDetail { runs, ..Default::default() };
         assert_eq!(detail.status(), CheckStatus::Pending);
@@ -1595,12 +1612,13 @@ mod tests {
 
     #[test]
     fn log_tail_respects_limits_and_utf8() {
-        let raw: String = (0..1000).map(|i| format!("linha {i} çãõ\n")).collect();
+        // "çãõ" is deliberate non-ASCII data: it checks that the byte cut never splits a character.
+        let raw: String = (0..1000).map(|i| format!("line {i} çãõ\n")).collect();
         let log = tail_log(&raw, LOG_MAX_LINES, 2000);
         assert!(log.truncated);
         assert!(log.lines.len() < 200);
-        assert_eq!(log.lines.last().map(String::as_str), Some("linha 999 çãõ"));
-        assert!(log.lines.iter().all(|l| l.starts_with("linha ")), "não começa no meio de uma linha");
+        assert_eq!(log.lines.last().map(String::as_str), Some("line 999 çãõ"));
+        assert!(log.lines.iter().all(|l| l.starts_with("line ")), "does not start in the middle of a line");
         assert_eq!(tail_log("", 10, 10), JobLog::default());
         let small = tail_log("a\nb\n", 10, 1000);
         assert_eq!(small.lines, vec!["a", "b"]);
@@ -1613,16 +1631,16 @@ mod tests {
         let tail = read_stream_tail(&data[..], 1000, 10_000_000).unwrap();
         assert_eq!(tail.len(), 1000);
         assert_eq!(tail, data[data.len() - 1000..]);
-        let all = read_stream_tail(&b"curto"[..], 1000, 10_000_000).unwrap();
-        assert_eq!(all, b"curto");
+        let all = read_stream_tail(&b"short"[..], 1000, 10_000_000).unwrap();
+        assert_eq!(all, b"short");
     }
 
     #[test]
     fn github_error_messages_are_clear() {
         let limited = GithubError::RateLimited { reset_in_secs: Some(125), authenticated: false }.to_string();
         assert!(limited.contains("3 min") && limited.contains("60/h"), "{limited}");
-        let nf = GithubError::NotFound { repo: "dono/repo".into(), authenticated: false }.to_string();
-        assert!(nf.contains("dono/repo") && nf.contains("privado"), "{nf}");
+        let nf = GithubError::NotFound { repo: "owner/repo".into(), authenticated: false }.to_string();
+        assert!(nf.contains("owner/repo") && nf.contains("private"), "{nf}");
         assert!(GithubError::Unauthorized.to_string().contains("401"));
         for e in [GithubError::Unauthorized, GithubError::Forbidden("x".into()), GithubError::Network("y".into())] {
             assert!(!e.to_string().to_lowercase().contains("bearer"));
@@ -1631,20 +1649,20 @@ mod tests {
 
     #[test]
     fn prompts_for_issue_and_failed_job_without_pr() {
-        let repo = RepoSlug::new("dono", "repo");
+        let repo = RepoSlug::new("owner", "repo");
         let issue = Issue {
             number: 7,
-            title: "Quebra \u{1b}[31mao abrir".into(),
+            title: "Crashes \u{1b}[31mwhen opening".into(),
             author: "x".into(),
             labels: vec!["bug".into()],
             comments: 0,
-            html_url: "https://github.com/dono/repo/issues/7".into(),
+            html_url: "https://github.com/owner/repo/issues/7".into(),
             updated_at: String::new(),
-            body_preview: "passos".into(),
+            body_preview: "steps".into(),
         };
         let m = format_issue_prompt(&repo, &issue);
-        assert!(m.contains("issue #7") && m.contains("Rótulos: bug") && m.contains("Resumo: passos"));
-        assert!(!m.contains('\u{1b}'), "sem caracteres de controle");
+        assert!(m.contains("issue #7") && m.contains("Labels: bug") && m.contains("Summary: steps"));
+        assert!(!m.contains('\u{1b}'), "no control characters");
 
         let job = WorkflowJob {
             id: 1,
@@ -1652,13 +1670,13 @@ mod tests {
             name: "test".into(),
             status: CheckStatus::Failure,
             conclusion: Some("failure".into()),
-            html_url: "https://github.com/dono/repo/actions/runs/2/job/1".into(),
+            html_url: "https://github.com/owner/repo/actions/runs/2/job/1".into(),
             failed_steps: vec![],
         };
         let run = WorkflowRun {
             id: 2,
             name: "CI".into(),
-            display_title: "Corrige X".into(),
+            display_title: "Fixes X".into(),
             head_branch: "fix/x".into(),
             head_sha: String::new(),
             event: "push".into(),
@@ -1669,6 +1687,6 @@ mod tests {
             created_at: String::new(),
         };
         let m = format_failed_job_prompt(&repo, None, Some(&run), &job, None);
-        assert!(m.contains("na execução \"Corrige X\" (branch fix/x)"), "{m}");
+        assert!(m.contains("in the \"Fixes X\" run (branch fix/x)"), "{m}");
     }
 }
