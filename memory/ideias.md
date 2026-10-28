@@ -1,101 +1,102 @@
-# Ideias e limitações conhecidas
+# Ideas and known limitations
 
-O que **não** está entre os próximos passos. Não é compromisso: uma ideia só vira trabalho quando entra em
-[pendencias.md](pendencias.md), que tem no máximo 10 itens (revisão com o usuário em 2026-10-24). Ao entrar lá, sai daqui.
-Uma limitação que passar a incomodar no uso também sobe para lá.
+What is **not** among the next steps. Not a commitment: an idea only becomes work when it enters
+[pendencias.md](pendencias.md), which holds at most 10 items (user review on 2026-10-24). Upon entering there, it leaves here.
+A limitation that starts getting in the way during actual use also moves up there.
 
-## Ideias
+## Ideas
 
-### Mesa de tarefas e modelos
+### Tasks desk and models
 
-- **Teste de fogo num projeto que não é o AgentDeck** (usuário, 2026-10-24): um jogo em Godot, depois da bandeja e do
-  retomar a conversa. Até aqui o app só foi usado para construir a si mesmo (Rust, `memory/` cheio, agentes que conhecem o
-  repositório). Observar: a memória começando vazia (os agentes criam aprendizados?), `--outline` sem GDScript, a
-  reimportação da pasta `.godot/` em cada worktree nova, a revisão de `.tscn`/`.tres` e dos assets binários, os testes
-  com `godot --headless`, e a fila do escopo com arquivos que todos mexem (`project.godot`, a cena principal).
+- **Acid test on a project other than AgentDeck** (user, 2026-10-24): a Godot game, after system tray and conversation
+  resumption. So far the app was only used to build itself (Rust, full `memory/`, agents familiar with the repository).
+  Points to observe: memory starting empty (do agents create learnings?), `--outline` without GDScript, reimporting the
+  `.godot/` folder in each new worktree, reviewing `.tscn`/`.tres` and binary assets, running tests with `godot --headless`,
+  and scope queue behavior with files everyone touches (`project.godot`, the main scene).
 
-- **Mensagens ao agente não citam a validação:** `start_message` não conta que, depois de mesclada, a tarefa ainda pode
-  voltar reprovada; ele só descobre quando `reject_message` chega. Conferir no uso se faz falta.
-- **Rodar os testes do projeto ao receber o relatório**; **editar uma tarefa em rascunho**.
-- **"Como validar" no pedido** (do OpenSpec, 2026-10-24): uma seção opcional com cenários QUANDO/ENTÃO; o relatório diz
-  qual teste cobre cada um, e "aguardando validação" os mostra como caixas de marcar (o formato do `testes.md`).
-  Opcional: obrigatório viraria burocracia nas tarefas pequenas.
-- **Skills do projeto para os 4 CLIs oficiais** (2026-10-24): cada CLI procura skills numa pasta (`.claude/skills`,
-  a do Antigravity a confirmar, `.agents/skills` no Codex, `.opencode/skills`); o AgentDeck entregaria uma pasta só a todos.
-- **Seletor de modelos só com os que o plano permite** (`t14`): a lista vem de `agy models`/`opencode models` (o que o CLI
-  conhece, não o que o plano permite). Em 2026-10-24 o usuário disse que, na prática, já funciona assim; reabrir se um
-  modelo sem acesso aparecer. Se for feito, o mesmo filtro vale para `Core::models_inventory`.
-- **Modelo por instância, depois:** trocar o modelo de uma aba aberta; lista de modelos do Codex no "+ Novo agente";
-  campo livre para modelo fora da lista; editar `roleModels` pela interface.
+- **Messages to the agent do not mention validation:** `start_message` does not disclose that, after merging, the task can still
+  come back rejected; it only finds out when `reject_message` arrives. Check in actual use if this is needed.
+- **Run project tests upon receiving the report**; **edit a draft task**.
+- **"How to validate" in the brief** (from OpenSpec, 2026-10-24): an optional section with WHEN/THEN scenarios; the report
+  specifies which test covers each, and "awaiting validation" shows them as checkboxes (the format of `testes.md`).
+  Optional: making it mandatory would create unnecessary bureaucracy for small tasks.
+- **Project skills for the 4 official CLIs** (2026-10-24): each CLI searches for skills in a folder (`.claude/skills`,
+  Antigravity to be confirmed, `.agents/skills` in Codex, `.opencode/skills`); AgentDeck would provide a single folder for all.
+- **Model selector showing only what the plan allows** (`t14`): the list comes from `agy models`/`opencode models` (what the
+  CLI knows, not what the plan allows). On 2026-10-24 the user stated that in practice it already works this way; reopen if a
+  model without access appears. If implemented, the same filter applies to `Core::models_inventory`.
+- **Model per instance, later:** switch the model of an open tab; Codex models list under "+ New agent"; free-form field for
+  models outside the list; edit `roleModels` via the UI.
 
-### Modo Documentos, fase 2
+### Documents Mode, phase 2
 
-- Diff lado a lado; gravar as abas de documento (somem ao fechar o app); documento ao lado de um agente (ver
-  [GERAL.md](GERAL.md), "Documentos").
-- Editor (`t39`, de fora de propósito): recuo automático, substituir (`Ctrl+H`), ir para a linha (`Ctrl+G`), menu de
-  clique direito no diff e no arquivo grande, rolagem horizontal, CRLF/LF misturados e fora do UTF-8 (hoje só leitura),
-  busca no markdown formatado e no pedido/relatório, busca no diff por ocorrência, realce dentro de bloco de código do
-  markdown, mais linguagens (ver `memory/aprendizados/editor-de-documentos.md` antes de trocar por `syntect`).
-- Explorador: marcar o que mudou (git), filtrar/buscar, abrir os arquivos de uma tarefa pelo detalhe dela.
-- Diff: o hash de layout (`content_hash`, `ui/diff_view.rs`) varre o diff inteiro a cada quadro; calcular uma vez ao
-  carregar se um diff de vários MB pesar.
+- Side-by-side diff; persist document tabs (currently lost on app exit); document side-by-side with an agent (see
+  [GERAL.md](GERAL.md), "Documents").
+- Editor (`t39`, intentionally deferred): auto-indent, replace (`Ctrl+H`), go to line (`Ctrl+G`), right-click context menu on
+  diff and large files, horizontal scrolling, mixed CRLF/LF and non-UTF-8 files (currently read-only), search in formatted
+  markdown and in brief/report, search by occurrence in diff, syntax highlighting inside markdown code blocks, more
+  languages (see `memory/aprendizados/editor-de-documentos.md` before replacing with `syntect`).
+- Explorer: mark modified files (git), filter/search, open files of a task from its detail view.
+- Diff: layout hash (`content_hash`, `ui/diff_view.rs`) scans the entire diff every frame; compute once on load if a multi-megabyte
+  diff impacts performance.
 
 ### Interface
 
-- **Inglês na interface** (estava em `pendencias.md`; saiu em 2026-10-24 para os itens de Windows e Linux caberem).
-- **Temas** (pedido do usuário, 18/10; deixado de lado em 2026-10-24): trocar as constantes de `theme.rs` por uma paleta
-  em tempo de execução, escolhida nas configurações, incluindo o fundo e as 16 cores do terminal (`terminal/colors.rs`).
-- Emojis coloridos (o egui só tem monocromáticos); animação de hover no estado vazio.
-- Tela dividida: arrastar uma aba para outra janela, maximizar uma janela, atalho de teclado com a barra lateral recolhida,
-  cache por aba se o redesenho pesar com 5–6 janelas.
-- Projetos: a árvore e o Git guardarem o estado por projeto; lógica da `Deck` em funções puras testáveis (como `split.rs`);
-  testes de interface (egui) para a barra direita, a aba Git e a tela dividida.
-- Uso do Antigravity: renovar o token em memória quando o CLI está fechado (hoje "sem dados" depois de ~1 h); aviso
-  discreto quando a API interna falha por muito tempo.
+- **English in the interface** (was in `pendencias.md`; removed on 2026-10-24 to make room for Windows and Linux items).
+- **Themes** (user request, 10/18; set aside on 2026-10-24): replace `theme.rs` constants with a runtime palette selected
+  in settings, including background and the 16 terminal colors (`terminal/colors.rs`).
+- Color emojis (egui only supports monochrome); hover animation on empty state.
+- Split screen: drag a tab to another window, maximize a window, keyboard shortcut with collapsed sidebar, per-tab cache if
+  repainting is heavy with 5–6 windows.
+- Projects: file tree and Git persist state per project; `Deck` logic in pure testable functions (like `split.rs`); UI tests
+  (egui) for right panel, Git tab, and split screen.
+- Antigravity usage: refresh in-memory token when CLI is closed (currently shows "no data" after ~1 h); unobtrusive warning when
+  internal API repeatedly fails.
 
-### Memória
+### Memory
 
-- `--outline` em JS/TS, Python e PowerShell/shell; medir no uso se os agentes rodam `--learn`/`--outline`.
-- `ContextProvider` geral (adiado em 2026-10-23; reabrir só se a medição mostrar que os agentes não pedem), e RAG por ele.
-- Perfis de agente em arquivo (`prompts/_comum.md` e `prompts/<agente>.md`), editáveis sem recompilar.
-- Situação atual com decisões recentes; aviso de `touches` que aponta para arquivo renomeado/removido e um jeito de
-  aposentar aprendizado; aprendizado novo de uma branch visível antes da mescla.
+- `--outline` in JS/TS, Python, and PowerShell/shell; measure in practice whether agents run `--learn`/`--outline`.
+- General `ContextProvider` (postponed on 2026-10-23; reopen only if telemetry shows agents aren't prompting for it), and RAG
+  powered by it.
+- Agent profiles in files (`prompts/_comum.md` and `prompts/<agente>.md`), editable without recompilation.
+- Current situation with recent decisions; warning for `touches` pointing to renamed/deleted files and a mechanism to retire
+  learnings; new learning from a branch visible before merge.
 
-### Ponte e GitHub
+### Bridge and GitHub
 
-- `ask-agent --cancel <n>`; reentregar sozinha a resposta que ficou no `--inbox`; pré-autorizar o `ask-agent` nos CLIs que
-  pedem aprovação na aba (hoje só o Claude abre com `--allowedTools`).
-- No headless, aider (`--yes-always`) e interpreter (`-y`) rodam sem aprovação: avaliar modos mais restritos.
-- GitHub pelo app: comentar e aprovar PR, criar issue, reexecutar job; exercitar o caminho `gh auth token`.
-- `commit.gpgsign` com pinentry gráfico: deixar o diálogo de senha abrir em vez de recusar.
+- `ask-agent --cancel <n>`; automatically redeliver responses left in `--inbox`; pre-authorize `ask-agent` in CLIs requiring in-tab
+  approval (currently only Claude launches with `--allowedTools`).
+- In headless mode, aider (`--yes-always`) and interpreter (`-y`) run without approval: evaluate more restricted modes.
+- GitHub via the app: comment on and approve PRs, create issues, rerun jobs; exercise `gh auth token` pathway.
+- `commit.gpgsign` with graphical pinentry: allow password dialog to appear instead of rejecting.
 
-### Sistemas
+### Systems
 
-- Linux: abrir de verdade no Wayland (GNOME, KDE) e num Fedora Workstation; WSLg pelo X11 (janela maximizada, escala,
-  cota pelo chaveiro; [LINUX.md](LINUX.md), 2.8); pacotes (`.deb`, `.rpm`, Flatpak, AppImage, `.desktop`); ditado com GPU;
-  aviso quando falta `xdg-desktop-portal`/`xdg-utils`; textos de Git/GitHub próprios do Linux.
-- **Celular** (bem mais para frente, com o app estável): acompanhar e falar com os agentes longe do computador.
+- Linux: run genuinely on Wayland (GNOME, KDE) and Fedora Workstation; WSLg via X11 (maximized window, scaling, keyring
+  quota; [LINUX.md](LINUX.md), 2.8); packages (`.deb`, `.rpm`, Flatpak, AppImage, `.desktop`); dictation with GPU;
+  warning when missing `xdg-desktop-portal`/`xdg-utils`; native Linux Git/GitHub messages.
+- **Mobile** (much further ahead, once the app is stable): monitor and communicate with agents away from the computer.
 
-## Limitações conhecidas
+## Known limitations
 
-Para quem for mexer no código; não são tarefas.
+For anyone modifying the code; these are not tasks.
 
-- **Claude Code duplica a conversa no histórico a cada mudança de largura** (Windows): ele limpa só a tela e reimprime,
-  sem `ESC[3J`. O PTY só muda com o tamanho parado por 150 ms (um arrasto = uma cópia); numa troca de aba no Destaque,
-  por 600 ms, e o próximo redimensionamento da aba espera ela terminar de reimprimir (300 ms de saída parada, teto de 3 s).
-  Sobra também a repetição de 1 a 3 linhas no histórico nas mudanças de largura. Ver
+- **Claude Code duplicates conversation in history on every width change** (Windows): it clears only the screen and reprints,
+  without `ESC[3J`. The PTY only resizes after window dimensions remain stationary for 150 ms (one drag = one copy); on tab
+  switch in Focus mode, for 600 ms, and the next tab resize waits for reprinting to finish (300 ms quiescent output, 3 s ceiling).
+  History also accumulates 1 to 3 repeated lines across width changes. See
   `memory/aprendizados/claude-code-sem-esc3j-no-windows.md`.
-- **A ponte não percebe o cliente (`ask-agent`) cair** no meio da espera (`tiny_http`); a pergunta fica pendente até ser
-  respondida ou expirar em 10 min. A resposta não entregue fica em `ask-agent --inbox`.
-- **Agente da aba que não responde por `ask-agent`** (modelo fraco, ou o usuário assumiu o terminal): a pergunta expira em
-  10 minutos, com aviso por escrito a quem perguntou.
-- **Hooks de turno só no Claude e no Codex**; os demais seguem a heurística da saída (1,5 s parado / 30 s na fila).
-- **As instruções da ponte são fixadas na partida**: um agente aberto antes de uma versão nova não sabe dos comandos novos
-  até reabrir a aba; o aviso de equipe só chega com a próxima mensagem.
-- **A ponte sem interface usa o modo headless** (não aparece nas abas).
-- **O `AGENTS.md` de projetos não ativos** só é reescrito quando se abre a próxima aba deles.
-- **A cota do Antigravity vem de uma API interna** (`v1internal:retrieveUserQuotaSummary`) que pode mudar sem aviso; o
-  **uso do Codex** só foi testado com arquivos de exemplo.
-- **Select, spinner e tooltips desenhados à mão**; o desfoque atrás do overlay de arrastar é aproximado.
-- **Fora do rumo** (2026-10-23): o agente Ollama próprio e a "IA local como serviço interno"; um modelo local entra por um
-  CLI que o suporte (ver [AGENTDECK.md](AGENTDECK.md), "O que o AgentDeck é e não é").
+- **Bridge does not detect client (`ask-agent`) disconnecting** during wait (`tiny_http`); the question remains pending until
+  answered or timing out after 10 min. Undelivered answers remain in `ask-agent --inbox`.
+- **Tab agent not responding via `ask-agent`** (weak model, or user took over the terminal): question expires after 10 minutes,
+  notifying the caller in writing.
+- **Turn hooks only in Claude and Codex**; others rely on output heuristics (1.5 s idle / 30 s in queue).
+- **Bridge instructions are frozen at startup**: an agent launched before a new version is unaware of new commands until the tab
+  is reopened; team notifications only arrive with the next message.
+- **Bridge without UI runs in headless mode** (does not appear in tabs).
+- **`AGENTS.md` in non-active projects** is only rewritten when opening their next tab.
+- **Antigravity quota comes from an internal API** (`v1internal:retrieveUserQuotaSummary`) that may change without warning;
+  **Codex usage** was only tested with sample files.
+- **Select dropdown, spinner, and tooltips are custom-drawn**; blur behind drag overlay is approximated.
+- **Out of scope** (2026-10-23): dedicated Ollama agent and "local AI as an internal service"; local models enter through a
+  supported CLI (see [AGENTDECK.md](AGENTDECK.md), "What AgentDeck is and is not").
