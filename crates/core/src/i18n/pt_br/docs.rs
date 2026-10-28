@@ -5,6 +5,7 @@
 
 pub const ENTRIES: &[(&str, &str)] = &[
     ("Text", "Texto"),
+    ("The file is empty.", "O arquivo está vazio."),
     ("Workspace is not configured.", "Workspace não configurado."),
     (
         "Access denied: the path \"{path}\" is outside the configured workspace (\"{root}\").",
