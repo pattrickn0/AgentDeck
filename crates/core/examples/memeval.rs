@@ -1,26 +1,27 @@
-//! Régua da memória: mede o que cada jeito de entregar aprendizados teria acertado nas tarefas já mescladas.
+//! Memory ruler: measures what each way of delivering learnings would have got right in the merged tasks.
 //!
 //! ```text
-//! cargo run -p agentdeck-core --example memeval -- <repositório> <arquivo de tarefas> [opções]
+//! cargo run -p agentdeck-core --example memeval -- <repository> <tasks file> [options]
 //! ```
 //!
-//! O `<arquivo de tarefas>` é o `dados/tarefas/<projeto>.json` do AgentDeck. Só leitura: o programa chama o `git`
-//! instalado e imprime tabelas; nada é gravado.
+//! The `<tasks file>` is the `dados/tarefas/<project>.json` of AgentDeck. Read-only: the program calls the installed
+//! `git` and prints tables; nothing is written.
 //!
-//! Para cada caso (uma tarefa mesclada, ou um commit direto da `dev` com diff grande o bastante):
+//! For each case (a merged task, or a direct commit of `dev` with a big enough diff):
 //!
-//! - **O certo:** os aprendizados (com `touches`) que casam com os arquivos que o caso de fato mudou, lidos **como
-//!   estavam na base** do caso, para a resposta não vazar do futuro. Os globais ficam fora da conta (chegam sempre).
-//! - **O palpite:** o que cada estratégia entregaria sabendo só o pedido (o `brief`, ou a mensagem do commit):
-//!   (a) hoje: os aprendizados dos caminhos citados no pedido; (b) hoje + o índice de uma linha de todos os outros;
-//!   (c) co-mudança: os caminhos citados, ampliados pelos arquivos que mudavam junto com eles antes da base.
-//! - **A nota:** recall, precisão e tamanho entregue (caracteres e tokens, caracteres ÷ 4).
+//! - **The right one:** the learnings (with `touches`) that match the files the case actually changed, read **as
+//!   they were in the base** of the case, so the answer does not leak from the future. The global ones stay out of
+//!   the account (they always arrive).
+//! - **The guess:** what each strategy would deliver knowing only the request (the `brief`, or the commit message):
+//!   (a) today: the learnings of the paths cited in the request; (b) today + the one-line index of every other one;
+//!   (c) co-change: the cited paths, widened by the files that changed together with them before the base.
+//! - **The score:** recall, precision and delivered size (characters and tokens, characters ÷ 4).
 //!
-//! Também mede a previsão de arquivos (os citados + os vizinhos da co-mudança contra os que o caso mudou) e a
-//! semente (quantos pedidos citam algum caminho do repositório).
+//! It also measures the file prediction (the cited ones + the co-change neighbours against the ones the case
+//! changed) and the seed (how many requests cite some path of the repository).
 //!
-//! Opções: `--commits-min-arquivos N` (padrão 3: tamanho mínimo, sem `memory/**` e `Cargo.lock`, dos commits da
-//! segunda amostra), `--detalhe` (uma linha por caso).
+//! Options: `--commits-min-arquivos N` (default 3: minimum size, without `memory/**` and `Cargo.lock`, of the
+//! commits of the second sample), `--detalhe` (one line per case).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -28,20 +29,20 @@ use std::process::Command;
 
 use agentdeck_core::learnings::{self, Learning};
 
-/// Commits com mais arquivos que isso (reformatações, renomeações) não ensinam co-mudança.
+/// Commits with more files than this (reformattings, renames) do not teach co-change.
 const MAX_COMMIT_FILES: usize = 15;
-/// Orçamento de caracteres de aprendizados por inteiro, o mesmo da entrega real no início da tarefa.
+/// Budget of characters of learnings in full, the same as the real delivery at the start of a task.
 const BUDGET: usize = learnings::START_BUDGET;
-/// Os mesmos limites com que `learnings::load` lê um aprendizado.
+/// The same limits with which `learnings::load` reads a learning.
 const MAX_LEARNING_BYTES: u64 = 64 * 1024;
-/// Meias-vidas (em dias) testadas para o decaimento pela idade; `None` = sem decaimento.
+/// Half-lives (in days) tested for the decay by age; `None` = no decay.
 const HALF_LIVES: [Option<f64>; 3] = [None, Some(7.0), Some(3.0)];
 const KS: [usize; 3] = [3, 5, 10];
 const MIN_COUNTS: [u32; 3] = [1, 2, 3];
 const MIN_SCORES: [f64; 2] = [0.0, 0.3];
 
-/// Uma linha da grade: de onde vêm os vizinhos (meia-vida e ordenação por lift, ou `None` = o controle), quantos, o
-/// mínimo de vezes juntos e o peso mínimo.
+/// One row of the grid: where the neighbours come from (half-life and ordering by lift, or `None` = the control),
+/// how many, the minimum of times together and the minimum weight.
 type Setting = (Option<(usize, bool)>, usize, u32, f64);
 
 // ---------- git ----------
@@ -58,7 +59,7 @@ impl Repo {
             .args(["-c", "core.quotepath=false"])
             .args(args)
             .output()
-            .map_err(|e| format!("não consegui rodar o git: {e}"))?;
+            .map_err(|e| format!("could not run git: {e}"))?;
         if !out.status.success() {
             return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
         }
@@ -70,9 +71,9 @@ impl Repo {
     }
 }
 
-// ---------- Histórico e co-mudança ----------
+// ---------- History and co-change ----------
 
-/// Arquivos que não entram na co-mudança nem na previsão: a memória e o que o cargo regrava sozinho.
+/// Files that enter neither the co-change nor the prediction: the memory and what the cargo rewrites on its own.
 fn is_noise(path: &str) -> bool {
     path.starts_with("memory/") || path == "Cargo.lock"
 }
@@ -82,15 +83,15 @@ struct Commit {
     files: Vec<String>,
 }
 
-/// Os commits (sem merges) que servem à co-mudança, por hash, e o índice arquivo → commits.
+/// The commits (without merges) that serve the co-change, by hash, and the file → commits index.
 #[derive(Default)]
 struct History {
     commits: HashMap<String, Commit>,
     by_file: HashMap<String, Vec<String>>,
 }
 
-/// Lê a saída de `git log --no-merges --name-only --format=%x01%H %ct`. Fica de fora o commit com mais de
-/// [`MAX_COMMIT_FILES`] arquivos, e os arquivos de ruído; o commit que só tinha ruído some.
+/// Reads the output of `git log --no-merges --name-only --format=%x01%H %ct`. The commit with more than
+/// [`MAX_COMMIT_FILES`] files stays out, as do the noise files; the commit that had only noise disappears.
 fn parse_history(log: &str) -> History {
     let mut hist = History::default();
     for chunk in log.split('\u{1}').skip(1) {
@@ -113,7 +114,7 @@ fn parse_history(log: &str) -> History {
     hist
 }
 
-/// Peso de um commit com `age_days` de idade: 1 sem decaimento, ou cai pela metade a cada `half_life` dias.
+/// Weight of a commit with `age_days` of age: 1 without decay, or halved every `half_life` days.
 fn weight(age_days: f64, half_life: Option<f64>) -> f64 {
     match half_life {
         None => 1.0,
@@ -121,21 +122,22 @@ fn weight(age_days: f64, half_life: Option<f64>) -> f64 {
     }
 }
 
-/// Um arquivo que costuma mudar junto com as sementes.
+/// A file that usually changes together with the seeds.
 #[derive(Debug, Clone, PartialEq)]
 struct Neighbour {
     path: String,
-    /// Soma, sobre as sementes, de (peso dos commits em que mudaram juntos ÷ peso dos commits da semente).
+    /// Sum, over the seeds, of (weight of the commits in which they changed together ÷ weight of the commits of the seed).
     score: f64,
-    /// Quantas vezes mudaram juntos, na semente em que isso mais se repete.
+    /// How many times they changed together, in the seed where that repeats the most.
     count: u32,
-    /// A confiança dividida pela frequência do arquivo em todos os commits: quanto mais específico da semente, maior.
+    /// The confidence divided by the frequency of the file in all commits: the more specific to the seed, the higher.
     lift: f64,
 }
 
-/// Os arquivos que mudaram junto com as `seeds` nos commits que são ancestrais da base (`ancestors`), vistos de
-/// `base_time` (segundos Unix). Só os que existem na base (`exists`) e não são sementes. Do mais para o menos forte:
-/// pela confiança (`by_lift` falso) ou pela confiança corrigida pela frequência do arquivo (`by_lift`).
+/// The files that changed together with the `seeds` in the commits that are ancestors of the base (`ancestors`),
+/// seen from `base_time` (Unix seconds). Only the ones that exist in the base (`exists`) and are not seeds. From the
+/// strongest to the weakest: by the confidence (`by_lift` false) or by the confidence corrected by the file
+/// frequency (`by_lift`).
 fn neighbours(
     hist: &History,
     ancestors: &HashSet<String>,
@@ -185,8 +187,9 @@ fn neighbours(
     out
 }
 
-/// Controle da co-mudança: os arquivos que mais mudaram antes da base, qualquer que seja o pedido (os "centrais" do
-/// repositório). Se sugerir esses acertar tanto quanto sugerir os vizinhos, a co-mudança não acrescenta nada.
+/// Control of the co-change: the files that changed the most before the base, whatever the request (the "central
+/// ones" of the repository). If suggesting those gets as much right as suggesting the neighbours, the co-change adds
+/// nothing.
 fn popular(hist: &History, ancestors: &HashSet<String>, exists: &HashSet<String>, seeds: &[String]) -> Vec<Neighbour> {
     let mut count: HashMap<&str, u32> = HashMap::new();
     for (hash, commit) in &hist.commits {
@@ -205,17 +208,18 @@ fn popular(hist: &History, ancestors: &HashSet<String>, exists: &HashSet<String>
     out
 }
 
-/// Os vizinhos de co-mudança de `p` (meia-vida `hi`, e se ordenados por lift), ou o controle dos mais mudados (`None`).
+/// The co-change neighbours of `p` (half-life `hi`, and whether ordered by lift), or the control of the most-changed
+/// files (`None`).
 fn source(p: &Prepared, key: Option<(usize, bool)>) -> &[Neighbour] {
     key.map_or(&p.popular, |(hi, lift)| &p.neigh[hi * 2 + usize::from(lift)])
 }
 
-/// Os `k` primeiros vizinhos com pelo menos `min_count` mudanças juntas e peso `min_score`.
+/// The first `k` neighbours with at least `min_count` changes together and weight `min_score`.
 fn pick(all: &[Neighbour], k: usize, min_count: u32, min_score: f64) -> Vec<&Neighbour> {
     all.iter().filter(|n| n.count >= min_count && n.score >= min_score).take(k).collect()
 }
 
-// ---------- Casos ----------
+// ---------- Cases ----------
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Sample {
@@ -226,15 +230,15 @@ enum Sample {
 struct Case {
     id: String,
     sample: Sample,
-    /// O pedido: o `brief` da tarefa ou a mensagem do commit.
+    /// The request: the `brief` of the task or the commit message.
     text: String,
-    /// Onde o agente começou (o repositório como ele o via).
+    /// Where the agent started (the repository as it saw it).
     base: String,
-    /// Arquivos mudados e se são novos (não existiam na base).
+    /// Changed files and whether they are new (they did not exist in the base).
     changed: Vec<(String, bool)>,
 }
 
-/// `git diff --name-status` (sem renomeações) → (caminho, é novo).
+/// `git diff --name-status` (without renames) → (path, is new).
 fn parse_name_status(text: &str) -> Vec<(String, bool)> {
     text.lines()
         .filter_map(|l| {
@@ -244,20 +248,20 @@ fn parse_name_status(text: &str) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// Um caso com tudo o que a nota precisa, calculado uma vez.
+/// A case with everything the score needs, computed once.
 struct Prepared {
     id: String,
     sample: Sample,
     learnings: Vec<Learning>,
-    /// Caminhos citados no pedido que existem na base.
+    /// Paths cited in the request that exist in the base.
     seeds: Vec<String>,
-    /// Aprendizados com `touches` que casam com o que o caso mudou.
+    /// Learnings with `touches` that match what the case changed.
     truth: HashSet<String>,
-    /// Arquivos que o caso mudou, já existentes na base e fora do ruído (a previsão tenta acertá-los).
+    /// Files the case changed, already existing in the base and outside the noise (the prediction tries to hit them).
     actual: HashSet<String>,
-    /// Vizinhos da co-mudança, um conjunto por meia-vida de [`HALF_LIVES`].
-    neigh: Vec<Vec<Neighbour>>, // por meia-vida e, dentro dela, [confiança, lift]
-    /// O controle: os arquivos mais mudados da base, sem relação com o pedido.
+    /// Neighbours of the co-change, one set per half-life of [`HALF_LIVES`].
+    neigh: Vec<Vec<Neighbour>>, // per half-life and, inside it, [confidence, lift]
+    /// The control: the most-changed files of the base, unrelated to the request.
     popular: Vec<Neighbour>,
 }
 
@@ -271,16 +275,16 @@ impl Prepared {
     }
 }
 
-// ---------- Nota ----------
+// ---------- Score ----------
 
-/// O que uma estratégia entregou: quais aprendizados por inteiro, quais só por linha de índice, e o tamanho.
+/// What one strategy delivered: which learnings in full, which only as an index line, and the size.
 struct Delivery {
     full: HashSet<String>,
     index: HashSet<String>,
     chars: usize,
 }
 
-/// Lê o que `rendered` (a saída de `learnings::render*`) entregou de cada aprendizado.
+/// Reads what `rendered` (the output of `learnings::render*`) delivered of each learning.
 fn read_delivery(all: &[Learning], rendered: &str) -> Delivery {
     let mut d = Delivery { full: HashSet::new(), index: HashSet::new(), chars: rendered.chars().count() };
     for l in all {
@@ -293,16 +297,16 @@ fn read_delivery(all: &[Learning], rendered: &str) -> Delivery {
     d
 }
 
-/// Soma das notas de uma estratégia numa amostra. Só entram os casos que tinham aprendizado específico na base.
+/// Sum of the scores of one strategy in one sample. Only the cases that had a specific learning in the base go in.
 #[derive(Default, Clone)]
 struct MemTally {
     cases: usize,
     cases_with_truth: usize,
     truth: usize,
     hits: usize,
-    /// Aprendizados específicos entregues por inteiro (a base da precisão).
+    /// Specific learnings delivered in full (the base of the precision).
     delivered: usize,
-    /// Certos que não vieram por inteiro mas estavam como linha do índice.
+    /// Right ones that did not come in full but were there as an index line.
     in_index_only: usize,
     chars: usize,
     recall_sum: f64,
@@ -357,7 +361,7 @@ fn ratio(a: usize, b: usize) -> f64 {
     }
 }
 
-/// Soma da previsão de arquivos: os citados contra os vizinhos da co-mudança.
+/// Sum of the file prediction: the cited ones against the co-change neighbours.
 #[derive(Default, Clone)]
 struct FileTally {
     cases: usize,
@@ -366,10 +370,11 @@ struct FileTally {
     seed_hits: usize,
     suggested: usize,
     suggested_hits: usize,
-    /// Casos em que algum vizinho foi sugerido, e a soma da precisão deles (média por caso, sem o peso dos casos enormes).
+    /// Cases in which some neighbour was suggested, and the sum of their precision (average per case, without the
+    /// weight of the huge cases).
     cases_suggested: usize,
     suggested_precision_sum: f64,
-    /// Soma, por caso, do recall dos citados + vizinhos.
+    /// Sum, per case, of the recall of the cited ones + neighbours.
     recall_sum: f64,
 }
 
@@ -408,12 +413,13 @@ impl FileTally {
     }
 }
 
-/// Cabeçalho do bloco de textos por inteiro, como em `learnings::render_with`.
-const FULL_HEADER: &str = "Valem para este trabalho (projeto todo ou os arquivos em questão):\n\n";
+/// Header of the block of full texts, as in `learnings::render_with`.
+const FULL_HEADER: &str = "Apply to this work (whole project or the files in question):\n\n";
 
-/// Entrega em camadas, dentro de `budget`: primeiro os aprendizados dos caminhos citados, depois os dos vizinhos da
-/// co-mudança (`extra`), por último os globais. Com `extra` vazio dá o mesmo que `learnings::render_with(.., 0)`; a
-/// diferença é que um vizinho nunca tira o lugar de um aprendizado que o próprio pedido já pedia.
+/// Layered delivery, inside `budget`: first the learnings of the cited paths, then the ones of the co-change
+/// neighbours (`extra`), and last the global ones. With an empty `extra` it gives the same as
+/// `learnings::render_with(.., 0)`; the difference is that a neighbour never takes the place of a learning the
+/// request itself already asked for.
 fn layered(all: &[Learning], seeds: &[String], extra: &[String], budget: usize) -> String {
     let specific = |paths: &[String]| all.iter().filter(|l| !l.is_global() && l.touches_any(paths)).collect::<Vec<_>>();
     let mut seen: HashSet<&str> = HashSet::new();
@@ -440,9 +446,10 @@ fn pct(x: f64) -> String {
     format!("{:>5.1}%", x * 100.0)
 }
 
-// ---------- Montagem dos casos ----------
+// ---------- Building the cases ----------
 
-/// Os aprendizados na árvore de `base`, como o `learnings::load` os leria lá. `blobs` guarda o que já foi lido.
+/// The learnings in the tree of `base`, as `learnings::load` would read them there. `blobs` keeps what was already
+/// read.
 fn learnings_at(repo: &Repo, tree: &[(String, String, u64)], blobs: &mut HashMap<(String, String), Option<Learning>>) -> Vec<Learning> {
     let prefix = format!("{}/", learnings::DIR);
     let mut out = Vec::new();
@@ -467,7 +474,7 @@ fn learnings_at(repo: &Repo, tree: &[(String, String, u64)], blobs: &mut HashMap
     out
 }
 
-/// `git ls-tree -r -l`: (caminho, blob, tamanho).
+/// `git ls-tree -r -l`: (path, blob, size).
 fn parse_tree(text: &str) -> Vec<(String, String, u64)> {
     text.lines()
         .filter_map(|l| {
@@ -498,8 +505,7 @@ impl Ctx<'_> {
         let actual: HashSet<String> =
             case.changed.iter().filter(|(p, added)| !added && !is_noise(p) && exists.contains(p)).map(|(p, _)| p.clone()).collect();
         let ancestors: HashSet<String> = repo.text(&["rev-list", &case.base])?.lines().map(str::to_owned).collect();
-        let base_time: i64 =
-            repo.text(&["log", "-1", "--format=%ct", &case.base])?.trim().parse().map_err(|_| "data da base".to_owned())?;
+        let base_time: i64 = repo.text(&["log", "-1", "--format=%ct", &case.base])?.trim().parse().map_err(|_| "base date".to_owned())?;
         let file_seeds: Vec<String> = seeds.iter().filter(|s| !is_noise(s)).cloned().collect();
         let neigh = HALF_LIVES
             .iter()
@@ -510,7 +516,7 @@ impl Ctx<'_> {
     }
 }
 
-/// Os merges "Merge tarefa tN: …" do histórico: id da tarefa → (merge, pai 1, pai 2).
+/// The "Merge tarefa tN: …" merges of the history: task id → (merge, parent 1, parent 2).
 fn task_merges(repo: &Repo) -> Result<HashMap<String, (String, String, String)>, String> {
     let log = repo.text(&["log", "--merges", "--format=%H\t%P\t%s", "HEAD"])?;
     let mut out = HashMap::new();
@@ -527,7 +533,7 @@ fn task_merges(repo: &Repo) -> Result<HashMap<String, (String, String, String)>,
     Ok(out)
 }
 
-/// Onde a tarefa começou: o pai do commit mais antigo da própria linha da branch (o primeiro pai de cada commit).
+/// Where the task started: the parent of the oldest commit of the branch's own line (the first parent of each commit).
 fn branch_point(repo: &Repo, p1: &str, p2: &str) -> Option<String> {
     let range = format!("{p1}..{p2}");
     let own = repo.text(&["rev-list", "--first-parent", &range]).ok()?;
@@ -536,20 +542,20 @@ fn branch_point(repo: &Repo, p1: &str, p2: &str) -> Option<String> {
 }
 
 fn task_cases(repo: &Repo, tasks_json: &str) -> Result<Vec<Case>, String> {
-    let json: serde_json::Value = serde_json::from_str(tasks_json).map_err(|e| format!("arquivo de tarefas: {e}"))?;
+    let json: serde_json::Value = serde_json::from_str(tasks_json).map_err(|e| format!("tasks file: {e}"))?;
     let merges = task_merges(repo)?;
     let mut out = Vec::new();
-    for t in json["tasks"].as_array().ok_or("o arquivo de tarefas não tem a lista \"tasks\"")? {
+    for t in json["tasks"].as_array().ok_or("the tasks file has no \"tasks\" list")? {
         if t["status"] != "merged" {
             continue;
         }
         let (Some(id), Some(brief)) = (t["id"].as_str(), t["brief"].as_str()) else { continue };
         let Some((merge, p1, p2)) = merges.get(id) else {
-            eprintln!("{id}: sem commit de mesclagem no histórico, fora da amostra");
+            eprintln!("{id}: no merge commit in the history, out of the sample");
             continue;
         };
         let Some(base) = branch_point(repo, p1, p2) else {
-            eprintln!("{id}: não achei a base, fora da amostra");
+            eprintln!("{id}: could not find the base, out of the sample");
             continue;
         };
         let changed = parse_name_status(&repo.text(&["diff", "--no-renames", "--name-status", p1, merge])?);
@@ -572,12 +578,12 @@ fn commit_cases(repo: &Repo, min_files: usize) -> Result<Vec<Case>, String> {
     Ok(out)
 }
 
-// ---------- Relatório ----------
+// ---------- Report ----------
 
 fn sample_name(s: Sample) -> &'static str {
     match s {
-        Sample::Task => "TAREFAS mescladas",
-        Sample::Commit => "COMMITS diretos da dev",
+        Sample::Task => "MERGED TASKS",
+        Sample::Commit => "DIRECT COMMITS OF dev",
     }
 }
 
@@ -587,16 +593,18 @@ fn report(cases: &[Prepared], sample: Sample, detail: bool) {
     let with_seed = pop.iter().filter(|p| !p.seeds.is_empty()).count();
     let with_learn = pop.iter().filter(|p| p.has_specific()).count();
     let with_truth = pop.iter().filter(|p| !p.truth.is_empty()).count();
-    println!("casos: {}", pop.len());
-    println!("semente (o pedido cita ao menos um caminho que existe no repositório): {} de {}", with_seed, pop.len());
-    println!("com aprendizado específico na base: {with_learn}; com gabarito (algum aprendizado casa com o que mudou): {with_truth}");
-    println!("A nota usa só os {with_learn} casos com aprendizado na base; o recall só os {with_truth} com gabarito.");
+    println!("cases: {}", pop.len());
+    println!("seed (the request cites at least one path that exists in the repository): {} of {}", with_seed, pop.len());
+    println!("with a specific learning in the base: {with_learn}; with an answer key (some learning matches what changed): {with_truth}");
+    println!(
+        "The score uses only the {with_learn} cases with a learning in the base; the recall only the {with_truth} with an answer key."
+    );
     let scored: Vec<&Prepared> = pop.iter().copied().filter(|p| p.has_specific()).collect();
     if scored.is_empty() {
         return;
     }
 
-    // Estratégias (a), (a+índice real), (b) e (c)
+    // Strategies (a), (a+real index), (b) and (c)
     let (mut a, mut a_real, mut b, mut all_full) = (MemTally::default(), MemTally::default(), MemTally::default(), MemTally::default());
     let mut a_free = MemTally::default();
     for p in &scored {
@@ -609,8 +617,8 @@ fn report(cases: &[Prepared], sample: Sample, detail: bool) {
         let everything = format!("{FULL_HEADER}{}", texts.join("\n\n"));
         all_full.add(p, &read_delivery(&p.learnings, &everything));
     }
-    println!("\n--- Memória: o que cada estratégia entrega (teto de {BUDGET} caracteres de textos por inteiro) ---");
-    println!("{:<46} {:>8} {:>9} {:>9} {:>9} {:>9}", "estratégia", "recall", "recall*", "precisão", "caracs", "tokens");
+    println!("\n--- Memory: what each strategy delivers (cap of {BUDGET} characters of full texts) ---");
+    println!("{:<46} {:>8} {:>9} {:>9} {:>9} {:>9}", "strategy", "recall", "recall*", "precision", "chars", "tokens");
     let line = |name: &str, t: &MemTally| {
         println!(
             "{:<46} {:>8} {:>9} {:>9} {:>9.0} {:>9.0}",
@@ -622,34 +630,34 @@ fn report(cases: &[Prepared], sample: Sample, detail: bool) {
             t.avg_chars() / 4.0
         )
     };
-    line("(a) hoje, só os textos (sem índice)", &a);
-    line("(a') hoje de verdade (índice cortado em 2500)", &a_real);
-    line("(b) hoje + índice de todos os outros", &b);
-    line("    referência: (a) sem teto de caracteres", &a_free);
-    line("    referência: todos os específicos por inteiro", &all_full);
-    for (name, t) in [("(a') hoje de verdade", &a_real), ("(b)", &b)] {
+    line("(a) today, only the texts (no index)", &a);
+    line("(a') today for real (index cut at 2500)", &a_real);
+    line("(b) today + index of all the others", &b);
+    line("    reference: (a) with no character cap", &a_free);
+    line("    reference: every specific one in full", &all_full);
+    for (name, t) in [("(a') today for real", &a_real), ("(b)", &b)] {
         println!(
-            "  {name}: {} dos {} certos que (a) não entregou inteiros estavam como linha do índice (o agente teria de pedir com --learn).",
+            "  {name}: {} of the {} right ones that (a) did not deliver in full were there as an index line (the agent would have to ask with --learn).",
             t.in_index_only,
             t.truth - t.hits
         );
     }
-    println!("  recall = certos entregues por inteiro ÷ certos (todos os casos juntos); recall* = média do recall de cada caso;");
-    println!("  precisão = certos ÷ específicos entregues por inteiro. Tamanho = média por caso, com os globais e o índice.");
+    println!("  recall = right ones delivered in full ÷ right ones (all cases together); recall* = average of the recall of each case;");
+    println!("  precision = right ones ÷ specific ones delivered in full. Size = average per case, with the global ones and the index.");
 
-    // O teto de caracteres: quanto custa e quanto ganha subi-lo (estratégia (a), sem índice).
-    println!("\n--- Efeito do teto de caracteres em (a) ---");
-    println!("{:<12} {:>8} {:>9} {:>9} {:>9}", "teto", "recall", "precisão", "caracs", "tokens");
+    // The character cap: what it costs and what raising it gains (strategy (a), without index).
+    println!("\n--- Effect of the character cap in (a) ---");
+    println!("{:<12} {:>8} {:>9} {:>9} {:>9}", "cap", "recall", "precision", "chars", "tokens");
     for cap in [3_000, BUDGET, 9_000, 12_000, usize::MAX] {
         let mut t = MemTally::default();
         for p in &scored {
             t.add(p, &read_delivery(&p.learnings, &learnings::render_with(&p.learnings, &p.seeds, cap, 0)));
         }
-        let name = if cap == usize::MAX { "sem teto".to_owned() } else { cap.to_string() };
+        let name = if cap == usize::MAX { "no cap".to_owned() } else { cap.to_string() };
         println!("{:<12} {:>8} {:>9} {:>9.0} {:>9.0}", name, pct(t.recall()), pct(t.precision()), t.avg_chars(), t.avg_chars() / 4.0);
     }
 
-    // Grade da co-mudança
+    // Co-change grid
     let file_pop: Vec<&Prepared> = pop.iter().copied().filter(|p| !p.file_seeds().is_empty() && !p.actual.is_empty()).collect();
     let mut grid: Vec<Setting> = Vec::new();
     for (hi, lift) in (0..HALF_LIVES.len()).flat_map(|hi| [(hi, false), (hi, true)]) {
@@ -661,22 +669,24 @@ fn report(cases: &[Prepared], sample: Sample, detail: bool) {
             }
         }
     }
-    // Controle: os arquivos mais mudados, sem olhar o pedido.
+    // Control: the most-changed files, without looking at the request.
     grid.extend(KS.iter().map(|&k| (None, k, 1, 0.0)));
     let label = |key: Option<(usize, bool)>, k: usize, min_count: u32, min_score: f64| {
         let name = key.map_or("ctrl".to_owned(), |(h, lift)| {
-            let half = HALF_LIVES[h].map_or("sem".to_owned(), |d| format!("{d}d"));
+            let half = HALF_LIVES[h].map_or("none".to_owned(), |d| format!("{d}d"));
             format!("{half}/{}", if lift { "lift" } else { "conf" })
         });
         format!("{name:<8} {k:>4} {min_count:>5} {min_score:>5.1}")
     };
-    println!("\n--- (c) co-mudança para a memória: grade de limiares ({} casos) ---", scored.len());
-    println!("ctrl = controle: os arquivos mais mudados antes da base, sem olhar o pedido.");
-    println!("decai = meia-vida em dias; viz = no máximo de vizinhos; vezes = mudaram juntos ao menos; peso = soma das confianças.");
-    println!("Camadas: os aprendizados dos citados primeiro, depois os dos vizinhos, dentro do teto. s/teto = o mesmo sem o teto.");
+    println!("\n--- (c) co-change for the memory: grid of thresholds ({} cases) ---", scored.len());
+    println!("ctrl = control: the files that changed the most before the base, without looking at the request.");
+    println!(
+        "decay = half-life in days; nei = at most how many neighbours; times = changed together at least; weight = sum of the confidences."
+    );
+    println!("Layers: the learnings of the cited ones first, then the ones of the neighbours, inside the cap. w/o cap = the same without the cap.");
     println!(
         "{:<8} {:>4} {:>5} {:>5} | {:>8} {:>9} {:>8} | {:>10} {:>11} {:>10}",
-        "decai", "viz", "vezes", "peso", "recall", "precisão", "tokens", "rec.s/teto", "prec.s/teto", "tok.s/teto"
+        "decay", "nei", "times", "weight", "recall", "precision", "tokens", "rec.w/o cap", "prec.w/o cap", "tok.w/o cap"
     );
     for &(key, k, min_count, min_score) in &grid {
         let (mut c, mut free) = (MemTally::default(), MemTally::default());
@@ -697,19 +707,21 @@ fn report(cases: &[Prepared], sample: Sample, detail: bool) {
         );
     }
 
-    println!("\n--- Previsão de arquivos pela co-mudança: grade de limiares ({} casos com semente e arquivos mudados) ---", file_pop.len());
-    println!("sugeridos = vizinhos por caso; prec.viz = vizinhos que o caso de fato mudou ÷ vizinhos (prec.viz* = média por caso);");
-    println!("rec.tot / prec.tot = citados + vizinhos contra os arquivos mudados (rec.tot* = média por caso).");
+    println!("\n--- File prediction by the co-change: grid of thresholds ({} cases with a seed and changed files) ---", file_pop.len());
+    println!(
+        "suggested = neighbours per case; prec.nei = neighbours the case actually changed ÷ neighbours (prec.nei* = average per case);"
+    );
+    println!("rec.all / prec.all = cited ones + neighbours against the changed files (rec.all* = average per case).");
     println!(
         "{:<8} {:>4} {:>5} {:>5} | {:>9} {:>8} {:>9} | {:>8} {:>9} {:>9}",
-        "decai", "viz", "vezes", "peso", "sugeridos", "prec.viz", "prec.viz*", "rec.tot", "rec.tot*", "prec.tot"
+        "decay", "nei", "times", "weight", "suggested", "prec.nei", "prec.nei*", "rec.all", "rec.all*", "prec.all"
     );
     let mut seeds_only = FileTally::default();
     for p in &file_pop {
         seeds_only.add(p, &[]);
     }
     println!(
-        "só os citados (sem co-mudança): precisão {} recall {} recall* {} ({} arquivos citados, {} mudados)",
+        "only the cited ones (no co-change): precision {} recall {} recall* {} ({} cited files, {} changed)",
         pct(ratio(seeds_only.seed_hits, seeds_only.seeds)),
         pct(ratio(seeds_only.seed_hits, seeds_only.actual)),
         pct(seeds_only.recall_macro()),
@@ -734,12 +746,12 @@ fn report(cases: &[Prepared], sample: Sample, detail: bool) {
     }
 
     if detail {
-        println!("\n--- Por caso ---");
+        println!("\n--- Per case ---");
         for p in &pop {
             let d = read_delivery(&p.learnings, &learnings::render_with(&p.learnings, &p.seeds, BUDGET, 0));
             let got: Vec<&String> = p.truth.iter().filter(|t| d.full.contains(*t)).collect();
             println!(
-                "{:<8} sementes {:>2} | aprendizados na base {:>2} | certos {:>2} | (a) acertou {:>2} | arquivos mudados {:>3}",
+                "{:<8} seeds {:>2} | learnings in the base {:>2} | right ones {:>2} | (a) got {:>2} | changed files {:>3}",
                 p.id,
                 p.seeds.len(),
                 p.learnings.len(),
@@ -756,11 +768,11 @@ fn main() {
     let detail = take_flag(&mut args, "--detalhe");
     let min_files = take_value(&mut args, "--commits-min-arquivos").and_then(|v| v.parse().ok()).unwrap_or(3);
     if args.len() != 2 {
-        eprintln!("uso: memeval <repositório> <arquivo de tarefas> [--commits-min-arquivos N] [--detalhe]");
+        eprintln!("usage: memeval <repository> <tasks file> [--commits-min-arquivos N] [--detalhe]");
         std::process::exit(2);
     }
     if let Err(e) = run(&args[0], &args[1], min_files, detail) {
-        eprintln!("erro: {e}");
+        eprintln!("error: {e}");
         std::process::exit(1);
     }
 }
@@ -782,12 +794,12 @@ fn run(repo: &str, tasks: &str, min_files: usize, detail: bool) -> Result<(), St
     let tasks_json = std::fs::read(tasks).map_err(|e| format!("{tasks}: {e}"))?;
     let tasks_json = agentdeck_core::util::decode_text(&tasks_json);
     let hist = parse_history(
-        &repo.text(&["log", "--no-merges", "--name-only", "--format=%x01%H %ct", "HEAD"]).map_err(|e| format!("histórico: {e}"))?,
+        &repo.text(&["log", "--no-merges", "--name-only", "--format=%x01%H %ct", "HEAD"]).map_err(|e| format!("history: {e}"))?,
     );
-    eprintln!("histórico: {} commits úteis para a co-mudança", hist.commits.len());
+    eprintln!("history: {} commits useful for the co-change", hist.commits.len());
     let mut cases = task_cases(&repo, &tasks_json)?;
     cases.extend(commit_cases(&repo, min_files)?);
-    eprintln!("{} casos; preparando…", cases.len());
+    eprintln!("{} cases; preparing…", cases.len());
     let mut ctx = Ctx { repo: &repo, hist: &hist, blobs: HashMap::new() };
     let mut prepared = Vec::new();
     for case in &cases {
@@ -811,7 +823,7 @@ mod tests {
             titulo: format!("T {file}"),
             resumo: "r".into(),
             touches: touches.iter().map(|s| s.to_string()).collect(),
-            body: "corpo".into(),
+            body: "body".into(),
         }
     }
 
@@ -857,7 +869,7 @@ mod tests {
     fn neighbours_count_and_rank_by_confidence() {
         let (h, anc, exists) = setup();
         let n = neighbours(&h, &anc, 2000, &["src/a.rs".to_owned()], &exists, None, false);
-        // a mudou em 2 commits: b junto em 1, c junto em 1 → confiança 0,5 cada, desempate pelo caminho.
+        // a changed in 2 commits: b together in 1, c together in 1 → confidence 0.5 each, tie broken by the path.
         assert_eq!(n.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(), ["src/b.rs", "src/c.rs"]);
         assert!(n.iter().all(|n| n.count == 1 && (n.score - 0.5).abs() < 1e-9));
     }
@@ -876,7 +888,7 @@ mod tests {
     #[test]
     fn decay_favours_recent_commits() {
         let (_, anc, exists) = setup();
-        // aaa (com b) é 7 dias mais velho que bbb (com c); a base vem logo depois de bbb.
+        // aaa (with b) is 7 days older than bbb (with c); the base comes right after bbb.
         let h = parse_history(&LOG.replace("bbb 2000", &format!("bbb {}", 1000 + 7 * 86_400)));
         let base = 1000 + 7 * 86_400;
         let seeds = ["src/a.rs".to_owned()];
@@ -939,7 +951,7 @@ mod tests {
             learning("memory/aprendizados/b.md", &["src/b.rs"]),
             learning("memory/aprendizados/c.md", &["src/c.rs"]),
         ];
-        // O certo é a e b; o palpite entrega a (certo) e c (errado); b só aparece no índice.
+        // The right ones are a and b; the guess delivers a (right) and c (wrong); b only shows up in the index.
         let p = prepared(all.clone(), &["memory/aprendizados/a.md", "memory/aprendizados/b.md"]);
         let rendered = learnings::render_with(&all, &["src/a.rs".to_owned(), "src/c.rs".to_owned()], BUDGET, usize::MAX);
         let mut t = MemTally::default();
@@ -978,11 +990,12 @@ mod tests {
         all.push(learning("memory/aprendizados/g.md", &[]));
         let seeds = vec!["src/b.rs".to_owned()];
         assert_eq!(layered(&all, &seeds, &[], BUDGET), learnings::render_with(&all, &seeds, BUDGET, 0));
-        // O teto só cabe um texto: o do citado (b) vale mais que o do vizinho (a), mesmo que a venha antes na pasta.
+        // The cap fits only one text: the one of the cited file (b) is worth more than the one of the neighbour (a),
+        // even though a comes first in the folder.
         let one = all[1].full_text().chars().count();
         let rendered = layered(&all, &seeds, &["src/a.rs".to_owned()], one);
         assert!(rendered.contains(&all[1].full_text()) && !rendered.contains(&all[0].full_text()));
-        // Sem teto, entram os dois e o global, uma vez cada.
+        // Without a cap, both come in, plus the global one, once each.
         let rendered = layered(&all, &seeds, &["src/a.rs".to_owned(), "src/b.rs".to_owned()], usize::MAX);
         assert_eq!(rendered.matches("### ").count(), 3);
         assert_eq!(layered(&[], &seeds, &[], BUDGET), "");

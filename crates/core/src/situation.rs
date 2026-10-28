@@ -1,35 +1,35 @@
-//! Memória de curto prazo: a "situação atual" do projeto.
+//! Short-term memory: the "current situation" of the project.
 //!
-//! Diz ao agente o que está acontecendo agora no projeto, para ele não pisar em ninguém: as outras tarefas em
-//! andamento (com os arquivos que a branch delas já mexeu) e os últimos commits da base. Sai por dois caminhos:
-//! empurrada no início de uma tarefa (`task_situation`) e por demanda no `ask-agent --learn` de qualquer aba
-//! ([`crate::Core::learn`]), que também avisa quando um arquivo que o agente vai mexer já é mexido por outra
-//! tarefa ([`clash_warnings`]). Quem monta a lista de tarefas com os arquivos é [`Core::busy_tasks`]; o resto
-//! são funções puras.
+//! It tells the agent what is happening in the project right now, so it does not step on anyone: the other tasks
+//! in progress (with the files their branch already touched) and the latest commits of the base. It goes out two
+//! ways: pushed at the start of a task (`task_situation`) and on demand by the `ask-agent --learn` of any tab
+//! ([`crate::Core::learn`]), which also warns when a file the agent is about to touch is already touched by another
+//! task ([`clash_warnings`]). Whoever builds the list of tasks with the files is [`Core::busy_tasks`]; the rest
+//! are pure functions.
 
 use crate::git::Repo;
 use crate::tasks::{changed_files, union_files, worktree_dirty_unlocked};
 use crate::{Core, TaskStatus};
 
-/// Orçamento (em caracteres) da seção inteira.
+/// Budget (in characters) of the whole section.
 pub const BUDGET: usize = 1_500;
-/// Outras tarefas citadas, e arquivos mostrados por tarefa.
+/// Other tasks cited, and files shown per task.
 const MAX_TASKS: usize = 6;
 const MAX_FILES: usize = 6;
 
-/// Uma tarefa em andamento no projeto (que não é a que está começando).
+/// A task in progress in the project (which is not the one starting).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OtherTask {
     pub id: String,
     pub title: String,
-    /// A instância do agente (`claude@t12`).
+    /// The instance of the agent (`claude@t12`).
     pub instance: String,
-    /// O estado, para pessoas (`em andamento`).
+    /// The state, for people (as `TaskStatus::label` writes it).
     pub status: String,
-    /// Arquivos que a branch já mexeu (`git diff --name-only base...branch`); vazio = nenhum até agora.
+    /// Files the branch already touched (`git diff --name-only base...branch`); empty = none so far.
     pub files: Vec<String>,
-    /// Arquivos que o pedido da tarefa cita e que ainda não estão em `files`: é onde o choque começa, antes do
-    /// primeiro commit. Vazio em `Validating` (já está na base).
+    /// Files the task's request cites and that are not yet in `files`: that is where the clash starts, before the
+    /// first commit. Empty in `Validating` (it is already in the base).
     pub cited: Vec<String>,
 }
 
@@ -42,11 +42,11 @@ fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// Arquivos que não contam como choque: o histórico mescla por união (`.gitattributes`), então duas tarefas
-/// acrescentando ali não conflitam.
+/// Files that do not count as a clash: the history merges by union (`.gitattributes`), so two tasks adding to it
+/// do not conflict.
 const MERGE_SAFE: &[&str] = &["memory/historico.md"];
 
-/// Os últimos commits de `base` (`git log --oneline`); vazio se o git falha.
+/// The latest commits of `base` (`git log --oneline`); empty if git fails.
 pub(crate) fn base_commits(repo: &Repo, base: &str) -> Vec<String> {
     repo.read(&["log", "--oneline", "-8", base, "--"])
         .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::to_owned).collect())
@@ -54,9 +54,10 @@ pub(crate) fn base_commits(repo: &Repo, base: &str) -> Vec<String> {
 }
 
 impl Core {
-    /// As tarefas do projeto que estão mexendo no código agora (em andamento, em revisão, aguardando validação),
-    /// menos a da instância `except_instance`, cada uma com os arquivos que mexe e os que o pedido dela cita. Cada
-    /// tarefa pede ao git dois comandos (a branch e a worktree), então rodam em paralelo, uma thread por tarefa.
+    /// The project tasks that are touching the code right now (in progress, in review, waiting for validation),
+    /// except the one of instance `except_instance`, each with the files it touches and the ones its request
+    /// cites. Each task asks git for two commands (the branch and the worktree), so they run in parallel, one
+    /// thread per task.
     pub(crate) fn busy_tasks(&self, project: &str, repo: &Repo, except_instance: &str) -> Vec<OtherTask> {
         let busy: Vec<_> = self
             .tasks(project)
@@ -70,8 +71,8 @@ impl Core {
                 .into_iter()
                 .map(|t| {
                     scope.spawn(move || {
-                        // `Validating` já está na base (a branch foi alinhada): não há diff a mostrar.
-                        // Em andamento, junta o que já está na branch com o que ainda não foi commitado.
+                        // `Validating` is already in the base (the branch was aligned): there is no diff to show.
+                        // In progress, it joins what is already in the branch with what is not yet committed.
                         let (files, cited) = match t.status {
                             TaskStatus::Validating => (Vec::new(), Vec::new()),
                             _ => {
@@ -92,9 +93,9 @@ impl Core {
     }
 }
 
-/// Um aviso por arquivo de `paths` que outra tarefa de `others` também mexe, dizendo de onde veio (`já mexeu`:
-/// está na branch ou na worktree dela; `o pedido cita`: ainda não mexeu, mas o pedido dela cita o arquivo).
-/// `memory/historico.md` não conta. Um por linha; vazio se não há choque.
+/// One warning per file of `paths` that another task of `others` also touches, saying where it came from
+/// (`already touched`: it is in its branch or worktree; `cited by the request`: it did not touch it yet, but its
+/// request cites the file). `memory/historico.md` does not count. One per line; empty if there is no clash.
 pub fn clash_warnings(others: &[OtherTask], paths: &[String]) -> String {
     let mut lines: Vec<String> = Vec::new();
     for path in paths {
@@ -105,60 +106,63 @@ pub fn clash_warnings(others: &[OtherTask], paths: &[String]) -> String {
             .iter()
             .filter_map(|t| {
                 let origin = if t.files.iter().any(|f| f.eq_ignore_ascii_case(path)) {
-                    "já mexeu"
+                    "already touched"
                 } else if t.cited.iter().any(|f| f.eq_ignore_ascii_case(path)) {
-                    "o pedido cita"
+                    "cited by the request"
                 } else {
                     return None;
                 };
-                Some(format!("a {} ({}, {}; {origin})", t.id, t.instance, t.status))
+                Some(format!("{} ({}, {}; {origin})", t.id, t.instance, t.status))
             })
             .collect();
         if who.is_empty() {
             continue;
         }
-        let also = if who.len() == 1 { "também mexe" } else { "também mexem" };
-        lines.push(format!("{path}: {} {also} nele; mudanças nas mesmas linhas vão conflitar na mesclagem", who.join(" e ")));
+        let also = if who.len() == 1 { "also touches it" } else { "also touch it" };
+        lines.push(format!("{path}: {} {also}; changes to the same lines will conflict when merging", who.join(" and ")));
     }
     lines.join("\n")
 }
 
-/// A seção "Situação atual". `own_paths` são os arquivos que o pedido da tarefa cita: se outra tarefa mexe em
-/// um deles, a linha avisa. `commits` são linhas de `git log --oneline` da base. Cabe em `budget` caracteres:
-/// o que não couber é cortado do fim (primeiro os commits).
+/// The "Current situation" section. `own_paths` are the files the task's request cites: if another task touches
+/// one of them, the line warns. `commits` are lines of `git log --oneline` of the base. It fits in `budget`
+/// characters: what does not fit is cut from the end (the commits first).
 pub fn render(others: &[OtherTask], commits: &[String], base: &str, own_paths: &[String], budget: usize) -> String {
     let mut lines: Vec<String> = Vec::new();
     if others.is_empty() {
-        lines.push("Outras tarefas em andamento: nenhuma.".to_owned());
+        lines.push("Other tasks in progress: none.".to_owned());
     } else {
-        lines.push("Outras tarefas em andamento (evite os mesmos arquivos):".to_owned());
+        lines.push("Other tasks in progress (avoid the same files):".to_owned());
         for t in others.iter().take(MAX_TASKS) {
             let mut line = format!("- {} \"{}\" ({}, {})", t.id, clip(&t.title, 60), t.instance, t.status);
             if t.files.is_empty() {
-                line.push_str(": ainda sem arquivos na branch");
+                line.push_str(": no files in the branch yet");
                 if !t.cited.is_empty() {
                     let shown: Vec<&str> = t.cited.iter().take(MAX_FILES).map(String::as_str).collect();
-                    line.push_str(&format!("; o pedido cita {}", shown.join(", ")));
+                    line.push_str(&format!("; the request cites {}", shown.join(", ")));
                 }
             } else {
                 let shown: Vec<&str> = t.files.iter().take(MAX_FILES).map(String::as_str).collect();
-                line.push_str(&format!(": mexe em {}", shown.join(", ")));
+                line.push_str(&format!(": touches {}", shown.join(", ")));
                 if t.files.len() > MAX_FILES {
-                    line.push_str(&format!(" e mais {}", t.files.len() - MAX_FILES));
+                    line.push_str(&format!(" and {} more", t.files.len() - MAX_FILES));
                 }
                 let clash: Vec<&str> = t.files.iter().chain(&t.cited).filter(|f| own_paths.contains(f)).map(String::as_str).collect();
                 if !clash.is_empty() {
-                    line.push_str(&format!(". ATENÇÃO: o seu pedido cita {}; combine com essa tarefa antes de mexer", clash.join(", ")));
+                    line.push_str(&format!(
+                        ". WARNING: your request cites {}; coordinate with that task before touching it",
+                        clash.join(", ")
+                    ));
                 }
             }
             lines.push(line);
         }
         if others.len() > MAX_TASKS {
-            lines.push(format!("- … e mais {} tarefa(s)", others.len() - MAX_TASKS));
+            lines.push(format!("- … and {} more task(s)", others.len() - MAX_TASKS));
         }
     }
     if !commits.is_empty() {
-        lines.push(format!("Últimos commits de {base}:"));
+        lines.push(format!("Latest commits on {base}:"));
         lines.extend(commits.iter().map(|c| format!("- {}", clip(c.trim(), 90))));
     }
     let mut out = String::new();
@@ -183,22 +187,22 @@ mod tests {
     fn other(id: &str, files: &[&str]) -> OtherTask {
         OtherTask {
             id: id.into(),
-            title: format!("Título {id}"),
+            title: format!("Title {id}"),
             instance: format!("claude@{id}"),
-            status: "em andamento".into(),
+            status: TaskStatus::Running.label().into(),
             files: files.iter().map(|f| (*f).to_owned()).collect(),
             cited: Vec::new(),
         }
     }
 
     fn commits() -> Vec<String> {
-        (0..8).map(|n| format!("abc{n:04} commit número {n} com uma mensagem bem comprida para ocupar espaço")).collect()
+        (0..8).map(|n| format!("abc{n:04} commit number {n} with a very long message to take up some space")).collect()
     }
 
     #[test]
     fn an_empty_project_still_lists_the_base_commits() {
-        let out = render(&[], &["1fa59a7 Merge tarefa t11".into()], "dev", &[], BUDGET);
-        assert_eq!(out, "Outras tarefas em andamento: nenhuma.\nÚltimos commits de dev:\n- 1fa59a7 Merge tarefa t11");
+        let out = render(&[], &["1fa59a7 feat: something".into()], "dev", &[], BUDGET);
+        assert_eq!(out, "Other tasks in progress: none.\nLatest commits on dev:\n- 1fa59a7 feat: something");
     }
 
     #[test]
@@ -210,13 +214,16 @@ mod tests {
             &["crates/core/src/tasks.rs".to_owned()],
             BUDGET,
         );
+        let running = TaskStatus::Running.label();
         assert!(
-            out.contains("- t12 \"Título t12\" (claude@t12, em andamento): mexe em crates/app/src/ui/tabs.rs, crates/core/src/tasks.rs"),
+            out.contains(&format!(
+                "- t12 \"Title t12\" (claude@t12, {running}): touches crates/app/src/ui/tabs.rs, crates/core/src/tasks.rs"
+            )),
             "{out}"
         );
-        assert!(out.contains("ATENÇÃO: o seu pedido cita crates/core/src/tasks.rs"), "{out}");
-        assert!(out.contains("- t14 \"Título t14\" (claude@t14, em andamento): ainda sem arquivos na branch"), "{out}");
-        assert!(!out.contains("Últimos commits"), "{out}");
+        assert!(out.contains("WARNING: your request cites crates/core/src/tasks.rs"), "{out}");
+        assert!(out.contains(&format!("- t14 \"Title t14\" (claude@t14, {running}): no files in the branch yet")), "{out}");
+        assert!(!out.contains("Latest commits"), "{out}");
     }
 
     #[test]
@@ -224,8 +231,8 @@ mod tests {
         let files: Vec<String> = (0..10).map(|n| format!("f{n}.rs")).collect();
         let many: Vec<OtherTask> = (1..=9).map(|n| OtherTask { files: files.clone(), ..other(&format!("t{n}"), &[]) }).collect();
         let out = render(&many, &[], "dev", &[], 100_000);
-        assert!(out.contains("f5.rs e mais 4"), "{out}");
-        assert!(out.contains("- … e mais 3 tarefa(s)") && !out.contains("- t7 "), "{out}");
+        assert!(out.contains("f5.rs and 4 more"), "{out}");
+        assert!(out.contains("- … and 3 more task(s)") && !out.contains("- t7 "), "{out}");
     }
 
     #[test]
@@ -234,12 +241,15 @@ mod tests {
         let b = OtherTask { cited: vec!["crates/app/src/app.rs".into(), "memory/historico.md".into()], ..other("t40", &["x.rs"]) };
         let paths = ["crates/app/src/app.rs", "memory/historico.md", "y.rs"].map(String::from);
         let out = clash_warnings(&[a.clone(), b], &paths);
+        let running = TaskStatus::Running.label();
         assert_eq!(
             out,
-            "crates/app/src/app.rs: a t37 (claude@t37, em andamento; já mexeu) e a t40 (claude@t40, em andamento; o pedido cita) também mexem nele; mudanças nas mesmas linhas vão conflitar na mesclagem"
+            format!(
+                "crates/app/src/app.rs: t37 (claude@t37, {running}; already touched) and t40 (claude@t40, {running}; cited by the request) also touch it; changes to the same lines will conflict when merging"
+            )
         );
         let one = clash_warnings(&[a], &paths[..1]);
-        assert!(one.contains("a t37 (claude@t37, em andamento; já mexeu) também mexe nele;"), "{one}");
+        assert!(one.contains(&format!("t37 (claude@t37, {running}; already touched) also touches it;")), "{one}");
         assert_eq!(clash_warnings(&[], &paths), "");
     }
 
@@ -247,7 +257,7 @@ mod tests {
     fn a_task_with_no_files_yet_shows_what_its_request_cites() {
         let t = OtherTask { cited: vec!["a.rs".into(), "b.rs".into()], ..other("t12", &[]) };
         let out = render(&[t], &[], "dev", &[], BUDGET);
-        assert!(out.contains("ainda sem arquivos na branch; o pedido cita a.rs, b.rs"), "{out}");
+        assert!(out.contains("no files in the branch yet; the request cites a.rs, b.rs"), "{out}");
     }
 
     #[test]
@@ -255,8 +265,8 @@ mod tests {
         let tasks = [other("t12", &["a.rs"])];
         let out = render(&tasks, &commits(), "dev", &[], BUDGET);
         assert!(out.chars().count() <= BUDGET, "{}", out.chars().count());
-        assert!(out.contains("- t12 ") && out.contains("Últimos commits de dev:"), "{out}");
-        // Com pouco espaço, os commits somem do fim, nunca as tarefas.
+        assert!(out.contains("- t12 ") && out.contains("Latest commits on dev:"), "{out}");
+        // With little room, the commits disappear from the end, never the tasks.
         let tight = render(&tasks, &commits(), "dev", &[], 200);
         assert!(tight.chars().count() <= 200 && tight.contains("- t12 ") && tight.ends_with('…'), "{tight}");
         assert!(!tight.contains("abc0007"), "{tight}");

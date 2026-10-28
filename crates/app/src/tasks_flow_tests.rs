@@ -528,7 +528,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     let first = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t1}-brief.md"))).expect("brief da t1");
     assert!(first.contains("O que o projeto já aprendeu:") && first.contains("### Aprendizado do-arquivo"), "{first}");
     assert!(first.contains("Cuidado ao mexer no a.txt.") && first.contains("Vale para todo mundo."), "{first}");
-    assert!(first.contains("Outras tarefas em andamento: nenhuma.") && first.contains("docs: aprendizados"), "{first}");
+    assert!(first.contains("Other tasks in progress: none.") && first.contains("docs: aprendizados"), "{first}");
     // O que não casa vira só a linha do índice.
     assert!(
         first.contains("- memory/aprendizados/de-outra-area.md — Resumo de-outra-area.") && !first.contains("Só para o código."),
@@ -540,8 +540,9 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     env.agent_commits(&t1, "a.txt", "dois\n");
     let t2 = create(&env, &project, "Segunda", "Também mexa no `a.txt`.");
     let second = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-brief.md"))).expect("brief da t2");
-    assert!(second.contains(&format!("- {t1} \"Primeira\" (claude@{t1}, em andamento): mexe em a.txt")), "{second}");
-    assert!(second.contains("ATENÇÃO: o seu pedido cita a.txt"), "{second}");
+    let running = TaskStatus::Running.label();
+    assert!(second.contains(&format!("- {t1} \"Primeira\" (claude@{t1}, {running}): touches a.txt")), "{second}");
+    assert!(second.contains("WARNING: your request cites a.txt"), "{second}");
 
     // O feedback anterior volta na devolução seguinte.
     env.pump("a t2 na lista", |d| d.tasks.task("t2").is_some());
@@ -601,7 +602,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     let first = feedback_file(&t1);
     assert!(first.contains("O que o projeto já aprendeu sobre os arquivos citados:"), "{first}");
     assert!(first.contains("Cuidado com o b.") && !first.contains("Cuidado com o a."), "{first}");
-    assert!(!first.contains("Vale para todo mundo.") && !first.contains("Outros aprendizados"), "{first}");
+    assert!(!first.contains("Vale para todo mundo.") && !first.contains("Other learnings"), "{first}");
 
     // O b.txt agora já foi citado num feedback anterior: citar de novo não repete o aprendizado.
     env.core.task_done(&project, &t1, "Feito de novo.").expect("done 2");
@@ -625,7 +626,8 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     std::fs::write(work.join("a.txt"), "mudou\n").expect("w");
     let t3 = create(&env, &project, "Terceira", "Nada.");
     let brief = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t3}-brief.md"))).expect("brief da t3");
-    assert!(brief.contains(&format!("- {t2} \"Segunda\" (claude@{t2}, em andamento): mexe em a.txt, novo.txt")), "{brief}");
+    let running = TaskStatus::Running.label();
+    assert!(brief.contains(&format!("- {t2} \"Segunda\" (claude@{t2}, {running}): touches a.txt, novo.txt")), "{brief}");
 }
 
 #[test]
