@@ -1,5 +1,5 @@
-//! Pintura da grade do terminal no egui + mouse (seleção, rolagem, roda e relatório de mouse para o
-//! programa quando ele ativa os modos 1000/1002/1003/1006).
+//! Terminal grid painting in egui + mouse (selection, scrolling, wheel and mouse reporting to the
+//! program when it activates modes 1000/1002/1003/1006).
 
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
@@ -21,10 +21,10 @@ pub const PAD_LEFT: f32 = 10.0;
 pub const PAD_TOP: f32 = 6.0;
 pub const PAD_RIGHT: f32 = 4.0;
 pub const PAD_BOTTOM: f32 = 6.0;
-/// Largura da barra de rolagem do viewport do xterm (reservada pelo FitAddon).
+/// xterm viewport scrollbar width (reserved by FitAddon).
 pub const SCROLLBAR_W: f32 = 5.0;
 
-/// Métricas da célula para a fonte do terminal.
+/// Cell metrics for the terminal font.
 #[derive(Debug, Clone)]
 pub struct Metrics {
     pub cell_w: f32,
@@ -41,7 +41,7 @@ impl Metrics {
         Self { cell_w: if w > 0.0 { w } else { 8.4 }, cell_h: h.ceil().max(1.0), font, bold }
     }
 
-    /// Colunas × linhas que cabem na área (equivalente ao `FitAddon.proposeDimensions`).
+    /// Columns × rows that fit in the area (equivalent to `FitAddon.proposeDimensions`).
     pub fn grid_size_for(&self, rect: Rect) -> GridSize {
         let w = rect.width() - PAD_LEFT - PAD_RIGHT - SCROLLBAR_W;
         let h = rect.height() - PAD_TOP - PAD_BOTTOM;
@@ -49,30 +49,30 @@ impl Metrics {
     }
 }
 
-/// Estado de interação por aba.
+/// Interaction state per tab.
 #[derive(Default)]
 pub struct ViewState {
     wheel_accum: f32,
     dragging_scrollbar: Option<(f32, usize)>,
-    /// Botão (já com modificadores) enviado ao programa e ainda não solto.
+    /// Button (already with modifiers) sent to the program and not yet released.
     mouse_down: Option<u8>,
-    /// Última célula (coluna, linha, base 1) relatada, para não repetir movimentos.
+    /// Last cell (column, row, 1-based) reported, to avoid repeating moves.
     last_cell: Option<(usize, usize)>,
 }
 
-/// Resultado da interação no quadro atual.
+/// Interaction result for the current frame.
 #[derive(Default)]
 pub struct ViewResponse {
-    /// O usuário clicou na área (deve receber o foco do teclado).
+    /// User clicked in the area (should receive keyboard focus).
     pub focus: bool,
-    /// Bytes a enviar ao processo (ex.: roda do mouse em modo de relatório/tela alternativa).
+    /// Bytes to send to the process (e.g. mouse wheel in reporting/alternate screen mode).
     pub to_pty: Vec<u8>,
-    /// Célula do cursor do terminal (onde o IME ancora a composição), se visível na tela.
+    /// Terminal cursor cell (where IME anchors composition), if visible on screen.
     pub cursor_rect: Option<Rect>,
 }
 
-/// Pinta o terminal e trata o mouse. `focused` = recebe teclado; `blink_on` = fase do cursor;
-/// `preedit` = texto em composição do IME, desenhado sobre o cursor.
+/// Paints the terminal and handles mouse input. `focused` = receives keyboard; `blink_on` = cursor blink phase;
+/// `preedit` = IME composition text, drawn over the cursor.
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
@@ -100,7 +100,7 @@ pub fn show(
     let cols = emu.term.columns();
     let history = emu.term.grid().history_size();
 
-    // ---------- Barra de rolagem ----------
+    // ---------- Scrollbar ----------
     let track = Rect::from_min_max(
         Pos2::new(rect.max.x - PAD_RIGHT - SCROLLBAR_W, rect.min.y + PAD_TOP),
         Pos2::new(rect.max.x - PAD_RIGHT, rect.min.y + PAD_TOP + rows as f32 * m.cell_h),
@@ -116,8 +116,8 @@ pub fn show(
     let pointer = ui.input(|i| i.pointer.interact_pos());
     let on_scrollbar = pointer.is_some_and(|p| track.expand2(Vec2::new(1.0, 0.0)).contains(p)) && thumb.is_some();
 
-    // O programa pediu o mouse (vim, htop, menus interativos): clique/arrasto/movimento vão para ele.
-    // Shift devolve o mouse ao terminal (seleção), como no xterm.
+    // Program requested mouse (vim, htop, interactive menus): click/drag/motion go to it.
+    // Shift returns mouse handling to the terminal (selection), as in xterm.
     let mode = *emu.term.mode();
     let reporting = mode.intersects(TermMode::MOUSE_MODE) && !ui.input(|i| i.modifiers.shift);
     if reporting && response.hovered() {
@@ -159,7 +159,7 @@ pub fn show(
             let cur = emu.term.grid().display_offset() as f32;
             emu.term.scroll_display(Scroll::Delta((target - cur).round() as i32));
         } else if let (false, Some(p)) = (reporting, response.interact_pointer_pos()) {
-            // Rolagem automática ao arrastar para fora da área.
+            // Automatic scrolling when dragging outside the area.
             if p.y < rect.min.y {
                 emu.term.scroll_display(Scroll::Delta(1));
             } else if p.y > rect.max.y {
@@ -189,14 +189,14 @@ pub fn show(
         emu.term.selection = None;
     }
 
-    // Roda do mouse.
+    // Mouse wheel.
     if response.hovered() {
         let events = ui.input(|i| i.events.clone());
         for ev in events {
             if let egui::Event::MouseWheel { unit, delta, modifiers, .. } = ev {
-                // Shift+roda pode chegar como rolagem horizontal (macOS).
+                // Shift+wheel may arrive as horizontal scrolling (macOS).
                 let dy = if delta.y == 0.0 && modifiers.shift { delta.x } else { delta.y };
-                // Uma "linha" de roda ≈ 100 px no Chromium; o xterm converte pixels em linhas pela altura da célula.
+                // One wheel "line" ≈ 100 px in Chromium; xterm converts pixels to lines by cell height.
                 let px = match unit {
                     egui::MouseWheelUnit::Point => dy,
                     egui::MouseWheelUnit::Line => dy * 100.0,
@@ -209,7 +209,7 @@ pub fn show(
                 }
                 state.wheel_accum -= lines as f32;
                 if modifiers.shift {
-                    // Shift devolve a roda ao terminal (como na seleção): rola o histórico local.
+                    // Shift returns wheel to terminal (as in selection): scrolls local history.
                     emu.term.scroll_display(Scroll::Delta(lines));
                 } else if mode.intersects(TermMode::MOUSE_MODE) {
                     if let Some(p) = pointer {
@@ -238,7 +238,7 @@ pub fn show(
         }
     }
 
-    // Clique, soltar e movimento relatados ao programa.
+    // Click, release, and motion reported to the program.
     if reporting {
         let sgr = mode.contains(TermMode::SGR_MOUSE);
         let drag = mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION);
@@ -295,7 +295,7 @@ pub fn show(
         }
     }
 
-    // ---------- Pintura ----------
+    // ---------- Painting ----------
     let content = emu.term.renderable_content();
     let offset = content.display_offset;
     let overrides = content.colors;
@@ -310,7 +310,7 @@ pub fn show(
 
     let mut bgs: Vec<(Rect, Color32)> = Vec::new();
     let mut texts: Vec<(Pos2, LayoutJob, Option<f32>)> = Vec::new();
-    let mut lines: Vec<(Pos2, f32, Color32, bool)> = Vec::new(); // (início, largura, cor, tachado?)
+    let mut lines: Vec<(Pos2, f32, Color32, bool)> = Vec::new(); // (start, width, color, strikethrough?)
     let mut run: Option<Run> = None;
     let mut cursor_cell: Option<(char, bool, Color32)> = None;
 
@@ -374,7 +374,7 @@ pub fn show(
     }
     for (pos, job, span) in texts {
         let galley = painter.layout_job(job);
-        // Caracteres largos/fora do ASCII: centraliza na(s) célula(s) que ocupam.
+        // Wide/non-ASCII characters: center in the cell(s) they occupy.
         let dx = span.map(|w| (w - galley.size().x) / 2.0).unwrap_or(0.0);
         painter.galley(pos + Vec2::new(dx, 0.0), galley, theme::TERM_FG);
     }
@@ -417,7 +417,7 @@ pub fn show(
         }
     }
 
-    // Texto em composição do IME (ainda não confirmado): sublinhado, sobre o cursor.
+    // IME composition text (not yet confirmed): underlined, over cursor.
     if let (false, Some(cell)) = (preedit.is_empty(), out.cursor_rect) {
         let galley = painter.layout_no_wrap(preedit.to_owned(), m.font.clone(), theme::TERM_FG);
         let w = galley.size().x;
@@ -473,7 +473,7 @@ mod tests {
         Metrics { cell_w: 10.0, cell_h: 20.0, font: FontId::monospace(14.0), bold: FontId::monospace(14.0) }
     }
 
-    /// Centro da célula (coluna, linha), base 0, em coordenadas da tela.
+    /// Cell center (col, row), 0-based, in screen coordinates.
     fn cell(col: usize, row: usize) -> Pos2 {
         Pos2::new(PAD_LEFT + col as f32 * 10.0 + 5.0, PAD_TOP + row as f32 * 20.0 + 10.0)
     }
@@ -483,24 +483,24 @@ mod tests {
         session: Session,
         state: ViewState,
         time: f64,
-        /// Formas pintadas no último quadro.
+        /// Shapes painted in the last frame.
         shapes: Vec<egui::epaint::ClippedShape>,
     }
 
     impl Harness {
-        /// `modes`: sequências DECSET que o "programa" enviaria (ex.: `ESC[?1002h`).
+        /// `modes`: DECSET sequences that the "program" would send (e.g. `ESC[?1002h`).
         fn new(modes: &str) -> Self {
             let session = Session::new(GridSize { cols: 30, rows: 15 });
             session.shared.emu.lock().feed(modes.as_bytes());
             let mut h = Self { ctx: egui::Context::default(), session, state: ViewState::default(), time: 0.0, shapes: Vec::new() };
-            h.frame(vec![], Modifiers::NONE); // registra o widget (o hover usa o quadro anterior)
+            h.frame(vec![], Modifiers::NONE); // registers widget (hover uses previous frame)
             h
         }
 
         fn frame(&mut self, events: Vec<Event>, modifiers: Modifiers) -> ViewResponse {
             let input = RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
-                // O egui 0.36 recebe os modificadores como evento (e os mantém entre quadros).
+                // egui 0.36 receives modifiers as an event (and keeps them between frames).
                 events: std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect(),
                 time: Some(self.time),
                 ..Default::default()
@@ -511,9 +511,9 @@ mod tests {
             let mut full = self.ctx.run_ui(input, |ui| {
                 out = Some(show(ui, AREA, egui::Id::new("t"), session, state, true, true, "", &metrics()));
             });
-            full.textures_delta.clear(); // sem GPU: nada a aplicar
+            full.textures_delta.clear(); // no GPU: nothing to apply
             self.shapes = std::mem::take(&mut full.shapes);
-            out.expect("quadro executado")
+            out.expect("frame executed")
         }
 
         fn moved(&mut self, p: Pos2) -> Vec<u8> {
@@ -529,11 +529,11 @@ mod tests {
     #[test]
     fn sgr_click_drag_and_release_are_reported() {
         let mut h = Harness::new("\x1b[?1002h\x1b[?1006h");
-        assert!(h.moved(cell(3, 2)).is_empty(), "sem botão e sem modo 1003, mover não relata");
+        assert!(h.moved(cell(3, 2)).is_empty(), "without button and without mode 1003, move does not report");
         assert_eq!(h.button(cell(3, 2), true, Modifiers::NONE), b"\x1b[<0;4;3M");
-        assert_eq!(h.moved(cell(5, 2)), b"\x1b[<32;6;3M", "arrastar com botão: bit de movimento");
-        assert!(h.session.shared.emu.lock().term.selection.is_none(), "o programa recebe o arrasto: nada de seleção");
-        assert!(h.moved(cell(5, 2)).is_empty(), "mesma célula não repete");
+        assert_eq!(h.moved(cell(5, 2)), b"\x1b[<32;6;3M", "drag with button: motion bit");
+        assert!(h.session.shared.emu.lock().term.selection.is_none(), "program receives drag: no selection");
+        assert!(h.moved(cell(5, 2)).is_empty(), "same cell does not repeat");
         assert_eq!(h.button(cell(5, 2), false, Modifiers::NONE), b"\x1b[<0;6;3m");
         assert!(h.state.mouse_down.is_none());
     }
@@ -550,7 +550,7 @@ mod tests {
         h.moved(cell(0, 0));
         assert_eq!(h.button(cell(0, 0), true, Modifiers::NONE), vec![0x1b, b'[', b'M', 32, 33, 33]);
         assert_eq!(h.button(cell(0, 0), false, Modifiers::NONE), vec![0x1b, b'[', b'M', 35, 33, 33]);
-        // Modo 1000 não relata arrasto.
+        // Mode 1000 does not report drag.
         h.button(cell(0, 0), true, Modifiers::NONE);
         assert!(h.moved(cell(4, 4)).is_empty());
     }
@@ -568,7 +568,7 @@ mod tests {
         h.moved(cell(3, 2));
         assert!(h.button(cell(3, 2), true, Modifiers::NONE).is_empty());
         assert!(h.moved(cell(8, 2)).is_empty());
-        assert!(h.session.shared.emu.lock().term.selection.is_some(), "arrastar seleciona texto");
+        assert!(h.session.shared.emu.lock().term.selection.is_some(), "dragging selects text");
         assert!(h.button(cell(8, 2), false, Modifiers::NONE).is_empty());
     }
 
@@ -588,7 +588,7 @@ mod tests {
         assert!(h.button(outside, true, Modifiers::NONE).is_empty());
     }
 
-    /// Uma linha de roda para cima (+) ou para baixo (−) sobre a célula `at`.
+    /// One wheel line up (+) or down (-) over cell `at`.
     fn wheel(h: &mut Harness, at: Pos2, lines: f32, modifiers: Modifiers) -> Vec<u8> {
         h.moved(at);
         let ev = Event::MouseWheel {
@@ -613,14 +613,14 @@ mod tests {
 
     #[test]
     fn shift_wheel_scrolls_the_local_history_even_in_mouse_mode() {
-        let mut h = Harness::new(&"linha\r\n".repeat(40));
+        let mut h = Harness::new(&"line\r\n".repeat(40));
         h.session.shared.emu.lock().feed(b"\x1b[?1000h\x1b[?1006h");
-        assert!(wheel(&mut h, cell(1, 1), 2.0, Modifiers::SHIFT).is_empty(), "nada vai ao programa");
+        assert!(wheel(&mut h, cell(1, 1), 2.0, Modifiers::SHIFT).is_empty(), "nothing goes to program");
         assert_eq!(h.session.shared.emu.lock().term.grid().display_offset(), 2);
         assert_eq!(wheel(&mut h, cell(1, 1), 1.0, Modifiers::NONE), b"\x1b[<64;2;2M");
     }
 
-    /// Linhas da tela (base 0) em que o quadro pintou texto.
+    /// Screen lines (0-based) where the frame painted text.
     fn painted_rows(h: &Harness) -> Vec<usize> {
         let mut rows: Vec<usize> = h
             .shapes
@@ -636,8 +636,8 @@ mod tests {
 
     #[test]
     fn the_frame_paints_every_row_the_grid_has_text_in_and_no_other() {
-        // Defeito t37 ("metade de cima em branco"): o quadro desenha a grade como ela está, sem cache de linhas.
-        // Uma sessão real do Claude Code (gravação) depois de encolher e alargar a tela, e depois com o histórico rolado.
+        // Bug t37 ("top half blank"): the frame draws the grid as is, without line caching.
+        // A real Claude Code session (recording) after shrinking and widening the screen, and then with scrolled history.
         const BYTES: &[u8] = include_bytes!("testdata/claude-classico-encolhe-e-alarga.bin");
         const EVENTS: &str = include_str!("testdata/claude-classico-encolhe-e-alarga.events.txt");
         let mut h = Harness::new("");
@@ -645,21 +645,21 @@ mod tests {
         h.frame(vec![], Modifiers::NONE);
         let screen = crate::terminal::record::replay::screen(&h.session);
         let with_text: Vec<usize> = screen.iter().enumerate().filter(|(_, l)| !l.is_empty()).map(|(i, _)| i).collect();
-        assert!(with_text.len() > 30, "a gravação enche a tela");
+        assert!(with_text.len() > 30, "the recording fills the screen");
         assert_eq!(painted_rows(&h), with_text);
 
-        // Rolado 6 linhas para cima: as 6 últimas linhas da grade saem e entram 6 do histórico.
+        // Scrolled 6 lines up: last 6 lines of grid leave and 6 from history enter.
         h.session.shared.emu.lock().term.scroll_display(Scroll::Delta(6));
         h.frame(vec![], Modifiers::NONE);
         let painted = painted_rows(&h);
-        assert!(painted.len() >= with_text.len(), "o histórico rolado também tem texto nas primeiras linhas: {painted:?}");
-        assert_eq!(painted.first(), Some(&0), "a primeira linha do quadro tem texto");
+        assert!(painted.len() >= with_text.len(), "scrolled history also has text in first lines: {painted:?}");
+        assert_eq!(painted.first(), Some(&0), "first line of frame has text");
     }
 
     #[test]
     fn cursor_rect_is_exposed_for_the_ime() {
         let mut h = Harness::new("ab");
-        let r = h.frame(vec![], Modifiers::NONE).cursor_rect.expect("cursor visível");
+        let r = h.frame(vec![], Modifiers::NONE).cursor_rect.expect("cursor visible");
         assert_eq!(r.min, Pos2::new(PAD_LEFT + 20.0, PAD_TOP));
         assert_eq!(r.size(), Vec2::new(10.0, 20.0));
     }

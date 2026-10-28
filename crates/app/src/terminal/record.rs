@@ -1,14 +1,14 @@
-//! Gravação da saída crua de uma aba, só para depuração (`AGENTDECK_DEBUG_PTY=1`, desligada por padrão).
+//! Raw output recording for a tab, debug only (`AGENTDECK_DEBUG_PTY=1`, off by default).
 //!
-//! Serve para o defeito que só aparece na sessão do usuário (ex.: a metade de cima do terminal em branco): com a
-//! gravação ligada, cada processo de aba deixa em `dados/pty/` três arquivos com o mesmo prefixo
-//! `<aba>-<data>-<hora>`:
-//! - `.bin`: os bytes que o PTY entregou, exatamente como chegaram (é o que o emulador recebeu);
-//! - `.events.txt`: uma linha por mudança de tamanho (`<ms> <posição no .bin> size <colunas> <linhas>`), para
-//!   reproduzir os bytes no mesmo tamanho e nas mesmas trocas de tamanho (ver `replay`, nos testes);
-//! - `.grid.txt`: a grade do emulador (tela e o fim do histórico) tirada 1,5 s depois da última saída,
-//!   reescrita a cada vez. Se o texto está nela mas o quadro mostrava em branco, o defeito é do desenho; se a
-//!   grade também está em branco, é do emulador ou do que o CLI mandou, e o `.bin` decide qual.
+//! Useful for bugs that only show up in the user's session (e.g. top half of the terminal blank): with
+//! recording enabled, each tab process creates three files in `dados/pty/` with the same prefix
+//! `<tab>-<date>-<time>`:
+//! - `.bin`: bytes delivered by the PTY, exactly as received (what the emulator received);
+//! - `.events.txt`: one line per resize event (`<ms> <position in .bin> size <cols> <rows>`), to
+//!   replay bytes at the same size and resize transitions (see `replay`, in tests);
+//! - `.grid.txt`: the emulator grid (screen and tail of history) taken 1.5s after last output,
+//!   rewritten each time. If text is present in it but the frame was blank, the bug is in rendering; if the
+//!   grid is also blank, it comes from the emulator or what the CLI sent, and `.bin` resolves which.
 
 use std::fmt::Write as _;
 use std::fs::File;
@@ -22,9 +22,9 @@ use alacritty_terminal::term::TermMode;
 
 use super::{Emulator, GridSize};
 
-/// Quanto tempo sem saída até tirar a foto da grade.
+/// How long without output until taking the grid snapshot.
 pub const SNAPSHOT_IDLE: Duration = Duration::from_millis(1500);
-/// Linhas de histórico que entram na foto (as mais recentes).
+/// History lines included in snapshot (most recent).
 const SNAPSHOT_HISTORY: usize = 400;
 
 pub struct Recorder {
@@ -33,12 +33,12 @@ pub struct Recorder {
     grid: PathBuf,
     started: Instant,
     offset: u64,
-    /// `output_seq` da última foto (para só fotografar saída nova).
+    /// `output_seq` of last snapshot (to only snapshot fresh output).
     pub snapped: u64,
 }
 
 impl Recorder {
-    /// Abre os três arquivos de `name` (nome da aba) em `dir`, já anotando o tamanho inicial.
+    /// Opens the three files for `name` (tab name) in `dir`, logging the initial size.
     pub fn start(dir: &Path, name: &str, size: GridSize) -> std::io::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let safe = safe_name(name);
@@ -74,7 +74,7 @@ impl Recorder {
     }
 }
 
-/// Nome seguro para arquivo (letras, números e `-`).
+/// Safe file name (letters, digits, and `-`).
 fn safe_name(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect()
 }
@@ -83,7 +83,7 @@ fn stamp() -> String {
     chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
 }
 
-/// Grava a foto da grade avulsa (sem gravação ligada): `<aba>-<data>-<hora>.grid.txt`.
+/// Saves a standalone grid snapshot (without active recording): `<tab>-<date>-<time>.grid.txt`.
 pub fn write_snapshot(dir: &Path, name: &str, text: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}-{}.grid.txt", safe_name(name), stamp()));
@@ -91,14 +91,14 @@ pub fn write_snapshot(dir: &Path, name: &str, text: &str) -> std::io::Result<Pat
     Ok(path)
 }
 
-/// A grade do emulador em texto: cabeçalho com o estado, o fim do histórico (`h<linha>`) e a tela (`s<linha>`).
+/// The emulator grid as text: header with state, tail of history (`h<line>`) and screen (`s<line>`).
 pub fn grid_text(emu: &Emulator) -> String {
     let term = &emu.term;
     let grid = term.grid();
     let (rows, cols, history) = (term.screen_lines(), term.columns(), grid.history_size());
     let cursor = grid.cursor.point;
     let mut out = format!(
-        "# colunas={cols} linhas={rows} historico={history} display_offset={} cursor=({},{}) tela_alternativa={}\n",
+        "# cols={cols} rows={rows} history={history} display_offset={} cursor=({},{}) alt_screen={}\n",
         grid.display_offset(),
         cursor.line.0,
         cursor.column.0,
@@ -116,11 +116,11 @@ pub fn grid_text(emu: &Emulator) -> String {
 
 #[cfg(test)]
 pub mod replay {
-    //! Reproduz uma gravação (`.bin` + `.events.txt`) num emulador novo, no mesmo tamanho e com as mesmas trocas de tamanho.
+    //! Replays a recording (`.bin` + `.events.txt`) in a new emulator, at the same size and with the same resize transitions.
 
     use super::super::{GridSize, Session};
 
-    /// Eventos `(posição no .bin, tamanho)` na ordem de `events`.
+    /// Events `(position in .bin, size)` in order of `events`.
     pub fn parse_events(events: &str) -> Vec<(usize, GridSize)> {
         events
             .lines()
@@ -147,7 +147,7 @@ pub mod replay {
         session
     }
 
-    /// Como [`run`], mas só com o emulador: `keep_top` escolhe a mudança de tamanho (ver `resize.rs`), em qualquer sistema.
+    /// Like [`run`], but with emulator only: `keep_top` selects resize behavior (see `resize.rs`), on any platform.
     pub fn run_with(bytes: &[u8], events: &str, keep_top: bool) -> Session {
         let events = parse_events(events);
         let first = events.first().map_or(GridSize { cols: 80, rows: 24 }, |e| e.1);
@@ -163,7 +163,7 @@ pub mod replay {
         session
     }
 
-    /// Números das linhas `L00001 ...` (o roteiro do PowerShell) na ordem do histórico + tela.
+    /// Numbers of lines `L00001 ...` (the PowerShell script) in history + screen order.
     pub fn numbered(session: &Session) -> Vec<u32> {
         use alacritty_terminal::grid::Dimensions;
         use alacritty_terminal::index::{Column, Line};
@@ -177,7 +177,7 @@ pub mod replay {
             .collect()
     }
 
-    /// Linhas da tela (sem o histórico), sem os espaços do fim.
+    /// Screen lines (excluding history), trimmed of trailing whitespace.
     pub fn screen(session: &Session) -> Vec<String> {
         use alacritty_terminal::grid::Dimensions;
         use alacritty_terminal::index::{Column, Line};
@@ -196,13 +196,13 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
 
-    /// Gravação real (portable-pty + o `claude.exe`, modo clássico, `--model haiku`): o Claude Code responde uma tabela de
-    /// 40 linhas numa tela de 120×58 que encolhe para 50×12 durante a resposta (como uma janela que deixa de ser a
-    /// grande no Destaque) e volta a 120×58.
+    /// Real recording (portable-pty + `claude.exe`, classic mode, `--model haiku`): Claude Code responds with a 40-line
+    /// table on a 120×58 screen that shrinks to 50×12 during the response (like a window no longer featured in Spotlight)
+    /// and grows back to 120×58.
     const CLAUDE_BYTES: &[u8] = include_bytes!("testdata/claude-classico-encolhe-e-alarga.bin");
     const CLAUDE_EVENTS: &str = include_str!("testdata/claude-classico-encolhe-e-alarga.events.txt");
 
-    /// Maior sequência de linhas vazias que ainda tem texto depois (o "vão" do defeito t37).
+    /// Longest sequence of empty lines that still has text afterwards (the "gap" of bug t37).
     fn widest_gap(screen: &[String]) -> usize {
         let last = screen.iter().rposition(|l| !l.is_empty()).unwrap_or(0);
         let (mut run, mut widest) = (0, 0);
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn events_are_parsed_and_bad_lines_ignored() {
-        let ev = replay::parse_events("0 0 size 120 58\nlixo\n5 100 size 50 12\n7 x size 1 2\n");
+        let ev = replay::parse_events("0 0 size 120 58\ngarbage\n5 100 size 50 12\n7 x size 1 2\n");
         assert_eq!(ev, vec![(0, GridSize { cols: 120, rows: 58 }), (100, GridSize { cols: 50, rows: 12 })]);
     }
 
@@ -224,14 +224,14 @@ mod tests {
         let session = replay::run(CLAUDE_BYTES, CLAUDE_EVENTS);
         let screen = replay::screen(&session);
         assert_eq!((screen.len(), session.size()), (58, GridSize { cols: 120, rows: 58 }));
-        assert!(widest_gap(&screen) < 5, "vão no meio da tela:\n{}", screen.join("\n"));
-        assert!(screen.iter().any(|l| l.contains("Baleia") || l.contains("40")), "o fim da tabela está na tela");
-        assert!(screen.iter().any(|l| l.starts_with('❯')), "a caixa de entrada voltou ao fim");
+        assert!(widest_gap(&screen) < 5, "gap in the middle of the screen:\n{}", screen.join("\n"));
+        assert!(screen.iter().any(|l| l.contains("Baleia") || l.contains("40")), "the end of the table is on screen");
+        assert!(screen.iter().any(|l| l.starts_with('❯')), "the input prompt returned to the end");
     }
 
     #[test]
     fn replaying_in_every_chunk_size_gives_the_same_grid() {
-        // A leitora entrega o que o ConPTY mandou em pedaços de tamanho qualquer: a grade não pode depender deles.
+        // The reader delivers ConPTY output in arbitrary chunk sizes: the grid must not depend on them.
         let whole = replay::screen(&replay::run(CLAUDE_BYTES, CLAUDE_EVENTS));
         for chunk in [1usize, 7, 61, 4096] {
             let events = replay::parse_events(CLAUDE_EVENTS);
@@ -241,7 +241,7 @@ mod tests {
             while pos < CLAUDE_BYTES.len() {
                 let until = next.peek().map_or(CLAUDE_BYTES.len(), |e| e.0).min(CLAUDE_BYTES.len());
                 if pos >= until {
-                    session.resize(next.next().expect("evento").1, 8.0, 16.0);
+                    session.resize(next.next().expect("event").1, 8.0, 16.0);
                     continue;
                 }
                 let end = (pos + chunk).min(until);
@@ -251,12 +251,12 @@ mod tests {
             for e in next {
                 session.resize(e.1, 8.0, 16.0);
             }
-            assert_eq!(replay::screen(&session), whole, "pedaços de {chunk} bytes");
+            assert_eq!(replay::screen(&session), whole, "{chunk}-byte chunks");
         }
     }
 
-    /// Gravações reais do ConPTY (Windows, `powershell -NoLogo`, `1..N | % { "L{0:D5} ..." }`) com a janela mudando de
-    /// tamanho: altura 58→30→58→40→58 (200 linhas) e largura 120→60→120 (400 linhas quebradas ao meio).
+    /// Real ConPTY recordings (Windows, `powershell -NoLogo`, `1..N | % { "L{0:D5} ..." }`) with the window resizing:
+    /// height 58→30→58→40→58 (200 lines) and width 120→60→120 (400 lines wrapped in half).
     const PS_ALTURA: (&[u8], &str) =
         (include_bytes!("testdata/conhost-powershell-altura.bin"), include_str!("testdata/conhost-powershell-altura.events.txt"));
     const PS_LARGURA: (&[u8], &str) =
@@ -264,99 +264,100 @@ mod tests {
 
     #[test]
     fn growing_the_window_does_not_lose_the_lines_the_grid_pulled_from_the_history() {
-        // Defeito t37: o `alacritty_terminal` puxa o histórico para o topo ao ganhar linhas e o ConPTY repinta por cima.
+        // Bug t37: alacritty_terminal pulls history to the top when gaining lines and ConPTY repaints over it.
         let (bytes, events) = PS_ALTURA;
         let lost = replay::numbered(&replay::run_with(bytes, events, false));
-        assert!(lost.len() < 200 && lost.windows(2).any(|w| w[1] != w[0] + 1), "sem a correção as linhas somem: {lost:?}");
+        assert!(lost.len() < 200 && lost.windows(2).any(|w| w[1] != w[0] + 1), "without the fix lines disappear: {lost:?}");
 
         let session = replay::run_with(bytes, events, true);
-        assert_eq!(replay::numbered(&session), (1..=200).collect::<Vec<u32>>(), "nenhuma linha some do histórico");
+        assert_eq!(replay::numbered(&session), (1..=200).collect::<Vec<u32>>(), "no lines disappear from history");
         let screen = replay::screen(&session);
-        assert!(screen[0].starts_with("L00172"), "o topo da janela é o do ConPTY: {:?}", &screen[..3]);
-        assert!(screen[29].starts_with("PS C:"), "o prompt fica onde o ConPTY o pintou");
-        assert!(screen[30..].iter().all(|l| l.is_empty()), "as linhas novas ficam em branco embaixo, como no ConPTY");
+        assert!(screen[0].starts_with("L00172"), "top of the window matches ConPTY: {:?}", &screen[..3]);
+        assert!(screen[29].starts_with("PS C:"), "prompt stays where ConPTY painted it");
+        assert!(screen[30..].iter().all(|l| l.is_empty()), "new lines remain blank at the bottom, as in ConPTY");
     }
 
     #[test]
     fn widening_a_wrapped_session_does_not_lose_the_lines_the_reflow_pulled_from_the_history() {
         let (bytes, events) = PS_LARGURA;
         let lost = replay::numbered(&replay::run_with(bytes, events, false));
-        assert!(lost.windows(2).any(|w| w[1] != w[0] + 1), "sem a correção uma linha some: {lost:?}");
+        assert!(lost.windows(2).any(|w| w[1] != w[0] + 1), "without the fix a line disappears: {lost:?}");
 
         let numbers = replay::numbered(&replay::run_with(bytes, events, true));
-        assert_eq!(numbers, (1..=400).collect::<Vec<u32>>(), "nenhuma linha some nem se repete");
+        assert_eq!(numbers, (1..=400).collect::<Vec<u32>>(), "no lines disappear or repeat");
     }
+
     #[test]
     fn the_snapshot_has_the_state_header_the_history_tail_and_the_screen() {
         let session = Session::new(GridSize { cols: 20, rows: 3 });
-        session.print(&"linha\r\n".repeat(10));
+        session.print(&"line\r\n".repeat(10));
         let text = grid_text(&session.shared.emu.lock());
         let mut lines = text.lines();
-        assert_eq!(lines.next(), Some("# colunas=20 linhas=3 historico=8 display_offset=0 cursor=(2,0) tela_alternativa=false"));
+        assert_eq!(lines.next(), Some("# cols=20 rows=3 history=8 display_offset=0 cursor=(2,0) alt_screen=false"));
         assert_eq!(text.lines().filter(|l| l.starts_with('h')).count(), 8);
         assert_eq!(text.lines().filter(|l| l.starts_with('s')).count(), 3);
-        assert!(text.contains("s    0| linha"));
+        assert!(text.contains("s    0| line"));
     }
 
     #[test]
     fn the_menu_toggle_starts_recording_now_and_a_snapshot_works_with_or_without_it() {
-        let dir = tempfile::tempdir().expect("pasta");
+        let dir = tempfile::tempdir().expect("dir");
         let pty = dir.path().join("pty");
         let mut s = Session::new(GridSize { cols: 20, rows: 4 });
         s.print("abc\r\n");
         assert!(!s.recording());
 
-        // Sem gravar: foto avulsa, `<aba>-<data>-<hora>.grid.txt`.
-        let alone = s.save_snapshot(&pty, "claude@t1").expect("foto");
+        // Without recording: standalone snapshot, `<tab>-<date>-<time>.grid.txt`.
+        let alone = s.save_snapshot(&pty, "claude@t1").expect("snapshot");
         assert!(alone.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("claude_t1-") && n.ends_with(".grid.txt")));
-        assert!(std::fs::read_to_string(&alone).expect("lê").contains("s    0| abc"));
+        assert!(std::fs::read_to_string(&alone).expect("read").contains("s    0| abc"));
 
-        // Ligar sem processo só guarda o pedido (a gravação abre no `spawn`); desligar limpa.
+        // Enabling without a process only buffers the request (recording opens on spawn); disabling clears.
         s.set_recording(Some((pty.clone(), "claude@t1".into())));
         assert!(s.recording());
-        assert!(s.shared.recorder.lock().is_none(), "sem processo ainda");
+        assert!(s.shared.recorder.lock().is_none(), "no process yet");
         s.set_recording(None);
         assert!(!s.recording());
         assert!(!s.shared.recorder.lock().is_some());
 
-        // Gravando: a foto reescreve o `.grid.txt` da gravação.
+        // Recording: snapshot overwrites recording's .grid.txt.
         *s.shared.recorder.lock() = Recorder::start(&pty, "claude@t1", s.size()).ok();
-        let grid = s.save_snapshot(&pty, "claude@t1").expect("foto");
+        let grid = s.save_snapshot(&pty, "claude@t1").expect("snapshot");
         assert!(grid.to_string_lossy().ends_with(".grid.txt"));
-        assert!(std::fs::read_to_string(&grid).expect("lê").starts_with("# colunas=20 linhas=4"));
+        assert!(std::fs::read_to_string(&grid).expect("read").starts_with("# cols=20 rows=4"));
     }
 
     #[test]
     fn recording_writes_bytes_resizes_and_a_snapshot_when_output_goes_idle() {
-        let dir = tempfile::tempdir().expect("pasta");
+        let dir = tempfile::tempdir().expect("dir");
         let mut s = Session::new(GridSize { cols: 20, rows: 4 });
         s.record_to(dir.path().join("pty"), "claude@t1".into());
-        // Sem processo real: liga a gravação como o `spawn` faz e alimenta como a leitora.
+        // Without a real process: enables recording like spawn does and feeds like the reader.
         *s.shared.recorder.lock() = Recorder::start(&dir.path().join("pty"), "claude@t1", s.size()).ok();
         s.resize(GridSize { cols: 30, rows: 5 }, 8.0, 16.0);
-        s.shared.recorder.lock().as_mut().expect("gravando").bytes(b"oi\r\n");
-        s.print("oi\r\n");
+        s.shared.recorder.lock().as_mut().expect("recording").bytes(b"hello\r\n");
+        s.print("hello\r\n");
         s.shared.output_seq.fetch_add(1, Ordering::Relaxed);
         *s.shared.last_output.lock() = Some(Instant::now());
 
-        let at = s.record_tick(Instant::now()).expect("ainda não está parada");
-        assert_eq!(s.record_tick(at + Duration::from_millis(1)), None, "tirou a foto");
-        assert_eq!(s.record_tick(at + Duration::from_secs(9)), None, "sem saída nova não repete");
+        let at = s.record_tick(Instant::now()).expect("not idle yet");
+        assert_eq!(s.record_tick(at + Duration::from_millis(1)), None, "took snapshot");
+        assert_eq!(s.record_tick(at + Duration::from_secs(9)), None, "does not repeat without fresh output");
 
         let files = |ext: &str| -> Vec<String> {
             let mut v: Vec<_> = std::fs::read_dir(dir.path().join("pty"))
-                .expect("pasta")
+                .expect("dir")
                 .filter_map(|e| e.ok()?.file_name().into_string().ok())
                 .filter(|n| n.ends_with(ext))
                 .collect();
             v.sort();
             v
         };
-        let read = |ext: &str| std::fs::read(dir.path().join("pty").join(&files(ext)[0])).expect("arquivo");
-        assert!(files(".bin")[0].starts_with("claude_t1-"), "nome seguro: {:?}", files(".bin"));
-        assert_eq!(read(".bin"), b"oi\r\n");
+        let read = |ext: &str| std::fs::read(dir.path().join("pty").join(&files(ext)[0])).expect("file");
+        assert!(files(".bin")[0].starts_with("claude_t1-"), "safe name: {:?}", files(".bin"));
+        assert_eq!(read(".bin"), b"hello\r\n");
         let events = String::from_utf8(read(".events.txt")).expect("utf8");
         assert_eq!(replay::parse_events(&events), vec![(0, GridSize { cols: 20, rows: 4 }), (0, GridSize { cols: 30, rows: 5 })]);
-        assert!(String::from_utf8(read(".grid.txt")).expect("utf8").starts_with("# colunas=30 linhas=5"));
+        assert!(String::from_utf8(read(".grid.txt")).expect("utf8").starts_with("# cols=30 rows=5"));
     }
 }
