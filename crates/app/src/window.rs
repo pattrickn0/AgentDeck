@@ -1,4 +1,4 @@
-//! Janela winit + contexto OpenGL (glutin) — base adaptada do exemplo `pure_glow` do egui_glow.
+//! winit window + OpenGL context (glutin) — base adapted from egui_glow's `pure_glow` example.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ pub struct GlWindow {
 }
 
 impl GlWindow {
-    /// Cria a janela (invisível até o primeiro quadro) e o contexto GL.
+    /// Creates the window (invisible until the first frame) and the GL context.
     pub fn new(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> anyhow::Result<(Self, Arc<glow::Context>)> {
         let template = glutin::config::ConfigTemplateBuilder::new()
             .prefer_hardware_accelerated(None)
@@ -27,13 +27,13 @@ impl GlWindow {
         let (window, config) = glutin_winit::DisplayBuilder::new()
             .with_preference(glutin_winit::ApiPreference::FallbackEgl)
             .with_window_attributes(Some(attrs.clone()))
-            .build(event_loop, template, |mut configs| configs.next().expect("nenhuma configuração OpenGL disponível"))
-            .map_err(|e| anyhow::anyhow!("falha ao criar a configuração OpenGL: {e}"))?;
+            .build(event_loop, template, |mut configs| configs.next().expect("no OpenGL configuration available"))
+            .map_err(|e| anyhow::anyhow!("failed to create the OpenGL configuration: {e}"))?;
         let display = config.display();
         let raw = window.as_ref().and_then(|w| w.window_handle().ok().map(|h| h.as_raw()));
         let ctx_attrs = ContextAttributesBuilder::new().build(raw);
         let fallback = ContextAttributesBuilder::new().with_context_api(ContextApi::Gles(None)).build(raw);
-        // SAFETY: o handle da janela é válido enquanto a janela existir (guardada junto do contexto).
+        // SAFETY: the window handle is valid while the window exists (kept together with the context).
         let not_current = unsafe { display.create_context(&config, &ctx_attrs).or_else(|_| display.create_context(&config, &fallback))? };
         let window = match window {
             Some(w) => w,
@@ -45,14 +45,14 @@ impl GlWindow {
             NonZeroU32::new(w).unwrap_or(NonZeroU32::MIN),
             NonZeroU32::new(h).unwrap_or(NonZeroU32::MIN),
         );
-        // SAFETY: idem — a superfície vive junto da janela.
+        // SAFETY: same as above — the surface lives together with the window.
         let surface = unsafe { display.create_window_surface(&config, &surface_attrs)? };
         let context = not_current.make_current(&surface)?;
         let _ = surface.set_swap_interval(&context, SwapInterval::Wait(NonZeroU32::MIN));
-        // SAFETY: o contexto está corrente nesta thread; os ponteiros vêm do próprio display.
+        // SAFETY: the context is current on this thread; the pointers come from the display itself.
         let gl = unsafe {
             glow::Context::from_loader_function(|s| {
-                let s = std::ffi::CString::new(s).expect("nome de função GL inválido");
+                let s = std::ffi::CString::new(s).expect("invalid GL function name");
                 display.get_proc_address(&s)
             })
         };

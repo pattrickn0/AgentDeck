@@ -1,9 +1,9 @@
-//! Ditado opcional (o Whisper só é baixado se a pessoa quiser).
+//! Optional dictation (Whisper is only downloaded if the person wants it).
 
 use super::*;
 
 impl Deck {
-    /// Na abertura do app: baixa o que faltar (quem já usa o ditado) ou abre a pergunta (quem nunca foi perguntado).
+    /// At app startup: downloads what is missing (whoever already uses dictation) or opens the question (whoever was never asked).
     pub fn dictation_startup(&mut self) {
         match self.core.dictation_startup() {
             agentdeck_core::whisper::Startup::Ensure => self.core.ensure_whisper_async(),
@@ -12,12 +12,12 @@ impl Deck {
         }
     }
 
-    /// Estado do Whisper no disco, para o botão de microfone e as configurações.
+    /// Whisper state on disk, for the microphone button and the settings.
     pub fn dictation_setup(&self) -> Setup {
         Setup::of(self.dictation_installed, self.core.dictation_downloading())
     }
 
-    /// "Baixar": grava o "sim" e baixa em segundo plano (a faixa de progresso aparece na barra direita).
+    /// "Download": saves the "yes" and downloads in the background (the progress bar appears in the right bar).
     pub fn dictation_accept(&mut self) {
         self.dictation_prompt = false;
         self.core.set_dictation_choice(DictationChoice::Yes);
@@ -25,39 +25,39 @@ impl Deck {
         self.refresh_engine();
     }
 
-    /// "Agora não": grava o "não" (não pergunta de novo nem baixa) e fecha a pergunta.
+    /// "Not now": saves the "no" (does not ask again, does not download) and closes the question.
     pub fn dictation_decline(&mut self) {
         self.dictation_prompt = false;
         self.core.set_dictation_choice(DictationChoice::No);
     }
 
-    /// Configurações: apaga o que o ditado baixou.
+    /// Settings: deletes what dictation downloaded.
     pub fn dictation_remove(&mut self) {
         self.dictation_confirm_remove = false;
         if self.mic_phase != MicPhase::Idle {
-            self.system("Termine a gravação do ditado antes de remover o Whisper.");
+            self.system(t!("Finish the dictation recording before removing Whisper."));
             return;
         }
         match self.core.remove_dictation() {
             Ok(_) => {
                 self.dictation_installed = self.core.dictation_installed();
-                self.system("Ditado por voz removido do disco. Dá para baixar de novo pelas configurações.");
+                self.system(t!("Voice dictation removed from disk. You can download it again from the settings."));
             }
-            Err(e) => self.system(format!("Não foi possível remover o ditado por voz: {e}.")),
+            Err(e) => self.system(t!("Could not remove voice dictation: {error}.", error = e)),
         }
     }
 
-    /// Antes de gravar: com o Whisper pronto segue; sem ele, explica ou oferece o download em vez de falhar calado.
+    /// Before recording: with Whisper ready it proceeds; without it, explains or offers the download instead of failing silently.
     fn mic_ready(&mut self) -> bool {
-        // Compilado sem áudio (`--no-default-features`): oferecer o download seria baixar 1,6 GB para nada gravar.
+        // Built without audio (`--no-default-features`): offering the download would be 1.6 GB for nothing to record.
         if !crate::audio::AVAILABLE {
-            self.system("O ditado por voz não está disponível: o AgentDeck foi compilado sem o recurso de áudio.");
+            self.system(t!("Voice dictation is unavailable: AgentDeck was built without the audio feature."));
             return false;
         }
         match self.dictation_setup() {
             Setup::Ready => true,
             Setup::Downloading => {
-                self.system("O ditado por voz ainda está baixando (veja a barra direita). Tente de novo quando terminar.");
+                self.system(t!("Voice dictation is still downloading (see the right bar). Try again when it finishes."));
                 false
             }
             Setup::NotInstalled => {
@@ -67,8 +67,8 @@ impl Deck {
         }
     }
 
-    /// Aciona o microfone para `target` (`Tab(uid)`). Abrir o dispositivo pode levar
-    /// até 5 s: vai para uma thread, e um segundo clique enquanto isso desiste.
+    /// Triggers the microphone for `target` (`Tab(uid)`). Opening the device can take
+    /// up to 5 s: it goes to a thread, and a second click meanwhile gives up.
     pub(super) fn toggle_mic_for(&mut self, target: MicTarget) {
         if self.mic_phase == MicPhase::Idle && !self.mic_ready() {
             return;
@@ -97,13 +97,13 @@ impl Deck {
             Err(e) => {
                 crate::dictation::on_opened(&mut self.mic_phase, false);
                 if was_opening {
-                    self.system(format!("Microfone indisponível: {e}"));
+                    self.system(t!("Microphone unavailable: {error}", error = e));
                 }
             }
         }
     }
 
-    /// `recorder.stop()` → transcreve numa thread.
+    /// `recorder.stop()` → transcribes on a thread.
     pub(super) fn stop_recording(&mut self) {
         let Some(rec) = self.recorder.take() else { return };
         self.recording_since = None;
@@ -111,7 +111,7 @@ impl Deck {
         self.spawn_bg("transcribe", move |core| {
             let pcm = rec.stop();
             let res = if pcm.is_empty() {
-                Err("nenhum áudio capturado".to_string())
+                Err(t!("no audio captured").to_string())
             } else {
                 core.transcribe_pcm16k(&pcm).map(|t| t.text).map_err(|e| e.to_string())
             };
@@ -119,15 +119,15 @@ impl Deck {
         });
     }
 
-    /// `pty:submit`: cola entre colchetes e confirma com Enter após 250 ms (e de novo após
-    /// 600 ms quando há menção `@` em CLIs com autocomplete de arquivo).
+    /// `pty:submit`: pastes in brackets and confirms with Enter after 250 ms (and again after
+    /// 600 ms when there is an `@` mention in CLIs with file autocomplete).
     ///
-    /// Os Enters saem da thread da interface (em `tick`), na ordem certa em relação ao que o
-    /// usuário digitar nesse meio-tempo; uma thread só acorda a interface na hora.
+    /// The Enters leave from the interface thread (in `tick`), in the right order relative to what the
+    /// user types meanwhile; a thread only wakes the interface on time.
     pub(super) fn submit(&mut self, idx: usize, text: &str) {
         let now = Instant::now();
         let tab = &mut self.tabs[idx];
-        // Um envio anterior que ainda esperava o Enter é confirmado antes desta colagem.
+        // A previous submit still waiting for the Enter is confirmed before this paste.
         for _ in tab.pending_enter.drain(..) {
             tab.session.write(b"\r");
         }
@@ -160,7 +160,7 @@ impl Deck {
         });
     }
 
-    /// Mantém o processo de cada aba encerrado ao fechar a janela.
+    /// Keeps each tab's process closed when the window closes.
     pub fn shutdown(&mut self) {
         self.persist_tabs_now();
         self.persist_layout_now();
