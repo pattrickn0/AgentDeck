@@ -1,15 +1,15 @@
 ---
-titulo: No Windows o Codex engole o Enter que chega antes de terminar de ler a colagem
-resumo: O Codex lê a colagem tecla por tecla; o Enter cedo vira quebra de linha. O atraso do Enter cresce 1 ms por caractere (delivery::enter_delay).
+title: On Windows Codex swallows Enter that arrives before it finishes reading pasted text
+summary: Codex reads pasted content key by key; an early Enter turns into a newline. Enter delay increases by 1 ms per character (delivery::enter_delay).
 touches: [crates/core/src/delivery.rs, crates/app/src/deck/**]
 ---
-O app cola as mensagens com bracketed paste e manda o Enter 250 ms depois. No Windows o Codex 0.164 liga o modo de
-colagem (`?2004h`), mas pelo ConPTY recebe o texto como teclas soltas e o digere aos poucos: o Enter que chega antes do
-fim vira uma quebra de linha dentro do "[Pasted Content N chars]" e a mensagem fica parada no campo até alguém apertar
-Enter. Medido em 2026-10-25 com uma sonda de PTY: 1.735 caracteres perdem o Enter em 600 ms e pegam em 1.200 ms; 3.593
-perdem em 1.200 e pegam em 2.400. Texto curto pega em 250 ms.
+The app pastes messages using bracketed paste and sends Enter 250 ms later. On Windows, Codex 0.164 turns on bracketed
+paste mode (`?2004h`), but through ConPTY it receives text as individual keystrokes and processes them gradually: an Enter arriving before
+the end becomes a newline inside "[Pasted Content N chars]" and the message stays sitting in the input field until someone presses
+Enter. Measured on 2026-10-25 with a PTY probe: 1,735 characters lose Enter at 600 ms and receive it at 1,200 ms; 3,593
+lose it at 1,200 ms and receive it at 2,400 ms. Short text is picked up in 250 ms.
 
-**Por quê:** o usuário precisava apertar Enter à mão nas tarefas do Codex (o pedido e as mensagens do `ask-agent` são longos).
-**Como aplicar:** o atraso do primeiro Enter vem de `delivery::enter_delay` (só Codex no Windows, 1 ms por caractere, teto de
-10 s). Não "resolva" com um segundo Enter fixo: num Codex que acabou de abrir uma pergunta de aprovação, o Enter a mais
-aprova o comando. CLI novo que deixe a mensagem parada no campo: meça do mesmo jeito (colar N caracteres e variar o atraso).
+**Why:** the user had to press Enter manually during Codex tasks (task prompts and `ask-agent` messages are long).
+**How to apply:** the delay for the first Enter comes from `delivery::enter_delay` (Codex on Windows only, 1 ms per character, capped at
+10 s). Do not "solve" this with a second fixed Enter: in a Codex that just displayed an approval prompt, the extra Enter
+approves the command. For a new CLI that leaves messages stranded in the input field: measure it the same way (paste N characters and vary the delay).
