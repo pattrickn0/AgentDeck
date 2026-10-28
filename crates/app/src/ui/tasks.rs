@@ -1,13 +1,13 @@
-//! Aba "Tarefas" da barra direita: a lista de tarefas em andamento e o histórico de encerradas, o
-//! detalhe de uma tarefa (pedido, relatório, alterações, histórico e os botões de cada estado) e o
-//! formulário de nova tarefa. O estado e as chamadas ao core ficam em `tasks_ui.rs`; aqui só se
-//! pinta e se *coleta* o que foi clicado ([`Act`]), aplicado no fim do quadro com o `Deck` inteiro.
+//! The right bar's "Tasks" tab: the list of tasks in progress and the history of finished ones, the
+//! detail of a task (request, report, changes, history and the buttons of each status) and the
+//! new task form. The state and the calls into the core live in `tasks_ui.rs`; here we only
+//! paint and *collect* what was clicked ([`Act`]), applied at the end of the frame with the whole `Deck`.
 
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 use agentdeck_core::capability::Level;
 use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{FeedKind, MergeBlock, Task, TaskMessage, TaskStatus};
+use agentdeck_core::{t, FeedKind, MergeBlock, Task, TaskMessage, TaskStatus};
 
 use super::{
     button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label,
@@ -30,41 +30,41 @@ const CHIP_H: f32 = 21.0;
 const PAD: f32 = 12.0;
 const LIST_PAD: f32 = 8.0;
 const FOOTER_H: f32 = 45.0;
-/// Quantos caracteres do pedido e do relatório vão para a tela.
+/// How many characters of the request and the report go to the screen.
 const TEXT_MAX: usize = 20_000;
-/// Altura máxima da área rolável do relatório.
+/// Maximum height of the report's scrollable area.
 const REPORT_MAX_H: f32 = 240.0;
-/// Linhas do `git diff --stat` mostradas no detalhe.
+/// Lines of `git diff --stat` shown in the detail.
 const STAT_MAX_LINES: usize = 40;
-/// Eventos do histórico mostrados no detalhe.
-/// Arquivos citados no aviso de "mexeu fora do escopo".
+/// Files named in the "touched outside the scope" notice.
 const OUTSIDE_SHOWN: usize = 8;
+/// History events shown in the detail.
 const EVENTS_MAX: usize = 50;
 
-/// O que foi clicado neste quadro.
+/// What was clicked in this frame.
 enum Act {
     New,
     Back,
     Open(String),
-    /// Abre o detalhe da tarefa já com o campo de devolver/reprovar aberto.
+    /// Opens the task's detail with the return/reject field already open.
     ReturnFromCard(String),
     ToggleHistoryMenu,
     CloseHistoryMenu,
     SetHistoryFilter(HistoryFilter),
     ToggleSection(Section),
-    /// Abre ou recolhe uma mensagem da linha do tempo (id da tarefa, hora da mensagem).
+    /// Opens or collapses a timeline message (task id, message time).
     ToggleMessage(String, u64),
     Task(String, TaskAct),
-    /// "Ver diff completo" / "Ver o que foi mesclado": abre o diff no centro.
+    /// "View full diff" / "View what was merged": opens the diff in the center.
     OpenDiff(String),
-    /// "Abrir em Documentos" no pedido (`false`) ou no relatório (`true`).
+    /// "Open in Documents" on the request (`false`) or on the report (`true`).
     OpenText(String, bool),
     DismissNotice,
-    /// "Guardar minhas alterações e mesclar" no aviso da recusa.
+    /// "Stash my changes and merge" in the refusal notice.
     MergeStash(String),
-    /// "Pedir ao agente para fazer o commit" / "…resolver o conflito".
+    /// "Ask the agent to commit" / "…resolve the conflict".
     AskAgent(String),
-    /// "Ver o que está sem commit" / "Esconder a lista".
+    /// "See what is uncommitted" / "Hide the list".
     ToggleNoticeFiles,
     ConfirmYes,
     ConfirmNo,
@@ -76,7 +76,7 @@ enum Act {
     SetModel(Option<String>),
     SetEffort(Option<Effort>),
     SetLevel(Level),
-    /// Passo do menu de modelo: o provedor cujos modelos estão à mostra (`None` = lista de provedores).
+    /// Step of the model menu: the provider whose models are on show (`None` = list of providers).
     SetProvider(Option<String>),
     ToggleStartNow,
     PickAttachments,
@@ -96,7 +96,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         TasksView::New => form_view(deck, ui, rect, &mut acts),
     }
     confirm_dialog(deck, ui.ctx(), rect, &mut acts);
-    // Os tempos ("há 5 min") andam sozinhos.
+    // The times ("5 min ago") advance by themselves.
     ui.ctx().request_repaint_after(std::time::Duration::from_secs(20));
     for act in acts {
         apply(deck, act);
@@ -146,7 +146,7 @@ fn apply(deck: &mut Deck, act: Act) {
             let open = deck.tasks.form.menu != Some(m);
             deck.tasks.form.menu = open.then_some(m);
             if open && m == FormMenu::Model {
-                // O menu abre no provedor do modelo escolhido; sem modelo, na lista de provedores.
+                // The menu opens on the provider of the chosen model; with no model, on the list of providers.
                 deck.tasks.form.provider = deck.tasks.form.model.as_deref().and_then(models::provider).map(str::to_owned);
             }
         }
@@ -175,11 +175,11 @@ fn apply(deck: &mut Deck, act: Act) {
 }
 
 // ---------------------------------------------------------------------------
-// Peças comuns
+// Common pieces
 // ---------------------------------------------------------------------------
 
-/// Cor monocromática do estado no detalhe: `accent` quando pede ação do humano, cor do agente em
-/// execução, `danger` em falha, e `text_2` / `text_3` nos demais.
+/// Monochrome color of the status in the detail: `accent` when it asks for the human's action, the agent's color while
+/// running, `danger` on failure, and `text_2` / `text_3` for the rest.
 fn status_color(deck: &Deck, task: &Task) -> Color32 {
     let p = theme::pal();
     match task.status {
@@ -191,7 +191,7 @@ fn status_color(deck: &Deck, task: &Task) -> Color32 {
     }
 }
 
-/// Ponto de estado; a tarefa em andamento ganha o halo pulsante dos agentes trabalhando.
+/// Status dot; the task in progress gets the pulsing halo of working agents.
 fn status_dot(ui: &Ui, center: Pos2, color: Color32, pulse: bool) {
     let p = ui.painter();
     if pulse {
@@ -202,7 +202,7 @@ fn status_dot(ui: &Ui, center: Pos2, color: Color32, pulse: bool) {
     super::dot(p, center, color);
 }
 
-/// Faixa do topo (detalhe e formulário): borda inferior, "←" (opcional) e o título.
+/// Top strip (detail and form): bottom border, "←" (optional) and the title.
 fn head_bar(ui: &Ui, rect: Rect, back: Option<&str>, title: &str, right: f32, acts: &mut Vec<Act>) -> Rect {
     let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), HEAD_H));
     let p = ui.painter_at(head);
@@ -244,7 +244,7 @@ fn btn_width(painter: &egui::Painter, label: &str, kind: BtnKind) -> f32 {
     galley(painter, label, font, theme::pal().text).size().x + 22.0
 }
 
-/// Botão com texto (cantos 5). Desligado, fica apagado e não reage. Devolve se foi clicado.
+/// Button with text (corners 5). When off, it is dimmed and does not react. Returns whether it was clicked.
 fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: BtnKind, enabled: bool, tooltip: &str) -> bool {
     let r = if enabled { clickable(ui, rect, id) } else { ui.interact(rect, id, Sense::hover()) };
     let hot = enabled && r.hovered();
@@ -280,7 +280,7 @@ fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: BtnKind, enabled: bool
     enabled && r.clicked()
 }
 
-/// Botões em linha que quebram para a linha de baixo quando não cabem. Devolve o índice do clicado.
+/// Buttons in a row that wrap to the next row when they do not fit. Returns the index of the clicked one.
 fn button_flow(ui: &mut Ui, buttons: &[(String, BtnKind, bool, &str)], id_salt: &str) -> Option<usize> {
     let avail = ui.available_width();
     let max_w = (avail - 2.0 * PAD).max(60.0);
@@ -288,7 +288,7 @@ fn button_flow(ui: &mut Ui, buttons: &[(String, BtnKind, bool, &str)], id_salt: 
     let mut clicked = None;
     let mut i = 0;
     while i < buttons.len() {
-        // Quantos cabem nesta linha.
+        // How many fit on this row.
         let mut end = i;
         let mut w = 0.0;
         while end < buttons.len() {
@@ -313,7 +313,7 @@ fn button_flow(ui: &mut Ui, buttons: &[(String, BtnKind, bool, &str)], id_salt: 
     clicked
 }
 
-/// Parágrafo com quebra de linha, recuado `PAD` dos dois lados. Devolve o retângulo ocupado.
+/// Paragraph with line wrapping, indented `PAD` on both sides. Returns the rectangle it occupies.
 fn paragraph(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) -> Rect {
     let w = (ui.available_width() - 2.0 * PAD).max(40.0);
     let g = ui.painter().layout(text.to_owned(), font, color, w);
@@ -322,17 +322,17 @@ fn paragraph(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) -> Rec
     r
 }
 
-/// Mensagem curta e muda (estados vazios dentro de uma seção).
+/// Short, quiet message (empty states inside a section).
 fn muted_line(ui: &mut Ui, text: &str) {
     paragraph(ui, text, theme::ui(12.0), theme::pal().text_2);
 }
 
-/// Faixa vermelha com o erro (e o "×" opcional). Devolve se o "×" foi clicado.
+/// Red strip with the error (and the optional "×"). Returns whether the "×" was clicked.
 fn error_box(ui: &mut Ui, text: &str, dismiss: bool) -> bool {
     notice_box(ui, text, dismiss, true)
 }
 
-/// Faixa do aviso: vermelha (`danger`) para erro, âmbar (`warning`) para o que deu certo mas o usuário precisa saber.
+/// Notice strip: red (`danger`) for an error, amber (`warning`) for what worked but the user needs to know.
 fn notice_box(ui: &mut Ui, text: &str, dismiss: bool, danger: bool) -> bool {
     let (tone, text_color) =
         if danger { (theme::pal().danger, theme::pal().danger_text) } else { (theme::pal().warning, theme::pal().text) };
@@ -356,12 +356,12 @@ fn notice_box(ui: &mut Ui, text: &str, dismiss: bool, danger: bool) -> bool {
             theme::ui(15.0),
             if xr.hovered() { theme::pal().text } else { theme::pal().text_2 },
         );
-        closed = tip(xr, "Fechar o aviso").clicked();
+        closed = tip(xr, t!("Close the notice")).clicked();
     }
     closed
 }
 
-/// Campo de texto numa moldura de 1 px (fundo `recess`, borda `separator` e `accent` no foco); a moldura cresce com o texto.
+/// Text field in a 1 px frame (`recess` background, `separator` border and `accent` on focus); the frame grows with the text.
 fn text_field(ui: &mut Ui, id: Id, text: &mut String, hint: &str, rows: Option<usize>) -> egui::Response {
     let focused = ui.ctx().memory(|m| m.has_focus(id));
     let p = theme::pal();
@@ -386,7 +386,7 @@ fn text_field(ui: &mut Ui, id: Id, text: &mut String, hint: &str, rows: Option<u
         .response
 }
 
-/// Executa `f` numa coluna recuada `PAD` dos dois lados e avança o cursor do `ui` pelo que ela ocupou.
+/// Runs `f` in a column indented `PAD` on both sides and advances the `ui` cursor by what it occupied.
 fn padded<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
     let avail = ui.available_rect_before_wrap();
     let inner = Rect::from_min_max(Pos2::new(avail.min.x + PAD, avail.min.y), Pos2::new(avail.max.x - PAD, avail.max.y));
@@ -398,7 +398,7 @@ fn padded<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
     out
 }
 
-/// Cabeçalho de seção recolhível: seta, título em IBM Plex Mono Medium 10 px MAIÚSCULAS e um detalhe à direita.
+/// Collapsible section header: arrow, title in IBM Plex Mono Medium 10 px UPPERCASE and a detail on the right.
 fn section_header(
     deck: &mut Deck,
     ui: &mut Ui,
@@ -441,16 +441,16 @@ fn section_header(
 }
 
 // ---------------------------------------------------------------------------
-// Lista ("Tarefas" em andamento + "HISTÓRICO" + rodapé "+ Nova tarefa")
+// List (tasks in progress + "HISTORY" + "+ New task" footer)
 // ---------------------------------------------------------------------------
 
 fn list_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, now: u64, acts: &mut Vec<Act>) {
-    // Rodapé fixo embaixo: separator + botão primário "+ Nova tarefa" de largura total e 28 px de altura.
+    // Fixed footer at the bottom: separator + primary "+ New task" button, full width and 28 px high.
     let footer = Rect::from_min_max(Pos2::new(rect.min.x, (rect.max.y - FOOTER_H).max(rect.min.y)), rect.max);
     let body = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, footer.min.y));
 
     if deck.tasks.tasks.is_empty() {
-        // Sem projeto aberto ninguém lê a lista: não fica em "Lendo as tarefas…" para sempre.
+        // With no open project nobody reads the list: it does not stay on "Reading the tasks…" forever.
         empty_state(ui, body, deck.tasks.loaded || deck.active_project.is_empty());
         draw_footer(ui, footer, acts);
         return;
@@ -471,14 +471,14 @@ fn list_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, now: u64, acts: &mut Vec<
         (body, None)
     };
 
-    // 1. Tarefas em andamento (no topo).
+    // 1. Tasks in progress (at the top).
     let mut active_child = ui.new_child(UiBuilder::new().max_rect(active_rect).layout(egui::Layout::top_down(egui::Align::Min)));
     active_child.set_clip_rect(active_rect);
     egui::ScrollArea::vertical().id_salt("tasks-list").auto_shrink([false, false]).show(&mut active_child, |ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         ui.add_space(LIST_PAD);
         if active.is_empty() {
-            muted_line(ui, "Nenhuma tarefa em andamento.");
+            muted_line(ui, t!("No tasks in progress."));
         } else {
             for (i, task) in active.iter().enumerate() {
                 if i > 0 {
@@ -490,16 +490,16 @@ fn list_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, now: u64, acts: &mut Vec<
         ui.add_space(LIST_PAD);
     });
 
-    // 2. Seção HISTÓRICO (abaixo das em andamento, com rolagem própria).
+    // 2. HISTORY section (below the ones in progress, with its own scrolling).
     let mut filter_anchor = None;
     if let Some(hrect) = hist_rect {
         filter_anchor = Some(draw_history_section(deck, ui, hrect, &history, filter, acts));
     }
 
-    // 3. Rodapé "+ Nova tarefa".
+    // 3. "+ New task" footer.
     draw_footer(ui, footer, acts);
 
-    // Menu suspenso do filtro do histórico.
+    // Drop-down menu of the history filter.
     if deck.tasks.history_menu {
         if let Some(anchor) = filter_anchor {
             let items: Vec<MenuItem> = HistoryFilter::ALL
@@ -527,7 +527,7 @@ fn draw_footer(ui: &Ui, footer: Rect, acts: &mut Vec<Act>) {
     line_sep(&painter, Pos2::new(footer.min.x, footer.min.y + 0.5), Pos2::new(footer.max.x, footer.min.y + 0.5));
     let btn_rect =
         Rect::from_min_size(Pos2::new(footer.min.x + LIST_PAD, footer.min.y + 8.5), Vec2::new(footer.width() - 2.0 * LIST_PAD, BTN_H));
-    if tip(ui_button(ui, btn_rect, Id::new("tasks-new"), "+ Nova tarefa", ButtonKind::Primary), "Criar uma tarefa para um agente").clicked()
+    if tip(ui_button(ui, btn_rect, Id::new("tasks-new"), t!("+ New task"), ButtonKind::Primary), t!("Create a task for an agent")).clicked()
     {
         acts.push(Act::New);
     }
@@ -543,26 +543,28 @@ fn empty_state(ui: &mut Ui, body: Rect, loaded: bool) {
             &painter,
             Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 20.0)),
             Align2::LEFT_CENTER,
-            "Lendo as tarefas…",
+            t!("Reading the tasks…"),
             theme::ui(12.0),
             theme::pal().text_2,
         );
         return;
     }
-    let title = painter.layout("Nenhuma tarefa ainda".to_owned(), theme::ui_semibold(13.0), theme::pal().text_strong, w);
+    let title = painter.layout(t!("No tasks yet").to_owned(), theme::ui_semibold(13.0), theme::pal().text_strong, w);
     painter.galley(Pos2::new(x, y), title.clone(), theme::pal().text_strong);
     y += title.size().y + 6.0;
-    let text = "Uma tarefa é um pedido que um agente faz numa cópia isolada do projeto (uma branch com a própria pasta). \
-Quando ele termina, você revisa o relatório e o diff, mescla, testa e valida. Se algo falhar, devolve ou reprova com o motivo.";
+    let text = t!(
+        "A task is a request that an agent carries out on an isolated copy of the project (a branch with its own folder). \
+When it finishes, you review the report and the diff, merge, test and validate. If something fails, you send it back or reject it with the reason."
+    );
     let g = painter.layout(text.to_owned(), theme::ui(12.0), theme::pal().text_2, w);
     painter.galley(Pos2::new(x, y), g, theme::pal().text_2);
 }
 
-/// Cartão de uma tarefa em andamento:
-/// - Linha 1: `id` (10,5 px mono, `text_3`), `state` (10,5 px 600, `text_2` ou `accent` no em foco), espaço, `when` (`age_text`, 10,5 px, `text_3`).
-/// - Linha 2: `title` (12,5 px 600, `text`, até 2 linhas).
-/// - Linha 3: ponto de 6 px na cor do agente + `agente · modelo · esforço` (11 px, `text_2`), espaço e barra de 5 segmentos (3 px × 70 px).
-/// - Linha 4 (só `Review` / `Validating`): ações de 24 px (`Primary`, `Secondary`, `Ghost`).
+/// Card of a task in progress:
+/// - Row 1: `id` (10.5 px mono, `text_3`), `state` (10.5 px 600, `text_2` or `accent` when focused), space, `when` (`age_text`, 10.5 px, `text_3`).
+/// - Row 2: `title` (12.5 px 600, `text`, up to 2 lines).
+/// - Row 3: 6 px dot in the agent's color + `agent · model · effort` (11 px, `text_2`), space and a 5-segment bar (3 px × 70 px).
+/// - Row 4 (only `Review` / `Validating`): 24 px actions (`Primary`, `Secondary`, `Ghost`).
 fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec<Act>) {
     let p = theme::pal();
     let avail_w = ui.available_width();
@@ -571,7 +573,7 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     let focused = is_focused_card(task.status);
     let has_actions = matches!(task.status, TaskStatus::Review | TaskStatus::Validating);
 
-    // Prepara o título (até 2 linhas, 12,5 px 600).
+    // Prepares the title (up to 2 lines, 12.5 px 600).
     let mut title_job = egui::text::LayoutJob {
         wrap: egui::text::TextWrapping { max_width: inner_w, max_rows: 2, break_anywhere: false, overflow_character: Some('…') },
         ..Default::default()
@@ -607,7 +609,7 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     let x0 = rect.min.x + 10.0;
     let right = rect.max.x - 10.0;
 
-    // Linha 1: id + estado + tempo.
+    // Row 1: id + status + time.
     let y1 = rect.min.y + 8.0;
     let r1 = Rect::from_min_size(Pos2::new(x0, y1), Vec2::new(inner_w, l1_h));
     let id_g = galley(&painter, &task.id, theme::meta(10.5), p.text_3);
@@ -622,7 +624,7 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
         p.text_2
     };
     let state_text = match (task.status, task.waiting_for.as_deref()) {
-        (TaskStatus::Queued, Some(holder)) => format!("{} · espera {holder}", card_state_label(task.status)),
+        (TaskStatus::Queued, Some(holder)) => t!("{state} · waits for {holder}", state = card_state_label(task.status), holder),
         _ => card_state_label(task.status).to_owned(),
     };
     let state_g = galley(&painter, &state_text, theme::ui_semibold(10.5), state_color);
@@ -638,11 +640,11 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     let when_g = galley(&painter, &when, theme::ui(10.5), p.text_3);
     place(&painter, r1, Align2::RIGHT_CENTER, when_g, p.text_3);
 
-    // Linha 2: título (até 2 linhas).
+    // Row 2: title (up to 2 lines).
     let y2 = y1 + l1_h + 6.0;
     painter.galley(Pos2::new(x0, y2), title_g, p.text);
 
-    // Linha 3: ponto de 6 px na cor do agente + agente · modelo · esforço + barra de 5 etapas (70 px × 3 px).
+    // Row 3: 6 px dot in the agent's color + agent · model · effort + 5-step bar (70 px × 3 px).
     let y3 = y2 + title_h + 6.0;
     let r3 = Rect::from_min_size(Pos2::new(x0, y3), Vec2::new(inner_w, l3_h));
     let agent_color = deck.agents.tab_color(&task.kind);
@@ -658,7 +660,7 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     let who_g = galley_trunc(&painter, &who, theme::ui(11.0), p.text_2, who_max_w);
     place(&painter, Rect::from_min_size(Pos2::new(x0 + 11.0, y3), Vec2::new(who_max_w, l3_h)), Align2::LEFT_CENTER, who_g, p.text_2);
 
-    // Barra de 5 segmentos de 3 px de altura em 70 px de largura (gap de 2 px).
+    // 5-segment bar, 3 px high and 70 px wide (2 px gap).
     let step = task_step(task.status);
     let seg_gap = 2.0;
     let seg_w = (steps_w - 4.0 * seg_gap) / 5.0;
@@ -678,14 +680,14 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
         painter.rect_filled(seg_rect, 1.5, seg_color);
     }
 
-    // Linha 4: botões de 24 px para tarefas em revisão ou validação.
+    // Row 4: 24 px buttons for tasks in review or validation.
     let mut action_clicked = false;
     if has_actions {
         let y4 = y3 + l3_h + 6.0;
         let (prim_label, prim_act, prim_tip, sec_label, sec_tip) = if task.status == TaskStatus::Validating {
-            ("Validar", TaskAct::Validate, TaskAct::Validate.tip(), "Reprovar", TaskAct::Reject.tip())
+            (t!("Validate"), TaskAct::Validate, TaskAct::Validate.tip(), t!("Reject"), TaskAct::Reject.tip())
         } else {
-            ("Mesclar", TaskAct::Merge, TaskAct::Merge.tip(), "Devolver", TaskAct::Return.tip())
+            (t!("Merge"), TaskAct::Merge, TaskAct::Merge.tip(), t!("Return"), TaskAct::Return.tip())
         };
         let mut bx = x0;
         let pw = button_width(&painter, prim_label, ButtonKind::Primary);
@@ -705,11 +707,14 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
         bx = sr.max.x + 6.0;
 
         if can_show_diff(task) {
-            let gw = button_width(&painter, "Ver diff", ButtonKind::Ghost);
+            let gw = button_width(&painter, t!("View diff"), ButtonKind::Ghost);
             if bx + gw <= right + 2.0 {
                 let gr = Rect::from_min_size(Pos2::new(bx, y4), Vec2::new(gw, 24.0));
-                if tip(ui_button(ui, gr, Id::new(("card-diff", &task.id)), "Ver diff", ButtonKind::Ghost), tasks_ui::diff_button_tip(task))
-                    .clicked()
+                if tip(
+                    ui_button(ui, gr, Id::new(("card-diff", &task.id)), t!("View diff"), ButtonKind::Ghost),
+                    tasks_ui::diff_button_tip(task),
+                )
+                .clicked()
                 {
                     acts.push(Act::OpenDiff(task.id.clone()));
                     action_clicked = true;
@@ -724,15 +729,15 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     }
 }
 
-/// Seção HISTÓRICO abaixo das tarefas em andamento. Devolve o retângulo do botão de filtro.
+/// HISTORY section below the tasks in progress. Returns the rectangle of the filter button.
 fn draw_history_section(deck: &mut Deck, ui: &mut Ui, rect: Rect, history: &[&Task], filter: HistoryFilter, acts: &mut Vec<Act>) -> Rect {
     let p = theme::pal();
     let painter = ui.painter_at(rect);
     line_sep(&painter, Pos2::new(rect.min.x, rect.min.y + 0.5), Pos2::new(rect.max.x, rect.min.y + 0.5));
 
-    // Cabeçalho: section_label("HISTÓRICO") à esquerda e filtro "Concluídas e descartadas ▾" à direita.
+    // Header: section_label("HISTORY") on the left and the "Completed and discarded ▾" filter on the right.
     let head = Rect::from_min_size(Pos2::new(rect.min.x, rect.min.y + 6.0), Vec2::new(rect.width(), super::SECTION_LABEL_H));
-    section_label(&painter, head, "HISTÓRICO");
+    section_label(&painter, head, t!("History"));
 
     let filter_text = format!("{} ▾", filter.label());
     let fg_measure = galley(&painter, &filter_text, theme::ui(11.0), p.text_2);
@@ -744,11 +749,11 @@ fn draw_history_section(deck: &mut Deck, ui: &mut Ui, rect: Rect, history: &[&Ta
         painter.rect_filled(filter_rect, 4.0, p.hover);
     }
     text_in(&painter, filter_rect, Align2::CENTER_CENTER, &filter_text, theme::ui(11.0), if f_hot { p.text } else { p.text_2 });
-    if tip(f_resp, "Filtrar o histórico de tarefas encerradas").clicked() {
+    if tip(f_resp, t!("Filter the history of finished tasks")).clicked() {
         acts.push(Act::ToggleHistoryMenu);
     }
 
-    // Lista rolável de linhas de 24 px.
+    // Scrollable list of 24 px rows.
     let list_rect = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y + 2.0), Pos2::new(rect.max.x, rect.max.y - 4.0));
     let mut child = ui.new_child(UiBuilder::new().max_rect(list_rect).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(list_rect);
@@ -760,7 +765,7 @@ fn draw_history_section(deck: &mut Deck, ui: &mut Ui, rect: Rect, history: &[&Ta
                 ui.painter(),
                 Rect::from_min_max(Pos2::new(r.min.x + 10.0, r.min.y), r.max),
                 Align2::LEFT_CENTER,
-                "Nenhuma tarefa neste filtro.",
+                t!("No tasks in this filter."),
                 theme::ui(11.5),
                 p.text_3,
             );
@@ -774,9 +779,9 @@ fn draw_history_section(deck: &mut Deck, ui: &mut Ui, rect: Rect, history: &[&Ta
     filter_rect
 }
 
-/// Uma linha de 24 px no HISTÓRICO: ponto de 6 px na cor do agente, `id` (10,5 px mono, `text_3`),
-/// `title` truncado (11,5 px, `text`; se `Discarded`, riscado em `text_3`), `state` (10,5 px, `text_2`)
-/// e data `dd/mm` (10 px mono, `text_3`, alinhada à direita).
+/// A 24 px row in the HISTORY: 6 px dot in the agent's color, `id` (10.5 px mono, `text_3`),
+/// truncated `title` (11.5 px, `text`; if `Discarded`, struck through in `text_3`), `state` (10.5 px, `text_2`)
+/// and the `dd/mm` date (10 px mono, `text_3`, right-aligned).
 fn history_row(deck: &mut Deck, ui: &mut Ui, task: &Task, acts: &mut Vec<Act>) {
     let p = theme::pal();
     let avail_w = ui.available_width();
@@ -789,14 +794,14 @@ fn history_row(deck: &mut Deck, ui: &mut Ui, task: &Task, acts: &mut Vec<Act>) {
     let painter = ui.painter().clone();
     let cy = row.center().y;
 
-    // 1. Ponto de 6 px na cor do agente.
+    // 1. 6 px dot in the agent's color.
     painter.circle_filled(Pos2::new(row.min.x + 6.0 + 3.0, cy), 3.0, deck.agents.tab_color(&task.kind));
 
-    // 2. id (10,5 px mono, text_3, 24 px de largura).
+    // 2. id (10.5 px mono, text_3, 24 px wide).
     let id_rect = Rect::from_min_size(Pos2::new(row.min.x + 18.0, row.min.y), Vec2::new(24.0, 24.0));
     text_in(&painter, id_rect, Align2::LEFT_CENTER, &task.id, theme::meta(10.5), p.text_3);
 
-    // 3. Data dd/mm à direita (34 px) e estado antes dela.
+    // 3. dd/mm date on the right (34 px) and the status before it.
     let date_rect = Rect::from_min_size(Pos2::new(row.max.x - 6.0 - 34.0, row.min.y), Vec2::new(34.0, 24.0));
     text_in(&painter, date_rect, Align2::RIGHT_CENTER, &task_date_ddmm(task), theme::meta(10.0), p.text_3);
 
@@ -806,7 +811,7 @@ fn history_row(deck: &mut Deck, ui: &mut Ui, task: &Task, acts: &mut Vec<Act>) {
     let state_rect = Rect::from_min_size(Pos2::new(date_rect.min.x - 6.0 - state_w, row.min.y), Vec2::new(state_w, 24.0));
     place(&painter, state_rect, Align2::RIGHT_CENTER, state_g, p.text_2);
 
-    // 4. Título truncado (riscado em text_3 quando Discarded).
+    // 4. Truncated title (struck through in text_3 when Discarded).
     let title_x0 = id_rect.max.x + 6.0;
     let title_w = (state_rect.min.x - 6.0 - title_x0).max(20.0);
     let discarded = task.status == TaskStatus::Discarded;
@@ -841,11 +846,11 @@ fn history_row(deck: &mut Deck, ui: &mut Ui, task: &Task, acts: &mut Vec<Act>) {
 }
 
 // ---------------------------------------------------------------------------
-// Detalhe
+// Detail
 // ---------------------------------------------------------------------------
 
 fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, acts: &mut Vec<Act>) {
-    let head = head_bar(ui, rect, Some("Voltar à lista de tarefas"), &format!("Tarefa {}", task.id), 0.0, acts);
+    let head = head_bar(ui, rect, Some(t!("Back to the task list")), &t!("Task {id}", id = task.id), 0.0, acts);
     let busy = deck.tasks.busy.clone();
     let working = busy.is_some();
     let busy_here = busy.as_ref().filter(|b| b.id == task.id).map(|b| b.label);
@@ -871,13 +876,13 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         let p = theme::pal();
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         ui.add_space(10.0);
-        // Título.
+        // Title.
         let w = ui.available_width() - 2.0 * PAD;
         let g = ui.painter().layout(task.title.clone(), theme::ui_semibold(14.0), p.text_strong, w);
         let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), g.size().y + 8.0), Sense::hover());
         ui.painter().galley(Pos2::new(r.min.x + PAD, r.min.y), g, p.text_strong);
 
-        // Chip do estado e o tempo.
+        // Status chip and the time.
         let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
         let name = status_name(task.status);
         let cw = galley(ui.painter(), name, theme::ui_semibold(11.0), color).size().x + 24.0;
@@ -903,14 +908,14 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         );
         ui.add_space(8.0);
 
-        // `branch → base` e o agente com o modelo.
+        // `branch → base` and the agent with the model.
         padded(ui, |ui| {
             let line = tasks_ui::branch_line(task);
             let g = ui.painter().layout(line, theme::mono(11.0), p.text_2, ui.available_width() - 20.0);
             let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), g.size().y + 4.0), Sense::hover());
             deck.icons.paint(ui.painter(), Icon::GitBranch, r.min + Vec2::new(6.0, 8.5), 12.0, p.text_2, 0.0);
             ui.painter().galley(Pos2::new(r.min.x + 20.0, r.min.y + 1.0), g, p.text_2);
-            tip(resp, "Branch da tarefa → branch em que ela será mesclada (e o commit da mesclagem, se já houve)");
+            tip(resp, t!("Task branch → branch it will be merged into (and the merge commit, if there was one)"));
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
             let mut x = r.min.x;
             if let Some(icon) = super::projects::agent_icon(&task.kind) {
@@ -929,32 +934,38 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
             place(ui.painter(), Rect::from_min_max(Pos2::new(x, r.min.y), r.max), Align2::LEFT_CENTER, g, p.text);
         });
         if !task.scope.is_empty() {
-            paragraph(ui, &format!("Escopo: {}", task.scope.join(", ")), theme::mono(11.0), p.text_2);
+            paragraph(ui, &t!("Scope: {scope}", scope = task.scope.join(", ")), theme::mono(11.0), p.text_2);
         }
         ui.add_space(6.0);
 
-        // Na fila: por quem espera. Mexeu fora do escopo: aviso da revisão, não bloqueia nada.
+        // Queued: who it waits for. Touched outside the scope: a review notice, it blocks nothing.
         if let (TaskStatus::Queued, Some(holder)) = (task.status, task.waiting_for.as_deref()) {
-            let text = format!(
-                "Na fila: o escopo se sobrepõe ao da tarefa {holder}. Começa sozinha quando ela for mesclada, descartada ou falhar, partindo de {} nesse momento.",
-                task.base
+            let text = t!(
+                "Queued: the scope overlaps task {holder}'s scope. It starts by itself when that task is merged, discarded or fails, branching from {base} at that moment.",
+                holder,
+                base = task.base
             );
             notice_box(ui, &text, false, false);
         }
         if task.status == TaskStatus::Review && !task.outside_scope.is_empty() {
             let shown: Vec<&str> = task.outside_scope.iter().take(OUTSIDE_SHOWN).map(String::as_str).collect();
             let more = task.outside_scope.len().saturating_sub(OUTSIDE_SHOWN);
-            let tail = if more > 0 { format!(" e mais {more}") } else { String::new() };
-            notice_box(ui, &format!("Mexeu fora do escopo: {}{tail}", shown.join(", ")), false, false);
+            let files = shown.join(", ");
+            let text = if more > 0 {
+                t!("Touched outside the scope: {files} and {more} more", files, more)
+            } else {
+                t!("Touched outside the scope: {files}", files)
+            };
+            notice_box(ui, &text, false, false);
         }
 
-        // O erro da tarefa (Failed) e o da última ação.
+        // The task's error (Failed) and the last action's.
         if let Some(err) = task.error.as_deref().filter(|_| task.status == TaskStatus::Failed) {
             error_box(ui, err, false);
         }
         if let Some(n) = &notice {
-            // Recusa da mesclagem com saída: a explicação em linguagem comum no lugar do texto do git, e o botão da saída.
-            // O aviso do stash vai junto: é a única frase que diz onde ficaram as alterações do usuário.
+            // A merge refusal with a way out: the plain-language explanation in place of git's text, and the way-out button.
+            // The stash notice goes along: it is the only sentence that says where the user's changes went.
             let shown = match (&notice_block, &notice_stash) {
                 (Some(b), Some(note)) => format!("{} {note}", b.explain(task)),
                 (Some(b), None) => b.explain(task),
@@ -968,7 +979,7 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
             }
         }
 
-        // Botões do estado.
+        // The status's buttons.
         let buttons: Vec<(String, BtnKind, bool, &str)> = acts_for
             .iter()
             .map(|a| {
@@ -1008,17 +1019,17 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         ui.add_space(4.0);
         separator(ui);
 
-        // Pedido.
-        if section_header(deck, ui, Section::Brief, "Pedido", None, acts) {
+        // Request.
+        if section_header(deck, ui, Section::Brief, t!("Request"), None, acts) {
             if task.brief.trim().is_empty() {
-                muted_line(ui, "Sem pedido além do título: o agente recebe só o título.");
+                muted_line(ui, t!("No request besides the title: the agent gets only the title."));
             } else {
                 paragraph(ui, &clip_text(task.brief.trim(), TEXT_MAX), theme::ui(12.0), p.text_2);
                 open_center_button(ui, "brief", task, false, acts);
             }
         }
-        // Relatório.
-        if section_header(deck, ui, Section::Report, "Relatório", None, acts) {
+        // Report.
+        if section_header(deck, ui, Section::Report, t!("Report"), None, acts) {
             match task.report.as_deref().filter(|r| !r.trim().is_empty()) {
                 Some(report) => {
                     egui::ScrollArea::vertical()
@@ -1030,17 +1041,17 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                         });
                     open_center_button(ui, "report", task, true, acts);
                 }
-                None if task.status == TaskStatus::Running => muted_line(ui, "O agente ainda não entregou o relatório."),
-                None => muted_line(ui, "Sem relatório."),
+                None if task.status == TaskStatus::Running => muted_line(ui, t!("The agent has not delivered the report yet.")),
+                None => muted_line(ui, t!("No report.")),
             }
         }
-        // Alterações.
+        // Changes.
         let summary = task.diff_stat.as_deref().and_then(parse_diff_stat);
         let right = summary.map(|s| (s.text(), p.text_3));
-        if section_header(deck, ui, Section::Changes, "Alterações", right, acts) {
+        if section_header(deck, ui, Section::Changes, t!("Changes"), right, acts) {
             match task.diff_stat.as_deref().filter(|s| !s.trim().is_empty()) {
                 Some(stat) => stat_box(ui, stat),
-                None => muted_line(ui, if can_show_diff(task) { "O resumo chega com o relatório." } else { "Sem alterações registradas." }),
+                None => muted_line(ui, if can_show_diff(task) { t!("The summary arrives with the report.") } else { t!("No changes recorded.") }),
             }
             if can_show_diff(task) {
                 let b = [(tasks_ui::diff_button_label(task).to_owned(), BtnKind::Secondary, true, tasks_ui::diff_button_tip(task))];
@@ -1049,21 +1060,21 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 }
             }
         }
-        // Mensagens.
+        // Messages.
         let messages = tasks_ui::messages_in_order(task);
-        if section_header(deck, ui, Section::Messages, "Mensagens", Some((messages.len().to_string(), p.text_3)), acts) {
+        if section_header(deck, ui, Section::Messages, t!("Messages"), Some((messages.len().to_string(), p.text_3)), acts) {
             timeline(deck, ui, task, &messages, acts);
         }
-        // Histórico.
+        // History.
         let events = events_newest_first(task);
-        if section_header(deck, ui, Section::History, "Histórico", Some((events.len().to_string(), p.text_3)), acts) {
+        if section_header(deck, ui, Section::History, t!("History"), Some((events.len().to_string(), p.text_3)), acts) {
             history(ui, &events);
         }
         ui.add_space(14.0);
     });
 }
 
-/// Os botões da saída da recusa da mesclagem (e, para o que está sem commit, a lista completa de arquivos).
+/// The buttons of the way out of the merge refusal (and, for what is uncommitted, the full list of files).
 fn refusal_buttons(ui: &mut Ui, task: &Task, block: &MergeBlock, files_open: bool, enabled: bool, acts: &mut Vec<Act>) {
     let mergeable = matches!(task.status, TaskStatus::Review | TaskStatus::Failed);
     if !mergeable {
@@ -1073,35 +1084,35 @@ fn refusal_buttons(ui: &mut Ui, task: &Task, block: &MergeBlock, files_open: boo
         MergeBlock::MainDirty(_) => (
             vec![
                 (
-                    "Guardar minhas alterações e mesclar".to_owned(),
+                    t!("Stash my changes and merge").to_owned(),
                     BtnKind::Primary,
                     enabled,
-                    "Guarda as suas alterações sem commit (git stash), mescla a tarefa e devolve as alterações; se elas se chocarem com a tarefa, ficam guardadas e o aviso diz como recuperar",
+                    t!("Stashes your uncommitted changes (git stash), merges the task and gives the changes back; if they clash with the task, they stay stashed and the notice says how to recover them"),
                 ),
                 (
-                    if files_open { "Esconder a lista" } else { "Ver o que está sem commit" }.to_owned(),
+                    if files_open { t!("Hide the list") } else { t!("See what is uncommitted") }.to_owned(),
                     BtnKind::Secondary,
                     true,
-                    "Mostra todos os arquivos com alterações sem commit na pasta principal",
+                    t!("Shows all the files with uncommitted changes in the main folder"),
                 ),
             ],
             true,
         ),
         MergeBlock::TaskDirty(_) => (
             vec![(
-                "Pedir ao agente para fazer o commit".to_owned(),
+                t!("Ask the agent to commit").to_owned(),
                 BtnKind::Primary,
                 enabled,
-                "Devolve a tarefa ao agente com a lista dos arquivos e o pedido de fazer o commit",
+                t!("Sends the task back to the agent with the list of files and a request to commit"),
             )],
             false,
         ),
         MergeBlock::Conflict(_) => (
             vec![(
-                "Pedir ao agente para resolver o conflito".to_owned(),
+                t!("Ask the agent to resolve the conflict").to_owned(),
                 BtnKind::Primary,
                 enabled,
-                "Devolve a tarefa ao agente pedindo para juntar a base na branch dele (git merge) e resolver os arquivos em conflito",
+                t!("Sends the task back to the agent asking it to merge the base into its branch (git merge) and resolve the conflicting files"),
             )],
             false,
         ),
@@ -1113,22 +1124,19 @@ fn refusal_buttons(ui: &mut Ui, task: &Task, block: &MergeBlock, files_open: boo
         None => {}
     }
     if files_open && files {
-        let list = block.files().join(
-            "
-",
-        );
+        let list = block.files().join("\n");
         paragraph(ui, &clip_text(&list, TEXT_MAX), theme::mono(11.0), theme::pal().text_2);
     }
 }
 
-/// "Abrir em Documentos" embaixo do pedido e do relatório: eles aparecem formatados no modo Documentos.
+/// "Open in Documents" under the request and the report: they show formatted in Documents mode.
 fn open_center_button(ui: &mut Ui, id_salt: &str, task: &Task, report: bool, acts: &mut Vec<Act>) {
     let tip = if report {
-        "Abre o relatório formatado, com a largura toda do centro"
+        t!("Opens the report formatted, with the full width of the center")
     } else {
-        "Abre o pedido formatado, com a largura toda do centro"
+        t!("Opens the request formatted, with the full width of the center")
     };
-    let b = [("Abrir em Documentos".to_owned(), BtnKind::Secondary, true, tip)];
+    let b = [(t!("Open in Documents").to_owned(), BtnKind::Secondary, true, tip)];
     if button_flow(ui, &b, id_salt).is_some() {
         acts.push(Act::OpenText(task.id.clone(), report));
     }
@@ -1139,7 +1147,7 @@ fn separator(ui: &mut Ui) {
     line_sep(ui.painter(), Pos2::new(r.min.x + PAD, r.min.y + 0.5), Pos2::new(r.max.x - PAD, r.min.y + 0.5));
 }
 
-/// Corta o começo do texto (`…ui/tasks.rs`) para caber em `max_w`: num caminho, o fim é o que identifica.
+/// Cuts the start of the text (`…ui/tasks.rs`) to fit `max_w`: in a path, the end is what identifies it.
 fn tail_galley(painter: &egui::Painter, text: &str, font: egui::FontId, color: Color32, max_w: f32) -> std::sync::Arc<egui::Galley> {
     let full = galley(painter, text, font.clone(), color);
     if full.size().x <= max_w {
@@ -1160,8 +1168,8 @@ fn tail_galley(painter: &egui::Painter, text: &str, font: egui::FontId, color: C
     galley(painter, &cut, font, color)
 }
 
-/// O `git diff --stat` do relatório: um arquivo por linha (o caminho, cortado pelo começo, e o número de
-/// linhas mudadas à direita). O total fica no cabeçalho da seção.
+/// The report's `git diff --stat`: one file per line (the path, cut from the start, and the number of
+/// changed lines on the right). The total goes in the section header.
 fn stat_box(ui: &mut Ui, stat: &str) {
     let lines = tasks_ui::parse_stat_lines(stat);
     if lines.is_empty() {
@@ -1196,28 +1204,30 @@ fn stat_box(ui: &mut Ui, stat: &str) {
         );
     }
     if extra > 0 {
+        let more = if extra == 1 { t!("… and 1 more file").to_owned() } else { t!("… and {extra} more files", extra) };
         text_in(
             ui.painter(),
             Rect::from_min_size(Pos2::new(r.min.x + 8.0, r.min.y + 6.0 + shown as f32 * row), Vec2::new(r.width() - 16.0, row)),
             Align2::LEFT_CENTER,
-            &format!("… e mais {extra} arquivos"),
+            &more,
             theme::ui(11.0),
             p.text_2,
         );
     }
 }
 
-/// Linha do tempo das mensagens do `ask-agent` da tarefa, da mais antiga para a mais nova: hora, tipo, de → para, e o
-/// texto (recolhido; o clique abre inteiro).
+/// Timeline of the task's `ask-agent` messages, from the oldest to the newest: time, kind, from → to, and the
+/// text (collapsed; a click opens it whole).
 fn timeline(deck: &Deck, ui: &mut Ui, task: &Task, messages: &[&TaskMessage], acts: &mut Vec<Act>) {
     if messages.is_empty() {
-        muted_line(ui, "Nenhuma pergunta nem resposta com outros agentes ainda.");
+        muted_line(ui, t!("No questions or answers with other agents yet."));
         return;
     }
     let p = theme::pal();
     let hidden = messages.len().saturating_sub(tasks_ui::MESSAGES_SHOWN);
     if hidden > 0 {
-        muted_line(ui, &format!("… e mais {hidden} mensagens anteriores."));
+        let text = if hidden == 1 { t!("… and 1 earlier message.").to_owned() } else { t!("… and {hidden} earlier messages.", hidden) };
+        muted_line(ui, &text);
     }
     for m in messages.iter().skip(hidden) {
         let open = deck.tasks.open_messages.contains(&(task.id.clone(), m.at_ms));
@@ -1237,7 +1247,7 @@ fn timeline(deck: &Deck, ui: &mut Ui, task: &Task, messages: &[&TaskMessage], ac
             if resp.clicked() {
                 acts.push(Act::ToggleMessage(task.id.clone(), m.at_ms));
             }
-            tip(resp.clone(), if open { "Recolhe a mensagem" } else { "Abre a mensagem inteira" });
+            tip(resp.clone(), if open { t!("Collapses the message") } else { t!("Opens the whole message") });
         }
         if more && resp.hovered() {
             ui.painter().rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), 5.0, p.hover);
@@ -1278,7 +1288,7 @@ fn timeline(deck: &Deck, ui: &mut Ui, task: &Task, messages: &[&TaskMessage], ac
                 painter,
                 Rect::from_min_size(Pos2::new(r.min.x + PAD, r.min.y + 3.0 + head_h + body.size().y), Vec2::new(w - 2.0 * PAD, foot_h)),
                 Align2::LEFT_CENTER,
-                if open { "recolher" } else { "ver tudo" },
+                if open { t!("collapse") } else { t!("see all") },
                 theme::meta(10.5),
                 p.text_3,
             );
@@ -1286,10 +1296,10 @@ fn timeline(deck: &Deck, ui: &mut Ui, task: &Task, messages: &[&TaskMessage], ac
     }
 }
 
-/// Eventos (do mais novo): data e hora, e o texto ao lado.
+/// Events (newest first): date and time, and the text beside it.
 fn history(ui: &mut Ui, events: &[&agentdeck_core::TaskEvent]) {
     if events.is_empty() {
-        muted_line(ui, "Nada registrado ainda.");
+        muted_line(ui, t!("Nothing recorded yet."));
         return;
     }
     let p = theme::pal();
@@ -1307,26 +1317,28 @@ fn history(ui: &mut Ui, events: &[&agentdeck_core::TaskEvent]) {
         ui.painter().galley(Pos2::new(r.min.x + PAD + time_w + 8.0, r.min.y + 2.0), g, p.text_2);
     }
     if events.len() > EVENTS_MAX {
-        muted_line(ui, &format!("… e mais {} eventos mais antigos.", events.len() - EVENTS_MAX));
+        let older = events.len() - EVENTS_MAX;
+        let text = if older == 1 { t!("… and 1 older event.").to_owned() } else { t!("… and {older} older events.", older) };
+        muted_line(ui, &text);
     }
 }
 
-/// Campo de feedback do "Devolver", com "Enviar" e "Cancelar".
+/// Feedback field of "Return", with "Send" and "Cancel".
 fn return_form(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &mut Vec<Act>) {
-    // Em revisão devolve-se com ajustes; aguardando validação, reprova-se com o que não funcionou no teste.
+    // In review it is sent back with adjustments; awaiting validation, it is rejected with what did not work in the test.
     let (hint, send, send_tip, cancel_tip) = if task.status == TaskStatus::Validating {
         (
-            "O que não funcionou no teste? (Ctrl+Enter envia)",
-            "Reprovar e enviar",
-            "Devolve a tarefa ao mesmo agente, dizendo que o trabalho já foi mesclado e o que falhou no teste",
-            "Fecha sem reprovar",
+            t!("What did not work in the test? (Ctrl+Enter sends)"),
+            t!("Reject and send"),
+            t!("Sends the task back to the same agent, saying the work was already merged and what failed in the test"),
+            t!("Closes without rejecting"),
         )
     } else {
         (
-            "O que o agente precisa mudar? (Ctrl+Enter envia)",
-            "Enviar ao agente",
-            "Devolve a tarefa ao agente com este pedido de ajustes",
-            "Fecha sem devolver",
+            t!("What does the agent need to change? (Ctrl+Enter sends)"),
+            t!("Send to the agent"),
+            t!("Sends the task back to the agent with this request for changes"),
+            t!("Closes without returning"),
         )
     };
     let id = Id::new("tasks-return-feedback");
@@ -1337,7 +1349,7 @@ fn return_form(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &
         ui.add_space(2.0);
         text_field(ui, id, &mut deck.tasks.feedback, hint, Some(4));
     });
-    let b = [(send.to_owned(), BtnKind::Primary, ready, send_tip), ("Cancelar".to_owned(), BtnKind::Secondary, true, cancel_tip)];
+    let b = [(send.to_owned(), BtnKind::Primary, ready, send_tip), (t!("Cancel").to_owned(), BtnKind::Secondary, true, cancel_tip)];
     ui.add_space(6.0);
     match button_flow(ui, &b, "return") {
         Some(0) => acts.push(Act::SendReturn(task.id.clone())),
@@ -1348,10 +1360,10 @@ fn return_form(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &
 }
 
 // ---------------------------------------------------------------------------
-// Confirmação
+// Confirmation
 // ---------------------------------------------------------------------------
 
-/// Modal de confirmação de "Mesclar" e "Descartar", dentro do painel, sobre o fundo escurecido.
+/// Confirmation modal for "Merge" and "Discard", inside the panel, over the dimmed background.
 fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut Vec<Act>) {
     let Some(confirm) = deck.tasks.confirm.clone() else { return };
     let (id, merge) = match &confirm {
@@ -1364,25 +1376,26 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
     };
     let (title, detail, yes) = if merge {
         (
-            format!("Mesclar \"{}\" em {}?", task.title, task.base),
-            format!(
-                "A branch {} entra em {} com um commit de mesclagem (git merge --no-ff). O agente, a worktree e a branch continuam até você testar e validar a tarefa.",
-                task.branch, task.base
+            t!("Merge \"{title}\" into {base}?", title = task.title, base = task.base),
+            t!(
+                "Branch {branch} goes into {base} with a merge commit (git merge --no-ff). The agent, the worktree and the branch stay until you test and validate the task.",
+                branch = task.branch,
+                base = task.base
             ),
-            "Mesclar",
+            t!("Merge"),
         )
     } else {
         (
-            format!("Descartar \"{}\"?", task.title),
+            t!("Discard \"{title}\"?", title = task.title),
             if task.status == TaskStatus::Validating {
-                format!(
-                    "A aba do agente fecha e a worktree e a branch da tarefa são apagadas. O que já foi mesclado continua em {}: descartar não desfaz a mesclagem.",
-                    task.base
+                t!(
+                    "The agent's tab closes and the task's worktree and branch are deleted. What was already merged stays in {base}: discarding does not undo the merge.",
+                    base = task.base
                 )
             } else {
-                "A aba do agente fecha e a worktree e a branch da tarefa são apagadas, com tudo o que o agente fez e não foi mesclado. Não dá para desfazer.".to_owned()
+                t!("The agent's tab closes and the task's worktree and branch are deleted, along with everything the agent did that was not merged. This cannot be undone.").to_owned()
             },
-            "Descartar",
+            t!("Discard"),
         )
     };
     super::modal_backdrop(deck, ctx, "tasks-confirm-backdrop");
@@ -1403,14 +1416,14 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
         let by = rect.max.y - 14.0 - BTN_H;
         let dw = button_width(ui.painter(), yes, ButtonKind::Primary);
         let d = Rect::from_min_size(Pos2::new(rect.max.x - 14.0 - dw, by), Vec2::new(dw, BTN_H));
-        let cw = button_width(ui.painter(), "Cancelar", ButtonKind::Secondary);
+        let cw = button_width(ui.painter(), t!("Cancel"), ButtonKind::Secondary);
         let c = Rect::from_min_size(Pos2::new(d.min.x - 8.0 - cw, by), Vec2::new(cw, BTN_H));
         let dr = if merge {
             ui_button(ui, d, Id::new("tasks-confirm-yes"), yes, ButtonKind::Primary)
         } else {
             button_danger(ui, d, Id::new("tasks-confirm-yes"), yes)
         };
-        let cr = ui_button(ui, c, Id::new("tasks-confirm-no"), "Cancelar", ButtonKind::Secondary);
+        let cr = ui_button(ui, c, Id::new("tasks-confirm-no"), t!("Cancel"), ButtonKind::Secondary);
         if dr.clicked() {
             acts.push(Act::ConfirmYes);
         } else if cr.clicked() || ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -1420,23 +1433,25 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect, acts: &mut 
 }
 
 // ---------------------------------------------------------------------------
-// Nova tarefa
+// New task
 // ---------------------------------------------------------------------------
 
-/// Rótulo de seção/campo do formulário (IBM Plex Mono Medium 10 px, MAIÚSCULAS, `text_3`, `0.1em`).
-/// Os segmentos do seletor de esforço, na ordem de [`effort_of`].
-const EFFORT_LABELS: [&str; 4] = ["Padrão", "Baixo", "Médio", "Alto"];
+/// The segments of the effort selector, in the order of [`effort_of`].
+fn effort_labels() -> [&'static str; 4] {
+    [t!("Default"), t!("Low"), t!("Mid"), t!("High")]
+}
 
-/// O segmento de um esforço (`None` = "Padrão").
+/// The segment of an effort (`None` = "Default").
 fn effort_index(effort: Option<Effort>) -> usize {
     effort.map_or(0, |e| 1 + Effort::ALL.iter().position(|x| *x == e).unwrap_or(0))
 }
 
-/// O esforço de um segmento.
+/// The effort of a segment.
 fn effort_of(index: usize) -> Option<Effort> {
     index.checked_sub(1).and_then(|i| Effort::ALL.get(i).copied())
 }
 
+/// Section/field label of the form (IBM Plex Mono Medium 10 px, UPPERCASE, `text_3`, `0.1em`).
 fn field_label(ui: &mut Ui, text: &str) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
     let color = theme::pal().text_3;
@@ -1449,7 +1464,7 @@ fn chip_width(painter: &egui::Painter, reference: &str) -> f32 {
     10.0 + t + 4.0 + (8.0 + text_w(painter, "×", theme::ui(13.0))) + 4.0 + 2.0
 }
 
-/// Botão "Anexar arquivos" e chips dos arquivos anexados ao pedido da nova tarefa.
+/// "Attach files" button and chips of the files attached to the new task's request.
 fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
     let avail = ui.available_width();
     let attachments = &deck.tasks.form.attachments;
@@ -1499,7 +1514,7 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
                     theme::ui(13.0),
                     if xr.hovered() && !busy { p.text } else { p.text_2 },
                 );
-                if tip(xr, "Remover anexo").clicked() && !busy {
+                if tip(xr, t!("Remove attachment")).clicked() && !busy {
                     acts.push(Act::RemoveAttachment(idx));
                 }
             }
@@ -1508,7 +1523,7 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
     }
 
     ui.add_space(6.0);
-    let label = "Anexar arquivos";
+    let label = t!("Attach files");
     let lw = text_w(ui.painter(), label, theme::ui(11.5));
     let bw = 10.0 + 14.0 + 6.0 + lw + 12.0;
     let (row, _) = ui.allocate_exact_size(Vec2::new(avail, 26.0), Sense::hover());
@@ -1535,12 +1550,12 @@ fn form_attachments(deck: &mut Deck, ui: &mut Ui, acts: &mut Vec<Act>) {
         theme::ui(11.5),
         fg,
     );
-    if tip(resp, "Anexar arquivos ou imagens ao pedido (também pode arrastar e soltar sobre o formulário)").clicked() && !busy {
+    if tip(resp, t!("Attach files or images to the request (you can also drag and drop onto the form)")).clicked() && !busy {
         acts.push(Act::PickAttachments);
     }
 }
 
-/// Botão em forma de campo que abre um menu: texto (com a bolinha do agente, se houver) e "▾".
+/// Field-shaped button that opens a menu: text (with the agent's dot, if any) and "▾".
 fn dropdown_button(ui: &mut Ui, id: Id, label: &str, dot: Option<Color32>, enabled: bool, open: bool, tooltip: &str) -> (Rect, bool) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
     let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
@@ -1561,32 +1576,32 @@ fn dropdown_button(ui: &mut Ui, id: Id, label: &str, dot: Option<Color32>, enabl
     (r, clicked)
 }
 
-/// Marca discreta à direita da linha de um menu do formulário.
+/// Quiet mark on the right of a form menu row.
 #[derive(Clone, Copy)]
 enum Detail {
-    /// "grátis": modelo sem custo por token.
+    /// "free": a model with no per-token cost.
     Free,
-    /// "N modelos": quantos o provedor tem.
+    /// "N models": how many the provider has.
     Count(usize),
-    /// Uso atual da cota do CLI oficial; `None` significa que ainda não há leitura.
+    /// Current use of the official CLI's quota; `None` means there is no reading yet.
     Quota(Option<u8>),
 }
 
-/// Itens de um menu do formulário ou do filtro.
+/// Items of a form or filter menu.
 #[derive(Clone)]
 struct MenuItem {
     label: String,
     dot: Option<Color32>,
     selected: bool,
     enabled: bool,
-    /// Texto discreto à direita: "12 modelos" no passo do provedor, "grátis" nos modelos sem custo.
+    /// Quiet text on the right: "12 models" on the provider step, "free" on the no-cost models.
     detail: Option<Detail>,
-    /// Abre outro passo: desenha a seta "›" à direita.
+    /// Opens another step: draws the "›" arrow on the right.
     submenu: bool,
 }
 
-/// Menu sob `anchor` (fundo `popup` opaco, `glass_border`, cantos 8, itens de 26 px com `hover`).
-/// Devolve o índice escolhido; fecha com clique fora ou Esc.
+/// Menu under `anchor` (opaque `popup` background, `glass_border`, corners 8, 26 px items with `hover`).
+/// Returns the chosen index; closes on a click outside or Esc.
 fn dropdown_menu(
     ctx: &egui::Context,
     id: &str,
@@ -1637,10 +1652,11 @@ fn dropdown_menu(
                 }
                 if let Some(detail) = &item.detail {
                     let (text, dcolor) = match detail {
-                        Detail::Free => ("grátis".to_owned(), p.success),
-                        Detail::Count(n) => (format!("{n} modelo{}", if *n == 1 { "" } else { "s" }), p.text_2),
-                        Detail::Quota(Some(used)) => (format!("{used}% usada"), if *used >= 80 { p.warning } else { p.success }),
-                        Detail::Quota(None) => ("sem leitura".to_owned(), p.text_3),
+                        Detail::Free => (t!("free").to_owned(), p.success),
+                        Detail::Count(1) => (t!("1 model").to_owned(), p.text_2),
+                        Detail::Count(count) => (t!("{count} models", count), p.text_2),
+                        Detail::Quota(Some(used)) => (t!("{used}% used", used), if *used >= 80 { p.warning } else { p.success }),
+                        Detail::Quota(None) => (t!("no reading").to_owned(), p.text_3),
                     };
                     let g = galley(ui.painter(), &text, theme::ui(11.0), dcolor);
                     let w = g.size().x;
@@ -1669,11 +1685,11 @@ fn dropdown_menu(
 }
 
 fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
-    let head = head_bar(ui, rect, Some("Voltar à lista de tarefas"), "Nova tarefa", 0.0, acts);
+    let head = head_bar(ui, rect, Some(t!("Back to the task list")), t!("New task"), 0.0, acts);
     let body = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
     let ctx = ui.ctx().clone();
 
-    // O que os menus e o botão precisam do Deck, antes de a closure pegar emprestados os campos.
+    // What the menus and the button need from the Deck, before the closure borrows the fields.
     let kind = deck.tasks.form.kind.clone();
     let choices = deck.tasks_agent_choices();
     let quota_used = deck.core.quota_used();
@@ -1699,27 +1715,27 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             submenu: false,
         })
         .collect();
-    // O OpenCode lista todos os provedores conectados (`opencode`, `opencode-go`…): o menu
-    // pede o provedor antes e mostra só os modelos dele. Os outros agentes têm uma lista só.
+    // OpenCode lists every connected provider (`opencode`, `opencode-go`…): the menu
+    // asks for the provider first and shows only its models. The other agents have a single list.
     let groups = models::by_provider(&known);
     let sole = models::sole_provider(&groups).map(str::to_owned);
     let step = deck.tasks.form.provider.clone().filter(|p| groups.iter().any(|(name, _)| name == p)).or(sole.clone());
-    let model_label = deck.tasks.form.model.clone().unwrap_or_else(|| "Padrão".to_owned());
-    // Esforço: o que o agente (e o modelo escolhido) permite; sem isso o seletor fica desligado, com a dica.
+    let model_label = deck.tasks.form.model.clone().unwrap_or_else(|| t!("Default").to_owned());
+    // Effort: what the agent (and the chosen model) allows; without it the selector is off, with the tooltip.
     let effort_off = models::effort_unavailable(&kind, deck.tasks.form.model.as_deref());
     let effort_at = if effort_off.is_some() { 0 } else { effort_index(deck.tasks.form.effort) };
     let rows: Vec<(MenuItem, Act)> = if let Some(provider) = &step {
         let mut rows = Vec::new();
-        // Com um provedor só não há passo anterior: o menu abre direto nos modelos dele.
+        // With a single provider there is no previous step: the menu opens straight on its models.
         if sole.is_none() {
             rows.push((
-                MenuItem { label: "‹ Provedores".into(), dot: None, selected: false, enabled: true, detail: None, submenu: false },
+                MenuItem { label: t!("‹ Providers").into(), dot: None, selected: false, enabled: true, detail: None, submenu: false },
                 Act::SetProvider(None),
             ));
         }
         rows.push((
             MenuItem {
-                label: "Padrão".into(),
+                label: t!("Default").into(),
                 dot: None,
                 selected: deck.tasks.form.model.is_none(),
                 enabled: true,
@@ -1745,7 +1761,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     } else if groups.is_empty() {
         let mut rows = vec![(
             MenuItem {
-                label: "Padrão".into(),
+                label: t!("Default").into(),
                 dot: None,
                 selected: deck.tasks.form.model.is_none(),
                 enabled: true,
@@ -1766,7 +1782,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             (item, Act::SetModel(Some(m.clone())))
         }));
         if known.is_empty() {
-            let text = if loading { "Carregando modelos…" } else { "Sem lista de modelos: só o padrão" };
+            let text = if loading { t!("Loading models…") } else { t!("No model list: default only") };
             rows.push((
                 MenuItem { label: text.into(), dot: None, selected: false, enabled: false, detail: None, submenu: false },
                 Act::CloseMenu,
@@ -1776,7 +1792,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     } else {
         let mut rows = vec![(
             MenuItem {
-                label: "Padrão".into(),
+                label: t!("Default").into(),
                 dot: None,
                 selected: deck.tasks.form.model.is_none(),
                 enabled: true,
@@ -1817,17 +1833,17 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         ui.add_space(8.0);
         padded(ui, |ui| {
-            field_label(ui, "Título");
-            text_field(ui, title_id, &mut deck.tasks.form.title, "O que o agente deve fazer, em uma linha", None);
+            field_label(ui, t!("Title"));
+            text_field(ui, title_id, &mut deck.tasks.form.title, t!("What the agent should do, in one line"), None);
             if focus_title {
                 ui.ctx().memory_mut(|m| m.request_focus(title_id));
             }
             ui.add_space(8.0);
-            field_label(ui, "Pedido");
-            text_field(ui, brief_id, &mut deck.tasks.form.brief, "Detalhes, arquivos, critérios de aceite… (opcional)", Some(6));
+            field_label(ui, t!("Request"));
+            text_field(ui, brief_id, &mut deck.tasks.form.brief, t!("Details, files, acceptance criteria… (optional)"), Some(6));
             form_attachments(deck, ui, acts);
             ui.add_space(8.0);
-            field_label(ui, "Nível");
+            field_label(ui, t!("Level"));
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
             let level_labels = Level::ALL.map(Level::label);
             let level_at = Level::ALL.iter().position(|l| *l == deck.tasks.form.level).unwrap_or(1);
@@ -1836,10 +1852,10 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             }
             tip(
                 ui.interact(r, Id::new("tasks-new-level-tip"), Sense::hover()),
-                "O tamanho do trabalho (não é o esforço): decide quais modelos dão conta. Sem escolher, vale Média",
+                t!("The size of the work (not the effort): decides which models can handle it. If you do not choose, Medium applies"),
             );
             ui.add_space(8.0);
-            field_label(ui, "Agente");
+            field_label(ui, t!("Agent"));
             let (r, click) = dropdown_button(
                 ui,
                 Id::new("tasks-new-agent"),
@@ -1847,7 +1863,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 Some(agent_dot),
                 !choices.is_empty(),
                 open_menu == Some(FormMenu::Agent),
-                "Agente que vai executar a tarefa",
+                t!("The agent that will run the task"),
             );
             anchors[0] = Some(r);
             if click {
@@ -1855,14 +1871,14 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             }
             if let Some(note) = deck.core.quota_advisory(&kind, &choices) {
                 ui.add_space(3.0);
-                notice_box(ui, &format!("Aviso de cota: {note}. A escolha continua disponível."), false, false);
+                notice_box(ui, &t!("Quota warning: {note}. The choice is still available.", note), false, false);
             }
             if let Some(note) = deck.tasks.form.capacity_note.clone() {
                 ui.add_space(3.0);
-                notice_box(ui, &format!("Aviso de capacidade: {note}. A escolha continua disponível."), false, false);
+                notice_box(ui, &t!("Capacity warning: {note}. The choice is still available.", note), false, false);
             }
             ui.add_space(8.0);
-            field_label(ui, "Modelo");
+            field_label(ui, t!("Model"));
             let (r, click) = dropdown_button(
                 ui,
                 Id::new("tasks-new-model"),
@@ -1871,11 +1887,11 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 picks_model,
                 open_menu == Some(FormMenu::Model),
                 if !picks_model {
-                    "Este agente não permite escolher o modelo"
+                    t!("This agent does not allow choosing the model")
                 } else if groups.is_empty() || sole.is_some() {
-                    "Modelo de LLM do agente"
+                    t!("The agent's LLM model")
                 } else {
-                    "Escolha o provedor e depois o modelo"
+                    t!("Choose the provider and then the model")
                 },
             );
             anchors[1] = Some(r);
@@ -1883,19 +1899,19 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 acts.push(Act::ToggleMenu(FormMenu::Model));
             }
             ui.add_space(8.0);
-            field_label(ui, "Esforço");
+            field_label(ui, t!("Effort"));
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
             let picked = ui
                 .scope(|ui| {
                     if effort_off.is_some() {
                         ui.set_opacity(0.4);
                     }
-                    segmented(ui, r, Id::new("tasks-new-effort"), &EFFORT_LABELS, effort_at, true)
+                    segmented(ui, r, Id::new("tasks-new-effort"), &effort_labels(), effort_at, true)
                 })
                 .inner;
             match effort_off {
                 Some(why) => {
-                    // Cobre o seletor: sem clique nem destaque ao passar o mouse, só a dica.
+                    // Covers the selector: no click or hover highlight, only the tooltip.
                     tip(ui.interact(r, Id::new("tasks-new-effort-off"), Sense::hover()), why);
                 }
                 None => {
@@ -1905,13 +1921,13 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 }
             }
             ui.add_space(8.0);
-            field_label(ui, "Base");
-            text_field(ui, base_id, &mut deck.tasks.form.base, "branch atual", None);
+            field_label(ui, t!("Base"));
+            text_field(ui, base_id, &mut deck.tasks.form.base, t!("current branch"), None);
             ui.add_space(8.0);
-            field_label(ui, "Escopo");
-            text_field(ui, scope_id, &mut deck.tasks.form.scope, "Arquivos ou pastas que vai mexer, um por linha (opcional)", Some(3));
+            field_label(ui, t!("Scope"));
+            text_field(ui, scope_id, &mut deck.tasks.form.scope, t!("Files or folders it will touch, one per line (optional)"), Some(3));
             ui.add_space(10.0);
-            // "Iniciar agora".
+            // "Start now".
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::hover());
             let rr = clickable(ui, r, Id::new("tasks-new-start"));
             let cb = Rect::from_min_size(Pos2::new(r.min.x + 1.0, r.center().y - 7.0), Vec2::splat(14.0));
@@ -1929,11 +1945,11 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
                 ui.painter(),
                 Rect::from_min_max(Pos2::new(cb.max.x + 8.0, r.min.y), r.max),
                 Align2::LEFT_CENTER,
-                "Iniciar agora",
+                t!("Start now"),
                 theme::ui(12.0),
                 if rr.hovered() { theme::pal().text } else { theme::pal().text_2 },
             );
-            if tip(rr, "Já cria a worktree e abre o agente. Desligado, a tarefa fica em rascunho para iniciar depois").clicked() {
+            if tip(rr, t!("Creates the worktree and opens the agent right away. Off, the task stays a draft to start later")).clicked() {
                 acts.push(Act::ToggleStartNow);
             }
         });
@@ -1943,15 +1959,20 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
         }
         ui.add_space(10.0);
         let label = if busy {
-            "Criando…".to_owned()
+            t!("Creating…").to_owned()
         } else if start_now {
-            "Criar e iniciar".to_owned()
+            t!("Create and start").to_owned()
         } else {
-            "Criar rascunho".to_owned()
+            t!("Create draft").to_owned()
         };
         let b = [
-            (label, BtnKind::Primary, can_submit, if can_submit { "Cria a tarefa (Ctrl+Enter)" } else { "Escreva o título da tarefa" }),
-            ("Cancelar".to_owned(), BtnKind::Secondary, !busy, "Volta à lista sem criar"),
+            (
+                label,
+                BtnKind::Primary,
+                can_submit,
+                if can_submit { t!("Creates the task (Ctrl+Enter)") } else { t!("Write the task title") },
+            ),
+            (t!("Cancel").to_owned(), BtnKind::Secondary, !busy, t!("Goes back to the list without creating")),
         ];
         match button_flow(ui, &b, "form") {
             Some(0) => acts.push(Act::Submit),
