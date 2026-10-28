@@ -3,7 +3,7 @@
 **A desktop terminal where your AI agents work as a team.** Claude Code, Codex, Antigravity, and OpenCode
 run side by side, talk to each other, and receive isolated tasks that you review and merge, without losing track of anything.
 
-![AgentDeck with Claude, Codex, and OpenCode in Spotlight mode and the tasks desk on the right](docs/screenshots/main.png)
+![AgentDeck with Claude, Codex, and OpenCode in Highlight mode and the tasks desk on the right](docs/screenshots/main.png)
 
 100% Rust, native for **Windows** and **Linux**. MIT License.
 
@@ -173,7 +173,7 @@ ask-agent --outline src/config.rs                           # signatures with li
 ```
 
 Accented text works better via file (`--file`): on Windows, PowerShell standard input replaces accents with `?`.
-The complete reference is in [memory/GERAL.md](memory/GERAL.md#2-o-que-dá-para-fazer).
+The complete reference is in [memory/GERAL.md](memory/GERAL.md#2-what-you-can-do).
 
 ## Shortcuts
 

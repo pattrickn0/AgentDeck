@@ -21,7 +21,7 @@ test that fails becomes an item here. Product direction and decision-makers are 
    the X hides the window to the tray, without asking (Windows: `tray-icon`; Linux: `ksni`; without `StatusNotifierWatcher` the X
    minimizes); the tray has Open and Exit (Exit prompts if there is an unsaved edit or a tab mid-turn); opening the
    program again brings the instance back (`POST /activate`, see ARCHITECTURE.md, "Single instance and
-   system tray"). Remaining to verify in use: the walkthrough is in testes.md ("Tray and second launch"), especially a long turn
+   system tray"). Remaining to verify in use: the walkthrough is in testes.md ("Tray and second instance"), especially a long turn
    ending with the window hidden and the icon on Linux (vanilla GNOME tray lacks `StatusNotifierWatcher`; requires
    AppIndicator extension), which was only compiled, not run.
 3. [ ] **Resume each tab's conversation** after closing the app or a crash (T4). Id per tab in `ProjectCfg`, saved
