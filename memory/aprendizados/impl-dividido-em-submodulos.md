@@ -1,20 +1,20 @@
 ---
-titulo: `impl` dividido em módulos filhos: método privado e nome sombreado
-resumo: Ao quebrar um `impl` em módulos filhos, `fn` privado de uma seção não é visto pela outra (`pub(super)`) e um submódulo com o nome de um `use crate::x::{self, …}` esconde o import.
+title: `impl` split across child modules: private methods and shadowed names
+summary: When splitting an `impl` into child modules, private `fn` in one section is invisible to another (`pub(super)`), and a submodule named after `use crate::x::{self, ...}` shadows the import.
 touches: [crates/app/src/deck/**, crates/core/src/tasks/**]
 ---
-O `impl Deck` de `crates/app/src/deck.rs` virou um `impl` por arquivo de `crates/app/src/deck/` (t54). Quem repetir a
-divisão em outro `impl` grande (a `t53` faz o mesmo com `crates/core/src/tasks.rs`) esbarra em duas coisas que o
-`cargo check` só mostra depois de mover tudo.
+The `impl Deck` in `crates/app/src/deck.rs` was split into one `impl` per file in `crates/app/src/deck/` (t54). Anyone repeating this
+split on another large `impl` (t53 does the same with `crates/core/src/tasks.rs`) will encounter two pitfalls that
+`cargo check` only surfaces after moving everything.
 
-**Por quê:** a privacidade em Rust é por módulo, não por `impl`. Um `fn load_project(&mut self)` declarado em
-`deck/tabs.rs` é privado de `deck::tabs` e some para `deck::sidebar`, mesmo sendo método do mesmo `Deck`; só os
-campos de `Deck` continuam visíveis (estão no módulo pai). E `mod dictation;` no pai disputa o nome com
-`use crate::dictation::{self, …}`: o `use` deixa de compilar (E0255) e, pior, `dictation::toggle(…)` passa a resolver
-para o módulo novo (E0425), porque a sombra vale para todo filho que faz `use super::*`.
+**Why:** visibility in Rust is scoped per module, not per `impl`. A `fn load_project(&mut self)` declared in
+`deck/tabs.rs` is private to `deck::tabs` and hidden from `deck::sidebar`, even though both are methods on `Deck`; only
+`Deck`'s fields remain visible (as they reside in the parent module). Also, `mod dictation;` in the parent module collides with
+`use crate::dictation::{self, ...}`: the `use` fails to compile (E0255) and, worse, `dictation::toggle(...)` starts resolving
+to the newly declared submodule (E0425), because shadowing affects every child module that includes `use super::*;`.
 
-**Como aplicar:** depois de mover, rode `cargo check` e troque `    fn nome(` por `    pub(super) fn nome(` só nos
-métodos que alguma outra seção chama (`pub(super)` = visível no pai e nos irmãos, a mesma visibilidade que o método
-tinha dentro do módulo único; não use `pub(crate)`, que amplia). Para o nome sombreado, tire o `self` do `use` e
-qualifique as chamadas (`crate::dictation::toggle`). `use super::*;` no topo de cada arquivo traz os tipos, constantes
-e imports do pai sem aviso de import não usado, e os testes (`#[cfg(test)]`) podem ficar no arquivo que testam.
+**How to apply:** after moving code, run `cargo check` and replace `    fn name(` with `    pub(super) fn name(` only on
+methods called across sections (`pub(super)` = visible to parent and siblings, matching the visibility the method had
+when inside the single module; do not use `pub(crate)`, which widens scope unnecessarily). For shadowed names, remove `self` from the `use`
+and qualify call sites (`crate::dictation::toggle`). `use super::*;` at the top of each file imports types, constants,
+and imports from the parent without unused import warnings, and unit tests (`#[cfg(test)]`) can stay inside the files they test.

@@ -1,14 +1,14 @@
 ---
-titulo: Aba que precisa abrir recebe o pedido por arquivo, não digitado
-resumo: Digitar num CLI que ainda sobe perde o texto; o prompt inicial é uma linha ASCII que manda ler um arquivo.
+title: A tab that needs to launch receives its request via file, not typed input
+summary: Typing into a CLI that is still booting drops text; initial prompt is an ASCII line instructing it to read a file.
 touches: [crates/core/src/tasks/**, crates/core/src/agents.rs, crates/core/src/models.rs, crates/core/src/delivery.rs]
 ---
-Digitar o texto numa aba que ainda está abrindo (nova, ou processo encerrado) o perde: o CLI está subindo (visto no
-Antigravity). Então o brief, a devolução ou a reprovação vão para `dados/tarefas/<projeto>-<id>-brief.md` (ou
-`-feedback.md`) e `Delivery::boot` leva só uma linha ASCII (`tasks::boot_line`) mandando ler o arquivo.
-`agents::spawn_spec_for` a põe na linha de comando, uma vez (`models::boot_prompt_flag`): `claude "<linha>"`,
-`agy -i "<linha>"`, `opencode --prompt "<linha>"`.
+Typing text into a tab that is still initializing (brand new, or restarted process) drops input: the CLI is still booting up (observed
+with Antigravity). Therefore, task briefs, feedback, and rejection notices are written to `dados/tarefas/<project>-<id>-brief.md` (or
+`-feedback.md`) and `Delivery::boot` sends only a single ASCII command line (`tasks::boot_line`) directing it to read that file.
+`agents::spawn_spec_for` puts it on the command line once (`models::boot_prompt_flag`): `claude "<line>"`,
+`agy -i "<line>"`, `opencode --prompt "<line>"`.
 
-**Por quê:** aspas, quebras de linha e acentos na linha de comando se perdem nos shims `.cmd` do Windows.
-**Como aplicar:** não ponha o texto da tarefa na linha de comando nem digite na aba que ainda abre. Mensagem nova ao
-agente da tarefa passa por `task_boot_prompt`; os CLIs sem `boot_prompt_flag` e a aba já viva seguem digitando.
+**Why:** quotation marks, line breaks, and accented characters on the command line are corrupted in Windows `.cmd` shims.
+**How to apply:** do not pass task body text directly on the command line, and do not type into a booting tab. New messages
+dispatched to a task agent pass through `task_boot_prompt`; CLIs without a `boot_prompt_flag` and already-running tabs continue using typed input.

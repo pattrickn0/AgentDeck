@@ -1,14 +1,14 @@
 ---
-titulo: O historico.md mescla por união
-resumo: .gitattributes marca memory/historico.md com merge=union; não tire, e não edite entradas antigas.
+title: historico.md merges using union strategy
+summary: .gitattributes marks memory/historico.md with merge=union; do not remove it, and do not edit old entries.
 touches: [memory/historico.md, .gitattributes]
 ---
-O `.gitattributes` marca `memory/historico.md` com `merge=union`: quando duas branches acrescentam linhas no mesmo
-lugar, o git guarda as dos dois lados em vez de parar com conflito.
+`.gitattributes` marks `memory/historico.md` with `merge=union`: when two branches append lines at the same
+location, git retains lines from both sides instead of stopping with a merge conflict.
 
-**Por quê:** toda tarefa põe a sua entrada no topo do histórico, então duas tarefas em paralelo conflitavam ali em
-toda mesclagem (t33, t34, t35 e t39 em 23/10; t37 e t38 iam pelo mesmo caminho). O usuário via a recusa "conflito ao
-mesclar" a cada tarefa.
-**Como aplicar:** o arquivo só recebe entradas novas; não reescreva nem apague as antigas, porque a união não
-detecta conflito de verdade e manteria as duas versões. A entrada de uma tarefa pode ficar abaixo das que entraram
-depois que ela começou: é esperado. Não use `union` em arquivos que também removem linhas (`pendencias.md`, código).
+**Why:** every task places its entry at the top of the history file, so two concurrent tasks previously conflicted there on
+every merge (t33, t34, t35, and t39 on 23/10; t37 and t38 were heading the same way). The user saw "conflict while
+merging" rejections on every task.
+**How to apply:** the file only receives new entries; do not rewrite or delete historical entries, because union merge
+does not perform true conflict detection and would keep both versions. A task's entry may end up placed below entries that were merged
+after it started: this is expected. Do not use `union` on files where lines are also deleted (`pendencias.md`, code).

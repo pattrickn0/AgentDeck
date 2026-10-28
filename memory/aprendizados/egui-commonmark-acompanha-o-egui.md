@@ -1,15 +1,15 @@
 ---
-titulo: O egui_commonmark acompanha a versão do egui
-resumo: A versão menor do egui_commonmark segue a do egui (0.25 para o egui 0.36); atualize os dois juntos e restaure o espaçamento no markdown.
+title: egui_commonmark tracks the egui version
+summary: The minor version of egui_commonmark follows egui (0.25 for egui 0.36); update both together and restore markdown spacing.
 touches: [Cargo.toml, crates/app/Cargo.toml, crates/app/src/ui/docs.rs]
 ---
-O markdown do modo Documentos é desenhado pelo `egui_commonmark` (dependência do workspace, sem recursos extras). Ele depende de
-uma versão exata do `egui`: a 0.25 é a do egui 0.36 (a 0.26 já pede o 0.37, a 0.24 o 0.35). Quando o egui mudar de versão, a
-conta é conferir no crates.io qual `egui_commonmark` pede o egui novo e atualizar os dois no `Cargo.toml` da raiz; se não houver,
-o desenho próprio com `pulldown-cmark` (títulos, listas com `- [ ]`, tabelas, citações, código) é o plano B.
+Markdown in Documents mode is rendered by `egui_commonmark` (workspace dependency, no extra features). It depends on
+an exact version of `egui`: 0.25 corresponds to egui 0.36 (0.26 requires 0.37, 0.24 requires 0.35). When upgrading egui,
+check crates.io for which `egui_commonmark` targets the new egui and upgrade both in the root `Cargo.toml`; if none is available,
+custom rendering with `pulldown-cmark` (headings, checklists with `- [ ]`, tables, blockquotes, code blocks) is the fallback plan.
 
-**Por quê:** o app zera `style.spacing.item_spacing` e `button_padding` (`theme::install_style`) porque quase tudo é pintado à mão; o
-`egui_commonmark` depende desse espaçamento para separar parágrafos e itens, e sem ele o texto sai colado. Por isso
-`ui/docs.rs::markdown_style` restaura o espaçamento, as fontes e as cores só dentro da coluna do documento.
-**Como aplicar:** ao atualizar o egui, atualize junto e confira o resultado com `AGENTDECK_DEBUG_UI=docs-demo-report`; mexa no
-estilo do markdown só em `markdown_style`, nunca em `install_style`.
+**Why:** the app zeros `style.spacing.item_spacing` and `button_padding` (`theme::install_style`) because almost everything is painted by hand;
+`egui_commonmark` relies on this spacing to separate paragraphs and list items, and without it text renders glued together. Therefore,
+`ui/docs.rs::markdown_style` restores spacing, fonts, and colors specifically within the document column.
+**How to apply:** when updating egui, update both simultaneously and check results with `AGENTDECK_DEBUG_UI=docs-demo-report`; adjust
+markdown styling only in `markdown_style`, never in `install_style`.

@@ -1,19 +1,19 @@
 ---
-titulo: O sandbox do Codex não grava em .git, nem com --add-dir
-resumo: Na worktree de uma tarefa, `git add`/`git commit` do Codex dá "Access is denied"; só aprovando o comando fora do sandbox.
+title: Codex sandbox does not write to .git, even with --add-dir
+summary: In a task worktree, Codex's `git add`/`git commit` yields "Access is denied"; committing requires approval outside the sandbox.
 touches: [crates/core/src/agents.rs, crates/core/src/tasks/**]
 ---
-A worktree de uma tarefa guarda o índice e o HEAD em `<repo>/.git/worktrees/<id>`, fora da pasta da tarefa. No modo
-`workspace-write` (o padrão do Codex 0.164 no Windows, com `sandbox = "elevated"`), o Codex protege qualquer caminho
-`.git`: nem `--add-dir <repo>\.git`, nem `--add-dir <repo>\.git\worktrees\<id>`, nem
-`sandbox_workspace_write.writable_roots` liberam a gravação (testado com `codex exec` e `codex sandbox`).
+A task worktree stores its index and HEAD in `<repo>/.git/worktrees/<id>`, outside the task folder. In
+`workspace-write` mode (the default for Codex 0.164 on Windows, with `sandbox = "elevated"`), Codex protects any path in
+`.git`: neither `--add-dir <repo>\.git`, nor `--add-dir <repo>\.git\worktrees\<id>`, nor
+`sandbox_workspace_write.writable_roots` permit writes (tested with `codex exec` and `codex sandbox`).
 
-**Por quê:** em 2026-10-24 a t49 (Codex, gpt-6-luna) entregou o relatório sem commit; o `git add` saiu com status 1 e a
-mesclagem foi recusada por trabalho sem commit. O commit só saiu quando o comando foi aprovado fora do sandbox.
-**Como aplicar:** ao dar tarefa ao Codex, diga no pedido que o commit pede aprovação fora do sandbox. Melhor: o app fazer
-o commit do que sobrou na worktree ao receber o `--task done`, ou abrir o Codex das tarefas com outra política de
-sandbox (decisão do usuário).
+**Why:** on 2026-10-24, t49 (Codex, gpt-6-luna) delivered its report without committing; `git add` exited with status 1 and
+merging was rejected due to uncommitted work. The commit was only made when the command was approved outside the sandbox.
+**How to apply:** when assigning a task to Codex, note in the instructions that committing requires approval outside the sandbox. Better yet: have the app
+commit remaining changes in the worktree upon receiving `--task done`, or open the task Codex with a different sandbox
+policy (user decision).
 
-**Teste que só falha no sandbox:** `file_lock::tests::a_file_held_open_names_this_process` falha dentro do Codex (o
-Restart Manager devolve `[]`) e passa fora dele (visto na t55, 2026-10-25). Quem revisa roda os testes fora do sandbox
-antes de tratar essa falha como defeito.
+**Test that only fails in sandbox:** `file_lock::tests::a_file_held_open_names_this_process` fails inside Codex (Restart
+Manager returns `[]`) and passes outside it (observed in t55, 2026-10-25). Reviewers should run tests outside the sandbox
+before treating this failure as a defect.
