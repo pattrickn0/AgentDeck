@@ -395,7 +395,10 @@ fn attachments_and_config_persistence() {
     // Sessão registrada.
     let sessions = std::fs::read_to_string(env.root.join("dados").join("sessions.json")).expect("sessions.json");
     assert!(sessions.contains(env.core.session_id()));
-    assert_eq!(env.core.transcribe_engine(), "indisponível");
+    assert_eq!(env.core.transcribe_engine(), "unavailable");
+    agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || {
+        assert_eq!(env.core.transcribe_engine(), "indisponível");
+    });
     assert!(env.core.transcribe_pcm16k(&[0.0; 160]).is_err());
     env.core.shutdown();
 }
