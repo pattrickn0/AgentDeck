@@ -1,242 +1,242 @@
-# Guia de manutenção
+# Maintenance guide
 
-Este guia é para quem vai manter o AgentDeck, sozinho ou junto com agentes de IA. Ele não pressupõe experiência com Rust.
-Visão geral e mapa dos documentos: [GERAL.md](GERAL.md).
+This guide is for whoever maintains AgentDeck, alone or alongside AI agents. It does not assume prior Rust experience.
+Overview and document map: [GERAL.md](GERAL.md).
 
-## 1. Como o Rust funciona, na prática
+## 1. How Rust works in practice
 
-- **Rust é compilado.** O código-fonte (`.rs`) vira um executável nativo (`.exe`). O usuário final não precisa de Rust, Node ou nenhum runtime: basta o `.exe`.
-- **`cargo` é a ferramenta de tudo.** Ele baixa dependências, compila, roda testes e formata o código. Equivale a `npm` + `node` juntos.
-- **Crate = pacote.** Este repositório é um *workspace*: um `Cargo.toml` na raiz que agrupa 3 crates em `crates/`.
-- **Dependências** ficam no `Cargo.toml`, como no `package.json`. As versões exatas ficam travadas no `Cargo.lock`, como no `package-lock.json`. Ambos vão para o git.
-- **O compilador é o seu maior aliado.** O Rust recusa compilar código com uso inválido de memória, tipos errados e várias condições de corrida entre threads. Se compilou, boa parte dos bugs já foi eliminada. As mensagens de erro são longas, mas costumam dizer exatamente o que fazer: leia a sugestão `help:`.
-- **`Result` em vez de exceções.** Funções que podem falhar retornam `Result<Valor, Erro>`. O operador `?` repassa o erro para quem chamou. `unwrap()` derruba o programa se der erro, então evite em código de produção.
-- **Posse (*ownership*).** Cada valor tem um dono. Para compartilhar entre threads usamos `Arc` (contador de referências) e `Mutex`/`RwLock` (trava). É por isso que o `Core` é um `Arc` por dentro e pode ser clonado à vontade.
+- **Rust is compiled.** Source code (`.rs`) turns into a native executable (`.exe`). The end user does not need Rust, Node, or any runtime: just the `.exe`.
+- **`cargo` is the tool for everything.** It downloads dependencies, compiles, runs tests, and formats code. It is equivalent to `npm` + `node` combined.
+- **Crate = package.** This repository is a *workspace*: a root `Cargo.toml` grouping 3 crates in `crates/`.
+- **Dependencies** live in `Cargo.toml`, like in `package.json`. Exact versions are locked in `Cargo.lock`, like in `package-lock.json`. Both go into git.
+- **The compiler is your greatest ally.** Rust refuses to compile code with invalid memory usage, mismatched types, and various thread race conditions. If it compiled, a large portion of bugs has already been eliminated. Error messages are long, but usually tell you exactly what to do: read the `help:` suggestion.
+- **`Result` instead of exceptions.** Functions that can fail return `Result<Value, Error>`. The `?` operator bubbles the error up to the caller. `unwrap()` crashes the program on error, so avoid it in production code.
+- **Ownership.** Every value has an owner. To share across threads we use `Arc` (reference count) and `Mutex`/`RwLock` (lock). That is why `Core` is an `Arc` inside and can be cloned freely.
 
-### Comandos do dia a dia
+### Day-to-day commands
 
 ```bash
-cargo run -p agentdeck            # compila e abre o app (debug)
-cargo build --workspace --release   # gera os .exe otimizados em target/release/
-cargo test --workspace              # roda os testes
-cargo clippy --workspace --all-targets -- -D warnings   # "linter": aponta código suspeito
-cargo fmt --all                     # formata o código (estilo em rustfmt.toml; a CI confere com --check)
-cargo update                        # atualiza dependências dentro das versões permitidas
+cargo run -p agentdeck            # compiles and opens the app (debug)
+cargo build --workspace --release   # generates optimized .exe files in target/release/
+cargo test --workspace              # runs tests
+cargo clippy --workspace --all-targets -- -D warnings   # "linter": flags suspicious code
+cargo fmt --all                     # formats code (style in rustfmt.toml; CI checks with --check)
+cargo update                        # updates dependencies within allowed versions
 ```
 
-Versão mínima do Rust: **1.89** (`rust-version` no `Cargo.toml`). A primeira compilação demora alguns minutos, porque compila todas as dependências. As seguintes são incrementais e rápidas. A pasta `target/` pode ser apagada a qualquer momento: ela é só cache de build.
+Minimum Rust version: **1.89** (`rust-version` in `Cargo.toml`). The initial compilation takes a few minutes because it compiles all dependencies. Subsequent ones are incremental and fast. The `target/` folder can be deleted at any time: it is just build cache.
 
-## 2. Mapa do código
+## 2. Code map
 
 ```
-Cargo.toml                 workspace + versões das dependências compartilhadas
+Cargo.toml                 workspace + shared dependency versions
 crates/
-├── core/   (agentdeck-core)   "backend": nada de interface gráfica
-│   ├── lib.rs        Core: a API que a interface usa (como os canais IPC)
-│   ├── events.rs     CoreEvent: o que o backend avisa à interface
-│   ├── agents.rs     lista de agentes, onde achar cada CLI, comando de cada aba, instruções da ponte
-│   ├── trust.rs      confiança da pasta por CLI antes de abrir a aba (Claude, Codex, Antigravity)
-│   ├── bridge.rs     servidor HTTP local usado pelo ask-agent (/agents, /models, /team, /ask, /reply, /signal, /usage, /learn, /outline, /inbox, /tasks, /activate)
-│   ├── exchange.rs   perguntas entre abas esperando resposta (ciclos, profundidade, resposta por número)
-│   ├── inbox.rs      caixa de entrada das respostas por instância (`ask-agent --inbox`)
-│   ├── instances.rs  nomes das instâncias (modelo@cargo@nome) e resolução do destino
-│   ├── team.rs       equipe: quem é chefe de quem (funções puras)
-│   ├── activity.rs   última atividade de cada aba (o que a entrega nas abas consulta)
-│   ├── models.rs     modelo de LLM de cada instância: resolução (pedido > gravado > role_models), validação, argumentos por CLI, lista de modelos e o inventário do `ask-agent --models`
-│   ├── capability.rs + capability.json   capacidade de cada modelo: tabela de benchmarks, medida pelas tarefas concluídas e escolha por capacidade + cota
-│   ├── scope.rs      escopo de escrita por tarefa e sobreposição por componente
-│   ├── tasks/        mesa de tarefas: mod.rs (Task, TaskStatus, erros, constantes), text.rs (slug, id, mensagens ao agente), store.rs (armazenamento em dados/tarefas e consultas), lifecycle.rs (criar, iniciar, fila, relatório, devolver), merge.rs, finish.rs (validar, reprovar, descartar), git_ops.rs e stash.rs
-│   ├── file_lock.rs  diagnóstico de arquivos e processos que seguram uma worktree
-│   ├── highlight.rs  léxico do realce de sintaxe (tokenizador próprio por linguagem: `Tok`, `Span`, `Lang`, `highlight_lines`); mora no core porque o `outline.rs` o usa, e `app/src/highlight.rs` o reexporta e acrescenta a busca, `pieces` e `Cache`
-│   ├── outline.rs    `ask-agent --outline`: esqueleto de um arquivo (assinaturas com a linha, sem corpos) por linguagem, com orçamento
-│   ├── learnings.rs  memória de longo prazo: aprendizados de memory/aprendizados/ (frontmatter, globs, caminhos do brief, entrega com orçamento, `ask-agent --learn`)
-│   ├── situation.rs  memória de curto prazo: "Situação atual" do início da tarefa e do `--learn` (outras tarefas, arquivos delas, avisos de choque e commits da base)
-│   ├── delivery.rs   quando digitar uma mensagem no terminal de uma aba (regra pura, com testes)
-│   ├── headless.rs   roda um agente em modo -p (sem terminal) e captura a resposta
-│   ├── whisper.rs    transcrição de voz (whisper.cpp); download.rs baixa o motor e o modelo
-│   ├── usage.rs      uso dos planos (sessão e semana); usage/codex.rs e usage/antigravity.rs leem cada fonte
-│   ├── context.rs    ponto de extensão para RAG (ContextProvider; o headless o consulta)
-│   ├── git.rs        git do workspace: parse do status/diff/branches (puro, com testes) e as operações
-│   ├── github.rs     GitHub (PRs, issues, Actions): remoto → dono/repo, token do credential helper, API REST, parse (puro, com testes)
-│   ├── workspace.rs  pasta de trabalho: listagem da árvore, AGENTS.md, watcher, `resolve_workspace_path`, `read_text` e `write_text` (arquivo de texto até 1 MB para o modo Documentos; com `safe_rel` e conferência de links simbólicos)
-│   ├── activation.rs ativação da instância viva na segunda abertura (`dados/.agentdeck.bridge` → `POST /activate`)
+├── core/   (agentdeck-core)   "backend": no graphical interface
+│   ├── lib.rs        Core: the API used by the UI (like IPC channels)
+│   ├── events.rs     CoreEvent: what the backend reports to the UI
+│   ├── agents.rs     agent list, where to find each CLI, command for each tab, bridge instructions
+│   ├── trust.rs      folder trust per CLI before opening tab (Claude, Codex, Antigravity)
+│   ├── bridge.rs     local HTTP server used by ask-agent (/agents, /models, /team, /ask, /reply, /signal, /usage, /learn, /outline, /inbox, /tasks, /activate)
+│   ├── exchange.rs   inter-tab questions awaiting reply (cycles, depth, reply by number)
+│   ├── inbox.rs      inbox of replies per instance (`ask-agent --inbox`)
+│   ├── instances.rs  instance names (model@role@name) and destination resolution
+│   ├── team.rs       team: who reports to whom (pure functions)
+│   ├── activity.rs   last activity of each tab (queried by tab delivery)
+│   ├── models.rs     LLM model of each instance: resolution (requested > saved > role_models), validation, CLI arguments, model list, and `ask-agent --models` inventory
+│   ├── capability.rs + capability.json   capability of each model: benchmark table, measured by completed tasks, and choice by capability + quota
+│   ├── scope.rs      write scope per task and component-based overlap
+│   ├── tasks/        tasks desk: mod.rs (Task, TaskStatus, errors, constants), text.rs (slug, id, messages to agent), store.rs (storage in dados/tarefas and queries), lifecycle.rs (create, start, queue, report, return), merge.rs, finish.rs (validate, reject, discard), git_ops.rs, and stash.rs
+│   ├── file_lock.rs  diagnostics of files and processes holding a worktree
+│   ├── highlight.rs  syntax highlighting lexer (custom tokenizer per language: `Tok`, `Span`, `Lang`, `highlight_lines`); lives in core because `outline.rs` uses it, and `app/src/highlight.rs` re-exports it and adds search, `pieces`, and `Cache`
+│   ├── outline.rs    `ask-agent --outline`: file outline (signatures with line number, no bodies) per language, with budget
+│   ├── learnings.rs  long-term memory: learnings from memory/aprendizados/ (frontmatter, globs, brief paths, budgeted delivery, `ask-agent --learn`)
+│   ├── situation.rs  short-term memory: "Current situation" at task start and in `--learn` (other tasks, their files, clash warnings, and base commits)
+│   ├── delivery.rs   when to type a message into a tab's terminal (pure rule, with tests)
+│   ├── headless.rs   runs an agent in -p mode (without terminal) and captures reply
+│   ├── whisper.rs    voice transcription (whisper.cpp); download.rs downloads engine and model
+│   ├── usage.rs      plan usage (session and week); usage/codex.rs and usage/antigravity.rs read each source
+│   ├── context.rs    extension point for RAG (ContextProvider; headless queries it)
+│   ├── git.rs        workspace git: parse status/diff/branches (pure, with tests) and operations
+│   ├── github.rs     GitHub (PRs, issues, Actions): remote → owner/repo, credential helper token, REST API, parse (pure, with tests)
+│   ├── workspace.rs  working folder: tree listing, AGENTS.md, watcher, `resolve_workspace_path`, `read_text`, and `write_text` (text file up to 1 MB for Documents mode; with `safe_rel` and symlink check)
+│   ├── activation.rs activation of live instance on second launch (`dados/.agentdeck.bridge` → `POST /activate`)
 │   ├── attachments.rs, sessions.rs, config.rs, env.rs, paths.rs, process.rs, util.rs
-│   ├── examples/memeval.rs   mede recall/precisão/tamanho da entrega de aprendizados nas tarefas já feitas
-│   ├── tests/bridge.rs   testes de ponta a ponta da ponte
-│   ├── tests/instructions.rs   canais de instruções de cada CLI
-│   ├── tests/learn_situation.rs   `--learn` com situação atual e aviso de arquivo em uso
-│   ├── tests/git.rs      integração com o git real (pula se o git não estiver instalado)
-│   ├── tests/tasks.rs    ciclo de vida das tarefas com o git real (pula se o git não estiver instalado)
-│   ├── tests/tasks_bridge.rs   rotas /tasks e permissões do agente de uma tarefa
-│   ├── tests/tasks_queue.rs    escopo de escrita e avanço automático da fila
-│   ├── tests/support/tasks_env.rs, fake_agent.rs   cenário compartilhado e binário do agente falso
-│   └── tests/github.rs   remoto origin com o git real; um teste `--ignored` com a rede e a credencial reais
-├── app/    (agentdeck)        interface gráfica (o .exe principal)
-│   ├── main.rs / app.rs / window.rs / tray.rs / wslg.rs   janela winit, OpenGL, loop de eventos, bandeja do sistema e detecção do WSLg
-│   ├── debug_ui.rs   cenários fictícios de captura (`AGENTDECK_DEBUG_UI=…`: `debug_ui::apply`, `debug_tasks`…)
-│   ├── theme.rs      cores, fontes e tamanhos (o "CSS")
-│   ├── icons.rs      ícones SVG rasterizados em tempo de execução
-│   ├── util.rs       funções puras compartilhadas pela interface
-│   ├── agents.rs     cores, nomes e menus dos agentes do lado da interface
-│   ├── highlight.rs  reexporta o léxico do core e acrescenta busca, `pieces` e `Cache` para o modo Documentos
-│   ├── terminal/     emulador de terminal: mod.rs (pty + alacritty_terminal), view.rs (desenho e mouse), input.rs (teclado), colors.rs (paleta), record.rs (gravação do PTY para depurar: menu da aba ou `AGENTDECK_DEBUG_PTY=1`), resize.rs (mudança de tamanho como o ConPTY espera)
-│   ├── git_ui.rs     estado e ações da aba Git (seções, chip da topbar, releituras)
-│   ├── github_ui.rs  estado e ações da aba GitHub (eventos do core, seleção, menu "Enviar para agente", dados de demonstração)
-│   ├── tasks_ui.rs   estado e ações da aba Tarefas (lista, detalhe, formulário, chamadas ao core em threads) e as funções puras (grupos, resumo do diff, textos, botões por estado), com testes; dados de demonstração
-│   ├── tasks_flow_tests.rs   o Deck da mesa de ponta a ponta com o core e o git reais (criar, iniciar, revisar, devolver, mesclar, validar, descartar, reabrir a aba)
-│   ├── docs.rs       modo Documentos do centro: `CenterView`, `DocKind`/`DocTab`/`DocState` (inclusive `Source`, o arquivo editável, e `Find`, a busca), `Docs` (abrir, focar, fechar, duplicata, por projeto), a lista de arquivos de um diff (`diff_files`), o selo da chave (`Badge`) e, em `impl Deck`, abrir cada tipo de documento e ler fora da thread da interface (`UiMsg::Doc`); testes puros
-│   ├── docs_demo.rs  documentos fictícios do `AGENTDECK_DEBUG_UI=docs-demo*`
-│   ├── dictation.rs  ditado por voz: estados do microfone e destino fixo na aba onde a gravação começou (funções puras, com testes)
-│   ├── split.rs      tela dividida: grupos, grade, divisores, vizinhos (funções puras, com testes)
-│   ├── deck/         estado das abas e lógica da interface: mod.rs (tipos, `Deck`, constantes), frame.rs (quadro, `work`/`background`, entregas, eventos), tabs.rs, keyboard.rs, sidebar.rs, projects.rs, feed.rs, attachments.rs (anexos e arquivos soltos) e dictation.rs
-│   ├── audio.rs      som de notificação e microfone (cpal)
-│   ├── crash.rs      registro de quedas em dados/crash.log; logfile.rs, o log do app em dados/agentdeck.log; smoke.rs, a captura de tela (AGENTDECK_SMOKE)
-│   └── ui/           mod.rs (pintura, modais) + background.rs (fundo com brilhos radiais)
-│       ├── titlebar.rs (barra de título) + usage.rs (uso dos agentes na barra)
-│       ├── panes.rs (janelas da tela dividida: cabeçalho com alça, microfone, anexo e "+") + tabs.rs (faixa de abas: degradê, setas ‹ ›, menu ▾; pinta uma lista de `Item`, serve às abas dos agentes e às dos documentos)
-│       ├── docs.rs (modo Documentos: a chave Agentes | Documentos (`switch`, desenhada pela barra lateral ou, recolhida, pela barra de título), a faixa de documentos, o diff com a lista de arquivos, o arquivo de texto, o aviso de edição, a busca e a pergunta de salvar, e o markdown)
-│       ├── code.rs (o arquivo como código: o editor sobre `TextEdit` e o arquivo grande pintado linha a linha), diff_view.rs (desenho do diff com quebra de linha, realce e busca), select.rs (seleção de texto das telas pintadas à mão)
-│       ├── sidebar.rs (a chave, ORGANIZAÇÃO e ARQUIVOS) + projects.rs (projetos e agentes em árvore; `model_tag` encurta o modelo)
-│       ├── right_panel.rs (barra direita: Tarefas/Conversa/Git/GitHub; a Conversa é só leitura)
-│       ├── tasks.rs (aba Tarefas), git.rs + git_views.rs (aba Git), github.rs (aba GitHub)
-│       └── menus.rs (nova aba, configurações), shortcuts.rs (atalhos), overlay.rs (arrastar arquivos), empty_state.rs (nenhum agente aberto)
+│   ├── examples/memeval.rs   measures recall/precision/size of learning delivery on completed tasks
+│   ├── tests/bridge.rs   end-to-end bridge tests
+│   ├── tests/instructions.rs   instruction channels for each CLI
+│   ├── tests/learn_situation.rs   `--learn` with current situation and file-in-use warning
+│   ├── tests/git.rs      integration with real git (skipped if git is not installed)
+│   ├── tests/tasks.rs    task lifecycle with real git (skipped if git is not installed)
+│   ├── tests/tasks_bridge.rs   /tasks routes and task agent permissions
+│   ├── tests/tasks_queue.rs    write scope and automatic queue progression
+│   ├── tests/support/tasks_env.rs, fake_agent.rs   shared fixture and fake agent binary
+│   └── tests/github.rs   origin remote with real git; one `--ignored` test with real network and credentials
+├── app/    (agentdeck)        graphical interface (the main .exe)
+│   ├── main.rs / app.rs / window.rs / tray.rs / wslg.rs   winit window, OpenGL, event loop, system tray, and WSLg detection
+│   ├── debug_ui.rs   fictional screenshot scenarios (`AGENTDECK_DEBUG_UI=…`: `debug_ui::apply`, `debug_tasks`…)
+│   ├── theme.rs      colors, fonts, and sizes (the "CSS")
+│   ├── icons.rs      SVG icons rasterized at runtime
+│   ├── util.rs       pure functions shared across the UI
+│   ├── agents.rs     colors, names, and agent menus on the UI side
+│   ├── highlight.rs  re-exports core lexer and adds search, `pieces`, and `Cache` for Documents mode
+│   ├── terminal/     terminal emulator: mod.rs (pty + alacritty_terminal), view.rs (drawing and mouse), input.rs (keyboard), colors.rs (palette), record.rs (PTY recording for debugging: tab menu or `AGENTDECK_DEBUG_PTY=1`), resize.rs (resizing as ConPTY expects)
+│   ├── git_ui.rs     state and actions for Git tab (sections, topbar chip, reloads)
+│   ├── github_ui.rs  state and actions for GitHub tab (core events, selection, "Send to agent" menu, demo data)
+│   ├── tasks_ui.rs   state and actions for Tasks tab (list, detail, form, thread calls to core) and pure functions (groups, diff summary, texts, buttons per state), with tests; demo data
+│   ├── tasks_flow_tests.rs   desk Deck end-to-end with real core and git (create, start, review, return, merge, validate, discard, reopen tab)
+│   ├── docs.rs       center Documents mode: `CenterView`, `DocKind`/`DocTab`/`DocState` (including `Source`, editable file, and `Find`, search), `Docs` (open, focus, close, duplicate, per project), file list of a diff (`diff_files`), toggle badge (`Badge`), and in `impl Deck`, open each document type and read off UI thread (`UiMsg::Doc`); pure tests
+│   ├── docs_demo.rs  fictional documents for `AGENTDECK_DEBUG_UI=docs-demo*`
+│   ├── dictation.rs  voice dictation: microphone states and fixed target in tab where recording started (pure functions, with tests)
+│   ├── split.rs      split screen: groups, grid, dividers, neighbors (pure functions, with tests)
+│   ├── deck/         tab state and UI logic: mod.rs (types, `Deck`, constants), frame.rs (frame, `work`/`background`, deliveries, events), tabs.rs, keyboard.rs, sidebar.rs, projects.rs, feed.rs, attachments.rs (attachments and dropped files), and dictation.rs
+│   ├── audio.rs      notification sound and microphone (cpal)
+│   ├── crash.rs      crash logging in dados/crash.log; logfile.rs, app log in dados/agentdeck.log; smoke.rs, screenshot capture (AGENTDECK_SMOKE)
+│   └── ui/           mod.rs (rendering, modals) + background.rs (background with radial glows)
+│       ├── titlebar.rs (title bar) + usage.rs (agent usage in the bar)
+│       ├── panes.rs (split panes: header with handle, mic, attachment, and "+") + tabs.rs (tab strip: gradient, ‹ › arrows, ▾ menu; renders list of `Item`, serves agent tabs and document tabs)
+│       ├── docs.rs (Documents mode: Agents | Documents toggle (`switch`, drawn by sidebar or, when collapsed, by title bar), document strip, diff with file list, text file, edit notice, search and save prompt, and markdown)
+│       ├── code.rs (file as code: editor on `TextEdit` and large file rendered line by line), diff_view.rs (diff rendering with line wrapping, highlighting, and search), select.rs (text selection for custom-rendered screens)
+│       ├── sidebar.rs (toggle, ORGANIZATION, and FILES) + projects.rs (projects and agents tree; `model_tag` shortens model name)
+│       ├── right_panel.rs (right sidebar: Tasks/Conversation/Git/GitHub; Conversation is read-only)
+│       ├── tasks.rs (Tasks tab), git.rs + git_views.rs (Git tab), github.rs (GitHub tab)
+│       └── menus.rs (new tab, settings), shortcuts.rs (shortcuts), overlay.rs (drag-and-drop overlay), empty_state.rs (no open agent)
 └── cli/    (agentdeck-cli)    ask-agent
-    ├── src/bin/ask-agent.rs     o comando dos agentes (`parse_task`, `learn_command`, `outline_command`, `models_command`, `inbox_command`, com testes)
-    └── tests/ask_agent.rs, tests/tasks.rs   o `ask-agent` de verdade contra uma ponte real
+    ├── src/bin/ask-agent.rs     the agent command (`parse_task`, `learn_command`, `outline_command`, `models_command`, `inbox_command`, with tests)
+    └── tests/ask_agent.rs, tests/tasks.rs   real `ask-agent` against a real bridge
 ```
 
-**Regra de ouro:** a interface (`app`) só fala com o backend pelos métodos de `Core` (em `crates/core/src/lib.rs`). Os eventos voltam pelo `CoreEvent` (`events.rs`). Mudou algo no backend? Nenhuma tela precisa saber como foi feito.
+**Golden rule:** the UI (`app`) only speaks to the backend via `Core` methods (in `crates/core/src/lib.rs`). Events return via `CoreEvent` (`events.rs`). Changed something in the backend? No UI screen needs to know how it was implemented.
 
-### Como a interface funciona (modo "imediato")
+### How the UI works ("immediate" mode)
 
-A interface usa **egui**, que funciona em *modo imediato*. Não existe uma árvore de elementos como no HTML. A cada quadro, o código "desenha" a tela inteira a partir do estado atual, e um clique é detectado no mesmo trecho que desenha o botão:
+The UI uses **egui**, which operates in *immediate mode*. There is no DOM tree like in HTML. On each frame, code "draws" the whole screen from the current state, and a click is detected in the exact same place that draws the button:
 
 ```rust
-if ui.button("Enviar").clicked() {
+if ui.button("Send").clicked() {
     deck.send_message();
 }
 ```
 
-Para mudar o visual, mexa em `theme.rs` (cores e tamanhos) ou no arquivo de `ui/` da área correspondente. O **winit** só cria a janela e entrega os eventos do sistema operacional: teclado, mouse, arrastar arquivos e redimensionar.
+To change visuals, edit `theme.rs` (colors and sizes) or the corresponding area file in `ui/`. **winit** only creates the window and delivers operating system events: keyboard, mouse, file drops, and resizing.
 
-## 3. Receitas comuns
+## 3. Common recipes
 
-**Adicionar um novo agente CLI.** Edite `crates/core/src/agents.rs`:
-1. Crie uma entrada na tabela `AGENTS` com id, rótulo, cor, função de resolução e mensagem de "não instalado".
-2. Se ele tiver modo não interativo, adicione os argumentos em `headless.rs` (no `match` por agente). O prompt
-   **nunca** vai cru na linha de comando: use a entrada padrão ou `self.prompt_arg(prompt, via_cmd)`, que manda
-   por arquivo quando o agente é um shim `.cmd` no Windows (o `cmd.exe` executaria `&`, `|`… do texto).
-3. Se o CLI tiver hooks de início/fim de turno, ligue-os a `ask-agent --signal busy|idle` no `spawn_spec_for`
-   (como o Claude e o Codex): a entrega nas abas fica mais precisa (`delivery.rs`).
-4. Se o CLI escolhe o modelo, ensine `models::accepts_model`, `cli_args` (aba) e `headless_args` (headless); se não houver
-   opção no modo interativo (como o TUI do OpenCode), ache outro caminho (configuração por variável de ambiente) e confira
-   o resultado observando o CLI de verdade. Para listar modelos no menu, acrescente o agente em `Core::known_models`.
-5. Opcionalmente, crie um alias em `ALIASES`, e atualize a lista de ids no teste `workspace_agents_md_and_spawn_specs`.
+**Adding a new CLI agent.** Edit `crates/core/src/agents.rs`:
+1. Create an entry in `AGENTS` table with id, label, color, resolution function, and "not installed" message.
+2. If it has a non-interactive mode, add arguments in `headless.rs` (in per-agent `match`). The prompt
+   **never** goes raw on the command line: use stdin or `self.prompt_arg(prompt, via_cmd)`, which passes
+   via file when the agent is a `.cmd` shim on Windows (`cmd.exe` would execute `&`, `|`… in the text).
+3. If the CLI has turn start/end hooks, connect them to `ask-agent --signal busy|idle` in `spawn_spec_for`
+   (like Claude and Codex): delivery into tabs becomes more accurate (`delivery.rs`).
+4. If the CLI chooses the model, implement `models::accepts_model`, `cli_args` (tab), and `headless_args` (headless); if there is no
+   option in interactive mode (like OpenCode TUI), find another path (env var config) and verify the result
+   observing the real CLI. To list models in the menu, add the agent to `Core::known_models`.
+5. Optionally, create an alias in `ALIASES`, and update the list of ids in the `workspace_agents_md_and_spawn_specs` test.
 
-**Mudar uma cor ou tamanho.** Edite `crates/app/src/theme.rs`: as cores são os campos de `Palette` (leia com `theme::pal()`); a cor de destaque é a do agente ativo (`theme::accent()`). Larguras da barra direita: `RIGHT_*_W`. O ícone (`assets/agentdeck.ico`) se regenera com `scripts/gerar-icone.ps1`.
+**Changing a color or size.** Edit `crates/app/src/theme.rs`: colors are fields of `Palette` (read via `theme::pal()`); accent color is that of the active agent (`theme::accent()`). Right sidebar widths: `RIGHT_*_W`. The icon (`assets/agentdeck.ico`) is regenerated with `scripts/gerar-icone.ps1`.
 
-**Mexer na tela dividida.** O cálculo é puro e testado em `crates/app/src/split.rs` (grupo de cada aba,
-formato da grade, retângulos, divisores, vizinho para os atalhos, ordem das janelas, foco ao fechar); o
-`Deck` guarda a ordem (`group_order`), as proporções (`split_ratios`) e qual aba aparece em cada janela (a
-ativada mais recentemente, `Tab::shown`); a pintura fica em `crates/app/src/ui/panes.rs` (janelas, divisores,
-arrasto) e `ui/tabs.rs` (faixa de abas). Para ver o arrasto sem mouse: `AGENTDECK_DEBUG_UI=split-drag`.
+**Working on split screen.** Calculation is pure and tested in `crates/app/src/split.rs` (group of each tab,
+grid layout, rectangles, dividers, neighbor for shortcuts, pane order, focus on close);
+`Deck` holds the order (`group_order`), ratios (`split_ratios`), and which tab appears in each pane (most
+recently activated, `Tab::shown`); rendering lives in `crates/app/src/ui/panes.rs` (panes, dividers,
+dragging) and `ui/tabs.rs` (tab strip). To see dragging without a mouse: `AGENTDECK_DEBUG_UI=split-drag`.
 
-**Mexer no ditado e nos anexos.** Os botões de microfone e de anexo ficam no cabeçalho de cada janela (`ui/panes.rs`) e agem na
-aba visível dela; o estado do microfone e o destino fixo da transcrição são funções puras e testadas em `crates/app/src/dictation.rs`
-(métodos do `Deck` em `deck/dictation.rs`); o que acontece com o arquivo (copiar para `dados/anexos`, digitar `@caminho` ou o caminho,
-`input::paste_bytes` sem Enter) e a zona de soltar (`resolve_drop_zone`, `attach_dropped_files`) ficam em `deck/attachments.rs`, e o
-destaque ao arrastar, em `ui/overlay.rs`. O formulário "Nova tarefa" anexa pelo mesmo caminho (`util::append_brief_attachments` junta os caminhos ao pedido).
+**Working on dictation and attachments.** Microphone and attachment buttons live in each pane header (`ui/panes.rs`) and act on its
+visible tab; microphone state and fixed transcription target are pure and tested functions in `crates/app/src/dictation.rs`
+(`Deck` methods in `deck/dictation.rs`); file handling (copying to `dados/anexos`, typing `@path` or the path,
+`input::paste_bytes` without Enter) and drop zone (`resolve_drop_zone`, `attach_dropped_files`) live in `deck/attachments.rs`, and
+drag highlighting lives in `ui/overlay.rs`. The "New task" form attaches files through the same mechanism (`util::append_brief_attachments` appends paths to the brief).
 
-**Mexer na aba Git.** As operações ficam em `crates/core/src/git.rs` (`impl Core`, com o ambiente seguro em
-`base_command`); o estado e as releituras, em `crates/app/src/git_ui.rs`; a pintura, em `crates/app/src/ui/git.rs`
-(o desenho só coleta as ações e aplica no fim). Comando novo do git: sempre `args([...])` com `--` antes de
-caminhos, nunca um shell; teste a interpretação da saída com bytes de exemplo e o fluxo em `tests/git.rs`. Para ver
-sem um repositório: `AGENTDECK_DEBUG_UI=git-demo` (ou `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
+**Working on the Git tab.** Operations live in `crates/core/src/git.rs` (`impl Core`, with safe environment in
+`base_command`); state and reloads in `crates/app/src/git_ui.rs`; rendering in `crates/app/src/ui/git.rs`
+(drawing only collects actions and applies them at the end). New git command: always `args([...])` with `--` before
+paths, never a shell; test output parsing with sample bytes and the flow in `tests/git.rs`. To view
+without a repository: `AGENTDECK_DEBUG_UI=git-demo` (or `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
 
-**Mexer na aba GitHub.** A leitura fica em `crates/core/src/github.rs` (`impl Core`: `github_refresh`,
-`github_load_pr`, `github_load_run_jobs`, `github_load_job_log`, todas em thread própria e devolvendo
-`CoreEvent::Github`); o parse da API é puro e testado com JSON de exemplo (`parse_pulls`, `parse_issues`,
+**Working on the GitHub tab.** Fetching lives in `crates/core/src/github.rs` (`impl Core`: `github_refresh`,
+`github_load_pr`, `github_load_run_jobs`, `github_load_job_log`, all on dedicated threads returning
+`CoreEvent::Github`); API parsing is pure and tested with sample JSON (`parse_pulls`, `parse_issues`,
 `parse_workflow_runs`, `parse_workflow_jobs`, `tail_log`, `parse_github_remote`, `parse_credential_fill`).
-O token nunca sai de `SecretToken`: não o coloque em log, `format!` de erro nem config. O estado e o tratamento
-dos eventos ficam em `crates/app/src/github_ui.rs`; a pintura, em `crates/app/src/ui/github.rs`. A mensagem
-enviada ao agente é montada no core (`format_pr_prompt`, `format_issue_prompt`, `format_failed_job_prompt`) e
-entregue por `Deck::send_to_instance` (abre a aba se não existir e enfileira como qualquer mensagem de outro
-agente, com `request: 0`). Para ver sem rede: `AGENTDECK_DEBUG_UI=github-demo` (ou `github-issues`,
-`github-actions`, `github-menu`, `github-norepo`, `github-error`). Para testar a rede e o login reais:
+The token never leaves `SecretToken`: do not put it in logs, error `format!`, or config. State and event handling
+live in `crates/app/src/github_ui.rs`; rendering in `crates/app/src/ui/github.rs`. Prompt messages
+sent to agents are built in core (`format_pr_prompt`, `format_issue_prompt`, `format_failed_job_prompt`) and
+delivered via `Deck::send_to_instance` (opens tab if missing and queues like any message from another
+agent, with `request: 0`). To view without network: `AGENTDECK_DEBUG_UI=github-demo` (or `github-issues`,
+`github-actions`, `github-menu`, `github-norepo`, `github-error`). To test real network and login:
 `cargo test -p agentdeck-core --test github -- --ignored --nocapture`.
 
-**Novo aprendizado.** Crie `memory/aprendizados/<nome>.md` (formato e critérios no `README.md` da pasta). Um frontmatter inválido é
-ignorado com um aviso no log, e o teste `every_learning_in_the_repository_is_valid` (`learnings.rs`) falha se algum arquivo da pasta não
-passar na validação ou se um `touches` literal apontar para um arquivo que não existe.
+**New learning.** Create `memory/aprendizados/<name>.md` (format and criteria in `README.md` of the folder). Invalid frontmatter is
+ignored with a log warning, and the test `every_learning_in_the_repository_is_valid` (`learnings.rs`) fails if any file in the folder fails
+validation or if a literal `touches` points to a non-existent file.
 
-**Mexer nas tarefas.** O modelo e o ciclo de vida ficam em `crates/core/src/tasks/` (`mod.rs`, `lifecycle.rs`, `merge.rs`, `finish.rs`,
-`store.rs`, `text.rs`, `git_ops.rs` e `stash.rs`, além de `scope.rs` e `capability.rs`; o git usa o executor seguro de `git.rs`); as rotas
-e as permissões, em `bridge.rs` (`tasks_route`, `task_permission`); o comando, em `crates/cli/src/bin/ask-agent.rs` (`parse_task`, com
-testes). Textos puros (slug, branch, mensagens ao agente, `exclude`) têm testes em `tasks/mod.rs` e `tasks/text.rs`; o fluxo com o git
-real, em `tests/tasks.rs`, `tests/tasks_bridge.rs` e `tests/tasks_queue.rs` (cenário em `tests/support/tasks_env.rs`; a identidade do git
-vem de um `GIT_CONFIG_GLOBAL` do teste). Mudou o que o agente recebe ao iniciar? É `tasks::start_message` (em `tasks/text.rs`).
+**Working on tasks.** Model and lifecycle live in `crates/core/src/tasks/` (`mod.rs`, `lifecycle.rs`, `merge.rs`, `finish.rs`,
+`store.rs`, `text.rs`, `git_ops.rs`, and `stash.rs`, plus `scope.rs` and `capability.rs`; git uses the safe runner in `git.rs`); routes
+and permissions live in `bridge.rs` (`tasks_route`, `task_permission`); the command lives in `crates/cli/src/bin/ask-agent.rs` (`parse_task`, with
+tests). Pure text (slug, branch, agent messages, `exclude`) has tests in `tasks/mod.rs` and `tasks/text.rs`; flow with real git
+in `tests/tasks.rs`, `tests/tasks_bridge.rs`, and `tests/tasks_queue.rs` (fixture in `tests/support/tasks_env.rs`; git identity
+comes from test's `GIT_CONFIG_GLOBAL`). Changed what the agent receives at startup? That is `tasks::start_message` (in `tasks/text.rs`).
 
-**Mexer na aba Tarefas (interface).** O estado e as ações ficam em `crates/app/src/tasks_ui.rs`; a pintura, em
-`crates/app/src/ui/tasks.rs` (a pintura só *coleta* o que foi clicado em `Act`; `apply` aplica no fim do quadro).
-Toda chamada de tarefa do core roda git, então vai para `Deck::spawn_bg` e volta como `UiMsg::Tasks(geração, TaskReply)`
-(a geração muda a cada troca de projeto e descarta respostas do anterior); a lista é relida ao abrir a aba, a cada
-`CoreEvent::TasksChanged` e depois de cada ação. `tasks_flow_tests.rs` roda esse fluxo com o core e o git reais. O número do ícone da aba é `TasksUi::review_count`. Quais botões cada
-estado tem é `actions_for` (função pura, com testes); o agrupamento da lista, o resumo do diff (`parse_diff_stat`) e os
-textos de tempo também. O diff completo vem de `Core::task_diff` e abre no centro (`Deck::docs_open_task_diff`, ver "Mexer no modo
-Documentos"), desenhado por `ui::git::diff_lines_at` (`ui/diff_view.rs`), o mesmo desenho da aba Git (sem os botões por trecho). Reabrir a aba de uma tarefa é `Deck::open_task_tab` (registra a instância
-de novo; o terminal abre na worktree sozinho). Para ver sem git nem agentes: `AGENTDECK_DEBUG_UI=tasks-demo` (ou
+**Working on the Tasks tab (UI).** State and actions live in `crates/app/src/tasks_ui.rs`; rendering in
+`crates/app/src/ui/tasks.rs` (rendering only *collects* clicks in `Act`; `apply` executes at the end of the frame).
+Every core task call runs git, so goes to `Deck::spawn_bg` and returns as `UiMsg::Tasks(generation, TaskReply)`
+(generation increments on each project switch and drops replies from previous one); list reloads when opening tab, on every
+`CoreEvent::TasksChanged`, and after each action. `tasks_flow_tests.rs` exercises this flow with real core and git. The badge number on the tab icon is `TasksUi::review_count`. Which buttons each
+state has is `actions_for` (pure function, with tests); list grouping, diff summary (`parse_diff_stat`), and
+timestamp strings as well. Full diff comes from `Core::task_diff` and opens in the center (`Deck::docs_open_task_diff`, see "Working on
+Documents mode"), rendered by `ui::git::diff_lines_at` (`ui/diff_view.rs`), the same renderer as Git tab (without per-hunk buttons). Reopening a task tab is `Deck::open_task_tab` (registers instance
+again; terminal opens in worktree automatically). To view without git or agents: `AGENTDECK_DEBUG_UI=tasks-demo` (or
 `tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-confirm`, `tasks-discard`,
-`tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` em `debug_ui.rs`).
-Para a largura mínima da barra, ponha `{"rightPanelWidth": 280}` em `cfg/config.json` da pasta de `AGENTDECK_HOME`.
+`tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` in `debug_ui.rs`).
+For minimum sidebar width, set `{"rightPanelWidth": 280}` in `cfg/config.json` inside `AGENTDECK_HOME` folder.
 
-**Mexer no modo Documentos.** O estado e a lógica pura ficam em `crates/app/src/docs.rs` (`Docs`: abrir/focar/fechar por projeto, sem
-duplicata; `diff_files`: a lista de arquivos de um `GitDiff`; `DocTab::apply`: o que cada tipo mostra ao receber a leitura), com
-testes; a pintura, em `ui/docs.rs` (a chave é chamada pela barra lateral e, com ela recolhida, pela barra de título; `ui/mod.rs` escolhe entre `panes::draw` e `docs::draw`) e a
-faixa de abas, em `ui/tabs.rs` (`strip_items`, o mesmo desenho dos agentes). Documento novo = um `DocKind`, o `DocState` que ele mostra,
-a leitura em `Deck::docs_load` (numa thread, volta como `UiMsg::Doc`) e o corpo em `ui/docs.rs::document`. O arquivo vem de
-`Core::read_text` (1 MB, `safe_rel`); o diff, de `Core::task_diff`, `git_commit_detail` ou `git_diff`; o markdown é desenhado pelo
-**`egui_commonmark`** (a versão acompanha a do egui: a 0.25 é a do egui 0.36; ver `memory/aprendizados/egui-commonmark-acompanha-o-egui.md`).
-Regras que não se quebram: com o centro em Documentos **nenhum `fit_tab`** roda (o PTY não muda de tamanho), o terminal não recebe teclado
-nem IME (`handle_key`, `handle_ime`) e o fim de turno marca `Tab.done` mesmo na aba ativa. O watcher (`CoreEvent::WorkspaceChanged`) relê
-os arquivos abertos (`docs_reload_files`). `tasks_flow_tests.rs` cobre o fluxo com o core e o git reais. Para ver sem nada disso:
-`AGENTDECK_DEBUG_UI=docs-demo` (ou `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`, `-edit`, `-find`, `-diff-find`,
+**Working on Documents mode.** State and pure logic live in `crates/app/src/docs.rs` (`Docs`: open/focus/close per project, deduplicated;
+`diff_files`: file list of a `GitDiff`; `DocTab::apply`: what each type displays upon receiving data), with
+tests; rendering in `ui/docs.rs` (toggle is called by sidebar and, when collapsed, by title bar; `ui/mod.rs` picks between `panes::draw` and `docs::draw`) and
+tab strip in `ui/tabs.rs` (`strip_items`, same styling as agents). New document = a `DocKind`, the `DocState` it displays,
+reading in `Deck::docs_load` (in a thread, returns as `UiMsg::Doc`), and body in `ui/docs.rs::document`. The file comes from
+`Core::read_text` (1 MB, `safe_rel`); diff comes from `Core::task_diff`, `git_commit_detail`, or `git_diff`; markdown is rendered by
+**`egui_commonmark`** (version follows egui's: 0.25 matches egui 0.36; see `memory/aprendizados/egui-commonmark-acompanha-o-egui.md`).
+Non-negotiable rules: with center in Documents **no `fit_tab`** runs (PTY does not change size), terminal receives no keyboard
+or IME (`handle_key`, `handle_ime`), and turn end marks `Tab.done` even on active tab. The watcher (`CoreEvent::WorkspaceChanged`) reloads
+open files (`docs_reload_files`). `tasks_flow_tests.rs` covers flow with real core and git. To view without dependencies:
+`AGENTDECK_DEBUG_UI=docs-demo` (or `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`, `-edit`, `-find`, `-diff-find`,
 `-external`, `-confirm`, `-large`, `-md-code`; `docs_demo.rs`).
-O arquivo editável (`Source`), a gravação (`docs_save`, `write_text`) e a pergunta ao fechar estão em `ARCHITECTURE.md` ("Modo Documentos e editor") e em `memory/aprendizados/editor-de-documentos.md`.
+The editable file (`Source`), saving (`docs_save`, `write_text`), and close prompt are in `ARCHITECTURE.md` ("Documents mode and editor") and `memory/aprendizados/editor-de-documentos.md`.
 
-**Plugar RAG (futuro).** Implemente o trait `ContextProvider` (`context.rs`) e registre com `core.register_context_provider(...)`. O executor headless já consulta os provedores registrados.
+**Plugging in RAG (future).** Implement `ContextProvider` trait (`context.rs`) and register via `core.register_context_provider(...)`. Headless runner already queries registered providers.
 
-**Adicionar um teste.** Coloque um `#[test]` num bloco `#[cfg(test)] mod tests` no fim do arquivo. Para testes de ponta a ponta, use `crates/core/tests/`.
-Para chamar a ponte como uma aba, pegue o token dela com `spawn_spec_for(&ident).env["AGENTDECK_TOKEN"]`
-(veja `tab_token` em `tests/bridge.rs`); com o token mestre, o `from` do corpo é aceito. Os testes iniciam o
-`Core` com `system_dirs: false`, para não depender dos CLIs instalados na máquina.
+**Adding a test.** Place a `#[test]` in a `#[cfg(test)] mod tests` block at the end of the file. For end-to-end tests, use `crates/core/tests/`.
+To invoke the bridge as a tab, obtain its token with `spawn_spec_for(&ident).env["AGENTDECK_TOKEN"]`
+(see `tab_token` in `tests/bridge.rs`); with master token, body `from` is accepted. Tests initialize
+`Core` with `system_dirs: false`, so as not to depend on CLIs installed on the machine.
 
-## 4. Trabalhando com agentes de IA no projeto
+## 4. Working with AI agents on the project
 
-- Peça sempre para o agente rodar `cargo fmt`, `cargo clippy ... -D warnings` e `cargo test --workspace` antes de concluir. É o mesmo que o CI faz.
-- Mudanças em `Core` (lib.rs) afetam a interface. Peça mudanças pequenas e uma área de cada vez (core **ou** app).
-- O **CI** (Integração Contínua) é o robô do GitHub (`.github/workflows/ci.yml`). A cada push ele compila e testa no Windows, no Ubuntu e no Fedora (este num contêiner, só build e testes), e marca o commit/PR com ✅ ou ❌. Se ficar ❌, abra o log da execução para ver o erro. O que já foi verificado no Linux está em [LINUX.md](LINUX.md).
-- Para depurar visualmente sem abrir a janela: `AGENTDECK_SMOKE=<pasta>` salva uma captura `screen.png` e fecha o app (sem baixar o whisper, para não começar 1,6 GB em cada pasta temporária). Também existem `AGENTDECK_DEBUG_FEED=1`, `AGENTDECK_DEBUG_FAKE_SHELL=1`, `AGENTDECK_DEBUG_PTY=1` (grava a saída crua de cada aba em `dados/pty/`, ver `terminal/record.rs`; o menu da aba, botão direito, liga a mesma gravação sem variável) e `AGENTDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agente>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; lista em `debug_ui::apply`, `crates/app/src/debug_ui.rs`). No Linux, rode sob `xvfb-run`.
-- Logs: rode com `RUST_LOG=debug` para ver mensagens detalhadas no console (em build debug).
+- Always ask agents to run `cargo fmt`, `cargo clippy ... -D warnings`, and `cargo test --workspace` before concluding. That is the same as what CI runs.
+- Changes to `Core` (lib.rs) affect the UI. Ask for small changes and one area at a time (core **or** app).
+- **CI** (Continuous Integration) is GitHub's workflow (`.github/workflows/ci.yml`). On each push it compiles and tests on Windows, Ubuntu, and Fedora (Fedora in container, build and tests only), marking the commit/PR with ✅ or ❌. If ❌, open the run log to view the error. What has been verified on Linux is in [LINUX.md](LINUX.md).
+- To debug visually without opening the window: `AGENTDECK_SMOKE=<folder>` saves a `screen.png` capture and exits the app (without downloading Whisper, to avoid initiating 1.6 GB in every temp folder). There are also `AGENTDECK_DEBUG_FEED=1`, `AGENTDECK_DEBUG_FAKE_SHELL=1`, `AGENTDECK_DEBUG_PTY=1` (records raw PTY output of each tab in `dados/pty/`, see `terminal/record.rs`; tab right-click menu toggles same recording without env var), and `AGENTDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agent>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`). On Linux, run under `xvfb-run`.
+- Logs: run with `RUST_LOG=debug` to view detailed messages in console (in debug builds).
 
-## 5. Limitações conhecidas
+## 5. Known limitations
 
-A lista fica em [ideias.md](ideias.md), seção "Limitações conhecidas"; o que ainda não rodou no Windows está em [testes.md](testes.md).
+The list is in [ideias.md](ideias.md), section "Known limitations"; what has not yet run on Windows is in [testes.md](testes.md).
 
-## 6. Migração do nome (CommandDeck → AgentDeck)
+## 6. Name migration (CommandDeck → AgentDeck)
 
-O app se chamava CommandDeck e passou a AgentDeck (tarefa `t20`). Na `t32` (2026-10-23, antes da promoção para a `main`) o código
-deixou de aceitar os nomes antigos: as variáveis `COMMANDDECK_*` (só `AGENTDECK_*` valem), o cabeçalho `x-commanddeck-token`, o
-marcador `<!-- commanddeck:start/end -->` do `AGENTS.md` e a trava `dados/.commanddeck.lock`. Uma aba aberta pela versão antiga
-precisa ser fechada e reaberta; um `AGENTS.md` ainda com o bloco `commanddeck:` ganha o bloco novo ao lado (apague o velho à mão).
+The app was formerly named CommandDeck and renamed to AgentDeck (task `t20`). In `t32` (2026-10-23, before promotion to `main`) the code
+stopped accepting legacy names: `COMMANDDECK_*` variables (only `AGENTDECK_*` are valid), the `x-commanddeck-token` header, the
+`<!-- commanddeck:start/end -->` marker in `AGENTS.md`, and the `dados/.commanddeck.lock` lock. A tab opened by the old version
+must be closed and reopened; an `AGENTS.md` still containing a `commanddeck:` block gets the new block alongside it (remove old block manually).
 
-**Fica uma reserva só**, em `config.rs`: `config::legacy_config_files` começa por `%APPDATA%/CommandDeck/config.json`. Quem nunca
-abriu o AgentDeck e atualiza teria a lista de projetos perdida; então, sem `AgentDeck/config.json`, o app **copia** a do CommandDeck
-(com as abas; o antigo não é apagado). As configurações de `CommandDeck Terminal` (Electron) e de `orquestra` seguem lidas sem as
-abas. Com `AGENTDECK_HOME` o app é isolado e não lê config nenhuma do usuário. Os executáveis são `agentdeck.exe` e `ask-agent`.
+**Only one reservation remains**, in `config.rs`: `config::legacy_config_files` starts with `%APPDATA%/CommandDeck/config.json`. Anyone who never
+opened AgentDeck and updates would lose their project list; therefore, if `AgentDeck/config.json` is missing, the app **copies** the one from CommandDeck
+(with tabs; the old one is not deleted). Configurations from `CommandDeck Terminal` (Electron) and `orquestra` continue being read without
+tabs. With `AGENTDECK_HOME` the app is isolated and reads no user config. Executables are `agentdeck.exe` and `ask-agent`.
 
-**Até quando:** numa versão depois da promoção da `dev` para a `main` (item em [pendencias.md](pendencias.md)). Tire então
-`legacy_config_files`, `is_commanddeck_config`, a cópia em `Config::load_from` e os testes `*_commanddeck_*`.
-Contexto: [aprendizados/migracao-da-config-do-commanddeck.md](aprendizados/migracao-da-config-do-commanddeck.md).
+**Until when:** in a version after promoting `dev` to `main` (item in [pendencias.md](pendencias.md)). Then remove
+`legacy_config_files`, `is_commanddeck_config`, the copy in `Config::load_from`, and `*_commanddeck_*` tests.
+Context: [aprendizados/migracao-da-config-do-commanddeck.md](aprendizados/migracao-da-config-do-commanddeck.md).
 
-**Depois de atualizar:** o repositório do GitHub já se chama `AgentDeck`; falta renomear a pasta local `commanddeck-dev`
-(ação do usuário; o GitHub redireciona a URL antiga).
+**After updating:** the GitHub repository is already named `AgentDeck`; remaining step is renaming the local folder `commanddeck-dev`
+(user action; GitHub redirects the old URL).
