@@ -1,16 +1,16 @@
 ---
-titulo: O feed (Conversa integrada) não é guardado; a linha do tempo da tarefa é
-resumo: Deck::feed vive só na memória (500 entradas); o que sobrevive é Task::messages, gravado em Core::feed.
+title: The feed (Integrated Chat) is not persisted; the task timeline is
+summary: Deck::feed lives only in memory (500 entries); what persists is Task::messages, recorded via Core::feed.
 touches: [crates/core/src/lib.rs, crates/core/src/tasks/**, crates/core/src/bridge.rs, crates/app/src/deck/**, crates/app/src/ui/tasks.rs]
 ---
-A Conversa integrada (`Deck::feed`) é uma lista na memória da interface, com teto de `FEED_MAX`; fechar o app a apaga. A
-linha do tempo de cada tarefa não pode depender dela: `Core::feed` (único caminho do `ask-agent`: `bridge::Caller::feed`,
-`answer_lost`…) chama `record_task_message`, que grava em `Task::messages` no JSON das tarefas.
+Integrated Chat (`Deck::feed`) is an in-memory UI list capped at `FEED_MAX`; closing the app clears it. The
+timeline of each task cannot depend on it: `Core::feed` (the sole entry point for `ask-agent`: `bridge::Caller::feed`,
+`answer_lost`...) calls `record_task_message`, which writes to `Task::messages` in the task JSON.
 
-**Por quê:** guardar o feed inteiro misturaria todos os projetos e abas e cresceria sem fim; por tarefa o teto é claro
-(`MAX_MESSAGES` × `MAX_MESSAGE_CHARS`) e os dados morrem com a tarefa. Só entram `Ask`, `Answer` e `Error` em que a
-instância da tarefa fala ou ouve; `Thinking` é transitório, `System` não tem remetente e `User` nasce na própria interface
-(`Deck::add_feed`), nunca passa pelo core.
-**Como aplicar:** uma entrada nova da ponte tem de sair por `Core::feed` (com `.in_project(...)`: sem projeto ela não é
-registrada) para aparecer na linha do tempo. A comparação é com o id sem projeto (`claude@t3`, nunca `claude@t30`). Não
-chame `Core::feed` de dentro de `with_tasks`: o registro trava as tarefas de novo.
+**Why:** persisting the full feed would mix all projects and tabs together and grow indefinitely; per-task data has a clear cap
+(`MAX_MESSAGES` × `MAX_MESSAGE_CHARS`) and data is cleaned up when the task is deleted. Only `Ask`, `Answer`, and `Error` entries
+where the task instance is sender or receiver are recorded; `Thinking` is transient, `System` has no sender, and `User` originates in the UI
+itself (`Deck::add_feed`), never passing through core.
+**How to apply:** any new bridge entry must go through `Core::feed` (with `.in_project(...)`: without a project it is not
+recorded) to appear on the timeline. Comparison is against the project-less id (`claude@t3`, never `claude@t30`). Do
+not call `Core::feed` from within `with_tasks`: recording re-locks the task store.

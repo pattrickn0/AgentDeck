@@ -1,29 +1,29 @@
 ---
-titulo: Cada CLI recebe as instruções do AgentDeck por um canal próprio
-resumo: Claude, Codex, OpenCode, Aider e Interpreter por opção; Antigravity por um AGENTS.md em dados/ via --add-dir; Goose e Copilot só pelo AGENTS.md do projeto (criado só com o bloco do app).
+title: Each CLI receives AgentDeck instructions through its own channel
+summary: Claude, Codex, OpenCode, Aider, and Interpreter via CLI flags/config; Antigravity via AGENTS.md in dados/ with --add-dir; Goose and Copilot only via project AGENTS.md (created with app marker block only).
 touches: [crates/core/src/agents.rs, crates/core/src/models.rs, crates/core/src/workspace.rs, crates/core/src/headless.rs, AGENTS.md]
 ---
-As instruções do AgentDeck (regra de não usar subagentes internos, `ask-agent`, memória geral) não podem depender do
-`AGENTS.md` do usuário: um projeto novo não tem um, e o agente sem as instruções abre o subagente do próprio CLI.
+AgentDeck instructions (rule against internal subagents, `ask-agent`, shared memory) cannot depend on the
+user's `AGENTS.md`: a new project lacks one, and an agent lacking instructions launches its CLI's built-in subagents.
 
-- **Claude:** `--append-system-prompt`. **Codex:** `-c developer_instructions=<TOML>`; num shim `.cmd` as aspas morrem
-  (`cmd_safe_arg`), então o texto vai cru, que o Codex aceita como string quando não é TOML. Não instalado na máquina de
-  desenvolvimento: nunca visto funcionando.
-- **OpenCode:** `{"instructions": ["<arquivo>"]}` em `OPENCODE_CONFIG_CONTENT` (soma-se às do usuário). Conferido: com
-  `opencode run --standalone` a regra do arquivo foi obedecida. Só o servidor próprio da aba lê a variável, então o TUI
-  agora **sempre** abre com `--standalone`, com ou sem modelo.
-- **Aider:** `--read <arquivo>`. **Interpreter:** `--custom_instructions` (não verificados).
-- **Antigravity:** sem opção de sistema, mas o `agy` lê o `AGENTS.md` de cada pasta passada em `--add-dir`, **somado** ao
-  do projeto. Conferido em 2026-10-24 (`agy` 1.4.7, Flash): uma regra num `AGENTS.md` fora do projeto valeu só com o
-  `--add-dir`, e junto com a regra do `AGENTS.md` do projeto. O app grava `dados/agy/<instância>/AGENTS.md` (com o nome e o
-  cargo, como o Claude) e passa a pasta (`write_agy_instructions`): nada no repositório do usuário.
-- **Goose, Copilot:** só leem o `AGENTS.md` do projeto. O app cria um só com o bloco quando a pasta não tem um, avisa na
-  Conversa e nunca toca num que já exista (`Core::ensure_agents_file`). Não verificados (não instalados aqui).
-- O texto genérico (arquivo e bloco) não lista os agentes instalados: senão o arquivo mudaria de máquina para máquina e
-  sujaria o `git status`.
+- **Claude:** `--append-system-prompt`. **Codex:** `-c developer_instructions=<TOML>`; in a `.cmd` shim quotes are lost
+  (`cmd_safe_arg`), so raw text is passed, which Codex accepts as a string when not valid TOML. Not installed on the
+  development machine: unverified in practice.
+- **OpenCode:** `{"instructions": ["<file>"]}` in `OPENCODE_CONFIG_CONTENT` (merged with user configuration). Verified: with
+  `opencode run --standalone` file rules were respected. Only the tab's dedicated server reads this variable, so the TUI
+  now **always** starts with `--standalone`, with or without a model.
+- **Aider:** `--read <file>`. **Interpreter:** `--custom_instructions` (unverified).
+- **Antigravity:** no system option available, but `agy` reads `AGENTS.md` in each folder passed via `--add-dir`, **combined** with
+  the project's file. Verified on 2026-10-24 (`agy` 1.4.7, Flash): a rule in an external `AGENTS.md` applied only when
+  `--add-dir` was present, alongside rules from the project `AGENTS.md`. The app writes `dados/agy/<instance>/AGENTS.md` (with name and
+  role, similar to Claude) and passes that folder (`write_agy_instructions`): nothing added to the user's repository.
+- **Goose, Copilot:** only read the project `AGENTS.md`. The app generates one containing solely the marker block when the folder lacks one, notifies in
+  Chat, and never modifies an existing file (`Core::ensure_agents_file`). Unverified (not installed locally).
+- Generic instructions (file and block) do not list installed agents: otherwise the file would vary across machines and
+  dirty `git status`.
 
-**Por quê:** relato de usuário novo (23/10): os agentes não usavam o `ask-agent` e abriam subagentes do CLI.
-**Como aplicar:** CLI novo = achar a opção de instruções dele (`--help`, documentação) e acrescentar a `instruction_args`;
-antes de cair em `reads_only_agents_md`, teste se ele lê o `AGENTS.md` de uma pasta adicionada (como o `agy`): uma regra
-fácil de ver ("comece a resposta com ABACAXI-7") num `AGENTS.md` fora do projeto, com e sem a opção. O que a cota impede
-de testar vai para `memory/testes.md`.
+**Why:** new user report (23/10): agents were not using `ask-agent` and were spawning CLI subagents.
+**How to apply:** for a new CLI = find its instruction flag (`--help`, documentation) and add to `instruction_args`;
+before falling back to `reads_only_agents_md`, test whether it reads `AGENTS.md` from an added directory (like `agy`): use an easily
+observable rule ("start answer with PINEAPPLE-7") in an `AGENTS.md` outside the project, with and without the option. What quota limits
+prevent testing goes to `memory/testes.md`.
