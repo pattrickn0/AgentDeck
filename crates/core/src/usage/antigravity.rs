@@ -1,33 +1,33 @@
-//! Uso do Antigravity: cota consultada via API interna do Google Cloud Code.
+//! Antigravity usage: quota queried via internal Google Cloud Code API.
 //!
-//! # Fonte e Endpoints
-//! O Antigravity CLI (`agy`) utiliza a API interna `cloudcode-pa.googleapis.com`
-//! (com fallback para `daily-cloudcode-pa.googleapis.com`):
-//! - `POST /v1internal:retrieveUserQuotaSummary`: endpoint principal de cota,
-//!   retorna os limites por grupo (ex.: "Gemini Models") divididos em janelas:
-//!   - `window: "5h"` (limite da sessão de 5 horas);
-//!   - `window: "weekly"` (limite semanal).
-//!     Cada bucket traz `remainingFraction` (0.0..=1.0) e `resetTime` (RFC 3339).
-//! - `POST /v1internal:fetchAvailableModels`: endpoint alternativo que lista os
-//!   modelos disponíveis e seus respectivos `quotaInfo.{remainingFraction, resetTime}`.
+//! # Source and Endpoints
+//! The Antigravity CLI (`agy`) uses the internal API `cloudcode-pa.googleapis.com`
+//! (with fallback to `daily-cloudcode-pa.googleapis.com`):
+//! - `POST /v1internal:retrieveUserQuotaSummary`: main quota endpoint,
+//!   returns limits by group (e.g. "Gemini Models") divided into windows:
+//!   - `window: "5h"` (5-hour session limit);
+//!   - `window: "weekly"` (weekly limit).
+//!     Each bucket provides `remainingFraction` (0.0..=1.0) and `resetTime` (RFC 3339).
+//! - `POST /v1internal:fetchAvailableModels`: alternative endpoint that lists
+//!   available models and their respective `quotaInfo.{remainingFraction, resetTime}`.
 //!
-//! O servidor escolhe o que devolve pelo `User-Agent`: só para `antigravity/cli/<versão>` de um CLI
-//! recente (1.4.5 sim, 1.0.0 não) vêm os grupos do Gemini ("Gemini Models", "Gemini 4 Argon"); para
-//! qualquer outro vem só "Claude and GPT models". Por isso o pedido imita o CLI, com a versão instalada.
-//! Dos grupos, valem os do Gemini (é para isso que o Antigravity é usado aqui), cada janela com o de
-//! maior uso.
+//! The server chooses what to return based on `User-Agent`: only for `antigravity/cli/<version>` of a
+//! recent CLI (1.4.5 yes, 1.0.0 no) do Gemini groups arrive ("Gemini Models", "Gemini 4 Argon"); for
+//! any other it returns only "Claude and GPT models". For this reason the request mimics the CLI, with the installed version.
+//! Of the groups, Gemini ones apply (that is what Antigravity is used for here), each window with the one of
+//! highest usage.
 //!
-//! # Credenciais
-//! O CLI guarda o token ativo no chaveiro do sistema: no Windows, o Gerenciador de Credenciais (`gemini:antigravity`);
-//! no Linux, o Secret Service por D-Bus (`service=gemini`, `username=antigravity`, como o `zalando/go-keyring` que
-//! ele usa). O conteúdo é o mesmo JSON nos dois (`parse_creds_json` entende o formato do keyring).
-//! Como fallback, lê `~/.gemini/oauth_creds.json` e o arquivo que o `agy` usa quando não há chaveiro
-//! (`GEMINI_FORCE_FILE_STORAGE=true`, o caminho de SSH, contêiner e WSL): `~/.gemini/antigravity-cli/antigravity-oauth-token`.
-//! Só o `access_token` válido é usado: quem o renova é o próprio CLI (enquanto roda).
-//! Vencido, a cota fica "sem dados" até ele renovar; o app não guarda credenciais OAuth
-//! de terceiros nem renova tokens por conta própria.
+//! # Credentials
+//! The CLI stores the active token in the system keyring: on Windows, the Credential Manager (`gemini:antigravity`);
+//! on Linux, the Secret Service via D-Bus (`service=gemini`, `username=antigravity`, like the `zalando/go-keyring` that
+//! it uses). The content is the same JSON on both (`parse_creds_json` understands the keyring format).
+//! As fallback, it reads `~/.gemini/oauth_creds.json` and the file that `agy` uses when there is no keyring
+//! (`GEMINI_FORCE_FILE_STORAGE=true`, the path for SSH, containers, and WSL): `~/.gemini/antigravity-cli/antigravity-oauth-token`.
+//! Only a valid `access_token` is used: the CLI itself refreshes it (while running).
+//! When expired, quota stays "no data" until it refreshes; the app does not store third-party OAuth
+//! credentials or refresh tokens on its own.
 //!
-//! ATENÇÃO: Esta é uma API interna do Google Cloud e seu formato pode mudar entre versões.
+//! WARNING: This is an internal Google Cloud API and its format may change between versions.
 
 use std::path::Path;
 use std::time::Duration;
@@ -37,30 +37,30 @@ use serde_json::{json, Value};
 use super::{epoch_ms, AgentUsage, UsageGroup, UsageWindow};
 use crate::util;
 
-/// Endpoint de produção e diário da API Cloud Code.
+/// Production and daily endpoint of the Cloud Code API.
 const API_HOSTS: &[&str] = &["cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com"];
 
-/// Timeout para as requisições HTTP da cota.
+/// Timeout for HTTP quota requests.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Versão do CLI no `User-Agent` quando não dá para perguntar ao `agy` instalado (uma conferida que
-/// recebe os grupos do Gemini).
+/// CLI version in `User-Agent` when unable to ask the installed `agy` (a check that
+/// receives Gemini groups).
 const FALLBACK_CLI_VERSION: &str = "1.4.5";
 
-/// Serviço e usuário com que o `agy` grava o token no Secret Service do Linux (`zalando/go-keyring`: os atributos
-/// `service` e `username`, com o rótulo "Password for 'antigravity' on 'gemini'").
+/// Service and user with which `agy` writes the token to Linux Secret Service (`zalando/go-keyring`:
+/// attributes `service` and `username`, with label "Password for 'antigravity' on 'gemini'").
 #[cfg(target_os = "linux")]
 const KEYRING_SERVICE: &str = "gemini";
 #[cfg(target_os = "linux")]
 const KEYRING_USER: &str = "antigravity";
 
-/// Quanto a leitura do chaveiro pode segurar a consulta de cota. Ela roda em segundo plano, a cada poucos minutos:
-/// sem sessão gráfica (SSH, contêiner) ou com o chaveiro travado, tem de desistir e cair nos arquivos.
+/// How long keyring read can hold quota query. It runs in background, every few minutes:
+/// without graphical session (SSH, container) or with locked keyring, it must give up and fall back to files.
 #[cfg(target_os = "linux")]
 const KEYRING_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// O `User-Agent` do CLI (`antigravity/cli/1.4.5 (aidev_client; os_type=windows; arch=amd64)`).
+/// The CLI's `User-Agent` (`antigravity/cli/1.4.5 (aidev_client; os_type=windows; arch=amd64)`).
 fn user_agent(version: Option<&str>) -> String {
     let arch = match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -71,7 +71,7 @@ fn user_agent(version: Option<&str>) -> String {
     format!("antigravity/cli/{} (aidev_client; os_type={os}; arch={arch})", version.unwrap_or(FALLBACK_CLI_VERSION))
 }
 
-/// A versão na saída de `agy --version` ("1.4.5").
+/// The version in `agy --version` output ("1.4.5").
 fn parse_version(out: &str) -> Option<String> {
     out.split_whitespace()
         .map(|t| t.trim_start_matches('v'))
@@ -79,7 +79,7 @@ fn parse_version(out: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// A versão do `agy` instalado (`None` se não rodar ou não disser). Bloqueante (~0,2 s).
+/// The version of installed `agy` (`None` if not running or not reporting). Blocking (~0.2 s).
 pub(crate) fn installed_version(agy: &crate::agents::Resolved) -> Option<String> {
     let (program, args) = agy.command();
     let mut cmd = std::process::Command::new(program);
@@ -118,12 +118,12 @@ mod wincred {
         let wide: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
         let mut cred_ptr: *mut CredentialW = std::ptr::null_mut();
         // CRED_TYPE_GENERIC = 1
-        // SAFETY: `wide` termina em NUL e vive até o fim da chamada; `cred_ptr` só é lido se ela der certo.
+        // SAFETY: `wide` ends in NUL and lives until the end of the call; `cred_ptr` is only read if it succeeds.
         let ok = unsafe { CredReadW(wide.as_ptr(), 1, 0, &mut cred_ptr) };
         if ok == 0 || cred_ptr.is_null() {
             return None;
         }
-        // SAFETY: `cred_ptr` aponta para a CREDENTIALW alocada por CredReadW, com `credential_blob_size` bytes no blob.
+        // SAFETY: `cred_ptr` points to the CREDENTIALW allocated by CredReadW, with `credential_blob_size` bytes in the blob.
         let res = unsafe {
             let size = (*cred_ptr).credential_blob_size as usize;
             if size == 0 || (*cred_ptr).credential_blob.is_null() {
@@ -133,7 +133,7 @@ mod wincred {
                 String::from_utf8(slice.to_vec()).ok()
             }
         };
-        // SAFETY: libera uma única vez o que CredReadW alocou; o blob já foi copiado.
+        // SAFETY: frees once what CredReadW allocated; blob was already copied.
         unsafe {
             CredFree(cred_ptr as *mut c_void);
         }
@@ -146,11 +146,11 @@ mod secret_service {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    /// Lê o segredo `service`/`username` do chaveiro do sistema (Secret Service, por D-Bus).
+    /// Reads secret `service`/`username` from system keyring (Secret Service, via D-Bus).
     ///
-    /// A busca roda numa thread própria com prazo: sem sessão D-Bus (SSH, contêiner) ou com o chaveiro travado, a
-    /// chamada pode esperar, e a consulta de cota não pode ficar presa por isso. Só os itens já destravados são
-    /// lidos — destravar abriria um pedido de senha na tela do usuário.
+    /// Lookup runs on its own thread with timeout: without D-Bus session (SSH, container) or with locked keyring,
+    /// the call could wait, and quota query cannot get stuck on it. Only already unlocked items are read —
+    /// unlocking would pop up a password prompt on user's screen.
     pub fn read(service: &str, user: &str, timeout: Duration) -> Option<String> {
         let (tx, rx) = std::sync::mpsc::channel();
         let (service, user) = (service.to_owned(), user.to_owned());
@@ -167,7 +167,7 @@ mod secret_service {
         use secret_service::blocking::SecretService;
         use secret_service::EncryptionType;
 
-        // Sessão "plain": o segredo não sai da máquina e o `go-keyring` do `agy` também abre a sessão assim.
+        // "plain" session: the secret does not leave the machine and agy's `go-keyring` also opens the session like this.
         let ss = SecretService::connect(EncryptionType::Plain).ok()?;
         let found = ss.search_items(HashMap::from([("service", service), ("username", user)])).ok()?;
         let secret = found.unlocked.into_iter().find_map(|item| item.get_secret().ok());
@@ -189,19 +189,19 @@ impl RawCreds {
 
 fn parse_creds_json(json_str: &str) -> Option<RawCreds> {
     let v: Value = serde_json::from_str(json_str).ok()?;
-    // Formato do keyring (Go): {"token": {"access_token": ..., "expiry": ...}}
+    // Keyring format (Go): {"token": {"access_token": ..., "expiry": ...}}
     if let Some(token_obj) = v.get("token").filter(|t| t.is_object()) {
         let access_token = token_obj.get("access_token")?.as_str()?.to_owned();
         let expires_at_ms = token_obj.get("expiry").and_then(epoch_ms);
         return Some(RawCreds { access_token, expires_at_ms });
     }
-    // Formato de ~/.gemini/oauth_creds.json
+    // Format of ~/.gemini/oauth_creds.json
     let access_token = v.get("access_token")?.as_str()?.to_owned();
     let expires_at_ms = v.get("expiry_date").or_else(|| v.get("expiry")).and_then(epoch_ms);
     Some(RawCreds { access_token, expires_at_ms })
 }
 
-/// Escolhe o primeiro `access_token` ainda válido por mais de um minuto entre as fontes candidatas.
+/// Chooses the first `access_token` still valid for more than one minute among candidate sources.
 fn first_valid_token<I>(sources: I, now_ms: u64) -> Option<String>
 where
     I: IntoIterator<Item = String>,
@@ -211,7 +211,7 @@ where
 
 fn credential_sources(home: &Path) -> Vec<String> {
     let mut out = Vec::new();
-    // O chaveiro é do usuário do sistema: com uma home isolada (testes, `StartOptions`) ele não entra.
+    // Keyring belongs to system user: with an isolated home (tests, `StartOptions`) it does not enter.
     #[cfg(any(windows, target_os = "linux"))]
     let own_home = dirs::home_dir().filter(|h| util::same_path(h, home));
 
@@ -222,17 +222,17 @@ fn credential_sources(home: &Path) -> Vec<String> {
         }
     }
 
-    // Linux: o `agy` guarda o token no Secret Service, com o mesmo JSON que usa no Gerenciador de Credenciais do
-    // Windows (`service=gemini`, `username=antigravity`).
+    // Linux: agy stores the token in Secret Service, with the same JSON it uses in Windows Credential Manager
+    // (`service=gemini`, `username=antigravity`).
     #[cfg(target_os = "linux")]
     if own_home.is_some() {
         match secret_service::read(KEYRING_SERVICE, KEYRING_USER, KEYRING_TIMEOUT) {
             Some(secret) => out.push(secret),
-            None => log::debug!("cota do Antigravity: o chaveiro do sistema não devolveu o token {KEYRING_SERVICE}/{KEYRING_USER}"),
+            None => log::debug!("Antigravity quota: system keyring did not return token {KEYRING_SERVICE}/{KEYRING_USER}"),
         }
     }
 
-    // Fallback: ~/.gemini/oauth_creds.json na pasta home passada, e depois na home do sistema (se for outra).
+    // Fallback: ~/.gemini/oauth_creds.json in passed home folder, and then in system home (if different).
     let system_home = dirs::home_dir();
     let mut bases = vec![home];
     if let Some(h) = system_home.as_deref().filter(|h| !util::same_path(h, home)) {
@@ -259,7 +259,7 @@ fn http_agent() -> ureq::Agent {
         .into()
 }
 
-/// O `access_token` do CLI, se ainda vale por mais de um minuto (sem data de validade, tenta assim mesmo).
+/// The CLI's `access_token`, if still valid for more than one minute (without expiry date, tries anyway).
 fn valid_access_token(home: &Path, now_ms: u64) -> Option<String> {
     first_valid_token(credential_sources(home), now_ms)
 }
@@ -279,7 +279,7 @@ fn merge_window(slot: &mut Option<UsageWindow>, candidate: UsageWindow) {
     }
 }
 
-/// A sessão e a semana de um grupo (de cada tipo, o bucket de maior uso).
+/// Session and weekly windows of a group (for each type, bucket of highest usage).
 fn group_windows(buckets: &[Value], now_ms: u64) -> (Option<UsageWindow>, Option<UsageWindow>) {
     let mut session = None;
     let mut weekly = None;
@@ -304,8 +304,8 @@ fn group_windows(buckets: &[Value], now_ms: u64) -> (Option<UsageWindow>, Option
     (session, weekly)
 }
 
-/// Faz o parse da resposta de `v1internal:retrieveUserQuotaSummary`: cada grupo com as suas janelas (os do Gemini
-/// primeiro) e, como resumo, as dos grupos do Gemini (sem nenhum, as de todos), cada uma com o de maior uso.
+/// Parses response of `v1internal:retrieveUserQuotaSummary`: each group with its windows (Gemini ones
+/// first) and, as summary, those of Gemini groups (without any, all groups), each with highest usage.
 pub(crate) fn parse_quota_summary(json: &Value, now_ms: u64) -> Option<AgentUsage> {
     let mut found: Vec<(bool, UsageGroup)> = Vec::new();
     for g in json.get("groups").and_then(Value::as_array)? {
@@ -314,7 +314,7 @@ pub(crate) fn parse_quota_summary(json: &Value, now_ms: u64) -> Option<AgentUsag
         if session.is_none() && weekly.is_none() {
             continue;
         }
-        let name = g.get("displayName").and_then(Value::as_str).unwrap_or("Modelos").to_owned();
+        let name = g.get("displayName").and_then(Value::as_str).unwrap_or("Models").to_owned();
         found.push((name.to_ascii_lowercase().contains("gemini"), UsageGroup { name, session, weekly }));
     }
     let any_gemini = found.iter().any(|(gemini, _)| *gemini);
@@ -329,11 +329,11 @@ pub(crate) fn parse_quota_summary(json: &Value, now_ms: u64) -> Option<AgentUsag
     (session.is_some() || weekly.is_some()).then_some(AgentUsage { session, weekly, updated_ms: now_ms, local: false, groups })
 }
 
-/// Fallback: faz o parse de `v1internal:fetchAvailableModels`.
+/// Fallback: parses `v1internal:fetchAvailableModels`.
 pub(crate) fn parse_available_models(json: &Value, now_ms: u64) -> Option<AgentUsage> {
     let models = json.get("models").and_then(Value::as_object)?;
 
-    // Se houver modelo padrão indicado, tenta ele primeiro.
+    // If there is a specified default model, try it first.
     if let Some(default_id) = json.get("defaultAgentModelId").and_then(Value::as_str) {
         if let Some(minfo) = models.get(default_id) {
             if let Some(q) = minfo.get("quotaInfo") {
@@ -352,7 +352,7 @@ pub(crate) fn parse_available_models(json: &Value, now_ms: u64) -> Option<AgentU
         }
     }
 
-    // Senão, procura o modelo de maior uso efetivo (depois de zerar janelas já vencidas).
+    // Otherwise, look for model with highest effective usage (after zeroing already expired windows).
     let mut best: Option<UsageWindow> = None;
 
     for minfo in models.values() {
@@ -369,8 +369,8 @@ pub(crate) fn parse_available_models(json: &Value, now_ms: u64) -> Option<AgentU
 fn fetch_with_bases(bases: &[String], token: &str, ua: &str, now_ms: u64) -> Option<AgentUsage> {
     let agent = http_agent();
 
-    // Tenta primeiro o endpoint de resumo por grupos (com janela semanal e de 5h).
-    // Um 401 no primeiro host (ex.: prod vs daily) não impede tentar o segundo host.
+    // Tries group summary endpoint first (with weekly and 5h windows).
+    // A 401 on first host (e.g. prod vs daily) does not prevent trying the second host.
     for base in bases {
         let url = format!("{base}/v1internal:retrieveUserQuotaSummary");
         let mut resp = match agent
@@ -393,7 +393,7 @@ fn fetch_with_bases(bases: &[String], token: &str, ua: &str, now_ms: u64) -> Opt
         }
     }
 
-    // Fallback: tenta fetchAvailableModels
+    // Fallback: tries fetchAvailableModels
     for base in bases {
         let url = format!("{base}/v1internal:fetchAvailableModels");
         let mut resp = match agent
@@ -419,8 +419,8 @@ fn fetch_with_bases(bases: &[String], token: &str, ua: &str, now_ms: u64) -> Opt
     None
 }
 
-/// Consulta a cota do Antigravity (`None` em qualquer falha: sem login, rede, formato), como o CLI na versão
-/// `cli_version` (sem ela, [`FALLBACK_CLI_VERSION`]). Bloqueante; roda na thread `cd-usage`.
+/// Queries Antigravity quota (`None` on any failure: not logged in, network, format), as CLI at version
+/// `cli_version` (without it, [`FALLBACK_CLI_VERSION`]). Blocking; runs on thread `cd-usage`.
 pub(crate) fn fetch(home: &Path, cli_version: Option<&str>) -> Option<AgentUsage> {
     let now_ms = util::now_ms();
     let token = valid_access_token(home, now_ms)?;
@@ -524,11 +524,11 @@ mod tests {
             }]
         });
         let usage = parse_quota_summary(&v, NOW).expect("usage");
-        // Entre 80% usado (pro) e 10% usado (flash), mantém o de maior uso (0.80).
+        // Between 80% used (pro) and 10% used (flash), keeps the one of highest usage (0.80).
         let session = usage.session.expect("session");
         assert!((session.used - 0.80).abs() < 1e-6);
         assert_eq!(session.resets_at_ms, super::super::rfc3339_ms("2026-10-15T05:52:53Z"));
-        // Janela com resetTime no passado zera.
+        // Window with resetTime in the past zeroes out.
         assert_eq!(usage.weekly, Some(UsageWindow { used: 0.0, resets_at_ms: None }));
     }
 
@@ -553,11 +553,11 @@ mod tests {
         }"#;
         let v: Value = serde_json::from_str(json_str).expect("json");
         let usage = parse_available_models(&v, NOW).expect("usage");
-        // defaultAgentModelId foi especificado
+        // defaultAgentModelId was specified
         assert_eq!(usage.session.expect("session").used, 0.2);
         assert!(usage.weekly.is_none());
 
-        // Sem defaultAgentModelId: escolhe a menor fração restante (maior uso: 0.5 -> used 0.5)
+        // Without defaultAgentModelId: picks smallest remaining fraction (highest usage: 0.5 -> used 0.5)
         let json_no_default = r#"{
             "models": {
                 "gemini-flash": {
@@ -578,7 +578,7 @@ mod tests {
         let usage2 = parse_available_models(&v2, NOW).expect("usage");
         assert_eq!(usage2.session.expect("session").used, 0.5);
 
-        // Com resetTime no passado, zera a janela.
+        // With resetTime in the past, zeroes the window.
         let v_expired = json!({
             "defaultAgentModelId": "gemini-pro",
             "models": {
@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn parse_creds_both_formats_and_fallback_when_first_expired() {
-        // Formato keyring (vencido em relação a NOW)
+        // Keyring format (expired relative to NOW)
         let keyring_expired = r#"{
             "token": {
                 "access_token": "ya29.expired",
@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(creds1.access_token, "ya29.expired");
         assert!(!creds1.is_valid(NOW));
 
-        // Formato ~/.gemini/oauth_creds.json (válido)
+        // Format ~/.gemini/oauth_creds.json (valid)
         let file_valid = r#"{
             "access_token": "ya29.file",
             "refresh_token": "1//file_refresh",
@@ -620,14 +620,14 @@ mod tests {
         assert_eq!(creds2.expires_at_ms, Some(1791860192679));
         assert!(creds2.is_valid(NOW));
 
-        // Se a primeira fonte (ex.: Credential Manager) estiver vencida, cai para a segunda (oauth_creds.json).
+        // If the first source (e.g. Credential Manager) is expired, falls back to the second (oauth_creds.json).
         let token = first_valid_token([keyring_expired.to_owned(), file_valid.to_owned()], NOW);
         assert_eq!(token.as_deref(), Some("ya29.file"));
     }
 
-    /// Lê a requisição HTTP inteira (cabeçalhos + corpo pelo Content-Length). Responder e fechar com
-    /// bytes ainda não lidos faz o Windows mandar RST em vez de FIN, e o cliente vê "conexão
-    /// redefinida" no lugar da resposta (o teste falhava só com a máquina carregada).
+    /// Reads entire HTTP request (headers + body by Content-Length). Responding and closing with
+    /// unread bytes causes Windows to send RST instead of FIN, and the client sees "connection reset"
+    /// instead of response (test failed only under heavy load).
     fn read_request(s: &mut std::net::TcpStream) {
         use std::io::Read;
         let mut data = Vec::new();
@@ -678,7 +678,7 @@ mod tests {
         });
 
         let bases = vec![format!("http://{addr1}"), format!("http://{addr2}")];
-        let usage = fetch_with_bases(&bases, "tok", &user_agent(None), NOW).expect("segundo host deve responder");
+        let usage = fetch_with_bases(&bases, "tok", &user_agent(None), NOW).expect("second host should respond");
         assert_eq!(usage.session, Some(UsageWindow { used: 0.75, resets_at_ms: None }));
         let _ = t1.join();
         let _ = t2.join();
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn gemini_groups_win_over_claude_and_each_window_keeps_the_most_used() {
-        // Como o servidor responde ao User-Agent do CLI (22/10): o grupo de Claude/GPT não conta.
+        // How the server responds to the CLI User-Agent (22/10): Claude/GPT group does not count.
         let v = json!({
             "groups": [
                 {"displayName": "Gemini Models", "buckets": [
@@ -703,16 +703,16 @@ mod tests {
         });
         let usage = parse_quota_summary(&v, NOW).expect("usage");
         let session = usage.session.expect("session");
-        assert!((session.used - 0.1).abs() < 1e-6, "a sessão é a do Gemini, não a do Claude");
+        assert!((session.used - 0.1).abs() < 1e-6, "session is from Gemini, not Claude");
         let weekly = usage.weekly.expect("weekly");
-        assert!((weekly.used - 0.94).abs() < 1e-6, "a semana é a do Argon, a mais gasta");
+        assert!((weekly.used - 0.94).abs() < 1e-6, "week is from Argon, the most used");
         assert_eq!(weekly.resets_at_ms, super::super::rfc3339_ms("2026-10-24T12:30:35Z"));
-        // Todos os grupos ficam para o painel, os do Gemini primeiro; o Argon só tem a semana.
+        // All groups remain for panel, Gemini ones first; Argon only has weekly.
         let names: Vec<&str> = usage.groups.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(names, ["Gemini Models", "Gemini 4 Argon", "Claude and GPT models"]);
         assert!(usage.groups[1].session.is_none() && usage.groups[1].weekly.is_some());
         assert!((usage.groups[2].session.expect("3p").used - 0.9).abs() < 1e-6);
-        // Sem grupo do Gemini, vale o que vier.
+        // Without Gemini group, whatever comes counts.
         let only_claude =
             json!({"groups": [{"displayName": "Claude and GPT models", "buckets": [{"window": "5h", "remainingFraction": 0.5}]}]});
         assert_eq!(parse_quota_summary(&only_claude, NOW).and_then(|u| u.session).map(|s| s.used), Some(0.5));
@@ -722,7 +722,7 @@ mod tests {
     fn the_request_looks_like_the_installed_cli() {
         assert_eq!(parse_version("1.4.5\r\n").as_deref(), Some("1.4.5"));
         assert_eq!(parse_version("agy v1.10.2 (abc)").as_deref(), Some("1.10.2"));
-        assert_eq!(parse_version("erro: não sei"), None);
+        assert_eq!(parse_version("error: unknown"), None);
         let ua = user_agent(Some("1.5.0"));
         assert!(ua.starts_with("antigravity/cli/1.5.0 (aidev_client; os_type="), "{ua}");
         assert!(user_agent(None).starts_with(&format!("antigravity/cli/{FALLBACK_CLI_VERSION} ")));
@@ -737,7 +737,7 @@ mod tests {
 
     #[test]
     fn the_token_file_of_a_keyring_less_agy_is_another_source() {
-        // Sem chaveiro (SSH, contêiner, WSL), o `agy` grava o mesmo JSON em disco quando
+        // Without keyring (SSH, container, WSL), agy writes the same JSON to disk when
         // `GEMINI_FORCE_FILE_STORAGE=true`.
         let home = tempfile::tempdir().expect("home");
         let dir = home.path().join(".gemini").join("antigravity-cli");
@@ -746,12 +746,12 @@ mod tests {
         std::fs::write(dir.join("antigravity-oauth-token"), secret).expect("write");
 
         let sources = credential_sources(home.path());
-        assert!(sources.iter().any(|s| s == secret), "o arquivo do `agy` sem chaveiro entra nas fontes");
+        assert!(sources.iter().any(|s| s == secret), "agy file without keyring is included in sources");
         assert_eq!(valid_access_token(home.path(), NOW).as_deref(), Some("ya29.disco"));
     }
 
     #[test]
-    #[ignore = "usa a rede"]
+    #[ignore = "uses network"]
     fn fetch_real_quota() {
         let home = dirs::home_dir().expect("home");
         let usage = fetch(&home, None).expect("usage");

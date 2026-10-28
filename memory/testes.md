@@ -1,418 +1,412 @@
-# Roteiro de testes manuais
+# Manual test script
 
-Testes para fazer **à mão, no Windows, com os agentes reais**. Os testes automáticos (`cargo test`) e as capturas de
-tela no Linux já passaram; o que está aqui não dá para verificar sem a sua máquina: ConPTY, Git for Windows,
-Credential Manager, fontes do Windows, os CLIs instalados e o comportamento real dos agentes.
+Tests to perform **manually, on Windows, with real agents**. Automated tests (`cargo test`) and Linux screenshots
+have already passed; what is here cannot be verified without your machine: ConPTY, Git for Windows,
+Credential Manager, Windows fonts, installed CLIs, and actual agent behavior.
 
-O trabalho de desenvolvimento que falta fica em [pendencias.md](pendencias.md); visão geral em [GERAL.md](GERAL.md).
+Remaining development work is tracked in [pendencias.md](pendencias.md); overview in [GERAL.md](GERAL.md).
 
-**Como usar**
-- Marque `[x]` no que passou. No que falhar, anote embaixo do item: o que fez, o que esperava, o que aconteceu,
-  um print e, se o app fechou, o fim de `dados/crash.log`.
-- Os números entre parênteses (ex.: 202, 409) são só referência para quem for corrigir.
-- Itens com ★ são os mais importantes (mudanças grandes que ainda não rodaram no Windows).
-- "(uso real, t1–t16)" marca o que a própria mesa de tarefas já fez de verdade, conferido nos eventos das tarefas
-  (`dados/tarefas/<projeto>.json`): vale como teste passado, mas repita se a área mudar.
-- O roteiro é por **área** (as mesmas de [ideias.md](ideias.md)). Comece pela Preparação e pelas áreas com ★.
+**How to use**
+- Mark `[x]` on what passed. On anything that fails, note below the item: what you did, what was expected, what happened,
+  a screenshot, and if the app crashed, the end of `dados/crash.log`.
+- Numbers in parentheses (e.g. 202, 409) are reference codes for fixes.
+- Items with ★ are the most important (major changes not yet verified on Windows).
+- "(real use, t1–t16)" marks what the task desk itself has already performed in practice, verified in task events
+  (`dados/tarefas/<projeto>.json`): counts as a passed test, but repeat if the area changes.
+- The script is organized by **area** (the same areas as in [ideias.md](ideias.md)). Start with Preparation and areas with ★.
 
 ---
 
-## Preparação
+## Preparation
 
-- [x] Compilar e abrir: `cargo build --workspace --release` e `.\target\release\agentdeck.exe` (os três `.exe` na mesma pasta).
-- [x] Ter instalados, se possível: Claude Code, Antigravity, Git for Windows. Opcionais: Codex (`npm i -g @openai/codex`), OpenCode.
-- [x] (Opcional) Compilar e abrir no **Linux** seguindo a seção "Compilar e rodar (Linux)" do README; anotar a distribuição e se é X11 ou Wayland.
-- [x] Primeira abertura (sem `config.json`) e reabrir depois de fechar **todas** as abas: abre **sem abas**; nenhum agente abre sozinho.
-- [x] Abrir um projeto seu que seja repositório git ("+" da seção PROJETOS na barra lateral).
+- [x] Compile and launch: `cargo build --workspace --release` and `.\target\release\agentdeck.exe` (all three `.exe` in the same directory).
+- [x] Have installed, if possible: Claude Code, Antigravity, Git for Windows. Optional: Codex (`npm i -g @openai/codex`), OpenCode.
+- [x] (Optional) Compile and launch on **Linux** following the "Build and run (Linux)" section of the README; note distribution and whether X11 or Wayland.
+- [x] First launch (without `config.json`) and relaunching after closing **all** tabs: opens **without tabs**; no agent launches automatically.
+- [x] Open a personal project that is a git repository ("+" in the PROJECTS section on the sidebar).
 
-## Mesa de tarefas ★
+## Tasks desk ★
 
-Pelo CLI (`ask-agent --task`):
+Via CLI (`ask-agent --task`):
 
-- [x] (uso real, t1–t16) Num projeto git, de uma aba orquestradora: `ask-agent --task new "teste" --start -` com o pedido na entrada. A aba da tarefa abre em segundo plano, o terminal dela está em `<repo>\.agentdeck\worktrees\t1`, o pedido e as regras chegam digitados, e o `git status` do repositório principal continua limpo.
-- [x] (uso real, t1–t16; o `--boss` não foi conferido) Na aba da tarefa, fazer um commit e rodar `ask-agent --task done t1 -`. O `--task show t1` mostra o relatório e o diff, e o `--boss` da tarefa chega a quem a criou.
-- [x] (uso real, t1–t16) Na aba da tarefa, escrever o relatório num arquivo com acentos (ex.: `C:\Temp\relatorio.md`) e rodar `ask-agent --task done t1 --file C:\Temp\relatorio.md`: o `--task show t1` mostra os acentos inteiros (sem `?`).
-- [x] (uso real, t1–t16) `--task return t1 "ajuste"` digita o retorno na aba. Depois, `--task merge t1` cria o commit de merge e a tarefa fica **aguardando validação**: a aba, a pasta e a branch continuam, e a branch da tarefa aponta para o mesmo commit da base.
-- [x] (uso real, t1–t16) `--task validate t1` (aguardando validação) fecha a aba e apaga a pasta e a branch, mesmo com o processo do agente vivo; a tarefa vira "concluída".
-- [ ] `--task validate` fora de "aguardando validação" recusa (409).
-- [ ] `--task reject t1 "não salva"` (aguardando validação) volta a tarefa ao mesmo agente: o texto chega na aba dizendo que o trabalho já foi mesclado e qual foi o motivo. Com a aba fechada e/ou a pasta apagada à mão, a aba reabre na worktree (recriada). Depois `done` → `merge` → `validate` fecham o ciclo.
-- [ ] **Reprovar → done sem commit → mesclar → validar** (t18): numa tarefa aguardando validação, `--task reject t1 "talvez não quebre"`. Na aba, o agente confere, não muda nada e roda `ask-agent --task done t1 --file <arq>` (a tarefa vai a revisão). `--task merge t1` (ou "Mesclar") não recusa: a tarefa volta a **Aguardando validação**, o histórico diz "sem commits novos desde a última mesclagem (<hash>); aguardando validação de novo" e o `git log` da base não ganha commit de mesclagem novo. "Validar" conclui.
-- [ ] **`--task done` em aguardando validação** (t18): com a tarefa aguardando validação, fazer um commit direto na aba dela e rodar `ask-agent --task done t1 --file <arq>`: a tarefa vai a **Em revisão** ("o agente entregou mais trabalho depois da mesclagem"). Sem commit novo, o mesmo comando dá 409 dizendo que a tarefa já foi mesclada e que quem decide é o usuário (Reprovar).
-- [ ] **Validar com a base apagada** (t18): com a tarefa aguardando validação, apagar a branch base à mão (`git branch -D <base>` depois de trocar de branch) e validar: conclui, com o aviso "a base … não existe mais" no histórico.
-- [ ] Com o repositório principal em outra branch, ou com um arquivo rastreado alterado, o merge recusa com explicação e a tarefa fica em revisão.
-- [x] (uso real, t1–t16) Conflito (mesma linha alterada na base e na tarefa): o merge é desfeito, a tarefa fica em revisão e o repositório principal fica limpo.
-- [x] (uso real, t1–t16) `--task discard` numa tarefa em andamento fecha a aba e apaga a worktree e a branch.
-- [ ] `--task discard` com a pasta da worktree já apagada à mão também limpa a branch e o registro.
-- [ ] Reabrir o app com uma tarefa em andamento: a aba volta na worktree, e o número da próxima tarefa não se repete.
-- [ ] Com "Abrir abas dos agentes" desligado, `--task start` recusa com explicação.
-- [ ] **Prompt inicial na abertura (Antigravity, Claude, OpenCode):** `--start` de uma tarefa de cada um. O agente começa sozinho, sem ninguém digitar "pode começar" (no Antigravity, mesmo com o aviso "Verbosity now defaults to medium" na tela), e lê o arquivo `dados/tarefas/<projeto>-<id>-brief.md`. Conferir se o OpenCode lê o arquivo de fora do workspace sem pedir permissão. Reprovar com a aba fechada reabre já com o motivo (`-feedback.md`).
+- [x] (real use, t1–t16) In a git project, from an orchestrator tab: `ask-agent --task new "teste" --start -` with request on stdin. The task tab opens in the background, its terminal is at `<repo>\.agentdeck\worktrees\t1`, the request and rules arrive typed, and the main repository's `git status` remains clean.
+- [x] (real use, t1–t16; `--boss` was not verified) In the task tab, make a commit and run `ask-agent --task done t1 -`. `--task show t1` shows the report and diff, and the task's `--boss` reaches whoever created it.
+- [x] (real use, t1–t16) In the task tab, write the report to a file with accented characters (e.g. `C:\Temp\relatorio.md`) and run `ask-agent --task done t1 --file C:\Temp\relatorio.md`: `--task show t1` displays full accents (without `?`).
+- [x] (real use, t1–t16) `--task return t1 "ajuste"` types the feedback into the tab. Afterwards, `--task merge t1` creates the merge commit and the task transitions to **awaiting validation**: the tab, folder, and branch remain, and the task branch points to the same commit as the base.
+- [x] (real use, t1–t16) `--task validate t1` (awaiting validation) closes the tab and deletes the folder and branch, even with the agent process still running; the task becomes "completed".
+- [ ] `--task validate` outside "awaiting validation" rejects (409).
+- [ ] `--task reject t1 "does not save"` (awaiting validation) returns the task to the same agent: text arrives in the tab explaining that the work was already merged along with the rejection reason. With the tab closed and/or folder deleted manually, the tab reopens in the worktree (recreated). Then `done` → `merge` → `validate` complete the cycle.
+- [ ] **Reject → done without commit → merge → validate** (t18): on a task awaiting validation, `--task reject t1 "might not break"`. In the tab, the agent verifies, changes nothing, and runs `ask-agent --task done t1 --file <file>` (task goes to review). `--task merge t1` (or "Merge") does not reject: task returns to **Awaiting validation**, history states "no new commits since last merge (<hash>); awaiting validation again", and base `git log` gains no new merge commit. "Validate" completes.
+- [ ] **`--task done` while awaiting validation** (t18): with the task awaiting validation, make a commit directly in its tab and run `ask-agent --task done t1 --file <file>`: the task transitions to **In review** ("agent submitted more work after merge"). Without new commits, the same command returns 409 stating the task was already merged and that user decision is needed (Reject).
+- [ ] **Validate with deleted base branch** (t18): with the task awaiting validation, manually delete the base branch (`git branch -D <base>` after switching branches) and validate: completes, with the note "base … no longer exists" in history.
+- [ ] With main repository on another branch, or with a modified tracked file, merge rejects with an explanation and task stays in review.
+- [x] (real use, t1–t16) Conflict (same line modified in base and task): merge is aborted, task stays in review, and main repository remains clean.
+- [x] (real use, t1–t16) `--task discard` on an in-progress task closes the tab and deletes the worktree and branch.
+- [ ] `--task discard` with worktree folder already deleted manually also cleans up branch and record.
+- [ ] Relaunch the app with an in-progress task: tab reopens in worktree, and next task number is not repeated.
+- [ ] With "Open agent tabs" disabled, `--task start` rejects with explanation.
+- [ ] **Initial prompt on launch (Antigravity, Claude, OpenCode):** `--start` one task for each. The agent starts on its own without anyone typing "you can start" (in Antigravity, even with "Verbosity now defaults to medium" on screen), and reads `dados/tarefas/<projeto>-<id>-brief.md`. Check if OpenCode reads the file from outside workspace without asking for permission. Rejecting with tab closed reopens with the reason (`-feedback.md`).
 
-Pela aba **Tarefas** da barra direita:
+Via the **Tasks** tab on the right panel:
 
-- [ ] Abrir o app mostra Tarefas como a primeira aba da barra direita. Num projeto git sem tarefas, aparece a explicação e "+ Nova tarefa".
-- [ ] **Escolha pela cota (t49):** em `+ Nova tarefa`, conferir o percentual ao lado de Claude, Antigravity e Codex e se o de menor uso vem selecionado; escolher outro agente manualmente e reabrir confirma que a escolha manual permanece. Criar uma tarefa sem `--agent` e conferir no histórico o motivo com as cotas dos candidatos.
-- [ ] **Nível e capacidade (t52):** em `+ Nova tarefa`, "Nível" (Simples | Média | Complexa; Média de início). Com o agente automático, escolher Complexa muda a recomendação para um modelo capaz (com Codex no padrão `gpt-6-luna`, que só vai até simples, ele nunca é a recomendação de uma tarefa média ou complexa); escolher à mão um modelo abaixo do nível (ex.: Claude com `haiku` e Complexa) mostra o "Aviso de capacidade" sem bloquear. `--task new "x" --level complexa --file <p>` grava o nível (`--task show` mostra "nível: complexa") e, sem `--agent`, o histórico traz o motivo "complexa: claude sonnet, capaz e com N% livre; …". `--level enorme` dá "nível inválido".
-- [ ] **`--models` com a capacidade (t52):** depois dos agentes, o bloco "capacidade" lista cada modelo com o nível e a fonte ("Coding Agent Index 59.3 (2026-10)"); depois de 3 tarefas num nível, a linha mostra a medida ("media: 4 de 5 de primeira, …"). Um `dados/capacidade.json` com `{"models":[{"name":"GPT-6 Luna","aliases":["gpt-6-luna"],"score":50,"source":"teste","date":"2026-11"}]}` passa o Luna para `media` na próxima chamada.
-- [ ] **Aviso de cota (t49):** com um agente destino acima de 80% e outro CLI oficial instalado abaixo de 50%, rodar `ask-agent <agente> "mensagem"`: o aviso aparece antes da resposta e a mensagem ainda chega; com outro agente só a 50% ou mais, nenhum aviso aparece.
-- [ ] "+ Nova": com o título vazio, o botão fica desligado; a base vem com a branch atual; base inexistente dá erro inline; Ctrl+Enter cria. Com "Iniciar agora", o detalhe abre em andamento e a aba do agente aparece na worktree com o pedido digitado. Sem ele, a tarefa fica em rascunho e "Iniciar" a começa.
-- [ ] **Esforço no formulário** (t25): em "+ Nova" o campo ESFORÇO vem em "Padrão". Com Claude, escolher "Alto" e criar com "Iniciar agora": o cartão e o detalhe mostram "Claude · <modelo> · alto" e a aba abre com `--effort high` (o Claude mostra o esforço na linha de status ou em `/model`; se não mostrar, conferir a linha de comando do processo). Com Antigravity, escolher um modelo `…-argon-low` e "Alto": o modelo da tarefa vira `…-argon-high`; sem modelo escolhido o seletor fica apagado, com a dica ao passar o mouse. Com OpenCode (e Codex) o seletor fica apagado, com a dica. `ask-agent --task new "x" --effort alto --start --file p.md` aceita `low|medium|high` (ou baixo|médio|alto) e `--effort max` dá erro.
-- [ ] **Escopo e fila** (t45): em "+ Nova", o campo ESCOPO aceita um caminho por linha. (1) Criar a tarefa A com escopo `crates/core` e "Iniciar agora"; criar a B com escopo `crates/core/src/git.rs` e "Iniciar agora": a B abre no detalhe como **Na fila** ("Na fila · espera t1" no cartão, faixa amarela "Na fila: o escopo se sobrepõe ao da tarefa t1…" no detalhe), sem aba nem pasta em `.agentdeck/worktrees`, só o botão Descartar. (2) Mesclar a A pelo botão: a B começa sozinha, a aba dela abre e a worktree já tem o que a A trouxe (`git log` na pasta dela). Repetir descartando a A em vez de mesclar. (3) Duas tarefas com `crates/app` e `crates/cli` começam juntas. (4) Duas tarefas que só citam `memory/pendencias.md` (e `Cargo.lock`) além dos seus escopos começam juntas. (5) Uma tarefa sem escopo, com outra em andamento, começa na hora. (6) A tarefa que entrega mexendo num arquivo fora do escopo mostra na revisão a faixa "Mexeu fora do escopo: <arquivo>" e continua mesclável. (7) Com a B na fila, fechar o app e reabrir: ela continua na fila (cartão e `ask-agent --task list` mostram "na fila" e "(espera t1)") e começa quando a A terminar. (8) `ask-agent --task new "x" "pedido" --scope crates/core memory/GERAL.md --start` mostra o escopo na criação; `--scope 'crates/*.rs'` e `--scope C:\x` dão erro; o `--task show` lista o escopo e, na fila, por quem espera. Uma tarefa aguardando validação não segura a fila: com a A em "Aguardando validação", a B (mesmo escopo) começa na hora.
-- [ ] Fechar a aba de uma tarefa em andamento: o detalhe mostra "Reabrir aba", que a abre de novo na worktree com o modelo da tarefa.
-- [ ] O agente roda `ask-agent --task done tN -`: o cartão vai sozinho para "Em revisão", o selo do ícone sobe e aparece "N arquivos +X −Y".
-- [ ] No detalhe em revisão: relatório, alterações por arquivo, e "Ver diff completo" abre o diff **no centro** (modo Documentos, t19: lista de arquivos à esquerda, cores, linhas longas quebradas na largura, sem rolagem horizontal); a barra direita continua no detalhe, com os botões da revisão visíveis. **Abrir em Documentos** embaixo do Pedido e do Relatório abre cada um formatado.
-- [ ] **"Ver o que foi mesclado"** (t18): em aguardando validação (e depois em concluída), o detalhe mostra o hash curto da mesclagem ao lado de `branch → base` e o botão das alterações diz "Ver o que foi mesclado"; ele abre (no centro) só o que a mesclagem trouxe (sem o que a base ganhou antes) e "←" volta. Uma tarefa mesclada antes desta versão (sem o hash) não mostra o botão. Em revisão e em andamento o botão segue "Ver diff completo".
-- [ ] "Devolver" com Ctrl+Enter: a tarefa volta a andamento e o texto chega à aba do agente, reabrindo-a se estiver fechada.
-- [ ] "Mesclar em <base>" pede confirmação. Com o repositório principal sujo, mostra a recusa e a tarefa fica em revisão. Limpo, mescla e move para **Aguardando validação** (o selo do ícone continua contando); a aba do agente segue aberta.
-- [ ] **Recusa da mesclagem com saída** (t35). Em revisão, com o repositório principal sujo (alterar um arquivo rastreado, sem commit), "Mesclar" → "sim": o aviso explica em linguagem comum ("Há alterações suas, ainda sem commit…") e traz **Guardar minhas alterações e mesclar** e **Ver o que está sem commit** (mostra todos os arquivos). O primeiro guarda (`git stash`), mescla e devolve: a tarefa vai a "Aguardando validação", a sua alteração continua na pasta e o aviso âmbar diz que ela voltou; `git stash list` fica vazio (ou só com o que já havia). Se a sua alteração mexe na mesma linha que a tarefa, a mesclagem passa, a pasta fica limpa (sem marcas de conflito) e o aviso diz que a alteração continua guardada e como recuperar (`git stash list` e `git stash pop`); confira que `git stash show -p` mostra o seu texto. Um arquivo novo seu, não rastreado, com o nome de um que a tarefa cria, recusa antes de mexer em qualquer coisa (sem botão; mova o arquivo). `ask-agent --task merge` continua recusando sem guardar nada.
-- [ ] **Pedir ao agente** (t35): com trabalho sem commit na pasta da tarefa, a recusa traz **Pedir ao agente para fazer o commit**; com conflito, **Pedir ao agente para resolver o conflito**. O clique devolve a tarefa à aba do agente com o pedido pronto (arquivos listados, a pasta da tarefa e, no conflito, `git merge <base>`); depois de ele entregar de novo, "Mesclar" passa. HEAD solto, outra branch, operação do git em andamento ou branch sumida: só a mensagem, sem botão.
-- [ ] Aguardando validação: "Validar" conclui sem perguntar (fecha a aba, apaga a worktree, move para Concluídas). "Reprovar" abre o campo do motivo (Ctrl+Enter envia): a tarefa volta a andamento e o motivo chega ao mesmo agente.
-- [ ] "Descartar" pede confirmação (aguardando validação, avisa que o que já foi mesclado continua na base); depois a aba fecha e a worktree e a branch somem.
-- [ ] Na largura mínima (280 px), nada vaza na lista, no detalhe nem no formulário; trocar de projeto mostra as tarefas do outro.
-- [ ] Uma tarefa criada por outro agente (`ask-agent --task new --start`) aparece sem clicar em atualizar.
-- [ ] **Anexos no formulário "Nova tarefa"** (t11): "Anexar arquivos" abre o seletor; os arquivos viram chips removíveis (o × tira o chip) e, ao criar, os caminhos (cópias em `dados/anexos`) vão anexados ao final do pedido.
-- [ ] **Arrastar arquivos sobre o formulário "Nova tarefa"** aberto (t11): a barra direita ganha o destaque "Solte para anexar à nova tarefa" e soltar acrescenta os chips; com o formulário fechado, o destaque vai para a janela do agente sob o ponteiro.
+- [ ] Opening the app displays Tasks as the first tab on the right panel. In a git project without tasks, shows explanation and "+ New task".
+- [ ] **Quota-based selection (t49):** in `+ New task`, check the percentage next to Claude, Antigravity, and Codex and verify the one with lowest usage is preselected; manually choosing another agent and reopening confirms manual choice persists. Create a task without `--agent` and check history for the reason with candidate quotas.
+- [ ] **Level and capability (t52):** in `+ New task`, "Level" (Simple | Medium | Complex; Medium by default). With automatic agent, choosing Complex changes recommendation to a capable model (with Codex defaulted to `gpt-6-luna`, which only handles simple, it is never recommended for medium or complex tasks); manually choosing a model below the level (e.g. Claude with `haiku` and Complex) shows "Capability warning" without blocking. `--task new "x" --level complex --file <p>` records the level (`--task show` displays "level: complex") and, without `--agent`, history shows reason "complex: claude sonnet, capable and with N% free; …". `--level huge` returns "invalid level".
+- [ ] **`--models` with capability (t52):** after agents, the "capability" block lists each model with level and source ("Coding Agent Index 59.3 (2026-10)"); after 3 tasks at a level, the line shows measured performance ("medium: 4 of 5 first try, …"). A `dados/capacidade.json` with `{"models":[{"name":"GPT-6 Luna","aliases":["gpt-6-luna"],"score":50,"source":"test","date":"2026-11"}]}` upgrades Luna to `medium` on the next call.
+- [ ] **Quota warning (t49):** with target agent above 80% and another installed official CLI below 50%, run `ask-agent <agent> "message"`: warning appears before response and message still delivers; with another agent only at 50% or more, no warning appears.
+- [ ] "+ New": with empty title, button is disabled; base defaults to current branch; non-existent base gives inline error; Ctrl+Enter creates. With "Start now", detail opens in-progress and agent tab appears in worktree with prompt typed. Without it, task stays in draft and "Start" begins it.
+- [ ] **Effort in form** (t25): in "+ New", the EFFORT field defaults to "Default". With Claude, choose "High" and create with "Start now": card and detail show "Claude · <model> · high" and tab opens with `--effort high` (Claude shows effort in statusline or in `/model`; if not shown, check process command line). With Antigravity, choose a `…-argon-low` model and "High": task model becomes `…-argon-high`; with no model chosen selector is disabled with tooltip on hover. With OpenCode (and Codex) selector is disabled with tooltip. `ask-agent --task new "x" --effort high --start --file p.md` accepts `low|medium|high` (or aliases baixo|medio|alto) and `--effort max` errors out.
+- [ ] **Scope and queue** (t45): in "+ New", SCOPE field accepts one path per line. (1) Create task A with scope `crates/core` and "Start now"; create task B with scope `crates/core/src/git.rs` and "Start now": B opens in detail as **Queued** ("Queued · waiting for t1" on card, yellow banner "Queued: scope overlaps with task t1…" in detail), without tab or folder in `.agentdeck/worktrees`, only the Discard button. (2) Merge A via button: B starts automatically, its tab opens, and worktree already contains what A introduced (`git log` in its folder). Repeat discarding A instead of merging. (3) Two tasks with `crates/app` and `crates/cli` start together. (4) Two tasks that only mention `memory/pendencias.md` (and `Cargo.lock`) beyond their scopes start together. (5) A task without scope starts immediately alongside an in-progress task. (6) A task that delivers changes outside its scope shows "Modified outside scope: <file>" banner in review and remains mergeable. (7) With B queued, close and reopen the app: it remains queued (card and `ask-agent --task list` show "queued" and "(waiting for t1)") and starts when A finishes. (8) `ask-agent --task new "x" "brief" --scope crates/core memory/GERAL.md --start` displays scope on creation; `--scope 'crates/*.rs'` and `--scope C:\x` error out; `--task show` lists scope and, when queued, what it waits for. A task awaiting validation does not hold the queue: with A in "Awaiting validation", B (same scope) starts immediately.
+- [ ] Close the tab of an in-progress task: detail displays "Reopen tab", reopening it in the worktree with task model.
+- [ ] Agent runs `ask-agent --task done tN -`: card automatically transitions to "In review", icon badge increments, and "N files +X −Y" appears.
+- [ ] In review detail: report, changes per file, and "View full diff" opens diff **in center** (Documents mode, t19: file list on left, colors, long lines soft-wrapped, no horizontal scrolling); right panel remains on detail with review buttons visible. **Open in Documents** under Brief and Report opens each formatted.
+- [ ] **"View merged changes"** (t18): in awaiting validation (and later in completed), detail displays short merge hash next to `branch → base` and changes button reads "View merged changes"; it opens (in center) only what the merge introduced (excluding earlier base changes) and "←" goes back. A task merged before this version (without hash) does not show button. In review and in progress button remains "View full diff".
+- [ ] "Return" with Ctrl+Enter: task returns to in-progress and text arrives in agent tab, reopening it if closed.
+- [ ] "Merge into <base>" requests confirmation. If main repo is dirty, shows refusal and task stays in review. If clean, merges and moves to **Awaiting validation** (icon badge keeps counting); agent tab remains open.
+- [ ] **Merge refusal with resolution options** (t35). In review, with dirty main repository (tracked file modified, uncommitted), "Merge" → "yes": warning explains in plain language ("You have uncommitted changes…") and offers **Stash my changes and merge** and **View uncommitted changes** (lists all files). The first option stashes (`git stash`), merges, and restores: task moves to "Awaiting validation", your changes remain in directory, and amber banner notes they were restored; `git stash list` is empty (or contains only pre-existing stashes). If your change touches the same line as the task, merge succeeds, working tree remains clean (no conflict markers), and notice states changes remain stashed with instructions to recover (`git stash list` and `git stash pop`); verify `git stash show -p` shows your text. An untracked file with the same name as one created by the task rejects before touching anything (no button; move the file). `ask-agent --task merge` continues to reject without stashing anything.
+- [ ] **Ask agent** (t35): with uncommitted work in task directory, refusal offers **Ask agent to commit**; with conflict, **Ask agent to resolve conflict**. Clicking returns task to agent tab with prepared request (files listed, task folder, and on conflict, `git merge <base>`); after resubmission, "Merge" passes. Detached HEAD, different branch, ongoing git operation, or missing branch: message only, no action button.
+- [ ] Awaiting validation: "Validate" completes without prompting (closes tab, deletes worktree, moves to Completed). "Reject" opens reason field (Ctrl+Enter sends): task returns to in-progress and reason arrives at same agent.
+- [ ] "Discard" requests confirmation (in awaiting validation, warns that already merged changes remain in base); then tab closes and worktree and branch disappear.
+- [ ] At minimum width (280 px), nothing clips or overflows in list, detail, or form; switching projects displays tasks of that project.
+- [ ] A task created by another agent (`ask-agent --task new --start`) appears without clicking refresh.
+- [ ] **Attachments in "New task" form** (t11): "Attach files" opens picker; files become removable chips (× removes chip) and, on creation, paths (copies in `dados/anexos`) are appended to end of request.
+- [ ] **Drag files over open "New task" form** (t11): right panel highlights "Drop to attach to new task" and dropping adds chips; with form closed, highlight targets agent window under cursor.
 
-## Modelos ★
+## Models ★
 
-- [ ] `ask-agent --model sonnet claude@dev "diga oi"` de dentro de uma aba: abre "Claude · Dev" com o sufixo `sonnet` no cabeçalho e na barra lateral; o Claude mostra Sonnet (`/status`).
-- [ ] Repetir com `--model opus` e a aba aberta: 409 `claude@dev já está aberta com sonnet; use --new para abrir outra com opus`. Com o mesmo modelo, ou sem `--model`, a entrega é normal. Com `--new --model opus`, abre `claude@dev@ana` com opus.
-- [ ] `ask-agent --model opencode/big-pickle opencode "oi"`: a aba do OpenCode abre com "Big Pickle" na linha de status. Sem `--model`, abre com o padrão de sempre.
-- [ ] `ask-agent --model x aider "oi"`: 400 "o agente aider não aceita escolher modelo". `--model "a b"`: "modelo inválido".
-- [ ] `ask-agent --list` e `--team` mostram `claude@dev (sonnet)`.
-- [ ] `"roleModels": {"claude@dev": "sonnet"}` no config.json: abrir `claude@dev` já usa sonnet, `claude@qa` cai no padrão e um `--model` explícito vence.
-- [ ] Reabrir o app: as abas voltam com o mesmo modelo. Renomear mantém o modelo, e fechar a aba apaga a entrada de `tabModels`.
-- [ ] "+ Novo agente" › do Claude lista Padrão, opus, sonnet, haiku, fable. O › do OpenCode mostra primeiro os provedores (`opencode`, `opencode-go`) com a contagem de modelos; escolher um lista só os modelos dele, com os `-free` primeiro e marcados "grátis", e o "‹" do cabeçalho volta aos provedores. Com um provedor só conectado, o menu vai direto aos modelos dele, sem o passo do provedor. O do Antigravity mostra "Carregando modelos…" e depois a lista (sem CLI ou rede, só "Padrão"). Clicar no nome abre com o padrão.
-- [ ] "Nova tarefa" › Modelo com o OpenCode: o menu começa nos provedores (Padrão + a lista), depois mostra os modelos do provedor, com os `-free` primeiro; "‹ Provedores" volta e "Padrão" limpa o modelo. Com um provedor só, o menu vai direto aos modelos (com "Padrão"), sem "‹ Provedores". O modelo gravado na tarefa mantém o prefixo do provedor (`opencode/…`).
-- [ ] Clique direito numa aba com modelo mostra "Modelo: <m>" no alto do menu.
-- [ ] Antigravity com `--model claude-sonnet-5-5-medium`: o rodapé do agy mostra "Claude Sonnet 5.5 · medium".
-- [ ] Codex com `--model <m>` (se instalado): abre com o modelo e o aviso de fim de turno continua funcionando.
-- [ ] **`ask-agent --models`** (t14): de dentro de uma aba, lista um bloco por agente instalado, na ordem do `--list`, com o nome como vale no `--agent` e os modelos como o `--model` aceita; os `-free` vêm primeiro e levam "(grátis)"; o OpenCode sai agrupado por provedor (`opencode/: …`); o Codex sai como "não lista os modelos" e os CLIs sem escolha (aider…) como "sem escolha de modelo".
-- [ ] **`ask-agent --models <agente>`** (t14), ex.: `--models opencode` ou `--models claude`: lista só aquele agente; um agente que não está instalado dá erro (404) e um nome inválido, "agente inválido". Com o CLI sem responder, a linha diz "não consegui listar os modelos" e o resto continua.
+- [ ] `ask-agent --model sonnet claude@dev "say hello"` from inside a tab: opens "Claude · Dev" with `sonnet` suffix in header and sidebar; Claude reports Sonnet (`/status`).
+- [ ] Repeat with `--model opus` while tab is open: 409 `claude@dev is already open with sonnet; use --new to open another with opus`. With same model or without `--model`, delivery is normal. With `--new --model opus`, opens `claude@dev@ana` with opus.
+- [ ] `ask-agent --model opencode/big-pickle opencode "hello"`: OpenCode tab opens with "Big Pickle" in statusline. Without `--model`, opens with default.
+- [ ] `ask-agent --model x aider "hello"`: 400 "agent aider does not support choosing a model". `--model "a b"`: "invalid model".
+- [ ] `ask-agent --list` and `--team` show `claude@dev (sonnet)`.
+- [ ] `"roleModels": {"claude@dev": "sonnet"}` in config.json: opening `claude@dev` defaults to sonnet, `claude@qa` falls back to default, and explicit `--model` overrides.
+- [ ] Relaunch app: tabs reopen with same model. Renaming preserves model, and closing tab deletes entry from `tabModels`.
+- [ ] "+ New agent" › Claude submenu lists Default, opus, sonnet, haiku, fable. OpenCode submenu first shows providers (`opencode`, `opencode-go`) with model counts; selecting one lists only its models, with `-free` first marked "free", and header "‹" returns to providers. With only one connected provider, menu navigates directly to its models without provider step. Antigravity submenu shows "Loading models…" then the list (without CLI or network, just "Default"). Clicking name opens with default.
+- [ ] "New task" › Model with OpenCode: menu starts with providers (Default + list), then shows provider models, with `-free` first; "‹ Providers" goes back and "Default" clears model. With single provider, goes directly to models (with "Default"), without "‹ Providers". Model saved on task retains provider prefix (`opencode/…`).
+- [ ] Right-click on tab with model shows "Model: <m>" at top of menu.
+- [ ] Antigravity with `--model claude-sonnet-5-5-medium`: agy footer shows "Claude Sonnet 5.5 · medium".
+- [ ] Codex with `--model <m>` (if installed): opens with model and turn-end notification continues working.
+- [ ] **`ask-agent --models`** (t14): from inside a tab, lists a block per installed agent, in `--list` order, with name as accepted by `--agent` and models as accepted by `--model`; `-free` models appear first with "(free)"; OpenCode is grouped by provider (`opencode/: …`); Codex appears as "does not list models" and CLIs without model choice (aider…) as "no model choice".
+- [ ] **`ask-agent --models <agent>`** (t14), e.g. `--models opencode` or `--models claude`: lists only that agent; uninstalled agent returns error (404) and invalid name returns "invalid agent". With unresponsive CLI, line indicates "could not list models" and remaining output proceeds.
 
-## Memória ★
+## Memory ★
 
-- [ ] **`ask-agent --learn <arquivo>`** (t13): numa aba de tarefa, `ask-agent --learn crates/core/src/tasks.rs` imprime os aprendizados que valem para esse arquivo (os globais e os que casam com os `touches`); um caminho absoluto dentro da worktree funciona igual; um arquivo sem aprendizado específico imprime só os globais.
-- [ ] **`ask-agent --learn` sem argumentos** (t15): imprime os aprendizados globais por inteiro e o índice (uma linha, `arquivo — resumo`) de todos os outros. Fora de uma tarefa, lê `memory/aprendizados/` do repositório do projeto.
-- [ ] **Instruções da ponte** (t15): um agente novo (aba aberta depois desta versão) sabe do `--learn` e do `--models` sem ninguém contar (as instruções dizem para rodar `ask-agent --learn <arquivo>` antes de mexer em arquivos).
-- [ ] **Aprendizados no início da tarefa** (t13): o pedido da tarefa cita um arquivo com aprendizado específico (ex.: `crates/core/src/workspace.rs`); a mensagem que o agente recebe (`dados/tarefas/<projeto>-<id>-brief.md`) traz, na seção "O que o projeto já aprendeu", o texto completo dos globais e desse aprendizado, e o índice dos demais.
-- [ ] **"Situação atual" no início da tarefa** (t13/t16): com outra tarefa em andamento que tem arquivos alterados na branch e **arquivos ainda sem commit na worktree**, a tarefa nova recebe a seção "Situação atual" com a outra tarefa (id, título, estado) e todos esses arquivos, com um aviso se algum é citado no pedido, mais os últimos commits da base. Sem outras tarefas, diz "nenhuma". Conferir que o `git add`/`commit` do agente da outra tarefa não falha por causa disso (sem `index.lock`).
-- [ ] **Aprendizados no feedback** (t16): devolver (ou reprovar) uma tarefa com um feedback que cita um arquivo com aprendizado específico que o agente ainda não recebeu: a mensagem traz "O que o projeto já aprendeu sobre os arquivos citados"; um arquivo que já estava no pedido ou em feedback anterior não repete. A devolução também repete os feedbacks anteriores (até 5).
-- [ ] **Aprendizado criado pelo agente** (t13): o agente da tarefa cria um arquivo em `memory/aprendizados/` na branch e o cita no relatório; depois de mesclar, o `ask-agent --learn` de outra tarefa o mostra. Um arquivo com frontmatter inválido é ignorado, com aviso no log, sem derrubar a tarefa.
+- [ ] **`ask-agent --learn <file>`** (t13): in a task tab, `ask-agent --learn crates/core/src/tasks.rs` prints learnings relevant to that file (global ones and those matching `touches`); absolute path within worktree works identically; file without specific learning prints only globals.
+- [ ] **`ask-agent --learn` without arguments** (t15): prints global learnings in full and index (one line, `file — summary`) of all others. Outside a task, reads `memory/aprendizados/` from project repository.
+- [ ] **Bridge instructions** (t15): a new agent (tab opened after this version) is aware of `--learn` and `--models` without explicit instruction (instructions say to run `ask-agent --learn <file>` before modifying files).
+- [ ] **Learnings at task start** (t13): task brief mentions a file with specific learning (e.g. `crates/core/src/workspace.rs`); message the agent receives (`dados/tarefas/<project>-<id>-brief.md`) contains, under "What the project has learned", full text of globals and that learning, plus index of the rest.
+- [ ] **"Current situation" at task start** (t13/t16): with another task in progress having modified files in branch and **uncommitted files in worktree**, the new task receives "Current situation" section with the other task (id, title, state) and all those files, with warning if any are mentioned in the brief, plus latest base commits. Without other tasks, shows "none". Verify that `git add`/`commit` from other task agent doesn't fail due to this (no `index.lock`).
+- [ ] **Learnings in feedback** (t16): return (or reject) a task with feedback referencing a file with specific learning the agent hasn't received: message includes "What the project has learned about referenced files"; a file already in the brief or prior feedback is not repeated. Return also repeats previous feedbacks (up to 5).
+- [ ] **Learning created by agent** (t13): task agent creates a file in `memory/aprendizados/` on branch and cites it in report; after merge, `ask-agent --learn` in another task displays it. File with invalid frontmatter is ignored with log warning without crashing task.
+- [ ] **Instructions in every tab, in new project without `AGENTS.md`** (t38): open a new folder (without `AGENTS.md`) as a project and open a tab for each installed CLI. Automated tests cover arguments with mock agents; verify with real CLI that it **received and obeys** (ask "what did AgentDeck instruct you to do when you need another agent?" or ask for review by another agent and check if it opens a tab instead of a subagent):
+  - Claude (`--append-system-prompt`), OpenCode (`instructions` in `OPENCODE_CONFIG_CONTENT`; verified with `opencode run --standalone`, TUI remaining);
+  - **Codex** (`-c developer_instructions=...`; not installed on dev machine): verify value enters and, with npm installation on Windows (shim `.cmd`, raw text without quotes), `codex` does not reject option;
+  - **Aider** (`--read`) and **Open Interpreter** (`--custom_instructions`): verify flags exist in installed version;
+  - **Antigravity** (quota exhausted at development time): folder receives `AGENTS.md` containing only app block, Conversation warns once, and agent knows `ask-agent` and subagent rules; reopening does not modify file or warn.
+- [ ] `git status` of new project: with Claude, Codex, OpenCode, and Aider, clean; with Antigravity/Goose/Copilot, only `AGENTS.md` (once, without changing on each launch).
+- [ ] Project that already has its own `AGENTS.md`: user text remains untouched, only gains app block (standard case), and Conversation does not announce creation.
+- [ ] `ask-agent --learn` in project without `memory/aprendizados/` shows "project does not yet have learnings" and file format (`title`, `summary`, `touches`).
 
-- [ ] **Instruções em toda aba, num projeto novo sem `AGENTS.md`** (t38): abra uma pasta nova (sem `AGENTS.md`) como projeto e abra uma aba de cada CLI instalado. Os testes automáticos cobrem os argumentos com agentes falsos; falta ver com o CLI real que ele **recebeu e obedece** (pergunte "o que o AgentDeck mandou você fazer quando precisar de outro agente?" ou peça uma revisão por outro agente e veja se ele abre uma aba em vez de um subagente):
-  - Claude (`--append-system-prompt`), OpenCode (`instructions` em `OPENCODE_CONFIG_CONTENT`; conferido com `opencode run --standalone`, falta o TUI);
-  - **Codex** (`-c developer_instructions=...`; não instalado na máquina de desenvolvimento): confira que o valor entra e que, com a instalação por npm no Windows (shim `.cmd`, texto cru sem aspas), o `codex` não recusa a opção;
-  - **Aider** (`--read`) e **Open Interpreter** (`--custom_instructions`): confira que as flags existem na versão instalada;
-  - **Antigravity** (cota esgotada na hora do desenvolvimento): a pasta ganha um `AGENTS.md` só com o bloco do app, a Conversa avisa uma vez, e o agente conhece o `ask-agent` e a regra dos subagentes; abrir de novo não muda o arquivo nem avisa.
-- [ ] O `git status` do projeto novo: com Claude, Codex, OpenCode e Aider, nada novo; com Antigravity/Goose/Copilot, só o `AGENTS.md` (uma vez, sem mudar a cada abertura).
-- [ ] Um projeto que já tem `AGENTS.md` próprio: o texto do usuário fica como está, só ganha o bloco do app (o caso de sempre), e a Conversa não avisa de criação.
-- [ ] `ask-agent --learn` num projeto sem `memory/aprendizados/` mostra "o projeto ainda não tem aprendizados" e o formato do arquivo (`titulo`, `resumo`, `touches`).
+## Bridge and instances
 
-## Ponte e instâncias
+Inter-agent conversation ★
 
-Conversa entre agentes ★
+- [x] Ask Claude: *"ask antigravity what is the capital of France"*. The question is **typed into Antigravity tab** and answer returns to Claude.
+- [x] Typed message ends with `ask-agent --reply <number> "your reply"`, and agent responds accordingly (reply arrives).
+- [x] **Slow response:** request a time-consuming task (over 90 s) from another agent. Claude's `ask-agent` finishes stating response will come later; when it arrives, it is **typed into Claude tab** as a new message.
+- [ ] In a **Terminal** tab (shell), run `ask-agent claude "hi"` and let Claude take time: command **waits until completion** (nothing is typed into your shell).
+- [x] Role delegation: `ask-agent claude@dev "task"` opens **Claude · Dev** tab in background.
+- [ ] Closing tab of caller during wait: nothing hangs; other tab proceeds normally.
+- [ ] Long chain: A asks B, B asks C, and C tries to ask a 4th agent → rejected with "maximum depth" (limit is 2 hops).
+- [ ] `ask-agent claude@dev "/review src"` via Claude Bash arrives with `/review` intact.
+- [ ] Bridge: question with deferred response (202); rename caller tab and destination tab before response arrives. Response is typed into caller's renamed tab.
+- [ ] Bridge: after a 202, destination runs `ask-agent <caller> "question"`. Arrives as new question, while original keeps waiting for `--reply N`.
+- [ ] Bridge: replying via legacy alias (`ask-agent agy "..."` for Antigravity question) delivers reply, no 409.
+- [ ] Headless ("Open agent tabs" disabled): ask a question and kill agentdeck.exe via Task Manager during response. Headless claude/node process terminates alongside it.
 
-- [x] Peça ao Claude: *"pergunte ao antigravity qual é a capital da França"*. A pergunta é **digitada na aba do Antigravity** e a resposta volta ao Claude.
-- [x] A mensagem digitada termina com `ask-agent --reply <número> "sua resposta"`, e o agente responde assim (a resposta chega).
-- [x] **Resposta lenta:** peça uma tarefa demorada (mais de 90 s) a outro agente. O `ask-agent` do Claude termina avisando que a resposta virá depois; quando ela chega, é **digitada na aba do Claude** como mensagem nova.
-- [ ] Numa aba **Terminal** (shell), rode `ask-agent claude "oi"` e deixe o Claude demorar: o comando **espera até o fim** (nada é digitado no seu shell).
-- [x] Delegação por cargo: `ask-agent claude@dev "tarefa"` abre a aba **Claude · Dev** em segundo plano.
-- [ ] Fechar a aba de quem perguntou no meio da espera: nada trava; a outra aba segue normal.
-- [ ] Cadeia longa: A pergunta a B, B a C, e C tenta perguntar a um quarto agente → recusado com "profundidade máxima" (o limite é 2 saltos).
-- [ ] `ask-agent claude@dev "/review src"` pelo Bash do Claude chega com `/review` intacto.
-- [ ] Ponte: pergunta com resposta atrasada (202); renomear a aba de quem perguntou e a do destino antes da resposta. A resposta é digitada na aba renomeada de quem perguntou.
-- [ ] Ponte: depois de um 202, o destino roda `ask-agent <quem perguntou> "pergunta"`. Chega como pergunta nova, e a original continua esperando o `--reply N`.
-- [ ] Ponte: responder pela forma antiga com apelido (`ask-agent agy "..."` para uma pergunta do Antigravity) entrega a resposta, sem 409.
-- [ ] Headless ("Abrir abas dos agentes" desligado): fazer uma pergunta e matar o agentdeck.exe pelo Gerenciador de Tarefas durante a resposta. O claude/node do headless some junto.
+When message is typed into tab ★
 
-Quando a mensagem é digitada na aba ★
+- [ ] While **you are typing** (without Enter) in an agent tab, another agent's question is **not typed into the middle** (waits ~20 s without keystrokes).
+- [ ] While Claude is **mid-response** (or in a long thinking pause), question waits for it to finish (Claude hooks).
+- [ ] With Claude paused on a **permission prompt**, question is not typed over the prompt.
+- [ ] Pressing Enter in a Claude **menu** (e.g. `/model`) does not jam the queue: subsequent question is still delivered.
+- [ ] Typing right after a message is sent to tab: your keystrokes appear **after** the message, never interleaved.
 
-- [ ] Enquanto **você digita** algo (sem Enter) na aba de um agente, uma pergunta de outro agente **não é digitada no meio** (espera ~20 s sem teclas).
-- [ ] Com o Claude **no meio de uma resposta** (ou numa pausa longa de raciocínio), a pergunta espera ele terminar (hooks do Claude).
-- [ ] Com o Claude parado num **pedido de permissão**, a pergunta não é digitada por cima do pedido.
-- [ ] Apertar Enter num **menu** do Claude (ex.: `/model`) não trava a fila: uma pergunta seguinte ainda é entregue.
-- [ ] Digitar logo depois de uma mensagem ser enviada à aba: suas teclas aparecem **depois** da mensagem, nunca misturadas.
+Team and hierarchical agents ★
 
-Equipe e agentes em árvore ★
+- [ ] "+ New agent" at bottom of active project list opens agent menu; Ctrl+T with collapsed sidebar opens menu under titlebar.
+  - Verified: "+ New agent". Remaining: Ctrl+T with collapsed sidebar.
+- [ ] Arrow ▸/▾ on each project and double-arrow button in header collapse/expand agents; state persists across app restarts.
+- [ ] Clicking agent from another project switches project and activates tab (including project not yet opened in this session).
+- [ ] Model logo replacing dot: pulsing halo when working, ring upon completion when unseen, dimmed when terminated.
+- [ ] Agent calling `ask-agent claude@xyz` (new role) spawns new tab beneath it; its first message states "you report to …".
+- [ ] Dragging agent onto another: project-colored outline and ghost "→ team of …"; on drop, tree updates and persists across restarts.
+- [ ] Dragging manager onto member of their own team: red outline, forbidden cursor, no change. Esc cancels drag.
+- [ ] Dropping onto project row returns agent to root.
+- [ ] In reorganized agent tab, `ask-agent --team` shows correct manager and team; `ask-agent --boss "hi"` reaches manager; without manager, `--boss` explains it reports to user.
+  - Verified: on manager, `--team` shows team and `--boss` explains reporting to user. Remaining: verify in subordinate tab.
+- [ ] After reorganization, next message delivered to agent ends with "[AgentDeck] Your position in the team has changed…" (once only; if it ran `--team` earlier, omitted).
+- [ ] Closing manager tab: their team moves up to their manager (or root). Renaming tab with team preserves hierarchy.
+- [ ] Team: changing agent manager and closing their tab before next message does not consume notice. Closing subordinate without team notifies manager on next message.
 
-- [ ] "+ Novo agente" no fim da lista do projeto ativo abre o menu de agentes; Ctrl+T com a barra recolhida abre o menu sob a barra de título.
-  - Conferido: o "+ Novo agente". Falta o Ctrl+T com a barra recolhida.
-- [ ] Seta ▸/▾ de cada projeto e o botão de setas duplas do cabeçalho mostram/escondem os agentes; o estado volta igual ao reabrir o app.
-- [ ] Clicar num agente de outro projeto troca de projeto e ativa a aba (inclusive de projeto ainda não aberto nesta sessão).
-- [ ] Logo do modelo no lugar do ponto: halo pulsando trabalhando, anel ao concluir sem ser visto, apagado quando encerrado.
-- [ ] Um agente que chama `ask-agent claude@xyz` (cargo novo) faz a aba nova aparecer sob ele; a primeira mensagem dela diz "você responde a …".
-- [ ] Arrastar um agente sobre outro: contorno na cor do projeto e fantasma "→ equipe de …"; ao soltar, a árvore muda e continua assim depois de reabrir o app.
-- [ ] Arrastar o chefe sobre alguém da própria equipe: contorno vermelho, cursor de proibido, nada muda. Esc cancela o arrasto.
-- [ ] Soltar sobre a linha do projeto devolve o agente à raiz.
-- [ ] Na aba de um agente reorganizado, `ask-agent --team` mostra o chefe e a equipe certos; `ask-agent --boss "oi"` chega ao chefe; sem chefe, o `--boss` explica que ele responde ao usuário.
-  - Conferido: no chefe, `--team` mostra a equipe e `--boss` explica que ele responde ao usuário. Falta conferir na aba do subordinado.
-- [ ] Depois de reorganizar, a próxima mensagem entregue ao agente termina com "[AgentDeck] Sua posição na equipe mudou…" (uma vez só; se ele rodou `--team` antes, não vem).
-- [ ] Fechar a aba de um chefe: a equipe dele sobe para o chefe dele (ou para a raiz). Renomear uma aba com equipe mantém a árvore.
-- [ ] Equipe: mudar o chefe de um agente e fechar a aba dele antes da próxima mensagem não gasta o aviso. Fechar um subordinado sem equipe avisa o chefe na próxima mensagem.
+Security, environment, and new agents
 
-Segurança, ambiente e agentes novos
-
-- [ ] Abrir **uma segunda janela** do AgentDeck: ela sai em silêncio e a primeira vem para a frente (ver "Bandeja e segunda abertura"). Só se a primeira estiver travada aparece "outra janela já está usando a pasta de dados".
-- [ ] Com `AGENTDECK_HOME` apontando para outra pasta, a segunda janela abre (instância separada).
-- [ ] Abrir o AgentDeck **de dentro de uma aba** de outro AgentDeck: a aba de origem não cai.
-- [ ] Pasta de dados com `&` no caminho (`AGENTDECK_HOME=C:\tmp\Ana&Bia`): a aba do Claude (shim npm) abre e os hooks de turno funcionam.
-- [ ] crash.log: usar o app normalmente não acrescenta nada; `AGENTDECK_DEBUG_CRASH=heap` ainda registra a queda; um crash.log acima de 256 KB vira crash.log.1 ao abrir.
-- [ ] O **Gemini não aparece** mais no "+" nem no `ask-agent --list` (o Antigravity é o agente do Google).
-- [ ] **Codex**: abre pela aba "+"; ao terminar um turno, a fila de perguntas anda (aviso `notify`). Se ele pedir aprovação para rodar `ask-agent`, anotar.
-- [ ] **OpenCode**: abre pela aba "+" e responde a um `ask-agent opencode "oi"`.
-- [ ] Agente instalado **via npm sem `.exe`** (ex.: Codex ou OpenCode, `codex.cmd`/`opencode.cmd`): responder a um `ask-agent` sem aba aberta (headless) com uma mensagem com aspas, `&`, `|` e várias linhas → a resposta vem e **nada é executado** no cmd.
-- [ ] Codex, OpenCode, Aider, Goose, Copilot, Amazon Q, Open Interpreter (os que tiver): ao receber uma pergunta numa aba, pedem aprovação para rodar `ask-agent`? Anotar quais pedem.
+- [ ] Open **second window** of AgentDeck: exits silently and first window comes to front (see "Tray and second instance"). Only if first is hung does "another window is already using data folder" appear.
+- [ ] With `AGENTDECK_HOME` pointing to another folder, second window opens (separate instance).
+- [ ] Launching AgentDeck **from inside a tab** of another AgentDeck: parent tab does not crash.
+- [ ] Data folder with `&` in path (`AGENTDECK_HOME=C:\tmp\Ana&Bia`): Claude tab (npm shim) opens and turn hooks work.
+- [ ] crash.log: normal app usage appends nothing; `AGENTDECK_DEBUG_CRASH=heap` records crash; crash.log exceeding 256 KB rolls to crash.log.1 on launch.
+- [ ] **Gemini no longer appears** in "+" or `ask-agent --list` (Antigravity is the Google agent).
+- [ ] **Codex**: opens via "+" tab; upon turn completion, question queue advances (`notify` notification). If it prompts for approval to run `ask-agent`, note it.
+- [ ] **OpenCode**: opens via "+" tab and responds to `ask-agent opencode "hi"`.
+- [ ] Agent installed **via npm without `.exe`** (e.g. Codex or OpenCode, `codex.cmd`/`opencode.cmd`): reply to `ask-agent` without open tab (headless) with message containing quotes, `&`, `|`, and newlines → response returns and **nothing executes** in cmd.
+- [ ] Codex, OpenCode, Aider, Goose, Copilot, Amazon Q, Open Interpreter (whichever available): upon receiving a question in a tab, do they prompt for approval to run `ask-agent`? Note which ones prompt.
 
 ## Terminal
 
-- [ ] Colar (Ctrl+V) um texto grande com várias linhas no terminal de um agente: vira texto, não comandos soltos.
-- [ ] Colar (Ctrl+V) num shell com *bracketed paste* um texto com `ESC[201~` no meio: tudo chega como colagem, nada é executado.
-- [ ] Colagem grande (~5 MB) numa aba de shell rodando `timeout /t 30`, que não lê a entrada: a janela continua respondendo e as outras abas funcionam. Quando o comando termina, o texto chega inteiro.
-- [ ] **IME real**: teclado chinês/japonês/coreano ou o seletor de emoji `Win+.` dentro do terminal — a pré-edição aparece sublinhada no cursor e o texto confirmado chega ao programa.
-- [ ] Acentos do português no terminal.
-- [ ] Enter num prompt vazio do Claude/terminal: a aba não fica "trabalhando" (o halo para em ~8 s, sem campainha).
-- [ ] Ctrl+C com o teclado em layout russo/grego interrompe o programa do terminal.
-- [ ] Numa aba em segundo plano ou de outro projeto, `printf '\e]52;c;%s\a' $(printf teste|base64)` não muda a área de transferência; na aba ativa, muda.
-- [ ] No vim/htop com mouse ligado, Ctrl+roda e Alt+roda chegam ao programa com o modificador. Shift+roda rola o histórico do terminal, com ou sem programa usando o mouse.
-- [ ] Arrastar devagar a borda da barra direita ou o divisor com o Claude aberto: durante o arrasto a aba não se redesenha; ao soltar, o Claude se redesenha uma vez na largura nova (no histórico fica no máximo uma cópia antiga por arrasto).
-- [ ] Com o Claude trabalhando, abrir um terceiro tipo de agente (a tela vira 2+1) e arrastar os divisores: a aba do Claude se redesenha em seguida, sem ficar preta nem parada.
-- [ ] **Linhas em branco depois de mudar o tamanho (t37)**: numa aba do PowerShell, rode `1..3000 | % { "linha $_ " * 12 }`, depois mude o tamanho da janela várias vezes (Destaque, divisor, maximizar), para menor e para maior; role o histórico até o começo: as linhas continuam em ordem, sem buracos, e nada some quando a janela cresce (embaixo pode sobrar espaço em branco: é como o Windows Terminal faz). Botão direito na aba: "Gravar o terminal (diagnóstico)" liga a gravação (o item vira "Parar de gravar o terminal" e a Conversa diz onde ficam os arquivos, `dados/pty/`); "Salvar foto da grade agora" salva o texto da tela e do histórico e abre a pasta. Sem ligar nada, nada é gravado em `dados/pty/`.
+- [ ] Paste (Ctrl+V) large multi-line text into agent terminal: treated as text, not separate commands.
+- [ ] Paste (Ctrl+V) into shell with *bracketed paste* containing `ESC[201~`: arrives as paste, nothing executes.
+- [ ] Large paste (~5 MB) into shell tab running `timeout /t 30` (not reading input): window remains responsive and other tabs work. When command finishes, text arrives intact.
+- [ ] **Real IME**: Chinese/Japanese/Korean keyboard or `Win+.` emoji picker in terminal — composition appears underlined at cursor and committed text arrives in program.
+- [ ] Portuguese accented characters in terminal.
+- [ ] Enter on empty prompt in Claude/terminal: tab doesn't show "working" (halo stops in ~8 s, no bell).
+- [ ] Ctrl+C with Russian/Greek keyboard layout interrupts terminal program.
+- [ ] In background tab or different project, `printf '\e]52;c;%s\a' $(printf teste|base64)` does not alter clipboard; in active tab, it does.
+- [ ] In vim/htop with mouse enabled, Ctrl+wheel and Alt+wheel arrive with modifier. Shift+wheel scrolls terminal history, with or without mouse-aware program.
+- [ ] Slowly dragging right panel border or splitter with Claude open: tab does not repaint during drag; on release, Claude repaints once at new width (history retains at most one old copy per drag).
+- [ ] With Claude working, open third agent type (screen becomes 2+1) and drag splitters: Claude tab repaints promptly, without going black or freezing.
+- [ ] **Blank lines after resize (t37)**: in PowerShell tab, run `1..3000 | % { "linha $_ " * 12 }`, then resize window repeatedly (Focus, splitter, maximize), smaller and larger; scroll history to top: lines stay in order without holes, and nothing disappears when window grows (bottom may have trailing blank space: matches Windows Terminal behavior). Tab right-click: "Record terminal (diagnostics)" enables recording (menu item toggles to "Stop recording terminal" and Conversation indicates files location, `dados/pty/`); "Save grid snapshot now" dumps screen and history text and opens folder. Without enabling, nothing is written to `dados/pty/`.
 
 ## Interface
 
-Barra direita ★
+Right panel ★
 
-- [x] A Conversa integrada aparece à **direita**, ocupando a altura toda; as janelas dos terminais ocupam a altura toda no centro.
-- [x] Arrastar a borda esquerda da barra muda a largura (entre ~280 px e ~metade da janela; o padrão agora é 330 px, um pouco mais estreito); **não existe** como recolher.
-- [x] Fechar e reabrir o app: a largura escolhida volta igual.
-- [x] Diminuir a janela até o mínimo (~820 px de largura): nada se sobrepõe; o terminal continua usável.
-- [x] Menu "+" (nova aba) perto da borda direita da janela: abre dentro da tela e a escolha funciona.
-- [x] Download do Whisper (se aparecer): a faixa de progresso fica logo abaixo do topo da barra.
-- [x] Ícones: **balões** (Conversa) e **branch** (Git). Passar o mouse mostra o nome de cada um.
-- [x] Os ícones ficam nítidos (sem serrilhado estranho) e o ícone de branch mostra os **círculos vazados**.
-- [X] Ficar no Git enquanto chegam mensagens: aparece um **número** sobre o ícone da Conversa; voltar à Conversa zera.
-- [X] "Limpar" só aparece na Conversa.
-- [ ] **Conversa só leitura** (t11): a barra direita não tem caixa de mensagem nem "Enviar para"; só o feed. Para escrever a um agente, vale o terminal da aba dele.
+- [x] Integrated Conversation appears on the **right**, occupying full height; terminal windows occupy full height in center.
+- [x] Dragging left border resizes panel (between ~280 px and ~half window width; default is now 330 px, slightly narrower); **cannot** be collapsed.
+- [x] Close and reopen app: chosen width persists.
+- [x] Shrink window to minimum (~820 px width): nothing overlaps; terminal remains usable.
+- [x] "+" menu (new tab) near right window edge: opens within bounds and selection works.
+- [x] Whisper download progress (if active): progress banner sits directly below panel top.
+- [x] Icons: **speech bubbles** (Conversation) and **branch** (Git). Hover shows name of each.
+- [x] Icons render crisp (no strange jagged edges) and branch icon shows **open circles**.
+- [x] Staying on Git while messages arrive: **counter badge** appears over Conversation icon; switching to Conversation clears it.
+- [x] "Clear" only appears on Conversation.
+- [ ] **Read-only Conversation** (t11): right panel has no input box or "Send to"; feed only. To write to an agent, use its tab terminal.
 
-Conversa
+Conversation
 
-- [ ] Mensagens que você manda a um agente por "Enviar para agente" (aba GitHub) entram no feed com indicador vertical verde (`theme::USER = #10b981`), distinguindo de pronto das mensagens de IA.
-- [ ] Mensagens longas e multilinhas: quebra automática no card sem vazar a largura do painel e com altura dinâmica do indicador colorido.
-- [ ] Renomear uma aba (claude → claude@dev) enquanto ela está "pensando" na Conversa: as mensagens antigas mostram o nome novo, e o "pensando" some com a próxima mensagem dela.
+- [ ] Messages sent to an agent via "Send to agent" (GitHub tab) enter feed with vertical green indicator (`theme::USER = #10b981`), readily distinguished from AI messages.
+- [ ] Long and multi-line messages: auto-wrap in card without overflowing panel width and dynamic height on color bar.
+- [ ] Renaming tab (claude → claude@dev) while "thinking" in Conversation: older messages show new name, and "thinking" indicator clears with its next message.
 
-Documentos no centro ★ (t19)
+Documents in center ★ (t19)
 
-- [ ] **A chave**: no topo da barra lateral aparecem **Agentes** e **Documentos 0** (o ativo na cor do agente); recolhendo a barra (Ctrl+B) a chave passa para a barra de título, logo depois do logo; com a barra estreita (150 px) o segundo lado vira "Docs"; "Documentos" fica apagado e não clica sem documentos. Passar o mouse mostra a dica com o atalho.
-- [ ] **Abrir o diff pela mesa**: numa tarefa em revisão, "Ver diff completo". O centro troca sozinho para Documentos, com uma aba `t1 · diff`; o contador vira "Documentos (1)"; os botões Mesclar, Devolver, Validar e Reprovar seguem na barra direita. Clicar de novo em "Ver diff completo" só foca a aba (não abre outra). Depois de mesclar, "Ver o que foi mesclado" abre outra aba (`t1 · mesclagem`).
-- [ ] **A lista de arquivos do diff**: cada arquivo com a letra (A/M/D/R), o nome e `+`/`−`; clicar num arquivo rola o diff até ele; a seleção fica marcada. Num diff de uma tarefa com vários arquivos, conferir se a lista bate com o "N arquivos" do detalhe.
-- [ ] **O selo e os agentes escondidos**: com os terminais rodando, mudar para Documentos. Os terminais não somem nem reiniciam: ao voltar para Agentes, o que o agente escreveu enquanto isso está lá. Quando um agente termina um turno com o centro em Documentos, "Agentes" ganha um número (até o agente da aba que estava ativa); se só trabalha, um ponto pulsa. Voltar para Agentes limpa o número da aba ativa.
-- [ ] **O terminal não duplica a conversa** (Claude Code, Windows): com o Claude conversando, alternar Agentes ↔ Documentos várias vezes, e mudar a largura da janela ou da barra direita com Documentos à vista. Ao voltar, a conversa **não** aparece duplicada no histórico do terminal (o PTY só muda de tamanho depois que o tamanho para).
-- [ ] **O atalho Ctrl+Shift+D** alterna Agentes ↔ Documentos, com o terminal focado e com o foco fora dele; sem documentos abertos não faz nada; com um modal aberto (Ctrl+/) também não. Com Documentos à vista, nada que se digita vai para o terminal escondido (nem o emoji `Win+.`).
-- [ ] **Abrir e fechar**: abrir qualquer documento muda para Documentos; clicar em "Agentes", num agente da barra lateral, "Ir para a aba" da mesa ou Ctrl+T volta; fechar o último documento (×) volta para Agentes sozinho. Trocar de projeto mostra os documentos do outro (e Agentes, se ele não tem nenhum); voltar traz os primeiros de volta.
-- [ ] **Faixa de abas de documento**: com muitos documentos, aparecem as setas ‹ › e o ▾ com a lista (como nas abas dos agentes); Ctrl+Tab / Ctrl+Shift+Tab passam pelos documentos.
-- [ ] **Duplo clique num `.rs`** no explorador: abre a visualização (monoespaçada, número de linha, rolagem nos dois sentidos). **Num `.md`**: abre formatado (títulos, listas, `- [ ]`, tabela, citação, código). O clique simples continua inserindo `@arquivo` na aba ativa. "Abrir no programa padrão" abre o arquivo no programa do Windows.
-- [ ] **Arquivo que muda e recarrega**: com um arquivo aberto, pedir a um agente (ou o editor externo) que o altere: a visualização atualiza sozinha em instantes, sem piscar. Apagar o arquivo: a aba mostra o erro; recriar: volta. "Recarregar" relê.
-- [ ] **Arquivo grande ou binário**: duplo clique num `.exe`/`.png` ou num arquivo com mais de 1 MB mostra a explicação em vez do conteúdo, sem travar.
-- [ ] **Pedido e relatório** (mesa): "Abrir em Documentos" no Pedido e no Relatório de uma tarefa abre cada um formatado (um `- [x]` vira caixa marcada, uma tabela vira tabela). O relatório de uma tarefa sem relatório diz isso.
-- [ ] **Aba Git**: no diff de um arquivo alterado e no detalhe de um commit do Histórico, "Abrir em Documentos" abre o diff só para ler; o preparo por trecho continua na barra direita. Com a barra estreita (a padrão incluída) o botão vira só um ícone (caixa com seta) ao lado de + e ↶, com a dica; alargando a barra, volta o texto.
-- [ ] **Largura mínima da janela (~820 px)**: com Documentos à vista, nada vaza no centro nem na barra de título (a chave compacta cabe ao lado do logo com a barra recolhida; o uso dos agentes encolhe); o diff põe a lista de arquivos em cima do diff quando o centro é estreito.
+- [ ] **The toggle**: top of sidebar displays **Agents** and **Documents 0** (active in agent color); collapsing sidebar (Ctrl+B) moves toggle to titlebar immediately after logo; with narrow sidebar (150 px) second option becomes "Docs"; "Documents" is dimmed and unclickable without open documents. Hover displays tooltip with shortcut.
+- [ ] **Opening diff via task desk**: in review task, "View full diff". Center automatically switches to Documents with a `t1 · diff` tab; counter becomes "Documents (1)"; Merge, Return, Validate, and Reject buttons remain on right panel. Clicking "View full diff" again focuses tab (no duplicate opened). After merge, "View merged changes" opens another tab (`t1 · merge`).
+- [ ] **Diff file list**: each file marked with status letter (A/M/D/R), name, and `+`/`−`; clicking file scrolls diff to it; selection highlights. In multi-file diff, verify list matches "N files" from detail.
+- [ ] **Badge and hidden agents**: with terminals running, switch to Documents. Terminals do not disappear or restart: returning to Agents reveals everything written in the interim. When an agent finishes a turn while center is in Documents, "Agents" shows a counter badge (including for the active tab agent); if actively working, dot pulses. Returning to Agents clears badge for active tab.
+- [ ] **Terminal does not duplicate conversation** (Claude Code, Windows): with Claude conversing, toggle Agents ↔ Documents multiple times, and resize window or right panel with Documents visible. Returning to Agents shows conversation is **not** duplicated in terminal history (PTY only resizes after window dimensions stabilize).
+- [ ] **Shortcut Ctrl+Shift+D** toggles Agents ↔ Documents, whether terminal is focused or unfocused; with no open documents does nothing; with open modal (Ctrl+/) does nothing. With Documents in view, typed keys do not leak into hidden terminal (including `Win+.` emoji).
+- [ ] **Open and close**: opening any document switches to Documents; clicking "Agents", an agent in sidebar, "Go to tab" in task desk, or Ctrl+T returns; closing last document (×) returns to Agents automatically. Switching projects shows documents of the other project (or Agents if it has none); switching back restores previous set.
+- [ ] **Document tab strip**: with many documents, ‹ › scroll arrows and ▾ dropdown appear (matching agent tabs); Ctrl+Tab / Ctrl+Shift+Tab cycle through documents.
+- [ ] **Double-click `.rs` file** in explorer: opens viewer (monospace, line numbers, two-way scrolling). **On `.md` file**: opens formatted (headings, lists, `- [ ]`, tables, blockquotes, code). Single click continues inserting `@file` into active tab. "Open in default application" opens file in Windows program.
+- [ ] **File changes and reloads**: with file open, ask agent (or external editor) to modify it: view updates automatically within moments without flickering. Deleting file: tab displays error; recreating file: restores view. "Reload" re-reads file.
+- [ ] **Large or binary files**: double-clicking `.exe`/`.png` or file over 1 MB displays explanation instead of content, without hanging.
+- [ ] **Brief and report** (task desk): "Open in Documents" on task Brief and Report opens each formatted (`- [x]` renders as checked box, markdown table renders as table). Report button on task without report indicates this.
+- [ ] **Git tab**: on diff of modified file and commit detail in History, "Open in Documents" opens diff read-only; staging hunks remains on right panel. With narrow panel (including default), button becomes an icon (box with arrow) next to + and ↶ with tooltip; widening panel restores text.
+- [ ] **Minimum window width (~820 px)**: with Documents in view, nothing overflows center or titlebar (compact toggle fits next to logo with collapsed sidebar; agent usage shrinks); diff stacks file list on top of diff when center is narrow.
 
-Documentos: editor, realce e busca ★ (t39)
+Documents: editor, syntax highlighting, and search ★ (t39)
 
-- [ ] **Editar e salvar**: duplo clique num `.rs` do projeto, **Editar**, digitar. Na aba aparece um ponto âmbar no lugar do × e, no título, "● Não salvo"; **Ctrl+S** (ou **Salvar**) grava e o ponto some. Conferir no explorador do Windows/`git diff` que só as linhas editadas mudaram. Tab indenta com 4 espaços, Shift+Tab desfaz o recuo (com várias linhas selecionadas, todas), Ctrl+Z desfaz.
-- [ ] **Fim de linha e BOM**: um arquivo com CRLF (comum no Windows) volta com CRLF depois de gravar; um com LF volta com LF; um com BOM mantém o BOM; um sem BOM não ganha. Um arquivo que mistura CRLF e LF, ou que não é UTF-8 (salvar um `.txt` em ANSI com acento), abre só para leitura e uma faixa explica o motivo (sem botão Editar).
-- [ ] **Fechar com edição não salva**: o × da aba pergunta (Salvar / Não salvar / Cancelar) e cada botão faz o que diz; **Recarregar** sobre uma edição pergunta antes de descartar; fechar o app (× da janela, Alt+F4) com edição pergunta, e "Salvar tudo e sair" grava todos os arquivos antes de sair.
-- [ ] **Um agente muda o arquivo aberto**: com edição não salva, pedir a um agente que mude o mesmo arquivo. Aparece a faixa "O arquivo mudou no disco (um agente?)…" com **Manter a minha** e **Recarregar a do disco**; nada do que foi digitado some antes da escolha; Ctrl+S e Salvar não gravam enquanto a escolha não é feita. "Manter a minha" e salvar põe o texto do usuário por cima; "Recarregar a do disco" mostra o do agente. Sem edição não salva, o arquivo só atualiza sozinho. Apagar o arquivo com edição: aviso, a edição fica e Ctrl+S o recria.
-- [ ] **Realce**: abrir arquivos de cada tipo (Rust, Markdown, TOML, JSON, YAML, JS/TS, Python, PowerShell, shell): palavras-chave, textos, números, comentários, tipos e chaves coloridos; digitar não trava num arquivo de ~250 KB (o limite do editor); um arquivo maior (ou com linha de mais de 4 000 caracteres, como um JSON minificado) abre só para leitura, com a faixa, e rola com fluidez. No diff, o código tem as cores da linguagem do arquivo, e um `/* … */` aberto num lado não pinta o outro.
-- [ ] **Buscar (Ctrl+F)**: num arquivo, num arquivo grande e num diff: o campo ganha o foco, cada achado fica marcado (o atual mais forte), "n de m", Enter/Shift+Enter e ‹ › andam e rolam até o achado, Esc fecha. No `.md` formatado, Ctrl+F mostra o código.
-- [ ] **Selecionar e copiar**: arrastar no arquivo seleciona (duplo clique uma palavra) e Ctrl+C copia; no diff e no arquivo grande, arrastar seleciona (passando da borda de cima ou de baixo a tela rola), Ctrl+A seleciona tudo e Ctrl+C copia só o código, sem número de linha nem `+`/`−`; colar num editor externo confere (tabulações do arquivo de volta).
+- [ ] **Edit and save**: double-click project `.rs` file, **Edit**, type. Amber dot appears on tab replacing ×, title reads "● Unsaved"; **Ctrl+S** (or **Save**) writes file and dot disappears. Verify in Windows Explorer / `git diff` that only edited lines changed. Tab indents with 4 spaces, Shift+Tab dedents (entire selection when multi-line), Ctrl+Z undos.
+- [ ] **Line endings and BOM**: file with CRLF (common on Windows) saves with CRLF; file with LF saves with LF; file with BOM keeps BOM; file without BOM does not gain one. Mixed CRLF/LF file or non-UTF-8 file (e.g. ANSI `.txt` with accents) opens read-only with explanatory banner (no Edit button).
+- [ ] **Close with unsaved changes**: tab × prompts (Save / Don't save / Cancel) with expected behavior; **Reload** over unsaved changes confirms before discarding; closing app (window ×, Alt+F4) with unsaved changes prompts, and "Save all and exit" saves all files before closing.
+- [ ] **Agent modifies open file**: with unsaved edits, ask agent to modify same file. Banner appears: "File changed on disk (an agent?)…" with **Keep mine** and **Reload from disk**; typed text remains intact until choice; Ctrl+S and Save are blocked until choice is made. "Keep mine" followed by save overwrites disk; "Reload from disk" loads agent version. Without unsaved edits, file updates automatically. Deleting file with unsaved edits: warning shown, edits preserved, Ctrl+S recreates it.
+- [ ] **Syntax highlighting**: open files of various types (Rust, Markdown, TOML, JSON, YAML, JS/TS, Python, PowerShell, shell): keywords, strings, numbers, comments, types, and brackets colored; typing remains responsive on ~250 KB file (editor limit); larger file (or line exceeding 4,000 characters like minified JSON) opens read-only with banner and scrolls smoothly. In diff, code uses file language colors, and multiline `/* … */` opened on one side does not color the other.
+- [ ] **Search (Ctrl+F)**: in file, large file, and diff: field gains focus, matches highlighted (current match emphasized), "n of m", Enter/Shift+Enter and ‹ › navigate and scroll to match, Esc closes. In formatted `.md`, Ctrl+F reveals raw code.
+- [ ] **Select and copy**: drag in file selects (double-click word) and Ctrl+C copies; in diff and large file, dragging selects (scrolling automatically when passing top/bottom edge), Ctrl+A selects all, and Ctrl+C copies code only without line numbers or `+`/`−`; pasting into external editor preserves tabs.
 
-Tela dividida ★
+Split screen ★
 
-- [x] "+" no cabeçalho do Claude: a 2ª aba do Claude entra **na mesma janela** (não divide de novo).
-- [x] Abrir um Codex (ou Terminal) pelo "+" da topbar: a tela vira **2 em cima + 1 largo embaixo**. Com o 4º tipo, 2×2.
-- [x] `claude@dev` fica na **mesma janela** do Claude, em outra aba.
-- [x] Clicar numa janela: ela ganha o **contorno na cor do agente** e o que você digita vai para ela.
-- [x] A rolagem do mouse funciona na janela sob o ponteiro, mesmo sem foco.
-- [x] Ctrl+Tab troca de aba **só dentro** da janela focada; Ctrl+Alt+← → ↑ ↓ passa o foco para a janela vizinha (anotar se o driver de vídeo girar a tela com esse atalho).
-- [x] Arrastar o divisor entre janelas muda o tamanho; duplo clique iguala; fechar e reabrir o app mantém.
-- [x] Arrastar a alça **⋮⋮** de uma janela sobre outra: aparece "Soltar para trocar de lugar" e, ao soltar, as duas trocam. A ordem volta igual ao reabrir.
-- [x] Fechar a última aba de um tipo: a janela some e as outras ocupam o espaço. Fechar uma aba com outras do mesmo tipo: o foco fica na mesma janela.
-- [x] Um agente chamar outro que não está aberto (`ask-agent codex "oi"`): a janela do Codex aparece **sem tirar o foco** de onde você digita. Se já houver Codex, vira aba na janela dele.
-- [x] Botão de **tela dividida** na topbar: desligado, volta a uma janela só com todas as abas; ligado de novo, volta a dividir.
-- [x] Janela mínima (~820 px) com 3 ou mais tipos: as janelas empilham; o que não cabe vira aba da última janela, sem sumir nada.
-- [ ] Com um diff do Git aberto, a barra **mantém a largura** (o conteúdo rola dentro dela) e as janelas **não mudam de tamanho**.
-- [x] Com 4–6 janelas e agentes respondendo ao mesmo tempo: o app continua fluido (anotar se travar).
-- [ ] **Destaque** (t28), com 3 CLIs abertos (Claude, Antigravity, Codex): em ORGANIZAÇÃO, "Destaque" põe a janela do agente selecionado com 2/3 do centro, à esquerda, e as outras duas empilhadas à direita com a mesma altura e a fresta de 6 px.
-- [ ] **Destaque: trocar o destaque** (t28): clicar no terminal ou no cabeçalho de uma janela pequena, clicar noutro agente da barra lateral, Ctrl+Tab/atalho para outro CLI e o botão "Trazer para o destaque" (ícone de expandir, à esquerda do microfone) trazem o CLI dele para a janela grande. Dois agentes do mesmo CLI continuam em abas na mesma janela. Depois da troca o Claude Code não duplica a conversa (o PTY muda de tamanho uma vez, com o tamanho parado).
-- [ ] **Destaque: divisor** (t28): arrastar a fresta entre a janela grande e a coluna muda a largura (as duas mantêm ~260 px no mínimo); duplo clique volta aos 2/3; a proporção volta ao reabrir o app.
-- [ ] **Destaque: aperto** (t28): estreitar a janela do app até caber uma coluna só (<~526 px de centro): fica só a janela grande, com os outros CLIs como abas. Diminuir a altura até as pequenas não caberem (140 px cada): as que sobram viram abas da última pequena. Com um CLI só, a janela ocupa o centro todo, sem halo.
-- [ ] **Realce do selecionado** (t28), na Dividida e no Destaque: a janela da aba ativa tem borda de 1 px e halo de 3 px na cor do agente; as outras ficam mais apagadas (62%) e voltam a 100% ao passar o mouse (e continuam atualizando). Em Abas nada muda.
-- [ ] **Migração** (t28): quem tinha só `"splitEnabled": false` no config abre em Abas, e `true` em Dividida; a escolha nova é gravada em `organization`.
-- [ ] Tela dividida: arrastar um divisor, estreitar a janela até a grade mudar de formato e alargar de novo. As proporções arrastadas voltam, também depois de reabrir o app.
-- [ ] **Abas escondidas: degradê e setas** (t12): numa janela com mais abas do que cabem (estreite a janela ou abra várias abas do mesmo tipo), o lado com aba escondida ganha um degradê curto e uma seta ‹ ou ›. Clicar na seta rola a faixa até a aba escondida mais próxima daquele lado; a dica da seta cita o nome dela.
-- [ ] **Abas escondidas: sem aba escondida, nada aparece** (t12): com todas as abas à vista, nenhuma seta nem degradê; alargar a janela de volta os faz sumir.
-- [ ] **Abas escondidas: menu ▾** (t12): com a faixa rolando, aparece o botão ▾ no fim; abre o menu com todas as abas da janela e clicar numa delas a mostra (a faixa rola até ela). Ao rolar para longe da aba visível, ela não volta sozinha para a vista a cada quadro; só quando você troca de aba.
+- [x] "+" in Claude header: 2nd Claude tab opens in **same pane** (does not split again).
+- [x] Open Codex (or Terminal) via topbar "+": view splits into **2 on top + 1 wide on bottom**. With 4th type, 2×2 grid.
+- [x] `claude@dev` stays in **same pane** as Claude, in another tab.
+- [x] Clicking a pane: gains **agent-colored outline** and keyboard focus.
+- [x] Mouse wheel scrolls pane under cursor even without focus.
+- [x] Ctrl+Tab switches tabs **within** focused pane only; Ctrl+Alt+← → ↑ ↓ shifts focus to neighboring pane (note if graphics driver intercepts shortcut to rotate display).
+- [x] Dragging splitter between panes resizes; double-click equalizes; persists across restarts.
+- [x] Dragging handle **⋮⋮** of pane onto another: displays "Drop to swap positions" and swaps on drop. Order persists across restarts.
+- [x] Closing last tab of a type: pane closes and remaining panes expand. Closing tab with others of same type: focus remains in same pane.
+- [x] Agent invoking another not currently open (`ask-agent codex "hi"`): Codex pane appears **without stealing focus** from active typing area. If Codex exists, adds tab to its pane.
+- [x] **Split screen** button in topbar: toggled off, returns to single window with all tabs; toggled on, restores split layout.
+- [x] Minimum window (~820 px) with 3 or more types: panes stack; overflow becomes tabs in last pane without loss.
+- [ ] With Git diff open, panel **maintains width** (content scrolls internally) and panes **do not resize**.
+- [x] With 4–6 panes and agents responding concurrently: app remains fluid (note if freezing occurs).
+- [ ] **Highlight mode** (t28), with 3 open CLIs (Claude, Antigravity, Codex): in ORGANIZATION, "Highlight" places selected agent pane taking 2/3 of center on left, with remaining two stacked on right at equal height with 6 px gap.
+- [ ] **Highlight mode: changing the highlighted agent** (t28): clicking terminal or header of smaller pane, clicking another agent in sidebar, Ctrl+Tab/shortcut to another CLI, and "Bring to highlight" button (expand icon left of microphone) bring its CLI to large pane. Two agents of same CLI stay as tabs in same pane. After switch, Claude Code does not duplicate conversation (PTY resizes once after stabilization).
+- [ ] **Highlight mode: splitter** (t28): dragging gap between large pane and column resizes width (both maintain ~260 px minimum); double-click resets to 2/3; proportion persists across restarts.
+- [ ] **Highlight mode: narrow constraints** (t28): shrink app window until only one column fits (<~526 px center): keeps only large pane with other CLIs as tabs. Reduce height until small panes cannot fit (140 px each): overflow becomes tabs in last small pane. With single CLI, pane occupies entire center without halo.
+- [ ] **Active pane highlight** (t28), in Split and Focus: active tab pane has 1 px border and 3 px halo in agent color; others dimmed (62%) and restore to 100% on mouse hover (continuing live updates). In Tabs mode nothing changes.
+- [ ] **Migration** (t28): config with `"splitEnabled": false` opens in Tabs, and `true` in Split; new choice saved in `organization`.
+- [ ] Split screen: drag splitter, shrink window until grid reformats, and widen again. Dragged proportions restore, including after app restart.
+- [ ] **Hidden tabs: gradient and arrows** (t12): in pane with more tabs than fit (narrow window or open multiple tabs of same type), side with hidden tab shows short gradient and arrow ‹ or ›. Clicking arrow scrolls strip to nearest hidden tab; arrow tooltip names it.
+- [ ] **Hidden tabs: nothing shown when all visible** (t12): with all tabs in view, no arrows or gradient; widening window removes them.
+- [ ] **Hidden tabs: ▾ menu** (t12): with scrolling strip, ▾ button appears at end; opens menu listing all pane tabs and clicking one reveals it (strip scrolls to it). Scrolling away from visible tab does not force it back into view every frame; only when switching tabs.
 
-Ditado e anexos ★
+Dictation and attachments ★
 
-- [ ] **Ditado opcional: primeira abertura limpa** (t34): numa pasta de dados sem `whisper/models/` e sem `config.json` (use `AGENTDECK_HOME` novo; a pasta `whisper/` ao lado do executável não pode ter o modelo), o app abre normalmente e mostra o modal "Ditado por voz (opcional)" com o tamanho do download (cerca de 1,6 GB). Nada é baixado antes de responder (a barra direita não mostra progresso).
-- [ ] **Ditado opcional: "Agora não"** (t34): o modal fecha (Esc faz o mesmo), nada baixa, o `config.json` ganha `"dictation": "no"` e, ao fechar e abrir o app, a pergunta não volta. O microfone da janela (e `Ctrl+Shift+M`) abre o mesmo modal em vez de gravar; a dica do microfone diz "Ditado por voz não instalado: clique para baixar".
-- [ ] **Ditado opcional: baixar** (t34): "Baixar" no modal (ou, depois, ☰ Configurações → "Baixar (cerca de 1,6 GB)") grava `"dictation": "yes"`, mostra a faixa de progresso na barra direita e, ao terminar, o estado em Configurações vira "instalado"; o microfone grava e transcreve como antes. Durante o download o microfone avisa na Conversa que ainda está baixando (e a dica do botão diz o mesmo).
-- [ ] **Ditado opcional: remover** (t34): ☰ Configurações → "Remover do disco" pede confirmação ("Confirmar: apagar do disco"; fechar o menu desfaz a confirmação); confirmando, `whisper/models/ggml-large-v3-turbo.bin` (e `bin-cuda/`) somem, o estado vira "não instalado", o config grava `"no"` e o microfone volta a oferecer o download. Com o ditado gravando, a remoção é recusada com aviso.
-- [ ] **Ditado opcional: quem já tem o Whisper** (t34): com o modelo já baixado e config sem o campo `dictation` (o caso de quem atualiza), o app não pergunta nada e o ditado funciona como antes; o `config.json` passa a ter `"dictation": "yes"`.
-- [ ] **Ditado opcional: captura de tela** (t34): `AGENTDECK_SMOKE` continua sem baixar nem perguntar; `AGENTDECK_DEBUG_UI=dictation-ask` mostra o modal para conferir o visual.
-- [ ] **Ditado preso à aba (`Ctrl+Shift+M` ou ícone de microfone na aba)**: clicar no microfone da aba grava (pisca em vermelho), clicar de novo transcreve ("Transcrevendo…" na aba) e digita o texto no PTY daquela aba **sem Enter**; trocar de aba durante a gravação/transcrição mantém o destino na aba onde começou; fechar a aba antes do fim descarta o texto com aviso na Conversa.
-- [ ] **Microfone e anexo no cabeçalho da janela** (t11): cada janela tem, ao lado do "+", os botões de microfone e de anexar arquivo; os dois agem na **aba visível daquela janela** (não na janela focada nem na primeira): com duas janelas, gravar na segunda digita na aba visível da segunda; trocar a aba visível muda o alvo. O botão fica apagado quando a aba visível não está viva (ou enquanto transcreve) e a aba mostra só o indicador (ponto vermelho pulsando, "Abrindo…" ou "Transcrevendo…").
-- [ ] **Anexar pelo cabeçalho** (t11): o botão de anexo copia o arquivo para `dados/anexos` e digita `@caminho` no Claude (o caminho puro nos demais CLIs) na aba visível, **sem Enter**; um arquivo com o mesmo nome de outro não o sobrescreve.
-- [ ] **Arrastar arquivo sobre a janela** (t11): ao arrastar um arquivo do Explorer, a janela sob o ponteiro escurece com "Solte para anexar em <aba>" e o destaque acompanha o ponteiro entre as janelas; soltar digita o caminho na aba visível **dessa** janela (sem Enter). Colar uma imagem (Ctrl+V) continua anexando à aba ativa.
-- [ ] Microfone: a janela não congela enquanto ele abre, e um segundo clique desiste. Gravar mais de 5 min para sozinho com aviso e transcreve.
-- [ ] Download do Whisper: desconectar o Wi-Fi no meio. A nova tentativa aparece em ~30 s, sem travar por horas. Com o antivírus ativo, o download de 1,6 GB termina sem erro de rename.
-- [ ] Whisper CUDA: matar o app durante a extração. Na próxima abertura não existe `bin-cuda` pela metade, o `bin-cuda.staging` some e o `.zip` em `whisper\` é reaproveitado.
-- [ ] Ditado duas vezes seguidas, rápido: nenhum `audio-*.wav` sobra em `dados\anexos`. Fechar o app durante uma transcrição não deixa `whisper-cli.exe` rodando.
+- [ ] **Optional dictation: clean initial launch** (t34): in data folder without `whisper/models/` and without `config.json` (use fresh `AGENTDECK_HOME`; executable's sibling `whisper/` must not have model), app launches normally and shows modal "Voice dictation (optional)" with download size (~1.6 GB). Nothing downloaded before user answers (right panel shows no progress).
+- [ ] **Optional dictation: "Not now"** (t34): modal closes (Esc also closes), nothing downloads, `config.json` receives `"dictation": "no"`, and on restart prompt does not reappear. Window microphone (and `Ctrl+Shift+M`) opens same modal instead of recording; microphone tooltip reads "Voice dictation not installed: click to download".
+- [ ] **Optional dictation: download** (t34): "Download" in modal (or later via ☰ Settings → "Download (~1.6 GB)") saves `"dictation": "yes"`, displays progress banner on right panel, and when finished status in Settings becomes "installed"; microphone records and transcribes as before. During download microphone informs in Conversation that download is in progress (and button tooltip says same).
+- [ ] **Optional dictation: remove** (t34): ☰ Settings → "Remove from disk" asks confirmation ("Confirm: delete from disk"; closing menu cancels confirmation); confirming deletes `whisper/models/ggml-large-v3-turbo.bin` (and `bin-cuda/`), status becomes "not installed", config saves `"no"`, and microphone offers download again. While dictation is actively recording, removal is rejected with warning.
+- [ ] **Optional dictation: existing Whisper installations** (t34): with model already downloaded and config lacking `dictation` field (upgrading users), app prompts nothing and dictation functions as before; `config.json` acquires `"dictation": "yes"`.
+- [ ] **Optional dictation: screenshot mode** (t34): `AGENTDECK_SMOKE` continues without downloading or prompting; `AGENTDECK_DEBUG_UI=dictation-ask` displays modal to inspect UI.
+- [ ] **Tab-scoped dictation (`Ctrl+Shift+M` or microphone icon on tab)**: clicking tab microphone records (blinks red), clicking again transcribes ("Transcribing…" on tab) and types text into PTY of that tab **without Enter**; switching tabs during recording/transcription keeps target on starting tab; closing tab before completion discards text with notice in Conversation.
+- [ ] **Microphone and attachment in pane header** (t11): each pane has microphone and file attachment buttons next to "+"; both operate on the **visible tab of that pane** (not focused pane or first pane): with two panes, recording in second types into visible tab of second; changing visible tab updates target. Button is disabled when visible tab is dead (or while transcribing) and tab shows only indicator (pulsing red dot, "Opening…" or "Transcribing…").
+- [ ] **Attach via header** (t11): attachment button copies file to `dados/anexos` and types `@path` in Claude (raw path in other CLIs) into visible tab **without Enter**; duplicate filename does not overwrite existing file.
+- [ ] **Drag file over window** (t11): dragging file from Explorer darkens pane under cursor with "Drop to attach to <tab>" and highlight tracks cursor across panes; dropping types path into visible tab of **that** pane (without Enter). Pasting image (Ctrl+V) attaches to active tab.
+- [ ] Microphone: window does not freeze while opening, second click cancels. Recording over 5 min stops automatically with notice and transcribes.
+- [ ] Whisper download: disconnect Wi-Fi mid-download. Retry appears in ~30 s without hanging for hours. With active antivirus, 1.6 GB download finishes without rename errors.
+- [ ] Whisper CUDA: kill app during extraction. On next launch, no partial `bin-cuda` exists, `bin-cuda.staging` is cleaned up, and `.zip` in `whisper\` is reused.
+- [ ] Dictation twice in rapid succession: no leftover `audio-*.wav` in `dados\anexos`. Closing app during transcription leaves no running `whisper-cli.exe`.
 
-Abas e atalhos
+## Tabs and shortcuts
 
-- [ ] Duplo clique no título da aba ou clique direito → "Renomear".
-- [ ] Digitar novo cargo/nome (ex.: `dev`, `dev@ana` ou `claude@dev@ana`).
-- [ ] Nome vazio: restaura para o modelo original sem quebrar.
-- [ ] Nome duplicado: modal recusa com aviso em vermelho.
-- [ ] Nome com acento (`josé`) ou caracteres especiais (`!`, espaços): recusado amigavelmente com mensagem de formato esperado (`modelo@cargo@nome`).
-- [ ] Persistência: novo nome persiste na reinicialização (`config.custom_names`) e propaga no feed e no `ask-agent`.
-- [ ] Com um modal aberto (renomear aba ou projeto, Ctrl+/), clicar nas abas, na barra lateral ou no terminal não faz nada, e o que se digita não vai ao terminal. Esc fecha e devolve o foco.
-- [ ] Ctrl+/ com o terminal focado abre e fecha a tela de atalhos.
-- [ ] Shell focado: Ctrl+L limpa a tela, Ctrl+B chega ao programa (tmux) e Ctrl+T abre aba. Com "Atalhos do app acima do terminal" ligado, Ctrl+B recolhe a barra. A opção continua depois de reabrir.
+- [ ] Double-click tab title or right-click → "Rename".
+- [ ] Enter new role/name (e.g. `dev`, `dev@ana` or `claude@dev@ana`).
+- [ ] Empty name: restores original model name without breaking.
+- [ ] Duplicate name: modal rejects with red warning.
+- [ ] Name with accents (e.g. non-ASCII) or special characters (`!`, spaces): rejected friendly with expected format message (`model@role@name`).
+- [ ] Persistence: new name persists across restarts (`config.custom_names`) and propagates in feed and `ask-agent`.
+- [ ] With open modal (rename tab or project, Ctrl+/), clicking tabs, sidebar, or terminal does nothing, and typed keys do not leak to terminal. Esc closes and restores focus.
+- [ ] Ctrl+/ with focused terminal toggles shortcuts screen.
+- [ ] Focused shell: Ctrl+L clears screen, Ctrl+B reaches program (tmux), and Ctrl+T opens tab. With "App shortcuts take precedence over terminal" enabled, Ctrl+B collapses sidebar. Setting persists across restarts.
 
-Barra de título, uso dos agentes e barra lateral ★
+## Titlebar, agent usage, and sidebar ★
 
-- [x] A janela não tem mais a barra do Windows: no topo, ☰, o botão de painel (recolhe/expande a barra lateral), "AgentDeck" (sem logo) e +; à direita, os botões menores de minimizar, maximizar/restaurar e fechar (o fechar fica vermelho no hover).
-- [ ] Arrastar pela barra move a janela; duplo clique maximiza/restaura; arrastar até a borda da tela encaixa (snap); Win+setas funcionam.
-- [ ] Redimensionar pelas 4 bordas e pelos 4 cantos (o cursor muda); maximizada, as bordas não reagem e a janela não cobre a barra de tarefas. No Linux, conferir em X11 e em Wayland.
-- [ ] Fechar pelo × salva o tamanho da janela, como antes.
-- [ ] ☰ abre as configurações alinhadas à esquerda.
-- [ ] Uso: cada agente com cota aparece com o logo, a barra fina da sessão (em cima) e a grossa da semana (embaixo), com as porcentagens; passar o mouse abre o painel de uso (todos os agentes, "lido há", quando renova cada janela, "bloqueado até" com a sessão esgotada) e ele fica aberto enquanto o mouse está no item ou no painel.
-- [ ] Uso sem janela aberta: sem nenhuma aba do Antigravity (instalado e com login), o uso dele aparece em até ~3 min. Fechar e reabrir o app mantém o último uso do Claude (`dados/usage.json`), com "lido há" no painel.
-- [ ] Antigravity aberto: em até ~3 min aparece o uso dele; sem login ou sem rede, anel tracejado e "uso indisponível".
-  - Conferido: com login, o uso do Antigravity aparece. Falta o caso sem login/sem rede.
-- [ ] Demonstração: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34 %/12 %, Antigravity com a semana em aviso, Codex com a sessão esgotada) e `usage-panel` (o mesmo com o painel aberto).
-- [ ] Explorador sem a linha raiz repetida; "Atualizar" relê a árvore e "Recolher tudo" fecha as pastas.
-- [x] Seção **ORGANIZAÇÃO** na barra lateral: o controle **Abas | Dividida | Destaque** escolhe como as janelas se arrumam (Abas = janela só).
-- [ ] Uso: passado o horário de renovação da sessão sem leitura nova, a barra da sessão mostra 0% esmaecido e o painel diz "renovou · aguardando leitura nova".
-- [ ] Antigravity com token vencido no Credential Manager e válido em `~\.gemini\oauth_creds.json`: a cota aparece. Sem login, o círculo reaparece em até 20 s depois do login.
-- [ ] Codex: abrir uma aba nova (rollout sem `rate_limits`): o uso da sessão anterior continua visível.
+- [x] Window no longer has Windows titlebar: at top, ☰, panel toggle button (collapses/expands sidebar), "AgentDeck" (no logo), and +; on right, smaller minimize, maximize/restore, and close buttons (close turns red on hover).
+- [ ] Dragging titlebar moves window; double-click toggles maximize/restore; dragging to screen edge snaps; Win+arrows work.
+- [ ] Resizing from 4 edges and 4 corners (cursor changes); when maximized, borders are inactive and window does not cover taskbar. On Linux, verify on X11 and Wayland.
+- [ ] Closing via × preserves window size as before.
+- [ ] ☰ opens settings aligned to left.
+- [ ] Usage: each agent with quota displays logo, thin session bar (top), and thick weekly bar (bottom) with percentages; hover opens usage panel (all agents, "read ago", window renewal times, "locked until" when session exhausted) and stays open while mouse is over item or panel.
+- [ ] Usage without open window: with no Antigravity tab (installed and logged in), its usage appears within ~3 min. Restarting app preserves last Claude usage (`dados/usage.json`), with "read ago" in panel.
+- [ ] Open Antigravity: usage appears within ~3 min; without login or network, dashed ring and "usage unavailable".
+  - Verified: with login, Antigravity usage appears. Remaining: case without login/network.
+- [ ] Demo: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34%/12%, Antigravity with weekly warning, Codex with exhausted session) and `usage-panel` (same with panel open).
+- [ ] Explorer without repeated root row; "Refresh" re-reads tree and "Collapse all" closes folders.
+- [x] **ORGANIZATION** section in sidebar: **Tabs | Split | Focus** control selects window layout (Tabs = single pane).
+- [ ] Usage: once session renewal time passes without new reading, session bar shows faded 0% and panel reads "renewed · awaiting new reading".
+- [ ] Antigravity with expired token in Credential Manager and valid token in `~\.gemini\oauth_creds.json`: quota appears. Without login, circle reappears within 20 s after login.
+- [ ] Codex: open new tab (rollout without `rate_limits`): prior session usage remains visible.
 
-Projetos ★
+## Projects ★
 
-- [x] **Migração:** a primeira abertura com a config antiga transforma cada pasta da lista em projeto; as abas que estavam abertas voltam no projeto da pasta ativa.
-- [ ] "+" da seção PROJETOS: escolher uma pasta cria o projeto (nome = pasta) e o ativa; o centro mostra "Nenhum agente aberto".
-- [ ] Abrir o Claude no projeto novo e clicar no projeto anterior: os terminais dele voltam como estavam; o Claude do novo **continua rodando** (o projeto mostra o logo e a contagem).
-- [x] O projeto ativo lista as abas dele; clicar numa ativa a aba. Os outros mostram os logos dos agentes e a contagem.
-- [ ] Cada terminal roda na pasta do seu projeto (`pwd`/`Get-Location`), e a árvore e a aba Git mudam com o projeto.
-- [ ] A Conversa mostra só o projeto ativo; uma conversa entre agentes de outro projeto aparece quando ele volta à tela.
-- [ ] `ask-agent claude@dev "oi"` num projeto abre `claude@dev` **nesse** projeto (escondido, se não for o da tela); o outro projeto não vê essa instância.
-- [ ] Dois projetos com um `claude` cada: cada um responde só ao seu projeto.
-- [ ] Fechar e reabrir o app: só as abas do projeto ativo abrem; as dos outros abrem ao clicar no projeto (e nada se perde).
-- [ ] Clique direito → Renomear (o nome muda, a pasta não), Abrir pasta, Remover (confirma, fecha as abas do projeto; a pasta fica).
-- [ ] Remover o último projeto: o centro pede "Abrir pasta…".
-- [ ] Captura: `AGENTDECK_DEBUG_UI=project:<id>` troca para o projeto `<id>` logo ao abrir.
-- [ ] Seção `PROJETOS` colapsável no topo da árvore de arquivos, com ponto indicador no projeto ativo.
-- [ ] Botão `+`: seletor de pasta adiciona novo workspace à lista e ativa-o.
-- [ ] Botão `×` (aparece ao passar o mouse, com 2+ projetos): fica visível sob o ponteiro e o clique remove o projeto da lista; se for o ativo, migra automaticamente para o primeiro da lista.
-- [ ] Pasta inexistente ou inacessível: não quebra a aplicação; exibe erro amigável na conversa.
-- [ ] Lista de projetos persiste no arquivo de configuração (`config.projectList`).
-- [ ] Clique direito num projeto → Remover: a janela continua desenhando com a pergunta aberta. "Sim" remove, "Não" mantém.
-- [ ] Projetos: remover um projeto com pergunta em andamento entre abas dele. Quem perguntou recebe erro, e nada reaparece no projeto removido.
-- [ ] Abrir o projeto por um caminho com outra caixa na unidade (`c:\...`): a árvore e o Git atualizam.
+- [x] **Migration:** first launch with legacy config converts each folder in list to project; open tabs reopen in active folder project.
+- [ ] "+" in PROJECTS section: selecting folder creates project (name = folder) and activates it; center displays "No agents open".
+- [ ] Open Claude in new project and click previous project: its terminals restore; Claude in new project **keeps running** (project displays logo and count).
+- [x] Active project lists its tabs; clicking activates tab. Other projects display agent logos and count.
+- [ ] Each terminal runs in its project folder (`pwd`/`Get-Location`), and tree and Git tab update with project.
+- [ ] Conversation displays active project only; conversation between agents in another project appears when brought back to screen.
+- [ ] `ask-agent claude@dev "hi"` in a project opens `claude@dev` in **that** project (hidden if not current); other project does not see instance.
+- [ ] Two projects with a `claude` each: each responds only to its project.
+- [ ] Restart app: only active project tabs open; other project tabs open when clicking project (nothing lost).
+- [ ] Right-click → Rename (name changes, folder does not), Open folder, Remove (confirms, closes project tabs; folder remains).
+- [ ] Removing last project: center prompts "Open folder…".
+- [ ] Screenshot: `AGENTDECK_DEBUG_UI=project:<id>` switches to project `<id>` on launch.
+- [ ] Collapsible `PROJECTS` section at top of file tree, with indicator dot on active project.
+- [ ] `+` button: folder picker adds new workspace to list and activates it.
+- [ ] `×` button (appears on hover with 2+ projects): visible under cursor, click removes project from list; if active, automatically switches to first in list.
+- [ ] Non-existent or inaccessible folder: does not crash application; displays friendly error in conversation.
+- [ ] Project list persists in config file (`config.projectList`).
+- [ ] Right-click project → Remove: window continues rendering with prompt open. "Yes" removes, "No" keeps.
+- [ ] Projects: remove project with ongoing question between its tabs. Caller receives error, nothing reappears in removed project.
+- [ ] Open project via path with different drive letter casing (`c:\...`): tree and Git update.
 
-Janela maximizada (t30)
+## Maximized window (t30)
 
-- [ ] Botão do meio da barra de título: maximiza; o glifo vira "Restaurar" (dois quadrados) e a dica diz "Restaurar"; clicar de novo volta ao tamanho de antes.
-- [ ] Duplo clique na barra de título alterna maximizar/restaurar; Win+↑ e Win+↓ também, e o glifo acompanha.
-- [ ] Maximizada, o cursor nas bordas e cantos não vira seta de redimensionar; restaurada, volta a redimensionar.
-- [ ] Fechar maximizada e reabrir: abre maximizada; ao restaurar, a janela tem o tamanho de antes de maximizar (não o da tela).
-- [ ] Redimensionar para um tamanho qualquer, maximizar, fechar e reabrir: restaurar volta a esse tamanho.
+- [ ] Middle button on titlebar: maximizes; glyph becomes "Restore" (two squares) and tooltip reads "Restore"; clicking again restores previous size.
+- [ ] Double-click titlebar toggles maximize/restore; Win+↑ and Win+↓ as well, glyph updates accordingly.
+- [ ] Maximized: cursor on edges and corners does not become resize arrow; restored: resizes normally.
+- [ ] Close maximized and reopen: opens maximized; upon restore, window has size from before maximizing (not full screen).
+- [ ] Resize to arbitrary size, maximize, close and reopen: restore returns to that arbitrary size.
 
-## Git e GitHub ★
+## Git and GitHub ★
 
-Git — com a pasta de trabalho num repositório git:
+Git — with working folder in a git repository:
 
-- [ ] O botão redundante da branch foi **removido da topbar**. O status da branch e contagem de alterações aparecem no topo da aba Git (`dev · N ▾`), no tooltip do ícone Git e no badge de alterações do ícone.
-- [ ] Topbar limpa (sem chip redundante da branch); HEAD destacado: exibe `{hash} (destacado) · N ▾`.
-- [ ] A aba Git lista as alterações em seções; as letras têm cores (M âmbar, A verde, D vermelho…).
-- [ ] Clicar num arquivo abre o **diff** (na largura da barra, com rolagem horizontal), com linhas numeradas e cores; **←** volta.
-- [ ] Preparar (+) e tirar (−) um arquivo e "tudo" pelos botões das seções.
-- [ ] Descartar (↶) pede **confirmação**; num arquivo não rastreado, avisa que vai **apagar**.
-- [ ] Commit com mensagem (botão e **Ctrl+Enter**); "Corrigir último commit" traz a última mensagem.
-- [ ] Commit sem `user.name`/`user.email` configurados: aparece a explicação de como configurar.
-- [ ] Menu da branch: buscar, trocar de branch, criar branch nova (digitar o nome + Enter).
-- [ ] HEAD destacado (detached HEAD): o botão da branch mostra `{hash} (destacado)` com a contagem de alterações.
-- [ ] **Push** num repositório do GitHub por HTTPS: abre o login do **Git Credential Manager** e o envio conclui. Sem credencial: mensagem de erro, **sem travar**.
-- [ ] Branch nova: o botão vira **Publicar** e cria o upstream.
-- [ ] Buscar (⟳) e Puxar (↓n) depois de um commit feito em outro lugar.
-- [ ] Fazer um commit **pelo terminal** (ou um agente fazer): a aba Git se atualiza sozinha.
-- [ ] Caminhos com **acentos e espaços** aparecem certos e o diff abre.
-- [ ] Pasta que não é repositório: aparece "Inicializar repositório" e funciona. Repositório sem git: exibe aviso explicativo e botão para inicializar.
-- [ ] (Se possível) sem git instalado / fora do PATH: aparece a mensagem com o link de instalação.
-- [ ] Observar: o `AGENTS.md` da pasta aparece como alterado (já conhecido, está em pendências).
-- [ ] Git: abrir "Descartar" num arquivo do projeto A e trocar para o projeto B pela barra lateral: a confirmação some e nada é descartado em B.
-- [ ] Git: na lista de branches, clicar numa remota (`origin/x`) cuja local já existe: troca para a local, sem erro.
-- [ ] Projeto que é uma worktree git (`git worktree add`) ou subpasta de repositório: commit, `git cherry-pick`/`git revert` com conflito e `git rebase -i` pelo terminal atualizam a aba Git sem reabrir o projeto.
-- [x] Repositório com `core.autocrlf=true` e `AGENTS.md` em CRLF: abrir o app não deixa o arquivo alterado no `git status`.
-  - Conferido no `commanddeck-dev`: o conteúdo tem o mesmo hash do HEAD. O `M` que ainda aparecia era o índice desatualizado; um `git add AGENTS.md`, sem mudar nada, limpou.
+- [ ] Redundant branch button **removed from topbar**. Branch status and change count appear at top of Git tab (`dev · N ▾`), in Git icon tooltip, and in icon changes badge.
+- [ ] Clean topbar (no redundant branch chip); detached HEAD displays `{hash} (detached) · N ▾`.
+- [ ] Git tab lists changes in sections; status letters colored (M amber, A green, D red…).
+- [ ] Clicking file opens **diff** (spanning panel width with horizontal scrolling), numbered lines and syntax colors; **←** returns.
+- [ ] Stage (+) and unstage (−) file and "all" via section buttons.
+- [ ] Discard (↶) prompts **confirmation**; on untracked file, warns it will **delete**.
+- [ ] Commit with message (button and **Ctrl+Enter**); "Amend last commit" populates previous message.
+- [ ] Commit without configured `user.name`/`user.email`: explains how to configure them.
+- [ ] Branch menu: search, switch branch, create new branch (enter name + Enter).
+- [ ] Detached HEAD: branch button displays `{hash} (detached)` with change count.
+- [ ] **Push** to GitHub repository over HTTPS: prompts **Git Credential Manager** login and completes push. Without credentials: error message **without hanging**.
+- [ ] New branch: button becomes **Publish** and sets upstream.
+- [ ] Fetch (⟳) and Pull (↓n) after commit made elsewhere.
+- [ ] Make commit **via terminal** (or an agent makes one): Git tab refreshes automatically.
+- [ ] Paths with **accents and spaces** display properly and diff opens.
+- [ ] Folder that is not a repository: displays "Initialize repository" and works. Repository without git: displays explanatory notice and initialize button.
+- [ ] (If possible) git not installed / outside PATH: displays message with installation link.
+- [ ] Note: folder `AGENTS.md` appears as modified (known limitation, tracked in pendencias).
+- [ ] Git: open "Discard" on file in project A and switch to project B via sidebar: confirmation closes and nothing discarded in B.
+- [ ] Git: in branch list, click remote branch (`origin/x`) whose local already exists: switches to local without error.
+- [ ] Project that is a git worktree (`git worktree add`) or subfolder of repository: commit, `git cherry-pick`/`git revert` conflict, and `git rebase -i` via terminal update Git tab without reloading project.
+- [x] Repository with `core.autocrlf=true` and `AGENTS.md` in CRLF: opening app leaves file clean in `git status`.
+  - Verified on `commanddeck-dev`: content matches HEAD hash. The `M` previously appearing was stale index; clean `git add AGENTS.md` cleared it.
 
-Git — trechos, histórico, stash, merge/rebase e conflitos:
+Git — hunks, history, stash, merge/rebase, and conflicts:
 
-- [ ] Diff de um arquivo com duas regiões alteradas: "Preparar" num trecho deixa o arquivo nas duas seções (preparado e alterações); "Tirar" o devolve; "Descartar" no outro trecho pede confirmação e mantém o primeiro. Os botões não cobrem o texto do cabeçalho `@@`.
-- [ ] O mesmo teste de trecho num arquivo com fim de linha CRLF (`autocrlf=false`).
-- [ ] Menu da branch, "Mesclar" uma branch com conflito: aparecem a faixa "Mesclagem · N conflito(s)" e a aba "Conflitos". "Continuar" fica desativado até resolver tudo; "Abortar" pede confirmação e restaura o estado.
-- [ ] Conflitos: "O nosso" num bloco e "O deles" noutro; "Marcar como resolvido" só fica ativo depois; "Continuar" conclui o merge; "Abrir" abre o arquivo no programa padrão.
-- [ ] O mesmo fluxo com "Rebase" (Continuar e Abortar).
-- [ ] Conflito "nós apagamos / eles alteraram": "Nosso" ou "Deles" no arquivo inteiro resolve; ↶ na seção Conflitos descarta com confirmação.
-- [ ] Histórico: lista com autor e data; "Carregar mais" traz mais 50; clicar abre o detalhe (mensagem, arquivos, diff); depois de um commit novo a lista é relida.
-- [ ] Stash: "Guardar" com mensagem e "Incluir não rastreados" tira os arquivos da pasta (o arquivo novo some e volta ao Aplicar). "Aplicar e apagar" remove da lista; "Apagar" pede confirmação.
-- [ ] gpgsign: com `commit.gpgsign=true` e a chave travada, o commit falha em menos de ~5 s com a explicação, sem diálogo de senha. Depois de `echo teste | gpg --clearsign` numa aba, o commit passa.
-- [ ] Push/pull por ssh com chave com senha fora do ssh-agent: "falha de autenticação" com o passo a passo do ssh-agent.
-- [ ] Descartar (↶) uma pasta não rastreada com `.git` dentro: apaga a pasta.
+- [ ] Diff of file with two modified regions: "Stage" on one hunk leaves file in both sections (staged and unstaged); "Unstage" returns it; "Discard" on other hunk prompts confirmation and keeps first. Buttons do not overlap `@@` header text.
+- [ ] Same hunk test on file with CRLF line endings (`autocrlf=false`).
+- [ ] Branch menu, "Merge" branch with conflict: displays "Merge · N conflict(s)" banner and "Conflicts" tab. "Continue" remains disabled until all resolved; "Abort" prompts confirmation and restores state.
+- [ ] Conflicts: "Ours" on one block and "Theirs" on another; "Mark as resolved" only enables afterwards; "Continue" completes merge; "Open" opens file in default application.
+- [ ] Same workflow with "Rebase" (Continue and Abort).
+- [ ] Conflict "we deleted / they modified": "Ours" or "Theirs" on entire file resolves; ↶ in Conflicts section discards with confirmation.
+- [ ] History: list with author and date; "Load more" fetches next 50; click opens detail (message, files, diff); after new commit list re-reads.
+- [ ] Stash: "Stash" with message and "Include untracked" clears files from working copy (new file disappears and returns on Apply). "Apply and drop" removes from list; "Drop" prompts confirmation.
+- [ ] gpgsign: with `commit.gpgsign=true` and locked key, commit fails in under ~5 s with explanation, without password dialog. After `echo teste | gpg --clearsign` in a tab, commit succeeds.
+- [ ] Push/pull over SSH with password-protected key outside ssh-agent: "authentication failure" with step-by-step ssh-agent instructions.
+- [ ] Discard (↶) untracked folder containing `.git`: deletes folder.
 
 GitHub:
 
-- [ ] Aba GitHub (4º ícone da barra direita) num projeto com `origin` do GitHub: mostra `dono/repo`, a bolinha verde (login do GCM) e as listas PRs / Issues / Actions com contagens; o selo do ícone mostra o nº de PRs abertos.
-- [ ] Projeto sem `origin` ou com remoto fora do GitHub: a aba diz "Sem repositório no GitHub" e explica; "Tentar de novo" funciona depois de adicionar o remoto.
-- [ ] Clicar num PR abre o detalhe embaixo (checks/jobs). Com job vermelho, o fim do log abre sozinho, rola nos dois sentidos sem alargar a barra e destaca as linhas de erro. "Log", "Corrigir ▾" e ↗ do job funcionam; o X volta à lista.
-- [ ] "Atualizar" (ou abrir a aba depois de 60 s) relê os dados. Sem rede, a lista anterior continua e aparece a faixa de erro vermelha (fechável).
-- [ ] Sem login: faixa "Sem login (60 por hora)". Num repositório privado, mensagem 404 explicando como entrar. O log de job pede login.
-- [ ] "Abrir no navegador" (PR, issue, execução, job, repositório) abre a página certa.
-- [ ] "Enviar para agente ▾" num PR, issue ou job vermelho: escolher uma aba aberta digita a mensagem pronta quando ela fica livre (não no meio da sua digitação); escolher modelo + cargo (ex.: claude@review) abre a aba se não existir e entrega; a mensagem aparece na Conversa integrada.
-- [ ] Trocar de projeto com a aba aberta limpa a lista e lê o repositório do novo projeto.
-- [ ] Barra direita no mínimo (280 px): nada corta além das reticências; janela baixa não derruba o app.
+- [ ] GitHub tab (4th icon on right panel) in project with GitHub `origin`: displays `owner/repo`, green dot (GCM login), and PRs / Issues / Actions lists with counts; icon badge indicates count of open PRs.
+- [ ] Project without `origin` or with remote outside GitHub: tab states "No GitHub repository" with explanation; "Try again" works after adding remote.
+- [ ] Clicking PR opens detail below (checks/jobs). With failing job, tail of log opens automatically, scrolls two-way without widening panel, and highlights error lines. "Log", "Fix ▾", and job ↗ work; X returns to list.
+- [ ] "Refresh" (or reopening tab after 60 s) re-reads data. Without network, previous list remains and red dismissible error banner appears.
+- [ ] Without login: banner "Not logged in (60 per hour)". In private repository, 404 message explaining how to log in. Job log prompts login.
+- [ ] "Open in browser" (PR, issue, run, job, repository) opens correct URL.
+- [ ] "Send to agent ▾" on PR, issue, or failing job: choosing open tab types prepared message when agent becomes free (not mid-typing); choosing model + role (e.g. claude@review) opens tab if absent and delivers; message appears in Integrated Conversation.
+- [ ] Switching projects with tab open clears list and reads new project repository.
+- [ ] Right panel at minimum (280 px): nothing clips beyond ellipsis; low window height does not crash app.
 
-## Bandeja e segunda abertura ★
+## Tray and second instance ★
 
-Windows, com o app aberto e uma aba de agente:
+Windows, with app open and an agent tab:
 
-- [ ] Clicar no × (ou Alt+F4): a janela some sem perguntar nada e o ícone do AgentDeck fica na bandeja; o processo `AgentDeck`
-  segue no Gerenciador de Tarefas e os CLIs das abas continuam rodando.
-- [ ] Antes do X, pedir um turno longo a uma aba (ex.: "conte até 200 devagar com sleep"): com a janela escondida o turno termina
-  sozinho; ao abrir de novo a resposta está lá, e o terminal está no tamanho certo (nada de 0×0 nem linhas duplicadas).
-- [ ] Clique esquerdo no ícone: a janela volta, focada. Clique direito: menu com **Abrir** e **Encerrar**; Abrir faz o mesmo.
-- [ ] Minimizar (botão da barra) e depois **Abrir** no ícone: restaura e foca.
-- [ ] Com a janela escondida (ou minimizada), abrir o `agentdeck.exe` de novo: não aparece segundo processo nem mensagem de
-  erro; a mesma janela volta para a frente (e não só pisca na barra de tarefas).
-- [ ] **Encerrar** sem nada pendente: fecha tudo (ícone some, processo sai, CLIs das abas encerram).
-- [ ] **Encerrar** com um arquivo editado e não salvo: a janela aparece sozinha com a pergunta "Há alterações não salvas".
-- [ ] **Encerrar** com um agente no meio de um turno: a janela aparece com "Há agentes trabalhando" (Cancelar mantém o app).
-- [ ] Linux com bandeja (KDE, ou GNOME com AppIndicator): o mesmo roteiro com `ksni`. Sem `StatusNotifierWatcher` (GNOME
-  puro): o × **minimiza**, e o app nunca fica invisível e sem ícone.
+- [ ] Click × (or Alt+F4): window hides without confirmation and AgentDeck icon sits in system tray; `AgentDeck` process continues in Task Manager and tab CLIs keep running.
+- [ ] Before ×, request long turn in a tab (e.g. "count to 200 slowly with sleep"): with window hidden turn completes normally; upon reopening response is present and terminal is correct size (no 0×0 or duplicate lines).
+- [ ] Left-click icon: window restores and focuses. Right-click: menu with **Open** and **Quit**; Open does the same.
+- [ ] Minimize (titlebar button) then **Open** from icon: restores and focuses.
+- [ ] With window hidden (or minimized), launch `agentdeck.exe` again: no second process or error message; original window comes to front (does not just flash on taskbar).
+- [ ] **Quit** with nothing pending: closes everything (icon vanishes, process exits, tab CLIs terminate).
+- [ ] **Quit** with unsaved edited file: window appears prompting "There are unsaved changes".
+- [ ] **Quit** with agent mid-turn: window appears with "Agents are currently working" (Cancel keeps app running).
+- [ ] Linux with tray (KDE, or GNOME with AppIndicator): same test script with `ksni`. Without `StatusNotifierWatcher` (pure GNOME): × **minimizes**, and app is never left invisible without an icon.
 
-## Migração do nome (CommandDeck → AgentDeck) ★
+## Name migration (CommandDeck → AgentDeck) ★
 
-Com a pasta de dados e a configuração de quem usava o CommandDeck (`%APPDATA%\CommandDeck\config.json`), sem `AGENTDECK_HOME`:
+With data directory and config from CommandDeck users (`%APPDATA%\CommandDeck\config.json`), without `AGENTDECK_HOME`:
 
-- [ ] Abrir o `agentdeck.exe`: a janela se chama AgentDeck, os projetos e as abas abertas da versão antiga aparecem, e
-  `%APPDATA%\AgentDeck\config.json` foi criado (o `CommandDeck\config.json` continua lá).
-- [ ] As tarefas existentes (`dados/tarefas/`) e o histórico continuam na mesa.
-- [ ] Numa aba de agente nova, `ask-agent --list` funciona e `echo %AGENTDECK_PORT%` (ou `$env:AGENTDECK_PORT`) tem valor.
+- [ ] Launch `agentdeck.exe`: window is named AgentDeck, projects and open tabs from legacy version appear, and `%APPDATA%\AgentDeck\config.json` was created (`CommandDeck\config.json` remains intact).
+- [ ] Existing tasks (`dados/tarefas/`) and history continue on task desk.
+- [ ] In new agent tab, `ask-agent --list` works and `echo %AGENTDECK_PORT%` (or `$env:AGENTDECK_PORT`) has a value.
 
-## Para fechar
+## Final checklist
 
-- [ ] Tirar um print da tela principal (com a barra direita) para substituir `docs/screenshots/main.png`.
+- [ ] Take a screenshot of main screen (with right panel) to replace `docs/screenshots/main.png`.

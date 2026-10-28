@@ -395,7 +395,10 @@ fn attachments_and_config_persistence() {
     // Sessão registrada.
     let sessions = std::fs::read_to_string(env.root.join("dados").join("sessions.json")).expect("sessions.json");
     assert!(sessions.contains(env.core.session_id()));
-    assert_eq!(env.core.transcribe_engine(), "indisponível");
+    assert_eq!(env.core.transcribe_engine(), "unavailable");
+    agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || {
+        assert_eq!(env.core.transcribe_engine(), "indisponível");
+    });
     assert!(env.core.transcribe_pcm16k(&[0.0; 160]).is_err());
     env.core.shutdown();
 }
@@ -1328,8 +1331,8 @@ fn a_model_without_quota_is_refused_before_opening_the_tab() {
         ask_raw(port, &master, json!({"from": "shell", "to": "antigravity@arq", "message": "oi", "model": "gemini-4-argon-high"}));
     assert_eq!(st, 409, "{body}");
     let error = body["error"].as_str().expect("erro");
-    assert!(error.starts_with("antigravity@arq usa gemini-4-argon-high e a cota de Gemini 4 Argon esgotada, renova em"), "{error}");
-    assert!(error.contains("--new --model <modelo>"), "{error}");
+    assert!(error.starts_with("antigravity@arq uses gemini-4-argon-high and its quota for Gemini 4 Argon exhausted, renews in"), "{error}");
+    assert!(error.contains("--new --model <model>"), "{error}");
     assert!(env.core.project_instance_ids(&p).is_empty(), "nada foi criado");
     assert!(env.core.projects()[0].tab_models.is_empty());
 
@@ -1465,12 +1468,12 @@ fn the_roster_and_the_team_show_the_models() {
     let (st, body) = http(port, "GET", "/agents", &host, &tab_token(&env, "claude"), "");
     assert_eq!(st, 200);
     assert_eq!(body["models"], json!({"claude@dev": "sonnet", "claude@main@ana": "opus"}));
-    assert_eq!(body["quota"], json!({"claude@dev": "cota: sem leitura", "claude@main@ana": "cota: sem leitura"}));
+    assert_eq!(body["quota"], json!({"claude@dev": "quota: no reading", "claude@main@ana": "quota: no reading"}));
     let (st, body) = http(port, "GET", "/team", &host, &tab_token(&env, "claude@dev"), "");
     assert_eq!(st, 200);
     // Só quem aparece na resposta (ele; o chefe e a equipe, se tivessem modelo).
     assert_eq!(body["models"], json!({"claude@dev": "sonnet"}));
-    assert_eq!(body["quota"], json!({"claude@dev": "cota: sem leitura"}));
+    assert_eq!(body["quota"], json!({"claude@dev": "quota: no reading"}));
     assert_eq!(body["boss"], "claude");
     env.core.shutdown();
 }
@@ -1489,9 +1492,9 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let (st, body) = get("/models");
     assert_eq!(st, 200, "{body}");
     let text = body["text"].as_str().expect("text");
-    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n"), "{text}");
+    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: no reading\n"), "{text}");
     assert!(text.contains("opencode: não consegui listar os modelos"), "{text}");
-    assert!(text.contains("\n  cota: sem leitura\n\ncapacidade ("), "a capacidade vem depois dos agentes: {text}");
+    assert!(text.contains("\n  cota: no reading\n\ncapacidade ("), "a capacidade vem depois dos agentes: {text}");
     assert!(text.contains("Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10)"), "{text}");
     assert!(!text.contains("antigravity"), "o que não está instalado não aparece: {text}");
 
@@ -1501,7 +1504,7 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     assert!(
         body["text"]
             .as_str()
-            .is_some_and(|t| t.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n\ncapacidade (")),
+            .is_some_and(|t| t.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: no reading\n\ncapacidade (")),
         "{body}"
     );
     let (st, body) = get("/models?agent=agy");
@@ -1528,8 +1531,8 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let agy_pos = text.find("antigravity").expect("agy");
     let claude_pos = text.find("claude --model").expect("claude");
     assert!(agy_pos < claude_pos, "o mais folgado vem primeiro:\n{text}");
-    assert!(text.contains("  cota: Gemini 4 Argon 4% usada (renova em 6 dias)"), "{text}");
-    assert!(text.contains("  cota: 60% usada (renova em 4 dias)"), "{text}");
+    assert!(text.contains("  cota: Gemini 4 Argon 4% used (renews in 6 days)"), "{text}");
+    assert!(text.contains("  cota: 60% used (renews in 4 days)"), "{text}");
     env.core.shutdown();
 }
 

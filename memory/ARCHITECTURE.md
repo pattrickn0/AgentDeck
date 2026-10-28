@@ -1,161 +1,161 @@
-# Arquitetura do AgentDeck
+# AgentDeck architecture
 
-Visão geral e mapa dos documentos: [GERAL.md](GERAL.md). Guia prático e mapa de arquivos: [MANUTENCAO.md](MANUTENCAO.md).
+Overview and map of documents: [GERAL.md](GERAL.md). Practical guide and file map: [MANUTENCAO.md](MANUTENCAO.md).
 
-Aplicação desktop nativa em Rust (reescrita da antiga versão Electron, sem Node em tempo de execução).
+Native desktop application in Rust (rewritten from the old Electron version, no Node at runtime).
 
-## Stack e decisões de base
+## Stack and base decisions
 
-| Camada | Escolha | Por quê |
+| Layer | Choice | Why |
 | :-- | :-- | :-- |
-| Janela e eventos | **winit 0.30** (`ApplicationHandler`) | controle total do loop de eventos, arrastar e soltar e janela sem decoração; sob WSLg força X11 (`app/src/wslg.rs`) |
-| Renderização e UI | **glutin + glow** com **egui 0.36** (`egui-winit` + `egui_glow`) | modo imediato estilizado à mão (`theme.rs`); OpenGL leve que roda até em `Xvfb`/llvmpipe no CI |
-| Terminal | **alacritty_terminal** (parser VT + grade) + **portable-pty** (ConPTY no Windows, PTY no Unix) | emulação VT madura; pintura própria da grade no egui (`app/src/terminal/`) e resize com debounce para compensar a repintura do ConPTY |
-| Ponte HTTP | **tiny_http** (thread por requisição, até 128 simultâneas) | servidor local em `127.0.0.1:0` para o `ask-agent`, autenticado por token de processo + validação de `Host` |
-| Cliente HTTP | **ureq** (com rustls) | síncrono e sem OpenSSL; roda em threads para GitHub, cota do Antigravity e downloads |
-| Sistema e arquivos | **notify**, **rfd** (portal no Linux), **open**, **arboard**, **tray-icon** / **ksni**, **secret-service** (D-Bus no Linux) | integrações nativas sem puxar GTK3 |
-| Áudio e ditado | **cpal** (feature `audio`) + **whisper.cpp** (`whisper/`) | transcrição local opcional; áudio apagado logo após transcrever |
+| Window and events | **winit 0.30** (`ApplicationHandler`) | full control over the event loop, drag and drop, and undecorated window; forces X11 under WSLg (`app/src/wslg.rs`) |
+| Rendering and UI | **glutin + glow** with **egui 0.36** (`egui-winit` + `egui_glow`) | custom-styled immediate mode (`theme.rs`); lightweight OpenGL that runs even on `Xvfb`/llvmpipe in CI |
+| Terminal | **alacritty_terminal** (VT parser + grid) + **portable-pty** (ConPTY on Windows, PTY on Unix) | mature VT emulation; custom grid rendering in egui (`app/src/terminal/`) and debounced resize to compensate for ConPTY repaint |
+| HTTP bridge | **tiny_http** (thread per request, up to 128 concurrent) | local server on `127.0.0.1:0` for `ask-agent`, authenticated by process token + `Host` validation |
+| HTTP client | **ureq** (with rustls) | synchronous and without OpenSSL; runs in threads for GitHub, Antigravity quota, and downloads |
+| System and files | **notify**, **rfd** (portal on Linux), **open**, **arboard**, **tray-icon** / **ksni**, **secret-service** (D-Bus on Linux) | native integrations without pulling in GTK3 |
+| Audio and dictation | **cpal** (feature `audio`) + **whisper.cpp** (`whisper/`) | optional local transcription; audio deleted immediately after transcription |
 
-## Crates e fronteiras
+## Crates and boundaries
 
 ```
 crates/
-├── core   (agentdeck-core)   backend sem interface gráfica
-├── app    (agentdeck)        janela winit + egui e emulador de terminal
-└── cli    (agentdeck-cli)    binário ask-agent
+├── core   (agentdeck-core)   backend without graphical interface
+├── app    (agentdeck)        winit + egui window and terminal emulator
+└── cli    (agentdeck-cli)    ask-agent binary
 ```
 
-- **Fronteira `app` ↔ `core`:** a interface só fala com o backend pelos métodos de `agentdeck_core::Core` (`crates/core/src/lib.rs`) e recebe eventos por canal (`events.rs`), acordando o loop do winit via `EventLoopProxy`. Operações bloqueantes (git, GitHub, listagem de modelos, transcrição, leitura/gravação de documentos) rodam sempre em threads fora da UI.
-- **Trabalho com e sem quadro (`crates/app/src/app.rs`, `crates/app/src/deck/`):** o que não depende de desenhar (eventos do core, respostas de threads, entregas de `ask-agent` nos terminais, respostas atrasadas, Enter agendado, fim de turno e temporizadores) roda antes de cada quadro com a janela visível e, quando a janela está na bandeja, minimizada ou com área 0×0 (no Windows não há `WM_PAINT`), num passo de segundo plano no loop de eventos a cada ≥ 50 ms (`ControlFlow::WaitUntil`). Sem quadro o PTY nunca é redimensionado às cegas.
-- **Extensão para RAG (`crates/core/src/context.rs`):** trait `ContextProvider`, consultado pelo executor headless antes de enviar o prompt.
+- **`app` ↔ `core` boundary:** the UI only speaks to the backend via `agentdeck_core::Core` methods (`crates/core/src/lib.rs`) and receives events through a channel (`events.rs`), waking the winit loop via `EventLoopProxy`. Blocking operations (git, GitHub, model listing, transcription, document read/write) always run in threads outside the UI.
+- **Work with and without frame (`crates/app/src/app.rs`, `crates/app/src/deck/`):** work that does not depend on drawing (core events, thread replies, `ask-agent` deliveries to terminals, delayed answers, scheduled Enter, turn completion, and timers) runs before each frame with the window visible and, when the window is in the tray, minimized, or has 0×0 area (on Windows there is no `WM_PAINT`), in a background step in the event loop every ≥ 50 ms (`ControlFlow::WaitUntil`). Without a frame, the PTY is never resized blindly.
+- **Extension for RAG (`crates/core/src/context.rs`):** `ContextProvider` trait, queried by the headless runner before sending the prompt.
 
 ---
 
-## Protocolo entre agentes e contrato da ponte (`ask-agent`)
+## Inter-agent protocol and bridge contract (`ask-agent`)
 
-### Ambiente de cada processo de agente (`crates/core/src/agents.rs`, `env.rs`)
+### Environment of each agent process (`crates/core/src/agents.rs`, `env.rs`)
 
-Cada aba interativa (e execução headless) recebe um ambiente higienizado:
+Each interactive tab (and headless execution) receives a sanitized environment:
 
-- **Injetadas:** `AGENTDECK_PORT` (porta TCP em `127.0.0.1`), `AGENTDECK_TOKEN` (token de 128 bits **exclusivo da aba ou execução**), `AGENTDECK_AGENT` (id da instância, ex.: `claude@dev`), `AGENTDECK_ROLE` (quando há cargo), `AGENTDECK_DEPTH` (profundidade de delegação), `PATH` (com a pasta dos executáveis na frente), `TERM=xterm-256color`, `COLORTERM=truecolor` e, no Windows, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `MSYS_NO_PATHCONV=1` e `MSYS2_ARG_CONV_EXCL=*` (impede o Git Bash de converter `/comando` em caminho).
-- **Filtradas:** qualquer `AGENTDECK_*` herdada do ambiente externo (exceto `AGENTDECK_ASK_WAIT`, configuração do usuário), variáveis de sessão aninhada do Claude (`CLAUDECODE`, `CLAUDE_CODE_*`), `ELECTRON_RUN_AS_NODE` e `OPENCODE_CONFIG_CONTENT` (inserida depois só para a aba do OpenCode a que pertence).
+- **Injected:** `AGENTDECK_PORT` (TCP port on `127.0.0.1`), `AGENTDECK_TOKEN` (128-bit token **exclusive to the tab or execution**), `AGENTDECK_AGENT` (instance id, e.g. `claude@dev`), `AGENTDECK_ROLE` (when there is a role), `AGENTDECK_DEPTH` (delegation depth), `PATH` (with executable folder up front), `TERM=xterm-256color`, `COLORTERM=truecolor`, and on Windows, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `MSYS_NO_PATHCONV=1`, and `MSYS2_ARG_CONV_EXCL=*` (prevents Git Bash from converting `/command` into a path).
+- **Filtered:** any `AGENTDECK_*` inherited from the external environment (except `AGENTDECK_ASK_WAIT`, a user configuration), Claude nested session variables (`CLAUDECODE`, `CLAUDE_CODE_*`), `ELECTRON_RUN_AS_NODE`, and `OPENCODE_CONFIG_CONTENT` (inserted later only for the OpenCode tab it belongs to).
 
-### Instruções do AgentDeck e confiança da pasta (`agents.rs`, `trust.rs`, `workspace.rs`)
+### AgentDeck instructions and folder trust (`agents.rs`, `trust.rs`, `workspace.rs`)
 
-As instruções da ponte (uso do `ask-agent`, proibição de subagentes internos do CLI sem pedido do usuário, `--models`/`--team`/`--learn`/`--outline` e `memory/aprendizados/`) chegam pelo canal próprio de cada CLI, sem depender de um `AGENTS.md` prévio:
+Bridge instructions (use of `ask-agent`, prohibition of CLI-internal subagents without user request, `--models`/`--team`/`--learn`/`--outline`, and `memory/aprendizados/`) arrive through each CLI's dedicated channel, without depending on a prior `AGENTS.md`:
 
-| CLI | Canal de entrega das instruções |
+| CLI | Instruction delivery channel |
 | :-- | :-- |
-| Claude | `--append-system-prompt <texto>` (inclui nome e cargo), `--allowedTools "Bash(ask-agent:*)"` e `--settings dados/hooks/claude-settings.json` |
-| Codex | `-c developer_instructions=<TOML>` (ou texto cru em shim `.cmd`) e, fora de shim, `-c notify=["ask-agent","--signal","idle"]` |
+| Claude | `--append-system-prompt <text>` (includes name and role), `--allowedTools "Bash(ask-agent:*)"`, and `--settings dados/hooks/claude-settings.json` |
+| Codex | `-c developer_instructions=<TOML>` (or raw text in `.cmd` shim) and, outside shims, `-c notify=["ask-agent","--signal","idle"]` |
 | OpenCode | `--standalone` + `OPENCODE_CONFIG_CONTENT={"model":…,"instructions":["dados/agentdeck-instructions.md"]}` (`models.rs`) |
 | Aider | `--read dados/agentdeck-instructions.md` |
-| Open Interpreter | `--custom_instructions <texto>` |
-| Antigravity | `--add-dir dados/agy/<instância>` (onde o app grava um `AGENTS.md` com nome e cargo da instância, somado ao do projeto pelo `agy`) |
-| Goose, Copilot | leem apenas o `AGENTS.md` da pasta: se não existir, o app cria um só com o bloco `<!-- agentdeck:start/end -->` e avisa na Conversa; se já existir, atualiza só o bloco |
-| Amazon Q, Terminal | sem canal de instruções |
+| Open Interpreter | `--custom_instructions <text>` |
+| Antigravity | `--add-dir dados/agy/<instance>` (where the app writes an `AGENTS.md` with instance name and role, combined with project's by `agy`) |
+| Goose, Copilot | read only the folder's `AGENTS.md`: if missing, the app creates one with only the `<!-- agentdeck:start/end -->` block and notifies in Conversation; if already present, updates only the block |
+| Amazon Q, Terminal | no instruction channel |
 
-O texto em arquivo compartilhado (`dados/agentdeck-instructions.md` e bloco de `AGENTS.md`) não lista os agentes instalados na máquina, para não sujar o `git status` entre computadores.
+The text in a shared file (`dados/agentdeck-instructions.md` and `AGENTS.md` block) does not list agents installed on the machine, so as not to dirty `git status` across computers.
 
-**Confiança da pasta (`crates/core/src/trust.rs`):** antes de abrir uma aba, o app registra a confiança da pasta de trabalho e da pasta do projeto para que abas abertas em segundo plano não travem em *"Do you trust this folder?"*: no Claude em `~/.claude.json` (se não houver pasta-mãe já aceita), no Codex via `-c projects={…}` na linha de comando e no Antigravity em `trustedWorkspaces` de `~/.gemini/antigravity-cli/settings.json` (caminho exato, removido junto com a worktree da tarefa). Pasta pessoal e raiz de disco nunca são adicionadas.
+**Folder trust (`crates/core/src/trust.rs`):** before opening a tab, the app registers trust for the working folder and project folder so background tabs do not stall on *"Do you trust this folder?"*: in Claude in `~/.claude.json` (if no parent folder is already accepted), in Codex via `-c projects={…}` on the command line, and in Antigravity in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json` (exact path, removed alongside task worktree). User home and drive root are never added.
 
-### Identidade por token e isolamento por projeto (`bridge.rs`, `instances.rs`)
+### Token identity and project isolation (`bridge.rs`, `instances.rs`)
 
-- **Identidade:** a ponte identifica quem chama pelo cabeçalho `x-agentdeck-token` (token por instância aberta ou por execução headless). O campo `"from"` do JSON é ignorado para tokens de agente; só o token mestre do próprio app pode informar `"from"` e `"project"`.
-- **Escopo de projeto:** o token carrega o projeto (`p` + 8 hex). Internamente, perguntas pendentes, filas por par, atividade e caixa de entrada usam a chave `<projeto>#<id>`, permitindo que dois projetos tenham cada um o seu `claude@dev` sem cruzar mensagens nem ciclos. Para agentes e usuários, os ids aparecem sem o prefixo.
+- **Identity:** the bridge identifies callers via the `x-agentdeck-token` header (token per open instance or headless execution). The JSON `"from"` field is ignored for agent tokens; only the app's master token can supply `"from"` and `"project"`.
+- **Project scope:** the token carries the project (`p` + 8 hex). Internally, pending questions, per-pair queues, activity, and inbox use the `<project>#<id>` key, allowing two projects to each have their own `claude@dev` without crossing messages or cycles. For agents and users, ids appear without the prefix.
 
-### Contrato HTTP da ponte (`crates/core/src/bridge.rs`)
+### Bridge HTTP contract (`crates/core/src/bridge.rs`)
 
-Toda requisição exige `x-agentdeck-token` (comparado em tempo constante) e `Host: 127.0.0.1:<porta>` ou `localhost:<porta>` (outro valor ou ausente → **403**). Limites globais: até **128** requisições simultâneas (**503** acima; perguntas em HTTP 202 ocupam vaga até a resposta atrasada terminar), corpo individual até **16 MB** (**413** acima) e soma dos corpos em leitura/atendimento até **64 MB** (**503** acima).
+Every request requires `x-agentdeck-token` (constant-time comparison) and `Host: 127.0.0.1:<port>` or `localhost:<port>` (other value or missing → **403**). Global limits: up to **128** concurrent requests (**503** above; HTTP 202 questions occupy a slot until delayed reply completes), individual body up to **16 MB** (**413** above), and sum of bodies reading/in flight up to **64 MB** (**503** above).
 
-| Rota | Corpo / parâmetros | Resposta e códigos HTTP |
+| Route | Body / parameters | Response and HTTP codes |
 | :-- | :-- | :-- |
-| `POST /activate` | `{}` (só token mestre) | **200** `{"ok":true}` e traz a janela à frente; **403** para token de agente |
-| `GET /agents` | — | **200** `{"agents":[…],"models":{id:modelo},"quota":{id:cota}}` do projeto do chamador |
-| `GET /models[?agent=<id>]` | `agent` opcional | **200** `{"text"}` com o inventário (`ask-agent --models`): os 4 CLIs oficiais do mais folgado ao mais gasto, linha `cota:` por grupo e bloco `capacidade`; **400** se inválido; **404** se não instalado |
-| `GET /team` | — (só token de aba) | **200** `{"id","boss","crew","models","quota"}` e consome aviso de mudança de equipe; **400** com token mestre |
-| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"][,"ack"]}` (+ `"from"`, `"project"` com token mestre) | **200** `{"answer","request"}` no prazo; **202** `{"pending":true,"answer","request"}` após `wait` (resposta digitada depois na aba); **400** destino desconhecido, auto-pergunta, `depth >= 2`, `model` inválido ou CLI sem escolha de modelo; **404** `reply_to` inexistente; **409** ciclo de espera, instância já aberta com outro modelo (sugere `--new`) ou cota esgotada (≥ 99,5%); **413** > 16 MB; **500** erro ou timeout (10 min) |
-| `POST /reply` | `{"to","message"[,"reply_to"]}` | **200** `{"answer"}` concluindo a pergunta pendente; **400** argumentos inválidos; **404** sem pergunta pendente daquele remetente |
-| `GET /inbox[?all=1]` | — (só token de aba) | **200** `{"answers":[{"request","from","text","failed","ts","delivered"}]}` (sem `all`, não entregues; `all=1`, 20 últimas) e marca como entregues; **400** com token mestre |
-| `POST /inbox/delivered` | `{"request":<n>}` (só token de aba) | **200** `{"ok":true}` confirmando entrega da resposta `<n>` após imprimir no stdout (quando `/ask` enviou `"ack":true`); **400** inválido/token mestre; **404** não pertence ao chamador |
-| `POST /learn` | `{"paths":[…]}` (até 50 caminhos) | **200** `{"text"}` com aprendizados e situação atual (sem caminhos) ou avisos de choque + aprendizados que casam (com caminhos); **400** sem repositório |
-| `POST /outline` | `{"paths":[…]}` (1 a 50 arquivos) | **200** `{"text"}` com assinaturas e linhas de cada arquivo; **400** sem arquivos ou sem repositório |
-| `POST /signal` | `{"state":"busy"\|"idle"}` | **200** `{"ok":true}` atualizando o estado de turno da aba (só token de aba) |
-| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}` | **200** `{"ok":true}` registrando uso do plano (`0.0..=1.0`, só token de aba; `shell` → **400**) |
-| `GET /tasks`, `GET /tasks/<id>` | `?project=<id>` opcional com token mestre | **200** `{"tasks":[…]}` (resumo com `scope` e `waiting_for`) ou `{"task":{…}}` completo; **404** não existe |
-| `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"effort"][,"level"][,"base"][,"scope"][,"start"]}` | **200** `{"task"}` (com `start:true`, em `running` ou `queued`); **400** dados inválidos, escopo inválido ou sem git; **403** agente de tarefa ativa |
-| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` | **200** `{"task"}`; **403** agente de tarefa; **404** não existe; **409** estado incompatível, árvore suja, conflito de merge ou worktree presa; **500** falha do git |
-| `POST /tasks/<id>/done` | `{"report"}` | **200** `{"task"}` passando a `review` (só dono da tarefa ou token mestre; vale em `running` ou `validating` com commits novos); **400** vazio; **403** outro agente; **409** estado inválido |
-| `POST /tasks/<id>/return`, `/reject` | `{"feedback"}` | **200** `{"task"}` devolvendo de `review` (`return`) ou reprovando de `validating` (`reject`) para `running`; **400** vazio; **403** agente de tarefa; **409** estado inválido |
+| `POST /activate` | `{}` (master token only) | **200** `{"ok":true}` and brings window forward; **403** for agent token |
+| `GET /agents` | — | **200** `{"agents":[…],"models":{id:model},"quota":{id:quota}}` for caller's project |
+| `GET /models[?agent=<id>]` | `agent` optional | **200** `{"text"}` with inventory (`ask-agent --models`): the 4 official CLIs from most quota headroom to most spent, `cota:` line per group, and `capacidade` block; **400** if invalid; **404** if not installed |
+| `GET /team` | — (tab token only) | **200** `{"id","boss","crew","models","quota"}` and consumes team change notification; **400** with master token |
+| `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"][,"ack"]}` (+ `"from"`, `"project"` with master token) | **200** `{"answer","request"}` within deadline; **202** `{"pending":true,"answer","request"}` after `wait` (reply typed later in tab); **400** unknown target, self-question, `depth >= 2`, invalid `model`, or CLI without model choice; **404** missing `reply_to`; **409** wait cycle, instance already open with different model (suggests `--new`), or exhausted quota (≥ 99.5%); **413** > 16 MB; **500** error or timeout (10 min) |
+| `POST /reply` | `{"to","message"[,"reply_to"]}` | **200** `{"answer"}` completing pending question; **400** invalid arguments; **404** no pending question from that sender |
+| `GET /inbox[?all=1]` | — (tab token only) | **200** `{"answers":[{"request","from","text","failed","ts","delivered"}]}` (without `all`, undelivered; `all=1`, last 20) and marks as delivered; **400** with master token |
+| `POST /inbox/delivered` | `{"request":<n>}` (tab token only) | **200** `{"ok":true}` confirming delivery of reply `<n>` after printing to stdout (when `/ask` sent `"ack":true`); **400** invalid/master token; **404** does not belong to caller |
+| `POST /learn` | `{"paths":[…]}` (up to 50 paths) | **200** `{"text"}` with learnings and current situation (without paths) or collision warnings + matching learnings (with paths); **400** without repository |
+| `POST /outline` | `{"paths":[…]}` (1 to 50 files) | **200** `{"text"}` with signatures and lines of each file; **400** without files or without repository |
+| `POST /signal` | `{"state":"busy"\|"idle"}` | **200** `{"ok":true}` updating tab turn state (tab token only) |
+| `POST /usage` | `{"session":{"used","resets_at_ms"}\|null,"weekly":…}` | **200** `{"ok":true}` recording plan usage (`0.0..=1.0`, tab token only; `shell` → **400**) |
+| `GET /tasks`, `GET /tasks/<id>` | `?project=<id>` optional with master token | **200** `{"tasks":[…]}` (summary with `scope` and `waiting_for`) or complete `{"task":{…}}`; **404** does not exist |
+| `POST /tasks` | `{"title","brief"[,"kind"][,"model"][,"effort"][,"level"][,"base"][,"scope"][,"start"]}` | **200** `{"task"}` (with `start:true`, in `running` or `queued`); **400** invalid data, invalid scope, or without git; **403** active task agent |
+| `POST /tasks/<id>/start`, `/merge`, `/validate`, `/discard` | `{}` | **200** `{"task"}`; **403** task agent; **404** does not exist; **409** incompatible state, dirty tree, merge conflict, or held worktree; **500** git failure |
+| `POST /tasks/<id>/done` | `{"report"}` | **200** `{"task"}` moving to `review` (task owner or master token only; valid in `running` or `validating` with new commits); **400** empty; **403** another agent; **409** invalid state |
+| `POST /tasks/<id>/return`, `/reject` | `{"feedback"}` | **200** `{"task"}` returning from `review` (`return`) or rejecting from `validating` (`reject`) to `running`; **400** empty; **403** task agent; **409** invalid state |
 
-**Códigos de saída do `ask-agent` (`crates/cli/src/bin/ask-agent.rs`):** `0` sucesso, `1` erro da ponte/agente, `2` erro de argumentos ou ambiente fora do AgentDeck (`--signal` sai sempre com `0` para não quebrar hooks).
+**Exit codes of `ask-agent` (`crates/cli/src/bin/ask-agent.rs`):** `0` success, `1` bridge/agent error, `2` argument error or environment outside AgentDeck (`--signal` always exits 0 to avoid breaking hooks).
 
-### Instância única e bandeja (`activation.rs`, `app/src/tray.rs`)
+### Single instance and system tray (`activation.rs`, `app/src/tray.rs`)
 
-- **Segunda abertura:** o core mantém a trava `dados/.agentdeck.lock` e grava porta + token mestre em `dados/.agentdeck.bridge`. Uma segunda abertura detecta a trava ocupada, chama `AllowSetForegroundWindow` (no Windows) + `POST /activate` e encerra; a instância em execução restaura e foca a janela.
-- **Bandeja:** fechar a janela (×, `Alt+F4` ou botão da barra de título) esconde a janela na bandeja (`tray-icon` no Windows, `ksni`/StatusNotifierItem no Linux) mantendo agentes e ponte ativos em segundo plano; sem bandeja no Linux, minimiza. Só **Encerrar** no menu da bandeja fecha o app, pedindo confirmação na janela se houver documento não salvo ou agente em turno.
-
----
-
-## Instâncias, equipe, modelos, cota e capacidade
-
-- **Identidade e equipe (`instances.rs`, `team.rs`):** instâncias usam `<modelo>[@<cargo>[@<nome>]]` (`claude`, `claude@dev`, `claude@dev@ana`, `claude@main@bia`). Quando um agente cria outra instância via `ask-agent`, torna-se chefe dela; o usuário reorganiza arrastando na barra lateral (ciclos são recusados). Fechar uma aba repassa os subordinados ao chefe dela; renomear preserva a árvore. Mudanças de posição geram aviso anexado à próxima mensagem entregue na aba (ou consumido por `ask-agent --team`). A equipe orienta, mas não bloqueia chamadas diretas.
-- **Modelo de LLM e esforço (`models.rs`):** resolvido ao abrir a aba na ordem: (1) pedido explícito (`--model` ou menu), (2) modelo já salvo para a instância no projeto, (3) padrão do cargo/CLI na configuração, (4) padrão do próprio CLI. Só `claude`, `antigravity`, `codex` e `opencode` aceitam modelo; pedir outro modelo para aba já aberta retorna **409**. Passado como `--model <m>` em `claude`, `agy` e `codex` (e `opencode run -m` no headless); na TUI do OpenCode vai via `--standalone` + `OPENCODE_CONFIG_CONTENT`. Modelos de `agy` e `opencode` são listados em thread (timeout de 15 s, cache de 10 min, `-free` primeiro). O esforço (`low`, `medium`, `high`) vira `--effort` no Claude e sufixo `-low|medium|high` no Antigravity (recusado com 400 nos demais).
-- **Uso dos planos e cota (`usage.rs`, `usage/codex.rs`, `usage/antigravity.rs`):** acompanha sessão (5 h) e semana (`0.0..=1.0` + horário de renovação) e salva em `dados/usage.json`. No Claude vem do hook de `statusLine` (`ask-agent --usage` lê `rate_limits` do stdin, envia `POST /usage` e repassa o stdin à statusline do usuário); no Codex lê a cada 60 s o `rollout-*.jsonl` mais recente de `~/.codex/sessions`; no Antigravity consulta a cada 3 min `retrieveUserQuotaSummary` (fallback `fetchAvailableModels`) com a versão e o token OAuth do `agy` (Credenciais do Windows, Secret Service D-Bus no Linux ou arquivo), separando por grupo (`Gemini 4 Argon`, `Gemini Models`, `Claude and GPT models`). Na ponte, `/ask` recusa com **409** destinos com grupo ≥ 99,5% (leitura < 1 h) e avisa quando o destino passa de 80% havendo outro CLI oficial < 50%.
-- **Capacidade e seleção para tarefas (`capability.rs`, `capability.json`):** cruza o nível da tarefa (`simples`, `media`, `complexa`) com o *AA Coding Agent Index v2.0* (`≥ 53` complexa, `40..53` média, `< 40` simples; esforço `low` desce um nível; sobreponível por `dados/capacidade.json`). Com ≥ 3 tarefas avaliadas de um modelo num nível (`dados/tarefas/*.json`), o histórico real prevalece (mais da metade descartada ou ≥ 2 devoluções desce um nível; 3 últimas do nível seguinte aprovadas de primeira sobem um nível). Sem agente explícito, a criação de tarefa escolhe entre os CLIs instalados capazes do nível o de menor cota usada; escolha explícita abaixo do nível gera aviso sem bloquear.
+- **Second launch:** the core holds the `dados/.agentdeck.lock` lock and writes port + master token to `dados/.agentdeck.bridge`. A second launch detects the occupied lock, calls `AllowSetForegroundWindow` (on Windows) + `POST /activate`, and exits; the running instance restores and focuses the window.
+- **System tray:** closing the window (×, `Alt+F4`, or title bar button) hides the window to the tray (`tray-icon` on Windows, `ksni`/StatusNotifierItem on Linux), keeping agents and bridge active in the background; without a tray on Linux, minimizes. Only **Exit** in the tray menu closes the app, prompting for confirmation in the window if there is an unsaved document or an agent in turn.
 
 ---
 
-## Fluxo de perguntas entre abas e entrega nos terminais
+## Instances, team, models, quota, and capability
 
-### Pergunta, resposta e detecção de ciclos (`exchange.rs`, `inbox.rs`)
-
-1. **Resolução e fila:** `POST /ask` resolve o destino no projeto do chamador (ou cria a instância e abre a aba em segundo plano, até 8 abas automáticas). Chamadas do mesmo par `de->para` seguem fila FIFO; no headless, sessões do par são retomadas no Claude (`--session-id`/`--resume`) e no Antigravity (`--conversation`).
-2. **Ciclos e profundidade:** se o destino já espera direta ou indiretamente por quem pergunta, `/ask` recusa com **409**. A cadeia de perguntas pendentes entre abas é recusada a partir de profundidade 2.
-3. **Resposta síncrona ou atrasada (HTTP 202):** o `ask-agent` espera até `AGENTDECK_ASK_WAIT` (padrão 90 s). Se `ask-agent --reply <n>` chegar no prazo, sai no stdout com HTTP 200 e o cliente confirma o recebimento em `POST /inbox/delivered` (pois o `tiny_http` não detecta se o cliente morreu antes de ler o 200). Se passar de 90 s, `/ask` devolve **202** liberando o `ask-agent` (a pergunta deixa de bloquear ciclos, mas segue contando na profundidade) e, quando o destino responder (em até 10 min), a resposta é digitada no terminal de quem perguntou. Abas `shell` e execuções headless esperam sempre até os 10 min.
-4. **Caixa de entrada (`inbox.rs`):** toda resposta (até 20 por instância) fica como "não entregue" até o `/inbox/delivered` ou a digitação na aba. Se a aba que perguntou fechou ou morreu, o app avisa na Conversa e a resposta fica disponível em `ask-agent --inbox`.
-
-### Quando digitar no terminal (`crates/core/src/delivery.rs`, `crates/app/src/deck/`)
-
-A política em `delivery.rs` evita atropelar o usuário ou a TUI:
-- **Respeito ao usuário:** não digita nos 2 s após tecla do usuário nem nos 20 s enquanto há texto digitado ainda sem Enter.
-- **Prontidão da aba:** aguarda 5 s na abertura de abas sem hooks; com hooks (Claude e Codex), aguarda o sinal `idle` + 300 ms sem saída (fallback de 10 min); sem hooks, 1,5 s sem saída ou 30 s esperando na fila.
-- **Colagem e Enter:** limpa `ESC` e controles C0/C1 (protegendo o *bracketed paste*) e envia pela thread de escrita do PTY. O Enter vai 250 ms depois (mais um segundo Enter em 600 ms quando há `@menção` no Claude/Antigravity; no Codex do Windows soma 1 ms por caractere colado, até 10 s). Teclas do usuário durante a espera do Enter saem logo após ele.
-- **Shims `.cmd` e processos no Windows (`agents.rs`, `headless.rs`, `process.rs`):** abas interativas abrem shims via `cmd.exe /d /e:on /v:off /c` com argumentos escapados; prompts livres nunca vão na linha de comando de um shim (no headless vão por arquivo em `dados/prompts/`). Processos headless e o `whisper-cli` entram num Job Object com `KILL_ON_JOB_CLOSE`.
+- **Identity and team (`instances.rs`, `team.rs`):** instances use `<model>[@<role>[@<name>]]` (`claude`, `claude@dev`, `claude@dev@ana`, `claude@main@bia`). When an agent creates another instance via `ask-agent`, it becomes its lead; the user reorganizes by dragging in the sidebar (cycles are rejected). Closing a tab reassigns subordinates to its lead; renaming preserves the tree. Position changes generate a notice attached to the next message delivered in the tab (or consumed by `ask-agent --team`). The team guides, but does not block direct calls.
+- **LLM model and effort (`models.rs`):** resolved when opening the tab in order: (1) explicit request (`--model` or menu), (2) model already saved for the instance in the project, (3) role/CLI default in configuration, (4) CLI's own default. Only `claude`, `antigravity`, `codex`, and `opencode` accept models; requesting a different model for an already open tab returns **409**. Passed as `--model <m>` in `claude`, `agy`, and `codex` (and `opencode run -m` in headless); in OpenCode TUI, passed via `--standalone` + `OPENCODE_CONFIG_CONTENT`. Models for `agy` and `opencode` are listed in a thread (15 s timeout, 10 min cache, `-free` first). Effort (`low`, `medium`, `high`) becomes `--effort` in Claude and suffix `-low|medium|high` in Antigravity (rejected with 400 in others).
+- **Plan usage and quota (`usage.rs`, `usage/codex.rs`, `usage/antigravity.rs`):** tracks session (5 h) and week (`0.0..=1.0` + renewal time) and saves in `dados/usage.json`. In Claude, comes from `statusLine` hook (`ask-agent --usage` reads `rate_limits` from stdin, posts `POST /usage`, and passes stdin through to user statusline); in Codex, reads most recent `rollout-*.jsonl` from `~/.codex/sessions` every 60 s; in Antigravity, queries `retrieveUserQuotaSummary` (fallback `fetchAvailableModels`) every 3 min with `agy` OAuth token and version (Windows Credentials, Secret Service D-Bus on Linux, or file), separated by group (`Gemini 4 Argon`, `Gemini Models`, `Claude and GPT models`). On bridge, `/ask` rejects with **409** targets with group ≥ 99.5% (reading < 1 h old) and warns when target exceeds 80% while another official CLI is < 50%.
+- **Capability and task selection (`capability.rs`, `capability.json`):** matches task level (`simples`, `media`, `complexa`) with the *AA Coding Agent Index v2.0* (`≥ 53` complex, `40..53` medium, `< 40` simple; effort `low` drops one level; overridable via `dados/capacidade.json`). With ≥ 3 evaluated tasks of a model at a level (`dados/tarefas/*.json`), actual history prevails (more than half discarded or ≥ 2 returns drops one level; last 3 of next level approved on first try raises one level). Without an explicit agent, task creation picks among capable installed CLIs for the level the one with lowest quota used; explicit selection below level generates warning without blocking.
 
 ---
 
-## Mesa de tarefas (`crates/core/src/tasks/`, `scope.rs`, `crates/app/src/tasks_ui.rs`)
+## Inter-tab question flow and terminal delivery
 
-Cada tarefa (`t1`, `t2`…, contador por projeto nunca reaproveitado) isola um trabalho num agente (`<modelo>@tN`), numa branch (`tarefa/<id>-<slug>`) e numa worktree própria.
+### Question, reply, and cycle detection (`exchange.rs`, `inbox.rs`)
+
+1. **Resolution and queue:** `POST /ask` resolves destination in caller's project (or creates instance and opens tab in background, up to 8 automatic tabs). Calls for same `from->to` pair follow a FIFO queue; in headless, sessions for the pair are resumed in Claude (`--session-id`/`--resume`) and Antigravity (`--conversation`).
+2. **Cycles and depth:** if target already waits directly or indirectly for caller, `/ask` rejects with **409**. Pending question chain between tabs is rejected starting at depth 2.
+3. **Synchronous or delayed reply (HTTP 202):** `ask-agent` waits up to `AGENTDECK_ASK_WAIT` (default 90 s). If `ask-agent --reply <n>` arrives in time, it outputs to stdout with HTTP 200 and the client confirms receipt in `POST /inbox/delivered` (since `tiny_http` does not detect if client died before reading 200). If exceeding 90 s, `/ask` returns **202** freeing `ask-agent` (question stops blocking cycles, but continues counting toward depth) and, when destination replies (within 10 min), the reply is typed into caller's terminal. `shell` tabs and headless executions always wait up to 10 min.
+4. **Inbox (`inbox.rs`):** each reply (up to 20 per instance) stays as "undelivered" until `/inbox/delivered` or typing in tab. If caller tab closed or died, app notifies in Conversation and reply remains available in `ask-agent --inbox`.
+
+### When to type in the terminal (`crates/core/src/delivery.rs`, `crates/app/src/deck/`)
+
+The policy in `delivery.rs` avoids overriding the user or TUI:
+- **Respect for user:** does not type within 2 s after a user keypress or within 20 s while typed text remains without Enter.
+- **Tab readiness:** waits 5 s when opening tabs without hooks; with hooks (Claude and Codex), waits for `idle` signal + 300 ms without output (10 min fallback); without hooks, 1.5 s without output or 30 s waiting in queue.
+- **Pasting and Enter:** cleans `ESC` and C0/C1 controls (protecting bracketed paste) and sends via PTY write thread. Enter follows 250 ms later (plus a second Enter in 600 ms when `@mention` is present in Claude/Antigravity; in Windows Codex adds 1 ms per pasted character, up to 10 s). User keys pressed during Enter wait are emitted immediately after it.
+- **`.cmd` shims and processes on Windows (`agents.rs`, `headless.rs`, `process.rs`):** interactive tabs open shims via `cmd.exe /d /e:on /v:off /c` with escaped arguments; free prompts never go on a shim's command line (in headless they go via file in `dados/prompts/`). Headless processes and `whisper-cli` join a Job Object with `KILL_ON_JOB_CLOSE`.
+
+---
+
+## Tasks desk (`crates/core/src/tasks/`, `scope.rs`, `crates/app/src/tasks_ui.rs`)
+
+Each task (`t1`, `t2`…, per-project counter never reused) isolates work in an agent (`<model>@tN`), a branch (`tarefa/<id>-<slug>`), and a dedicated worktree.
 
 ```
-Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged ("concluída")
-  │  │              ▲  ▲  ▲           │                  │ └─discard──▶ Discarded (de qualquer estado não final)
+Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged ("completed")
+  │  │              ▲  ▲  ▲           │                  │ └─discard──▶ Discarded (from any non-final state)
   │  │              │  │  └──return───┘                  │
   │  │              │  └────────────reject───────────────┘
-  │  └─ escopo ocupado ▶ Queued ──(a outra sai de Running/Review)──▶ Running
-  └─ erro ao iniciar ▶ Failed ──start de novo──▶ Running
+  │  └─ busy scope ▶ Queued ──(other leaves Running/Review)──▶ Running
+  └─ start error ▶ Failed ──start again──▶ Running
 ```
 
-- **Armazenamento e worktrees (`tasks/store.rs`, `tasks/git_ops.rs`):** salvas em `dados/tarefas/<projeto>.json` (fora do repo; remover e readicionar a pasta preserva o id do projeto). As worktrees ficam em `<raiz do repo>/.agentdeck/worktrees/<id>` — dentro do repositório para que agentes confinados ao workspace (como o Antigravity) tenham acesso — e `/.agentdeck/` é registrado em `<git comum>/info/exclude` (nunca no `.gitignore`).
-- **Início e entrega (`tasks/lifecycle.rs`, `tasks/text.rs`):** cria worktree e branch a partir da base, registra `<modelo>@<id>` subordinado a quem criou e entrega o pedido com memória e regras. Quando a aba precisa ser aberta, grava o pedido (ou feedback) em `dados/tarefas/<projeto>-<id>-brief.md` (ou `-feedback.md`) e passa uma linha curta em ASCII como argumento inicial do CLI (`claude "<linha>"`, `agy -i "<linha>"`, `opencode --prompt "<linha>"`), evitando perder texto enquanto a TUI inicializa.
-- **Escopo e fila (`scope.rs`, `tasks/lifecycle.rs`):** o escopo lista caminhos relativos (sem globs); dois escopos colidem quando um é igual ou prefixo por componente do outro (`memory/` e `Cargo.lock` não reservam nada). Se colidir com tarefa em `Running`, `Review` ou na fila antes dela, entra em `Queued` sem criar worktree nem aba. Quando a tarefa bloqueante é mesclada, descartada ou falha ao iniciar, a fila avança sozinha criando a worktree a partir do topo atual da base (`Validating` não segura a fila). No `done`, arquivos tocados fora do escopo geram aviso na revisão.
-- **Mesclagem (`tasks/merge.rs`, `tasks/stash.rs`):** exige repo principal na branch base e limpo (ignorando e restaurando o bloco automático do `AGENTS.md`) e worktree limpa. Faz `git merge --no-ff`, alinha a branch da tarefa (`git merge --ff-only`) e passa a `Validating` mantendo aba, worktree e branch vivas. Na UI, bloqueios oferecem resolução num clique — incluindo guardar alterações locais num `git stash`, mesclar e reaplicar pelo hash SHA após pré-verificar com `git merge-tree --write-tree`.
-- **Validação, reprovação, descarte e permissões (`tasks/finish.rs`, `file_lock.rs`, `bridge.rs`):** `validate` exige ausência de commits não mesclados, fecha a aba, remove a worktree (diagnosticando processos que prendam a pasta no Windows) e a branch e marca `Merged`. `reject` reabre aba/worktree se preciso e volta a `Running` com o motivo. `discard` limpa aba, worktree e branch de qualquer estado não final. Na ponte, o agente de uma tarefa ativa só pode consultar tarefas e chamar `/done` da própria tarefa (demais rotas de tarefa → **403**).
+- **Storage and worktrees (`tasks/store.rs`, `tasks/git_ops.rs`):** saved in `dados/tarefas/<projeto>.json` (outside repo; removing and re-adding folder preserves project id). Worktrees live in `<repo root>/.agentdeck/worktrees/<id>` — inside repository so workspace-confined agents (such as Antigravity) have access — and `/.agentdeck/` is recorded in `<common git>/info/exclude` (never in `.gitignore`).
+- **Start and delivery (`tasks/lifecycle.rs`, `tasks/text.rs`):** creates worktree and branch from base, registers `<model>@<id>` subordinate to creator, and delivers brief with memory and rules. When the tab needs to be opened, writes brief (or feedback) to `dados/tarefas/<projeto>-<id>-brief.md` (or `-feedback.md`) and passes a short ASCII line as initial CLI argument (`claude "<line>"`, `agy -i "<line>"`, `opencode --prompt "<line>"`), avoiding loss of text while TUI initializes.
+- **Scope and queue (`scope.rs`, `tasks/lifecycle.rs`):** scope lists relative paths (no globs); two scopes collide when one equals or is a path-component prefix of the other (`memory/` and `Cargo.lock` reserve nothing). If colliding with task in `Running`, `Review`, or ahead in queue, enters `Queued` without creating worktree or tab. When blocking task is merged, discarded, or fails to start, queue advances automatically, creating worktree from current base head (`Validating` does not hold the queue). On `done`, files touched outside scope produce a warning in review.
+- **Merge (`tasks/merge.rs`, `tasks/stash.rs`):** requires main repo on base branch and clean (ignoring and restoring automatic `AGENTS.md` block) and clean worktree. Performs `git merge --no-ff`, aligns task branch (`git merge --ff-only`), and transitions to `Validating` keeping tab, worktree, and branch alive. In UI, blockages offer one-click resolution — including stashing local changes in a `git stash`, merging, and reapplying by SHA hash after pre-verifying with `git merge-tree --write-tree`.
+- **Validation, rejection, discard, and permissions (`tasks/finish.rs`, `file_lock.rs`, `bridge.rs`):** `validate` requires no unmerged commits, closes tab, removes worktree (diagnosing processes locking folder on Windows) and branch, and marks `Merged`. `reject` reopens tab/worktree if needed and returns to `Running` with reason. `discard` cleans tab, worktree, and branch from any non-final state. On bridge, active task agent can only query tasks and call `/done` on its own task (other task routes → **403**).
 
 ---
 
-## Memória em duas camadas (`learnings.rs`, `situation.rs`, `outline.rs`)
+## Two-layer memory (`learnings.rs`, `situation.rs`, `outline.rs`)
 
-1. **Longo prazo — Aprendizados (`learnings.rs`):** arquivos `memory/aprendizados/*.md` com frontmatter `titulo`, `resumo` e `touches` (globs relativos à raiz; vazio = global), lidos da worktree da tarefa ou do repo principal. No início da tarefa, o agente recebe os globais e os que casam com caminhos citados no pedido por inteiro (até 6 000 caracteres) mais o índice dos demais (até 2 500); em devoluções/reprovações, recebe os que casam com arquivos novos citados no feedback (até 3 000).
-2. **Curto prazo — Situação atual e histórico (`situation.rs`, `tasks/`):** entrega as outras tarefas ativas com os arquivos que tocam (commits da branch + sujos da worktree via `git --no-optional-locks status`) e os últimos 8 commits da base (até 1 500 caracteres). Devoluções e reprovações repetem os últimos 5 feedbacks, e a tarefa guarda até 300 mensagens (6 000 caracteres cada) trocadas pelo agente.
-3. **Consulta sob demanda (`--learn` e `--outline`):** `ask-agent --learn [<arquivo>…]` (`POST /learn`, até 12 000 caracteres) devolve globais + índice + situação atual (sem argumentos) ou avisos `ATENÇÃO:` de choque com outras tarefas + aprendizados que casam (com arquivos). `ask-agent --outline <arquivo>…` (`POST /outline`, `outline.rs`, até 6 000 caracteres/arquivo e 16 000/chamada) extrai assinaturas e linhas (itens e membros de `impl`/`trait`/`mod` em Rust, títulos em Markdown) sobre o léxico de `highlight.rs`.
+1. **Long term — Learnings (`learnings.rs`):** files `memory/aprendizados/*.md` with frontmatter `titulo`, `resumo`, and `touches` (globs relative to root; empty = global), read from task worktree or main repo. At task start, agent receives globals and those matching paths cited in brief in full (up to 6,000 characters) plus index of remaining ones (up to 2,500); on returns/rejections, receives those matching newly cited files in feedback (up to 3,000).
+2. **Short term — Current situation and history (`situation.rs`, `tasks/`):** delivers other active tasks with files they touch (branch commits + worktree dirt via `git --no-optional-locks status`) and last 8 commits of base (up to 1,500 characters). Returns and rejections repeat last 5 feedbacks, and task stores up to 300 messages (6,000 characters each) exchanged by agent.
+3. **On-demand query (`--learn` and `--outline`):** `ask-agent --learn [<file>…]` (`POST /learn`, up to 12,000 characters) returns globals + index + current situation (without arguments) or `ATTENTION:` conflict warnings + matching learnings (with files). `ask-agent --outline <file>…` (`POST /outline`, `outline.rs`, up to 6,000 characters/file and 16,000/call) extracts signatures and lines (`impl`/`trait`/`mod` items and members in Rust, headings in Markdown) over `highlight.rs` lexer.
 
 ---
 
-## Interface: Organização, Modo Documentos, Git e GitHub
+## Interface: Organization, Documents Mode, Git, and GitHub
 
-- **Organização do centro (`crates/app/src/split.rs`, `ui/panes.rs`, `ui/tabs.rs`):** agrupa abas do projeto por tipo de CLI. Em `Split`, monta uma grade automática com proporções salvas; em `Highlight` (Destaque), põe o grupo da aba ativa em 2/3 à esquerda (trocar a aba ativa troca o destaque) e empilha os demais à direita; em `Tabs`, usa janela única. O PTY só é redimensionado quando o tamanho estabiliza e o mouse é solto (debounce de 150 ms no arrasto, 600 ms na troca de Destaque e 300 ms após saída do resize anterior, teto de 3 s).
-- **Modo Documentos e editor (`crates/app/src/docs.rs`, `ui/docs.rs`, `ui/code.rs`, `ui/diff_view.rs`, `highlight.rs`):** alterna o centro (`Ctrl+Shift+D`) entre terminais e abas de documentos (`TaskDiff`, `CommitDiff`, `FileDiff`, `File`, `Markdown`). Com terminais ocultos, nenhum resize ou tecla chega a eles e fins de turno viram selo em "Agentes". Arquivos até 256 KB (linhas ≤ 4 000 bytes, UTF-8 sem mistura CRLF/LF) abrem no editor com cache de layout/realce e gravação atômica que preserva CRLF/LF e BOM; alterações externas detectadas pelo watcher com edição não salva não sobrescrevem o buffer e abrem a faixa de resolução. Arquivos até 1 MB e diffs usam pintura linha a linha com seleção própria (`ui/select.rs`) e busca (`Ctrl+F`); Markdown usa `egui_commonmark`.
-- **Git local e GitHub (`crates/core/src/git.rs`, `github.rs`, `crates/app/src/git_ui.rs`, `github_ui.rs`):** o Git local roda o binário `git` sem shell, passando caminhos e mensagem de commit via stdin com ambiente não interativo (`GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`), enquanto o watcher observa `.git/` (`HEAD`, `index`, `refs/`). O painel GitHub lê o remoto `origin`, obtém o token só em memória (`git credential fill` ou `gh auth token`, descartado em 401), consulta `api.github.com` em threads (cache de 60 s) e baixa os 32 KiB finais de logs de jobs falhos sem reenviar `Authorization` após redirecionamento.
+- **Center organization (`crates/app/src/split.rs`, `ui/panes.rs`, `ui/tabs.rs`):** groups project tabs by CLI type. In `Split`, builds automatic grid with saved ratios; in `Highlight`, places active tab group in 2/3 on left (switching active tab switches highlight) and stacks others on right; in `Tabs`, uses single window. PTY is resized only when size stabilizes and mouse is released (150 ms debounce on drag, 600 ms on Highlight switch, and 300 ms after prior resize exit, 3 s ceiling).
+- **Documents mode and editor (`crates/app/src/docs.rs`, `ui/docs.rs`, `ui/code.rs`, `ui/diff_view.rs`, `highlight.rs`):** toggles center (`Ctrl+Shift+D`) between terminals and document tabs (`TaskDiff`, `CommitDiff`, `FileDiff`, `File`, `Markdown`). With terminals hidden, no resize or keypress reaches them and turn ends turn into a badge on "Agents". Files up to 256 KB (lines ≤ 4,000 bytes, UTF-8 without mixed CRLF/LF) open in editor with layout/highlight cache and atomic save preserving CRLF/LF and BOM; external changes detected by watcher with unsaved edit do not overwrite buffer and open resolution banner. Files up to 1 MB and diffs use line-by-line rendering with custom selection (`ui/select.rs`) and search (`Ctrl+F`); Markdown uses `egui_commonmark`.
+- **Local Git and GitHub (`crates/core/src/git.rs`, `github.rs`, `crates/app/src/git_ui.rs`, `github_ui.rs`):** local Git runs `git` binary without a shell, passing paths and commit message via stdin with non-interactive environment (`GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`), while watcher observes `.git/` (`HEAD`, `index`, `refs/`). GitHub panel reads `origin` remote, retrieves token only in memory (`git credential fill` or `gh auth token`, dropped on 401), queries `api.github.com` in threads (60 s cache), and downloads trailing 32 KiB of failed job logs without resending `Authorization` after redirect.

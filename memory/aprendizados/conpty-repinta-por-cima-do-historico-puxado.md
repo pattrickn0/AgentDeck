@@ -1,35 +1,35 @@
 ---
-titulo: No Windows, a grade não pode puxar o histórico ao crescer: o ConPTY repinta por cima e as linhas somem (t37)
-resumo: Ao ganhar linhas (ou juntar linhas no reflow) o alacritty puxa histórico para a tela; o ConPTY repinta de ESC[H e apaga o puxado. terminal/resize.rs desfaz isso.
+title: On Windows, the grid must not pull history when expanding: ConPTY repaints over it and lines vanish (t37)
+summary: When gaining lines (or joining lines during reflow) alacritty pulls history into the screen; ConPTY repaints from ESC[H and deletes what was pulled. terminal/resize.rs undoes this.
 touches: [crates/app/src/terminal/**, crates/app/src/deck/**, tools/pty-probe/**]
 ---
-Defeito (usuário, 23/10): "às vezes, nos terminais" a tela fica com linhas em branco e o texto cortado, em qualquer CLI. Reproduzido **sem
-o Claude**, com `powershell` + `tools/pty-probe`: 200 linhas numeradas, janela 58→30→58 linhas, e as linhas 144 a 171 sumiam do histórico
-(28 = as linhas ganhas) com 28 linhas em branco embaixo; numa sessão de 400 linhas quebradas, 120→60→120 colunas perdia 29 linhas; com 24
-mudanças aleatórias de tamanho, 155. É a causa 2/3 do pedido: o par ConPTY + `alacritty_terminal` desencontrado.
+Defect reported by user (23/10): "sometimes, in terminals" the screen ends up with blank lines and truncated text, across any CLI. Reproduced **without
+Claude**, using `powershell` + `tools/pty-probe`: 200 numbered lines, window 58→30→58 lines, and lines 144 to 171 vanished from history
+(28 = lines gained) with 28 blank lines at the bottom; in a 400-line wrapped session, 120→60→120 columns lost 29 lines; with 24
+random size changes, 155 lines lost. This is cause 2/3 from the request: a mismatch between ConPTY and `alacritty_terminal`.
 
-**Causa:** ao ganhar linhas, ou ao juntar linhas quebradas (reflow de uma largura maior), o `alacritty_terminal` mantém o cursor na mesma
-linha da tela e **puxa linhas do histórico para o topo**. O conhost não: o topo da janela dele fica no mesmo conteúdo, as linhas novas ficam
-em branco embaixo, e logo depois do redimensionamento ele repinta a janela toda a partir de `ESC[H` (visto nos bytes: `ESC[8;linhas;colunast`,
-`ESC[H`, as linhas, `ESC[K`). A repintura cai por cima das linhas puxadas, que somem do histórico e da tela. Encolher já era igual nos dois.
-Os CLIs em tela alternativa (OpenCode) não têm histórico e se repintam sozinhos: não sofrem.
+**Cause:** when gaining lines, or when joining wrapped lines (reflow at a wider width), `alacritty_terminal` keeps the cursor on the same
+screen line and **pulls history lines into the top**. Conhost does not: its window top remains at the same content, newly added lines stay
+blank at the bottom, and right after resizing it repaints the entire window starting from `ESC[H` (seen in bytes: `ESC[8;lines;columnst`,
+`ESC[H`, the lines, `ESC[K`). The repaint overwrites the pulled lines, which disappear from history and the screen. Shrinking was already identical between both.
+CLIs using the alternate screen buffer (OpenCode) have no scrollback and repaint themselves: they are unaffected.
 
-**Correção:** `terminal/resize.rs` (usada por `Emulator::resize`, só no Windows). Marca a primeira célula da tela com um caractere sem largura,
-deixa o `alacritty_terminal` redimensionar e, se a marca desceu (linhas puxadas), devolve essas linhas ao histórico (`scroll_up`, cursor
-junto); se a marca ficou no meio de uma linha (a continuação foi juntada à anterior), a linha inteira vai para o histórico. Resultado como
-o do ConPTY: o que estava no topo continua no topo e sobram linhas em branco embaixo. Medido com o `powershell`: 0 linhas perdidas nas
-24 mudanças aleatórias (eram 155). Sobra, em mudanças de largura, a repetição de 1 a 3 linhas no histórico (o mesmo problema de cópias do
+**Fix:** `terminal/resize.rs` (used by `Emulator::resize`, on Windows only). It marks the first cell on screen with a zero-width character,
+allows `alacritty_terminal` to resize, and if the mark moved down (lines pulled), pushes those lines back to history (`scroll_up`, moving cursor
+along); if the mark landed mid-line (continuation was joined to the previous line), the entire line goes to history. The result matches
+ConPTY: whatever was at the top stays at the top and extra lines remain blank at the bottom. Measured with `powershell`: 0 lines lost across
+24 random resizes (was 155). What remains on width changes is a repetition of 1 to 3 lines in history (the same duplicate-copy issue as in
 `claude-code-sem-esc3j-no-windows.md`).
-**Testes:** `record.rs` reproduz duas gravações reais do conhost (`testdata/conhost-powershell-*.bin` + `.events.txt`), com a correção ligada
-(nada some) e desligada (some).
+**Tests:** `record.rs` replays two real conhost recordings (`testdata/conhost-powershell-*.bin` + `.events.txt`), with the fix enabled
+(nothing vanishes) and disabled (lines vanish).
 
-**Como investigar o próximo caso:** a sonda `tools/pty-probe` (README) roda qualquer CLI, aplica as trocas de tamanho (`RESIZE`) e confere a
-numeração (`L00001 ...`) e vãos; `PROBE_PULL=1` desliga a correção para comparar; `PROBE_WATCH=L00372,...` mostra onde cada linha está. No app,
-o item "Gravar o terminal (diagnóstico)" do menu da aba (botão direito; ou `AGENTDECK_DEBUG_PTY=1`) grava em `dados/pty/` os bytes (`.bin`),
-as trocas de tamanho (`.events.txt`) e a grade 1,5 s depois da última saída (`.grid.txt`); "Salvar foto da grade agora" guarda a grade na hora
-e abre a pasta. Grade com o texto e quadro em branco = desenho; grade em branco, e o `.bin` reproduzido num `Term` novo também = o CLI/ConPTY.
-O `.bin` tem tudo o que o CLI mostrou: não publique sem olhar.
+**How to investigate the next occurrence:** the probe `tools/pty-probe` (README) runs any CLI, applies size changes (`RESIZE`), and checks
+numbering (`L00001 ...`) and gaps; `PROBE_PULL=1` disables the fix for comparison; `PROBE_WATCH=L00372,...` shows where each line is. In the app,
+the tab context menu item "Record terminal (diagnostics)" (right-click; or `AGENTDECK_DEBUG_PTY=1`) writes to `dados/pty/` the raw bytes (`.bin`),
+size changes (`.events.txt`), and the grid 1.5 s after last output (`.grid.txt`); "Save grid snapshot now" immediately captures the grid
+and opens the directory. A grid with text and a blank pane = rendering bug; a blank grid, and `.bin` replayed in a fresh `Term` also blank = CLI/ConPTY.
+The `.bin` contains everything displayed by the CLI: do not share without reviewing.
 
-**Por quê:** o ConPTY não conversa com o emulador sobre o que cada um fez no resize; qualquer diferença de modelo vira conteúdo no lugar errado
-sem erro nenhum. **Como aplicar:** mexer em resize/reflow é mexer aqui; meça com a sonda (shell e CLI) antes e depois. Ainda não se achou o caso
-"texto embaixo e vão em cima" da captura do usuário; se a correção não bastar, grave a sessão dele.
+**Why:** ConPTY does not communicate with the emulator about what each performed during a resize; any discrepancy in model results in misplaced content
+without producing an error. **How to apply:** changes to resize/reflow touch here; measure with the probe (shell and CLI) before and after. The case of
+"text at bottom and gap at top" from the user screenshot has not yet been reproduced; if the fix is insufficient, capture their session.

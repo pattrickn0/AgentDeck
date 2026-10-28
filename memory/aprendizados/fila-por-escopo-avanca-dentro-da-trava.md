@@ -1,19 +1,19 @@
 ---
-titulo: A fila por escopo avança dentro da trava das operações e Validating não a segura
-resumo: A tarefa que sai de Running/Review libera a fila por advance_queue_locked (sem retomar a trava); aguardando validação não segura ninguém.
+title: The scope-based queue advances inside the operations lock and Validating does not hold it
+summary: A task leaving Running/Review frees the queue via advance_queue_locked (without re-acquiring the lock); awaiting validation holds no one.
 touches: [crates/core/src/tasks/**, crates/core/src/scope.rs]
 ---
-Uma tarefa com escopo (`Task::scope`, lista de caminhos; `scope.rs`) que se sobrepõe ao de outra `Running`/`Review` vai a
-`Queued` em `task_start`. Quem a tira de lá é `Core::advance_queue_locked`, chamado no fim de `merge_task` (sucesso),
-`task_discard` e de um `task_start` que falhou.
+A task with a scope (`Task::scope`, list of paths; `scope.rs`) that overlaps with another `Running`/`Review` task transitions to
+`Queued` during `task_start`. What moves it out of the queue is `Core::advance_queue_locked`, called at the end of `merge_task` (on success),
+`task_discard`, and a failed `task_start`.
 
-**Por quê:** `TaskStore::op` é um `parking_lot::Mutex` (não reentrante) tomado por toda operação do ciclo de vida. Chamar
-`task_start` de dentro de `merge_task` travaria para sempre; por isso existem `start_locked` e `advance_queue_locked`, que
-assumem a trava já tomada. `Validating` fica fora de quem segura a fila de propósito: o código já está na base, a seguinte parte
-dele, e esperar o teste do usuário travaria o paralelismo (a reprovação só deixa um aviso no histórico se voltar sobreposta).
-`memory/**` e `Cargo.lock` (`scope::UNRESERVED`) não entram na sobreposição nem no aviso de "fora do escopo".
+**Why:** `TaskStore::op` is a `parking_lot::Mutex` (non-reentrant) held across every lifecycle operation. Calling
+`task_start` from within `merge_task` would deadlock permanently; hence `start_locked` and `advance_queue_locked` exist,
+assuming the lock is already held. `Validating` intentionally does not block the queue: the code is already on the base branch, the next task
+builds on it, and waiting for manual user validation would stall parallelism (rejection merely logs a notice in history if it returns with overlapping files).
+`memory/**` and `Cargo.lock` (`scope::UNRESERVED`) are exempt from overlap detection and from "outside of scope" warnings.
 
-**Como aplicar:** uma operação nova que tire uma tarefa de `Running`/`Review` (ou que a faça falhar) deve chamar
-`advance_queue_locked` no fim, ainda com a trava; nunca `task_start`/`tasks_advance_queue` de dentro de outra operação. A base da
-tarefa que sai da fila é a de quando ela começa (a worktree nasce do tip da base naquele momento), não a da criação. A interface
-não precisa mexer no `Deck::tick`: o início sozinho emite o mesmo `CoreEvent::Deliver` do botão Iniciar.
+**How to apply:** any new operation moving a task out of `Running`/`Review` (or causing it to fail) must call
+`advance_queue_locked` at the end while still holding the lock; never call `task_start`/`tasks_advance_queue` from within another operation. The base branch
+for a task leaving the queue is resolved when it starts (its worktree is branched from the base branch tip at that moment), not at task creation time. The UI
+does not need to poll in `Deck::tick`: task startup emits the exact same `CoreEvent::Deliver` event as the Start button.

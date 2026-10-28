@@ -178,7 +178,7 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     env.deck.tasks_submit_form();
     env.pump("the validation error", |d| !d.tasks.form.busy);
     let err = env.deck.tasks.form.error.clone().expect("inline error");
-    assert!(err.contains("não é uma branch local"), "{err}");
+    assert!(err.contains("is not a local branch"), "{err}");
     assert_eq!(env.deck.tasks.view, TasksView::New, "the form stays open");
     assert!(env.core.tasks(&env.project()).is_empty());
 
@@ -314,7 +314,7 @@ fn a_task_whose_scope_overlaps_waits_in_the_queue_and_starts_by_itself_when_the_
     env.deck.tasks.form.scope = "crates/*.rs".into();
     env.deck.tasks_submit_form();
     env.pump("the scope error", |d| !d.tasks.form.busy);
-    assert!(env.deck.tasks.form.error.as_deref().is_some_and(|e| e.contains("não de padrões")), "{:?}", env.deck.tasks.form.error);
+    assert!(env.deck.tasks.form.error.as_deref().is_some_and(|e| e.contains("not patterns (glob)")), "{:?}", env.deck.tasks.form.error);
     assert_eq!(env.core.tasks(&env.project()).len(), 1);
 
     // The second, with a scope inside the first's, enters the queue: no tab, only the discard button.
@@ -382,7 +382,7 @@ fn a_refused_merge_shows_the_core_message_and_discard_asks_first() {
     env.deck.tasks_confirm_accepted();
     env.pump("the refusal", |d| d.tasks.busy.is_none());
     let notice = env.deck.tasks.notice.clone().expect("notice");
-    assert!(notice.contains("alterações sem commit") && notice.contains("a.txt"), "{notice}");
+    assert!(notice.contains("uncommitted changes") && notice.contains("a.txt"), "{notice}");
     assert_eq!(env.deck.tasks.view, TasksView::Detail(id.clone()), "a refusal coming from the list opens the detail");
     assert_eq!(env.task(&id).status, TaskStatus::Review, "it stays in review");
 
@@ -434,7 +434,7 @@ fn a_refused_merge_offers_the_way_out_in_the_notice() {
     let back = std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt");
     assert_eq!(back.replace("\r\n", "\n"), "changed\n", "the user's change came back");
     let note = env.deck.tasks.notice.clone().expect("nota");
-    assert!(env.deck.tasks.notice_info && env.deck.tasks.notice_block.is_none() && note.contains("voltaram"), "{note}");
+    assert!(env.deck.tasks.notice_info && env.deck.tasks.notice_block.is_none() && note.contains("already back"), "{note}");
 
     // Rejected and delivered again, with work forgotten in the task folder: "Ask the agent to commit".
     git(&env.ws, &["checkout", "-q", "--", "a.txt"]);
@@ -456,7 +456,7 @@ fn a_refused_merge_offers_the_way_out_in_the_notice() {
     env.pump("the return", |d| d.tasks.busy.is_none());
     let back = env.task(&id);
     assert_eq!(back.status, TaskStatus::Running);
-    assert!(back.events.iter().any(|e| e.text.contains("devolvida ao agente")), "{:?}", back.events);
+    assert!(back.events.iter().any(|e| e.text.contains("returned to the agent")), "{:?}", back.events);
     assert!(env.deck.tasks.notice.is_none());
 }
 
@@ -529,7 +529,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     // The first task touches a.txt: no other tasks yet, with the base's commits.
     let t1 = create(&env, &project, "First", "Adjust a.txt and nothing else.");
     let first = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t1}-brief.md"))).expect("t1 brief");
-    assert!(first.contains("O que o projeto já aprendeu:") && first.contains("### Learning of-file"), "{first}");
+    assert!(first.contains("What the project has already learned:") && first.contains("### Learning of-file"), "{first}");
     assert!(first.contains("Careful when touching a.txt.") && first.contains("Applies to everyone."), "{first}");
     assert!(first.contains("Outras tarefas em andamento: nenhuma.") && first.contains("docs: learnings"), "{first}");
     // What does not match becomes only the index line.
@@ -543,7 +543,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     env.agent_commits(&t1, "a.txt", "two\n");
     let t2 = create(&env, &project, "Second", "Also touch `a.txt`.");
     let second = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-brief.md"))).expect("t2 brief");
-    assert!(second.contains(&format!("- {t1} \"First\" (claude@{t1}, em andamento): mexe em a.txt")), "{second}");
+    assert!(second.contains(&format!("- {t1} \"First\" (claude@{t1}, in progress): mexe em a.txt")), "{second}");
     assert!(second.contains("ATENÇÃO: o seu pedido cita a.txt"), "{second}");
 
     // The previous feedback comes back in the next return.
@@ -552,12 +552,12 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     env.core.task_done(&project, &t2, "Done.").expect("done");
     env.core.task_return(&project, &t2, "First adjustment: rename.").expect("return 1");
     let after_first = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-feedback.md"))).expect("feedback 1");
-    assert!(!after_first.contains("Feedbacks anteriores"), "{after_first}");
+    assert!(!after_first.contains("Earlier feedback"), "{after_first}");
     env.core.task_done(&project, &t2, "Done again.").expect("done 2");
     let back = env.core.task_return(&project, &t2, "Second adjustment: test.").expect("return 2");
     let after_second = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-feedback.md"))).expect("feedback 2");
     assert!(
-        after_second.contains("1. [revisão] First adjustment: rename.") && after_second.contains("Second adjustment: test."),
+        after_second.contains("1. [review] First adjustment: rename.") && after_second.contains("Second adjustment: test."),
         "{after_second}"
     );
     assert_eq!(back.feedbacks.len(), 2, "the returned task keeps both");
@@ -602,7 +602,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     // A return naming a.txt (already in the request) and b.txt (new): only b.txt's learning goes, with no global one or index.
     env.core.task_return(&project, &t1, "Review a.txt and also b.txt.").expect("return");
     let first = feedback_file(&t1);
-    assert!(first.contains("O que o projeto já aprendeu sobre os arquivos citados:"), "{first}");
+    assert!(first.contains("What the project has already learned about the cited files:"), "{first}");
     assert!(first.contains("Careful with b.") && !first.contains("Careful with a."), "{first}");
     assert!(!first.contains("Applies to everyone.") && !first.contains("Outros aprendizados"), "{first}");
 
@@ -610,7 +610,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     env.core.task_done(&project, &t1, "Done again.").expect("done 2");
     env.core.task_return(&project, &t1, "Still missing in b.txt.").expect("return 2");
     let second = feedback_file(&t1);
-    assert!(second.contains("Feedbacks anteriores") && !second.contains("sobre os arquivos citados"), "{second}");
+    assert!(second.contains("Earlier feedback") && !second.contains("about the cited files"), "{second}");
     assert!(!second.contains("Careful with b."), "{second}");
 
     // The rejection follows the same rule: after merging, a.txt (request) and b.txt (feedback) were already seen.
@@ -618,7 +618,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     env.core.task_merge(&project, &t1).expect("merge");
     env.core.task_reject(&project, &t1, "It does not work: see a.txt and b.txt.").expect("reject");
     let rejected = feedback_file(&t1);
-    assert!(rejected.contains("reprovada na validação") && !rejected.contains("sobre os arquivos citados"), "{rejected}");
+    assert!(rejected.contains("rejected in validation") && !rejected.contains("about the cited files"), "{rejected}");
 
     // A new task sees t2's still uncommitted work in the current situation.
     let t2 = create(&env, &project, "Second", "Do something else.");
@@ -628,7 +628,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     std::fs::write(work.join("a.txt"), "changed\n").expect("w");
     let t3 = create(&env, &project, "Third", "Nothing.");
     let brief = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t3}-brief.md"))).expect("t3 brief");
-    assert!(brief.contains(&format!("- {t2} \"Second\" (claude@{t2}, em andamento): mexe em a.txt, new.txt")), "{brief}");
+    assert!(brief.contains(&format!("- {t2} \"Second\" (claude@{t2}, in progress): mexe em a.txt, new.txt")), "{brief}");
 }
 
 #[test]

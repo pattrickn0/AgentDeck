@@ -1,17 +1,17 @@
 ---
-titulo: O AGENTS.md é reescrito pelo app e não pode travar a mesclagem
-resumo: O app mantém um bloco no AGENTS.md; a mesclagem o ignora na checagem de "sujo" e o guarda e regrava se a branch também mexe no arquivo.
+title: AGENTS.md is rewritten by the app and must not block merging
+summary: The app maintains a block in AGENTS.md; merge ignores it in the "dirty" check and preserves and rewrites it if the branch also modifies the file.
 touches: [AGENTS.md, crates/core/src/workspace.rs, crates/core/src/tasks/**]
 ---
-O app mantém um bloco marcado no `AGENTS.md` do workspace com as instruções da ponte (o Antigravity não tem flag
-para isso). Só atualiza um arquivo que já exista (`workspace::ensure_agent_context`), gravando ao lado e trocando, e
-mantém CRLF. A única exceção é criar um só com o bloco para o CLI que não tem outro canal (`create = true`; ver
-`instrucoes-por-cli.md`); a pasta pessoal do usuário nunca recebe o arquivo.
+The app maintains a marked block in the workspace `AGENTS.md` with instructions for the bridge (Antigravity has no flag
+for this). It only updates a file that already exists (`workspace::ensure_agent_context`), writing alongside and replacing, and
+preserves CRLF. The only exception is creating one with only the block for a CLI that has no other channel (`create = true`; see
+`instrucoes-por-cli.md`); the user's home folder never receives the file.
 
-**Por quê:** o arquivo muda sozinho e aparece como alteração no repositório principal, e `git merge` recusa mesclar
-sobre um arquivo alterado que a branch também altera ("commit your changes or stash them").
-**Como aplicar:** `task_merge` tira `AGENTS.md` da checagem de "sujo". Se a branch da tarefa também mexe no arquivo e a
-diferença para o HEAD é só o bloco do app (`workspace::only_marker_blocks_differ`), ele guarda o conteúdo, faz
-`git checkout -- AGENTS.md`, mescla e regrava o bloco depois, em qualquer desfecho (`workspace::restore_marker_block`).
-Se o usuário editou o texto fora do bloco, recusa sem descartar nada. Não edite o bloco do AgentDeck à mão nem o
-inclua no commit de uma tarefa.
+**Why:** the file changes on its own and appears as a modification in the main repository, and `git merge` refuses to merge
+on top of a modified file that the branch also touches ("commit your changes or stash them").
+**How to apply:** `task_merge` excludes `AGENTS.md` from the "dirty" check. If the task branch also touches the file and the
+difference from HEAD is only the app's block (`workspace::only_marker_blocks_differ`), it saves the content, runs
+`git checkout -- AGENTS.md`, merges, and rewrites the block afterwards, in any outcome (`workspace::restore_marker_block`).
+If the user edited text outside the block, it refuses without discarding anything. Do not edit the AgentDeck block by hand or
+include it in a task commit.

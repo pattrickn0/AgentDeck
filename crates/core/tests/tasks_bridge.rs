@@ -1,5 +1,8 @@
-//! A ponte HTTP das tarefas (`/tasks`) com o git real: o ciclo de vida inteiro pelo token mestre e as
-//! permissões do agente de uma tarefa (consulta e entrega o próprio relatório; não mescla, não descarta, não cria).
+//! The tasks HTTP bridge (`/tasks`) with real git: the whole lifecycle through the master token and the
+//! permissions of a task's agent (it queries and delivers its own report; it does not merge, discard or create).
+//!
+//! A few assertions quote answers that belong to other areas (the bridge's permission and validation errors, the
+//! `/learn` and `/outline` texts); they stay as those areas have them.
 
 use std::path::Path;
 
@@ -13,7 +16,7 @@ use env::*;
 macro_rules! need_git {
     () => {
         if git_exe().is_none() {
-            eprintln!("git não instalado: teste pulado");
+            eprintln!("git not installed: test skipped");
             return;
         }
     };
@@ -26,7 +29,7 @@ fn the_bridge_serves_the_whole_lifecycle_with_the_master_token() {
     let master = env.core.bridge_token().to_owned();
     let call = |method: &str, path: &str, body: Value| http(&env.core, method, path, &master, &body.to_string());
 
-    let (st, b) = call("POST", "/tasks", json!({ "title": "Pela ponte", "brief": "Faça pela ponte.", "model": "sonnet" }));
+    let (st, b) = call("POST", "/tasks", json!({ "title": "Through the bridge", "brief": "Do it through the bridge.", "model": "sonnet" }));
     assert_eq!(st, 200, "{b}");
     assert_eq!((b["task"]["id"].as_str(), b["task"]["status"].as_str()), (Some("t1"), Some("draft")));
     assert_eq!(
@@ -34,60 +37,60 @@ fn the_bridge_serves_the_whole_lifecycle_with_the_master_token() {
         (Some("claude"), Some("sonnet"), Some("usuário"))
     );
 
-    // Erros de validação e rotas.
+    // Validation and route errors.
     assert_eq!(call("POST", "/tasks", json!({ "title": " " })).0, 400);
-    assert_eq!(call("POST", "/tasks", json!({ "title": "x", "kind": "nao-existe" })).0, 400);
+    assert_eq!(call("POST", "/tasks", json!({ "title": "x", "kind": "does-not-exist" })).0, 400);
     assert_eq!(call("POST", "/tasks", json!({ "title": 5 })).0, 400);
     assert_eq!(call("GET", "/tasks/t9", json!(null)).0, 404);
     assert_eq!(call("GET", "/tasks/xyz", json!(null)).0, 400);
     assert_eq!(call("POST", "/tasks/t1/explode", json!({})).0, 404);
-    assert_eq!(call("POST", "/tasks/t1/merge", json!({})).0, 409, "rascunho não se mescla");
+    assert_eq!(call("POST", "/tasks/t1/merge", json!({})).0, 409, "a draft is not merged");
     assert_eq!(call("POST", "/tasks/t9/start", json!({})).0, 404);
 
-    // Criar já iniciando.
-    let (st, b) = call("POST", "/tasks", json!({ "title": "Já começa", "brief": "Vai.", "start": true }));
+    // Create already starting.
+    let (st, b) = call("POST", "/tasks", json!({ "title": "Starts right away", "brief": "Go.", "start": true }));
     assert_eq!(st, 200, "{b}");
     assert_eq!(b["task"]["status"], "running");
     assert!(Path::new(b["task"]["worktree"].as_str().expect("worktree")).is_dir());
-    // Iniciar o rascunho t1 pelo caminho próprio.
+    // Start the t1 draft through its own path.
     let (st, b) = call("POST", "/tasks/t1/start", json!({}));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("running")));
 
-    // Listas.
+    // Lists.
     let (st, b) = call("GET", "/tasks", json!(null));
     assert_eq!(st, 200);
-    let list = b["tasks"].as_array().expect("lista");
+    let list = b["tasks"].as_array().expect("list");
     assert_eq!(list.iter().map(|t| t["id"].as_str().unwrap_or("")).collect::<Vec<_>>(), ["t1", "t2"]);
-    assert!(list[0].get("brief").is_none() && list[0].get("report").is_none(), "a lista é enxuta");
+    assert!(list[0].get("brief").is_none() && list[0].get("report").is_none(), "the list is slim");
     let (st, b) = call("GET", "/tasks/t1", json!(null));
     assert_eq!(st, 200);
-    assert_eq!(b["task"]["brief"], "Faça pela ponte.");
+    assert_eq!(b["task"]["brief"], "Do it through the bridge.");
     assert!(b["task"]["events"].as_array().is_some_and(|e| e.len() >= 2));
     let (st, b) = http(&env.core, "GET", &format!("/tasks?project={}", env.project), &master, "");
     assert_eq!((st, b["tasks"].as_array().map(Vec::len)), (200, Some(2)));
-    assert_eq!(http(&env.core, "GET", "/tasks?project=pnenhum", &master, "").0, 400);
+    assert_eq!(http(&env.core, "GET", "/tasks?project=pnone", &master, "").0, 400);
 
-    // Relatório, devolução, mesclagem e descarte.
+    // Report, return, merge and discard.
     let t1 = env.core.task(&env.project, "t1").expect("t1");
-    commit_file(&t1.worktree, "ponte.txt", "ok\n", "feat: ponte");
-    let (st, b) = call("POST", "/tasks/t1/done", json!({ "report": "Pela ponte, pronto." }));
-    assert_eq!((st, b["task"]["status"].as_str(), b["task"]["report"].as_str()), (200, Some("review"), Some("Pela ponte, pronto.")));
-    assert!(b["task"]["diff_stat"].as_str().is_some_and(|s| s.contains("ponte.txt")));
-    assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "de novo" })).0, 409);
-    let (st, b) = call("POST", "/tasks/t1/return", json!({ "feedback": "Falta um teste." }));
+    commit_file(&t1.worktree, "bridge.txt", "ok\n", "feat: bridge");
+    let (st, b) = call("POST", "/tasks/t1/done", json!({ "report": "Through the bridge, ready." }));
+    assert_eq!((st, b["task"]["status"].as_str(), b["task"]["report"].as_str()), (200, Some("review"), Some("Through the bridge, ready.")));
+    assert!(b["task"]["diff_stat"].as_str().is_some_and(|s| s.contains("bridge.txt")));
+    assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "again" })).0, 409);
+    let (st, b) = call("POST", "/tasks/t1/return", json!({ "feedback": "A test is missing." }));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("running")));
-    assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "Com teste." })).0, 200);
+    assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "With a test." })).0, 200);
     let (st, b) = call("POST", "/tasks/t1/merge", json!({}));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("validating")), "{b}");
-    assert!(env.ws.join("ponte.txt").is_file() && t1.worktree.is_dir(), "mesclar não limpa");
-    // Reprovar: sem motivo é erro de uso; com motivo volta a andamento. Depois, entrega, mescla e valida.
+    assert!(env.ws.join("bridge.txt").is_file() && t1.worktree.is_dir(), "merging does not clean up");
+    // Reject: without a reason it is a usage error; with a reason it goes back to in progress. Then deliver, merge and validate.
     assert_eq!(call("POST", "/tasks/t1/reject", json!({})).0, 400);
-    let (st, b) = call("POST", "/tasks/t1/reject", json!({ "feedback": "Não abre no app." }));
+    let (st, b) = call("POST", "/tasks/t1/reject", json!({ "feedback": "It does not open in the app." }));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("running")), "{b}");
-    assert_eq!(call("POST", "/tasks/t1/validate", json!({})).0, 409, "validar só a partir de aguardando validação");
+    assert_eq!(call("POST", "/tasks/t1/validate", json!({})).0, 409, "validating only from awaiting validation");
     assert_eq!(call("POST", "/tasks/t1/reject", json!({ "feedback": "x" })).0, 409);
-    commit_file(&t1.worktree, "ponte2.txt", "ok\n", "fix: abre no app");
-    assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "Corrigido." })).0, 200);
+    commit_file(&t1.worktree, "bridge2.txt", "ok\n", "fix: opens in the app");
+    assert_eq!(call("POST", "/tasks/t1/done", json!({ "report": "Fixed." })).0, 200);
     assert_eq!(call("POST", "/tasks/t1/merge", json!({})).0, 200);
     let (st, b) = call("POST", "/tasks/t1/validate", json!({}));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("merged")), "{b}");
@@ -103,25 +106,25 @@ fn a_task_agent_cannot_merge_discard_or_create() {
     need_git!();
     let env = start();
     let core = &env.core;
-    // O orquestrador (claude) cria duas tarefas pela ponte, com o token da aba dele.
+    // The orchestrator (claude) creates two tasks through the bridge, with its tab's token.
     core.register_instance(&env.project, "claude");
     let boss = tab_token(&env, "claude");
     let created = |title: &str| {
-        let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": title, "brief": "Faça.", "start": true }).to_string());
+        let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": title, "brief": "Do it.", "start": true }).to_string());
         assert_eq!(st, 200, "{b}");
         b["task"].clone()
     };
-    let (t1, t2) = (created("Primeira"), created("Segunda"));
+    let (t1, t2) = (created("First"), created("Second"));
     assert_eq!((t1["creator"].as_str(), t1["instance"].as_str()), (Some("claude"), Some("claude@t1")));
-    assert_eq!(core.team(&env.project, "claude@t1").boss.as_deref(), Some("claude"), "quem criou é o chefe");
+    assert_eq!(core.team(&env.project, "claude@t1").boss.as_deref(), Some("claude"), "whoever created it is the boss");
 
-    // O agente da tarefa t1 consulta e entrega o relatório da própria tarefa, só.
+    // The agent of task t1 queries and delivers its own task's report, only.
     let agent = tab_token(&env, "claude@t1");
     let call = |token: &str, method: &str, path: &str, body: Value| http(core, method, path, token, &body.to_string());
     assert_eq!(call(&agent, "GET", "/tasks", json!(null)).0, 200);
     assert_eq!(call(&agent, "GET", "/tasks/t2", json!(null)).0, 200);
     for (path, body) in [
-        ("/tasks", json!({ "title": "Subtarefa", "brief": "x" })),
+        ("/tasks", json!({ "title": "Subtask", "brief": "x" })),
         ("/tasks/t1/start", json!({})),
         ("/tasks/t1/return", json!({ "feedback": "x" })),
         ("/tasks/t1/merge", json!({})),
@@ -133,29 +136,30 @@ fn a_task_agent_cannot_merge_discard_or_create() {
     ] {
         let (st, b) = call(&agent, "POST", path, body);
         assert_eq!(st, 403, "{path}: {b}");
+        // The wording of the bridge's error belongs to `bridge.rs` (another area): it stays as that area has it.
         assert!(b["error"].as_str().is_some_and(|e| e.contains("só consulta tarefas")), "{b}");
     }
-    // O relatório de outra tarefa também não.
-    let (st, b) = call(&agent, "POST", "/tasks/t2/done", json!({ "report": "me passando por t2" }));
+    // Another task's report neither.
+    let (st, b) = call(&agent, "POST", "/tasks/t2/done", json!({ "report": "posing as t2" }));
     assert_eq!(st, 403, "{b}");
     assert_eq!(core.task(&env.project, "t2").map(|t| t.status), Some(TaskStatus::Running));
-    // E um agente que não é o da tarefa não entrega relatório por ela.
-    let (st, _) = call(&boss, "POST", "/tasks/t1/done", json!({ "report": "eu entrego por ele" }));
+    // And an agent that is not the task's does not deliver a report for it.
+    let (st, _) = call(&boss, "POST", "/tasks/t1/done", json!({ "report": "I deliver for it" }));
     assert_eq!(st, 403);
-    // Nada mudou: t1 e t2 seguem em andamento, o nome do criador intacto, nenhuma t3.
+    // Nothing changed: t1 and t2 are still in progress, the creator's name intact, no t3.
     assert_eq!(
         core.tasks(&env.project).iter().map(|t| (t.id.as_str(), t.status)).collect::<Vec<_>>(),
         [("t1", TaskStatus::Running), ("t2", TaskStatus::Running)]
     );
 
-    // O relatório da própria tarefa vale.
-    commit_file(Path::new(t1["worktree"].as_str().expect("worktree")), "feito.txt", "ok\n", "feat: feito");
-    let (st, b) = call(&agent, "POST", "/tasks/t1/done", json!({ "report": "Feito por mim." }));
+    // The task's own report is valid.
+    commit_file(Path::new(t1["worktree"].as_str().expect("worktree")), "done.txt", "ok\n", "feat: done");
+    let (st, b) = call(&agent, "POST", "/tasks/t1/done", json!({ "report": "Done by me." }));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("review")), "{b}");
-    // Quem criou (o orquestrador, não o agente da tarefa) mescla, valida e descarta.
+    // Whoever created it (the orchestrator, not the task's agent) merges, validates and discards.
     let (st, b) = call(&boss, "POST", "/tasks/t1/merge", json!({}));
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("validating")), "{b}");
-    // Aguardando validação o agente segue vivo (o token vale), mas continua sem poder validar nem reprovar.
+    // Awaiting validation the agent stays alive (the token is valid), but still cannot validate or reject.
     assert_eq!(call(&agent, "GET", "/tasks", json!(null)).0, 200);
     assert_eq!(call(&agent, "POST", "/tasks/t1/validate", json!({})).0, 403);
     assert_eq!(call(&agent, "POST", "/tasks/t1/reject", json!({ "feedback": "x" })).0, 403);
@@ -163,7 +167,7 @@ fn a_task_agent_cannot_merge_discard_or_create() {
     assert_eq!((st, b["task"]["status"].as_str()), (200, Some("merged")), "{b}");
     let (st, _) = call(&boss, "POST", "/tasks/t2/discard", json!({}));
     assert_eq!(st, 200);
-    // O token do agente da t1 deixou de existir com a instância; da t2 também.
+    // The t1 agent's token ceased to exist with the instance; t2's too.
     assert_eq!(call(&agent, "GET", "/tasks", json!(null)).0, 403);
     assert_eq!(t2["id"], "t2");
     core.shutdown();
@@ -174,47 +178,47 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
     need_git!();
     let env = start();
     let core = &env.core;
-    // Um aprendizado versionado na base, antes de a tarefa existir (a worktree parte dela).
-    let text = "---\ntitulo: Cuidado com src\nresumo: Regra de src.\ntouches: [src/**]\n---\nNão mexa em src sem ler isto.\n";
-    std::fs::create_dir_all(env.ws.join("memory").join("aprendizados")).expect("pasta");
-    commit_file(&env.ws, "memory/aprendizados/src.md", text, "docs: aprendizado");
+    // A learning versioned in the base, before the task exists (the worktree departs from it).
+    let text = "---\ntitle: Careful with src\nsummary: Rule for src.\ntouches: [src/**]\n---\nDo not touch src without reading this.\n";
+    std::fs::create_dir_all(env.ws.join("memory").join("aprendizados")).expect("folder");
+    commit_file(&env.ws, "memory/aprendizados/src.md", text, "docs: learning");
     core.register_instance(&env.project, "claude");
     let boss = tab_token(&env, "claude");
-    let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": "Com memória", "brief": "Faça.", "start": true }).to_string());
+    let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": "With memory", "brief": "Do it.", "start": true }).to_string());
     assert_eq!(st, 200, "{b}");
     let worktree = b["task"]["worktree"].as_str().expect("worktree").to_owned();
     let agent = tab_token(&env, "claude@t1");
     let ask = |token: &str, paths: Value| http(core, "POST", "/learn", token, &json!({ "paths": paths }).to_string());
 
-    // Caminho relativo e caminho absoluto dentro da worktree dão a mesma resposta.
+    // A relative path and an absolute path inside the worktree give the same answer.
     let (st, rel) = ask(&agent, json!(["src/lib.rs"]));
     assert_eq!(st, 200, "{rel}");
-    let rel = rel["text"].as_str().expect("texto").to_owned();
-    assert!(rel.contains("Não mexa em src sem ler isto.") && rel.contains("### Cuidado com src"), "{rel}");
+    let rel = rel["text"].as_str().expect("text").to_owned();
+    assert!(rel.contains("Do not touch src without reading this.") && rel.contains("### Careful with src"), "{rel}");
     let absolute = Path::new(&worktree).join("src").join("lib.rs").to_string_lossy().into_owned();
     let (st, abs) = ask(&agent, json!([absolute]));
     assert_eq!((st, abs["text"].as_str()), (200, Some(rel.as_str())));
-    // Arquivo sem aprendizado: diz que nada casa, e mostra o índice.
+    // A file without a learning: says nothing matches, and shows the index. (The wording belongs to `learnings.rs`.)
     let (st, none) = ask(&agent, json!(["docs/x.md"]));
     assert_eq!(st, 200);
     assert!(
         none["text"]
             .as_str()
-            .is_some_and(|t| t.contains("Nenhum aprendizado específico") && t.contains("memory/aprendizados/src.md — Regra de src.")),
+            .is_some_and(|t| t.contains("Nenhum aprendizado específico") && t.contains("memory/aprendizados/src.md — Rule for src.")),
         "{none}"
     );
-    // Sem caminhos: os globais e o índice dos específicos. O orquestrador (sem tarefa) lê do repositório do projeto.
+    // Without paths: the globals and the index of the specific ones. The orchestrator (no task) reads from the project's repository.
     let (st, b) = ask(&agent, json!([]));
     assert!(
         st == 200
             && b["text"]
                 .as_str()
-                .is_some_and(|t| t.starts_with("Aprendizados do projeto:") && t.contains("memory/aprendizados/src.md — Regra de src.")),
+                .is_some_and(|t| t.starts_with("Aprendizados do projeto:") && t.contains("memory/aprendizados/src.md — Rule for src.")),
         "{st} {b}"
     );
     let (st, b) = ask(&boss, json!(["src/lib.rs"]));
-    assert!(st == 200 && b["text"].as_str().is_some_and(|t| t.contains("Não mexa em src")), "{st} {b}");
-    // Só POST.
+    assert!(st == 200 && b["text"].as_str().is_some_and(|t| t.contains("Do not touch src")), "{st} {b}");
+    // POST only.
     assert_eq!(http(core, "GET", "/learn", &boss, "").0, 404);
 }
 
@@ -223,7 +227,7 @@ fn outline_answers_from_the_worktree_of_the_asking_agent() {
     need_git!();
     let env = start();
     let core = &env.core;
-    std::fs::create_dir_all(env.ws.join("src")).expect("pasta");
+    std::fs::create_dir_all(env.ws.join("src")).expect("folder");
     commit_file(
         &env.ws,
         "src/lib.rs",
@@ -241,43 +245,44 @@ impl S {
     );
     core.register_instance(&env.project, "claude");
     let boss = tab_token(&env, "claude");
-    let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": "Com resumo", "brief": "Faça.", "start": true }).to_string());
+    let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": "With outline", "brief": "Do it.", "start": true }).to_string());
     assert_eq!(st, 200, "{b}");
     let worktree = b["task"]["worktree"].as_str().expect("worktree").to_owned();
-    // O que a tarefa muda na worktree aparece no resumo dela, não no do repositório.
+    // What the task changes in the worktree shows up in its outline, not in the repository's.
     std::fs::write(
         Path::new(&worktree).join("src").join("lib.rs"),
         "pub fn only_in_the_task() {}
 ",
     )
-    .expect("escreve");
+    .expect("write");
     let agent = tab_token(&env, "claude@t1");
     let ask = |token: &str, paths: Value| http(core, "POST", "/outline", token, &json!({ "paths": paths }).to_string());
 
+    // The outline wording (`linha`, `não existe`, `recusado`...) belongs to `outline.rs` (another area): it stays as that area has it.
     let (st, rel) = ask(&agent, json!(["src/lib.rs"]));
     assert_eq!(st, 200, "{rel}");
-    let rel = rel["text"].as_str().expect("texto").to_owned();
+    let rel = rel["text"].as_str().expect("text").to_owned();
     assert!(rel.contains("src/lib.rs — 1 linha, Rust") && rel.contains("    1  pub fn only_in_the_task()"), "{rel}");
-    // Caminho absoluto dentro da worktree dá a mesma resposta.
+    // An absolute path inside the worktree gives the same answer.
     let absolute = Path::new(&worktree).join("src").join("lib.rs").to_string_lossy().into_owned();
     let (st, abs) = ask(&agent, json!([absolute]));
     assert_eq!((st, abs["text"].as_str()), (200, Some(rel.as_str())));
-    // Sem tarefa (o orquestrador) lê o repositório do projeto.
+    // Without a task (the orchestrator) it reads the project's repository.
     let (st, b) = ask(&boss, json!(["src/lib.rs"]));
     let text = b["text"].as_str().unwrap_or("");
     assert!(st == 200 && text.contains("pub struct S { a }") && text.contains("  pub fn go(&self) -> u8"), "{st} {b}");
-    // Arquivo que não existe, `..` e pasta viram aviso, não erro; o resto da lista continua.
-    let (st, b) = ask(&agent, json!(["nao-existe.rs", "../fora.rs", "src", "src/lib.rs"]));
+    // A file that does not exist, `..` and a folder become a notice, not an error; the rest of the list goes on.
+    let (st, b) = ask(&agent, json!(["does-not-exist.rs", "../outside.rs", "src", "src/lib.rs"]));
     let text = b["text"].as_str().unwrap_or("");
     assert!(
         st == 200
-            && text.contains("nao-existe.rs — não existe")
-            && text.contains("../fora.rs — recusado")
+            && text.contains("does-not-exist.rs — não existe")
+            && text.contains("../outside.rs — recusado")
             && text.contains("src — é uma pasta")
             && text.contains("only_in_the_task"),
         "{st} {b}"
     );
-    // Sem arquivos: erro de uso. Só POST.
+    // Without files: a usage error. POST only.
     assert_eq!(ask(&agent, json!([])).0, 400);
     assert_eq!(http(core, "GET", "/outline", &boss, "").0, 404);
     core.shutdown();
@@ -289,15 +294,16 @@ fn the_bridge_reads_the_effort_of_a_new_task() {
     let env = start();
     let token = tab_token(&env, "claude");
     let post = |body: &str| http(&env.core, "POST", "/tasks", &token, body);
-    let (status, body) = post(r#"{"title":"Rápida","kind":"claude","effort":"Alto"}"#);
+    // The request's own words are protocol input: the Portuguese spelling `Alto` is accepted as `high`.
+    let (status, body) = post(r#"{"title":"Quick","kind":"claude","effort":"Alto"}"#);
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["task"]["effort"], "high");
-    let (status, body) = post(r#"{"title":"Padrão","kind":"claude"}"#);
+    let (status, body) = post(r#"{"title":"Default","kind":"claude"}"#);
     assert_eq!((status, &body["task"]["effort"]), (200, &serde_json::Value::Null));
-    let (status, body) = post(r#"{"title":"Máximo","kind":"claude","effort":"max"}"#);
+    let (status, body) = post(r#"{"title":"Maximum","kind":"claude","effort":"max"}"#);
     assert_eq!(status, 400);
     assert!(body["error"].as_str().is_some_and(|e| e.contains("esforço inválido")), "{body}");
-    let (status, _) = post(r#"{"title":"Número","kind":"claude","effort":3}"#);
+    let (status, _) = post(r#"{"title":"Number","kind":"claude","effort":3}"#);
     assert_eq!(status, 400);
     env.core.shutdown();
 }
@@ -308,13 +314,13 @@ fn the_bridge_reads_the_level_of_a_new_task() {
     let env = start();
     let token = tab_token(&env, "claude");
     let post = |body: &str| http(&env.core, "POST", "/tasks", &token, body);
-    let (status, body) = post(r#"{"title":"Grande","kind":"claude","level":"complexa"}"#);
+    let (status, body) = post(r#"{"title":"Big","kind":"claude","level":"complexa"}"#);
     assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("complexa")), "{body}");
-    let (status, body) = post(r#"{"title":"Padrão","kind":"claude"}"#);
+    let (status, body) = post(r#"{"title":"Default","kind":"claude"}"#);
     assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("media")));
-    let (status, body) = post(r#"{"title":"Média","kind":"claude","level":"Média"}"#);
+    let (status, body) = post(r#"{"title":"Medium","kind":"claude","level":"Média"}"#);
     assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("media")));
-    let (status, body) = post(r#"{"title":"Enorme","kind":"claude","level":"enorme"}"#);
+    let (status, body) = post(r#"{"title":"Huge","kind":"claude","level":"enorme"}"#);
     assert_eq!(status, 400);
     assert!(body["error"].as_str().is_some_and(|e| e.contains("nível inválido")), "{body}");
     env.core.shutdown();
@@ -326,7 +332,7 @@ fn the_bridge_reads_the_scope_of_a_new_task_and_queues_on_start() {
     let env = start();
     let token = tab_token(&env, "claude");
     let post = |body: &str| http(&env.core, "POST", "/tasks", &token, body);
-    // Lista de caminhos ou texto com um por linha; chega normalizado e aparece na lista e no detalhe.
+    // A list of paths or a text with one per line; it arrives normalized and shows up in the list and in the detail.
     let (status, body) = post(r#"{"title":"Core","kind":"claude","scope":["crates/core/","Crates\\Core\\"],"start":true}"#);
     assert_eq!(status, 200, "{body}");
     assert_eq!((body["task"]["status"].as_str(), &body["task"]["scope"]), (Some("running"), &json!(["crates/core"])));
@@ -341,9 +347,9 @@ fn the_bridge_reads_the_scope_of_a_new_task_and_queues_on_start() {
     assert_eq!(list["tasks"][1]["scope"], json!(["crates/core/src/git.rs", "memory/GERAL.md"]));
     let (status, shown) = http(&env.core, "GET", "/tasks/t2", &token, "");
     assert_eq!((status, shown["task"]["waiting_for"].as_str()), (200, Some("t1")));
-    // Escopo inválido ou de outro tipo: 400, sem criar.
+    // Invalid scope or of another type: 400, without creating.
     for bad in [r#""scope":["crates/*.rs"]"#, r#""scope":["/abs"]"#, r#""scope":["../x"]"#, r#""scope":[3]"#, r#""scope":7"#] {
-        let (status, body) = post(&format!(r#"{{"title":"Ruim","kind":"claude",{bad}}}"#));
+        let (status, body) = post(&format!(r#"{{"title":"Bad","kind":"claude",{bad}}}"#));
         assert_eq!(status, 400, "{bad}: {body}");
     }
     assert_eq!(env.core.tasks(&env.project).len(), 2);

@@ -60,8 +60,8 @@ fn learn_brings_the_situation_to_any_tab_and_warns_about_clashes() {
     eprintln!("learn sem arquivos com 2 tarefas abertas: {:?}", started.elapsed());
     assert!(text.starts_with("O projeto ainda não tem aprendizados"), "{text}");
     let (_, situation) = text.split_once("Situação atual:\n").unwrap_or_else(|| panic!("sem situação: {text}"));
-    assert!(situation.contains("- t1 \"Primeira\" (claude@t1, em andamento): mexe em app.rs, memory/historico.md"), "{situation}");
-    assert!(situation.contains("- t2 \"Segunda\" (claude@t2, em andamento): mexe em wip.rs"), "{situation}");
+    assert!(situation.contains("- t1 \"Primeira\" (claude@t1, in progress): mexe em app.rs, memory/historico.md"), "{situation}");
+    assert!(situation.contains("- t2 \"Segunda\" (claude@t2, in progress): mexe em wip.rs"), "{situation}");
     assert!(situation.contains("Últimos commits de main:"), "{situation}");
 
     // O agente de uma tarefa não se vê na própria situação.
@@ -78,18 +78,18 @@ fn learn_brings_the_situation_to_any_tab_and_warns_about_clashes() {
     let on_branch = learn(&env, &a2, &["app.rs"]);
     assert!(
         on_branch.starts_with(
-            "ATENÇÃO:\napp.rs: a t1 (claude@t1, em andamento; já mexeu) também mexe nele; mudanças nas mesmas linhas vão conflitar na mesclagem\n\n"
+            "ATENÇÃO:\napp.rs: a t1 (claude@t1, in progress; já mexeu) também mexe nele; mudanças nas mesmas linhas vão conflitar na mesclagem\n\n"
         ),
         "{on_branch}"
     );
     // Arquivo só sem commit na worktree de t2.
     let dirty = learn(&env, &a1, &["wip.rs"]);
-    assert!(dirty.contains("wip.rs: a t2 (claude@t2, em andamento; já mexeu) também mexe nele"), "{dirty}");
+    assert!(dirty.contains("wip.rs: a t2 (claude@t2, in progress; já mexeu) também mexe nele"), "{dirty}");
     // O caminho absoluto dentro da própria worktree vale como o relativo (e continua sem avisar do próprio arquivo).
     let own_abs = Path::new(&w1).join("app.rs").to_string_lossy().into_owned();
     assert!(!learn(&env, &a1, &[own_abs.as_str()]).contains("ATENÇÃO"));
     // A aba normal também é avisada.
-    assert!(learn(&env, &boss, &["app.rs"]).contains("app.rs: a t1 (claude@t1, em andamento; já mexeu) também mexe nele"));
+    assert!(learn(&env, &boss, &["app.rs"]).contains("app.rs: a t1 (claude@t1, in progress; já mexeu) também mexe nele"));
     core.shutdown();
 }
 
@@ -106,7 +106,7 @@ fn learn_without_other_tasks_says_so_and_sends_nothing_extra_for_files() {
     assert!(alone.contains("Situação atual:\nOutras tarefas em andamento: nenhuma."), "{alone}");
     assert!(!learn(&env, &agent, &["app.rs"]).contains("ATENÇÃO"));
     // O orquestrador (aba normal) é avisado da tarefa que já mexeu.
-    assert!(learn(&env, &boss, &["app.rs"]).contains("a t1 (claude@t1, em andamento; já mexeu)"));
+    assert!(learn(&env, &boss, &["app.rs"]).contains("a t1 (claude@t1, in progress; já mexeu)"));
     env.core.shutdown();
 }
 
@@ -125,7 +125,7 @@ fn learn_stays_quick_with_several_tasks_open() {
     let text = learn(&env, &boss, &[]);
     let elapsed = started.elapsed();
     eprintln!("learn sem arquivos com 3 tarefas abertas: {elapsed:?}");
-    assert!(text.contains("- t3 \"Tarefa 2\" (claude@t3, em andamento): mexe em f2.rs, sujo2.rs"), "{text}");
+    assert!(text.contains("- t3 \"Tarefa 2\" (claude@t3, in progress): mexe em f2.rs, sujo2.rs"), "{text}");
     assert!(elapsed.as_secs() < 5, "lento: {elapsed:?}");
     env.core.shutdown();
 }
@@ -173,7 +173,7 @@ fn a_fresh_task_clashes_through_its_request_but_a_merged_one_does_not() {
     assert!(
         cited.starts_with(
             "ATENÇÃO:
-alvo.rs: a t1 (claude@t1, em andamento; o pedido cita) também mexe nele;"
+alvo.rs: a t1 (claude@t1, in progress; o pedido cita) também mexe nele;"
         ),
         "{cited}"
     );
@@ -181,9 +181,9 @@ alvo.rs: a t1 (claude@t1, em andamento; o pedido cita) também mexe nele;"
     assert!(!learn(&env, &agent, &["pronto.rs"]).contains("ATENÇÃO"));
     let situation = learn(&env, &agent, &[]);
     assert!(
-        situation.contains("- t1 \"Recém-criada\" (claude@t1, em andamento): ainda sem arquivos na branch; o pedido cita alvo.rs"),
+        situation.contains("- t1 \"Recém-criada\" (claude@t1, in progress): ainda sem arquivos na branch; o pedido cita alvo.rs"),
         "{situation}"
     );
-    assert!(situation.contains("- t2 \"Já mesclada\" (claude@t2, aguardando validação)"), "{situation}");
+    assert!(situation.contains("- t2 \"Já mesclada\" (claude@t2, awaiting validation)"), "{situation}");
     env.core.shutdown();
 }

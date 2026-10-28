@@ -1,4 +1,4 @@
-//! Anexos: cópia para `dados/anexos` com prefixo da sessão (equivalente a `attach:*`).
+//! Attachments: copy to `dados/anexos` with session prefix (equivalent to `attach:*`).
 
 use std::path::{Path, PathBuf};
 
@@ -6,8 +6,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::util::{base36, now_ms, ref_path};
 
-/// Nome seguro para arquivo: remove acentos (NFD sem marcas combinantes) e troca
-/// sequências fora de `[A-Za-z0-9_.-]` por `_`. Equivalente a `safeName`.
+/// Safe filename: removes accents (NFD without combining marks) and replaces
+/// sequences outside `[A-Za-z0-9_.-]` with `_`. Equivalent to `safeName`.
 pub fn safe_name(name: &str) -> String {
     let stripped: String = name.nfd().filter(|c| !('\u{0300}'..='\u{036f}').contains(c)).collect();
     let mut out = String::with_capacity(stripped.len());
@@ -24,15 +24,15 @@ pub fn safe_name(name: &str) -> String {
     out
 }
 
-/// Pasta de anexos (criada se preciso).
+/// Attachments directory (created if needed).
 pub(crate) fn attachments_dir(data_dir: &Path) -> std::io::Result<PathBuf> {
     let dir = data_dir.join("anexos");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
-/// Cria o destino `s_<sessão>_<ms base36>-<nome>` sem sobrescrever nada: dois anexos com o mesmo
-/// nome no mesmo milissegundo (ou nomes que viram o mesmo `safe_name`) ganham um sufixo.
+/// Creates destination `s_<session>_<base36 ms>-<name>` without overwriting anything: two attachments with the same
+/// name in the same millisecond (or names that become the same `safe_name`) get a suffix.
 fn create_dest(dir: &Path, session: &str, name: &str) -> std::io::Result<(PathBuf, std::fs::File)> {
     let stamp = base36(now_ms());
     for n in 0u32.. {
@@ -44,10 +44,10 @@ fn create_dest(dir: &Path, session: &str, name: &str) -> std::io::Result<(PathBu
             Err(e) => return Err(e),
         }
     }
-    unreachable!("o laço só termina retornando")
+    unreachable!("the loop only terminates by returning")
 }
 
-/// Copia arquivos (ignorando pastas e inexistentes) e devolve as referências.
+/// Copies files (ignoring directories and nonexistent paths) and returns references.
 pub(crate) fn attach_files(data_dir: &Path, workspace: &Path, session: &str, files: &[PathBuf]) -> Vec<String> {
     let Ok(dir) = attachments_dir(data_dir) else { return Vec::new() };
     files
@@ -67,11 +67,11 @@ pub(crate) fn attach_files(data_dir: &Path, workspace: &Path, session: &str, fil
         .collect()
 }
 
-/// Grava bytes como anexo (equivalente a `attach:saveBuffer`).
+/// Saves bytes as an attachment (equivalent to `attach:saveBuffer`).
 pub(crate) fn attach_bytes(data_dir: &Path, workspace: &Path, session: &str, name: &str, bytes: &[u8]) -> anyhow::Result<String> {
     let dir = attachments_dir(data_dir)?;
     let base_name = if !name.is_empty() && name != "image.png" { name.to_owned() } else { format!("imagem-{}.png", now_ms()) };
-    // `path.basename(name, ext)`: sem pastas e sem a extensão.
+    // `path.basename(name, ext)`: without directories and without extension.
     let file = Path::new(&base_name).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let (stem, ext) = match Path::new(&file).extension() {
         Some(e) => {
@@ -85,10 +85,10 @@ pub(crate) fn attach_bytes(data_dir: &Path, workspace: &Path, session: &str, nam
     Ok(ref_path(workspace, &dest))
 }
 
-/// Codifica RGBA 8 bits como PNG.
+/// Encodes 8-bit RGBA as PNG.
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> anyhow::Result<Vec<u8>> {
     let expected = width as usize * height as usize * 4;
-    anyhow::ensure!(rgba.len() == expected, "imagem RGBA com tamanho inválido ({} bytes, esperado {expected})", rgba.len());
+    anyhow::ensure!(rgba.len() == expected, "invalid RGBA image size ({} bytes, expected {expected})", rgba.len());
     let mut out = Vec::new();
     {
         let mut enc = png::Encoder::new(&mut out, width, height);
@@ -101,7 +101,7 @@ pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> anyhow::Result<Vec<u8
     Ok(out)
 }
 
-/// Grava uma imagem RGBA (área de transferência) como `screenshot.png`.
+/// Saves an RGBA image (clipboard) as `screenshot.png`.
 pub(crate) fn attach_rgba_png(
     data_dir: &Path,
     workspace: &Path,
@@ -150,13 +150,13 @@ mod tests {
         let r = attach_bytes(&data, &ws, "sess1", "semext", b"x").expect("ok");
         assert!(r.ends_with("-semext.png"), "{r}");
 
-        // Dentro do workspace a referência é relativa.
+        // Inside the workspace the reference is relative.
         let r = attach_bytes(&ws.join("d"), &ws, "s", "a.txt", b"x").expect("ok");
         assert!(r.starts_with("d/anexos/s_s_"), "{r}");
 
-        // Dois anexos com o mesmo nome em seguida (mesmo milissegundo, em geral) não se sobrescrevem.
+        // Two attachments with the same name in succession (same millisecond, in general) do not overwrite each other.
         let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
-        for (dir, body) in [(&a, "primeiro"), (&b, "segundo")] {
+        for (dir, body) in [(&a, "first"), (&b, "second")] {
             std::fs::create_dir_all(dir).expect("mkdir");
             std::fs::write(dir.join("foto.txt"), body).expect("write");
         }
@@ -171,7 +171,7 @@ mod tests {
             .map(|e| std::fs::read_to_string(e.path()).expect("read"))
             .collect();
         bodies.sort();
-        assert_eq!(bodies, ["primeiro", "segundo"]);
+        assert_eq!(bodies, ["first", "second"]);
     }
 
     #[test]

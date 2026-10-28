@@ -1,66 +1,66 @@
-//! Escopo de escrita de uma tarefa: os caminhos que ela declara que vai mexer.
+//! Task write scope: the paths the task declares it will modify.
 //!
-//! Funções puras, sem git nem disco. O escopo é uma lista de **caminhos** (arquivos e pastas relativos à raiz do
-//! repositório), nunca globs: uma pasta reserva tudo o que está dentro dela. Dois escopos se sobrepõem quando um
-//! caminho é igual a outro ou é prefixo dele **por componente** (`crates/core` cobre `crates/core/src/git.rs`;
-//! `crates/co` não cobre `crates/core`). A comparação ignora maiúsculas e trata `/` e `\` como iguais (o
-//! repositório vive no Windows). Quem usa o escopo para pôr tarefas na fila e avisar de arquivo fora dele é
+//! Pure functions, no git or disk access. The scope is a list of **paths** (files and directories relative to the
+//! repository root), never globs: a directory reserves everything inside it. Two scopes overlap when a path is
+//! equal to another or is a prefix of it **by component** (`crates/core` covers `crates/core/src/git.rs`;
+//! `crates/co` does not cover `crates/core`). Comparison ignores case and treats `/` and `\` as equal (the
+//! repository lives on Windows). The scope is used to queue tasks and warn about out-of-scope files in
 //! `tasks/` (`lifecycle.rs`, `finish.rs`).
 
-/// Caminhos que nenhuma tarefa reserva (ficam fora da conferência de sobreposição e do aviso de "fora do escopo"):
-/// toda tarefa mexe neles, e eles já se resolvem na mesclagem (ver `memory/aprendizados/historico-mescla-por-uniao.md`).
-/// Cada item vale para si e, sendo pasta, para tudo o que está dentro dela.
+/// Paths that no task reserves (excluded from overlap checking and the "out of scope" warning):
+/// every task modifies them, and they are already resolved during merge (see `memory/aprendizados/historico-mescla-por-uniao.md`).
+/// Each item applies to itself and, if a directory, to everything inside it.
 pub const UNRESERVED: &[&str] = &["memory", "Cargo.lock"];
 
-/// Quantos caminhos um escopo aceita, e o tamanho de cada um.
+/// How many paths a scope accepts, and the length of each.
 pub const MAX_SCOPE_PATHS: usize = 64;
 pub const MAX_SCOPE_PATH_CHARS: usize = 260;
 
-/// Os componentes do caminho, em minúsculas, com `/` e `\` equivalentes; `.` e componentes vazios somem.
+/// The path components, in lowercase, with `/` and `\` equivalent; `.` and empty components are dropped.
 fn components(path: &str) -> Vec<String> {
     path.split(['/', '\\']).filter(|c| !c.is_empty() && *c != ".").map(str::to_lowercase).collect()
 }
 
-/// `inner` é igual a `outer` ou está dentro dele (por componente).
+/// `inner` is equal to `outer` or is inside it (by component).
 fn covers(outer: &[String], inner: &[String]) -> bool {
     inner.len() >= outer.len() && inner[..outer.len()] == *outer
 }
 
-/// O caminho é dos que nenhuma tarefa reserva ([`UNRESERVED`])?
+/// Is the path one that no task reserves ([`UNRESERVED`])?
 pub fn is_unreserved(path: &str) -> bool {
     let parts = components(path);
     UNRESERVED.iter().any(|u| covers(&components(u), &parts))
 }
 
-/// Normaliza um caminho do escopo: separador `/`, sem `./` nem barra no fim. Recusa (com o motivo) o que não é um
-/// caminho relativo à raiz do repositório: vazio, absoluto, com `..`, com curinga (`*`, `?`) ou longo demais.
+/// Normalizes a scope path: `/` separator, no `./` or trailing slash. Rejects (with reason) anything that is not a
+/// path relative to the repository root: empty, absolute, containing `..`, wildcards (`*`, `?`) or too long.
 pub fn normalize(raw: &str) -> Result<String, String> {
     let text = raw.trim();
     if text.is_empty() {
-        return Err("caminho vazio no escopo".into());
+        return Err("empty path in scope".into());
     }
     let shown = || text.chars().take(60).collect::<String>().escape_debug().to_string();
     if text.chars().count() > MAX_SCOPE_PATH_CHARS {
-        return Err(format!("caminho longo demais no escopo: \"{}…\"", shown()));
+        return Err(format!("path too long in scope: \"{}…\"", shown()));
     }
     if text.contains(['*', '?']) {
-        return Err(format!("o escopo é uma lista de caminhos, não de padrões (glob): \"{}\"", shown()));
+        return Err(format!("scope is a list of paths, not patterns (glob): \"{}\"", shown()));
     }
     let windows_drive = text.as_bytes().get(1) == Some(&b':') && text.as_bytes()[0].is_ascii_alphabetic();
     if text.starts_with(['/', '\\']) || windows_drive {
-        return Err(format!("o caminho do escopo é relativo à raiz do repositório, não absoluto: \"{}\"", shown()));
+        return Err(format!("scope path is relative to repository root, not absolute: \"{}\"", shown()));
     }
     let parts: Vec<&str> = text.split(['/', '\\']).filter(|c| !c.is_empty() && *c != ".").collect();
     if parts.is_empty() {
-        return Err(format!("caminho inválido no escopo: \"{}\"", shown()));
+        return Err(format!("invalid path in scope: \"{}\"", shown()));
     }
     if parts.contains(&"..") {
-        return Err(format!("o caminho do escopo não pode sair do repositório (..): \"{}\"", shown()));
+        return Err(format!("scope path cannot escape repository (..): \"{}\"", shown()));
     }
     Ok(parts.join("/"))
 }
 
-/// Normaliza a lista toda, sem repetir caminhos (mesma comparação das sobreposições) e na ordem dada.
+/// Normalizes the entire list, without duplicate paths (same comparison as overlaps) and in the given order.
 pub fn normalize_all<S: AsRef<str>>(raw: &[S]) -> Result<Vec<String>, String> {
     let mut out: Vec<String> = Vec::new();
     for r in raw {
@@ -70,25 +70,25 @@ pub fn normalize_all<S: AsRef<str>>(raw: &[S]) -> Result<Vec<String>, String> {
         }
     }
     if out.len() > MAX_SCOPE_PATHS {
-        return Err(format!("escopo grande demais: no máximo {MAX_SCOPE_PATHS} caminhos (agrupe em pastas)"));
+        return Err(format!("scope too large: at most {MAX_SCOPE_PATHS} paths (group into folders)"));
     }
     Ok(out)
 }
 
-/// O escopo sem os caminhos que ninguém reserva: é o que vale para as conferências.
+/// The scope without unreserved paths: this is what counts for checks.
 fn reserved(scope: &[String]) -> Vec<Vec<String>> {
     scope.iter().filter(|p| !is_unreserved(p)).map(|p| components(p)).collect()
 }
 
-/// Os dois escopos se sobrepõem? Um escopo sem nenhum caminho reservado (vazio, ou só `memory/…`/`Cargo.lock`)
-/// não se sobrepõe a nada.
+/// Do the two scopes overlap? A scope with no reserved paths (empty, or only `memory/…`/`Cargo.lock`)
+/// overlaps nothing.
 pub fn overlaps(a: &[String], b: &[String]) -> bool {
     let (a, b) = (reserved(a), reserved(b));
     a.iter().any(|x| b.iter().any(|y| covers(x, y) || covers(y, x)))
 }
 
-/// Dos arquivos mexidos (caminhos do git, relativos à raiz), os que ficam fora do escopo, sem os que ninguém
-/// reserva. Vazio se a tarefa não declarou escopo reservado: aí não há de que se desviar.
+/// Of the modified files (git paths, relative to root), those outside the scope, excluding unreserved paths.
+/// Empty if the task declared no reserved scope: then there is nothing to deviate from.
 pub fn outside(scope: &[String], files: &[String]) -> Vec<String> {
     let scope = reserved(scope);
     if scope.is_empty() {
@@ -151,7 +151,7 @@ mod tests {
         assert_eq!(normalize(" .\\crates\\core\\ ").unwrap(), "crates/core");
         assert_eq!(normalize("crates/core/src/git.rs").unwrap(), "crates/core/src/git.rs");
         for bad in ["", "  ", "/etc/passwd", "\\x", "C:\\x", "c:/x", "../x", "a/../b", "crates/*.rs", "crates/?", ".", "./"] {
-            assert!(normalize(bad).is_err(), "{bad:?} devia ser recusado");
+            assert!(normalize(bad).is_err(), "{bad:?} should be rejected");
         }
         assert!(normalize(&"a/".repeat(200)).is_err());
     }
@@ -170,7 +170,7 @@ mod tests {
         let files =
             s(&["crates/core/src/tasks.rs", "crates/cli/src/bin/ask-agent.rs", "crates/core/src/git.rs", "memory/GERAL.md", "Cargo.lock"]);
         assert_eq!(outside(&scope, &files), s(&["crates/core/src/git.rs"]));
-        assert!(outside(&[], &files).is_empty(), "sem escopo não há desvio");
-        assert!(outside(&s(&["memory/x.md"]), &files).is_empty(), "escopo só de não reservados também não");
+        assert!(outside(&[], &files).is_empty(), "without scope there is no deviation");
+        assert!(outside(&s(&["memory/x.md"]), &files).is_empty(), "scope with only unreserved paths also has no deviation");
     }
 }
