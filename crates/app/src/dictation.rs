@@ -1,27 +1,29 @@
-//! Ditado por voz: estados (parado, abrindo o microfone, gravando, transcrevendo) e o destino
-//! fixo no início da gravação (uma aba específica pelo `uid`).
+//! Voice dictation: states (idle, opening microphone, recording, transcribing) and the target
+//! pinned at the start of recording (a specific tab by `uid`).
 //!
-//! Lógica pura e independente da pintura, com testes, no estilo de [`crate::split`].
+//! Pure logic independent of painting, with tests, in the style of [`crate::split`].
+
+use agentdeck_core::t;
 
 use crate::audio;
 
-/// Para onde vai o texto quando a transcrição terminar, fixado no início da gravação.
+/// Where transcribed text is delivered when transcription finishes, pinned at the start of recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MicTarget {
-    /// O terminal (PTY) da aba com este `uid` (digitado como colagem, sem Enter).
+    /// The terminal (PTY) of the tab with this `uid` (typed as paste, without Enter).
     Tab(u64),
 }
 
-/// Fase do microfone no app inteiro (há no máximo uma gravação por vez).
+/// Microphone phase for the entire app (at most one recording at a time).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MicPhase {
     #[default]
     Idle,
-    /// Abrindo o dispositivo de entrada numa thread (pode levar até 5 s).
+    /// Opening the input device on a thread (may take up to 5 s).
     Opening(MicTarget),
-    /// Capturando áudio para `MicTarget`.
+    /// Capturing audio for `MicTarget`.
     Recording(MicTarget),
-    /// Rodando o Whisper numa thread para `MicTarget`.
+    /// Running Whisper on a thread for `MicTarget`.
     Transcribing(MicTarget),
 }
 
@@ -31,38 +33,38 @@ impl MicPhase {
     }
 }
 
-/// O que um clique no botão de microfone (ou o atalho da aba) pede para fazer.
+/// What clicking the microphone button (or the tab shortcut) requests to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToggleOutcome {
-    /// Começa a abrir o microfone para este destino.
+    /// Starts opening the microphone for this target.
     StartOpening(MicTarget),
-    /// O usuário clicou de novo enquanto abria: desiste.
+    /// User clicked again while opening: cancels.
     CancelOpening,
-    /// Para a gravação atual e manda transcrever.
+    /// Stops the current recording and requests transcription.
     StopAndTranscribe,
-    /// Já está transcrevendo (ou gravando em outra aba): ignora o clique.
+    /// Already transcribing (or recording in another tab): ignores click.
     Busy,
 }
 
-/// Estado aparente de um botão de microfone específico (`button`), dado o estado global (`phase`).
+/// Apparent state of a specific microphone button (`button`), given the global state (`phase`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonVisual {
     Idle,
     Opening,
     Recording,
     Transcribing,
-    /// Outra aba está usando o microfone: este botão fica desabilitado.
+    /// Another tab is using the microphone: this button is disabled.
     DisabledOther,
 }
 
 impl ButtonVisual {
-    /// O botão não aceita clique (transcrevendo ou ocupado em outro destino).
+    /// The button does not accept clicks (transcribing or busy in another target).
     pub fn is_busy(self) -> bool {
         matches!(self, Self::Transcribing | Self::DisabledOther)
     }
 }
 
-/// Como o botão de `button` aparece quando o estado global é `phase`.
+/// How `button` appears when the global state is `phase`.
 pub fn button_visual(phase: MicPhase, button: MicTarget) -> ButtonVisual {
     match phase {
         MicPhase::Idle => ButtonVisual::Idle,
@@ -73,11 +75,11 @@ pub fn button_visual(phase: MicPhase, button: MicTarget) -> ButtonVisual {
     }
 }
 
-/// Transição pura ao acionar o microfone em `clicked` (botão do cabeçalho do painel ou atalho).
+/// Pure transition when triggering the microphone on `clicked` (panel header button or shortcut).
 ///
-/// Só existe uma gravação por vez no app inteiro: se já está abrindo ou gravando em `clicked`, o
-/// segundo clique cancela/para; se está ocupado em outro destino ou transcrevendo, devolve `Busy`
-/// sem alterar `phase`.
+/// Only one recording exists at a time across the whole app: if already opening or recording on
+/// `clicked`, the second click cancels/stops; if busy in another target or transcribing, returns `Busy`
+/// without altering `phase`.
 pub fn toggle(phase: &mut MicPhase, clicked: MicTarget) -> ToggleOutcome {
     match *phase {
         MicPhase::Idle => {
@@ -96,8 +98,8 @@ pub fn toggle(phase: &mut MicPhase, clicked: MicTarget) -> ToggleOutcome {
     }
 }
 
-/// Resultado de `Recorder::start` chegando da thread: só passa a `Recording` se o usuário ainda
-/// estava esperando em `Opening(t)`; caso contrário devolve `false` para descartar o gravador.
+/// Result of `Recorder::start` arriving from the thread: only transitions to `Recording` if the user
+/// was still waiting in `Opening(t)`; otherwise returns `false` to discard the recorder.
 pub fn on_opened(phase: &mut MicPhase, ok: bool) -> bool {
     match *phase {
         MicPhase::Opening(t) if ok => {
@@ -112,8 +114,7 @@ pub fn on_opened(phase: &mut MicPhase, ok: bool) -> bool {
     }
 }
 
-/// Para a gravação em andamento (ex.: limite de tempo) e entra em
-/// `Transcribing`, preservando o destino original.
+/// Stops the ongoing recording (e.g. time limit) and enters `Transcribing`, preserving original target.
 pub fn begin_transcribe(phase: &mut MicPhase) -> Option<MicTarget> {
     match *phase {
         MicPhase::Recording(t) => {
@@ -124,21 +125,20 @@ pub fn begin_transcribe(phase: &mut MicPhase) -> Option<MicTarget> {
     }
 }
 
-/// Destino final de uma transcrição concluída para uma aba, conferindo a lista de abas abertas
-/// `(uid, alive)`.
+/// Final delivery target of a completed transcription for a tab, checking the open tab list `(uid, alive)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabDelivery {
-    /// A aba `uid` está aberta no índice `idx` e com o processo rodando: digitar no PTY dela.
+    /// Tab `uid` is open at index `idx` with running process: type into its PTY.
     TypeInTab(usize),
-    /// A aba ainda existe, mas o processo encerrou antes de a transcrição terminar.
+    /// Tab still exists, but process exited before transcription finished.
     TabDead,
-    /// A aba foi fechada durante a transcrição: descartar o texto com aviso, sem mandar para outra.
+    /// Tab was closed during transcription: discard text with notice, do not route elsewhere.
     TabClosed,
 }
 
-/// Resolve para qual aba (índice) vai o texto transcrito de `target_uid`.
+/// Resolves which tab (index) receives transcribed text for `target_uid`.
 ///
-/// Nunca cai para a aba ativa nem para outra aba: se `target_uid` não está mais em `tabs`, devolve
+/// Never falls back to the active tab or another tab: if `target_uid` is no longer in `tabs`, returns
 /// [`TabDelivery::TabClosed`].
 pub fn resolve_tab_delivery(tabs: &[(u64, bool)], target_uid: u64) -> TabDelivery {
     match tabs.iter().position(|&(uid, _)| uid == target_uid) {
@@ -148,7 +148,7 @@ pub fn resolve_tab_delivery(tabs: &[(u64, bool)], target_uid: u64) -> TabDeliver
     }
 }
 
-/// Conclui a fase `Transcribing`, voltando a `Idle` e devolvendo o destino fixado no início.
+/// Finishes the `Transcribing` phase, returning to `Idle` and yielding the pinned target.
 pub fn finish_transcribe(phase: &mut MicPhase) -> Option<MicTarget> {
     match *phase {
         MicPhase::Transcribing(t) => {
@@ -159,19 +159,19 @@ pub fn finish_transcribe(phase: &mut MicPhase) -> Option<MicTarget> {
     }
 }
 
-/// Se o Whisper (modelo e motor) está no disco. O ditado é opcional: sem ele o microfone leva à opção de baixar.
+/// Whether Whisper (model and engine) is on disk. Dictation is optional: without it the mic offers download.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setup {
-    /// Pronto para gravar e transcrever.
+    /// Ready to record and transcribe.
     Ready,
-    /// Baixando (a faixa de progresso está na barra direita).
+    /// Downloading (progress bar is in the right panel).
     Downloading,
-    /// Não instalado: o clique no microfone (ou `Ctrl+Shift+M`) oferece o download.
+    /// Not installed: clicking the mic (or `Ctrl+Shift+M`) offers download.
     NotInstalled,
 }
 
 impl Setup {
-    /// Com o modelo e um motor no disco o ditado funciona, mesmo que um motor extra (CUDA) ainda esteja baixando.
+    /// With the model and an engine on disk dictation works, even if an extra engine (CUDA) is still downloading.
     pub fn of(installed: bool, downloading: bool) -> Self {
         if installed {
             Self::Ready
@@ -183,28 +183,40 @@ impl Setup {
     }
 }
 
-/// Texto do download oferecido (a pergunta da primeira abertura e a opção das configurações).
-pub const DOWNLOAD_SIZE: &str = "cerca de 1,6 GB";
+/// Download size text shown in UI (first-time prompt and settings option).
+pub fn download_size() -> &'static str {
+    t!("about 1.6 GB")
+}
 
-/// Dica (tooltip) do botão de microfone no cabeçalho do painel.
-/// `shortcut` aparece entre parênteses quando aplicável (ex.: `Some("Ctrl+Shift+M")`).
+/// Tooltip for the microphone button in the panel header.
+/// `shortcut` appears in parentheses when applicable (e.g. `Some("Ctrl+Shift+M")`).
 pub fn mic_tooltip(visual: ButtonVisual, available: bool, setup: Setup, engine_label: &str, shortcut: Option<&str>) -> String {
-    let sc = shortcut.map(|s| format!(" ({s})")).unwrap_or_default();
+    let minutes = audio::MAX_RECORDING_SECS / 60;
     match visual {
-        ButtonVisual::Recording => format!("Parar gravação e transcrever{sc} (até {} min)", audio::MAX_RECORDING_SECS / 60),
-        ButtonVisual::Opening => format!("Abrindo o microfone…{sc} (clique para desistir)"),
-        ButtonVisual::Transcribing => "Transcrevendo áudio…".to_owned(),
-        ButtonVisual::DisabledOther => "Microfone em uso em outra aba".to_owned(),
-        ButtonVisual::Idle if !available => "Ditado por voz (indisponível: compilado sem o recurso de áudio)".to_owned(),
+        ButtonVisual::Recording => match shortcut {
+            Some(shortcut) => t!("Stop recording and transcribe ({shortcut}) (up to {minutes} min)", shortcut, minutes),
+            None => t!("Stop recording and transcribe (up to {minutes} min)", minutes),
+        },
+        ButtonVisual::Opening => match shortcut {
+            Some(shortcut) => t!("Opening microphone… ({shortcut}) (click to cancel)", shortcut),
+            None => t!("Opening microphone… (click to cancel)").to_owned(),
+        },
+        ButtonVisual::Transcribing => t!("Transcribing audio…").to_owned(),
+        ButtonVisual::DisabledOther => t!("Microphone in use in another tab").to_owned(),
+        ButtonVisual::Idle if !available => t!("Voice dictation (unavailable: built without audio feature)").to_owned(),
         ButtonVisual::Idle if setup == Setup::NotInstalled => {
-            format!("Ditado por voz não instalado: clique para baixar ({DOWNLOAD_SIZE}){sc}")
+            let size = download_size();
+            match shortcut {
+                Some(shortcut) => t!("Voice dictation not installed: click to download ({size}) ({shortcut})", size, shortcut),
+                None => t!("Voice dictation not installed: click to download ({size})", size),
+            }
         }
-        ButtonVisual::Idle if setup == Setup::Downloading => "Baixando o ditado por voz… (veja a barra direita)".to_owned(),
+        ButtonVisual::Idle if setup == Setup::Downloading => t!("Downloading voice dictation… (see right bar)").to_owned(),
         ButtonVisual::Idle => {
             let eng = if engine_label.is_empty() { "…" } else { engine_label };
             match shortcut {
-                Some(s) => format!("Ditar nesta aba ({s} · transcrição: {eng})"),
-                None => format!("Ditar nesta aba (transcrição: {eng})"),
+                Some(shortcut) => t!("Dictate in this tab ({shortcut} · transcription: {engine})", shortcut, engine = eng),
+                None => t!("Dictate in this tab (transcription: {engine})", engine = eng),
             }
         }
     }
@@ -213,6 +225,7 @@ pub fn mic_tooltip(visual: ButtonVisual, available: bool, setup: Setup, engine_l
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentdeck_core::i18n::{self, Lang};
 
     #[test]
     fn target_stays_pinned_to_the_tab_where_recording_started() {
@@ -222,12 +235,12 @@ mod tests {
         assert!(on_opened(&mut phase, true));
         assert_eq!(phase, MicPhase::Recording(MicTarget::Tab(7)));
 
-        // Mesmo que o usuário troque de aba e tente clicar em outra (uid 9),
-        // a gravação continua presa à aba 7.
+        // Even if the user switches tabs and clicks another (uid 9),
+        // recording stays pinned to tab 7.
         assert_eq!(toggle(&mut phase, MicTarget::Tab(9)), ToggleOutcome::Busy);
         assert_eq!(phase, MicPhase::Recording(MicTarget::Tab(7)));
 
-        // Parar na aba 7 (ou pelo atalho): transcreve para a aba 7.
+        // Stop in tab 7 (or via shortcut): transcribes for tab 7.
         assert_eq!(toggle(&mut phase, MicTarget::Tab(7)), ToggleOutcome::StopAndTranscribe);
         assert_eq!(phase, MicPhase::Transcribing(MicTarget::Tab(7)));
         assert_eq!(finish_transcribe(&mut phase), Some(MicTarget::Tab(7)));
@@ -240,19 +253,19 @@ mod tests {
         assert_eq!(toggle(&mut phase, MicTarget::Tab(3)), ToggleOutcome::StartOpening(MicTarget::Tab(3)));
         assert_eq!(toggle(&mut phase, MicTarget::Tab(3)), ToggleOutcome::CancelOpening);
         assert_eq!(phase, MicPhase::Idle);
-        // Quando a thread terminar de abrir depois da desistência, o gravador é descartado.
+        // When the thread finishes opening after canceling, the recorder is discarded.
         assert!(!on_opened(&mut phase, true));
         assert_eq!(phase, MicPhase::Idle);
     }
 
     #[test]
     fn closed_or_dead_target_tab_never_falls_back_to_another_tab() {
-        // Abas abertas: uid 10 (índice 0, viva) e uid 20 (índice 1, viva).
+        // Open tabs: uid 10 (index 0, alive) and uid 20 (index 1, alive).
         let tabs = [(10, true), (20, true)];
         assert_eq!(resolve_tab_delivery(&tabs, 20), TabDelivery::TypeInTab(1));
-        // Aba 30 fechou enquanto transcrevia (mesmo com 10 e 20 abertas): descarta.
+        // Tab 30 closed during transcription (even with 10 and 20 open): discard.
         assert_eq!(resolve_tab_delivery(&tabs, 30), TabDelivery::TabClosed);
-        // Aba 20 encerrou o processo: não digita em 10.
+        // Tab 20 process exited: do not type into 10.
         let tabs_dead = [(10, true), (20, false)];
         assert_eq!(resolve_tab_delivery(&tabs_dead, 20), TabDelivery::TabDead);
     }
@@ -277,24 +290,42 @@ mod tests {
     fn tooltips_cover_every_state() {
         let ready = Setup::Ready;
         assert!(mic_tooltip(ButtonVisual::Idle, true, ready, "GPU CUDA", Some("Ctrl+Shift+M")).contains("Ctrl+Shift+M"));
-        assert!(mic_tooltip(ButtonVisual::Idle, false, ready, "", None).contains("indisponível"));
-        assert!(mic_tooltip(ButtonVisual::Opening, true, ready, "", Some("Ctrl+Shift+M")).contains("Abrindo"));
-        assert!(mic_tooltip(ButtonVisual::Recording, true, ready, "", Some("Ctrl+Shift+M")).contains("Parar gravação"));
-        assert!(mic_tooltip(ButtonVisual::Transcribing, true, ready, "", None).contains("Transcrevendo"));
-        assert!(mic_tooltip(ButtonVisual::DisabledOther, true, ready, "", None).contains("em uso"));
+        assert!(mic_tooltip(ButtonVisual::Idle, false, ready, "", None).contains("unavailable"));
+        assert!(mic_tooltip(ButtonVisual::Opening, true, ready, "", Some("Ctrl+Shift+M")).contains("Opening"));
+        assert!(mic_tooltip(ButtonVisual::Recording, true, ready, "", Some("Ctrl+Shift+M")).contains("Stop recording"));
+        assert!(mic_tooltip(ButtonVisual::Transcribing, true, ready, "", None).contains("Transcribing"));
+        assert!(mic_tooltip(ButtonVisual::DisabledOther, true, ready, "", None).contains("in use"));
+
+        // pt-BR check
+        i18n::with_lang(Lang::PtBr, || {
+            assert!(mic_tooltip(ButtonVisual::Idle, false, ready, "", None).contains("indisponível"));
+            assert!(mic_tooltip(ButtonVisual::Opening, true, ready, "", Some("Ctrl+Shift+M")).contains("Abrindo"));
+            assert!(mic_tooltip(ButtonVisual::Recording, true, ready, "", Some("Ctrl+Shift+M")).contains("Parar gravação"));
+            assert!(mic_tooltip(ButtonVisual::Transcribing, true, ready, "", None).contains("Transcrevendo"));
+            assert!(mic_tooltip(ButtonVisual::DisabledOther, true, ready, "", None).contains("em uso"));
+        });
     }
 
     #[test]
     fn without_whisper_the_mic_explains_and_offers_the_download() {
         assert_eq!(Setup::of(true, false), Setup::Ready);
-        assert_eq!(Setup::of(true, true), Setup::Ready, "o motor CUDA baixando não tira o ditado do ar");
+        assert_eq!(Setup::of(true, true), Setup::Ready, "CUDA engine downloading does not take dictation offline");
         assert_eq!(Setup::of(false, true), Setup::Downloading);
         assert_eq!(Setup::of(false, false), Setup::NotInstalled);
-        let off = mic_tooltip(ButtonVisual::Idle, true, Setup::NotInstalled, "indisponível", Some("Ctrl+Shift+M"));
-        assert!(off.contains("não instalado") && off.contains("baixar") && off.contains("1,6 GB"), "{off}");
-        assert!(!off.contains("transcrição:"), "não mostra o motor de um ditado que não existe: {off}");
-        assert!(mic_tooltip(ButtonVisual::Idle, true, Setup::Downloading, "", None).contains("Baixando"));
-        // Gravando ou transcrevendo, a dica é a de sempre (o Whisper estava pronto ao começar).
-        assert!(mic_tooltip(ButtonVisual::Recording, true, Setup::NotInstalled, "", None).contains("Parar gravação"));
+        let off = mic_tooltip(ButtonVisual::Idle, true, Setup::NotInstalled, "unavailable", Some("Ctrl+Shift+M"));
+        assert!(off.contains("not installed") && off.contains("download") && off.contains("about 1.6 GB"), "{off}");
+        assert!(!off.contains("transcription:"), "does not show engine for nonexistent dictation: {off}");
+        assert!(mic_tooltip(ButtonVisual::Idle, true, Setup::Downloading, "", None).contains("Downloading"));
+        // Recording or transcribing, the tip is standard (Whisper was ready when started).
+        assert!(mic_tooltip(ButtonVisual::Recording, true, Setup::NotInstalled, "", None).contains("Stop recording"));
+
+        // pt-BR check
+        i18n::with_lang(Lang::PtBr, || {
+            let off = mic_tooltip(ButtonVisual::Idle, true, Setup::NotInstalled, "indisponível", Some("Ctrl+Shift+M"));
+            assert!(off.contains("não instalado") && off.contains("baixar") && off.contains("cerca de 1,6 GB"), "{off}");
+            assert!(!off.contains("transcrição:"), "não mostra o motor de um ditado que não existe: {off}");
+            assert!(mic_tooltip(ButtonVisual::Idle, true, Setup::Downloading, "", None).contains("Baixando"));
+            assert!(mic_tooltip(ButtonVisual::Recording, true, Setup::NotInstalled, "", None).contains("Parar gravação"));
+        });
     }
 }
