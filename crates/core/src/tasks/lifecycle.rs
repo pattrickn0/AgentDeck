@@ -272,10 +272,14 @@ impl Core {
     /// from the worktree, which already has the base) and the current situation. Any failure only leaves that part
     /// out: a task never fails to start because of memory.
     fn task_memory(&self, project: &str, task: &Task) -> String {
-        let brief = if task.brief.trim().is_empty() { task.title.as_str() } else { task.brief.as_str() };
-        let cited = crate::learnings::paths_in_text(brief, &task.worktree);
-        let learnings = crate::learnings::render(&crate::learnings::load(&task.worktree), &cited, crate::learnings::START_BUDGET);
-        memory_block(&learnings, &self.task_situation(project, task, &cited))
+        // Agent-facing text: the situation shows task statuses (`TaskStatus::label`), which must read in English
+        // whatever the language of the user who clicked "Start".
+        crate::i18n::english(|| {
+            let brief = if task.brief.trim().is_empty() { task.title.as_str() } else { task.brief.as_str() };
+            let cited = crate::learnings::paths_in_text(brief, &task.worktree);
+            let learnings = crate::learnings::render(&crate::learnings::load(&task.worktree), &cited, crate::learnings::START_BUDGET);
+            memory_block(&learnings, &self.task_situation(project, task, &cited))
+        })
     }
 
     /// The learnings specific to the files the new `feedback` cites and the agent has not seen yet (neither in the

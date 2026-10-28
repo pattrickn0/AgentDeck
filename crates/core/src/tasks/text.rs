@@ -49,10 +49,12 @@ pub fn clean_title(title: &str) -> Result<String, TaskError> {
     Ok(one_line.chars().take(MAX_TITLE).collect())
 }
 
+/// Cuts the text at `max` characters with a notice. The notice is plain English on purpose: the brief, the feedback and
+/// the report travel to agents (and the report comes from one).
 pub(super) fn cap_text(text: &str, max: usize) -> String {
     let (head, cut) = util::truncate_chars(text, max);
     if cut {
-        format!("{head}\n\n{}", t!("[text cut at {max} characters]", max))
+        format!("{head}\n\n[text cut at {max} characters]")
     } else {
         head.to_owned()
     }

@@ -178,7 +178,7 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     env.deck.tasks_submit_form();
     env.pump("o erro de validação", |d| !d.tasks.form.busy);
     let err = env.deck.tasks.form.error.clone().expect("erro inline");
-    assert!(err.contains("não é uma branch local"), "{err}");
+    assert!(err.contains("is not a local branch"), "{err}");
     assert_eq!(env.deck.tasks.view, TasksView::New, "o formulário continua aberto");
     assert!(env.core.tasks(&env.project()).is_empty());
 
@@ -379,7 +379,7 @@ fn a_refused_merge_shows_the_core_message_and_discard_asks_first() {
     env.deck.tasks_confirm_accepted();
     env.pump("a recusa", |d| d.tasks.busy.is_none());
     let notice = env.deck.tasks.notice.clone().expect("aviso");
-    assert!(notice.contains("alterações sem commit") && notice.contains("a.txt"), "{notice}");
+    assert!(notice.contains("uncommitted changes") && notice.contains("a.txt"), "{notice}");
     assert_eq!(env.deck.tasks.view, TasksView::Detail(id.clone()), "a recusa vinda da lista abre o detalhe");
     assert_eq!(env.task(&id).status, TaskStatus::Review, "continua em revisão");
 
@@ -431,7 +431,7 @@ fn a_refused_merge_offers_the_way_out_in_the_notice() {
     let back = std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt");
     assert_eq!(back.replace("\r\n", "\n"), "mudou\n", "a alteração do usuário voltou");
     let note = env.deck.tasks.notice.clone().expect("nota");
-    assert!(env.deck.tasks.notice_info && env.deck.tasks.notice_block.is_none() && note.contains("voltaram"), "{note}");
+    assert!(env.deck.tasks.notice_info && env.deck.tasks.notice_block.is_none() && note.contains("already back"), "{note}");
 
     // Reprovada e entregue de novo, com trabalho esquecido na pasta da tarefa: "Pedir ao agente para fazer o commit".
     git(&env.ws, &["checkout", "-q", "--", "a.txt"]);
@@ -453,7 +453,7 @@ fn a_refused_merge_offers_the_way_out_in_the_notice() {
     env.pump("devolver", |d| d.tasks.busy.is_none());
     let back = env.task(&id);
     assert_eq!(back.status, TaskStatus::Running);
-    assert!(back.events.iter().any(|e| e.text.contains("devolvida ao agente")), "{:?}", back.events);
+    assert!(back.events.iter().any(|e| e.text.contains("returned to the agent")), "{:?}", back.events);
     assert!(env.deck.tasks.notice.is_none());
 }
 
@@ -526,7 +526,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     // A primeira tarefa mexe no a.txt: ainda sem outras tarefas, com os commits da base.
     let t1 = create(&env, &project, "Primeira", "Ajuste o a.txt e nada mais.");
     let first = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t1}-brief.md"))).expect("brief da t1");
-    assert!(first.contains("O que o projeto já aprendeu:") && first.contains("### Aprendizado do-arquivo"), "{first}");
+    assert!(first.contains("What the project has already learned:") && first.contains("### Aprendizado do-arquivo"), "{first}");
     assert!(first.contains("Cuidado ao mexer no a.txt.") && first.contains("Vale para todo mundo."), "{first}");
     assert!(first.contains("Outras tarefas em andamento: nenhuma.") && first.contains("docs: aprendizados"), "{first}");
     // O que não casa vira só a linha do índice.
@@ -540,7 +540,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     env.agent_commits(&t1, "a.txt", "dois\n");
     let t2 = create(&env, &project, "Segunda", "Também mexa no `a.txt`.");
     let second = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-brief.md"))).expect("brief da t2");
-    assert!(second.contains(&format!("- {t1} \"Primeira\" (claude@{t1}, em andamento): mexe em a.txt")), "{second}");
+    assert!(second.contains(&format!("- {t1} \"Primeira\" (claude@{t1}, in progress): mexe em a.txt")), "{second}");
     assert!(second.contains("ATENÇÃO: o seu pedido cita a.txt"), "{second}");
 
     // O feedback anterior volta na devolução seguinte.
@@ -549,12 +549,12 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     env.core.task_done(&project, &t2, "Feito.").expect("done");
     env.core.task_return(&project, &t2, "Primeiro ajuste: renomeie.").expect("return 1");
     let after_first = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-feedback.md"))).expect("feedback 1");
-    assert!(!after_first.contains("Feedbacks anteriores"), "{after_first}");
+    assert!(!after_first.contains("Earlier feedback"), "{after_first}");
     env.core.task_done(&project, &t2, "Feito de novo.").expect("done 2");
     let back = env.core.task_return(&project, &t2, "Segundo ajuste: teste.").expect("return 2");
     let after_second = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t2}-feedback.md"))).expect("feedback 2");
     assert!(
-        after_second.contains("1. [revisão] Primeiro ajuste: renomeie.") && after_second.contains("Segundo ajuste: teste."),
+        after_second.contains("1. [review] Primeiro ajuste: renomeie.") && after_second.contains("Segundo ajuste: teste."),
         "{after_second}"
     );
     assert_eq!(back.feedbacks.len(), 2, "a tarefa devolvida guarda os dois");
@@ -599,7 +599,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     // Devolução citando o a.txt (já no pedido) e o b.txt (novo): só o aprendizado do b.txt vai, sem global nem índice.
     env.core.task_return(&project, &t1, "Revise a.txt e também b.txt.").expect("return");
     let first = feedback_file(&t1);
-    assert!(first.contains("O que o projeto já aprendeu sobre os arquivos citados:"), "{first}");
+    assert!(first.contains("What the project has already learned about the cited files:"), "{first}");
     assert!(first.contains("Cuidado com o b.") && !first.contains("Cuidado com o a."), "{first}");
     assert!(!first.contains("Vale para todo mundo.") && !first.contains("Outros aprendizados"), "{first}");
 
@@ -607,7 +607,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     env.core.task_done(&project, &t1, "Feito de novo.").expect("done 2");
     env.core.task_return(&project, &t1, "Ainda falta no b.txt.").expect("return 2");
     let second = feedback_file(&t1);
-    assert!(second.contains("Feedbacks anteriores") && !second.contains("sobre os arquivos citados"), "{second}");
+    assert!(second.contains("Earlier feedback") && !second.contains("about the cited files"), "{second}");
     assert!(!second.contains("Cuidado com o b."), "{second}");
 
     // A reprovação segue a mesma regra: depois de mesclar, o a.txt (pedido) e o b.txt (feedback) já foram vistos.
@@ -615,7 +615,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     env.core.task_merge(&project, &t1).expect("merge");
     env.core.task_reject(&project, &t1, "Não funciona: veja a.txt e b.txt.").expect("reject");
     let rejected = feedback_file(&t1);
-    assert!(rejected.contains("reprovada na validação") && !rejected.contains("sobre os arquivos citados"), "{rejected}");
+    assert!(rejected.contains("rejected in validation") && !rejected.contains("about the cited files"), "{rejected}");
 
     // Uma tarefa nova vê o trabalho ainda sem commit da t2 na situação atual.
     let t2 = create(&env, &project, "Segunda", "Faça outra coisa.");
@@ -625,7 +625,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     std::fs::write(work.join("a.txt"), "mudou\n").expect("w");
     let t3 = create(&env, &project, "Terceira", "Nada.");
     let brief = std::fs::read_to_string(tasks_dir.join(format!("{project}-{t3}-brief.md"))).expect("brief da t3");
-    assert!(brief.contains(&format!("- {t2} \"Segunda\" (claude@{t2}, em andamento): mexe em a.txt, novo.txt")), "{brief}");
+    assert!(brief.contains(&format!("- {t2} \"Segunda\" (claude@{t2}, in progress): mexe em a.txt, novo.txt")), "{brief}");
 }
 
 #[test]

@@ -30,7 +30,6 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("not identified", "não identificados"),
     // Text helpers.
     ("the task title cannot be empty", "o título da tarefa não pode ficar vazio"),
-    ("[text cut at {max} characters]", "[texto cortado em {max} caracteres]"),
     ("{list} and {count} more", "{list} e mais {count}"),
     // Creating a task.
     ("invalid agent \"{agent}\": give only the model (claude, antigravity…)", "agente inválido \"{agent}\": informe só o modelo (claude, antigravity…)"),

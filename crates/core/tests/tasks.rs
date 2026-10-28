@@ -1486,3 +1486,35 @@ fn the_models_inventory_lists_the_capacity_of_each_model() {
     // The capacity wording belongs to `capability.rs` (another area): it stays as that area has it.
     assert!(sonnet.contains("complexa, Coding Agent Index 59.3 (2026-10)"), "{sonnet}");
 }
+
+#[test]
+fn what_the_user_reads_follows_the_language_and_what_the_agent_reads_stays_english() {
+    use agentdeck_core::i18n::{with_lang, Lang};
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let first = core.task_create(&env.project, spec("First")).expect("create");
+    core.task_start(&env.project, &first.id).expect("start");
+    let second = core.task_create(&env.project, spec("Second")).expect("create");
+    events(&env);
+    // The user, in Portuguese, starts the second task: the desk's history and the errors are Portuguese...
+    let second = with_lang(Lang::PtBr, || core.task_start(&env.project, &second.id)).expect("start");
+    assert!(second.events.iter().any(|e| e.text.starts_with("iniciada: worktree")), "{:?}", second.events);
+    match with_lang(Lang::PtBr, || core.task_start(&env.project, &second.id)) {
+        Err(TaskError::Conflict(m)) => assert!(m.contains("está em andamento") && m.contains("só se inicia um rascunho"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    let started = core.task(&env.project, &second.id).expect("task");
+    assert!(started.events.iter().any(|e| e.text == "brief entregue ao agente"), "{:?}", started.events);
+    // ...but the brief the agent receives, with its rules and the situation (which names the other task's status), is English.
+    let sent = deliveries(&events(&env));
+    let (_, prompt) = sent.iter().find(|(to, _)| to == "claude@t2").expect("delivery");
+    assert!(prompt.contains("Rules for task t2") && prompt.contains("(claude@t1, in progress)"), "{prompt}");
+    assert!(!prompt.contains("claude@t1, em andamento") && !prompt.contains("Regras da tarefa"), "{prompt}");
+    // The same refusal asked in English by default (what the bridge answers agents).
+    match core.task_start(&env.project, &second.id) {
+        Err(TaskError::Conflict(m)) => assert!(m.contains("is in progress") && m.contains("only a draft"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    core.shutdown();
+}
