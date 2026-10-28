@@ -1,103 +1,103 @@
 # ⚡ AgentDeck
 
-**Um terminal desktop onde os seus agentes de IA trabalham em equipe.** Claude Code, Codex, Antigravity e OpenCode
-rodam lado a lado, conversam entre si e recebem tarefas isoladas que você revisa e mescla, sem perder nada de vista.
+**A desktop terminal where your AI agents work as a team.** Claude Code, Codex, Antigravity, and OpenCode
+run side by side, talk to each other, and receive isolated tasks that you review and merge, without losing track of anything.
 
-![AgentDeck com Claude, Codex e OpenCode no modo Destaque e a mesa de tarefas à direita](docs/screenshots/main.png)
+![AgentDeck with Claude, Codex, and OpenCode in Spotlight mode and the tasks desk on the right](docs/screenshots/main.png)
 
-Feito 100% em Rust, nativo para **Windows** e **Linux**. Licença MIT.
+100% Rust, native for **Windows** and **Linux**. MIT License.
 
 ---
 
-## Por que existe
+## Why it exists
 
-Cada CLI de agente é bom sozinho, mas trabalhar com vários ao mesmo tempo vira uma pilha de terminais soltos: você
-copia texto de um para o outro, perde o que cada um está fazendo e torce para dois agentes não mexerem no mesmo
-arquivo.
+Each agent CLI is good on its own, but working with several at the same time turns into a pile of loose terminals: you
+copy text from one to another, lose track of what each one is doing, and hope two agents don't touch the same
+file.
 
-O AgentDeck junta tudo numa janela e dá aos agentes o que falta para colaborar:
+AgentDeck brings everything together in one window and gives agents what they need to collaborate:
 
-- **Um jeito de conversar.** Dentro de qualquer aba, o agente roda `ask-agent codex "revise isto"`. A mensagem é
-  digitada no terminal do outro agente, e a resposta volta para quem perguntou. Você vê tudo acontecendo e pode
-  intervir em qualquer aba.
-- **Trabalho isolado e revisável.** Uma tarefa ganha branch e pasta (git worktree) próprias. O agente trabalha lá,
-  entrega um relatório, e você lê o diff e decide se mescla, devolve com ajustes ou descarta.
-- **Memória do projeto.** O que o projeto já aprendeu (armadilhas, decisões, convenções) fica em arquivos versionados,
-  e o agente recebe o pedaço que vale para os arquivos em que vai mexer.
+- **A way to communicate.** Inside any tab, the agent runs `ask-agent codex "review this"`. The message is
+  typed into the other agent's terminal, and the reply returns to whoever asked. You see everything happening and can
+  intervene in any tab.
+- **Isolated, reviewable work.** A task gets its own branch and folder (git worktree). The agent works there,
+  delivers a report, and you inspect the diff and decide whether to merge, return with adjustments, or discard.
+- **Project memory.** What the project has learned (pitfalls, decisions, conventions) lives in versioned files,
+  and the agent receives the relevant slice for the files it will touch.
 
-Nada de trabalho invisível: todo agente tem uma aba de terminal de verdade, e nenhum abre subagentes escondidos.
+No invisible work: every agent has a real terminal tab, and none launches hidden subagents.
 
-## O que dá para fazer
+## What you can do
 
-### Agentes
+### Agents
 
-- **Abas de terminal reais** (ConPTY no Windows) para cada agente, restauradas quando o app reabre.
-- **Várias instâncias por agente**, com cargo e nome: `claude`, `claude@dev`, `claude@dev@ana`. Cada uma tem o seu
-  **modelo** (`opus`, `sonnet`, `gpt-6-luna`, `opencode/deepseek-v4.1-flash-free`…), mostrado ao lado do nome.
-- **Equipe**: arraste um agente sobre outro na barra lateral para definir chefe e subordinados.
-- **Uso dos planos** na barra de título: a sessão de 5 h e a semana de cada agente, com aviso a partir de 80%. Um modelo
-  esgotado não recebe pergunta.
-- **Instruções do AgentDeck em toda aba**, entregues pelo canal de cada CLI, sem depender do `AGENTS.md` do seu projeto.
-- **Sem perguntas que travam**: a pasta aberta como projeto já é registrada como confiável no Claude, no Codex e no
-  Antigravity, para uma aba aberta em segundo plano não parar em "Do you trust this folder?".
+- **Real terminal tabs** (ConPTY on Windows) for each agent, restored when the app reopens.
+- **Multiple instances per agent**, with role and name: `claude`, `claude@dev`, `claude@dev@ana`. Each has its own
+  **model** (`opus`, `sonnet`, `gpt-6-luna`, `opencode/deepseek-v4.1-flash-free`…), displayed next to the name.
+- **Team**: drag one agent onto another in the sidebar to define boss and subordinates.
+- **Plan usage** in the title bar: each agent's 5-hour session and weekly limits, with warnings starting at 80%. An exhausted
+  model receives no requests.
+- **AgentDeck instructions in every tab**, delivered via each CLI's native channel, without depending on your project's `AGENTS.md`.
+- **No blocking prompts**: folders opened as projects are automatically registered as trusted in Claude, Codex, and
+  Antigravity, so tabs opened in the background won't stall on "Do you trust this folder?".
 
-### Mesa de tarefas
+### Tasks desk
 
-A aba **Tarefas** da barra direita é onde o trabalho grande acontece:
+The **Tasks** tab in the right sidebar is where major work happens:
 
 ```
-rascunho ─→ em andamento ─→ em revisão ─→ aguardando validação ─→ concluída
-   │              ↑              │                  │
-   └→ na fila ────┘              └ devolver ↺       └ reprovar ↺ (volta ao mesmo agente)
+draft ─→ in progress ─→ in review ─→ awaiting validation ─→ completed
+  │           ↑              │               │
+  └→ queued ──┘              └ return ↺      └ reject ↺ (returns to the same agent)
 ```
 
-Em qualquer etapa antes de concluída, a tarefa pode ser descartada, e a branch e a pasta somem junto.
+At any stage before completion, the task can be discarded, and the branch and folder are removed along with it.
 
-- **Escolha do agente pela capacidade e pela cota.** Diga o tamanho do trabalho (`simples`, `media` ou `complexa`). A
-  mesa filtra os modelos que dão conta, por benchmarks públicos e pelo histórico das tarefas já feitas, e entre eles
-  escolhe o de mais folga de cota.
-- **Escopo com fila.** A tarefa pode declarar os caminhos que vai mexer. Outra que precise dos mesmos caminhos espera
-  **na fila** e começa sozinha quando a primeira termina.
-- **Revisão de verdade**: relatório, diff com realce de sintaxe e a linha do tempo das mensagens que o agente trocou.
-- **Mesclagem assistida**: se a mesclagem é recusada (alterações pendentes, conflito), a própria janela explica o
-  motivo e oferece a saída.
+- **Agent selection by capability and quota.** State the size of the work (`simples`, `media`, or `complexa`). The
+  desk filters models capable of handling it, based on public benchmarks and historical task outcomes, and among them
+  chooses the one with the most remaining quota headroom.
+- **Scoped queuing.** A task can declare the paths it will touch. Another task needing the same paths waits
+  **in the queue** and starts automatically when the first one finishes.
+- **Real review**: report, syntax-highlighted diff, and timeline of messages the agent exchanged.
+- **Assisted merge**: if the merge is rejected (uncommitted changes, conflicts), the window itself explains the
+  cause and provides the way forward.
 
 ### Interface
 
-- **Projetos**: cada projeto é uma pasta com os seus agentes. Trocar de projeto esconde as abas do anterior, que
-  continuam rodando.
-- **Três organizações** do centro: **Abas** (uma janela só), **Dividida** (uma janela por tipo de agente, em grade) e
-  **Destaque** (a janela da aba ativa grande, as outras empilhadas ao lado).
-- **Conversa integrada**: as mensagens entre agentes em tempo real, só leitura.
-- **Documentos**: o centro alterna para ler e **editar** arquivos com realce de sintaxe e busca, e para ler diffs e
-  relatórios com a largura toda (`Ctrl+Shift+D`).
-- **Git** (alterações, stage por trecho, commit, branches, merge e rebase, conflitos, stash) e **GitHub** (PRs com os
-  checks, issues, Actions e o log do job que falhou; um clique manda a falha para um agente).
-- **Anexos** por botão, arrastar e soltar ou `Ctrl+V` com imagem, e **ditado por voz opcional** com whisper.cpp local
-  (CUDA, Vulkan ou CPU). O áudio é apagado logo depois de transcrever.
-- **Bandeja do sistema**: o × esconde a janela e os agentes seguem trabalhando; abrir o app de novo traz a mesma janela.
+- **Projects**: each project is a folder with its own agents. Switching projects hides the tabs of the previous one, which
+  continue running.
+- **Three layouts** for the center: **Tabs** (a single window), **Split** (one window per agent type, in a grid), and
+  **Highlight** (the active tab's window large, the others stacked alongside).
+- **Integrated conversation**: agent-to-agent messages in real time, read-only.
+- **Documents**: the center toggles to read and **edit** files with syntax highlighting and search, and to view full-width
+  diffs and reports (`Ctrl+Shift+D`).
+- **Git** (changes, hunk staging, commit, branches, merge and rebase, conflicts, stash) and **GitHub** (PRs with
+  checks, issues, Actions, and the log of the failed job; one click sends the failure to an agent).
+- **Attachments** via button, drag and drop, or `Ctrl+V` with images, and **optional voice dictation** with local whisper.cpp
+  (CUDA, Vulkan, or CPU). Audio is deleted immediately after transcription.
+- **System tray**: × hides the window while agents keep working; opening the app again brings back the same window.
 
-## CLIs suportados
+## Supported CLIs
 
-Instale os que quiser usar. O AgentDeck usa o que encontrar instalado.
+Install whichever you want to use. AgentDeck uses whatever it finds installed.
 
-| CLI | Instalação |
+| CLI | Installation |
 | :-- | :-- |
 | Claude Code | `npm install -g @anthropic-ai/claude-code` |
 | Codex | `npm install -g @openai/codex` |
-| Antigravity | Windows: `irm https://antigravity.google/cli/install.ps1 \| iex` · Linux: instalador em https://antigravity.google |
-| OpenCode | `npm install -g opencode-ai` (inclui modelos gratuitos; também roda modelos locais) |
+| Antigravity | Windows: `irm https://antigravity.google/cli/install.ps1 \| iex` · Linux: installer at https://antigravity.google |
+| OpenCode | `npm install -g opencode-ai` (includes free models; also runs local models) |
 
-Também abrem como aba, com menos integração: Aider, Goose, GitHub Copilot CLI, Amazon Q, Open Interpreter e o terminal
-comum do sistema.
+Also open as tabs, with less integration: Aider, Goose, GitHub Copilot CLI, Amazon Q, Open Interpreter, and the system's
+standard terminal.
 
-## Instalar e rodar
+## Installation and running
 
-Não há instalador ainda: o app roda da pasta onde foi compilado.
+There is no installer yet: the app runs from the folder where it was built.
 
 ### Windows
 
-Pré-requisito: [Rust](https://rustup.rs) 1.89 ou mais novo.
+Prerequisite: [Rust](https://rustup.rs) 1.89 or newer.
 
 ```powershell
 git clone https://github.com/pattrickn0/AgentDeck.git
@@ -108,7 +108,7 @@ cargo build --workspace --release
 
 ### Linux
 
-Pré-requisitos: [Rust](https://rustup.rs) 1.89 ou mais novo e as bibliotecas de som e teclado.
+Prerequisites: [Rust](https://rustup.rs) 1.89 or newer and sound and keyboard libraries.
 
 ```bash
 # Ubuntu / Debian
@@ -122,105 +122,106 @@ cargo build --workspace --release
 ./target/release/agentdeck
 ```
 
-- Para abrir pastas e links e escolher arquivos: `xdg-utils` e `xdg-desktop-portal` com um backend
-  (`xdg-desktop-portal-gtk` no GNOME/XFCE, `xdg-desktop-portal-kde` no KDE).
-- Sem som nem microfone (dispensa a ALSA): `cargo build -p agentdeck --no-default-features --release`.
-- Testado em X11 (Ubuntu); o Fedora é conferido na CI, e no WSLg o app abre pelo X11 sozinho. Wayland ainda não foi
-  validado a fundo: se a janela não abrir, use `WINIT_UNIX_BACKEND=x11`. Detalhes e limitações em
+- To open folders and links and choose files: `xdg-utils` and `xdg-desktop-portal` with a backend
+  (`xdg-desktop-portal-gtk` in GNOME/XFCE, `xdg-desktop-portal-kde` in KDE).
+- Without sound or microphone (drops the ALSA requirement): `cargo build -p agentdeck --no-default-features --release`.
+- Tested on X11 (Ubuntu); Fedora is checked in CI, and in WSLg the app opens via X11 automatically. Wayland has not yet
+  been thoroughly validated: if the window does not open, use `WINIT_UNIX_BACKEND=x11`. Details and limitations in
   [memory/LINUX.md](memory/LINUX.md).
 
-### Os dois executáveis
+### The two executables
 
-O build gera o `agentdeck` (o app) e o `ask-agent` (o comando que os agentes usam). Eles precisam ficar **na mesma
-pasta**. Dentro das abas o app já põe o `ask-agent` no `PATH`.
+The build produces `agentdeck` (the app) and `ask-agent` (the command that agents use). They need to stay **in the same
+folder**. Inside tabs, the app automatically adds `ask-agent` to `PATH`.
 
-## Primeiros passos
+## Getting started
 
-1. Abra o app e clique em **Abrir pasta…** para criar o primeiro projeto (a pasta do seu código).
-2. Em **+ Novo agente**, na barra lateral, abra um Claude, um Codex ou outro CLI instalado. No Claude, no Antigravity e
-   no OpenCode, a seta `›` escolhe o modelo.
-3. Converse com o agente no terminal da aba. Para ele chamar outro agente, basta pedir: ele sabe usar o `ask-agent`.
-4. Para um trabalho maior, use **+ Nova tarefa** na aba Tarefas: escreva o pedido, escolha o nível e deixe a mesa
-   escolher o agente. Quando ele entregar, revise o diff e mescle.
+1. Open the app and click **Open folder…** to create the first project (your code folder).
+2. Under **+ New agent** in the sidebar, open Claude, Codex, or another installed CLI. In Claude, Antigravity, and
+   OpenCode, the `›` arrow selects the model.
+3. Chat with the agent in the tab's terminal. To have it call another agent, just ask: it knows how to use `ask-agent`.
+4. For larger work, use **+ New task** in the Tasks tab: describe the request, choose the level, and let the desk
+   select the agent. Once it delivers, review the diff and merge.
 
-## `ask-agent`: a linha de comando dos agentes
+## `ask-agent`: the agents' command line
 
-Os agentes usam estes comandos sozinhos (as instruções chegam a cada aba). Você também pode rodá-los numa aba de
-terminal comum.
+Agents use these commands on their own (instructions are delivered to each tab). You can also run them in a standard
+terminal tab.
 
 ```bash
-# Conversar
-ask-agent codex "Revise a função parse_config em src/config.rs"
-ask-agent --model sonnet claude@dev "Implemente o item 3"   # abre claude@dev com o modelo sonnet
-ask-agent --reply 7 "Feito: a pasta src/ foi dividida"      # responde à pergunta nº 7
-ask-agent --boss "Terminei a revisão"                       # reporta ao chefe
-ask-agent --inbox                                           # respostas que chegaram depois
+# Conversation
+ask-agent codex "Review the parse_config function in src/config.rs"
+ask-agent --model sonnet claude@dev "Implement item 3"      # opens claude@dev with the sonnet model
+ask-agent --reply 7 "Done: the src/ folder was split"       # replies to question #7
+ask-agent --boss "Finished the review"                      # reports to boss
+ask-agent --inbox                                           # replies that arrived later
 
-# Quem está aí
-ask-agent --list                                            # agentes e instâncias abertas
-ask-agent --team                                            # seu chefe e sua equipe
-ask-agent --models                                          # modelos de cada agente, cota e capacidade
+# Who is there
+ask-agent --list                                            # open agents and instances
+ask-agent --team                                            # your boss and team
+ask-agent --models                                          # models for each agent, quota, and capability
 
-# Tarefas
-ask-agent --task new "Tela de login" --level complexa --scope src/ui --start --file pedido.md
+# Tasks
+ask-agent --task new "Login screen" --level complexa --scope src/ui --start --file brief.md
 ask-agent --task list
-ask-agent --task merge t3                                   # mescla e deixa aguardando validação
-ask-agent --task validate t3                                # conclui e limpa a worktree
+ask-agent --task merge t3                                   # merges and leaves awaiting validation
+ask-agent --task validate t3                                # completes and cleans up the worktree
 
-# Memória do projeto
-ask-agent --learn src/config.rs                             # o que o projeto já aprendeu sobre esse arquivo
-ask-agent --outline src/config.rs                           # as assinaturas com a linha, para ler só o trecho certo
+# Project memory
+ask-agent --learn src/config.rs                             # what the project has learned about this file
+ask-agent --outline src/config.rs                           # signatures with line numbers, to read just the right slice
 ```
 
-Texto com acento vai melhor por arquivo (`--file`): no Windows, a entrada padrão do PowerShell troca acentos por `?`.
-A referência completa está em [memory/GERAL.md](memory/GERAL.md#2-o-que-dá-para-fazer).
+Accented text works better via file (`--file`): on Windows, PowerShell standard input replaces accents with `?`.
+The complete reference is in [memory/GERAL.md](memory/GERAL.md#2-o-que-dá-para-fazer).
 
-## Atalhos
+## Shortcuts
 
-| Atalho | Ação |
+| Shortcut | Action |
 | :-- | :-- |
-| `Ctrl+T` | nova aba do tipo focado |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | próxima / anterior aba da janela |
-| `Ctrl+Alt+setas` | foco na janela vizinha |
-| `Ctrl+B` | mostra ou esconde a barra lateral |
-| `Ctrl+Shift+D` | alterna o centro entre Agentes e Documentos |
-| `Ctrl+Shift+M` | ditado na aba visível |
-| `Ctrl+S` / `Ctrl+F` | grava / busca no documento aberto |
-| `Ctrl+/` | lista os atalhos |
+| `Ctrl+T` | new tab of focused type |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | next / previous tab in the window |
+| `Ctrl+Alt+arrows` | focus neighboring window |
+| `Ctrl+B` | show or hide sidebar |
+| `Ctrl+Shift+D` | toggle center between Agents and Documents |
+| `Ctrl+Shift+M` | dictation in visible tab |
+| `Ctrl+S` / `Ctrl+F` | save / find in open document |
+| `Ctrl+/` | list shortcuts |
 
-Com o terminal focado, `Ctrl+B` vai para o programa da aba (útil no tmux). A opção "Atalhos do app acima do terminal",
-no menu ☰, inverte isso.
+With the terminal focused, `Ctrl+B` goes to the tab's program (useful in tmux). The "App shortcuts above the terminal" option
+in the ☰ menu reverses this.
 
-## Dados e privacidade
+## Data and privacy
 
-- **Nada passa por um servidor do AgentDeck**, porque ele não tem um. Quem fala com a nuvem são os próprios CLIs; a
-  leitura de cota usa as credenciais que eles já guardam na máquina.
-- A comunicação entre agentes é uma ponte HTTP local, só em `127.0.0.1`, com um token por aba: um agente não consegue se
-  passar por outro.
-- O áudio do ditado é apagado logo depois da transcrição. Anexos e prompts longos ficam só das últimas 5 sessões.
-- Abrir uma pasta como projeto conta como confiar nela: o app a registra como confiável no Claude Code
-  (`~/.claude.json`) e no Antigravity (`~/.gemini/antigravity-cli/settings.json`). Sua pasta pessoal e a raiz de um
-  disco nunca são registradas.
-- Os dados de execução ficam em `dados/`, ao lado do executável (ou em `AGENTDECK_HOME`). A configuração fica em
-  `%APPDATA%\AgentDeck\config.json` no Windows e em `~/.config/AgentDeck/config.json` no Linux.
+- **Nothing passes through an AgentDeck server**, because it does not have one. The CLIs themselves communicate with
+  the cloud; quota reading uses credentials they already store on your machine.
+- Inter-agent communication is a local HTTP bridge, strictly on `127.0.0.1`, with a token per tab: an agent cannot
+  impersonate another.
+- Dictation audio is deleted immediately after transcription. Attachments and long prompts are retained only from the
+  last 5 sessions.
+- Opening a folder as a project counts as trusting it: the app registers it as trusted in Claude Code
+  (`~/.claude.json`) and in Antigravity (`~/.gemini/antigravity-cli/settings.json`). Your home folder and drive roots
+  are never registered.
+- Runtime data lives in `dados/`, next to the executable (or in `AGENTDECK_HOME`). Configuration is stored in
+  `%APPDATA%\AgentDeck\config.json` on Windows and in `~/.config/AgentDeck/config.json` on Linux.
 
-## Documentação
+## Documentation
 
-A documentação do projeto mora em [`memory/`](memory/GERAL.md), versionada junto com o código:
+Project documentation lives in [`memory/`](memory/GERAL.md), versioned alongside the code:
 
-- [GERAL.md](memory/GERAL.md): o ponto de partida, com como o app funciona, o que dá para fazer e o mapa dos documentos.
-- [ARCHITECTURE.md](memory/ARCHITECTURE.md): crates, fluxos e o contrato da ponte entre agentes.
-- [MANUTENCAO.md](memory/MANUTENCAO.md): como compilar, testar e manter, com uma introdução prática ao Rust.
-- [AGENTDECK.md](memory/AGENTDECK.md): visão e rumo do produto.
-- [pendencias.md](memory/pendencias.md) e [historico.md](memory/historico.md): o que vem a seguir e o que já foi feito.
-- [aprendizados/](memory/aprendizados/README.md): as armadilhas e decisões que o código não mostra.
+- [GERAL.md](memory/GERAL.md): the starting point, covering how the app works, what you can do, and the documentation map.
+- [ARCHITECTURE.md](memory/ARCHITECTURE.md): crates, workflows, and the inter-agent bridge contract.
+- [MANUTENCAO.md](memory/MANUTENCAO.md): how to build, test, and maintain, with a hands-on introduction to Rust.
+- [AGENTDECK.md](memory/AGENTDECK.md): product vision and direction.
+- [pendencias.md](memory/pendencias.md) and [historico.md](memory/historico.md): what comes next and what has already been done.
+- [aprendizados/](memory/aprendizados/README.md): pitfalls and decisions that the code does not show.
 
-## Contribuir
+## Contributing
 
-Veja [CONTRIBUTING.md](CONTRIBUTING.md). Antes de enviar, rode `cargo fmt --all`,
-`cargo clippy --workspace --all-targets -- -D warnings` e `cargo test --workspace`; a CI confere os três em Windows,
-Ubuntu e Fedora.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Before submitting, run `cargo fmt --all`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`; CI verifies all three on Windows,
+Ubuntu, and Fedora.
 
-## Licença
+## License
 
-MIT. Veja [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

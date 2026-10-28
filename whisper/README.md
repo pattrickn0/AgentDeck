@@ -1,65 +1,65 @@
-# 🎙️ Subsistema de Transcrição de Voz Local (`whisper/`)
+# 🎙️ Local Voice Transcription Subsystem (`whisper/`)
 
-O diretório `whisper/` gerencia todo o motor de inferência de voz para texto (Speech-to-Text) do **AgentDeck**, baseado no projeto de alto desempenho **`whisper.cpp`** da GGML.
-
----
-
-## 🌟 Pilares do Subsistema
-
-1. **Privacidade Absoluta (Zero Cloud):** Nenhuma gravação de áudio ou metadado vocal trafega pela internet. Toda inferência neural ocorre estritamente no seu computador.
-2. **Descarte Imediato de Áudio:** No milissegundo em que o texto é transcrito e inserido no campo de composição, o arquivo de áudio `.wav` temporário é **imediatamente excluído** do disco.
-3. **Aceleração por Hardware Dinâmica:** Detecta o hardware do sistema e seleciona a engine mais veloz disponível:
-   - 🟢 **NVIDIA CUDA:** Detecta placas GeForce/RTX via `nvidia-smi` e utiliza CUDA 12.4 (`bin-cuda/`).
-   - 🔴/🔵 **Vulkan API:** Suporte nativo multiplataforma para GPUs **AMD Radeon**, **Intel Arc / Iris Xe** (`bin-vulkan/`).
-   - ⚪ **CPU AVX2:** Fallback universal com multithreading OpenMP (`bin-cpu/`).
+The `whisper/` directory manages the entire Speech-to-Text voice inference engine of **AgentDeck**, based on the high-performance **`whisper.cpp`** project from GGML.
 
 ---
 
-## 📂 Estrutura de Pastas
+## 🌟 Subsystem Pillars
+
+1. **Absolute Privacy (Zero Cloud):** No audio recording or voice metadata travels over the internet. All neural inference occurs strictly on your computer.
+2. **Immediate Audio Discard:** The millisecond text is transcribed and inserted into the composer field, the temporary `.wav` audio file is **immediately deleted** from disk. Zero voice retention.
+3. **Dynamic Hardware Acceleration:** Detects system hardware and selects the fastest available engine:
+   - 🟢 **NVIDIA CUDA:** Detects GeForce/RTX cards via `nvidia-smi` and uses CUDA 12.4 (`bin-cuda/`).
+   - 🔴/🔵 **Vulkan API:** Native cross-platform support for **AMD Radeon**, **Intel Arc / Iris Xe** GPUs (`bin-vulkan/`).
+   - ⚪ **CPU AVX2:** Universal fallback with OpenMP multithreading (`bin-cpu/`).
+
+---
+
+## 📂 Folder Structure
 
 ```
 whisper/
-├── README.md               # Este documento de referência
-├── bin-vulkan/             # Binários compilados para aceleração Vulkan (AMD/Intel)
-│   ├── whisper-cli.exe     # Executável de inferência
-│   ├── whisper.dll         # Biblioteca Whisper
-│   └── ggml-vulkan.dll     # Backend Vulkan da biblioteca GGML
-├── bin-cpu/                # Binários oficiais de fallback para CPU (AVX2/OpenMP)
+├── README.md               # This reference document
+├── bin-vulkan/             # Binaries compiled for Vulkan acceleration (AMD/Intel)
+│   ├── whisper-cli.exe     # Inference executable
+│   ├── whisper.dll         # Whisper library
+│   └── ggml-vulkan.dll     # Vulkan backend of the GGML library
+├── bin-cpu/                # Official CPU fallback binaries (AVX2/OpenMP)
 │   └── Release/
 │       └── whisper-cli.exe
-├── bin-cuda/               # Baixado dinamicamente caso GPU NVIDIA seja detectada
-└── models/                 # Diretório de modelos neurais GGML
-    ├── README.md           # Instruções e links de download do modelo
-    └── .gitkeep            # ggml-large-v3-turbo.bin (~1.6 GB, ignorado no git)
+├── bin-cuda/               # Downloaded dynamically if an NVIDIA GPU is detected
+└── models/                 # GGML neural models directory
+    ├── README.md           # Model download instructions and links
+    └── .gitkeep            # ggml-large-v3-turbo.bin (~1.6 GB, git-ignored)
 ```
 
 ---
 
-## 🧠 Modelo Neural (`large-v3-turbo`)
+## 🧠 Neural Model (`large-v3-turbo`)
 
-O AgentDeck utiliza o modelo oficial **`large-v3-turbo`** (~1,62 GB) da OpenAI convertido para o formato GGML:
-- **Precisão Excepcional:** Suporte nativo a dezenas de idiomas com foco especial em Português e Inglês técnico.
-- **Download opcional:** O ditado por voz é opcional. Na primeira inicialização o AgentDeck pergunta se você quer usá-lo; só com o "sim" ele baixa o modelo (direto do Hugging Face, com o progresso na barra direita) e o motor de CPU. Quem disse "Agora não" pode baixar depois (ou remover o que foi baixado) em Configurações.
-- **Injeção de Contexto Fonético:** Cada inferência inclui um prompt contextual customizado (`--prompt "AgentDeck, Claude, Antigravity, agy, Vulkan..."`) para garantir grafia correta dos termos de desenvolvimento.
+AgentDeck uses the official **`large-v3-turbo`** model (~1.62 GB) from OpenAI converted to GGML format:
+- **Exceptional Accuracy:** Native support for dozens of languages with a special focus on Portuguese and technical English.
+- **Optional download:** Voice dictation is optional. On first launch, AgentDeck asks if you want to use it; only with confirmation does it download the model (directly from Hugging Face, with progress in the right bar) and the CPU engine. Users who chose "Not now" can download it later (or remove what was downloaded) in Settings.
+- **Phonetic Context Injection:** Each inference includes a customized contextual prompt (`--prompt "AgentDeck, Claude, Antigravity, agy, Vulkan..."`) to ensure correct spelling of development terms.
 
 ---
 
-## 🔨 Compilação Manual do Backend Vulkan (Opcional)
+## 🔨 Manual Compilation of the Vulkan Backend (Optional)
 
-Os binários em `bin-vulkan/` já vêm prontos para uso em sistemas Windows x64 com suporte a Vulkan. Caso queira recompilar ou atualizar a versão do `whisper.cpp`, fornecemos um script automatizado:
+The binaries in `bin-vulkan/` come ready to use on Windows x64 systems with Vulkan support. If you wish to recompile or update the `whisper.cpp` version, we provide an automated script:
 
 ```powershell
-# Pré-requisito: Vulkan SDK e CMake instalados
+# Prerequisite: Vulkan SDK and CMake installed
 powershell -ExecutionPolicy Bypass -File scripts/build-vulkan.ps1
 ```
 
 ---
 
-## Licenças de terceiros
+## Third-party licenses
 
-Os binários versionados em in-cpu/ e in-vulkan/ não são código do AgentDeck (MIT):
+The binaries versioned in `bin-cpu/` and `bin-vulkan/` are not AgentDeck code (MIT):
 
-- whisper.cpp e ggml (whisper-cli.exe, whisper.dll, ggml*.dll): MIT, © os autores do projeto GGML (https://github.com/ggml-org/whisper.cpp).
+- whisper.cpp and ggml (whisper-cli.exe, whisper.dll, ggml*.dll): MIT, © the GGML project authors (https://github.com/ggml-org/whisper.cpp).
 - SDL2.dll: zlib (https://libsdl.org).
-- msvcp140.dll, cruntime140*.dll, comp140.dll: runtime redistribuível do Visual C++ da Microsoft.
-- O modelo large-v3-turbo (baixado, nunca versionado): MIT, OpenAI.
+- msvcp140.dll, vcruntime140*.dll, vcomp140.dll: Microsoft Visual C++ redistributable runtime.
+- The large-v3-turbo model (downloaded, never versioned): MIT, OpenAI.
