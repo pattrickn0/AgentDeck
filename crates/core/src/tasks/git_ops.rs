@@ -47,12 +47,13 @@ pub(crate) fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String
         .unwrap_or_default()
 }
 
-/// `git diff --stat base...branch`, cut; "no changes" when empty.
+/// `git diff --stat base...branch`, cut; `(no changes against the base)` when empty.
 pub(super) fn diff_stat(repo: &Repo, base: &str, branch: &str) -> Result<String, String> {
     let out = git_out(repo, &["diff", "--stat", &format!("{base}...{branch}"), "--"]).map_err(|e| e.to_string())?;
     let out = out.trim();
     if out.is_empty() {
-        return Ok(t!("(no changes relative to the base)").into());
+        // Stored data (`Task::diff_stat`), recognized by `tasks_ui::parse_diff_stat`: plain English, not `t!`.
+        return Ok("(no changes against the base)".into());
     }
     Ok(cap_text(out, MAX_STAT))
 }

@@ -294,7 +294,6 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ),
     ("git worktree prune failed: {error}", "git worktree prune falhou: {error}"),
     // Git operations and the stash notices.
-    ("(no changes relative to the base)", "(nenhuma alteração em relação à base)"),
     ("the folder {folder} does not exist", "a pasta {folder} não existe"),
     (
         "Your uncommitted changes are still kept in git's stash (\"{message}\"): {why} Nothing was lost. To recover them: open a terminal in the project folder, run git stash list to find the entry and git stash pop to give it back (resolving whatever clashes).",
