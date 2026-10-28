@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn slugs_are_ascii_lowercase_and_short() {
-        assert_eq!(slugify("Fix the café button, Ação!", 40), "fix-the-cafe-button-acao");
+        assert_eq!(slugify("Fix the café button, Ünï!", 40), "fix-the-cafe-button-uni");
         assert_eq!(slugify("  --Héllo,   world--  ", 40), "hello-world");
         assert_eq!(slugify("日本語", 40), "");
         assert_eq!(slugify("a/b\\c:d", 40), "a-b-c-d");

@@ -1,6 +1,6 @@
-//! Escopo de escrita e fila da mesa de tarefas, com o git real (pula com aviso se o `git` não estiver instalado):
-//! a tarefa cujo escopo se sobrepõe ao de outra em andamento espera na fila e começa sozinha, partindo da base
-//! já com a mesclagem da outra.
+//! Write scope and queue of the tasks desk, with real git (skips with a notice if `git` is not installed):
+//! a task whose scope overlaps that of another one in progress waits in the queue and starts by itself, departing
+//! from the base already with the other's merge.
 use agentdeck_core::{Task, TaskError, TaskSpec, TaskStatus};
 
 #[path = "support/tasks_env.rs"]
@@ -10,7 +10,7 @@ use env::*;
 macro_rules! need_git {
     () => {
         if git_exe().is_none() {
-            eprintln!("git não instalado: teste pulado");
+            eprintln!("git not installed: test skipped");
             return;
         }
     };
@@ -20,23 +20,23 @@ fn scoped(title: &str, scope: &[&str]) -> TaskSpec {
     TaskSpec { scope: scope.iter().map(|s| (*s).to_owned()).collect(), ..spec(title) }
 }
 
-/// Cria e inicia uma tarefa com escopo; devolve como ficou depois do `start`.
+/// Creates and starts a task with a scope; returns how it ended up after the `start`.
 fn start_scoped(env: &Env, title: &str, scope: &[&str]) -> Task {
     let t = env.core.task_create(&env.project, scoped(title, scope)).expect("create");
     env.core.task_start(&env.project, &t.id).expect("start")
 }
 
-/// Leva a tarefa em andamento até a revisão, com um commit em `file`.
+/// Takes the task in progress to review, with a commit in `file`.
 fn deliver(env: &Env, t: &Task, file: &str) {
     if let Some(dir) = std::path::Path::new(file).parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(t.worktree.join(dir)).expect("mkdir");
     }
-    commit_file(&t.worktree, file, "conteúdo\n", &format!("feat: {}", t.title));
-    env.core.task_done(&env.project, &t.id, "Feito.").expect("done");
+    commit_file(&t.worktree, file, "content\n", &format!("feat: {}", t.title));
+    env.core.task_done(&env.project, &t.id, "Done.").expect("done");
 }
 
 fn status(env: &Env, id: &str) -> TaskStatus {
-    env.core.task(&env.project, id).expect("tarefa").status
+    env.core.task(&env.project, id).expect("task").status
 }
 
 #[test]
@@ -44,34 +44,34 @@ fn an_overlapping_scope_waits_in_the_queue_and_starts_when_the_other_is_merged()
     need_git!();
     let env = start();
     let core = &env.core;
-    let a = start_scoped(&env, "Mexe no core", &["crates/core"]);
+    let a = start_scoped(&env, "Touches core", &["crates/core"]);
     assert_eq!(a.status, TaskStatus::Running);
     assert_eq!(a.scope, ["crates/core"]);
     events(&env);
 
-    let b = start_scoped(&env, "Mexe no git.rs", &["crates/core/src/git.rs"]);
+    let b = start_scoped(&env, "Touches git.rs", &["crates/core/src/git.rs"]);
     assert_eq!((b.status, b.waiting_for.as_deref()), (TaskStatus::Queued, Some("t1")));
     assert!(b.queued_ms.is_some() && b.started_ms.is_none());
-    assert!(b.events.iter().any(|e| e.text.contains("na fila") && e.text.contains("t1")), "{:?}", b.events);
-    // Na fila não há worktree, branch, instância nem entrega ao agente.
+    assert!(b.events.iter().any(|e| e.text.contains("queued") && e.text.contains("t1")), "{:?}", b.events);
+    // In the queue there is no worktree, branch, instance or delivery to the agent.
     assert!(!b.worktree.exists());
     assert_eq!(branches(&env.ws), ["main", a.branch.as_str()]);
     assert!(deliveries(&events(&env)).iter().all(|(to, _)| to != "claude@t2"));
     assert!(!core.project_instance_ids(&env.project).contains(&"claude@t2".to_owned()));
-    // Iniciar de novo enquanto o escopo está ocupado só confere: continua na fila.
-    assert_eq!(core.task_start(&env.project, "t2").expect("start de novo").status, TaskStatus::Queued);
-    // A entrega da outra para revisão não libera: em revisão ela ainda segura.
-    deliver(&env, &a, "crates/core/novo.rs");
+    // Starting again while the scope is taken only checks: it stays in the queue.
+    assert_eq!(core.task_start(&env.project, "t2").expect("start again").status, TaskStatus::Queued);
+    // The other one's delivery to review does not free it: in review it still holds.
+    deliver(&env, &a, "crates/core/new.rs");
     assert_eq!(status(&env, "t2"), TaskStatus::Queued);
 
-    // Mescla a primeira: a segunda começa sozinha, já com a mesclagem.
+    // Merge the first: the second starts by itself, already with the merge.
     core.task_merge(&env.project, "t1").expect("merge");
     let b = core.task(&env.project, "t2").expect("t2");
     assert_eq!(b.status, TaskStatus::Running, "{:?}", b.events);
     assert!(b.waiting_for.is_none() && b.queued_ms.is_none() && b.started_ms.is_some());
-    assert!(b.worktree.join("crates/core/novo.rs").is_file(), "parte da base com a mesclagem da t1");
+    assert!(b.worktree.join("crates/core/new.rs").is_file(), "departs from the base with t1's merge");
     assert_eq!(git(&b.worktree, &["rev-parse", "main"]), git(&env.ws, &["rev-parse", "main"]));
-    assert!(deliveries(&events(&env)).iter().any(|(to, prompt)| to == "claude@t2" && prompt.contains("Mexe no git.rs")));
+    assert!(deliveries(&events(&env)).iter().any(|(to, prompt)| to == "claude@t2" && prompt.contains("Touches git.rs")));
     assert!(core.project_instance_ids(&env.project).contains(&"claude@t2".to_owned()));
     core.shutdown();
 }
@@ -81,8 +81,8 @@ fn discarding_the_task_in_front_also_starts_the_queued_one() {
     need_git!();
     let env = start();
     let core = &env.core;
-    start_scoped(&env, "Primeira", &["crates/core"]);
-    let b = start_scoped(&env, "Segunda", &["crates/core/src"]);
+    start_scoped(&env, "First", &["crates/core"]);
+    let b = start_scoped(&env, "Second", &["crates/core/src"]);
     assert_eq!(b.status, TaskStatus::Queued);
     core.task_discard(&env.project, "t1").expect("discard");
     assert_eq!(status(&env, "t2"), TaskStatus::Running);
@@ -94,16 +94,16 @@ fn a_task_that_fails_to_start_frees_the_scope_for_the_queue() {
     need_git!();
     let env = start();
     let core = &env.core;
-    let a = core.task_create(&env.project, scoped("Vai falhar", &["crates/core"])).expect("create");
-    // A pasta da worktree já existe: o início falha e a tarefa vira `Failed`.
+    let a = core.task_create(&env.project, scoped("Will fail", &["crates/core"])).expect("create");
+    // The worktree folder already exists: the start fails and the task becomes `Failed`.
     std::fs::create_dir_all(&a.worktree).expect("mkdir");
-    let b = core.task_create(&env.project, scoped("Espera", &["crates/core"])).expect("create");
-    // Sozinha, a t2 não espera ninguém (a t1 ainda é rascunho).
+    let b = core.task_create(&env.project, scoped("Waits", &["crates/core"])).expect("create");
+    // Alone, t2 waits for nobody (t1 is still a draft).
     let a_started = core.task_start(&env.project, &a.id);
     assert!(matches!(a_started, Err(TaskError::Failed(_))), "{a_started:?}");
     assert_eq!(status(&env, "t1"), TaskStatus::Failed);
     assert_eq!(core.task_start(&env.project, &b.id).expect("start").status, TaskStatus::Running);
-    // Nova tentativa da que falhou, com o escopo ocupado: recusa e continua falha, sem entrar na fila.
+    // New attempt of the one that failed, with the scope taken: refuses and stays failed, without entering the queue.
     std::fs::remove_dir_all(&a.worktree).expect("rm");
     match core.task_start(&env.project, &a.id) {
         Err(TaskError::Conflict(m)) => assert!(m.contains("t2"), "{m}"),
@@ -119,7 +119,7 @@ fn disjoint_scopes_start_together() {
     let env = start();
     let a = start_scoped(&env, "App", &["crates/app"]);
     let b = start_scoped(&env, "Cli", &["crates/cli"]);
-    let c = start_scoped(&env, "Prefixo parecido", &["crates/ap"]);
+    let c = start_scoped(&env, "Similar prefix", &["crates/ap"]);
     for t in [a, b, c] {
         assert_eq!(t.status, TaskStatus::Running, "{}", t.title);
         assert!(t.waiting_for.is_none());
@@ -142,11 +142,11 @@ fn memory_and_cargo_lock_do_not_reserve_anything() {
 fn a_task_without_scope_neither_queues_nor_holds_anyone() {
     need_git!();
     let env = start();
-    let a = start_scoped(&env, "Com escopo", &["crates/core"]);
-    let none = env.core.task_create(&env.project, spec("Sem escopo")).expect("create");
+    let a = start_scoped(&env, "With scope", &["crates/core"]);
+    let none = env.core.task_create(&env.project, spec("Without scope")).expect("create");
     assert!(none.scope.is_empty());
     assert_eq!(env.core.task_start(&env.project, &none.id).expect("start").status, TaskStatus::Running);
-    let b = start_scoped(&env, "Outra sem escopo e uma que espera", &["crates/core"]);
+    let b = start_scoped(&env, "Another one without scope and one that waits", &["crates/core"]);
     assert_eq!((a.status, b.status, b.waiting_for.as_deref()), (TaskStatus::Running, TaskStatus::Queued, Some("t1")));
     env.core.shutdown();
 }
@@ -156,19 +156,19 @@ fn awaiting_validation_does_not_hold_the_queue() {
     need_git!();
     let env = start();
     let core = &env.core;
-    let a = start_scoped(&env, "Primeira", &["crates/core"]);
+    let a = start_scoped(&env, "First", &["crates/core"]);
     deliver(&env, &a, "crates/core/a.rs");
     core.task_merge(&env.project, "t1").expect("merge");
     assert_eq!(status(&env, "t1"), TaskStatus::Validating);
-    // O código já está na base: a segunda começa na hora, com ele.
-    let b = start_scoped(&env, "Segunda", &["crates/core"]);
+    // The code is already in the base: the second starts right away, with it.
+    let b = start_scoped(&env, "Second", &["crates/core"]);
     assert_eq!(b.status, TaskStatus::Running);
     assert!(b.worktree.join("crates/core/a.rs").is_file());
-    // Reprovar a primeira a põe de volta em andamento, sobreposta à segunda: só um aviso.
-    core.task_reject(&env.project, "t1", "não funcionou").expect("reject");
+    // Rejecting the first puts it back in progress, overlapping the second: only a warning.
+    core.task_reject(&env.project, "t1", "it did not work").expect("reject");
     let a = core.task(&env.project, "t1").expect("t1");
     assert_eq!(a.status, TaskStatus::Running);
-    assert!(a.events.iter().any(|e| e.text.contains("aviso") && e.text.contains("t2")), "{:?}", a.events);
+    assert!(a.events.iter().any(|e| e.text.contains("warning") && e.text.contains("t2")), "{:?}", a.events);
     core.shutdown();
 }
 
@@ -179,7 +179,7 @@ fn the_queue_keeps_its_order_and_waits_for_whoever_is_ahead() {
     let core = &env.core;
     let a = start_scoped(&env, "A", &["crates/core"]);
     let b = start_scoped(&env, "B", &["crates/core/src"]);
-    // A t3 não colide com a t1 (em andamento) além de pelo escopo da t2: entra atrás dela.
+    // t3 does not collide with t1 (in progress) except through t2's scope: it enters behind it.
     let c = start_scoped(&env, "C", &["crates/core/src/git.rs", "crates/app"]);
     let d = start_scoped(&env, "D", &["crates/app"]);
     assert_eq!((a.status, b.status, c.status, d.status), (TaskStatus::Running, TaskStatus::Queued, TaskStatus::Queued, TaskStatus::Queued));
@@ -187,7 +187,7 @@ fn the_queue_keeps_its_order_and_waits_for_whoever_is_ahead() {
     assert_eq!(d.waiting_for.as_deref(), Some("t3"));
     deliver(&env, &a, "crates/core/x.rs");
     core.task_merge(&env.project, "t1").expect("merge");
-    // A t1 saiu: a t2 (primeira da fila) começa; a t3 passa a esperar a t2; a t4 segue atrás da t3.
+    // t1 left: t2 (first in the queue) starts; t3 now waits for t2; t4 stays behind t3.
     assert_eq!(status(&env, "t2"), TaskStatus::Running);
     let c = core.task(&env.project, "t3").expect("t3");
     assert_eq!((c.status, c.waiting_for.as_deref()), (TaskStatus::Queued, Some("t2")));
@@ -203,8 +203,8 @@ fn the_queue_keeps_its_order_and_waits_for_whoever_is_ahead() {
 fn the_queue_survives_a_restart_and_starts_when_the_other_ends() {
     need_git!();
     let env = start();
-    start_scoped(&env, "Primeira", &["crates/core"]);
-    let b = start_scoped(&env, "Segunda", &["crates/core/src"]);
+    start_scoped(&env, "First", &["crates/core"]);
+    let b = start_scoped(&env, "Second", &["crates/core/src"]);
     assert_eq!(b.status, TaskStatus::Queued);
     let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
     let Env { _tmp, core: first, rx, .. } = env;
@@ -215,7 +215,7 @@ fn the_queue_survives_a_restart_and_starts_when_the_other_ends() {
     let b = core.task(&project, "t2").expect("t2");
     assert_eq!((b.status, b.waiting_for.as_deref()), (TaskStatus::Queued, Some("t1")));
     assert_eq!(b.scope, ["crates/core/src"]);
-    // Nada começa enquanto a primeira segue em andamento.
+    // Nothing starts while the first is still in progress.
     core.tasks_advance_queue(&project);
     assert_eq!(core.task(&project, "t2").expect("t2").status, TaskStatus::Queued);
     core.task_discard(&project, "t1").expect("discard");
@@ -228,13 +228,13 @@ fn the_queue_survives_a_restart_and_starts_when_the_other_ends() {
 fn advancing_the_queue_catches_up_after_a_restart() {
     need_git!();
     let env = start();
-    let a = start_scoped(&env, "Primeira", &["crates/core"]);
-    start_scoped(&env, "Segunda", &["crates/core"]);
+    let a = start_scoped(&env, "First", &["crates/core"]);
+    start_scoped(&env, "Second", &["crates/core"]);
     let (root, project, config, ws) = (env.root.clone(), env.project.clone(), env.config.clone(), env.ws.clone());
     let Env { _tmp, core: first, rx, .. } = env;
     first.shutdown();
     drop((first, rx));
-    // Com o app fechado a primeira some do caminho (aqui, o registro dela passa a descartada à mão).
+    // With the app closed the first one leaves the way (here, its record is turned into discarded by hand).
     let file = root.join("dados").join("tarefas").join(format!("{project}.json"));
     let text = std::fs::read_to_string(&file).expect("json");
     let mut json: serde_json::Value = serde_json::from_str(&text).expect("parse");
@@ -255,32 +255,32 @@ fn done_warns_about_files_outside_the_scope_without_blocking() {
     need_git!();
     let env = start();
     let core = &env.core;
-    let t = start_scoped(&env, "Sai do escopo", &["crates/cli", "memory/pendencias.md"]);
+    let t = start_scoped(&env, "Leaves the scope", &["crates/cli", "memory/pendencias.md"]);
     std::fs::create_dir_all(t.worktree.join("crates/cli")).expect("mkdir");
     std::fs::create_dir_all(t.worktree.join("crates/core")).expect("mkdir");
     std::fs::create_dir_all(t.worktree.join("memory")).expect("mkdir");
-    std::fs::write(t.worktree.join("crates/cli/dentro.rs"), "x").expect("w");
-    std::fs::write(t.worktree.join("crates/core/fora.rs"), "x").expect("w");
+    std::fs::write(t.worktree.join("crates/cli/inside.rs"), "x").expect("w");
+    std::fs::write(t.worktree.join("crates/core/outside.rs"), "x").expect("w");
     std::fs::write(t.worktree.join("memory/GERAL.md"), "x").expect("w");
     std::fs::write(t.worktree.join("Cargo.lock"), "x").expect("w");
     git(&t.worktree, &["add", "-A"]);
-    git(&t.worktree, &["commit", "-q", "-m", "feat: tudo"]);
-    let done = core.task_done(&env.project, &t.id, "Feito.").expect("done");
-    assert_eq!(done.status, TaskStatus::Review, "o aviso não bloqueia");
-    assert_eq!(done.outside_scope, ["crates/core/fora.rs"]);
+    git(&t.worktree, &["commit", "-q", "-m", "feat: everything"]);
+    let done = core.task_done(&env.project, &t.id, "Done.").expect("done");
+    assert_eq!(done.status, TaskStatus::Review, "the warning does not block");
+    assert_eq!(done.outside_scope, ["crates/core/outside.rs"]);
     assert!(
-        done.events.iter().any(|e| e.text.contains("mexeu fora do escopo") && e.text.contains("crates/core/fora.rs")),
+        done.events.iter().any(|e| e.text.contains("touched files outside the scope") && e.text.contains("crates/core/outside.rs")),
         "{:?}",
         done.events
     );
-    // E a mesclagem segue normal.
+    // And the merge goes on as usual.
     core.task_merge(&env.project, &t.id).expect("merge");
 
-    // Sem escopo declarado não há de que se desviar.
-    let free = core.task_create(&env.project, spec("Livre")).expect("create");
+    // Without a declared scope there is nothing to stray from.
+    let free = core.task_create(&env.project, spec("Free")).expect("create");
     let free = core.task_start(&env.project, &free.id).expect("start");
-    commit_file(&free.worktree, "qualquer.txt", "x", "feat: qualquer");
-    assert!(core.task_done(&env.project, &free.id, "Feito.").expect("done").outside_scope.is_empty());
+    commit_file(&free.worktree, "anything.txt", "x", "feat: anything");
+    assert!(core.task_done(&env.project, &free.id, "Done.").expect("done").outside_scope.is_empty());
     core.shutdown();
 }
 
@@ -290,16 +290,16 @@ fn the_scope_is_normalized_and_validated_on_create() {
     let env = start();
     let core = &env.core;
     let t = core
-        .task_create(&env.project, scoped("Normaliza", &[" .\\crates\\core\\ ", "crates/core", "Crates/Core/", "crates/cli/src/lib.rs"]))
+        .task_create(&env.project, scoped("Normalizes", &[" .\\crates\\core\\ ", "crates/core", "Crates/Core/", "crates/cli/src/lib.rs"]))
         .expect("create");
     assert_eq!(t.scope, ["crates/core", "crates/cli/src/lib.rs"]);
-    for bad in ["/abs", "C:\\x", "../fora", "crates/*.rs", "crates/?", " "] {
-        match core.task_create(&env.project, scoped("Ruim", &[bad])) {
+    for bad in ["/abs", "C:\\x", "../outside", "crates/*.rs", "crates/?", " "] {
+        match core.task_create(&env.project, scoped("Bad", &[bad])) {
             Err(TaskError::Invalid(_)) => {}
             other => panic!("{bad:?}: {other:?}"),
         }
     }
-    // Nada disso gastou número.
-    assert_eq!(core.task_create(&env.project, spec("Seguinte")).expect("create").id, "t2");
+    // None of that spent a number.
+    assert_eq!(core.task_create(&env.project, spec("Next")).expect("create").id, "t2");
     core.shutdown();
 }
