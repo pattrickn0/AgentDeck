@@ -1,7 +1,7 @@
-//! Desenho de um diff, o mesmo na barra direita e no modo Documentos (como no GitHub e no VS Code com
-//! quebra de linha): as linhas quebram na largura visível, com a continuação recuada depois do `+`/`−`, sem
-//! rolagem horizontal. As linhas técnicas do git (`diff --git`, `index`, `---`, `+++`) somem; num diff de vários
-//! arquivos, cada um ganha um cabeçalho com o caminho.
+//! Drawing of a diff, the same in the right bar and in Documents mode (as on GitHub and in VS Code with
+//! word wrap): lines wrap at the visible width, with the continuation indented after the `+`/`−`, and there is no
+//! horizontal scrolling. The technical git lines (`diff --git`, `index`, `---`, `+++`) are hidden; in a diff of several
+//! files, each one gets a header with its path.
 
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -16,61 +16,61 @@ use super::select::{self, Pos, Selected};
 use crate::highlight::{self, Carry, Lang, Mark, Span};
 use crate::theme;
 
-/// Altura de uma linha de texto do diff.
+/// Height of a diff text line.
 pub const ROW_H: f32 = 17.0;
-/// Corpo da fonte monoespaçada do diff.
+/// Body of the diff's monospace font.
 pub const FONT: f32 = 12.0;
-/// Cabeçalho de arquivo e o respiro acima dele (menos no primeiro).
+/// File header and the space above it (except for the first one).
 const FILE_H: f32 = 26.0;
 const FILE_GAP: f32 = 10.0;
-/// Margem da direita do texto (a barra de rolagem fica ali).
+/// Right margin of the text (the scroll bar sits there).
 const RIGHT_PAD: f32 = 14.0;
-/// Tabulação vira espaços.
+/// A tab becomes spaces.
 const TAB: &str = "    ";
 
-/// O que o diff sabe além das linhas: o arquivo (para o realce, num diff sem `diff --git`, como o de um arquivo não
-/// rastreado) e a busca do modo Documentos.
+/// What the diff knows beyond its lines: the file (for highlighting, in a diff without `diff --git`, like the one of an
+/// untracked file) and the Documents mode search.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct View<'a> {
-    /// O caminho do arquivo do diff, se é um só.
+    /// The path of the diff's file, if there is only one.
     pub path: Option<&'a str>,
-    /// O que se busca (vazio = nada), as linhas que o têm (em ordem) e a linha da ocorrência atual.
+    /// What is being searched (empty = nothing), the lines that have it (in order) and the line of the current match.
     pub query: &'a str,
     pub found: &'a [usize],
     pub current: Option<usize>,
-    /// A linha do diff para onde rolar neste quadro.
+    /// The diff line to scroll to in this frame.
     pub jump: Option<usize>,
 }
 
-/// Como uma linha do diff aparece na tela.
+/// How a diff line shows on screen.
 #[derive(Debug, Clone, PartialEq)]
 enum Shape {
-    /// Cabeçalho técnico do git que o cabeçalho do arquivo já resume.
+    /// Technical git header that the file header already sums up.
     Hidden,
-    /// Início de um arquivo: o caminho (ou "antigo → novo").
+    /// Start of a file: the path (or "old → new").
     File(String),
-    /// Texto em linhas da tela: os pedaços (intervalos de bytes do texto já sem tabulação, ver [`body_of`]).
+    /// Text in screen lines: the pieces (byte ranges of the text with tabs already expanded, see [`body_of`]).
     Rows(Vec<Range<usize>>),
 }
 
-/// O que se mede uma vez por diff e largura: a forma e a altura acumulada de cada linha.
+/// What is measured once per diff and width: the shape and the accumulated height of each line.
 struct Layout {
     shapes: Vec<Shape>,
-    /// `tops[i]` é o y da linha `i`; `tops[n]`, a altura total.
+    /// `tops[i]` is the y of line `i`; `tops[n]`, the total height.
     tops: Vec<f32>,
 }
 
-/// As larguras disponíveis para o texto, em px: a linha comum (depois do marcador) e o cabeçalho do trecho (que
-/// divide a primeira linha com os botões).
+/// The widths available for the text, in px: the plain line (after the marker) and the hunk header (which
+/// shares its first line with the buttons).
 #[derive(Debug, Clone, Copy)]
 struct Widths {
     body: f32,
     hunk: f32,
 }
 
-/// Divide `text` em pedaços que cabem em `max_w` px, medindo cada caractere com `width` (a fonte do diff:
-/// emoji e CJK são mais largos). Quebra depois do último espaço do pedaço, se houver, para a palavra ir inteira
-/// para a linha seguinte. Devolve intervalos de bytes, sempre em fronteira de caractere; texto vazio = um pedaço.
+/// Splits `text` into pieces that fit in `max_w` px, measuring each character with `width` (the diff font:
+/// emoji and CJK are wider). Breaks after the last space of the piece, if any, so the word goes whole to the next
+/// line. Returns byte ranges, always on a character boundary; empty text = one piece.
 pub fn wrap_ranges(text: &str, max_w: f32, width: &mut impl FnMut(char) -> f32) -> Vec<Range<usize>> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut out = Vec::new();
@@ -85,7 +85,7 @@ pub fn wrap_ranges(text: &str, max_w: f32, width: &mut impl FnMut(char) -> f32) 
             let end = after_space.filter(|&e| e > start).unwrap_or(at);
             out.push(start..end);
             start = end;
-            // O que já passou do corte volta a contar no pedaço novo; o caractere atual é medido de novo.
+            // What went past the cut counts again in the new piece; the current character is measured again.
             used = chars.iter().filter(|(b, _)| *b >= start && *b < at).map(|(_, c)| width(*c)).sum();
             after_space = None;
             continue;
@@ -100,7 +100,7 @@ pub fn wrap_ranges(text: &str, max_w: f32, width: &mut impl FnMut(char) -> f32) 
     out
 }
 
-/// O título do arquivo numa linha `diff --git a/x b/y` (ou `diff --cc x`): `y`, ou `x → y` se mudou de nome.
+/// The file title in a `diff --git a/x b/y` line (or `diff --cc x`): `y`, or `x → y` if it was renamed.
 fn file_title(meta: &str) -> Option<String> {
     if let Some(rest) = meta.strip_prefix("diff --git ") {
         return Some(match rest.split_once(" b/") {
@@ -118,8 +118,8 @@ fn file_title(meta: &str) -> Option<String> {
     meta.strip_prefix("diff --cc ").or_else(|| meta.strip_prefix("diff --combined ")).map(str::to_owned)
 }
 
-/// O marcador (`+`, `-`, espaço) e o resto da linha. Só diff do git tem marcador: o de um arquivo não
-/// rastreado é o arquivo puro.
+/// The marker (`+`, `-`, space) and the rest of the line. Only a git diff has a marker: the one of an untracked
+/// file is the plain file.
 fn split_marker(line: &DiffLine, marked: bool) -> (&str, &str) {
     let text = line.text.trim_end_matches('\r');
     let has = marked && matches!(line.kind, DiffKind::Add | DiffKind::Del | DiffKind::Context);
@@ -129,13 +129,13 @@ fn split_marker(line: &DiffLine, marked: bool) -> (&str, &str) {
     }
 }
 
-/// O texto que se quebra e se pinta, sem o marcador e com a tabulação trocada por espaços.
+/// The text that wraps and is painted, without the marker and with tabs replaced by spaces.
 fn body_of(line: &DiffLine, marked: bool) -> String {
     split_marker(line, marked).1.replace('\t', TAB)
 }
 
-/// A forma de cada linha. As linhas `index`/`---`/`+++` somem; a `diff --git` vira o cabeçalho do arquivo com
-/// `headers` (diff de vários arquivos) e some sem ele (o caminho já está no título).
+/// The shape of each line. The `index`/`---`/`+++` lines are hidden; `diff --git` becomes the file header with
+/// `headers` (a diff of several files) and is hidden without it (the path is already in the title).
 fn shape(line: &DiffLine, widths: Widths, marked: bool, headers: bool, width: &mut impl FnMut(char) -> f32) -> Shape {
     if line.kind == DiffKind::Meta {
         if let Some(title) = file_title(&line.text) {
@@ -166,14 +166,14 @@ fn layout(diff: &GitDiff, widths: Widths, marked: bool, headers: bool, width: &m
     Layout { shapes, tops }
 }
 
-/// Quantas colunas tem cada número do gutter e quais aparecem (antigo, novo).
+/// How many columns each gutter number has and which ones show (old, new).
 fn gutter_cols(diff: &GitDiff) -> (usize, bool, bool) {
     let max = diff.lines.iter().flat_map(|l| [l.old, l.new]).flatten().max().unwrap_or(0);
     let digits = max.to_string().len().max(3);
     (digits, diff.lines.iter().any(|l| l.old.is_some()), diff.lines.iter().any(|l| l.new.is_some()))
 }
 
-/// Impressão digital do conteúdo do diff: a medida guardada só vale para este texto.
+/// Fingerprint of the diff content: the stored measurement only holds for this text.
 fn content_hash(diff: &GitDiff) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for l in &diff.lines {
@@ -183,16 +183,16 @@ fn content_hash(diff: &GitDiff) -> u64 {
     h.finish()
 }
 
-/// A linguagem de um diff de um arquivo só, pelo caminho do cabeçalho (`b/…`, ou o novo nome numa renomeação).
+/// The language of a single-file diff, from the header path (`b/…`, or the new name in a rename).
 fn lang_of_header(meta: &str) -> Option<Lang> {
     let title = file_title(meta)?;
     let path = title.rsplit_once(" → ").map_or(title.as_str(), |(_, new)| new);
     Some(Lang::from_path(path))
 }
 
-/// O realce de cada linha do diff, sobre o texto que se pinta (`body_of`: sem o marcador, tabulação em espaços). Cada
-/// lado do diff (o antigo: contexto e `−`; o novo: contexto e `+`) leva o seu estado de uma linha para a seguinte
-/// (comentário de bloco, texto de várias linhas), zerado a cada trecho e a cada arquivo.
+/// The highlighting of each diff line, over the text that is painted (`body_of`: no marker, tabs as spaces). Each
+/// side of the diff (the old one: context and `−`; the new one: context and `+`) carries its state from one line to the
+/// next (block comment, multi-line string), reset at each hunk and each file.
 fn diff_spans(diff: &GitDiff, marked: bool, hint: Option<&str>) -> Vec<Vec<Span>> {
     let mut lang = hint.map_or(Lang::Plain, Lang::from_path);
     let (mut old, mut new) = (Carry::default(), Carry::default());
@@ -220,21 +220,21 @@ fn diff_spans(diff: &GitDiff, marked: bool, hint: Option<&str>) -> Vec<Vec<Span>
         .collect()
 }
 
-/// Esta linha do diff se pinta como texto (e a busca olha)? Não, se é um cabeçalho técnico ou o título de um arquivo.
+/// Is this diff line painted as text (and searched)? Not if it is a technical header or a file title.
 fn is_text_line(line: &DiffLine) -> bool {
     line.kind != DiffKind::Meta
         || (file_title(&line.text).is_none() && !["index ", "--- ", "+++ "].iter().any(|p| line.text.starts_with(p)))
 }
 
-/// As linhas do diff com `query` no texto que se vê (sem diferença de maiúsculas e minúsculas ASCII).
+/// The diff lines with `query` in the visible text (ignoring ASCII case).
 pub fn search(diff: &GitDiff, query: &str) -> Vec<usize> {
     let marked = diff.lines.iter().any(|l| l.kind == DiffKind::Hunk);
     let bodies: Vec<String> = diff.lines.iter().map(|l| if is_text_line(l) { body_of(l, marked) } else { String::new() }).collect();
     highlight::find_lines(bodies.iter().map(String::as_str), query)
 }
 
-/// O byte de `orig` (o texto da linha com tabulações) que corresponde ao byte `at` do texto já com elas trocadas por
-/// espaços; no meio de uma tabulação, o começo dela.
+/// The byte of `orig` (the line text with tabs) that matches byte `at` of the text with tabs replaced by
+/// spaces; in the middle of a tab, its start.
 fn unexpanded(orig: &str, at: usize) -> usize {
     let mut seen = 0;
     for (i, c) in orig.char_indices() {
@@ -247,7 +247,7 @@ fn unexpanded(orig: &str, at: usize) -> usize {
     orig.len()
 }
 
-/// O texto de uma seleção, para copiar: só o código (sem número de linha nem `+`/`−`), com as tabulações de volta.
+/// The text of a selection, for copying: only the code (no line number nor `+`/`−`), with the tabs back.
 fn selection_text(diff: &GitDiff, marked: bool, sel: Selected) -> String {
     let mut out: Vec<String> = Vec::new();
     for n in sel.start.line..=sel.end.line.min(diff.lines.len().saturating_sub(1)) {
@@ -263,8 +263,8 @@ fn selection_text(diff: &GitDiff, marked: bool, sel: Selected) -> String {
     out.join("\n")
 }
 
-/// O trecho da linha de texto `body` que a peça `piece` mostra, com o realce de `spans` e as marcas da busca, numa só
-/// peça de texto.
+/// The part of text line `body` that piece `piece` shows, with the highlighting of `spans` and the search marks, as a
+/// single text piece.
 pub(super) fn piece_job(
     body: &str,
     piece: &Range<usize>,
@@ -285,7 +285,7 @@ pub(super) fn piece_job(
     let pal = theme::pal();
     let mut job = LayoutJob::default();
     for p in highlight::pieces(text, &[local], &marks, None) {
-        // Na linha da ocorrência atual, todos os achados valem como o atual.
+        // On the line of the current match, every match counts as the current one.
         let mark = if current && p.mark == Mark::Found { Mark::Current } else { p.mark };
         let (color, background) = pal.syn_mark(p.tok, mark, plain);
         job.append(&text[p.range], 0.0, TextFormat { font_id: font.clone(), color, background, ..Default::default() });
@@ -293,9 +293,9 @@ pub(super) fn piece_job(
     job
 }
 
-/// Desenha `diff` em `area`, rolando só na vertical. `id` identifica a rolagem; `view_opts`, o que o diff sabe além das
-/// linhas (a linha para onde rolar neste quadro, a busca). `hunk_reserve` é a largura que os botões ocupam à direita do cabeçalho de cada trecho
-/// (o texto dele quebra antes); `on_hunk(ui, linha, n)` os desenha por cima do cabeçalho do trecho `n`.
+/// Draws `diff` in `area`, scrolling only vertically. `id` identifies the scroll; `view_opts`, what the diff knows beyond
+/// its lines (the line to scroll to in this frame, the search). `hunk_reserve` is the width the buttons take on the right of each hunk header
+/// (its text wraps before them); `on_hunk(ui, line, n)` draws them over the header of hunk `n`.
 pub fn draw(
     ui: &mut Ui,
     area: Rect,
@@ -313,11 +313,11 @@ pub fn draw(
     let gutter = 6.0 + num_cols as f32 * (num_w + 8.0) + 4.0;
     let marked = diff.lines.iter().any(|l| l.kind == DiffKind::Hunk);
     let headers = diff.lines.iter().filter(|l| l.kind == DiffKind::Meta && file_title(&l.text).is_some()).count() > 1;
-    // A barra de rolagem vertical fica por cima da margem da direita; o marcador ocupa uma célula.
+    // The vertical scroll bar sits over the right margin; the marker takes one cell.
     let text_w = (area.width() - gutter - RIGHT_PAD).max(8.0 * cell);
     let widths = Widths { body: text_w - if marked { cell } else { 0.0 }, hunk: (text_w - hunk_reserve).max(8.0 * cell) };
 
-    // A medida só muda com o conteúdo ou com a largura: fica guardada entre os quadros.
+    // The measurement only changes with the content or the width: it is kept between frames.
     type Fingerprint = (u64, i32, i32, bool, bool);
     let fingerprint: Fingerprint = (content_hash(diff), widths.body.round() as i32, widths.hunk.round() as i32, marked, headers);
     let key = id.with("diff-layout");
@@ -331,7 +331,7 @@ pub fn draw(
         }
     };
 
-    // O realce só muda com o conteúdo (não com a largura): guardado à parte.
+    // The highlighting only changes with the content (not with the width): kept separately.
     let spans_key = id.with("diff-spans");
     let spans_print = (fingerprint.0, view_opts.path.map(str::to_owned));
     let spans = match ui.ctx().data(|d| d.get_temp::<((u64, Option<String>), Arc<Vec<Vec<Span>>>)>(spans_key)) {
@@ -433,17 +433,17 @@ pub fn draw(
     });
 }
 
-/// Quantos caracteres há antes do byte `byte` de `text` (o `CCursor` do egui conta caracteres).
+/// How many characters there are before byte `byte` of `text` (egui's `CCursor` counts characters).
 fn char_index(text: &str, byte: usize) -> usize {
     text.get(..byte).map_or_else(|| text.chars().count(), |t| t.chars().count())
 }
 
-/// O byte do caractere de número `chars` de `text`.
+/// The byte of character number `chars` of `text`.
 fn byte_index(text: &str, chars: usize) -> usize {
     text.char_indices().nth(chars).map_or(text.len(), |(i, _)| i)
 }
 
-/// A seleção de texto do diff: arrastar, Ctrl+A e Ctrl+C (ver `select.rs`). Posição = linha do diff e byte do texto que se vê.
+/// Text selection in the diff: drag, Ctrl+A and Ctrl+C (see `select.rs`). Position = diff line and byte of the visible text.
 #[allow(clippy::too_many_arguments)]
 fn select_text(
     ui: &mut Ui,
@@ -491,7 +491,7 @@ mod tests {
         DiffLine { kind, old: None, new: None, text: text.into() }
     }
 
-    /// Fonte de teste: uma célula por caractere, duas para CJK e emoji.
+    /// Test font: one cell per character, two for CJK and emoji.
     fn cells(c: char) -> f32 {
         if c as u32 >= 0x2E80 {
             2.0
@@ -517,13 +517,13 @@ mod tests {
     fn long_lines_wrap_at_a_space_or_at_the_width() {
         assert_eq!(pieces("", 10.0), vec![""]);
         assert_eq!(pieces("curto", 10.0), vec!["curto"]);
-        // A palavra que não cabe vai inteira para a linha seguinte.
+        // A word that does not fit goes whole to the next line.
         assert_eq!(pieces("uma frase com palavras", 10.0), vec!["uma frase ", "com ", "palavras"]);
-        // Sem espaço, corta na largura.
+        // Without a space, it cuts at the width.
         assert_eq!(pieces("abcdefghijklmnop", 6.0), vec!["abcdef", "ghijkl", "mnop"]);
-        // Acentos contam como um caractere e não partem no meio.
+        // Accented letters count as one character and are not split in the middle.
         assert_eq!(pieces("áéíóúçãõ", 3.0), vec!["áéí", "óúç", "ãõ"]);
-        // Caracteres largos (CJK, emoji) ocupam o que medem: nada passa da borda.
+        // Wide characters (CJK, emoji) take what they measure: nothing goes past the edge.
         assert_eq!(pieces("ab中中cd", 4.0), vec!["ab中", "中cd"]);
         assert_eq!(pieces("🙂🙂🙂", 3.0), vec!["🙂", "🙂", "🙂"]);
     }
@@ -544,7 +544,7 @@ mod tests {
         assert_eq!(s(&meta("index 1..2"), true), Shape::Hidden);
         assert_eq!(s(&meta("+++ b/a"), true), Shape::Hidden);
         assert_eq!(rows(s(&meta("new file mode 100644"), true)), 1);
-        // Um arquivo só: o caminho já está no título, sem cabeçalho.
+        // A single file: the path is already in the title, no header.
         assert_eq!(s(&meta("diff --git a/a b/a"), false), Shape::Hidden);
         assert_eq!(s(&meta("--- a/a"), false), Shape::Hidden);
     }
@@ -554,11 +554,11 @@ mod tests {
         let add = line(DiffKind::Add, "+abcdefgh");
         assert_eq!(split_marker(&add, true), ("+", "abcdefgh"));
         assert_eq!(body_of(&line(DiffKind::Add, "+\tx"), true), "    x");
-        // 8 caracteres em 4 de largura (o marcador já saiu da conta): duas linhas.
+        // 8 characters in a width of 4 (the marker is already out of the count): two lines.
         assert_eq!(rows(shape(&add, Widths { body: 4.0, hunk: 40.0 }, true, false, &mut cells)), 2);
-        // Arquivo não rastreado: o texto é o arquivo, sem marcador.
+        // Untracked file: the text is the file, with no marker.
         assert_eq!(split_marker(&line(DiffKind::Add, "+x"), false), ("", "+x"));
-        // O cabeçalho do trecho quebra na largura que sobra ao lado dos botões.
+        // The hunk header wraps at the width left beside the buttons.
         let hunk = line(DiffKind::Hunk, &"@".repeat(30));
         assert_eq!(rows(shape(&hunk, Widths { body: 40.0, hunk: 10.0 }, true, false, &mut cells)), 3);
     }
@@ -577,7 +577,7 @@ mod tests {
     fn the_fingerprint_follows_the_content() {
         let a = GitDiff { lines: vec![line(DiffKind::Add, "+ab")], ..Default::default() };
         let b = GitDiff { lines: vec![line(DiffKind::Add, "+ba")], ..Default::default() };
-        // Mesmo tamanho, conteúdo diferente: outra medida.
+        // Same size, different content: another measurement.
         assert_ne!(content_hash(&a), content_hash(&b));
         assert_eq!(content_hash(&a), content_hash(&a.clone()));
     }
@@ -601,11 +601,11 @@ mod tests {
         ]);
         let spans = diff_spans(&diff, true, None);
         let tok = |line: usize, n: usize| spans[line].get(n).map(|s| s.tok);
-        assert_eq!(tok(2, 0), Some(highlight::Tok::Keyword), "let em Rust");
+        assert_eq!(tok(2, 0), Some(highlight::Tok::Keyword), "let in Rust");
         assert_eq!(spans[2].last().map(|s| s.tok), Some(highlight::Tok::Comment));
-        assert_eq!(tok(5, 0), Some(highlight::Tok::Keyword), "def em Python");
-        assert!(spans[8].is_empty(), "texto puro não leva cor");
-        // Sem cabeçalho do git (arquivo não rastreado), a linguagem vem do caminho dado.
+        assert_eq!(tok(5, 0), Some(highlight::Tok::Keyword), "def in Python");
+        assert!(spans[8].is_empty(), "plain text gets no color");
+        // Without a git header (untracked file), the language comes from the given path.
         let untracked = diff_of(&[(DiffKind::Add, "+let x = 1;")]);
         assert!(diff_spans(&untracked, false, None)[0].is_empty());
         assert_eq!(diff_spans(&untracked, false, Some("src/a.rs"))[0].first().map(|s| s.tok), Some(highlight::Tok::Keyword));
@@ -622,7 +622,7 @@ mod tests {
         ]);
         let spans = diff_spans(&diff, true, None);
         assert_eq!(spans[2].first().map(|s| s.tok), Some(highlight::Tok::Comment));
-        // A linha removida é do outro lado: não herda o comentário aberto do lado novo.
+        // The removed line is on the other side: it does not inherit the comment opened on the new side.
         assert_eq!(spans[3].first().map(|s| s.tok), Some(highlight::Tok::Keyword));
         assert_eq!(spans[4].first().map(|s| (s.tok, s.range.clone())), Some((highlight::Tok::Comment, 0..20)));
     }
@@ -639,7 +639,7 @@ mod tests {
             (DiffKind::Context, " nada"),
             (DiffKind::Del, "-foo"),
         ]);
-        assert_eq!(search(&diff, "foo"), [5, 7], "o caminho do cabeçalho não conta");
+        assert_eq!(search(&diff, "foo"), [5, 7], "the header path does not count");
         assert!(search(&diff, "").is_empty());
     }
 
@@ -654,12 +654,12 @@ mod tests {
         ]);
         let all = Selected { start: Pos { line: 0, col: 0 }, end: Pos { line: 4, col: 4 } };
         assert_eq!(selection_text(&diff, true, all), "@@ -1,2 +1,2 @@\n\tum\n\tdois\ntres");
-        // Um pedaço de uma linha só (o corpo tem a tabulação como quatro espaços).
+        // A piece of a single line (the body has the tab as four spaces).
         let part = Selected { start: Pos { line: 2, col: 4 }, end: Pos { line: 2, col: 6 } };
         assert_eq!(selection_text(&diff, true, part), "um");
         assert_eq!(unexpanded("\ta\tb", 0), 0);
         assert_eq!(unexpanded("\ta\tb", 4), 1);
-        assert_eq!(unexpanded("\ta\tb", 6), 2, "no meio da segunda tabulação, o começo dela");
+        assert_eq!(unexpanded("\ta\tb", 6), 2, "in the middle of the second tab, its start");
         assert_eq!(unexpanded("\ta\tb", 99), 4);
     }
 
@@ -670,7 +670,7 @@ mod tests {
         let font = theme::mono(FONT);
         let marks = highlight::find_all(body, "x");
         let job = piece_job(body, &(4..14), &spans, &marks, false, theme::pal().text, &font);
-        // O pedaço é só o que cabe na linha da tela, e a marca da busca fica dentro dele.
+        // The piece is only what fits in the screen line, and the search mark stays inside it.
         assert_eq!(job.text, "x = 1; // ");
         assert_eq!(job.sections.first().map(|s| (usize::from(s.byte_range.start), usize::from(s.byte_range.end))), Some((0, 1)));
         assert_ne!(job.sections[0].format.background, egui::Color32::TRANSPARENT);

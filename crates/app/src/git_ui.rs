@@ -1,8 +1,8 @@
-//! Estado e ações da aba "Git" da barra direita (a pintura fica em `ui/git.rs`).
+//! State and actions of the "Git" tab in the right bar (the painting lives in `ui/git.rs`).
 //!
-//! Toda operação do git é bloqueante e roda numa thread (`Deck::spawn_bg`); a resposta volta como
-//! `UiMsg::Git`. O status é relido quando a aba abre, depois de cada operação, quando o workspace ou
-//! o `.git/` mudam (com um pequeno atraso para juntar eventos) e quando a janela volta a ter foco.
+//! Every git operation is blocking and runs on a thread (`Deck::spawn_bg`); the answer comes back as
+//! `UiMsg::Git`. The status is re-read when the tab opens, after each operation, when the workspace or
+//! `.git/` change (with a small delay to join events) and when the window gets focus again.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -11,30 +11,30 @@ use agentdeck_core::git::{
     extract_hunk_patch, ConflictBlock, ConflictChoice, DiffKind, DiffLine, EntryKind, GitBranch, GitCommit, GitCommitDetail,
     GitConflictFile, GitDiff, GitEntry, GitError, GitStash, GitStatus, RepoState,
 };
-use agentdeck_core::Core;
+use agentdeck_core::{t, Core};
 
 use crate::deck::{Deck, RightView, UiMsg};
 
-/// Atraso para reler o status depois de um aviso de mudança (junta rajadas de eventos).
+/// Delay to re-read the status after a change notice (joins bursts of events).
 const REFRESH_DELAY: Duration = Duration::from_millis(400);
-/// Repositório acima do workspace (o `.git` não é vigiado): relê assim, com a aba aberta.
+/// Repository above the workspace (`.git` is not watched): re-read like this while the tab is open.
 const POLL_EVERY: Duration = Duration::from_secs(10);
-/// Tamanho da página do histórico de commits (`git log`).
+/// Page size of the commit history (`git log`).
 pub const LOG_PAGE_SIZE: usize = 50;
 
-/// O que a aba mostra.
+/// What the tab shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitView {
     Loading,
     NoGit,
     NotRepo,
-    /// O git recusa a pasta (`safe.directory`): o caminho a liberar.
+    /// git refuses the folder (`safe.directory`): the path to allow.
     Unsafe(String),
     Error(String),
     Ready(GitStatus),
 }
 
-/// Visão interna da aba Git.
+/// Internal view of the Git tab.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GitSubView {
     #[default]
@@ -44,7 +44,7 @@ pub enum GitSubView {
     Conflicts,
 }
 
-/// Modo de escolha de branch no menu do topo.
+/// Branch choice mode in the top menu.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BranchMenuMode {
     #[default]
@@ -53,24 +53,24 @@ pub enum BranchMenuMode {
     Rebase,
 }
 
-/// Diff aberto no lugar da lista.
+/// Diff opened in place of the list.
 #[derive(Debug, Clone)]
 pub struct OpenDiff {
     pub entry: GitEntry,
-    /// Lado preparado (índice × HEAD) ou não (cópia de trabalho × índice).
+    /// Staged side (index × HEAD) or not (working copy × index).
     pub staged: bool,
-    /// `None` = carregando.
+    /// `None` = loading.
     pub diff: Option<Result<GitDiff, String>>,
 }
 
-/// Diff de um stash aberto no lugar da lista de stashes.
+/// Diff of a stash opened in place of the stash list.
 #[derive(Debug, Clone)]
 pub struct OpenStashDiff {
     pub stash: GitStash,
     pub diff: Option<Result<GitDiff, String>>,
 }
 
-/// Detalhe de um commit aberto no lugar da lista do histórico.
+/// Detail of a commit opened in place of the history list.
 #[derive(Debug, Clone)]
 pub struct OpenCommit {
     pub hash: String,
@@ -79,27 +79,27 @@ pub struct OpenCommit {
     pub detail: Option<Result<GitCommitDetail, String>>,
 }
 
-/// Arquivo em conflito aberto para resolução por blocos ou lado inteiro.
+/// File in conflict opened for resolution by blocks or by the whole side.
 #[derive(Debug, Clone)]
 pub struct OpenConflict {
     pub path: String,
     pub file: Option<Result<GitConflictFile, String>>,
 }
 
-/// Ação destrutiva aguardando confirmação no modal.
+/// Destructive action waiting for confirmation in the modal.
 #[derive(Debug, Clone)]
 pub enum ConfirmAction {
-    /// Descartar arquivo inteiro.
+    /// Discard the whole file.
     DiscardFile(GitEntry),
-    /// Descartar um único trecho (hunk) da cópia de trabalho.
+    /// Discard a single hunk of the working copy.
     DiscardHunk { path: String, patch: String },
-    /// Apagar um stash (`stash@{index}`).
+    /// Drop a stash (`stash@{index}`).
     DropStash(GitStash),
-    /// Abortar merge/rebase/cherry-pick/revert em andamento.
+    /// Abort an ongoing merge/rebase/cherry-pick/revert.
     AbortOp(RepoState),
 }
 
-/// Respostas das operações em segundo plano.
+/// Answers from the background operations.
 pub enum GitReply {
     Status(Result<GitStatus, GitError>),
     Diff {
@@ -126,14 +126,14 @@ pub enum GitReply {
         path: String,
         result: Result<GitConflictFile, GitError>,
     },
-    /// Operação concluída (`label` = o que foi feito, para a mensagem).
+    /// Operation finished (`label` = what was done, for the message).
     Done {
         label: &'static str,
         result: Result<String, GitError>,
     },
 }
 
-/// Seções da lista de alterações.
+/// Sections of the change list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
     Conflicts,
@@ -145,15 +145,15 @@ pub enum Section {
 impl Section {
     pub fn title(self) -> &'static str {
         match self {
-            Section::Conflicts => "CONFLITOS",
-            Section::Staged => "ALTERAÇÕES PREPARADAS",
-            Section::Changes => "ALTERAÇÕES",
-            Section::Untracked => "NÃO RASTREADOS",
+            Section::Conflicts => t!("Conflicts"),
+            Section::Staged => t!("Staged changes"),
+            Section::Changes => t!("Changes"),
+            Section::Untracked => t!("Untracked"),
         }
     }
 }
 
-/// Uma linha da lista: o arquivo, de que lado (preparado ou não) e a letra a mostrar.
+/// A row of the list: the file, which side (staged or not) and the letter to show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub entry: GitEntry,
@@ -161,8 +161,8 @@ pub struct Row {
     pub letter: char,
 }
 
-/// Agrupa o status nas seções, na ordem em que aparecem (seções vazias ficam de fora). Um arquivo
-/// com alteração preparada e outra não aparece nas duas.
+/// Groups the status into the sections, in the order they appear (empty sections stay out). A file
+/// with one staged change and another unstaged appears in both.
 pub fn sections(st: &GitStatus) -> Vec<(Section, Vec<Row>)> {
     let mut out: Vec<(Section, Vec<Row>)> = Vec::new();
     let mut push = |s: Section, row: Row| match out.iter_mut().find(|(k, _)| *k == s) {
@@ -188,17 +188,17 @@ pub fn sections(st: &GitStatus) -> Vec<(Section, Vec<Row>)> {
     out
 }
 
-/// Quantidade de arquivos em conflito (`Unmerged`) no status.
+/// Number of files in conflict (`Unmerged`) in the status.
 pub fn conflict_count(st: &GitStatus) -> usize {
     st.entries.iter().filter(|e| e.kind == EntryKind::Unmerged).count()
 }
 
-/// Texto resumido da branch e alterações: `main ↑1 ↓2 •3` (só o que não for zero).
+/// Short text of the branch and changes: `main ↑1 ↓2 •3` (only what is not zero).
 pub fn chip_text(st: &GitStatus) -> String {
     let mut t = st
         .branch
         .clone()
-        .unwrap_or_else(|| st.head.as_deref().map(|h| h.chars().take(7).collect()).unwrap_or_else(|| "(sem commits)".into()));
+        .unwrap_or_else(|| st.head.as_deref().map(|h| h.chars().take(7).collect()).unwrap_or_else(|| t!("(no commits)").into()));
     if st.ahead > 0 {
         t += &format!(" ↑{}", st.ahead);
     }
@@ -214,7 +214,7 @@ pub fn chip_text(st: &GitStatus) -> String {
 pub struct GitUi {
     pub view: GitView,
     pub subview: GitSubView,
-    /// Operação em andamento (ex.: "Enviando…"): os botões ficam desativados.
+    /// Operation in progress (e.g. "Pushing…"): the buttons are disabled.
     pub busy: Option<&'static str>,
     status_running: bool,
     status_dirty: bool,
@@ -227,30 +227,30 @@ pub struct GitUi {
     pub branch_menu_mode: BranchMenuMode,
     pub branches: Vec<GitBranch>,
     pub branch_filter: String,
-    /// Ação destrutiva esperando confirmação.
+    /// Destructive action waiting for confirmation.
     pub confirm: Option<ConfirmAction>,
-    /// Mensagem da última operação (texto, é erro?).
+    /// Message of the last operation (text, is it an error?).
     pub notice: Option<(String, bool)>,
     pub collapsed: HashSet<Section>,
-    /// Estado da visão Stash.
+    /// State of the Stash view.
     pub stashes: Vec<GitStash>,
     pub stash_loading: bool,
     pub stash_message: String,
     pub stash_include_untracked: bool,
     pub stash_diff: Option<OpenStashDiff>,
-    /// Estado da visão Histórico (log).
+    /// State of the History view (log).
     pub log: Vec<GitCommit>,
     pub log_has_more: bool,
     pub log_loading: bool,
-    /// HEAD em que `log` foi lido: se o HEAD mudar, a lista é relida.
+    /// HEAD at which `log` was read: if HEAD changes, the list is re-read.
     pub log_head: Option<String>,
     pub commit_detail: Option<OpenCommit>,
-    /// Estado da visão Conflitos.
+    /// State of the Conflicts view.
     pub conflict_open: Option<OpenConflict>,
-    /// SOMENTE DEPURAÇÃO: estado fictício que as releituras não substituem.
+    /// DEBUG ONLY: fake state that re-reads do not replace.
     pub debug_hold: bool,
-    /// Muda a cada troca de projeto: respostas de operações pedidas no projeto anterior chegam
-    /// com a geração velha e são descartadas (não podem aparecer nem agir no projeto novo).
+    /// Changes on every project switch: answers to operations requested in the previous project arrive
+    /// with the old generation and are discarded (they must not appear or act in the new project).
     pub generation: u64,
 }
 
@@ -305,15 +305,15 @@ fn err_text(e: &GitError) -> String {
 }
 
 impl Deck {
-    /// O projeto da tela mudou: esquece tudo do anterior (confirmação de descarte, branches,
-    /// mensagem, operação em andamento) e ignora as respostas que ainda vierem dele.
+    /// The project on screen changed: forget everything from the previous one (discard confirmation, branches,
+    /// message, operation in progress) and ignore answers that still come from it.
     pub fn git_reset_for_project(&mut self) {
         let generation = self.git.generation + 1;
         let collapsed = std::mem::take(&mut self.git.collapsed);
         self.git = GitUi { generation, collapsed, ..GitUi::default() };
     }
 
-    /// Relê o status (um por vez; um pedido no meio repete a leitura ao terminar).
+    /// Re-reads the status (one at a time; a request in the middle repeats the read when it finishes).
     pub fn git_refresh(&mut self) {
         if self.git.debug_hold {
             return;
@@ -328,13 +328,13 @@ impl Deck {
         self.spawn_bg("git-status", move |core| Some(UiMsg::Git(generation, GitReply::Status(core.git_status()))));
     }
 
-    /// Agenda uma releitura (avisos de mudança chegam em rajadas).
+    /// Schedules a re-read (change notices arrive in bursts).
     pub fn git_refresh_soon(&mut self) {
         self.git.refresh_at = Some(Instant::now() + REFRESH_DELAY);
     }
 
-    /// Chamado a cada quadro: releituras agendadas e o polling (só quando o `.git` não é vigiado).
-    /// Devolve quando precisa ser chamado de novo.
+    /// Called every frame: scheduled re-reads and polling (only when `.git` is not watched).
+    /// Returns when it needs to be called again.
     pub fn git_tick(&mut self, now: Instant) -> Option<Instant> {
         if let Some(at) = self.git.refresh_at {
             if now >= at {
@@ -357,7 +357,7 @@ impl Deck {
 
     pub fn on_git(&mut self, generation: u64, reply: GitReply) {
         if generation != self.git.generation {
-            return; // pedida no projeto anterior
+            return; // requested in the previous project
         }
         match reply {
             GitReply::Status(res) => {
@@ -372,14 +372,14 @@ impl Deck {
                     Err(GitError::Unsafe { path }) => GitView::Unsafe(path),
                     Err(e) => GitView::Error(err_text(&e)),
                 };
-                // Se estava na aba Conflitos e todos os conflitos acabaram, volta para Alterações.
+                // If it was in the Conflicts tab and all conflicts are gone, go back to Changes.
                 if let Some(st) = self.git.status() {
                     if self.git.subview == GitSubView::Conflicts && conflict_count(st) == 0 && st.state == RepoState::Normal {
                         self.git.subview = GitSubView::Changes;
                         self.git.conflict_open = None;
                     }
                 }
-                // O diff aberto acompanha o status (ou fecha, se o arquivo saiu daquele lado).
+                // The open diff follows the status (or closes if the file left that side).
                 if let (Some(open), Some(st)) = (self.git.diff.clone(), self.git.status()) {
                     let still = st.entries.iter().find(|e| e.path == open.entry.path).cloned().filter(|e| {
                         if open.staged {
@@ -393,7 +393,7 @@ impl Deck {
                         None => self.git.diff = None,
                     }
                 }
-                // Se o editor de conflitos está aberto num arquivo, recarrega (ou fecha se já foi resolvido).
+                // If the conflict editor is open on a file, reload it (or close it if it was already resolved).
                 if let (Some(open), Some(st)) = (self.git.conflict_open.clone(), self.git.status()) {
                     let still = st.entries.iter().any(|e| e.path == open.path && e.kind == EntryKind::Unmerged);
                     if still {
@@ -402,7 +402,7 @@ impl Deck {
                         self.git.conflict_open = None;
                     }
                 }
-                // Histórico e stash só são relidos quando mudaram (HEAD novo; outra quantidade de stashes).
+                // History and stash are only re-read when they changed (new HEAD; different number of stashes).
                 if let Some(st) = self.git.status() {
                     let (head, stashes) = (st.head.clone(), st.stash_count as usize);
                     if !self.git.log.is_empty() && self.git.log_head != head {
@@ -490,16 +490,19 @@ impl Deck {
                 self.git.busy = None;
                 match result {
                     Ok(text) => {
-                        // A mensagem do commit só sai da caixa quando ele deu certo.
-                        if label == "Commit" {
+                        // The commit message only leaves the box when it succeeded.
+                        if label == t!("Commit") {
                             self.git.message.clear();
                             self.git.amend = false;
                         }
-                        if label == "Stash salvo" {
+                        if label == t!("Stash saved") {
                             self.git.stash_message.clear();
                         }
-                        let text =
-                            if text.trim().is_empty() { format!("{label}: concluído.") } else { format!("{label}: {}", text.trim()) };
+                        let text = if text.trim().is_empty() {
+                            t!("{label}: done.", label)
+                        } else {
+                            t!("{label}: {text}", label, text = text.trim())
+                        };
                         self.git.notice = Some((text, false));
                     }
                     Err(e) => self.git.notice = Some((err_text(&e), true)),
@@ -510,7 +513,7 @@ impl Deck {
         }
     }
 
-    /// Troca a subvisão da aba Git e carrega os dados correspondentes.
+    /// Switches the Git tab subview and loads the matching data.
     pub fn git_set_subview(&mut self, subview: GitSubView) {
         self.git.subview = subview;
         if self.git.debug_hold {
@@ -529,7 +532,7 @@ impl Deck {
         }
     }
 
-    /// Roda uma operação em segundo plano (uma por vez; a interface desativa os botões).
+    /// Runs an operation in the background (one at a time; the UI disables the buttons).
     fn git_run(&mut self, label: &'static str, busy: &'static str, op: impl FnOnce(Core) -> Result<String, GitError> + Send + 'static) {
         if self.git.busy.is_some() {
             return;
@@ -554,31 +557,29 @@ impl Deck {
     }
 
     pub fn git_stage(&mut self, paths: Vec<String>) {
-        self.git_run("Preparado", "Preparando…", move |core| core.git_stage(&paths).map(|_| String::new()));
+        self.git_run(t!("Staged"), t!("Staging…"), move |core| core.git_stage(&paths).map(|_| String::new()));
     }
 
     pub fn git_unstage(&mut self, paths: Vec<String>) {
-        self.git_run("Removido da preparação", "Removendo da preparação…", move |core| {
-            core.git_unstage(&paths).map(|_| String::new())
-        });
+        self.git_run(t!("Unstaged"), t!("Unstaging…"), move |core| core.git_unstage(&paths).map(|_| String::new()));
     }
 
     pub fn git_unstage_all(&mut self) {
-        self.git_run("Preparação desfeita", "Removendo da preparação…", |core| core.git_unstage_all().map(|_| String::new()));
+        self.git_run(t!("Staging undone"), t!("Unstaging…"), |core| core.git_unstage_all().map(|_| String::new()));
     }
 
-    /// Prepara ou tira da preparação um único trecho (`hunk_index`) do diff aberto.
+    /// Stages or unstages a single hunk (`hunk_index`) of the open diff.
     pub fn git_stage_or_unstage_hunk(&mut self, hunk_index: usize) {
         let Some(open) = &self.git.diff else { return };
         let Some(Ok(diff)) = &open.diff else { return };
         let Some(patch) = extract_hunk_patch(diff, hunk_index) else { return };
         let staged = open.staged;
         let (label, busy) =
-            if staged { ("Trecho removido da preparação", "Removendo trecho…") } else { ("Trecho preparado", "Preparando trecho…") };
+            if staged { (t!("Hunk unstaged"), t!("Unstaging hunk…")) } else { (t!("Hunk staged"), t!("Staging hunk…")) };
         self.git_run(label, busy, move |core| core.git_apply_hunk(&patch, staged, false).map(|_| String::new()));
     }
 
-    /// Pede confirmação para descartar um trecho (`hunk_index`) do diff aberto.
+    /// Asks for confirmation to discard a hunk (`hunk_index`) of the open diff.
     pub fn git_ask_discard_hunk(&mut self, hunk_index: usize) {
         let Some(open) = &self.git.diff else { return };
         if open.staged {
@@ -589,15 +590,15 @@ impl Deck {
         self.git.confirm = Some(ConfirmAction::DiscardHunk { path: open.entry.path.clone(), patch });
     }
 
-    /// Executa a ação destrutiva depois da confirmação.
+    /// Executes the destructive action after the confirmation.
     pub fn git_confirm_accepted(&mut self) {
         let Some(action) = self.git.confirm.take() else { return };
         match action {
             ConfirmAction::DiscardFile(entry) => {
-                self.git_run("Descartado", "Descartando…", move |core| core.git_discard(&entry).map(|_| String::new()));
+                self.git_run(t!("Discarded"), t!("Discarding…"), move |core| core.git_discard(&entry).map(|_| String::new()));
             }
             ConfirmAction::DiscardHunk { patch, .. } => {
-                self.git_run("Trecho descartado", "Descartando trecho…", move |core| {
+                self.git_run(t!("Hunk discarded"), t!("Discarding hunk…"), move |core| {
                     core.git_apply_hunk(&patch, false, true).map(|_| String::new())
                 });
             }
@@ -606,10 +607,10 @@ impl Deck {
                     self.git.stash_diff = None;
                 }
                 let index = stash.index;
-                self.git_run("Stash apagado", "Apagando stash…", move |core| core.git_stash_drop(index).map(|_| String::new()));
+                self.git_run(t!("Stash dropped"), t!("Dropping stash…"), move |core| core.git_stash_drop(index).map(|_| String::new()));
             }
             ConfirmAction::AbortOp(_) => {
-                self.git_run("Operação abortada", "Abortando…", |core| core.git_abort_op());
+                self.git_run(t!("Operation aborted"), t!("Aborting…"), |core| core.git_abort_op());
             }
         }
     }
@@ -620,10 +621,10 @@ impl Deck {
         if msg.trim().is_empty() || self.git.busy.is_some() {
             return;
         }
-        self.git_run("Commit", "Fazendo commit…", move |core| core.git_commit(&msg, amend));
+        self.git_run(t!("Commit"), t!("Committing…"), move |core| core.git_commit(&msg, amend));
     }
 
-    /// Marca/desmarca "corrigir último commit" (marcando com a caixa vazia, traz a última mensagem).
+    /// Toggles "amend last commit" (turning it on with an empty box brings the last message).
     pub fn git_toggle_amend(&mut self) {
         self.git.amend = !self.git.amend;
         if self.git.amend && self.git.message.trim().is_empty() {
@@ -633,19 +634,19 @@ impl Deck {
     }
 
     pub fn git_fetch(&mut self) {
-        self.git_run("Buscar", "Buscando…", |core| core.git_fetch());
+        self.git_run(t!("Fetch"), t!("Fetching…"), |core| core.git_fetch());
     }
 
     pub fn git_pull(&mut self) {
-        self.git_run("Puxar", "Puxando…", |core| core.git_pull());
+        self.git_run(t!("Pull"), t!("Pulling…"), |core| core.git_pull());
     }
 
     pub fn git_push(&mut self) {
-        self.git_run("Enviar", "Enviando…", |core| core.git_push());
+        self.git_run(t!("Push"), t!("Pushing…"), |core| core.git_push());
     }
 
     pub fn git_init(&mut self) {
-        self.git_run("Repositório criado", "Inicializando…", |core| core.git_init().map(|_| String::new()));
+        self.git_run(t!("Repository created"), t!("Initializing…"), |core| core.git_init().map(|_| String::new()));
     }
 
     pub fn git_open_branch_menu(&mut self, mode: BranchMenuMode) {
@@ -662,7 +663,7 @@ impl Deck {
         }
     }
 
-    /// Troca o que o menu de branches faz (trocar, mesclar ou rebase) sem fechá-lo.
+    /// Changes what the branch menu does (switch, merge or rebase) without closing it.
     pub fn git_open_branch_menu_mode(&mut self, mode: BranchMenuMode) {
         self.git.branch_menu_mode = mode;
     }
@@ -670,26 +671,28 @@ impl Deck {
     pub fn git_checkout(&mut self, branch: GitBranch) {
         self.git.branch_menu = false;
         self.git.diff = None;
-        self.git_run("Branch trocada", "Trocando de branch…", move |core| core.git_checkout(&branch).map(|_| String::new()));
+        self.git_run(t!("Branch switched"), t!("Switching branch…"), move |core| core.git_checkout(&branch).map(|_| String::new()));
     }
 
     pub fn git_create_branch(&mut self, name: String) {
         self.git.branch_menu = false;
-        self.git_run("Branch criada", "Criando branch…", move |core| core.git_create_branch(&name, true).map(|_| String::new()));
+        self.git_run(t!("Branch created"), t!("Creating branch…"), move |core| {
+            core.git_create_branch(&name, true).map(|_| String::new())
+        });
     }
 
     pub fn git_merge_branch(&mut self, branch: String) {
         self.git.branch_menu = false;
-        self.git_run("Mesclar", "Mesclando…", move |core| core.git_merge(&branch));
+        self.git_run(t!("Merge"), t!("Merging…"), move |core| core.git_merge(&branch));
     }
 
     pub fn git_rebase_onto(&mut self, branch: String) {
         self.git.branch_menu = false;
-        self.git_run("Rebase", "Fazendo rebase…", move |core| core.git_rebase(&branch));
+        self.git_run(t!("Rebase"), t!("Rebasing…"), move |core| core.git_rebase(&branch));
     }
 
     pub fn git_continue_op(&mut self) {
-        self.git_run("Continuar", "Continuando…", |core| core.git_continue_op());
+        self.git_run(t!("Continue"), t!("Continuing…"), |core| core.git_continue_op());
     }
 
     // ---------- Stash ----------
@@ -706,7 +709,7 @@ impl Deck {
     pub fn git_stash_push(&mut self) {
         let msg = self.git.stash_message.clone();
         let untracked = self.git.stash_include_untracked;
-        self.git_run("Stash salvo", "Guardando no stash…", move |core| core.git_stash_push(&msg, untracked));
+        self.git_run(t!("Stash saved"), t!("Saving to the stash…"), move |core| core.git_stash_push(&msg, untracked));
     }
 
     pub fn git_open_stash_diff(&mut self, stash: GitStash) {
@@ -723,15 +726,15 @@ impl Deck {
     }
 
     pub fn git_stash_apply(&mut self, index: usize) {
-        self.git_run("Stash aplicado", "Aplicando stash…", move |core| core.git_stash_apply(index));
+        self.git_run(t!("Stash applied"), t!("Applying stash…"), move |core| core.git_stash_apply(index));
     }
 
     pub fn git_stash_pop(&mut self, index: usize) {
         self.git.stash_diff = None;
-        self.git_run("Stash aplicado e removido", "Aplicando stash…", move |core| core.git_stash_pop(index));
+        self.git_run(t!("Stash applied and dropped"), t!("Applying stash…"), move |core| core.git_stash_pop(index));
     }
 
-    // ---------- Histórico ----------
+    // ---------- History ----------
 
     pub fn git_load_log(&mut self, append: bool) {
         if self.git.debug_hold || self.git.log_loading {
@@ -760,7 +763,7 @@ impl Deck {
         });
     }
 
-    // ---------- Conflitos ----------
+    // ---------- Conflicts ----------
 
     pub fn git_open_conflict(&mut self, path: String) {
         self.git.subview = GitSubView::Conflicts;
@@ -780,25 +783,25 @@ impl Deck {
 
     pub fn git_resolve_conflict_file(&mut self, path: String, choice: ConflictChoice) {
         let label = match choice {
-            ConflictChoice::Ours => "Conflito resolvido (nosso)",
-            ConflictChoice::Theirs => "Conflito resolvido (deles)",
-            ConflictChoice::Both => "Conflito resolvido (ambos)",
+            ConflictChoice::Ours => t!("Conflict resolved (ours)"),
+            ConflictChoice::Theirs => t!("Conflict resolved (theirs)"),
+            ConflictChoice::Both => t!("Conflict resolved (both)"),
         };
-        self.git_run(label, "Resolvendo conflito…", move |core| core.git_resolve_conflict_file(&path, choice).map(|_| String::new()));
+        self.git_run(label, t!("Resolving conflict…"), move |core| core.git_resolve_conflict_file(&path, choice).map(|_| String::new()));
     }
 
     pub fn git_resolve_conflict_block(&mut self, path: String, block_index: usize, choice: ConflictChoice) {
         let label = match choice {
-            ConflictChoice::Ours => "Bloco resolvido (nosso)",
-            ConflictChoice::Theirs => "Bloco resolvido (deles)",
-            ConflictChoice::Both => "Bloco resolvido (ambos)",
+            ConflictChoice::Ours => t!("Block resolved (ours)"),
+            ConflictChoice::Theirs => t!("Block resolved (theirs)"),
+            ConflictChoice::Both => t!("Block resolved (both)"),
         };
-        self.git_run(label, "Resolvendo bloco…", move |core| {
+        self.git_run(label, t!("Resolving block…"), move |core| {
             core.git_resolve_conflict_block(&path, block_index, choice).map(|_| String::new())
         });
     }
 
-    /// Abre o arquivo (caminho relativo à raiz do repositório) no programa do sistema.
+    /// Opens the file (path relative to the repository root) in the system program.
     pub fn git_open_file(&mut self, rel: &str) {
         let Some(root) = self.git.status().map(|st| st.root.clone()) else { return };
         let full = root.join(rel);
@@ -808,7 +811,7 @@ impl Deck {
     }
 }
 
-/// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=git-demo`): status fictício para capturas de tela.
+/// DEBUG ONLY (`AGENTDECK_DEBUG_UI=git-demo`): fake status for screenshots.
 pub fn demo_status() -> GitStatus {
     let e =
         |path: &str, index: char, worktree: char, kind: EntryKind| GitEntry { path: path.into(), orig_path: None, index, worktree, kind };
@@ -826,14 +829,14 @@ pub fn demo_status() -> GitStatus {
             e("crates/core/src/git.rs", 'M', 'M', EntryKind::Ordinary),
             e("memory/GERAL.md", '.', 'M', EntryKind::Ordinary),
             e("README.md", '.', 'D', EntryKind::Ordinary),
-            e("docs/rascunho de ideias.md", '?', '?', EntryKind::Untracked),
+            e("docs/idea draft.md", '?', '?', EntryKind::Untracked),
         ],
         stash_count: 2,
         truncated: false,
     }
 }
 
-/// SOMENTE DEPURAÇÃO: diff fictício.
+/// DEBUG ONLY: fake diff.
 pub fn demo_diff() -> GitDiff {
     let l = |kind, old, new, text: &str| DiffLine { kind, old, new, text: text.into() };
     GitDiff {
@@ -841,33 +844,33 @@ pub fn demo_diff() -> GitDiff {
             l(DiffKind::Meta, None, None, "diff --git a/memory/GERAL.md b/memory/GERAL.md"),
             l(DiffKind::Meta, None, None, "--- a/memory/GERAL.md"),
             l(DiffKind::Meta, None, None, "+++ b/memory/GERAL.md"),
-            l(DiffKind::Hunk, None, None, "@@ -20,4 +20,6 @@ ## 1. Ambientação"),
-            l(DiffKind::Context, Some(20), Some(20), " Terminal desktop nativo em Rust (winit + egui)."),
-            l(DiffKind::Del, Some(21), None, "-A Conversa integrada fica embaixo dos terminais."),
-            l(DiffKind::Add, None, Some(21), "+A Conversa integrada fica na barra direita,"),
-            l(DiffKind::Add, None, Some(22), "+com a aba Git (branch, alterações, diff e commit)."),
+            l(DiffKind::Hunk, None, None, "@@ -20,4 +20,6 @@ ## 1. Environment"),
+            l(DiffKind::Context, Some(20), Some(20), " Native desktop terminal in Rust (winit + egui)."),
+            l(DiffKind::Del, Some(21), None, "-The integrated chat sits below the terminals."),
+            l(DiffKind::Add, None, Some(21), "+The integrated chat sits in the right bar,"),
+            l(DiffKind::Add, None, Some(22), "+with the Git tab (branch, changes, diff and commit)."),
             l(DiffKind::Context, Some(22), Some(23), " "),
-            l(DiffKind::Context, Some(23), Some(24), " ### Pastas"),
+            l(DiffKind::Context, Some(23), Some(24), " ### Folders"),
         ],
         truncated: false,
         binary: false,
     }
 }
 
-/// SOMENTE DEPURAÇÃO: diff com dois trechos (`AGENTDECK_DEBUG_UI=git-hunks`).
+/// DEBUG ONLY: diff with two hunks (`AGENTDECK_DEBUG_UI=git-hunks`).
 pub fn demo_hunks_diff() -> GitDiff {
     let mut d = demo_diff();
     let l = |kind, old, new, text: &str| DiffLine { kind, old, new, text: text.into() };
     d.lines.extend([
-        l(DiffKind::Hunk, None, None, "@@ -80,3 +82,3 @@ ### Limites"),
-        l(DiffKind::Context, Some(80), Some(82), " | Regra | Valor |"),
-        l(DiffKind::Del, Some(81), None, "-| Profundidade máxima | 2 |"),
-        l(DiffKind::Add, None, Some(83), "+| Profundidade máxima de delegação | 2 |"),
+        l(DiffKind::Hunk, None, None, "@@ -80,3 +82,3 @@ ### Limits"),
+        l(DiffKind::Context, Some(80), Some(82), " | Rule | Value |"),
+        l(DiffKind::Del, Some(81), None, "-| Maximum depth | 2 |"),
+        l(DiffKind::Add, None, Some(83), "+| Maximum delegation depth | 2 |"),
     ]);
     d
 }
 
-/// SOMENTE DEPURAÇÃO: branches fictícias.
+/// DEBUG ONLY: fake branches.
 pub fn demo_branches() -> Vec<GitBranch> {
     let b = |name: &str, remote: bool, current: bool| GitBranch { name: name.into(), remote, upstream: None, current };
     vec![
@@ -879,7 +882,7 @@ pub fn demo_branches() -> Vec<GitBranch> {
     ]
 }
 
-/// SOMENTE DEPURAÇÃO: histórico fictício (`AGENTDECK_DEBUG_UI=git-log`).
+/// DEBUG ONLY: fake history (`AGENTDECK_DEBUG_UI=git-log`).
 pub fn demo_log() -> Vec<GitCommit> {
     let c = |h: &str, author: &str, date: &str, subject: &str| GitCommit {
         hash: format!("{h}000000000000000000000000000000000"),
@@ -889,39 +892,39 @@ pub fn demo_log() -> Vec<GitCommit> {
         subject: subject.into(),
     };
     vec![
-        c("61621aa", "Ana", "há 12 min", "fix(terminal): prazo da atualização sincronizada"),
-        c("70e7441", "Claude", "há 2 horas", "fix: auditoria de regressão (ponte, Git, config e interface)"),
-        c("8c3de88", "Ana", "há 4 horas", "chore: skills de interface do projeto"),
-        c("52e96ad", "Antigravity", "ontem", "feat(ui): agentes em árvore com equipe reorganizável"),
-        c("e60286b", "Claude", "ontem", "feat(ui): abas por projeto na Deck"),
-        c("b1f7f48", "Claude", "há 2 dias", "feat(core): projetos como unidade principal"),
+        c("61621aa", "Ana", "12 min ago", "fix(terminal): synchronized update deadline"),
+        c("70e7441", "Claude", "2 hours ago", "fix: regression audit (bridge, Git, config and interface)"),
+        c("8c3de88", "Ana", "4 hours ago", "chore: project interface skills"),
+        c("52e96ad", "Antigravity", "yesterday", "feat(ui): agents in a tree with a reorganizable team"),
+        c("e60286b", "Claude", "yesterday", "feat(ui): tabs per project in the Deck"),
+        c("b1f7f48", "Claude", "2 days ago", "feat(core): projects as the main unit"),
     ]
 }
 
-/// SOMENTE DEPURAÇÃO: detalhe de um commit (`AGENTDECK_DEBUG_UI=git-commit`).
+/// DEBUG ONLY: detail of a commit (`AGENTDECK_DEBUG_UI=git-commit`).
 pub fn demo_commit_detail() -> GitCommitDetail {
     GitCommitDetail {
         hash: "61621aa000000000000000000000000000000000".into(),
         short_hash: "61621aa".into(),
         author: "Ana".into(),
         email: "ana@agentdeck.dev".into(),
-        date: "há 12 min".into(),
-        message: "fix(terminal): prazo da atualização sincronizada\n\nSolta a saída retida após 150 ms quando o fim do bloco se perde."
+        date: "12 min ago".into(),
+        message: "fix(terminal): synchronized update deadline\n\nReleases the held output after 150 ms when the end of the block is lost."
             .into(),
         files: vec![('M', "crates/app/src/terminal/mod.rs".into()), ('M', "memory/GERAL.md".into())],
         diff: demo_diff(),
     }
 }
 
-/// SOMENTE DEPURAÇÃO: stashes fictícios (`AGENTDECK_DEBUG_UI=git-stash`).
+/// DEBUG ONLY: fake stashes (`AGENTDECK_DEBUG_UI=git-stash`).
 pub fn demo_stashes() -> Vec<GitStash> {
     vec![
-        GitStash { index: 0, date: "há 25 min".into(), message: "On feat/git: rascunho do editor de conflitos".into() },
-        GitStash { index: 1, date: "ontem".into(), message: "WIP on dev: ajuste na barra lateral".into() },
+        GitStash { index: 0, date: "25 min ago".into(), message: "On feat/git: conflict editor draft".into() },
+        GitStash { index: 1, date: "yesterday".into(), message: "WIP on dev: sidebar tweak".into() },
     ]
 }
 
-/// SOMENTE DEPURAÇÃO: status com conflito e merge em andamento (`AGENTDECK_DEBUG_UI=git-conflicts`).
+/// DEBUG ONLY: status with a conflict and a merge in progress (`AGENTDECK_DEBUG_UI=git-conflicts`).
 pub fn demo_conflicts_status() -> GitStatus {
     let mut st = demo_status();
     st.state = RepoState::Merging;
@@ -934,7 +937,7 @@ pub fn demo_conflicts_status() -> GitStatus {
     st
 }
 
-/// SOMENTE DEPURAÇÃO: arquivo em conflito com blocos (`AGENTDECK_DEBUG_UI=git-conflicts`).
+/// DEBUG ONLY: file in conflict with blocks (`AGENTDECK_DEBUG_UI=git-conflicts`).
 pub fn demo_conflict_file() -> GitConflictFile {
     GitConflictFile {
         path: "crates/core/src/git.rs".into(),
@@ -977,7 +980,7 @@ mod tests {
                     Section::Changes,
                     vec![("crates/core/src/git.rs", false, 'M'), ("memory/GERAL.md", false, 'M'), ("README.md", false, 'D')]
                 ),
-                (Section::Untracked, vec![("docs/rascunho de ideias.md", false, 'U')]),
+                (Section::Untracked, vec![("docs/idea draft.md", false, 'U')]),
             ]
         );
         let conflict = GitStatus {
@@ -994,6 +997,7 @@ mod tests {
         assert_eq!(chip_text(&clean), "main");
         let detached = GitStatus { head: Some("abc1234567".into()), ..Default::default() };
         assert_eq!(chip_text(&detached), "abc1234");
-        assert_eq!(chip_text(&GitStatus::default()), "(sem commits)");
+        assert_eq!(chip_text(&GitStatus::default()), "(no commits)");
+        assert_eq!(agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || chip_text(&GitStatus::default())), "(sem commits)");
     }
 }
