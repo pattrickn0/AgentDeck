@@ -1,4 +1,4 @@
-//! Pasta de trabalho: listagem para a árvore, AGENTS.md com instruções da ponte e watcher.
+//! Working folder: listing for the tree, AGENTS.md with the bridge instructions and watcher.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Weak;
@@ -6,19 +6,19 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
-/// Item da árvore de arquivos (equivalente a `workspace:readDir`).
+/// Item of the file tree (equivalent to `workspace:readDir`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirEntry {
     pub name: String,
     pub is_dir: bool,
-    /// Caminho relativo ao workspace, com `/`.
+    /// Path relative to the workspace, with `/`.
     pub rel_path: String,
-    /// Extensão em minúsculas com ponto (`.rs`), vazia para pastas.
+    /// Lowercase extension with the dot (`.rs`), empty for folders.
     pub ext: String,
 }
 
-/// Nomes ignorados na árvore (`.gemini` é a pasta de configuração do Antigravity, `~/.gemini/antigravity`;
-/// `.agentdeck` guarda as worktrees das tarefas).
+/// Names ignored in the tree (`.gemini` is Antigravity's config folder, `~/.gemini/antigravity`;
+/// `.agentdeck` keeps the task worktrees).
 pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".agentdeck", "dados", "$RECYCLE.BIN", "target"];
 
 fn is_ignored_entry(name: &str) -> bool {
@@ -30,10 +30,10 @@ fn is_ignored_entry(name: &str) -> bool {
 }
 
 pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
-    // Só subpastas do workspace (`""` = a raiz): nada de `..`, absoluto ou `C:` no Windows.
-    // A barra invertida é separador no Windows (é o que `rel_path` usava antes): lá ela vira `/` antes de
-    // validar e de juntar. No Unix ela é um caractere válido de nome (`a\b` é uma pasta), e o `rel_path`
-    // que volta da árvore traz o nome intacto: trocá-la abriria outra pasta.
+    // Only subfolders of the workspace (`""` = the root): no `..`, absolute path or `C:` on Windows.
+    // The backslash is a separator on Windows (it is what `rel_path` used before): there it becomes `/`
+    // before validating and joining. On Unix it is a valid name character (`a\b` is a folder), and the
+    // `rel_path` that comes back from the tree brings the name intact: swapping it would open another folder.
     let rel_dir = if cfg!(windows) { rel_dir.replace('\\', "/") } else { rel_dir.to_owned() };
     if !rel_dir.is_empty() && !crate::git::safe_rel(&rel_dir) {
         return Vec::new();
@@ -65,63 +65,68 @@ pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
     items
 }
 
-/// Limite do que `read_text` lê: acima disso o arquivo não vira texto na tela.
+/// Limit of what `read_text` reads: above it the file does not become text on screen.
 pub const READ_TEXT_MAX: u64 = 1024 * 1024;
 
-/// O que `read_text` encontrou.
+/// What `read_text` found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextFile {
     Text(String),
-    /// Maior que [`READ_TEXT_MAX`] (tamanho em bytes); o conteúdo não é lido.
+    /// Larger than [`READ_TEXT_MAX`] (size in bytes); the content is not read.
     TooLarge(u64),
-    /// Tem bytes nulos: não é texto.
+    /// It has null bytes: it is not text.
     Binary,
 }
 
-/// Garante que o caminho acessado esteja estritamente dentro do workspace (normalização
-/// lexical: funciona com caminhos inexistentes; case-insensitive no Windows).
+/// Makes sure the accessed path is strictly inside the workspace (lexical normalization:
+/// works with paths that do not exist; case-insensitive on Windows).
 pub fn resolve_workspace_path(rel_or_abs: &str, workspace: &Path) -> Result<PathBuf, String> {
     if workspace.as_os_str().is_empty() {
-        return Err("Workspace não configurado.".into());
+        return Err(crate::t!("Workspace is not configured.").into());
     }
     let ws = crate::util::absolutize(workspace);
     let target = crate::util::normalize_lexical(&ws.join(rel_or_abs));
     if !crate::util::path_within(&target, &ws) {
-        return Err(format!("Acesso negado: o caminho \"{rel_or_abs}\" está fora do workspace configurado (\"{}\").", workspace.display()));
+        return Err(crate::t!(
+            "Access denied: the path \"{path}\" is outside the configured workspace (\"{root}\").",
+            path = rel_or_abs,
+            root = workspace.display()
+        ));
     }
     Ok(target)
 }
 
-/// Lê um arquivo de texto do workspace para a visualização somente leitura. O caminho precisa ser
-/// relativo e seguro (`git::safe_rel`) e, depois de resolver links simbólicos, continuar dentro do
-/// workspace. Bytes que não são UTF-8 viram `�` (arquivos antigos em Latin-1 ainda se leem).
+/// Reads a text file of the workspace for the read-only view. The path must be
+/// relative and safe (`git::safe_rel`) and, after resolving symbolic links, still inside the
+/// workspace. Bytes that are not UTF-8 become `�` (old Latin-1 files can still be read).
 pub fn read_text(workspace: &Path, rel: &str) -> Result<TextFile, String> {
     if workspace.as_os_str().is_empty() {
-        return Err("nenhum projeto aberto".into());
+        return Err(crate::t!("no project open").into());
     }
     if !crate::git::safe_rel(rel) {
-        return Err(format!("caminho inválido: {rel}"));
+        return Err(crate::t!("invalid path: {path}", path = rel));
     }
-    let root = std::fs::canonicalize(workspace).map_err(|e| format!("a pasta do projeto não abre: {e}"))?;
-    let full = std::fs::canonicalize(workspace.join(rel)).map_err(|e| format!("não consegui abrir {rel}: {e}"))?;
+    let root = std::fs::canonicalize(workspace).map_err(|e| crate::t!("the project folder does not open: {error}", error = e))?;
+    let full =
+        std::fs::canonicalize(workspace.join(rel)).map_err(|e| crate::t!("could not open {path}: {error}", path = rel, error = e))?;
     if !crate::util::path_within(&full, &root) {
-        return Err(format!("{rel} está fora da pasta do projeto"));
+        return Err(crate::t!("{path} is outside the project folder", path = rel));
     }
-    let meta = std::fs::metadata(&full).map_err(|e| format!("não consegui ler {rel}: {e}"))?;
+    let meta = std::fs::metadata(&full).map_err(|e| crate::t!("could not read {path}: {error}", path = rel, error = e))?;
     if !meta.is_file() {
-        return Err(format!("{rel} não é um arquivo"));
+        return Err(crate::t!("{path} is not a file", path = rel));
     }
     if meta.len() > READ_TEXT_MAX {
         return Ok(TextFile::TooLarge(meta.len()));
     }
-    let bytes = std::fs::read(&full).map_err(|e| format!("não consegui ler {rel}: {e}"))?;
+    let bytes = std::fs::read(&full).map_err(|e| crate::t!("could not read {path}: {error}", path = rel, error = e))?;
     if bytes.contains(&0) {
         return Ok(TextFile::Binary);
     }
     Ok(TextFile::Text(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
-/// O fim de linha de um arquivo de texto (o editor trabalha com `\n` e grava de volta com o mesmo).
+/// The line ending of a text file (the editor works with `\n` and writes back with the same).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Eol {
     #[default]
@@ -130,8 +135,8 @@ pub enum Eol {
 }
 
 impl Eol {
-    /// O texto com `\n` e o fim de linha que ele usava. `None` se mistura os dois (ou tem `\r` solto): trocar tudo
-    /// por um só alteraria linhas que o usuário não tocou.
+    /// The text with `\n` and the line ending it used. `None` if it mixes both (or has a stray `\r`): swapping everything
+    /// for a single one would change lines the user did not touch.
     pub fn normalize(text: &str) -> Option<(String, Eol)> {
         let crlf = text.matches("\r\n").count();
         let lf = text.matches('\n').count();
@@ -145,7 +150,7 @@ impl Eol {
         }
     }
 
-    /// `text_lf` (só com `\n`) no fim de linha `self`.
+    /// `text_lf` (only with `\n`) with the line ending `self`.
     pub fn apply(self, text_lf: &str) -> String {
         match self {
             Eol::Lf => text_lf.to_owned(),
@@ -154,39 +159,41 @@ impl Eol {
     }
 }
 
-/// Grava `text_lf` (com `\n`) em `rel`, no fim de linha `eol` e, se `bom`, com o BOM UTF-8 que o arquivo já tinha
-/// (nunca acrescenta um). Ao lado e trocando ([`write_atomic`]): um agente lendo o arquivo nunca o vê pela metade.
-/// O caminho precisa ser relativo e seguro e ficar dentro do workspace; o arquivo pode já não existir (apagado por
-/// um agente enquanto era editado), mas a pasta dele sim.
+/// Writes `text_lf` (with `\n`) to `rel`, with the line ending `eol` and, if `bom`, with the UTF-8 BOM the file already
+/// had (never adds one). Beside it and swapping ([`write_atomic`]): an agent reading the file never sees it half written.
+/// The path must be relative and safe and stay inside the workspace; the file may no longer exist (deleted by
+/// an agent while it was being edited), but its folder does.
 pub fn write_text(workspace: &Path, rel: &str, text_lf: &str, eol: Eol, bom: bool) -> Result<(), String> {
     if workspace.as_os_str().is_empty() {
-        return Err("nenhum projeto aberto".into());
+        return Err(crate::t!("no project open").into());
     }
     if !crate::git::safe_rel(rel) {
-        return Err(format!("caminho inválido: {rel}"));
+        return Err(crate::t!("invalid path: {path}", path = rel));
     }
-    let root = std::fs::canonicalize(workspace).map_err(|e| format!("a pasta do projeto não abre: {e}"))?;
+    let root = std::fs::canonicalize(workspace).map_err(|e| crate::t!("the project folder does not open: {error}", error = e))?;
     let joined = workspace.join(rel);
     let target = match std::fs::canonicalize(&joined) {
         Ok(full) => full,
         Err(_) => {
-            let name = joined.file_name().ok_or_else(|| format!("caminho inválido: {rel}"))?.to_owned();
-            let parent = joined.parent().ok_or_else(|| format!("caminho inválido: {rel}"))?;
-            std::fs::canonicalize(parent).map_err(|e| format!("a pasta de {rel} não abre: {e}"))?.join(name)
+            let name = joined.file_name().ok_or_else(|| crate::t!("invalid path: {path}", path = rel))?.to_owned();
+            let parent = joined.parent().ok_or_else(|| crate::t!("invalid path: {path}", path = rel))?;
+            std::fs::canonicalize(parent)
+                .map_err(|e| crate::t!("the folder of {path} does not open: {error}", path = rel, error = e))?
+                .join(name)
         }
     };
     if !crate::util::path_within(&target, &root) {
-        return Err(format!("{rel} está fora da pasta do projeto"));
+        return Err(crate::t!("{path} is outside the project folder", path = rel));
     }
     if target.is_dir() {
-        return Err(format!("{rel} não é um arquivo"));
+        return Err(crate::t!("{path} is not a file", path = rel));
     }
     let mut bytes = Vec::with_capacity(text_lf.len() + 3);
     if bom {
         bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
     }
     bytes.extend_from_slice(eol.apply(text_lf).as_bytes());
-    write_atomic(&target, &bytes).map_err(|e| format!("não consegui gravar {rel}: {e}"))
+    write_atomic(&target, &bytes).map_err(|e| crate::t!("could not write {path}: {error}", path = rel, error = e))
 }
 
 // ---------- AGENTS.md ----------
@@ -197,15 +204,15 @@ pub const MARKER_END: &str = "<!-- agentdeck:end -->";
 fn marker_re() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        // Reconhece também os marcadores de nomes mais antigos (`jwic`, `orquestra`) e os troca pelo atual.
+        // Also recognizes the markers of older names (`jwic`, `orquestra`) and swaps them for the current one.
         regex::Regex::new(r"<!-- (?:orquestra|jwic|agentdeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|agentdeck):end -->")
-            .expect("regex válida")
+            .expect("valid regex")
     })
 }
 
-/// Troca o primeiro bloco marcado por `block` e apaga os demais (com as linhas em branco que os
-/// separavam do resto): um app de versão anterior que não reconhece o marcador novo acrescenta o
-/// seu próprio bloco no fim, e sem isso os dois ficariam para sempre.
+/// Swaps the first marked block for `block` and deletes the others (with the blank lines that
+/// separated them from the rest): an app from an older version that does not recognize the new marker adds its
+/// own block at the end, and without this both would stay forever.
 fn replace_marker_blocks(old: &str, block: &str) -> String {
     let mut out = String::with_capacity(old.len());
     let mut pos = 0;
@@ -228,26 +235,26 @@ fn replace_marker_blocks(old: &str, block: &str) -> String {
     out
 }
 
-/// Resultado de [`ensure_agent_context`].
+/// Result of [`ensure_agent_context`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentContext {
-    /// Workspace é a pasta pessoal do usuário: nunca escrevemos lá.
+    /// The workspace is the user's home folder: we never write there.
     SkippedHome,
-    /// Fora da pasta do app, sem AGENTS.md pré-existente e sem pedido para criá-lo.
+    /// Outside the app folder, with no pre-existing AGENTS.md and no request to create it.
     SkippedForeign,
-    /// Conteúdo já estava atualizado.
+    /// Content was already up to date.
     Unchanged,
     Written,
-    /// O arquivo não existia e foi criado, só com o bloco do app (pedido com `create`).
+    /// The file did not exist and was created, with the app block only (requested with `create`).
     Created,
 }
 
-/// Mantém o bloco marcado do AgentDeck no AGENTS.md do workspace (o Antigravity CLI não
-/// tem flag para anexar instruções ao prompt de sistema). Equivalente a `ensureAgentContext`.
+/// Keeps the AgentDeck marked block in the workspace's AGENTS.md (the Antigravity CLI has no
+/// flag to append instructions to the system prompt). Equivalent to `ensureAgentContext`.
 ///
-/// REGRA: fora da pasta do app só atualiza um AGENTS.md que já exista; criar um na pasta do usuário
-/// (`create`) é só para o CLI que não tem outro jeito de receber as instruções (ver `agents::reads_only_agents_md`).
-/// Na pasta pessoal do usuário, nunca.
+/// RULE: outside the app folder only updates an AGENTS.md that already exists; creating one in the user's folder
+/// (`create`) is only for the CLI that has no other way of receiving the instructions (see `agents::reads_only_agents_md`).
+/// In the user's home folder, never.
 pub fn ensure_agent_context(
     workspace: &Path,
     app_dir: &Path,
@@ -266,8 +273,8 @@ pub fn ensure_agent_context(
     }
     let existed = file.exists();
     let old = if existed { std::fs::read_to_string(&file)? } else { String::new() };
-    // Mantém o fim de linha do arquivo (CRLF em repositórios com `core.autocrlf`): EOL misto
-    // sujaria o `git status` a cada abertura.
+    // Keeps the file's line ending (CRLF in repositories with `core.autocrlf`): mixed EOL
+    // would dirty `git status` at every open.
     let eol = if old.contains("\r\n") { "\r\n" } else { "\n" };
     let instructions = instructions.replace("\r\n", "\n").replace('\n', eol);
     let block = format!("{MARKER_START}{eol}{instructions}{eol}{MARKER_END}");
@@ -285,19 +292,19 @@ pub fn ensure_agent_context(
     Ok(if existed { AgentContext::Written } else { AgentContext::Created })
 }
 
-/// `text` sem os blocos marcados do app e sem diferença de fim de linha: o que sobra é do usuário.
+/// `text` without the app's marked blocks and without line-ending differences: what is left belongs to the user.
 fn without_marker_blocks(text: &str) -> String {
     marker_re().replace_all(&text.replace("\r\n", "\n"), "").trim().to_owned()
 }
 
-/// `true` se `current` difere de `committed` só nos blocos marcados do app (fora deles o texto é igual).
+/// `true` if `current` differs from `committed` only in the app's marked blocks (outside them the text is the same).
 pub fn only_marker_blocks_differ(committed: &str, current: &str) -> bool {
     without_marker_blocks(committed) == without_marker_blocks(current)
 }
 
-/// Põe em `file` o primeiro bloco marcado de `saved` (o que o app tinha gravado): troca o bloco que o arquivo
-/// tem agora ou, se não tiver, acrescenta ao final. Mantém o fim de linha do arquivo. Sem bloco em `saved`,
-/// não faz nada. Usada pela mesclagem de tarefas, que devolve o arquivo ao do HEAD para o git mesclar.
+/// Puts in `file` the first marked block of `saved` (what the app had written): swaps the block the file
+/// has now or, if it has none, appends it at the end. Keeps the file's line ending. Without a block in `saved`,
+/// does nothing. Used by the task merge, which puts the file back to the HEAD version so git can merge.
 pub fn restore_marker_block(file: &Path, saved: &str) -> std::io::Result<()> {
     let Some(found) = marker_re().find(saved) else { return Ok(()) };
     let old = std::fs::read_to_string(file).unwrap_or_default();
@@ -316,8 +323,8 @@ pub fn restore_marker_block(file: &Path, saved: &str) -> std::io::Result<()> {
     write_atomic(file, new.as_bytes())
 }
 
-/// Grava ao lado e troca: um agente lendo o AGENTS.md ao mesmo tempo nunca o vê pela metade.
-/// Se a troca falhar (no Windows, arquivo aberto sem permissão de troca), grava direto.
+/// Writes beside and swaps: an agent reading AGENTS.md at the same time never sees it half written.
+/// If the swap fails (on Windows, a file open without swap permission), writes directly.
 fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = file.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
@@ -331,19 +338,19 @@ fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
 
 // ---------- Watcher ----------
 
-/// Mudanças nestas pastas não recarregam a árvore (`.gemini`: configuração do Antigravity).
+/// Changes in these folders do not reload the tree (`.gemini`: Antigravity's configuration).
 const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".agentdeck", "dados", "target"];
 
-/// `path` relativo a `base`, comparando por componentes (sem diferença de caixa nem prefixo
-/// verbatim `\\?\` no Windows: `c:\x`, `C:\x` e `\\?\C:\x` são a mesma pasta). `None` se estiver fora.
+/// `path` relative to `base`, comparing by components (no case difference and no verbatim prefix
+/// `\\?\` on Windows: `c:\x`, `C:\x` and `\\?\C:\x` are the same folder). `None` if it is outside.
 fn rel_within(base: &Path, path: &Path) -> Option<PathBuf> {
     let base = crate::util::strip_verbatim(base);
     let path = crate::util::strip_verbatim(path);
     crate::util::path_within(&path, &base).then(|| path.components().skip(base.components().count()).collect())
 }
 
-/// `true` se a mudança em `path` deve ser ignorada. Fora do workspace não se ignora: as pastas
-/// acima dele (um projeto em `C:\dados\app`, por exemplo) não contam.
+/// `true` if the change in `path` must be ignored. Outside the workspace nothing is ignored: the folders
+/// above it (a project in `C:\dados\app`, for example) do not count.
 pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
     let Some(rel) = rel_within(workspace, path) else { return false };
     rel.components().any(|c| match c {
@@ -352,14 +359,14 @@ pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
     })
 }
 
-/// A mudança em `path` é no estado do repositório git do workspace (`.git/HEAD`, `index`, refs,
-/// merge/rebase/cherry-pick/revert em andamento…)? Os `*.lock` (temporários do git) não contam.
+/// Is the change in `path` in the workspace repository's git state (`.git/HEAD`, `index`, refs,
+/// merge/rebase/cherry-pick/revert in progress…)? The `*.lock` files (git temporaries) do not count.
 pub(crate) fn git_state_change(workspace: &Path, path: &Path) -> bool {
     git_state_change_in(&workspace.join(".git"), path)
 }
 
-/// Como [`git_state_change`], mas comparando diretamente com a pasta `git_dir` (que pode ficar
-/// fora de `workspace/.git` em worktrees, submódulos ou subpastas do repositório).
+/// Like [`git_state_change`], but comparing directly with the `git_dir` folder (which may be
+/// outside `workspace/.git` in worktrees, submodules or subfolders of the repository).
 pub(crate) fn git_state_change_in(git_dir: &Path, path: &Path) -> bool {
     let Some(rel) = rel_within(git_dir, path) else { return false };
     let name = rel.to_string_lossy();
@@ -397,8 +404,8 @@ fn resolve_git_path(base: &Path, raw: &str) -> Option<PathBuf> {
     abs.is_dir().then_some(abs)
 }
 
-/// Lê um arquivo `.git` (`gitdir: <caminho>`) de worktree/submódulo quando o binário `git` não
-/// está disponível (ex.: ambientes de teste isolados).
+/// Reads a `.git` file (`gitdir: <path>`) of a worktree/submodule when the `git` binary is not
+/// available (e.g. isolated test environments).
 fn git_dirs_from_dotgit_file(workspace: &Path) -> Vec<PathBuf> {
     let dotgit = workspace.join(".git");
     if !dotgit.is_file() {
@@ -418,8 +425,8 @@ fn git_dirs_from_dotgit_file(workspace: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Descobre o `.git` real do workspace (`git rev-parse --absolute-git-dir --git-common-dir`, sem
-/// shell). Chamado fora da thread da interface.
+/// Finds the workspace's real `.git` (`git rev-parse --absolute-git-dir --git-common-dir`, without a
+/// shell). Called outside the UI thread.
 pub(crate) fn discover_git_dirs(core: &crate::Core, workspace: &Path) -> Vec<PathBuf> {
     let mut git = core.inner.agents.which(if cfg!(windows) { "git.exe" } else { "git" });
     if git.is_none() && cfg!(windows) {
@@ -453,14 +460,14 @@ pub(crate) fn discover_git_dirs(core: &crate::Core, workspace: &Path) -> Vec<Pat
     out
 }
 
-/// Silêncio que encerra uma rajada de eventos.
+/// Silence that ends a burst of events.
 const DEBOUNCE_QUIET: Duration = Duration::from_millis(300);
-/// Teto da espera: sob eventos contínuos (um build, um log) emite ao menos nesse intervalo.
+/// Ceiling of the wait: under continuous events (a build, a log) emits at least at this interval.
 const DEBOUNCE_MAX: Duration = Duration::from_millis(1000);
 
-/// Junta os eventos (`true` = git, `false` = árvore) e chama `emit(árvore, git)` depois de
-/// `quiet` sem eventos ou, no máximo, `max` depois do primeiro. Termina quando o canal fecha
-/// (emitindo o que estava pendente) ou quando `emit` devolve `false`.
+/// Joins the events (`true` = git, `false` = tree) and calls `emit(tree, git)` after
+/// `quiet` without events or, at most, `max` after the first. Ends when the channel closes
+/// (emitting what was pending) or when `emit` returns `false`.
 fn debounce(rx: &crossbeam_channel::Receiver<bool>, quiet: Duration, max: Duration, mut emit: impl FnMut(bool, bool) -> bool) {
     while let Ok(first) = rx.recv() {
         let (mut tree, mut git) = (!first, first);
@@ -485,18 +492,18 @@ fn debounce(rx: &crossbeam_channel::Receiver<bool>, quiet: Duration, max: Durati
     }
 }
 
-/// Inicia um watcher recursivo com debounce de 300 ms que emite
-/// [`crate::CoreEvent::WorkspaceChanged`] (e [`crate::CoreEvent::GitChanged`] quando muda o estado
-/// do repositório em `.git/`). O watcher para quando o valor retornado é solto.
+/// Starts a recursive watcher with a 300 ms debounce that emits
+/// [`crate::CoreEvent::WorkspaceChanged`] (and [`crate::CoreEvent::GitChanged`] when the state of the
+/// repository in `.git/` changes). The watcher stops when the returned value is dropped.
 pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> notify::Result<notify::RecommendedWatcher> {
-    // `true` = mudança no repositório git; `false` = na árvore de arquivos.
+    // `true` = change in the git repository; `false` = in the file tree.
     let (tx, rx) = crossbeam_channel::unbounded::<bool>();
     let ws = workspace.to_path_buf();
     let extra_git: std::sync::Arc<parking_lot::RwLock<Vec<PathBuf>>> = std::sync::Arc::default();
     let extra_for_cb = extra_git.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(ev) = res else { return };
-        // Leituras (Access) não alteram a árvore — evita laço com a própria listagem.
+        // Reads (Access) do not change the tree — avoids a loop with the listing itself.
         if matches!(ev.kind, EventKind::Access(_)) {
             return;
         }
@@ -515,7 +522,7 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
     std::thread::Builder::new()
         .name("cd-watch-debounce".into())
         .spawn(move || {
-            // Descobre o `.git` real fora da thread da UI (worktrees, submódulos, subpasta de repo).
+            // Finds the real `.git` outside the UI thread (worktrees, submodules, subfolder of a repo).
             if let Some(inner) = core.upgrade() {
                 let c = crate::Core { inner: inner.clone() };
                 let default_git = ws_for_thread.join(".git");
@@ -535,7 +542,7 @@ pub(crate) fn start_watcher(workspace: &Path, core: Weak<crate::CoreInner>) -> n
                     }
                 }
             }
-            // Termina quando o watcher (dono do `tx`) é solto.
+            // Ends when the watcher (owner of `tx`) is dropped.
             debounce(&rx, DEBOUNCE_QUIET, DEBOUNCE_MAX, |tree, git| {
                 let Some(inner) = core.upgrade() else { return false };
                 let core = crate::Core { inner };
@@ -562,14 +569,14 @@ mod tests {
         let ws = tmp.path().join("ws");
         std::fs::create_dir_all(&ws).expect("mkdir");
         assert_eq!(resolve_workspace_path("a/b.txt", &ws).expect("ok"), ws.join("a").join("b.txt"));
-        assert_eq!(resolve_workspace_path("novo/inexistente/../x.txt", &ws).expect("ok"), ws.join("novo").join("x.txt"));
+        assert_eq!(resolve_workspace_path("new/missing/../x.txt", &ws).expect("ok"), ws.join("new").join("x.txt"));
         assert_eq!(resolve_workspace_path(".", &ws).expect("ok"), ws);
         assert_eq!(resolve_workspace_path(&ws.join("in.txt").to_string_lossy(), &ws).expect("ok"), ws.join("in.txt"));
-        for bad in ["../fora.txt", "a/../../fora", "../ws-irmao/x", "../../../../../../etc/passwd"] {
-            let err = resolve_workspace_path(bad, &ws).expect_err(bad);
-            assert!(err.starts_with("Acesso negado: o caminho"), "{err}");
+        for bad in ["../outside.txt", "a/../../outside", "../ws-sibling/x", "../../../../../../etc/passwd"] {
+            let err = crate::i18n::english(|| resolve_workspace_path(bad, &ws)).expect_err(bad);
+            assert!(err.starts_with("Access denied: the path"), "{err}");
         }
-        let outside = tmp.path().join("fora.txt");
+        let outside = tmp.path().join("outside.txt");
         assert!(resolve_workspace_path(&outside.to_string_lossy(), &ws).is_err());
         #[cfg(unix)]
         assert!(resolve_workspace_path("/etc/passwd", &ws).is_err());
@@ -591,18 +598,18 @@ mod tests {
         std::fs::write(ws.join("bin.dat"), b"MZ\0\0abc").expect("write");
         std::fs::write(ws.join("big.txt"), vec![b'x'; READ_TEXT_MAX as usize + 1]).expect("write");
         std::fs::write(ws.join("limit.txt"), vec![b'x'; READ_TEXT_MAX as usize]).expect("write");
-        std::fs::write(tmp.path().join("secret.txt"), "fora").expect("write");
+        std::fs::write(tmp.path().join("secret.txt"), "outside").expect("write");
 
         assert_eq!(read_text(&ws, "sub/a.rs"), Ok(TextFile::Text("fn main() {}\n".into())));
         assert_eq!(read_text(&ws, "latin.txt"), Ok(TextFile::Text("caf\u{fffd}".into())));
         assert_eq!(read_text(&ws, "bin.dat"), Ok(TextFile::Binary));
         assert_eq!(read_text(&ws, "big.txt"), Ok(TextFile::TooLarge(READ_TEXT_MAX + 1)));
         assert!(matches!(read_text(&ws, "limit.txt"), Ok(TextFile::Text(t)) if t.len() as u64 == READ_TEXT_MAX));
-        // Fora do workspace, absoluto, pasta, inexistente e sem projeto.
+        // Outside the workspace, absolute, folder, nonexistent and no project.
         assert!(read_text(&ws, "../secret.txt").is_err());
         assert!(read_text(&ws, &tmp.path().join("secret.txt").to_string_lossy()).is_err());
         assert!(read_text(&ws, "sub").is_err());
-        assert!(read_text(&ws, "nao-existe.txt").is_err());
+        assert!(read_text(&ws, "does-not-exist.txt").is_err());
         assert!(read_text(&ws, "").is_err());
         assert!(read_text(Path::new(""), "sub/a.rs").is_err());
     }
@@ -611,9 +618,9 @@ mod tests {
     fn line_endings_are_detected_and_restored() {
         assert_eq!(Eol::normalize("a\nb\n"), Some(("a\nb\n".into(), Eol::Lf)));
         assert_eq!(Eol::normalize("a\r\nb\r\n"), Some(("a\nb\n".into(), Eol::Crlf)));
-        assert_eq!(Eol::normalize("sem fim de linha"), Some(("sem fim de linha".into(), Eol::Lf)));
+        assert_eq!(Eol::normalize("no line ending"), Some(("no line ending".into(), Eol::Lf)));
         assert_eq!(Eol::normalize(""), Some((String::new(), Eol::Lf)));
-        // Misturado ou com \r solto: não dá para devolver igual.
+        // Mixed or with a stray \r: it cannot be given back the same.
         assert_eq!(Eol::normalize("a\r\nb\n"), None);
         assert_eq!(Eol::normalize("a\rb\n"), None);
         assert_eq!(Eol::Crlf.apply("a\nb\n"), "a\r\nb\r\n");
@@ -627,25 +634,25 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let ws = tmp.path().join("ws");
         std::fs::create_dir_all(ws.join("sub")).expect("mkdir");
-        std::fs::write(tmp.path().join("fora.txt"), "fora").expect("write");
-        write_text(&ws, "sub/a.txt", "um\ndois\n", Eol::Crlf, false).expect("grava");
-        assert_eq!(std::fs::read(ws.join("sub/a.txt")).expect("read"), b"um\r\ndois\r\n");
-        write_text(&ws, "sub/a.txt", "x\n", Eol::Lf, false).expect("regrava");
+        std::fs::write(tmp.path().join("outside.txt"), "outside").expect("write");
+        write_text(&ws, "sub/a.txt", "one\ntwo\n", Eol::Crlf, false).expect("writes");
+        assert_eq!(std::fs::read(ws.join("sub/a.txt")).expect("read"), b"one\r\ntwo\r\n");
+        write_text(&ws, "sub/a.txt", "x\n", Eol::Lf, false).expect("rewrites");
         assert_eq!(std::fs::read(ws.join("sub/a.txt")).expect("read"), b"x\n");
-        // O BOM só volta se o arquivo já tinha um.
-        write_text(&ws, "sub/b.txt", "x", Eol::Lf, true).expect("grava");
+        // The BOM only comes back if the file already had one.
+        write_text(&ws, "sub/b.txt", "x", Eol::Lf, true).expect("writes");
         assert_eq!(std::fs::read(ws.join("sub/b.txt")).expect("read"), b"\xEF\xBB\xBFx");
-        // Nenhum temporário fica para trás.
+        // No temporary file is left behind.
         let names: Vec<String> =
             std::fs::read_dir(ws.join("sub")).expect("ls").flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names.len(), 2, "{names:?}");
-        // Fora do projeto, absoluto, pasta, pasta inexistente e sem projeto.
-        assert!(write_text(&ws, "../fora.txt", "x", Eol::Lf, false).is_err());
-        assert!(write_text(&ws, &tmp.path().join("fora.txt").to_string_lossy(), "x", Eol::Lf, false).is_err());
+        // Outside the project, absolute, folder, nonexistent folder and no project.
+        assert!(write_text(&ws, "../outside.txt", "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, &tmp.path().join("outside.txt").to_string_lossy(), "x", Eol::Lf, false).is_err());
         assert!(write_text(&ws, "sub", "x", Eol::Lf, false).is_err());
-        assert!(write_text(&ws, "nao/existe/a.txt", "x", Eol::Lf, false).is_err());
+        assert!(write_text(&ws, "does/not/exist/a.txt", "x", Eol::Lf, false).is_err());
         assert!(write_text(Path::new(""), "a.txt", "x", Eol::Lf, false).is_err());
-        assert_eq!(std::fs::read_to_string(tmp.path().join("fora.txt")).expect("read"), "fora");
+        assert_eq!(std::fs::read_to_string(tmp.path().join("outside.txt")).expect("read"), "outside");
     }
 
     #[test]
@@ -669,12 +676,12 @@ mod tests {
         assert!(items[0].is_dir && items[0].ext.is_empty());
         let sub = read_dir(ws, "zeta");
         assert_eq!(sub[0].rel_path, "zeta/in.json");
-        // A barra invertida só é separador no Windows; no Unix ela faz parte do nome (ver o teste abaixo).
+        // The backslash is a separator only on Windows; on Unix it is part of the name (see the test below).
         if cfg!(windows) {
             let sub_bs = read_dir(ws, "zeta\\");
             assert_eq!(sub_bs[0].rel_path, "zeta/in.json");
         }
-        assert!(read_dir(ws, "nao-existe").is_empty());
+        assert!(read_dir(ws, "does-not-exist").is_empty());
     }
 
     #[cfg(unix)]
@@ -696,14 +703,14 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let ws = tmp.path().join("ws");
         std::fs::create_dir_all(ws.join("sub")).expect("mkdir");
-        std::fs::write(tmp.path().join("fora.txt"), "x").expect("write");
-        std::fs::write(ws.join("sub").join("dentro.txt"), "x").expect("write");
+        std::fs::write(tmp.path().join("outside.txt"), "x").expect("write");
+        std::fs::write(ws.join("sub").join("inside.txt"), "x").expect("write");
         for bad in ["..", "../", "../x", "a/../b", "sub/../sub", "/x", "C:..\\x", "sub/../.."] {
             assert!(read_dir(&ws, bad).is_empty(), "{bad:?}");
         }
         let abs = tmp.path().to_string_lossy().into_owned();
-        assert!(read_dir(&ws, &abs).is_empty(), "absoluto");
-        assert_eq!(read_dir(&ws, "./sub")[0].name, "dentro.txt");
+        assert!(read_dir(&ws, &abs).is_empty(), "absolute");
+        assert_eq!(read_dir(&ws, "./sub")[0].name, "inside.txt");
     }
 
     #[test]
@@ -712,36 +719,36 @@ mod tests {
         let app = tmp.path().join("app");
         let home = tmp.path().join("home");
         let ws_app = app.join("workspace");
-        let foreign = tmp.path().join("outro");
+        let foreign = tmp.path().join("outside");
         for d in [&ws_app, &home, &foreign] {
             std::fs::create_dir_all(d).expect("mkdir");
         }
 
-        // Pasta pessoal: nunca.
+        // Home folder: never.
         assert_eq!(ensure_agent_context(&home, &app, &home, "X", false).expect("ok"), AgentContext::SkippedHome);
         assert!(!home.join("AGENTS.md").exists());
-        // Fora do app, sem AGENTS.md: não cria.
+        // Outside the app, without AGENTS.md: does not create it.
         assert_eq!(ensure_agent_context(&foreign, &app, &home, "X", false).expect("ok"), AgentContext::SkippedForeign);
         assert!(!foreign.join("AGENTS.md").exists());
-        // Dentro do app: cria.
+        // Inside the app: creates it.
         assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X", false).expect("ok"), AgentContext::Created);
         let text = std::fs::read_to_string(ws_app.join("AGENTS.md")).expect("read");
         assert_eq!(text, format!("{MARKER_START}\nX\n{MARKER_END}\n"));
         assert_eq!(ensure_agent_context(&ws_app, &app, &home, "X", false).expect("ok"), AgentContext::Unchanged);
 
-        // Fora do app, AGENTS.md existente com bloco legado: substitui só o bloco.
-        std::fs::write(foreign.join("AGENTS.md"), "# Regras\n\n<!-- jwic:start -->\nvelho $1\n<!-- jwic:end -->\n\nfim\n").expect("write");
-        assert_eq!(ensure_agent_context(&foreign, &app, &home, "novo $1", false).expect("ok"), AgentContext::Written);
+        // Outside the app, an existing AGENTS.md with a legacy block: replaces only the block.
+        std::fs::write(foreign.join("AGENTS.md"), "# Rules\n\n<!-- jwic:start -->\nold $1\n<!-- jwic:end -->\n\nend\n").expect("write");
+        assert_eq!(ensure_agent_context(&foreign, &app, &home, "new $1", false).expect("ok"), AgentContext::Written);
         let text = std::fs::read_to_string(foreign.join("AGENTS.md")).expect("read");
-        assert_eq!(text, format!("# Regras\n\n{MARKER_START}\nnovo $1\n{MARKER_END}\n\nfim\n"));
+        assert_eq!(text, format!("# Rules\n\n{MARKER_START}\nnew $1\n{MARKER_END}\n\nend\n"));
 
-        // AGENTS.md existente sem bloco: acrescenta ao final.
-        std::fs::write(foreign.join("AGENTS.md"), "# Regras\n\n\n").expect("write");
+        // Existing AGENTS.md without a block: appends at the end.
+        std::fs::write(foreign.join("AGENTS.md"), "# Rules\n\n\n").expect("write");
         ensure_agent_context(&foreign, &app, &home, "Y", false).expect("ok");
         let text = std::fs::read_to_string(foreign.join("AGENTS.md")).expect("read");
-        assert_eq!(text, format!("# Regras\n\n{MARKER_START}\nY\n{MARKER_END}\n"));
+        assert_eq!(text, format!("# Rules\n\n{MARKER_START}\nY\n{MARKER_END}\n"));
 
-        // Pasta "irmã" com prefixo de string igual não conta como dentro do app.
+        // A "sister" folder with the same string prefix does not count as inside the app.
         let sibling = tmp.path().join("app-x");
         std::fs::create_dir_all(&sibling).expect("mkdir");
         assert_eq!(ensure_agent_context(&sibling, &app, &home, "X", false).expect("ok"), AgentContext::SkippedForeign);
@@ -752,14 +759,14 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let app = tmp.path().join("app");
         let home = tmp.path().join("home");
-        let project = tmp.path().join("projeto");
+        let project = tmp.path().join("project");
         for d in [&app, &home, &project] {
             std::fs::create_dir_all(d).expect("mkdir");
         }
-        // Pasta pessoal: nem com o pedido.
+        // Home folder: not even when asked.
         assert_eq!(ensure_agent_context(&home, &app, &home, "X", true).expect("ok"), AgentContext::SkippedHome);
         assert!(!home.join("AGENTS.md").exists());
-        // Projeto novo, com o pedido: cria só com o bloco; da segunda vez nada muda (nada novo no `git status`).
+        // New project, when asked: creates it with the block only; the second time nothing changes (nothing new in `git status`).
         assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Created);
         let text = std::fs::read_to_string(project.join("AGENTS.md")).expect("read");
         assert_eq!(
@@ -772,16 +779,16 @@ X
             )
         );
         assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Unchanged);
-        // Um AGENTS.md do usuário que já existe nunca é "criado": só ganha o bloco.
+        // A user AGENTS.md that already exists is never "created": it only gets the block.
         std::fs::write(
             project.join("AGENTS.md"),
-            "# Meu
+            "# Mine
 ",
         )
         .expect("write");
         assert_eq!(ensure_agent_context(&project, &app, &home, "X", true).expect("ok"), AgentContext::Written);
         assert!(std::fs::read_to_string(project.join("AGENTS.md")).expect("read").starts_with(
-            "# Meu
+            "# Mine
 "
         ));
     }
@@ -789,80 +796,80 @@ X
     #[test]
     fn agents_md_keeps_crlf() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outside"));
         std::fs::create_dir_all(&ws).expect("mkdir");
         let file = ws.join("AGENTS.md");
         let only_crlf = |t: &str| t.matches('\n').count() == t.matches("\r\n").count();
         for start in [
-            "# Regras\r\n\r\nfim\r\n",
-            "# Regras\r\n\r\n<!-- agentdeck:start -->\r\nvelho\r\n<!-- agentdeck:end -->\r\n",
-            "# Regras\r\n\r\n<!-- jwic:start -->\r\nvelho\r\n<!-- jwic:end -->\r\n",
+            "# Rules\r\n\r\nend\r\n",
+            "# Rules\r\n\r\n<!-- agentdeck:start -->\r\nold\r\n<!-- agentdeck:end -->\r\n",
+            "# Rules\r\n\r\n<!-- jwic:start -->\r\nold\r\n<!-- jwic:end -->\r\n",
         ] {
             std::fs::write(&file, start).expect("write");
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2", false).expect("ok"), AgentContext::Written);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "line 1\nline 2", false).expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
             assert!(only_crlf(&text), "{text:?}");
-            assert!(text.contains(&format!("{MARKER_START}\r\nlinha 1\r\nlinha 2\r\n{MARKER_END}\r\n")), "{text:?}");
-            // Segunda vez: nada muda.
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "linha 1\nlinha 2", false).expect("ok"), AgentContext::Unchanged);
+            assert!(text.contains(&format!("{MARKER_START}\r\nline 1\r\nline 2\r\n{MARKER_END}\r\n")), "{text:?}");
+            // Second time: nothing changes.
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "line 1\nline 2", false).expect("ok"), AgentContext::Unchanged);
             assert_eq!(std::fs::read_to_string(&file).expect("read"), text);
         }
-        // Nenhum temporário fica para trás.
+        // No temporary file is left behind.
         let names: Vec<String> =
             std::fs::read_dir(&ws).expect("ls").flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["AGENTS.md"]);
     }
 
-    /// Um AGENTS.md escrito por uma versão antiga (marcadores `jwic`) tem o bloco trocado pelo
-    /// novo, sem duplicar e sem tocar no resto do arquivo.
+    /// An AGENTS.md written by an old version (`jwic` markers) gets its block swapped for the
+    /// new one, without duplicating and without touching the rest of the file.
     #[test]
     fn an_old_name_block_is_replaced_not_duplicated() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outside"));
         std::fs::create_dir_all(&ws).expect("mkdir");
         let file = ws.join("AGENTS.md");
         for eol in ["\n", "\r\n"] {
-            let before = format!("# Regras{eol}{eol}Use tabs.{eol}{eol}");
-            let after = format!("{eol}## Fim{eol}Obrigado.{eol}");
-            let old_block = format!("<!-- jwic:start -->{eol}texto velho{eol}<!-- jwic:end -->");
+            let before = format!("# Rules{eol}{eol}Use tabs.{eol}{eol}");
+            let after = format!("{eol}## End{eol}Thanks.{eol}");
+            let old_block = format!("<!-- jwic:start -->{eol}old text{eol}<!-- jwic:end -->");
             std::fs::write(&file, format!("{before}{old_block}{eol}{after}")).expect("write");
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Written);
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Written);
             let text = std::fs::read_to_string(&file).expect("read");
-            let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
-            assert_eq!(text, format!("{before}{new_block}{eol}{after}"), "só o bloco muda");
+            let new_block = format!("{MARKER_START}{eol}new{eol}{MARKER_END}");
+            assert_eq!(text, format!("{before}{new_block}{eol}{after}"), "only the block changes");
             assert_eq!(text.matches("<!-- agentdeck:start -->").count(), 1);
             assert!(!text.contains("jwic"), "{text:?}");
-            // Com o bloco novo, nada mais muda.
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Unchanged);
+            // With the new block, nothing else changes.
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Unchanged);
         }
     }
 
-    /// O app antigo não reconhece `agentdeck:` e acrescenta o seu bloco no fim: o app novo troca o
-    /// primeiro e apaga os demais, sem deixar linhas em branco acumuladas nem tocar no resto.
+    /// The old app does not recognize `agentdeck:` and appends its block at the end: the new app swaps the
+    /// first one and deletes the others, without leaving blank lines piling up and without touching the rest.
     #[test]
     fn extra_blocks_from_an_old_app_are_removed() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outro"));
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outside"));
         std::fs::create_dir_all(&ws).expect("mkdir");
         let file = ws.join("AGENTS.md");
         for eol in ["\n", "\r\n"] {
-            let new_block = format!("{MARKER_START}{eol}novo{eol}{MARKER_END}");
-            let new_a = format!("<!-- agentdeck:start -->{eol}velho{eol}<!-- agentdeck:end -->");
-            let old_b = format!("<!-- jwic:start -->{eol}antigo{eol}<!-- jwic:end -->");
-            // No fim (caso do app antigo), no meio e colado ao primeiro.
+            let new_block = format!("{MARKER_START}{eol}new{eol}{MARKER_END}");
+            let new_a = format!("<!-- agentdeck:start -->{eol}old{eol}<!-- agentdeck:end -->");
+            let old_b = format!("<!-- jwic:start -->{eol}ancient{eol}<!-- jwic:end -->");
+            // At the end (the old app's case), in the middle and glued to the first.
             let cases = [
-                (format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}"), format!("# Regras{eol}{eol}{new_block}{eol}")),
+                (format!("# Rules{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}"), format!("# Rules{eol}{eol}{new_block}{eol}")),
                 (
-                    format!("# Regras{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}{eol}Fim.{eol}"),
-                    format!("# Regras{eol}{eol}{new_block}{eol}{eol}Fim.{eol}"),
+                    format!("# Rules{eol}{eol}{new_a}{eol}{eol}{old_b}{eol}{eol}End.{eol}"),
+                    format!("# Rules{eol}{eol}{new_block}{eol}{eol}End.{eol}"),
                 ),
                 (format!("{new_a}{eol}{old_b}{eol}"), format!("{new_block}{eol}")),
             ];
             for (start, expected) in cases {
                 std::fs::write(&file, &start).expect("write");
-                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Written);
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Written);
                 assert_eq!(std::fs::read_to_string(&file).expect("read"), expected, "{start:?}");
-                assert_eq!(ensure_agent_context(&ws, &app, &home, "novo", false).expect("ok"), AgentContext::Unchanged);
+                assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Unchanged);
                 assert_eq!(std::fs::read_to_string(&file).expect("read"), expected);
             }
         }
@@ -872,12 +879,12 @@ X
     fn debounce_emits_under_a_continuous_stream_and_on_disconnect() {
         let (tx, rx) = crossbeam_channel::unbounded::<bool>();
         let feeder = std::thread::spawn(move || {
-            // Um evento a cada 20 ms por ~700 ms: nunca há 100 ms de silêncio.
+            // One event every 20 ms for ~700 ms: there is never 100 ms of silence.
             for i in 0..35 {
                 let _ = tx.send(i % 5 == 0);
                 std::thread::sleep(Duration::from_millis(20));
             }
-            // Último evento e o canal fecha logo em seguida: não pode se perder.
+            // Last event and the channel closes right after: it cannot be lost.
             let _ = tx.send(false);
         });
         let started = Instant::now();
@@ -888,9 +895,9 @@ X
         });
         feeder.join().expect("feeder");
         assert!(emitted.len() >= 2, "{emitted:?}");
-        assert!(emitted[0].0 < Duration::from_millis(600), "o teto vale sob fluxo contínuo: {emitted:?}");
+        assert!(emitted[0].0 < Duration::from_millis(600), "the ceiling holds under a continuous stream: {emitted:?}");
         assert!(emitted[0].1 && emitted[0].2);
-        // `emit` devolvendo `false` encerra.
+        // `emit` returning `false` stops it.
         let (tx, rx) = crossbeam_channel::unbounded::<bool>();
         tx.send(true).expect("send");
         let mut calls = 0;
@@ -905,7 +912,7 @@ X
     fn watcher_filter() {
         let ws = Path::new("/w");
         assert!(watch_ignored(ws, Path::new("/w/.git/index")));
-        // …mas o estado do repositório vira um aviso próprio (GitChanged), sem os `.lock` do git.
+        // …but the repository state becomes its own event (GitChanged), without git's `.lock` files.
         for p in [
             "/w/.git/HEAD",
             "/w/.git/index",
@@ -919,16 +926,16 @@ X
         ] {
             assert!(git_state_change(ws, Path::new(p)), "{p}");
         }
-        // `.git` externo (worktree, submódulo ou subpasta de repositório).
+        // External `.git` (worktree, submodule or subfolder of a repository).
         let ext_git = Path::new("/repo/.git/worktrees/wt");
         assert!(git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/HEAD")));
         assert!(git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/CHERRY_PICK_HEAD")));
         assert!(!git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/index.lock")));
-        // Fora do workspace nada é ignorado (uma pasta-mãe chamada `dados` não conta).
-        assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/outro/dados/x")));
+        // Outside the workspace nothing is ignored (a parent folder named `dados` does not count).
+        assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/outside/dados/x")));
         assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/dados/app/src/x")));
         if cfg!(windows) {
-            // Letra da unidade com outra caixa e prefixo verbatim `\\?\`: é o mesmo repositório.
+            // Drive letter with another case and verbatim prefix `\\?\`: it is the same repository.
             assert!(git_state_change(Path::new(r"c:\w"), Path::new(r"C:\W\.git\HEAD")));
             assert!(git_state_change(Path::new(r"c:\w"), Path::new(r"\\?\C:\W\.git\HEAD")));
             assert!(git_state_change(Path::new(r"\\?\C:\w"), Path::new(r"c:\w\.git\CHERRY_PICK_HEAD")));
@@ -955,7 +962,7 @@ X
         std::fs::create_dir_all(&ws).expect("mkdir ws");
         std::fs::create_dir_all(real_git.join("rebase-merge")).expect("mkdir git");
         std::fs::create_dir_all(common_git.join("refs").join("heads")).expect("mkdir refs");
-        // Simula uma worktree sem depender do binário `git` instalado na máquina.
+        // Simulates a worktree without depending on the `git` binary installed on the machine.
         std::fs::write(ws.join(".git"), format!("gitdir: {}\n", real_git.display())).expect("dotgit");
         std::fs::write(real_git.join("commondir"), "../..\n").expect("commondir");
 
@@ -973,14 +980,14 @@ X
             config_file: root.join("cfg").join("config.json"),
         };
         let opts = crate::StartOptions {
-            search_path: Some(root.join("vazio").into_os_string()),
+            search_path: Some(root.join("empty").into_os_string()),
             home_dir: Some(root.join("home")),
             watch_workspace: true,
             config: Some(crate::Config::with_project(ws.clone())),
             system_dirs: false,
         };
         let (core, rx) = crate::Core::start_with(paths, opts).expect("start");
-        // Aguarda a thread `cd-watch-debounce` registrar o `git_dir` externo no watcher.
+        // Waits for the `cd-watch-debounce` thread to register the external `git_dir` in the watcher.
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut got_git = false;
         while Instant::now() < deadline && !got_git {
@@ -993,6 +1000,6 @@ X
             }
         }
         core.shutdown();
-        assert!(got_git, "mudança no git_dir externo deveria emitir GitChanged");
+        assert!(got_git, "a change in the external git_dir should emit GitChanged");
     }
 }

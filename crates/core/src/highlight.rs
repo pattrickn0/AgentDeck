@@ -1,19 +1,20 @@
-//! Léxico do realce de sintaxe: um tokenizador leve, escrito à mão, linha a linha. A busca, a composição com as marcas e o
-//! cache de quem pinta (`pieces`, `Cache`...) ficam na interface (`crates/app/src/highlight.rs`); o `outline.rs` usa só isto.
+//! Syntax highlighting lexicon: a lightweight tokenizer, written by hand, line by line. The search, the composition with
+//! the match marks and the painter's cache (`pieces`, `Cache`...) live in the UI (`crates/app/src/highlight.rs`);
+//! `outline.rs` uses only this.
 //!
-//! Escolha (t36): `syntect` (o que o `egui_extras::syntax_highlighting` usa) traz o motor de expressões regulares, as
-//! definições de sintaxe e os temas embutidos: alguns MB a mais no executável e minutos a mais na compilação (a CI
-//! compila nos três sistemas), para colorir nove linguagens. Aqui cada linguagem é uma tabela de palavras-chave mais
-//! as regras de comentário, texto entre aspas, número e chave; o estado que passa de uma linha para outra (comentário de
-//! bloco, texto de várias linhas, cerca do markdown) cabe em [`Carry`]. O resultado é só uma lista de faixas de bytes
-//! por linha ([`Span`]): quem pinta escolhe a cor (`theme::pal().syn_*`) e guarda o resultado por versão do texto.
+//! Choice (t36): `syntect` (what `egui_extras::syntax_highlighting` uses) brings the regular-expression engine, the
+//! syntax definitions and the built-in themes: a few MB more in the executable and minutes more of compilation (the CI
+//! builds on the three systems), to color nine languages. Here each language is a keyword table plus the rules for
+//! comments, quoted text, numbers and keys; the state that carries from one line to the next (block comment, multi-line
+//! text, markdown fence) fits in [`Carry`]. The result is only a list of byte ranges per line ([`Span`]): the painter
+//! picks the color (`theme::pal().syn_*`) and keeps the result per version of the text.
 //!
-//! Nada aqui pode dar pânico com texto qualquer (o arquivo é do usuário): as faixas sempre começam e terminam em
-//! fronteira de caractere, e o teste `spans_are_always_valid_on_any_text` confere isso.
+//! Nothing here may panic on arbitrary text (the file belongs to the user): ranges always start and end on a character
+//! boundary, and the `spans_are_always_valid_on_any_text` test checks that.
 
 use std::ops::Range;
 
-/// A categoria de um pedaço de texto; o que pinta traduz em cor.
+/// The category of a piece of text; the painter turns it into a color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tok {
     #[default]
@@ -24,13 +25,13 @@ pub enum Tok {
     String,
     Number,
     Comment,
-    /// Chave de JSON, TOML ou YAML; opção de linha de comando.
+    /// JSON, TOML or YAML key; command-line option.
     Key,
-    /// Atributo, macro, título do markdown, variável do shell.
+    /// Attribute, macro, markdown heading, shell variable.
     Meta,
 }
 
-/// Uma faixa colorida de uma linha (bytes dentro da linha, sem o `\n`). As linhas só guardam o que não é `Plain`.
+/// A colored range of one line (bytes inside the line, without the `\n`). Lines keep only what is not `Plain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub range: Range<usize>,
@@ -53,7 +54,7 @@ pub enum Lang {
 }
 
 impl Lang {
-    /// A linguagem pelo caminho do arquivo (extensão ou nome conhecido); o resto é texto puro.
+    /// The language by the file path (extension or known name); everything else is plain text.
     pub fn from_path(path: &str) -> Lang {
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_ascii_lowercase();
         match name.as_str() {
@@ -75,7 +76,7 @@ impl Lang {
         }
     }
 
-    /// A linguagem do que vem depois da cerca do markdown (```` ```rust ````).
+    /// The language of what comes after the markdown fence (```` ```rust ````).
     fn from_fence(info: &str) -> Lang {
         match info.split_whitespace().next().unwrap_or("").to_ascii_lowercase().as_str() {
             "rust" | "rs" => Lang::Rust,
@@ -90,10 +91,10 @@ impl Lang {
         }
     }
 
-    /// Nome para a dica da interface.
+    /// Name for the UI tooltip.
     pub fn label(self) -> &'static str {
         match self {
-            Lang::Plain => "Texto",
+            Lang::Plain => crate::t!("Text"),
             Lang::Rust => "Rust",
             Lang::Markdown => "Markdown",
             Lang::Toml => "TOML",
@@ -107,28 +108,28 @@ impl Lang {
     }
 }
 
-/// O que passa de uma linha para a seguinte.
+/// What carries from one line to the next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Carry {
-    /// Profundidade do comentário de bloco aberto.
+    /// Depth of the open block comment.
     block: u8,
-    /// Delimitador do texto de várias linhas aberto (0 = nenhum) e se é o triplo (Python, TOML).
+    /// Delimiter of the open multi-line text (0 = none) and whether it is the triple one (Python, TOML).
     quote: u8,
     triple: bool,
-    /// Texto cru do Rust aberto: quantos `#` fecham.
+    /// Open Rust raw text: how many `#` close it.
     raw: Option<u8>,
-    /// Markdown: dentro de uma cerca de código, com a linguagem dela.
+    /// Markdown: inside a code fence, with its language.
     fence: Option<Lang>,
 }
 
-/// O realce de todas as linhas de `text` (separadas por `\n`; o `\r` do fim some). Uma linha a mais no fim, vazia, se o
-/// texto termina em `\n`, como o editor mostra.
+/// The highlight of every line of `text` (separated by `\n`; the trailing `\r` is dropped). One extra empty line at the
+/// end if the text ends in `\n`, the way the editor shows it.
 pub fn highlight_lines(lang: Lang, text: &str) -> Vec<Vec<Span>> {
     let mut carry = Carry::default();
     text.split('\n').map(|l| highlight_line(lang, l.strip_suffix('\r').unwrap_or(l), &mut carry)).collect()
 }
 
-/// O realce de uma linha, continuando de `carry` e deixando nele o que a próxima precisa.
+/// The highlight of one line, continuing from `carry` and leaving in it what the next line needs.
 pub fn highlight_line(lang: Lang, line: &str, carry: &mut Carry) -> Vec<Span> {
     let mut out = Vec::new();
     match lang {
@@ -142,30 +143,30 @@ pub fn highlight_line(lang: Lang, line: &str, carry: &mut Carry) -> Vec<Span> {
 }
 
 // ---------------------------------------------------------------------------
-// As linguagens de código
+// The code languages
 // ---------------------------------------------------------------------------
 
-/// As regras de uma linguagem para o tokenizador comum.
+/// The rules of one language for the common tokenizer.
 struct Spec {
     lang: Lang,
     line_comments: &'static [&'static str],
-    /// Abre, fecha e se aninha.
+    /// Opens, closes and nests.
     block: Option<(&'static str, &'static str, bool)>,
     quotes: &'static [u8],
     triple: bool,
     keywords: &'static [&'static str],
     types: &'static [&'static str],
-    /// Palavra com inicial maiúscula é um tipo.
+    /// A word with an uppercase first letter is a type.
     upper_types: bool,
-    /// Comparar as palavras-chave sem diferença de caixa (PowerShell).
+    /// Compare the keywords ignoring case (PowerShell).
     nocase: bool,
-    /// `$var` (shell e PowerShell).
+    /// `$var` (shell and PowerShell).
     vars: bool,
-    /// `@nome` é um decorador.
+    /// `@name` is a decorator.
     decorators: bool,
-    /// O texto seguido de `:` é uma chave (JSON).
+    /// Text followed by `:` is a key (JSON).
     colon_keys: bool,
-    /// `-opção` e `--opção` (shell e PowerShell).
+    /// `-option` and `--option` (shell and PowerShell).
     options: bool,
 }
 
@@ -364,7 +365,7 @@ fn is_ident_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c >= 0x80
 }
 
-/// O fim (depois do delimitador) do texto que começou antes de `from`; `None` se a linha acaba antes.
+/// The end (after the delimiter) of the text that started before `from`; `None` if the line ends first.
 fn find_close(b: &[u8], from: usize, q: u8, triple: bool, escapes: bool) -> Option<usize> {
     let mut i = from;
     while i < b.len() {
@@ -391,7 +392,7 @@ fn push(out: &mut Vec<Span>, start: usize, end: usize, tok: Tok) {
     }
 }
 
-/// Continua um comentário de bloco aberto: pinta de `start` até o fecho (ou o fim da linha) e devolve onde parou.
+/// Continues an open block comment: paints from `start` to the close (or the end of the line) and returns where it stopped.
 fn block_rest(line: &str, start: usize, scan_from: usize, sp: &Spec, carry: &mut Carry, out: &mut Vec<Span>) -> usize {
     let Some((open, close, nested)) = sp.block else { return line.len() };
     let b = line.as_bytes();
@@ -415,7 +416,7 @@ fn block_rest(line: &str, start: usize, scan_from: usize, sp: &Spec, carry: &mut
     end
 }
 
-/// Uma palavra de `start` em diante: o fim dela (só bytes de identificador).
+/// A word from `start` on: its end (identifier bytes only).
 fn word_end(b: &[u8], start: usize) -> usize {
     let mut j = start;
     while j < b.len() && is_ident_byte(b[j]) {
@@ -424,12 +425,12 @@ fn word_end(b: &[u8], start: usize) -> usize {
     j
 }
 
-/// Quantos bytes tem o caractere que começa em `i` (`i` em fronteira).
+/// How many bytes the character starting at `i` has (`i` on a boundary).
 fn char_len(line: &str, i: usize) -> usize {
     line[i..].chars().next().map_or(1, char::len_utf8)
 }
 
-/// O texto cru do Rust que abre em `i` (`r"`, `r#"`, `br##"`): quantos `#` e quantos bytes tem a abertura.
+/// The Rust raw text that opens at `i` (`r"`, `r#"`, `br##"`): how many `#` and how many bytes the opening has.
 fn raw_open(b: &[u8], i: usize) -> Option<(u8, usize)> {
     let mut j = i;
     if b.get(j) == Some(&b'b') {
@@ -447,7 +448,7 @@ fn raw_open(b: &[u8], i: usize) -> Option<(u8, usize)> {
     (b.get(j) == Some(&b'"')).then_some((hashes, j + 1 - i))
 }
 
-/// Fim do texto cru: `"` e `hashes` vezes `#`.
+/// End of the raw text: `"` and `#` `hashes` times.
 fn raw_close(b: &[u8], from: usize, hashes: u8) -> Option<usize> {
     let mut i = from;
     while i < b.len() {
@@ -459,11 +460,11 @@ fn raw_close(b: &[u8], from: usize, hashes: u8) -> Option<usize> {
     None
 }
 
-/// O tokenizador comum às linguagens de código, de `start` em diante na linha.
+/// The tokenizer common to the code languages, from `start` on in the line.
 fn scan(sp: &Spec, line: &str, start: usize, carry: &mut Carry, out: &mut Vec<Span>) {
     let b = line.as_bytes();
     let mut i = start;
-    // O que ficou aberto da linha anterior.
+    // What stayed open from the previous line.
     if carry.block > 0 {
         i = block_rest(line, i, i, sp, carry, out);
     } else if carry.quote != 0 {
@@ -496,7 +497,7 @@ fn scan(sp: &Spec, line: &str, start: usize, carry: &mut Carry, out: &mut Vec<Sp
     while i < b.len() {
         let c = b[i];
         let prev_ws = i == 0 || b[i - 1].is_ascii_whitespace();
-        // Comentário de linha (o `#` só vale no começo de uma palavra: `$#`, `a#b`).
+        // Line comment (the `#` only counts at the start of a word: `$#`, `a#b`).
         if sp.line_comments.iter().any(|lc| b[i..].starts_with(lc.as_bytes()) && (*lc != "#" || prev_ws)) {
             push(out, i, b.len(), Tok::Comment);
             return;
@@ -508,7 +509,7 @@ fn scan(sp: &Spec, line: &str, start: usize, carry: &mut Carry, out: &mut Vec<Sp
                 continue;
             }
         }
-        // Texto cru do Rust.
+        // Rust raw text.
         if sp.lang == Lang::Rust && (c == b'r' || c == b'b') && (i == 0 || !is_ident_byte(b[i - 1])) {
             if let Some((hashes, open_len)) = raw_open(b, i) {
                 match raw_close(b, i + open_len, hashes) {
@@ -525,7 +526,7 @@ fn scan(sp: &Spec, line: &str, start: usize, carry: &mut Carry, out: &mut Vec<Sp
                 continue;
             }
         }
-        // Aspas simples do Rust: caractere ou lifetime.
+        // Rust single quotes: character or lifetime.
         if sp.lang == Lang::Rust && c == b'\'' {
             let rest = &line[i + 1..];
             let next = rest.chars().next();
@@ -559,7 +560,7 @@ fn scan(sp: &Spec, line: &str, start: usize, carry: &mut Carry, out: &mut Vec<Sp
                     push(out, i, end, tok);
                     i = end;
                 }
-                // Texto de várias linhas: o triplo, o crase do JS e o `"` do Rust (que continua na linha seguinte).
+                // Multi-line text: the triple quote, the JS backtick and the Rust `"` (which continues on the next line).
                 None if triple || c == b'`' || (sp.lang == Lang::Rust && c == b'"') => {
                     carry.quote = c;
                     carry.triple = triple;
@@ -661,7 +662,7 @@ fn scan(sp: &Spec, line: &str, start: usize, carry: &mut Carry, out: &mut Vec<Sp
 }
 
 // ---------------------------------------------------------------------------
-// Dados: TOML e YAML (a chave, e o resto como código)
+// Data: TOML and YAML (the key, and the rest as code)
 // ---------------------------------------------------------------------------
 
 fn toml_line(line: &str, carry: &mut Carry, out: &mut Vec<Span>) {
@@ -676,7 +677,7 @@ fn toml_line(line: &str, carry: &mut Carry, out: &mut Vec<Span>) {
         push(out, indent, end, Tok::Meta);
         return scan(&sp, line, end, carry, out);
     }
-    // `chave = valor`, com a chave simples, com aspas ou pontilhada.
+    // `key = value`, with the key plain, quoted or dotted.
     let key_end = if t.starts_with('"') || t.starts_with('\'') {
         let q = t.as_bytes()[0];
         find_close(t.as_bytes(), 1, q, false, q == b'"').and_then(|e| t[e..].trim_start().starts_with('=').then_some(indent + e))
@@ -702,7 +703,7 @@ fn yaml_line(line: &str, carry: &mut Carry, out: &mut Vec<Span>) {
         push(out, 0, 3, Tok::Meta);
         return scan(&sp, line, 3, carry, out);
     }
-    // Pula os `- ` da lista e acha `chave:` (seguida de espaço ou do fim).
+    // Skips the `- ` of the list and finds `key:` (followed by a space or the end).
     let mut at = indent;
     while line[at..].starts_with("- ") {
         at += 2;
@@ -763,7 +764,7 @@ fn markdown_line(line: &str, carry: &mut Carry, out: &mut Vec<Span>) {
         return push(out, indent, line.len(), Tok::Comment);
     }
     let mut at = indent;
-    // Marcador de lista (`-`, `*`, `+`, `1.`) e caixa de tarefa.
+    // List marker (`-`, `*`, `+`, `1.`) and task box.
     let marker = if t.starts_with(['-', '*', '+']) && t[1..].starts_with(' ') {
         Some(1)
     } else {
@@ -783,7 +784,7 @@ fn markdown_line(line: &str, carry: &mut Carry, out: &mut Vec<Span>) {
     inline_markdown(line, at, out);
 }
 
-/// Código entre crases, negrito e `[texto](url)`.
+/// Code between backticks, bold and `[text](url)`.
 fn inline_markdown(line: &str, from: usize, out: &mut Vec<Span>) {
     let b = line.as_bytes();
     let mut i = from;
@@ -848,7 +849,7 @@ mod tests {
             ("scripts\\gerar-icone.ps1", Lang::PowerShell),
             ("run.sh", Lang::Shell),
             ("LICENSE", Lang::Plain),
-            ("sem-extensao", Lang::Plain),
+            ("no-extension", Lang::Plain),
         ] {
             assert_eq!(Lang::from_path(path), lang, "{path}");
         }
@@ -856,15 +857,15 @@ mod tests {
 
     #[test]
     fn rust_keywords_types_strings_numbers_macros_and_comments() {
-        let t = toks(Lang::Rust, "pub fn run(x: u32) -> Option<String> { println!(\"oi {x}\"); 0x1F // fim");
+        let t = toks(Lang::Rust, "pub fn run(x: u32) -> Option<String> { println!(\"hi {x}\"); 0x1F // end");
         let has = |s: &str, tok| t.iter().any(|(w, k)| w == s && *k == tok);
         assert!(has("pub", Tok::Keyword) && has("fn", Tok::Keyword));
         assert!(has("run", Tok::Function));
         assert!(has("u32", Tok::Type) && has("Option", Tok::Type) && has("String", Tok::Type));
         assert!(has("println!", Tok::Meta));
-        assert!(has("\"oi {x}\"", Tok::String));
+        assert!(has("\"hi {x}\"", Tok::String));
         assert!(has("0x1F", Tok::Number));
-        assert!(has("// fim", Tok::Comment));
+        assert!(has("// end", Tok::Comment));
     }
 
     #[test]
@@ -886,28 +887,28 @@ mod tests {
             lines[n].iter().filter(|s| s.tok == Tok::Comment).map(|s| text[s.range.clone()].to_owned()).collect::<Vec<_>>()
         };
         assert_eq!(words(0, "a /* x"), ["/* x"]);
-        assert_eq!(words(1, "  y /* z */ w"), ["  y /* z */ w"], "o comentário aninha");
+        assert_eq!(words(1, "  y /* z */ w"), ["  y /* z */ w"], "the comment nests");
         assert_eq!(words(2, "*/ b"), ["*/"]);
-        assert!(lines[4].iter().any(|s| s.tok == Tok::String), "o texto cru continua");
+        assert!(lines[4].iter().any(|s| s.tok == Tok::String), "the raw text continues");
         assert!(lines[5].is_empty() || lines[5].iter().all(|s| s.tok != Tok::String));
     }
 
     #[test]
     fn python_triple_quotes_decorators_and_hash_comments() {
-        let lines = highlight_lines(Lang::Python, "@app.route\ndef f():\n    \"\"\"doc\n    mais\"\"\"  # c\n    return 'a#b'");
+        let lines = highlight_lines(Lang::Python, "@app.route\ndef f():\n    \"\"\"doc\n    more\"\"\"  # c\n    return 'a#b'");
         assert!(lines[0].iter().any(|s| s.tok == Tok::Meta));
         assert!(lines[1].iter().any(|s| s.tok == Tok::Keyword));
         assert!(lines[2].iter().any(|s| s.tok == Tok::String));
         assert!(lines[3].iter().any(|s| s.tok == Tok::String) && lines[3].iter().any(|s| s.tok == Tok::Comment));
         let last = &lines[4];
-        assert!(last.iter().any(|s| s.tok == Tok::String) && last.iter().all(|s| s.tok != Tok::Comment), "# dentro de aspas");
+        assert!(last.iter().any(|s| s.tok == Tok::String) && last.iter().all(|s| s.tok != Tok::Comment), "# inside quotes");
     }
 
     #[test]
     fn json_tells_keys_from_values() {
-        let t = toks(Lang::Json, "  \"nome\": \"valor\", \"n\": -12.5, \"ok\": true");
+        let t = toks(Lang::Json, "  \"name\": \"value\", \"n\": -12.5, \"ok\": true");
         let has = |s: &str, tok| t.iter().any(|(w, k)| w == s && *k == tok);
-        assert!(has("\"nome\"", Tok::Key) && has("\"valor\"", Tok::String));
+        assert!(has("\"name\"", Tok::Key) && has("\"value\"", Tok::String));
         assert!(has("12.5", Tok::Number) && has("true", Tok::Keyword));
     }
 
@@ -915,9 +916,9 @@ mod tests {
     fn toml_tables_keys_and_values() {
         let t = toks(Lang::Toml, "[workspace.package]");
         assert_eq!(t, [("[workspace.package]".to_owned(), Tok::Meta)]);
-        let t = toks(Lang::Toml, "rust-version = \"1.89\" # mínima");
+        let t = toks(Lang::Toml, "rust-version = \"1.89\" # minimum");
         let has = |s: &str, tok| t.iter().any(|(w, k)| w == s && *k == tok);
-        assert!(has("rust-version", Tok::Key) && has("\"1.89\"", Tok::String) && has("# mínima", Tok::Comment));
+        assert!(has("rust-version", Tok::Key) && has("\"1.89\"", Tok::String) && has("# minimum", Tok::Comment));
         let t = toks(Lang::Toml, "egui = { version = \"0.25\", default-features = false }");
         assert!(t.iter().any(|(w, k)| w == "egui" && *k == Tok::Key));
         assert!(t.iter().any(|(w, k)| w == "false" && *k == Tok::Keyword));
@@ -925,12 +926,12 @@ mod tests {
 
     #[test]
     fn yaml_keys_lists_and_comments() {
-        let t = toks(Lang::Yaml, "  - name: Rodar os testes # nota");
+        let t = toks(Lang::Yaml, "  - name: Run the tests # note");
         let has = |s: &str, tok| t.iter().any(|(w, k)| w == s && *k == tok);
-        assert!(has("name", Tok::Key) && has("# nota", Tok::Comment));
+        assert!(has("name", Tok::Key) && has("# note", Tok::Comment));
         let t = toks(Lang::Yaml, "run: cargo test --workspace");
         assert!(t.iter().any(|(w, k)| w == "run" && *k == Tok::Key));
-        // Uma URL não é chave.
+        // A URL is not a key.
         assert!(toks(Lang::Yaml, "- http://x.y/z").iter().all(|(_, k)| *k != Tok::Key));
         assert_eq!(toks(Lang::Yaml, "---"), [("---".to_owned(), Tok::Meta)]);
     }
@@ -946,9 +947,9 @@ mod tests {
         assert!(has("Get-ChildItem", Tok::Function) && has("-Recurse", Tok::Key) && has("Where-Object", Tok::Function));
         assert!(
             toks(Lang::PowerShell, "FOREACH ($a in $b) {}").iter().any(|(w, k)| w == "FOREACH" && *k == Tok::Keyword),
-            "sem diferença de caixa"
+            "case-insensitive"
         );
-        // `$#` não abre comentário.
+        // `$#` does not open a comment.
         assert!(toks(Lang::Shell, "echo $#").iter().all(|(_, k)| *k != Tok::Comment));
     }
 
@@ -962,17 +963,17 @@ mod tests {
 
     #[test]
     fn markdown_headings_lists_code_and_fenced_blocks_in_their_language() {
-        let text = "# Título\n- [ ] item `cod` **forte** [x](http://y)\n> cita\n```rust\nfn a() {}\n```\nfim";
+        let text = "# Title\n- [ ] item `code` **bold** [x](http://y)\n> quote\n```rust\nfn a() {}\n```\nend";
         let lines = highlight_lines(Lang::Markdown, text);
-        assert_eq!(lines[0], [Span { range: 0.."# Título".len(), tok: Tok::Meta }]);
+        assert_eq!(lines[0], [Span { range: 0.."# Title".len(), tok: Tok::Meta }]);
         let l1: Vec<Tok> = lines[1].iter().map(|s| s.tok).collect();
         assert!(l1.contains(&Tok::Keyword) && l1.contains(&Tok::Number) && l1.contains(&Tok::String) && l1.contains(&Tok::Function));
         assert!(l1.contains(&Tok::Key) && l1.contains(&Tok::Comment));
         assert_eq!(lines[2][0].tok, Tok::Comment);
         assert_eq!(lines[3][0].tok, Tok::Meta);
-        assert!(lines[4].iter().any(|s| s.tok == Tok::Keyword), "o código da cerca é Rust");
+        assert!(lines[4].iter().any(|s| s.tok == Tok::Keyword), "the fence code is Rust");
         assert_eq!(lines[5][0].tok, Tok::Meta);
-        assert!(lines[6].is_empty(), "depois da cerca volta ao texto");
+        assert!(lines[6].is_empty(), "after the fence it goes back to text");
     }
 
     #[test]
@@ -986,7 +987,7 @@ mod tests {
     fn spans_are_always_valid_on_any_text() {
         let nasty = [
             "",
-            "ção \"não fechada 中文 🙂 /* x",
+            "ßç \"unclosed 中文 🙂 /* x",
             "'é' 'ab 'ç' r#\"ü\" \\ \"\\",
             "#[é] $é ${ 🙂 -ü --é @é.ü 0é 1.é",
             "`🙂 ``` ~~~ ``` [é](ü) **ç** __ü__ - [x] 1. é",
