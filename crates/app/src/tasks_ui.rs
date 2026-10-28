@@ -1490,9 +1490,9 @@ mod tests {
         assert_eq!(model_effort_text(&t).as_deref(), Some("glm-5.3"));
         t.model = Some("sonnet".into());
         t.effort = Some(Effort::High);
-        assert_eq!(model_effort_text(&t).as_deref(), Some("sonnet · alto"));
+        assert_eq!(model_effort_text(&t).as_deref(), Some("sonnet · high"));
         t.model = None;
-        assert_eq!(model_effort_text(&t).as_deref(), Some("alto"));
+        assert_eq!(model_effort_text(&t).as_deref(), Some("high"));
         // Antigravity: o esforço já está no nome do modelo.
         t.model = Some("gemini-4-argon-medium".into());
         t.effort = Some(Effort::Medium);

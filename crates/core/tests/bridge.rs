@@ -250,9 +250,9 @@ fn workspace_agents_md_and_spawn_specs() {
     let ws = env.core.workspace();
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md criado no workspace do app");
-    assert!(md.starts_with("<!-- agentdeck:start -->\nVocê está rodando dentro do AgentDeck"));
-    assert!(md.contains("Seu nome e cargo estão nas variáveis AGENTDECK_AGENT e AGENTDECK_ROLE"));
-    assert!(md.contains("NÃO use subagentes internos do seu CLI"));
+    assert!(md.starts_with("<!-- agentdeck:start -->\nYou are running inside AgentDeck"));
+    assert!(md.contains("Your name and role are in the AGENTDECK_AGENT and AGENTDECK_ROLE variables"));
+    assert!(md.contains("do NOT use your CLI's internal subagents"));
 
     let shell = env.core.spawn_spec(&p, "shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
@@ -267,11 +267,11 @@ fn workspace_agents_md_and_spawn_specs() {
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
-    assert_eq!(env.core.spawn_spec(&p, "nada").expect_err("desconhecido"), "Agente desconhecido: nada");
+    assert_eq!(env.core.spawn_spec(&p, "nada").expect_err("desconhecido"), "Unknown agent: nada");
     let missing = env.core.spawn_spec(&p, "antigravity").expect_err("não instalado");
-    assert!(missing.starts_with("Antigravity CLI (agy) não encontrado."));
-    assert_eq!(env.core.spawn_spec(&p, "ollama").expect_err("o agente Ollama foi removido"), "Agente desconhecido: ollama");
-    assert_eq!(env.core.spawn_spec("pdeadbeef", "shell").expect_err("sem projeto"), "Projeto desconhecido: pdeadbeef");
+    assert!(missing.starts_with("Antigravity CLI (agy) not found."));
+    assert_eq!(env.core.spawn_spec(&p, "ollama").expect_err("o agente Ollama foi removido"), "Unknown agent: ollama");
+    assert_eq!(env.core.spawn_spec("pdeadbeef", "shell").expect_err("sem projeto"), "Unknown project: pdeadbeef");
 
     // Outro projeto (não ativo): o terminal abre na pasta dele, que ganha o AGENTS.md na primeira aba.
     let other_dir = env.root.join("outro");
@@ -286,7 +286,7 @@ fn workspace_agents_md_and_spawn_specs() {
     let claude = env.core.spawn_spec(&p, "claude").expect("claude");
     assert_eq!(claude.program, env.root.join("fake-bin").join(exe_name("claude")));
     assert_eq!(claude.args[0], "--append-system-prompt");
-    assert!(claude.args[1].contains("Seu nome aqui é \"claude\"."));
+    assert!(claude.args[1].contains("Your name here is \"claude\"."));
     let hooks = env.root.join("dados").join("hooks").join("claude-settings.json");
     assert_eq!(
         &claude.args[2..],
@@ -1379,7 +1379,7 @@ fn a_model_conflict_on_an_open_instance_is_an_explicit_409() {
     // Outro modelo para a mesma instância: 409 com a saída pelo --new; nada muda.
     let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@dev", "message": "oi", "model": "opus"}));
     assert_eq!(st, 409, "{body}");
-    assert_eq!(body["error"], "claude@dev já está aberta com sonnet; use --new para abrir outra com opus");
+    assert_eq!(body["error"], "claude@dev is already open with sonnet; use --new to open another one with opus");
     assert_eq!(env.core.project_instance_ids(&p), ["claude@dev"]);
     assert_eq!(state(&env).len(), 1);
     // Pedir um modelo a uma instância aberta com o padrão do CLI também é conflito.
@@ -1387,7 +1387,7 @@ fn a_model_conflict_on_an_open_instance_is_an_explicit_409() {
     let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@qa", "message": "oi", "model": "opus"}));
     assert_eq!(
         (st, body["error"].as_str()),
-        (409, Some("claude@qa já está aberta com o modelo padrão; use --new para abrir outra com opus"))
+        (409, Some("claude@qa is already open with the default model; use --new to open another one with opus"))
     );
 
     // O mesmo modelo, ou nenhum, entrega normalmente na aba que já existe.
@@ -1490,7 +1490,7 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     assert_eq!(st, 200, "{body}");
     let text = body["text"].as_str().expect("text");
     assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n"), "{text}");
-    assert!(text.contains("opencode: não consegui listar os modelos"), "{text}");
+    assert!(text.contains("opencode: could not list the models"), "{text}");
     assert!(text.contains("\n  cota: sem leitura\n\ncapacidade ("), "a capacidade vem depois dos agentes: {text}");
     assert!(text.contains("Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10)"), "{text}");
     assert!(!text.contains("antigravity"), "o que não está instalado não aparece: {text}");
@@ -1506,7 +1506,7 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     );
     let (st, body) = get("/models?agent=agy");
     assert_eq!(st, 404);
-    assert!(body["error"].as_str().expect("error").contains("não está instalado"), "{body}");
+    assert!(body["error"].as_str().expect("error").contains("is not installed"), "{body}");
     assert_eq!(get("/models?agent=a%20b").0, 400);
 
     // Com o Antigravity instalado e renovado (4%) e o Claude em 60%, o Antigravity vem antes do Claude.

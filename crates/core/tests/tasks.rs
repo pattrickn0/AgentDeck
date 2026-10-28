@@ -1008,7 +1008,7 @@ fn the_terminal_of_a_missing_worktree_says_so() {
     std::fs::remove_dir_all(&t.worktree).expect("rm");
     let ident = Ident::parse("claude@t1").expect("id");
     match core.spawn_spec_for(&env.project, &ident) {
-        Err(m) => assert!(m.contains("A pasta da tarefa não existe mais"), "{m}"),
+        Err(m) => assert!(m.contains("The task folder no longer exists"), "{m}"),
         Ok(s) => panic!("abriu em {}", s.cwd.display()),
     }
     core.shutdown();
@@ -1447,7 +1447,7 @@ fn the_task_level_is_recorded_and_the_choice_warns_when_the_model_falls_short() 
         .expect("create");
     assert_eq!(big.level, Level::Complex);
     assert_eq!(env.core.task(&env.project, &big.id).map(|t| t.level), Some(Level::Complex));
-    assert!(log(&big).contains("aviso de capacidade: a tarefa é complexa e claude haiku só vai até simples"), "{}", log(&big));
+    assert!(log(&big).contains("aviso de capacidade: the task is complex and claude haiku only reaches simple"), "{}", log(&big));
     // Esforço baixo derruba um nível: o sonnet (complexa) passa a média.
     let low = env
         .core
@@ -1461,12 +1461,12 @@ fn the_task_level_is_recorded_and_the_choice_warns_when_the_model_falls_short() 
             },
         )
         .expect("create");
-    assert!(log(&low).contains("claude sonnet só vai até media"), "{}", log(&low));
+    assert!(log(&low).contains("claude sonnet only reaches medium"), "{}", log(&low));
     // Agente automático: o capaz do nível, com o motivo registrado.
     let auto =
         env.core.task_create(&env.project, TaskSpec { kind: String::new(), level: Level::Complex, ..spec("Automático") }).expect("create");
     assert_eq!(auto.kind, "claude");
-    assert!(log(&auto).contains("pela capacidade e pela cota: complexa: claude sonnet, capaz"), "{}", log(&auto));
+    assert!(log(&auto).contains("pela capacidade e pela cota: complex: claude sonnet, capable"), "{}", log(&auto));
 }
 
 #[test]
