@@ -1,141 +1,154 @@
 ---
 name: agentdeck-ui
-description: Regras visuais e de código da interface do AgentDeck (egui, crates/app/src/ui e theme.rs). Use antes de criar ou mudar qualquer coisa na interface do app — barra lateral, barra de título, tela dividida, barra direita, menus, modais, ícones, cores, espaçamentos — e para conferir o resultado com captura de tela.
+description: Visual and code rules for the AgentDeck interface (egui, crates/app/src/ui and theme.rs). Use before creating or changing anything in the app's interface — sidebar, title bar, split view, right bar, menus, modals, icons, colors, spacing, user-facing text — and to check the result with a screenshot.
 ---
 
-# Interface do AgentDeck
+# AgentDeck interface
 
-O app é egui puro, sem widgets prontos na maior parte: cada componente é **pintado à mão** com o `Painter` e
-recebe interação por `ui.interact`/`clickable`. Siga o que já existe antes de inventar.
+The app is plain egui, mostly without ready-made widgets: each component is **painted by hand** with the `Painter`
+and gets interaction through `ui.interact`/`clickable`. Follow what already exists before inventing.
 
-Referência de apoio (instalada no projeto): `rust-desktop-applications` (`references/native-gui-frameworks.md`
-para egui). Quando divergir destas regras, valem estas.
+Supporting reference (installed in the project): `rust-desktop-applications` (`references/native-gui-frameworks.md`
+for egui). Where it disagrees with these rules, these win.
 
-## Princípios do produto
+## Product principles
 
-1. **Os agentes são o centro.** O que importa de relance: quais agentes existem, qual está trabalhando, qual
-   terminou sem ser visto, quem responde a quem. Arquivos, git e configurações são secundários.
-2. **Estado visível sem clicar.** Trabalhando = halo pulsando na cor do agente; concluído e não visto = anel;
-   encerrado = apagado (40 %) e riscado. Reaproveite `paint_agent_mark` (`ui/projects.rs`) e o mesmo pulso de
-   `ui/tabs.rs` — não crie outro código visual para o mesmo estado.
-3. **Agente se identifica pelo logo do modelo** (`Icon::ClaudeLogo`, `AntigravityLogo`,
-   `CodexLogo`), na cor do agente; o ponto (`dot`) só para quem não tem logo (terminal).
-4. **Hierarquia por recuo e linhas-guia**, como no explorador de arquivos (`agent_tree`/`paint_guides`).
-5. **Sem decoração gratuita.** Cor de destaque só para estado ou seleção; nada de pintar um cabeçalho inteiro
-   com a cor de um agente (vários agentes dividem o mesmo projeto).
+1. **Agents are the center.** What matters at a glance: which agents exist, which one is working, which one finished
+   unseen, who answers whom. Files, git and settings are secondary.
+2. **State visible without clicking.** Working = halo pulsing in the agent's color; finished and unseen = ring;
+   ended = dimmed (40 %) and struck through. Reuse `paint_agent_mark` (`ui/projects.rs`) and the same pulse as
+   `ui/tabs.rs` — do not write other visual code for the same state.
+3. **An agent is identified by its model's logo** (`Icon::ClaudeLogo`, `AntigravityLogo`, `CodexLogo`), in the agent's
+   color; the dot (`dot`) only for what has no logo (terminal).
+4. **Hierarchy by indentation and guide lines**, like the file explorer (`agent_tree`/`paint_guides`).
+5. **No gratuitous decoration.** Accent color only for state or selection; never paint a whole header in an agent's
+   color (several agents share the same project).
 
-Decisões já tomadas pelo usuário (não reabrir sem ele pedir):
-- "+ Novo agente" fica **dentro** do projeto ativo, no fim da lista de agentes; o "+" do cabeçalho PROJETOS
-  cria projeto. Nada de "+" solto na barra de título.
-- A seção ORGANIZAÇÃO continua sendo **seção** (hoje `Abas | Dividida | Destaque`), não um ícone no rodapé. A janela
-  da aba ativa tem borda de 1 px e halo de 3 px na cor do agente e as outras ficam a 62% (`theme::PANE_*`). Rodapé com atalhos: por enquanto não.
+Decisions the user already made (do not reopen unless they ask):
+- "+ New agent" lives **inside** the active project, at the end of its agent list; the "+" of the PROJECTS header
+  creates a project. No loose "+" in the title bar.
+- The ORGANIZATION section stays a **section** (today `Tabs | Split | Highlight`), not an icon in the footer. The window
+  of the active tab has a 1 px border and a 3 px halo in the agent's color, and the others sit at 62% (`theme::PANE_*`).
+  Footer with shortcuts: not for now.
+
+## Text and language
+
+- **Every text the user reads goes through `t!`** (`use agentdeck_core::t;`): `t!("Close")` is `&'static str`,
+  `t!("Model: {model}", model = m)` is `String`. The English text is the key; add the pair `("English", "Português")`
+  to the area file in `crates/core/src/i18n/pt_br/` (see `memory/aprendizados/i18n-english-key-and-area-files.md`).
+  The app is English by default; pt-BR is chosen in ☰ > Language and switches at once.
+- Write the English first, short sentences; tooltips say what the click does. The pt-BR entry keeps the same meaning
+  and the same `{placeholders}`. `cargo test -p agentdeck-core i18n` fails on a `t!` without a pt-BR entry.
+- Measure widths from the translated text (`text_w(&painter, t!("..."), ...)`), never from a fixed width that only
+  fits one language: Portuguese is usually 20–30% longer. Check both languages in the screenshot when a label is tight.
+- Text only agents read (instructions, briefs, ask-agent output) never goes through `t!`: it is English only.
+- Code comments are in English.
 
 ## Tokens (`crates/app/src/theme.rs`)
 
-Cores vêm da paleta semântica: `theme::pal().<token>` (`Palette`, `DARK`). Nunca escreva cor solta: o teste
-`colors_come_from_the_palette` falha com `Color32::from_rgb`/`from_rgba_*`/`from_gray`/`theme::rgba(` fora de
-`theme.rs`, `terminal/colors.rs` e `icons.rs` (lista `STILL_LOOSE`, hoje vazia: só encolhe).
+Colors come from the semantic palette: `theme::pal().<token>` (`Palette`, `DARK`). Never write a loose color: the test
+`colors_come_from_the_palette` fails on `Color32::from_rgb`/`from_rgba_*`/`from_gray`/`theme::rgba(` outside
+`theme.rs`, `terminal/colors.rs` and `icons.rs` (the `STILL_LOOSE` list, empty today: it only shrinks).
 
-| Token | Valor | Uso |
+| Token | Value | Use |
 | :-- | :-- | :-- |
-| `bg` | #16181c | fundo da janela, por trás das ilhas |
-| `glass` / `glass_border` / `glass_highlight` | branco-cinza 50% / branco 13% / branco 8% | fundo, borda de 1 px e filete do topo das ilhas |
-| `well` | rgba(22,24,28,.92) | ilha central (terminal) |
-| `strip` | rgba(44,47,54,.55) | faixa de abas |
-| `separator`, `guide` | branco 10% / 8% | linhas dentro das ilhas, guias da árvore |
-| `hover`, `selected`, `selected_soft` | branco 7% / 12% / 8% | hover, seleção neutra, arquivo selecionado |
-| `recess`, `chip` | preto 25% / branco 7% | trilho de controles e campos; etiquetas |
-| `popup` | #23262c | menus, modais, dicas (opaco) |
-| `text`, `text_strong`, `text_2`, `text_3`, `text_soft`, `text_faint` | #e6e8eb, #fff, #aab1bb, #939aa4, #c9cdd3, #6b717c | texto: principal, selecionado, secundário, rótulos/metadados, valores, separadores |
-| `on_accent` | #16181c | texto sobre a cor de destaque |
-| `danger`, `danger_text`, `success`, `warning`, `info` | | estados |
-| `scrim`, `shadow` | preto 50% / 28% | película do modal, sombra das ilhas |
+| `bg` | #16181c | window background, behind the islands |
+| `glass` / `glass_border` / `glass_highlight` | white-gray 50% / white 13% / white 8% | background, 1 px border and top highlight of the islands |
+| `well` | rgba(22,24,28,.92) | central island (terminal) |
+| `strip` | rgba(44,47,54,.55) | tab strip |
+| `separator`, `guide` | white 10% / 8% | lines inside islands, tree guides |
+| `hover`, `selected`, `selected_soft` | white 7% / 12% / 8% | hover, neutral selection, selected file |
+| `recess`, `chip` | black 25% / white 7% | track of controls and fields; chips |
+| `popup` | #23262c | menus, modals, tooltips (opaque) |
+| `text`, `text_strong`, `text_2`, `text_3`, `text_soft`, `text_faint` | #e6e8eb, #fff, #aab1bb, #939aa4, #c9cdd3, #6b717c | text: main, selected, secondary, labels/metadata, values, separators |
+| `on_accent` | #16181c | text on the accent color |
+| `danger`, `danger_text`, `success`, `warning`, `info` | | states |
+| `scrim`, `shadow` | black 50% / 28% | modal scrim, island shadow |
 
-Cores dos agentes (não são da paleta): `CLAUDE`, `ANTIGRAVITY`, `SHELL` ou `deck.agents.tab_color(kind)`.
+Agent colors (not in the palette): `CLAUDE`, `ANTIGRAVITY`, `SHELL` or `deck.agents.tab_color(kind)`.
 Terminal: `TERM_BG` #16181c, `TERM_FG`, `TERM_SELECTION` #2f3542.
 
-**A cor de destaque é a do agente ativo**, nunca uma cor fixa de marca: `deck.accent()` (ou `theme::accent()`, que
-`ui::draw` atualiza a cada quadro; sem aba, cinza neutro `#c9cdd3`). Ela marca seleção, ação primária, divisor ativo e o
-brilho do canto do fundo. Texto sobre ela: `on_accent`. Ajudantes: `accent_soft` (18%, linha selecionada),
-`accent_wash` (10%, cartão em foco), `accent_edge` (50%, borda do cartão), `with_alpha`, `with_opacity`, `brighten`, `over`.
+**The accent color is the active agent's**, never a fixed brand color: `deck.accent()` (or `theme::accent()`, which
+`ui::draw` updates every frame; with no tab, neutral gray `#c9cdd3`). It marks selection, primary action, active divider
+and the glow in the background's corner. Text on it: `on_accent`. Helpers: `accent_soft` (18%, selected row),
+`accent_wash` (10%, focused card), `accent_edge` (50%, card border), `with_alpha`, `with_opacity`, `brighten`, `over`.
 
-Fontes (embutidas, OFL, `assets/fonts/`): `theme::ui(px)` Inter, `ui_medium`, `ui_semibold`, `ui_bold`; `theme::label(px)`
-IBM Plex Mono Medium para rótulos de seção em MAIÚSCULAS (10 px, espaçamento 0,1 em, `ui::section_label`);
-`theme::meta(px)` Plex Mono Regular para metadados (10–10,5 px). Texto base 12 px. O terminal mantém a fonte do sistema.
-Símbolos (▾ ▸ ✕) caem no fallback do sistema.
+Fonts (embedded, OFL, `assets/fonts/`): `theme::ui(px)` Inter, `ui_medium`, `ui_semibold`, `ui_bold`; `theme::label(px)`
+IBM Plex Mono Medium for UPPERCASE section labels (10 px, 0.1 em spacing, `ui::section_label`); `theme::meta(px)` Plex
+Mono Regular for metadata (10–10.5 px). Base text 12 px. The terminal keeps the system font. Symbols (▾ ▸ ✕) fall back
+to the system font.
 
-## Ilhas e fundo
+## Islands and background
 
-- Barras e centro são **ilhas** de cantos 10 px (`ISLAND_RADIUS`), com margem e fresta de 6 px (`ISLAND_GAP`), sobre o
-  fundo `bg` com dois brilhos radiais (`ui/background.rs`, `Mesh` em leque). Sem desfoque (o egui não tem).
-- Ordem: `island_shadows` (sombra só nas frestas, o vidro é translúcido) → `island(ui, rect, kind)` (`Glass`/`Well`) →
-  conteúdo → `island_edge(ui, rect)` (repinta os cantos com a cor do fundo, borda e filete). Cada janela da tela dividida é
-  uma ilha `Well`. Divisores ficam na fresta (`paint_splitter` só aparece com o mouse).
-- Componentes comuns em `ui/mod.rs`: `segmented`, `button` (`ButtonKind::{Primary, Secondary, Ghost}`), `button_danger`,
+- Bars and center are **islands** with 10 px corners (`ISLAND_RADIUS`), with a 6 px margin and gap (`ISLAND_GAP`), on
+  the `bg` background with two radial glows (`ui/background.rs`, fan `Mesh`). No blur (egui has none).
+- Order: `island_shadows` (shadow only in the gaps, the glass is translucent) → `island(ui, rect, kind)` (`Glass`/`Well`)
+  → content → `island_edge(ui, rect)` (repaints the corners in the background color, border and highlight). Each window
+  of the split view is a `Well` island. Dividers sit in the gap (`paint_splitter` only shows with the mouse).
+- Common components in `ui/mod.rs`: `segmented`, `button` (`ButtonKind::{Primary, Secondary, Ghost}`), `button_danger`,
   `section_label`, `chip`, `separator`, `galley_spaced`.
-- Logo: `Icon::AgentDeck` (`icons.rs`, `LOGO_CARDS`); o `.ico` sai de `scripts/gerar-icone.ps1`.
+- Logo: `Icon::AgentDeck` (`icons.rs`, `LOGO_CARDS`); the `.ico` comes from `scripts/gerar-icone.ps1`.
 
-## Medidas
+## Measurements
 
-- Barra lateral, de cima para baixo: chave Agentes | Documentos (`docs::switch`, trilho de 28 px com segmentos de 24 px,
-  margem de 6 px, segmento ativo na cor de destaque; "Docs" se o segmento não comporta "Documentos n"; com a barra
-  recolhida vai para a barra de título, compacta, 24 px), `separator`, PROJETOS, ORGANIZAÇÃO (`segmented` sem
-  destaque, trilho de 24 px, margem de 10 px), ARQUIVOS. Separadores com a largura da ilha.
-- Linhas da barra lateral têm margem de 4 px (a seleção não encosta na borda): projeto 22 px (▾/▸, nome em 600,
-  contagem em `text_3`, anel 6 px do agente que terminou sem ser visto), **agente 24 px** (`AGENT_ROW_H`), "+ Novo agente"
-  22 px em `text_3`, arquivo 20 px (11,5 px; `FILE_ROW_H`).
-- Árvore de agentes: ícone do modelo (12 px numa caixa de 16) com o centro no x 30 da linha, recuo de 12 px por nível
-  (até 5), nome em Inter 12 px/500 (600 se selecionado) 7 px depois da caixa, **modelo à direita** em `meta(10)`,
-  `text_3`, encurtado por `projects::model_tag` (`sonnet`, `argon`, `flash`): o nome é quem corta (reticências), nada
-  quebra linha. Selecionado: `accent_soft` + filete de 2 px na cor de destaque, nome `text_strong`, modelo `text`.
-- Explorador: recuo de 12 px, ícones de extensão em `text_3` (cinza, menos cor), letra do Git (M, A, ?, D, R, U) em
-  `meta(10)` `text_2`; selecionado `selected_soft`, hover `hover`.
-- Abas (`ui/tabs.rs`): faixa de 30 px (`HEAD_H`), pílulas de 22 px, cantos 5, 3 px entre elas, padding 8; ativa com a
-  cor do agente, texto `on_accent` 600 e sombra leve; sem o foco da janela ou de documento, a ativa é `selected` +
-  `text_strong`; ponto de 7 px (halo trabalhando, anel de 1,5 px concluído sem ser visto, 40% sem processo); o ✕ é
-  desenhado (a Inter não o tem). `StripKind::colored` escolhe entre agente e documento.
-- Botões de ícone: na barra de título 26×24, cantos 5; nos cabeçalhos 20×20, cantos 4; hover `hover`.
-- Linha da lista de arquivos de um diff: 20 px, selecionada `selected_soft`; letras e `+`/`−` em `meta(10)`.
-- Barra direita: cabeçalho de 32 px (`TOPBAR_H`) com 4 abas-pílula com nome (`Tarefas`, `Conversa`, `Git`, `GitHub`,
-  22 px de altura, cantos 5, selo em pílula de 10 px); cartões de tarefa ativos com barra de 5 passos (3 px) e botões
-  embutidos, seguidos da seção `HISTÓRICO` (filtro e linhas compactas de 24 px) e rodapé fixo `+ Nova tarefa`.
-- Campos de texto: fundo `recess`, cantos 6, borda `separator` (ou `accent` quando focado).
-- Menus, dicas e modais: `frame(p, r, 6–10, popup, glass_border)` + `shadow(...)`; itens de menu de 26 px com hover
-  `hover`; títulos de modal `13 px 600`; posição de menu com `menus::keep_on_screen` (não use `Area::constrain`, ele
-  fecha o menu no clique — ver o comentário em `menus.rs`).
-- Barra de título: `TITLEBAR_H = 32`, sem fundo; botões da janela 40×32. Barra lateral: 150–480 px (padrão 220).
-  Barra direita: 280–640 (padrão 330).
+- Sidebar, top to bottom: the Agents | Documents switch (`docs::switch`, 28 px track with 24 px segments, 6 px margin,
+  active segment in the accent color; "Docs" if the segment cannot fit "Documents n"; with the sidebar collapsed it moves
+  to the title bar, compact, 24 px), `separator`, PROJECTS, ORGANIZATION (`segmented` without accent, 24 px track, 10 px
+  margin), FILES. Separators as wide as the island.
+- Sidebar rows have a 4 px margin (the selection does not touch the edge): project 22 px (▾/▸, name in 600, count in
+  `text_3`, 6 px ring of the agent that finished unseen), **agent 24 px** (`AGENT_ROW_H`), "+ New agent" 22 px in
+  `text_3`, file 20 px (11.5 px; `FILE_ROW_H`).
+- Agent tree: model icon (12 px in a 16 px box) centered at x 30 of the row, 12 px indent per level (up to 5), name in
+  Inter 12 px/500 (600 if selected) 7 px after the box, **model on the right** in `meta(10)`, `text_3`, shortened by
+  `projects::model_tag` (`sonnet`, `argon`, `flash`): the name is what gets cut (ellipsis), nothing wraps. Selected:
+  `accent_soft` + 2 px stripe in the accent color, name `text_strong`, model `text`.
+- Explorer: 12 px indent, extension icons in `text_3` (gray, less color), Git letter (M, A, ?, D, R, U) in `meta(10)`
+  `text_2`; selected `selected_soft`, hover `hover`.
+- Tabs (`ui/tabs.rs`): 30 px strip (`HEAD_H`), 22 px pills, corners 5, 3 px between them, padding 8; active in the
+  agent's color, text `on_accent` 600 and a light shadow; without window or document focus, the active one is `selected`
+  + `text_strong`; 7 px dot (halo working, 1.5 px ring finished unseen, 40% with no process); the ✕ is drawn (Inter does
+  not have it). `StripKind::colored` picks between agent and document.
+- Icon buttons: in the title bar 26×24, corners 5; in headers 20×20, corners 4; hover `hover`.
+- Row of a diff's file list: 20 px, selected `selected_soft`; letters and `+`/`−` in `meta(10)`.
+- Right bar: 32 px header (`TOPBAR_H`) with 4 named pill tabs (Tasks, Conversation, Git, GitHub; 22 px tall, corners 5,
+  10 px pill badge); active task cards with a 5-step bar (3 px) and inline buttons, followed by the HISTORY section
+  (filter and compact 24 px rows) and the fixed `+ New task` footer.
+- Text fields: `recess` background, corners 6, `separator` border (or `accent` when focused).
+- Menus, tooltips and modals: `frame(p, r, 6–10, popup, glass_border)` + `shadow(...)`; 26 px menu items with `hover`;
+  modal titles `13 px 600`; menu position with `menus::keep_on_screen` (do not use `Area::constrain`, it closes the menu
+  on the click — see the comment in `menus.rs`).
+- Title bar: `TITLEBAR_H = 32`, no background; window buttons 40×32. Sidebar: 150–480 px (default 220).
+  Right bar: 280–640 (default 330).
 
-## Padrões de código
+## Code patterns
 
-- **Ajudantes de `ui/mod.rs`:** `galley`, `galley_trunc` (reticências), `place`, `text_in`, `text_w`, `dot`,
-  `frame`, `shadow`, `clickable` (cursor de mão), `tip` (dica ao passar o mouse; toda ação sem texto precisa
-  de uma), `paint_splitter`.
-- **Interação:** pinte primeiro e decida depois. Guarde a ação numa variável dentro da closure
-  (`switch_to_id`, `agent_click`...) e aplique em `deck` **fora** dela (o borrow do `Deck` não deixa antes).
-- **Ids estáveis** para o que é arrastável ou tem estado entre quadros: `Id::new(("agent-row", &proj.id, &ag.id))`,
-  não o id automático de `allocate_exact_size`.
-- **Estado efêmero** (menu aberto, arrasto, âncoras) em `ctx.data_mut(|d| d.insert_temp(...))`; limpe quando
-  a seção some (ex.: barra recolhida). **Estado que o usuário espera de volta** vai para a config
-  (`Config`/`ProjectCfg` no core), não para `ctx.data`.
-- **Overlay acima de tudo** (fantasma de arrasto, dicas): `ctx.layer_painter(LayerId::new(Order::Tooltip, ...))`.
-- **Animação:** `ctx.animate_bool_with_time(id, on, 0.12–0.15)`; pulso com `ctx.input(|i| i.time)` e
-  `request_repaint_after(33 ms)` só enquanto o estado dura.
-- **`dragging`** (parâmetro das seções da barra lateral) desliga o hover enquanto algo é arrastado.
-- **Lógica fora da pintura:** cálculo de layout/árvore/ordem vai para função pura com testes no mesmo arquivo
-  (ex.: `agent_tree`, `in_subtree`, `split.rs`). O estado de verdade (instâncias, equipe) mora no core.
-- **Textos** em português do Brasil, frases curtas; dicas dizem o que o clique faz.
+- **Helpers in `ui/mod.rs`:** `galley`, `galley_trunc` (ellipsis), `place`, `text_in`, `text_w`, `dot`, `frame`,
+  `shadow`, `clickable` (hand cursor), `tip` (hover tooltip; every action without text needs one), `paint_splitter`.
+- **Interaction:** paint first and decide later. Keep the action in a variable inside the closure (`switch_to_id`,
+  `agent_click`...) and apply it to `deck` **outside** it (the `Deck` borrow does not allow it before).
+- **Stable ids** for what can be dragged or has state across frames: `Id::new(("agent-row", &proj.id, &ag.id))`, not
+  the automatic id from `allocate_exact_size`.
+- **Ephemeral state** (menu open, drag, anchors) in `ctx.data_mut(|d| d.insert_temp(...))`; clear it when the section
+  goes away (e.g. collapsed bar). **State the user expects back** goes to the config (`Config`/`ProjectCfg` in the core),
+  not to `ctx.data`.
+- **Overlay above everything** (drag ghost, tooltips): `ctx.layer_painter(LayerId::new(Order::Tooltip, ...))`.
+- **Animation:** `ctx.animate_bool_with_time(id, on, 0.12–0.15)`; pulse with `ctx.input(|i| i.time)` and
+  `request_repaint_after(33 ms)` only while the state lasts.
+- **`dragging`** (parameter of the sidebar sections) turns hover off while something is being dragged.
+- **Logic out of the painting:** layout/tree/order computation goes to a pure function with tests in the same file
+  (e.g. `agent_tree`, `in_subtree`, `split.rs`). The real state (instances, team) lives in the core.
 
-## Conferir o resultado (captura de tela)
+## Check the result (screenshot)
 
-Compile e rode numa pasta de dados separada (a do usuário está em uso), com os projetos fictícios:
+Build and run in a separate data folder (the user's is in use), with the fake projects:
 
 ```sh
 cargo build -p agentdeck
 AGENTDECK_HOME=<scratch>/home AGENTDECK_SMOKE=<scratch>/shot AGENTDECK_DEBUG_UI=projects-demo \
-  ./target/debug/agentdeck.exe        # salva <scratch>/shot/screen.png e sai
+  ./target/debug/agentdeck.exe        # saves <scratch>/shot/screen.png and exits
 ```
 
-Outros estados em `AGENTDECK_DEBUG_UI` (lista em `debug_ui::apply`, `crates/app/src/debug_ui.rs`): `settings`, `newtab`,
-`usage-demo`, `git-demo`, `split-drag`... Abra a imagem e confira alinhamento, truncamento e contraste antes de
-dizer que terminou; interação (clique, arrasto) não aparece na captura — diga ao usuário o que falta testar à mão.
+For Portuguese, write `{"language": "pt-BR"}` to `<scratch>/home/cfg/config.json` before running. Other states in
+`AGENTDECK_DEBUG_UI` (list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`): `settings`, `newtab`, `usage-demo`,
+`git-demo`, `split-drag`... Open the image and check alignment, truncation and contrast before saying you are done;
+interaction (click, drag) does not show in the screenshot — tell the user what is left to test by hand.

@@ -5,25 +5,41 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+pub mod agents;
 pub mod app;
+pub mod bridge;
 pub mod common;
 pub mod core;
 pub mod docs;
 pub mod git;
 pub mod github;
+pub mod memory;
 pub mod settings;
+pub mod system;
 pub mod tasks;
+pub mod tasks_core;
+pub mod terminal;
+pub mod ui;
+pub mod usage;
 
 /// Every area file with its name (the name only shows up in test failures).
 pub const AREAS: &[(&str, &[(&str, &str)])] = &[
     ("common", common::ENTRIES),
     ("settings", settings::ENTRIES),
     ("tasks", tasks::ENTRIES),
+    ("tasks_core", tasks_core::ENTRIES),
     ("git", git::ENTRIES),
     ("github", github::ENTRIES),
     ("docs", docs::ENTRIES),
     ("app", app::ENTRIES),
+    ("ui", ui::ENTRIES),
+    ("terminal", terminal::ENTRIES),
     ("core", core::ENTRIES),
+    ("system", system::ENTRIES),
+    ("bridge", bridge::ENTRIES),
+    ("agents", agents::ENTRIES),
+    ("memory", memory::ENTRIES),
+    ("usage", usage::ENTRIES),
 ];
 
 /// The Portuguese text for the English `key`, or `None` when there is no translation.

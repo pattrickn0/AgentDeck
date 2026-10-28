@@ -228,12 +228,17 @@ mod tests {
     }
 
     #[test]
-    fn no_english_key_is_in_two_area_files() {
-        let mut seen: HashMap<&str, &str> = HashMap::new();
+    fn no_english_key_has_two_different_translations() {
+        // The same key in two area files is fine when both say the same (tasks converting areas in parallel may both
+        // add it); two different translations would make one of them silently lose.
+        let mut seen: HashMap<&str, (&str, &str)> = HashMap::new();
         for (area, entries) in pt_br::AREAS {
-            for (en, _) in *entries {
-                if let Some(other) = seen.insert(en, area) {
-                    panic!("\"{en}\" is in both pt_br/{other}.rs and pt_br/{area}.rs: keep it in one (shared text goes in common.rs)");
+            for (en, pt) in *entries {
+                if let Some((other, other_pt)) = seen.insert(en, (area, pt)) {
+                    assert_eq!(
+                        other_pt, *pt,
+                        "\"{en}\" has different translations in pt_br/{other}.rs and pt_br/{area}.rs: pick one (or move it to common.rs)"
+                    );
                 }
             }
         }
