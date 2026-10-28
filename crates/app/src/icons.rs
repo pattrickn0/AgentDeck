@@ -1,7 +1,7 @@
-//! Ícones SVG da interface original, rasterizados em tempo de execução a partir dos
-//! mesmos `path d="…"` do HTML/JS (sem arquivos de imagem). O rasterizador é um
-//! preenchimento por varredura com regra "nonzero" e cobertura horizontal exata
-//! (anti-aliasing), suficiente para ícones pequenos e nítidos em qualquer escala.
+//! SVG icons from original interface, rasterized at runtime from the same
+//! `path d="…"` as the HTML/JS (no image files). The rasterizer is a scanline
+//! fill with nonzero winding rule and exact horizontal coverage (anti-aliasing),
+//! sufficient for small, crisp icons at any scale.
 
 use std::collections::HashMap;
 
@@ -15,34 +15,34 @@ pub enum Icon {
     Mic,
     /// `#attach` (viewBox 24).
     Attach,
-    /// Nuvem do overlay de arrastar e soltar (viewBox 24).
+    /// Drag and drop overlay cloud (viewBox 24).
     CloudUpload,
-    /// Chevron da árvore de arquivos (viewBox 16).
+    /// File tree chevron (viewBox 16).
     TreeChevron,
-    /// Arquivo genérico (viewBox 16).
+    /// Generic file (viewBox 16).
     FileGeneric,
-    /// Aba "Git" e chip da branch: Octicons `git-branch-16` (MIT, viewBox 16).
+    /// "Git" tab and branch chip: Octicons `git-branch-16` (MIT, viewBox 16).
     GitBranch,
-    /// Aba "GitHub": Octicons `mark-github-16` (MIT, viewBox 16).
+    /// "GitHub" tab: Octicons `mark-github-16` (MIT, viewBox 16).
     GitHub,
-    /// Git: buscar (fetch). Material Icons `refresh` (Apache-2.0, viewBox 24).
+    /// Git: fetch. Material Icons `refresh` (Apache-2.0, viewBox 24).
     Refresh,
-    /// Git: puxar (pull). Material Icons `arrow_downward` (Apache-2.0, viewBox 24).
+    /// Git: pull. Material Icons `arrow_downward` (Apache-2.0, viewBox 24).
     ArrowDown,
-    /// Git: enviar (push). Material Icons `arrow_upward` (Apache-2.0, viewBox 24).
+    /// Git: push. Material Icons `arrow_upward` (Apache-2.0, viewBox 24).
     ArrowUp,
-    /// Git: descartar alterações. Material Icons `undo` (Apache-2.0, viewBox 24).
+    /// Git: discard changes. Material Icons `undo` (Apache-2.0, viewBox 24).
     Undo,
-    /// Trazer a janela para o destaque. Material Icons `open_in_full` (Apache-2.0, viewBox 24).
+    /// Bring window to highlight. Material Icons `open_in_full` (Apache-2.0, viewBox 24).
     Expand,
-    /// Logo do Claude: o "spark", o asterisco laranja (viewBox 24).
+    /// Claude logo: the "spark", orange asterisk (viewBox 24).
     ClaudeLogo,
-    /// Logo do Google Antigravity (viewBox 112).
+    /// Google Antigravity logo (viewBox 112).
     AntigravityLogo,
-    /// Logo do Codex / OpenAI (viewBox 24).
+    /// Codex / OpenAI logo (viewBox 24).
     CodexLogo,
-    /// A marca do AgentDeck: um "baralho" de três cartões (grade 24×24). Não tem `path d`: tem as cores próprias de
-    /// [`LOGO_CARDS`] e é rasterizado por [`logo_rgba`]; o `color` de `paint` vira só o matiz (branco = como é).
+    /// AgentDeck brand: a "deck" of three cards (24×24 grid). Does not use `path d`: has its own
+    /// colors from [`LOGO_CARDS`] and is rasterized by [`logo_rgba`]; `paint`'s `color` acts only as tint (white = as is).
     AgentDeck,
 }
 
@@ -70,16 +70,16 @@ impl Icon {
     }
 }
 
-/// Cache de texturas (ícone × tamanho em pixels físicos).
+/// Texture cache (icon × size in physical pixels).
 #[derive(Default)]
 pub struct IconCache {
     textures: HashMap<(Icon, u32), TextureHandle>,
-    /// A marca do app, em cores (por tamanho em pixels físicos).
+    /// App brandmark, in color (by size in physical pixels).
     logos: HashMap<u32, TextureHandle>,
 }
 
 impl IconCache {
-    /// A marca em cores (texturas pré-multiplicadas); `tint` branco a deixa como é.
+    /// Brandmark in color (premultiplied textures); white `tint` renders as is.
     fn paint_logo(&mut self, painter: &egui::Painter, center: Pos2, size: f32, tint: Color32) {
         let ppp = painter.pixels_per_point();
         let px = (size * ppp).round().max(1.0) as u32;
@@ -117,8 +117,8 @@ impl IconCache {
         })
     }
 
-    /// Pinta o ícone centralizado em `rect` (quadrado de lado `size` pontos), tingido com `color`
-    /// e girado `angle` radianos em torno do centro (para os chevrons animados).
+    /// Paints the icon centered in `rect` (square of `size` points), tinted with `color`
+    /// and rotated `angle` radians around center (for animated chevrons).
     pub fn paint(&mut self, painter: &egui::Painter, icon: Icon, center: Pos2, size: f32, color: Color32, angle: f32) {
         if icon == Icon::AgentDeck {
             return self.paint_logo(painter, center, size, color);
@@ -140,10 +140,10 @@ impl IconCache {
 }
 
 // ---------------------------------------------------------------------------
-// A marca do AgentDeck: três cartões em baralho e um furo (grade 24×24)
+// AgentDeck brand: three cards in a deck and one hole (24×24 grid)
 // ---------------------------------------------------------------------------
 
-/// Um cartão do baralho, na grade 24×24 da marca.
+/// A card from the deck, on the brand's 24×24 grid.
 pub struct LogoCard {
     pub x: f32,
     pub y: f32,
@@ -151,30 +151,30 @@ pub struct LogoCard {
     pub h: f32,
     pub r: f32,
     pub fill: Color32,
-    /// Contorno de [`LOGO_STROKE`] na cor do fundo (separa o cartão do que está atrás).
+    /// Outline of [`LOGO_STROKE`] in background color (separates card from what's behind).
     pub outlined: bool,
 }
 
-/// Do fundo para a frente: traseiro, meio e frente.
+/// Back to front: back, middle, front.
 pub const LOGO_CARDS: [LogoCard; 3] = [
     LogoCard { x: 8.0, y: 2.5, w: 13.5, h: 10.0, r: 2.5, fill: crate::theme::DARK.text_faint, outlined: false },
     LogoCard { x: 5.25, y: 6.75, w: 13.5, h: 10.0, r: 2.5, fill: crate::theme::DARK.text_2, outlined: true },
     LogoCard { x: 2.5, y: 11.0, w: 13.5, h: 10.0, r: 2.5, fill: crate::theme::DARK.text, outlined: true },
 ];
-/// Furo no cartão da frente: centro e raio, na cor do fundo.
+/// Hole in front card: center and radius, in background color.
 pub const LOGO_HOLE: (f32, f32, f32) = (6.75, 16.0, 1.7);
-/// Espessura do contorno (centrado na borda, como o `stroke` do SVG).
+/// Stroke thickness (centered on border, like SVG `stroke`).
 pub const LOGO_STROKE: f32 = 1.5;
 
-/// Distância assinada (negativa dentro) de `p` ao retângulo arredondado do cartão.
+/// Signed distance (negative inside) from `p` to rounded rectangle of card.
 fn card_distance(p: (f32, f32), c: &LogoCard) -> f32 {
     let qx = (p.0 - (c.x + c.w / 2.0)).abs() - (c.w / 2.0 - c.r);
     let qy = (p.1 - (c.y + c.h / 2.0)).abs() - (c.h / 2.0 - c.r);
     qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - c.r
 }
 
-/// A cor da marca no ponto `p` da grade 24×24 (`None`: fundo transparente). `outline` é a cor do
-/// contorno dos cartões e do furo.
+/// Brand color at point `p` on 24×24 grid (`None`: transparent background). `outline` is color of
+/// card outline and hole.
 fn logo_sample(p: (f32, f32), outline: Color32) -> Option<Color32> {
     let mut out = None;
     for c in &LOGO_CARDS {
@@ -192,8 +192,8 @@ fn logo_sample(p: (f32, f32), outline: Color32) -> Option<Color32> {
     out
 }
 
-/// A marca rasterizada em `size`×`size` pixels: RGBA não pré-multiplicado, fundo transparente, com
-/// 4×4 amostras por pixel para as bordas ficarem lisas. É o mesmo desenho do ícone da janela e do `.ico`.
+/// Brandmark rasterized at `size`×`size` pixels: unpremultiplied RGBA, transparent background, with
+/// 4×4 samples per pixel for smooth edges. Same design as window icon and `.ico`.
 pub fn logo_rgba(size: usize, outline: Color32) -> Vec<u8> {
     const N: usize = 4;
     let scale = 24.0 / size as f32;
@@ -223,12 +223,12 @@ pub fn logo_rgba(size: usize, outline: Color32) -> Vec<u8> {
     out
 }
 
-/// Tamanhos (px) do ícone do executável.
+/// Executable icon sizes (px).
 #[cfg(test)]
 const ICO_SIZES: [usize; 5] = [16, 24, 32, 48, 256];
 
-/// O `.ico` do executável: um PNG por tamanho de [`ICO_SIZES`], com fundo transparente e contorno
-/// e furo em `#16181c`. Gerado por `scripts/gerar-icone.ps1`.
+/// Executable `.ico`: one PNG per size in [`ICO_SIZES`], with transparent background and outline
+/// and hole in `#16181c`. Generated by `scripts/gerar-icone.ps1`.
 #[cfg(test)]
 fn logo_ico() -> Vec<u8> {
     let images: Vec<Vec<u8>> = ICO_SIZES
@@ -238,9 +238,9 @@ fn logo_ico() -> Vec<u8> {
             let mut enc = png::Encoder::new(&mut png_bytes, s as u32, s as u32);
             enc.set_color(png::ColorType::Rgba);
             enc.set_depth(png::BitDepth::Eight);
-            let mut w = enc.write_header().expect("cabeçalho do PNG");
-            w.write_image_data(&logo_rgba(s, crate::theme::pal().bg)).expect("pixels do PNG");
-            w.finish().expect("fim do PNG");
+            let mut w = enc.write_header().expect("PNG header");
+            w.write_image_data(&logo_rgba(s, crate::theme::pal().bg)).expect("PNG pixels");
+            w.finish().expect("PNG end");
             png_bytes
         })
         .collect();
@@ -262,7 +262,7 @@ fn logo_ico() -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// Parser de `path d`(M L H V C S Q T A Z, absolutos e relativos) → polígonos.
+// Parser for `path d` (M L H V C S Q T A Z, absolute and relative) → polygons.
 // ---------------------------------------------------------------------------
 
 type Poly = Vec<(f32, f32)>;
@@ -289,7 +289,7 @@ impl Tokens<'_> {
         matches!(self.s.get(self.i), Some(c) if c.is_ascii_digit() || *c == b'-' || *c == b'+' || *c == b'.')
     }
 
-    /// Lê um número no formato compacto do SVG (`.5.5`, `1.06-1.06`, `1e-3`).
+    /// Reads a number in SVG compact format (`.5.5`, `1.06-1.06`, `1e-3`).
     fn number(&mut self) -> Option<f32> {
         self.skip_sep();
         let start = self.i;
@@ -327,7 +327,7 @@ impl Tokens<'_> {
         std::str::from_utf8(&s[start..i]).ok()?.parse().ok()
     }
 
-    /// Flags de arco podem vir coladas (`0 01.5 2`): lê um único dígito.
+    /// Arc flags may be adjacent (`0 01.5 2`): reads a single digit.
     fn flag(&mut self) -> Option<bool> {
         self.skip_sep();
         let c = *self.s.get(self.i)?;
@@ -348,7 +348,7 @@ pub(crate) fn flatten_path(d: &str) -> Vec<Poly> {
     let mut cur: Poly = Vec::new();
     let (mut x, mut y) = (0.0f32, 0.0f32);
     let (mut sx, mut sy) = (0.0f32, 0.0f32);
-    // Último ponto de controle (para S/T).
+    // Last control point (for S/T).
     let mut last_ctrl: Option<(f32, f32)> = None;
     let mut last_cmd = b' ';
     let mut cmd = b' ';
@@ -368,7 +368,7 @@ pub(crate) fn flatten_path(d: &str) -> Vec<Poly> {
         } else if !t.at_number() {
             break;
         } else if cmd == b'M' {
-            cmd = b'L'; // pares extras após M viram L
+            cmd = b'L'; // extra pairs after M become L
         } else if cmd == b'm' {
             cmd = b'l';
         }
@@ -474,7 +474,7 @@ pub(crate) fn flatten_path(d: &str) -> Vec<Poly> {
     polys
 }
 
-/// Converte um arco elíptico (parametrização por extremos, SVG 1.1 F.6.5) em segmentos.
+/// Converts elliptical arc (endpoint parameterization, SVG 1.1 F.6.5) to segments.
 #[allow(clippy::too_many_arguments)]
 fn arc_points(out: &mut Poly, p0: (f32, f32), p1: (f32, f32), rx: f32, ry: f32, rot_deg: f32, large: bool, sweep: bool) {
     if p0 == p1 {
@@ -536,9 +536,9 @@ fn arc_points(out: &mut Poly, p0: (f32, f32), p1: (f32, f32), rx: f32, ry: f32, 
     }
 }
 
-/// Rasteriza os polígonos (coordenadas no viewBox `vb`×`vb`) numa grade `w`×`h` de cobertura 0..1.
+/// Rasterizes polygons (coordinates in viewBox `vb`×`vb`) onto a `w`×`h` grid with coverage 0..1.
 pub(crate) fn rasterize(polys: &[Poly], vb: f32, w: usize, h: usize) -> Vec<f32> {
-    const SUB: usize = 5; // sub-linhas por pixel
+    const SUB: usize = 5; // sub-lines per pixel
     let sx = w as f32 / vb;
     let sy = h as f32 / vb;
     let mut edges: Vec<(f32, f32, f32, f32)> = Vec::new();
@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn hole_with_nonzero_rule() {
-        // Quadrado externo horário + interno anti-horário = moldura (furo no meio).
+        // Outer clockwise square + inner counterclockwise square = frame (hole in the middle).
         let polys = flatten_path("M0 0H16V16H0zM4 4V12H12V4z");
         let cov = rasterize(&polys, 16.0, 16, 16);
         assert!(cov[8 * 16 + 8] < 0.01);
@@ -657,8 +657,8 @@ mod tests {
             assert!(!polys.is_empty(), "{icon:?}");
             let cov = rasterize(&polys, vb, 24, 24);
             let total: f32 = cov.iter().sum();
-            assert!(total > 10.0, "{icon:?} quase vazio: {total}");
-            assert!(cov.iter().all(|c| *c <= 1.0001), "{icon:?} cobertura > 1");
+            assert!(total > 10.0, "{icon:?} almost empty: {total}");
+            assert!(cov.iter().all(|c| *c <= 1.0001), "{icon:?} coverage > 1");
         }
     }
 
@@ -667,10 +667,10 @@ mod tests {
         for (icon, name) in [(Icon::ClaudeLogo, "Claude"), (Icon::AntigravityLogo, "Antigravity"), (Icon::CodexLogo, "Codex")] {
             let (d, vb) = icon.path();
             let polys = flatten_path(d);
-            assert!(!polys.is_empty(), "{name} sem polígonos");
+            assert!(!polys.is_empty(), "{name} has no polygons");
             let cov = rasterize(&polys, vb, 24, 24);
             let total: f32 = cov.iter().sum();
-            assert!(total > 20.0 && total < 400.0, "{name} cobertura estranha: {total}");
+            assert!(total > 20.0 && total < 400.0, "{name} unexpected coverage: {total}");
         }
     }
 
@@ -685,14 +685,14 @@ mod tests {
         let bg = crate::theme::pal().bg;
         let rgba = logo_rgba(96, bg);
         let at = |x, y| pixel(&rgba, 96, x, y);
-        // Cada cartão na sua cor (nos trechos que o da frente não cobre).
-        assert_eq!(at(19.0, 4.0), [0x6b, 0x71, 0x7c, 255], "cartão de trás");
-        assert_eq!(at(17.0, 9.0), [0xaa, 0xb1, 0xbb, 255], "cartão do meio");
-        assert_eq!(at(14.0, 19.5), [0xe6, 0xe8, 0xeb, 255], "cartão da frente");
-        // O furo e o contorno usam a cor do fundo.
-        assert_eq!(at(6.75, 16.0), [bg.r(), bg.g(), bg.b(), 255], "furo");
-        assert_eq!(at(10.0, 11.0), [bg.r(), bg.g(), bg.b(), 255], "contorno do cartão da frente");
-        // Fora dos cartões o fundo é transparente.
+        // Each card in its color (in areas not covered by card in front).
+        assert_eq!(at(19.0, 4.0), [0x6b, 0x71, 0x7c, 255], "back card");
+        assert_eq!(at(17.0, 9.0), [0xaa, 0xb1, 0xbb, 255], "middle card");
+        assert_eq!(at(14.0, 19.5), [0xe6, 0xe8, 0xeb, 255], "front card");
+        // Hole and outline use background color.
+        assert_eq!(at(6.75, 16.0), [bg.r(), bg.g(), bg.b(), 255], "hole");
+        assert_eq!(at(10.0, 11.0), [bg.r(), bg.g(), bg.b(), 255], "front card outline");
+        // Outside the cards, background is transparent.
         assert_eq!(at(1.0, 1.0)[3], 0);
         assert_eq!(at(22.5, 22.5)[3], 0);
     }
@@ -703,42 +703,42 @@ mod tests {
             let rgba = logo_rgba(size, crate::theme::pal().bg);
             assert_eq!(rgba.len(), size * size * 4);
             let covered = rgba.chunks(4).filter(|p| p[3] > 0).count();
-            assert!(covered > size * size / 3, "{size}px quase vazio: {covered}");
+            assert!(covered > size * size / 3, "{size}px almost empty: {covered}");
         }
     }
 
-    /// O `.ico` versionado tem os cinco tamanhos e é o que `logo_ico` gera hoje.
+    /// The committed `.ico` has the five sizes and is what `logo_ico` generates today.
     #[test]
     fn the_committed_ico_has_the_five_sizes() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.ico");
-        let ico = std::fs::read(path).expect("crates/app/assets/agentdeck.ico (rode scripts/gerar-icone.ps1)");
+        let ico = std::fs::read(path).expect("crates/app/assets/agentdeck.ico (run scripts/gerar-icone.ps1)");
         assert_eq!(&ico[..4], &[0, 0, 1, 0]);
         assert_eq!(u16::from_le_bytes([ico[4], ico[5]]) as usize, ICO_SIZES.len());
         for (i, &s) in ICO_SIZES.iter().enumerate() {
             let entry = &ico[6 + 16 * i..6 + 16 * (i + 1)];
             let dim = if s >= 256 { 0 } else { s as u8 };
-            assert_eq!((entry[0], entry[1]), (dim, dim), "tamanho {s}");
+            assert_eq!((entry[0], entry[1]), (dim, dim), "size {s}");
         }
-        assert_eq!(ico, logo_ico(), "o .ico está desatualizado: rode scripts/gerar-icone.ps1");
+        assert_eq!(ico, logo_ico(), "the .ico is outdated: run scripts/gerar-icone.ps1");
     }
 
-    /// Gera `assets/agentdeck.ico`. Não roda sozinho: `scripts/gerar-icone.ps1`.
+    /// Generates `assets/agentdeck.ico`. Does not run automatically: `scripts/gerar-icone.ps1`.
     #[test]
-    #[ignore = "gera o arquivo; use scripts/gerar-icone.ps1"]
+    #[ignore = "generates the file; use scripts/gerar-icone.ps1"]
     fn write_the_ico_file() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.ico");
-        std::fs::write(path, logo_ico()).expect("gravar o .ico");
+        std::fs::write(path, logo_ico()).expect("write the .ico");
     }
 
     #[test]
     fn the_branch_icon_keeps_its_holes() {
-        // Os círculos do Octicons são anéis: o centro (furo) fica vazio com a regra nonzero.
+        // Octicons circles are rings: the center (hole) stays empty under the nonzero rule.
         let (d, vb) = Icon::GitBranch.path();
         let cov = rasterize(&flatten_path(d), vb, 64, 64);
         let at = |x: f32, y: f32| cov[(y / vb * 64.0) as usize * 64 + (x / vb * 64.0) as usize];
-        assert!(at(4.25, 3.25) < 0.3, "furo do círculo de cima à esquerda");
-        assert!(at(11.75, 3.25) < 0.3, "furo do círculo da direita");
-        assert!(at(4.25, 12.75) < 0.3, "furo do círculo de baixo");
-        assert!(at(4.25, 8.0) > 0.7, "o traço entre os círculos é cheio");
+        assert!(at(4.25, 3.25) < 0.3, "top-left circle hole");
+        assert!(at(11.75, 3.25) < 0.3, "right circle hole");
+        assert!(at(4.25, 12.75) < 0.3, "bottom circle hole");
+        assert!(at(4.25, 8.0) > 0.7, "line between circles is solid");
     }
 }

@@ -478,7 +478,7 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         text_in(p, row.shrink2(Vec2::new(8.0, 0.0)), Align2::RIGHT_CENTER, status, theme::meta(10.5), status_color);
         let action = Rect::from_min_size(Pos2::new(inner.min.x + 2.0, row.max.y), Vec2::new(inner.width() - 4.0, btn_h));
         let id = Id::new("setting-dictation");
-        let size = crate::dictation::DOWNLOAD_SIZE;
+        let size = crate::dictation::download_size();
         match setup {
             Setup::Downloading => {
                 text_in(
@@ -773,7 +773,7 @@ pub fn dictation_modal(deck: &mut Deck, ctx: &egui::Context) {
     let pal = theme::pal();
     let w = 400.0;
     let pad = 20.0;
-    let size = crate::dictation::DOWNLOAD_SIZE;
+    let size = crate::dictation::download_size();
     let intro =
         t!("Speak instead of typing: AgentDeck transcribes your voice on this computer, without sending the audio over the internet.");
     let detail = t!(
