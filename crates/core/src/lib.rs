@@ -1,12 +1,12 @@
-//! AgentDeck — núcleo (backend) sem dependências de interface gráfica.
+//! AgentDeck — the core (backend) without graphical interface dependencies.
 //!
-//! Este crate é o equivalente Rust de `main.js` da versão Electron.
-//! A interface (crate `agentdeck`) conversa com ele exclusivamente através de [`Core`]
-//! e dos eventos [`CoreEvent`] — o mesmo papel que o IPC/preload tinha no Electron.
+//! This crate is the Rust equivalent of `main.js` of the Electron version.
+//! The interface (crate `agentdeck`) talks to it exclusively through [`Core`]
+//! and the [`CoreEvent`] events — the same role the IPC/preload had in Electron.
 //!
-//! CONTRATO ESTÁVEL: os tipos e assinaturas públicas deste arquivo e de `events.rs`,
-//! `agents.rs` (tipos `AgentInfo`/`SpawnSpec`), `config.rs` (`Config`) e
-//! `workspace.rs` (`DirEntry`) são consumidos pela UI. Não mude sem alinhar com o lead.
+//! STABLE CONTRACT: the public types and signatures of this file and of `events.rs`,
+//! `agents.rs` (types `AgentInfo`/`SpawnSpec`), `config.rs` (`Config`) and
+//! `workspace.rs` (`DirEntry`) are consumed by the UI. Do not change them without aligning with the lead.
 
 pub mod activation;
 pub mod activity;
@@ -66,33 +66,33 @@ pub use team::Team;
 pub use usage::{AgentUsage, UsageGroup, UsageWindow};
 pub use workspace::{DirEntry, Eol, TextFile};
 
-/// Função chamada sempre que um [`CoreEvent`] é emitido, para acordar o loop da UI
-/// (ex.: `EventLoopProxy::send_event`). Pode ser chamada de qualquer thread.
+/// Function called whenever a [`CoreEvent`] is emitted, to wake the UI loop
+/// (e.g. `EventLoopProxy::send_event`). It can be called from any thread.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
-/// Resultado de uma transcrição.
+/// Result of a transcription.
 #[derive(Debug, Clone)]
 pub struct Transcription {
     pub text: String,
-    /// Rótulo do motor usado (ex.: "GPU (Vulkan)").
+    /// Label of the engine used (e.g. "GPU (Vulkan)").
     pub engine: String,
 }
 
-/// Opções de inicialização para testes e para embutir o núcleo. O padrão é o
-/// comportamento normal do app.
+/// Startup options for tests and for embedding the core. The default is the
+/// normal behavior of the app.
 #[derive(Debug, Clone)]
 pub struct StartOptions {
-    /// PATH usado para localizar os CLIs dos agentes (`None` = PATH do processo).
+    /// PATH used to find the agent CLIs (`None` = the process PATH).
     pub search_path: Option<OsString>,
-    /// Pasta pessoal usada na resolução de agentes e na regra "nunca escrever AGENTS.md na
-    /// pasta do usuário" (`None` = a do sistema).
+    /// Home folder used in the agent resolution and in the rule "never write AGENTS.md in the
+    /// user's folder" (`None` = the system one).
     pub home_dir: Option<PathBuf>,
-    /// Observar o workspace e emitir [`CoreEvent::WorkspaceChanged`].
+    /// Watch the workspace and emit [`CoreEvent::WorkspaceChanged`].
     pub watch_workspace: bool,
-    /// Configuração a usar em vez de ler `paths.config_file` (não é gravada até `update_config`).
+    /// Configuration to use instead of reading `paths.config_file` (not saved until `update_config`).
     pub config: Option<Config>,
-    /// Procurar CLIs também nas pastas do sistema (`APPDATA`, `LOCALAPPDATA`, `ProgramFiles`).
-    /// Os testes desligam, para não depender do que está instalado na máquina.
+    /// Also look for CLIs in the system folders (`APPDATA`, `LOCALAPPDATA`, `ProgramFiles`).
+    /// The tests turn it off, so they do not depend on what is installed on the machine.
     pub system_dirs: bool,
 }
 
@@ -102,7 +102,7 @@ impl Default for StartOptions {
     }
 }
 
-/// Handle principal do backend. Barato de clonar; seguro entre threads.
+/// Main backend handle. Cheap to clone; safe between threads.
 #[derive(Clone)]
 pub struct Core {
     pub(crate) inner: Arc<CoreInner>,
@@ -119,66 +119,66 @@ pub(crate) struct CoreInner {
     pub agents: agents::Registry,
     pub providers: context::Providers,
     pub processes: process::ProcessRegistry,
-    /// Chave do par (com o escopo do projeto) → id da sessão/conversa headless.
+    /// Key of the pair (with the project scope) → id of the headless session/conversation.
     pub headless_sessions: Mutex<HashMap<String, String>>,
-    /// Instâncias de agentes (uma por aba) de cada projeto (id do projeto → instâncias).
+    /// Agent instances (one per tab) of each project (project id → instances).
     pub instances: Mutex<HashMap<String, instances::Instances>>,
-    /// Perguntas aguardando resposta entre abas (chaves com escopo: `instances::scoped`).
+    /// Questions waiting for an answer between tabs (scoped keys: `instances::scoped`).
     pub exchange: exchange::Exchange,
-    /// Respostas recebidas por cada instância que perguntou (`ask-agent --inbox`).
+    /// Answers received by each instance that asked (`ask-agent --inbox`).
     pub inbox: inbox::Inbox,
-    /// Última atividade de cada aba (chave com escopo); o prazo de uma pergunta conta a partir dela.
+    /// Last activity of each tab (scoped key); a question's deadline counts from it.
     pub activity: activity::Activity,
-    /// Projetos fora do ativo cujo AGENTS.md já foi escrito nesta sessão (na primeira aba deles).
+    /// Projects other than the active one whose AGENTS.md was already written in this session (in their first tab).
     pub context_written: Mutex<HashSet<String>>,
-    /// A interface sabe entregar mensagens nas abas (senão a ponte responde em modo headless).
+    /// The UI knows how to deliver messages in the tabs (otherwise the bridge answers in headless mode).
     pub tab_delivery: std::sync::atomic::AtomicBool,
-    /// Token de cada processo de agente → quem ele é (a ponte não confia no `from` do corpo).
+    /// Token of each agent process → who it is (the bridge does not trust the `from` of the body).
     pub callers: Mutex<HashMap<String, Caller>>,
-    /// Instâncias (chaves com escopo) cuja posição na equipe mudou desde a última mensagem que
-    /// receberam: a próxima leva o aviso (ver `team::notice`).
+    /// Instances (scoped keys) whose position in the team changed since the last message they
+    /// received: the next one carries the notice (see `team::notice`).
     pub team_changed: Mutex<HashSet<String>>,
-    /// Serializa as gravações da configuração (ver `Core::update_config`).
+    /// Serializes the config saves (see `Core::update_config`).
     pub config_save: Mutex<()>,
-    /// As alterações da configuração ficam só na memória (capturas de tela e estados de depuração).
+    /// The config changes stay only in memory (screenshots and debug states).
     pub config_read_only: std::sync::atomic::AtomicBool,
     pub bridge_queues: bridge::PairQueues,
-    /// Modelos conhecidos de cada agente (menu de novo agente), em cache.
+    /// Known models of each agent (new agent menu), cached.
     pub model_lists: models::ModelLists,
     pub bridge_server: Mutex<Option<Arc<tiny_http::Server>>>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub whisper: whisper::WhisperState,
     pub git: git::GitState,
     pub github: github::GithubState,
-    /// Uso dos planos dos agentes (barra de título).
+    /// Usage of the agents' plans (title bar).
     pub usage: usage::UsageStore,
-    /// Tarefas (mesa de tarefas) de cada projeto, em `dados/tarefas/<projeto>.json`.
+    /// Tasks (task desk) of each project, in `dados/tarefas/<project>.json`.
     pub tasks: tasks::TaskStore,
-    /// Trava da pasta de dados (uma instância do app por `dados/`); solta ao encerrar.
+    /// Lock of the data folder (one instance of the app per `dados/`); released on shutdown.
     data_lock: Mutex<Option<std::fs::File>>,
 }
 
-/// Quem chamou a ponte, pelo token que recebeu no ambiente.
+/// Who called the bridge, by the token it received in the environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Caller {
-    /// Id da instância (`claude`, `claude@dev`…), sem o projeto.
+    /// Instance id (`claude`, `claude@dev`…), without the project.
     pub id: String,
-    /// Projeto da instância: a ponte só enxerga as instâncias dele.
+    /// Project of the instance: the bridge only sees the instances of it.
     pub project: String,
-    /// É o processo da aba (interativo). `false` = execução headless (ponte sem abas).
+    /// It is the process of the tab (interactive). `false` = headless run (bridge without tabs).
     pub tab: bool,
 }
 
-/// Resultado da autenticação de uma requisição à ponte.
+/// Result of authenticating a request to the bridge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Auth {
-    /// Token mestre (testes e ferramentas de depuração): o `from` do corpo é aceito, validado.
+    /// Master token (tests and debugging tools): the `from` of the body is accepted, validated.
     Master,
-    /// Token de um processo de agente: o `from` é o dele, sempre.
+    /// Token of an agent process: the `from` is its own, always.
     Agent(Caller),
 }
 
-/// Token de um processo headless; esquecido quando o processo termina.
+/// Token of a headless process; forgotten when the process ends.
 pub(crate) struct TokenGuard {
     inner: Arc<CoreInner>,
     pub token: String,
@@ -190,64 +190,65 @@ impl Drop for TokenGuard {
     }
 }
 
-/// Comparação em tempo constante (o token não vaza pelo tempo de resposta).
+/// Comparison in constant time (the token does not leak through the response time).
 fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Arquivo de trava da pasta de dados: uma instância do app por pasta.
+/// Lock file of the data folder: one instance of the app per folder.
 const LOCK_FILE: &str = ".agentdeck.lock";
 
-/// Trava `dados/.agentdeck.lock`. Erro se outra instância do app já usa a pasta.
+/// Locks `dados/.agentdeck.lock`. Error if another instance of the app already uses the folder.
 fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(LOCK_FILE);
     let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
     match file.try_lock() {
         Ok(()) => {}
-        Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(
-            "Outra janela do AgentDeck já está usando a pasta de dados {}.\n\nFeche-a, ou defina AGENTDECK_HOME com outra pasta para abrir uma instância separada.",
-            data_dir.display()
-        ),
-        Err(std::fs::TryLockError::Error(e)) => log::warn!("não consegui travar {}: {e}", path.display()),
+        Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(crate::t!(
+            "Another AgentDeck window is already using the data folder {dir}.\n\nClose it, or set AGENTDECK_HOME to another \
+             folder to open a separate instance.",
+            dir = data_dir.display()
+        )),
+        Err(std::fs::TryLockError::Error(e)) => log::warn!("could not lock {}: {e}", path.display()),
     }
     Ok(file)
 }
 
 pub(crate) mod state {
-    //! Estado mutável simples compartilhado.
+    //! Simple shared mutable state.
     #[derive(Default)]
     pub struct SharedState {
         pub bridge_port: parking_lot::Mutex<u16>,
         pub bridge_token: String,
         pub session_id: String,
-        /// Sinal de encerramento (interrompe as execuções headless da ponte).
+        /// Shutdown signal (interrupts the headless runs of the bridge).
         pub shutdown: std::sync::atomic::AtomicBool,
     }
 }
 
-/// Token aleatório de 128 bits em hexadecimal.
+/// Random 128-bit token in hexadecimal.
 fn random_token() -> String {
     let mut buf = [0u8; 16];
     if getrandom::fill(&mut buf).is_err() {
-        // Fallback improvável: UUID v4 (122 bits aleatórios).
+        // Unlikely fallback: UUID v4 (122 random bits).
         buf = *uuid::Uuid::new_v4().as_bytes();
     }
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 impl Core {
-    /// Inicializa o backend: carrega config, prepara workspace (AGENTS.md + watcher),
-    /// registra a sessão/limpeza de retenção e sobe a ponte HTTP em 127.0.0.1:0.
-    /// Retorna o handle e o receptor de eventos para a UI.
+    /// Initializes the backend: loads the config, prepares the workspace (AGENTS.md + watcher),
+    /// registers the session/retention cleanup and starts the HTTP bridge on 127.0.0.1:0.
+    /// Returns the handle and the event receiver for the UI.
     pub fn start(paths: paths::AppPaths) -> anyhow::Result<(Core, Receiver<CoreEvent>)> {
         Self::start_with(paths, StartOptions::default())
     }
 
-    /// Como [`Core::start`], com opções (testes / uso embutido).
+    /// Like [`Core::start`], with options (tests / embedded use).
     pub fn start_with(paths: paths::AppPaths, opts: StartOptions) -> anyhow::Result<(Core, Receiver<CoreEvent>)> {
         let data_lock = lock_data_dir(&paths.data_dir)?;
-        // Quem pega a trava é a única instância: o que sobrou de uma que travou não vale.
+        // Whoever takes the lock is the only instance: what was left by one that crashed means nothing.
         activation::forget(&paths.data_dir);
         let (tx, rx) = crossbeam_channel::unbounded();
         let home = opts.home_dir.clone().unwrap_or_else(util::home_dir);
@@ -310,18 +311,18 @@ impl Core {
         Ok((core, rx))
     }
 
-    /// Define a função que acorda a UI a cada evento emitido.
+    /// Sets the function that wakes the UI on every emitted event.
     pub fn set_waker(&self, waker: Waker) {
         *self.inner.waker.write() = Some(waker);
     }
 
-    /// A aba `id` do projeto `project` está trabalhando agora (a interface chama enquanto ela
-    /// produz saída ou está num turno).
+    /// Tab `id` of project `project` is working now (the UI calls it while it
+    /// produces output or is in a turn).
     pub fn touch_activity(&self, project: &str, id: &str, at: std::time::Instant) {
         self.inner.activity.touch(&instances::scoped(project, id), at);
     }
 
-    /// Emite um evento para a UI (e acorda o loop).
+    /// Emits an event to the UI (and wakes the loop).
     pub fn emit(&self, ev: CoreEvent) {
         let _ = self.inner.events_tx.send(ev);
         if let Some(w) = self.inner.waker.read().as_ref() {
@@ -329,7 +330,7 @@ impl Core {
         }
     }
 
-    /// Atalho para emitir uma entrada na "Conversa integrada".
+    /// Shortcut to emit an entry in the "integrated conversation".
     pub fn feed(&self, entry: FeedEntry) {
         self.record_task_message(&entry);
         self.emit(CoreEvent::Feed(entry));
@@ -339,31 +340,31 @@ impl Core {
         &self.inner.paths
     }
 
-    /// Id desta sessão do app (base36 do instante de início).
+    /// Id of this app session (base36 of the start instant).
     pub fn session_id(&self) -> &str {
         &self.inner.state.session_id
     }
 
-    /// Registra um provedor de contexto (ponto de extensão para RAG; nenhum por padrão).
+    /// Registers a context provider (extension point for RAG; none by default).
     pub fn register_context_provider(&self, provider: Arc<dyn context::ContextProvider>) {
         self.inner.providers.write().push(provider);
     }
 
-    // ---------- Configuração (config:get / config:save) ----------
+    // ---------- Configuration (config:get / config:save) ----------
 
     pub fn config(&self) -> Config {
         self.inner.config.read().clone()
     }
 
-    /// Aplica uma alteração e persiste em disco.
-    /// Daqui em diante a configuração muda só na memória, sem gravar o arquivo (depuração).
+    /// Applies a change and persists it to disk.
+    /// From now on the configuration changes only in memory, without writing the file (debugging).
     pub fn disable_config_writes(&self) {
         self.inner.config_read_only.store(true, Ordering::SeqCst);
     }
 
     pub fn update_config(&self, f: impl FnOnce(&mut Config)) {
-        // Uma gravação por vez e na ordem das alterações (a ponte e a interface gravam de threads
-        // diferentes): sem isso uma cópia velha podia ficar por cima da nova.
+        // One save at a time and in the order of the changes (the bridge and the UI save from different
+        // threads): without this an old copy could land on top of the new one.
         let _saving = self.inner.config_save.lock();
         let snapshot = {
             let mut cfg = self.inner.config.write();
@@ -376,35 +377,35 @@ impl Core {
             return;
         }
         if let Err(e) = snapshot.save(&self.paths().config_file) {
-            log::warn!("falha ao salvar a configuração em {}: {e}", self.paths().config_file.display());
+            log::warn!("failed to save the config at {}: {e}", self.paths().config_file.display());
         }
     }
 
-    // ---------- Agentes (agents:list / pty:spawn) ----------
+    // ---------- Agents (agents:list / pty:spawn) ----------
 
-    /// Lista de agentes para menus (mesma semântica de `agents:list`). Pode bloquear (procura os
-    /// CLIs no disco e consulta o `gh`): chame fora da thread da UI.
+    /// List of agents for menus (same semantics as `agents:list`). It may block (searches for the
+    /// CLIs on disk and queries `gh`): call it outside the UI thread.
     pub fn list_agents(&self) -> Vec<AgentInfo> {
         self.inner.agents.list()
     }
 
-    /// Monta o comando para abrir, na pasta do projeto `project`, um terminal interativo do agente
+    /// Builds the command to open, in the folder of project `project`, an interactive terminal of agent
     /// `kind` (`claude`, `antigravity`, `shell`, ...).
-    /// Erro = mensagem amigável ("não instalado", projeto desconhecido) a ser escrita no terminal.
+    /// Error = friendly message ("not installed", unknown project) to be written in the terminal.
     pub fn spawn_spec(&self, project: &str, kind: &str) -> Result<SpawnSpec, String> {
         agents::spawn_spec(self, project, kind)
     }
 
-    /// Como [`Core::spawn_spec`] para uma instância (modelo + cargo + nome): o id dela vai em
-    /// `AGENTDECK_AGENT` e o cargo em `AGENTDECK_ROLE`. O token da aba é do par projeto + id.
+    /// Like [`Core::spawn_spec`] for an instance (model + role + name): its id goes in
+    /// `AGENTDECK_AGENT` and the role in `AGENTDECK_ROLE`. The tab token belongs to the project + id pair.
     pub fn spawn_spec_for(&self, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
         agents::spawn_spec_for(self, project, ident)
     }
 
-    // ---------- Instâncias (abas) e perguntas entre elas ----------
+    // ---------- Instances (tabs) and questions between them ----------
 
-    /// A interface passa a entregar as perguntas do `ask-agent` digitando nas abas (em vez de rodar
-    /// o agente à parte, em modo headless). Só vale com `Config.auto_open_agent_tabs`.
+    /// The UI starts delivering the `ask-agent` questions by typing in the tabs (instead of running
+    /// the agent separately, in headless mode). Only applies with `Config.auto_open_agent_tabs`.
     pub fn enable_tab_delivery(&self) {
         self.inner.tab_delivery.store(true, Ordering::SeqCst);
     }
@@ -413,8 +414,8 @@ impl Core {
         self.inner.tab_delivery.load(Ordering::SeqCst) && self.config().auto_open_agent_tabs
     }
 
-    /// Aplica `f` às instâncias do projeto `project` (criadas na primeira vez). Um projeto que não
-    /// existe (removido no meio de uma pergunta) não ganha entrada: `f` recebe uma lista descartável.
+    /// Applies `f` to the instances of project `project` (created on first use). A project that does not
+    /// exist (removed in the middle of a question) gets no entry: `f` receives a disposable list.
     pub(crate) fn with_instances<R>(&self, project: &str, f: impl FnOnce(&mut instances::Instances) -> R) -> R {
         let exists = self.project_path(project).is_some();
         let mut all = self.inner.instances.lock();
@@ -425,39 +426,39 @@ impl Core {
         }
     }
 
-    /// Nova instância aberta pelo usuário no projeto (menu "+"): `claude`, e `claude@main@ana` se
-    /// o projeto já tem uma. Outro projeto pode ter o seu `claude` sem conflito.
+    /// New instance opened by the user in the project (the "+" menu): `claude`, and `claude@main@ana` if
+    /// the project already has one. Another project can have its own `claude` without a conflict.
     pub fn register_instance(&self, project: &str, kind: &str) -> Ident {
         self.with_instances(project, |list| list.allocate(kind, None, None))
     }
 
-    /// Reabre uma instância do projeto com o id que ela tinha (restauração das abas). `None` se o
-    /// id é inválido.
+    /// Reopens an instance of the project with the id it had (tab restoration). `None` if the
+    /// id is invalid.
     pub fn restore_instance(&self, project: &str, id: &str) -> Option<Ident> {
         let ident = Ident::parse(id)?;
         self.with_instances(project, |list| list.register(ident.clone()));
         Some(ident)
     }
 
-    /// Resolve uma instância (modelo/cargo/nome) no projeto, criando-a se não existir (ou se
-    /// `force_new`). Retorna `(ident, created)` ou a lista de candidatos ambíguos.
+    /// Resolves an instance (model/role/name) in the project, creating it if it does not exist (or if
+    /// `force_new`). Returns `(ident, created)` or the list of ambiguous candidates.
     pub fn resolve_instance(&self, project: &str, want: &Ident, force_new: bool) -> Result<(Ident, bool), Vec<String>> {
         self.with_instances(project, |list| list.resolve_or_create(want, force_new))
     }
 
-    /// A aba da instância fechou: esquece a instância, o token e a atividade dela, avisa quem
-    /// esperava resposta dela e descarta as perguntas que ela fez (ninguém mais lê as respostas).
+    /// The instance's tab was closed: forgets the instance, its token and its activity, notifies whoever
+    /// was waiting for its answer and discards the questions it asked (nobody reads the answers any more).
     pub fn close_instance(&self, project: &str, id: &str) {
         if let Some(list) = self.inner.instances.lock().get_mut(project) {
             list.remove(id);
         }
         self.inner.callers.lock().retain(|_, c| !(c.tab && c.project == project && c.id == id));
         let key = instances::scoped(project, id);
-        self.inner.exchange.fail_target(&key, &format!("a aba de \"{id}\" foi fechada antes de responder"));
-        self.inner.exchange.fail_asker(&key, &format!("a aba de \"{id}\" foi fechada"));
+        self.inner.exchange.fail_target(&key, &format!("the tab of \"{id}\" was closed before answering"));
+        self.inner.exchange.fail_asker(&key, &format!("the tab of \"{id}\" was closed"));
         self.inner.activity.forget(&key);
         self.inner.team_changed.lock().remove(&key);
-        // A equipe de quem fechou passa ao chefe dele.
+        // The team of whoever closed goes to their boss.
         let mut touched = Vec::new();
         self.update_project(project, |p| {
             touched = team::remove(&mut p.tab_parents, id);
@@ -466,29 +467,29 @@ impl Core {
         self.mark_team_changed(project, &touched);
     }
 
-    // ---------- Hierarquia (chefe e equipe) ----------
+    // ---------- Hierarchy (boss and team) ----------
 
-    /// Chefe e equipe da instância `id` do projeto (só instâncias abertas).
+    /// Boss and team of instance `id` of the project (only open instances).
     pub fn team(&self, project: &str, id: &str) -> Team {
         let parents = self.inner.config.read().project(project).map(|p| p.tab_parents.clone()).unwrap_or_default();
         team::team_of(&parents, id, &self.project_instance_ids(project))
     }
 
-    /// Põe a instância `id` sob `boss` (`None` = responde ao usuário). Recusa instâncias que não
-    /// estão abertas no projeto e ciclos. Quem foi afetado (ela, o chefe antigo e o novo) recebe o
-    /// aviso na próxima mensagem.
+    /// Puts instance `id` under `boss` (`None` = answers to the user). Refuses instances that are not
+    /// open in the project and cycles. Whoever was affected (it, the old boss and the new one) receives the
+    /// notice with the next message.
     pub fn set_boss(&self, project: &str, id: &str, boss: Option<&str>) -> Result<(), String> {
         let open = self.project_instance_ids(project);
         for who in std::iter::once(id).chain(boss) {
             if !open.iter().any(|o| o == who) {
-                return Err(format!("\"{who}\" não está aberto neste projeto"));
+                return Err(crate::t!("\"{who}\" is not open in this project", who));
             }
         }
-        // Confere e grava sob a mesma trava: um arrasto e a ponte ao mesmo tempo não formam ciclo.
+        // Checks and saves under the same lock: a drag and the bridge at the same time do not form a cycle.
         let mut outcome: Result<Option<Option<String>>, String> = Ok(None);
         self.update_project(project, |p| {
             if let Some(b) = boss.filter(|b| team::would_cycle(&p.tab_parents, id, b)) {
-                outcome = Err(format!("\"{b}\" já faz parte da equipe de \"{id}\": não pode ser o chefe dele"));
+                outcome = Err(crate::t!("\"{b}\" is already part of the team of \"{id}\": it cannot be its boss", b, id));
                 return;
             }
             let old = p.tab_parents.get(id).cloned();
@@ -512,14 +513,14 @@ impl Core {
         changed.extend(ids.iter().map(|id| instances::scoped(project, id)));
     }
 
-    /// O aviso de equipe pendente da instância (uma vez: some ao ser lido). A interface anexa à
-    /// mensagem quando a digita: uma entrega descartada não gasta o aviso.
+    /// The instance's pending team notice (once: it disappears when read). The UI attaches it to the
+    /// message when it types it: a discarded delivery does not spend the notice.
     pub fn take_team_notice(&self, project: &str, id: &str) -> Option<String> {
         let had = self.inner.team_changed.lock().remove(&instances::scoped(project, id));
         had.then(|| team::notice(&self.team(project, id)))
     }
 
-    /// Renomeia uma instância aberta do projeto (atualiza instâncias, callers e perguntas pendentes).
+    /// Renames an open instance of the project (updates instances, callers and pending questions).
     pub fn rename_instance(&self, project: &str, old_id: &str, new_ident: &Ident) -> Result<(), String> {
         self.with_instances(project, |list| list.rename(old_id, new_ident.clone()))?;
         let new_id = new_ident.id();
@@ -542,38 +543,38 @@ impl Core {
         Ok(())
     }
 
-    /// O processo da instância terminou (a aba continua aberta): quem esperava a resposta dela é liberado.
+    /// The instance's process ended (the tab stays open): whoever was waiting for its answer is released.
     pub fn instance_ended(&self, project: &str, id: &str) {
-        self.inner.exchange.fail_target(&instances::scoped(project, id), &format!("o processo de \"{id}\" encerrou antes de responder"));
+        self.inner.exchange.fail_target(&instances::scoped(project, id), &format!("the process of \"{id}\" ended before answering"));
     }
 
-    /// A pergunta número `request` ainda espera resposta. Uma pergunta que expirou ou cuja aba de
-    /// origem fechou enquanto estava na fila não deve mais ser digitada.
+    /// Question number `request` is still waiting for an answer. A question that expired or whose source
+    /// tab closed while it was in the queue must not be typed any more.
     pub fn question_pending(&self, request: u64) -> bool {
         self.inner.exchange.is_pending(request)
     }
 
-    /// A entrega não pôde ser feita (aba morreu, não subiu…): libera quem espera.
+    /// The delivery could not be made (tab died, did not start…): releases whoever is waiting.
     pub fn fail_delivery(&self, request: u64, reason: &str) {
         self.inner.exchange.fail(request, reason);
     }
 
-    /// A interface digitou no terminal de quem perguntou a resposta atrasada da pergunta `request`.
+    /// The UI typed the late answer of question `request` in the terminal of whoever asked.
     pub fn answer_typed(&self, request: u64) {
         self.inner.inbox.mark_delivered(request);
     }
 
-    /// A resposta da pergunta `request` não chegou a quem perguntou (`why`: a aba fechou, a conexão foi
-    /// abandonada…). Ela continua em `ask-agent --inbox`; a Conversa integrada do projeto avisa.
+    /// The answer of question `request` did not reach whoever asked (`why`: the tab closed, the connection was
+    /// abandoned…). It stays in `ask-agent --inbox`; the project's integrated conversation warns.
     pub fn answer_lost(&self, project: &str, request: u64, why: &str) {
         let Some((asker, entry)) = self.inner.inbox.find(request) else { return };
         let asker = instances::unscoped(&asker).1;
-        let text = format!("A resposta #{request} para {asker} não foi digitada: {why}; ela fica em ask-agent --inbox.");
+        let text = crate::t!("The answer #{request} to {asker} was not typed: {why}; it stays in ask-agent --inbox.", request, asker, why);
         self.feed(FeedEntry::new(FeedKind::Error, Some(&entry.from), Some(asker), text).in_project(project));
     }
 
-    /// Ids das instâncias abertas em todos os projetos, sem o projeto e sem repetição (o
-    /// `claude` de dois projetos aparece uma vez). Serve a quem só olha o modelo (uso dos planos).
+    /// Ids of the instances open in all projects, without the project and without repetition (the
+    /// `claude` of two projects appears once). It serves whoever only looks at the model (plan usage).
     pub fn instance_ids(&self) -> Vec<String> {
         let all = self.inner.instances.lock();
         let mut projects: Vec<&String> = all.keys().collect();
@@ -587,13 +588,13 @@ impl Core {
         out
     }
 
-    /// Ids das instâncias abertas no projeto.
+    /// Ids of the instances open in the project.
     pub fn project_instance_ids(&self, project: &str) -> Vec<String> {
         self.inner.instances.lock().get(project).map(instances::Instances::ids).unwrap_or_default()
     }
 
-    /// Ids que podem ser usados com `ask-agent` no projeto: os agentes instalados e as instâncias
-    /// abertas nele (as de outros projetos não aparecem).
+    /// Ids that can be used with `ask-agent` in the project: the installed agents and the instances
+    /// open in it (those of other projects do not appear).
     pub fn peers(&self, project: &str) -> Vec<String> {
         let mut out = self.inner.agents.peers();
         for id in self.project_instance_ids(project) {
@@ -604,36 +605,36 @@ impl Core {
         out
     }
 
-    /// Instruções da ponte para o agente `self_id` (`None` = texto genérico do AGENTS.md).
+    /// Bridge instructions for agent `self_id` (`None` = the generic text of AGENTS.md).
     pub fn bridge_instructions(&self, self_id: Option<&str>) -> String {
         self.inner.agents.bridge_instructions(self_id)
     }
 
-    // ---------- Projetos ----------
+    // ---------- Projects ----------
 
-    /// Projetos, na ordem da barra lateral.
+    /// Projects, in the sidebar order.
     pub fn projects(&self) -> Vec<ProjectCfg> {
         self.inner.config.read().project_list.clone()
     }
 
-    /// O projeto ativo (`None` = nenhum projeto).
+    /// The active project (`None` = no project).
     pub fn active_project(&self) -> Option<ProjectCfg> {
         self.inner.config.read().active().cloned()
     }
 
-    /// Id do projeto ativo (vazio = nenhum).
+    /// Id of the active project (empty = none).
     pub fn active_project_id(&self) -> String {
         self.inner.config.read().active_project.clone()
     }
 
-    /// Pasta do projeto `id`.
+    /// Folder of project `id`.
     pub fn project_path(&self, id: &str) -> Option<PathBuf> {
         self.inner.config.read().project(id).map(|p| p.path.clone())
     }
 
-    /// Cria (e grava) um projeto na pasta `path`; sem `name`, o nome é o da pasta. Se a pasta já
-    /// é de um projeto, devolve esse. Não troca o projeto ativo, a não ser que não haja nenhum:
-    /// aí o novo fica ativo.
+    /// Creates (and saves) a project in folder `path`; without `name`, the name is the folder's. If the folder already
+    /// belongs to a project, returns that one. Does not switch the active project, unless there is none:
+    /// then the new one becomes active.
     pub fn create_project(&self, path: &Path, name: Option<&str>) -> ProjectCfg {
         let path = util::absolutize(path);
         let mut out = None;
@@ -644,23 +645,23 @@ impl Core {
                 None => c.add_project(path, name),
             });
         });
-        let project = out.expect("update_config roda o fechamento");
+        let project = out.expect("update_config runs the closure");
         if self.active_project().is_none() {
             if let Err(e) = self.set_active_project(&project.id) {
-                log::warn!("falha ao ativar o projeto {}: {e}", project.path.display());
+                log::warn!("failed to activate project {}: {e}", project.path.display());
             }
         }
         project
     }
 
-    /// Dá outro nome ao projeto (a pasta não muda). `false` se o projeto não existe ou o nome é vazio.
+    /// Gives the project another name (the folder does not change). `false` if the project does not exist or the name is empty.
     pub fn rename_project(&self, id: &str, name: &str) -> bool {
         let name = name.trim();
         !name.is_empty() && self.update_project(id, |p| p.name = name.to_owned())
     }
 
-    /// Altera os dados de um projeto e grava (abas abertas, aba ativa, ordem e proporções das
-    /// janelas). O id e a pasta não mudam. `false` se o projeto não existe.
+    /// Changes a project's data and saves it (open tabs, active tab, order and proportions of the
+    /// windows). The id and the folder do not change. `false` if the project does not exist.
     pub fn update_project(&self, id: &str, f: impl FnOnce(&mut ProjectCfg)) -> bool {
         if self.inner.config.read().project(id).is_none() {
             return false;
@@ -676,15 +677,15 @@ impl Core {
         true
     }
 
-    /// Tira o projeto da lista: fecha as instâncias dele e falha as perguntas pendentes nele. Se
-    /// era o ativo, ativa o primeiro que sobrar (ou nenhum). `false` se o projeto não existe.
-    /// A pasta não é apagada.
+    /// Takes the project out of the list: closes its instances and fails the pending questions in it. If
+    /// it was the active one, activates the first that is left (or none). `false` if the project does not exist.
+    /// The folder is not deleted.
     pub fn remove_project(&self, id: &str) -> bool {
         if self.project_path(id).is_none() {
             return false;
         }
-        // Primeiro os tokens (nenhuma pergunta nova entra) e o projeto (uma pergunta que já passou
-        // da autenticação confere que ele existe depois de registrada; ver `bridge::ask_tab`).
+        // First the tokens (no new question comes in) and the project (a question that already passed
+        // authentication checks that it exists after being registered; see `bridge::ask_tab`).
         self.inner.callers.lock().retain(|_, c| c.project != id);
         let was_active = self.active_project_id() == id;
         self.update_config(|c| {
@@ -694,9 +695,9 @@ impl Core {
         for instance in &ids {
             self.close_instance(id, instance);
         }
-        // Perguntas que sobraram no projeto (ex.: feitas pelo token mestre).
+        // Questions that were left in the project (e.g. asked with the master token).
         for p in self.inner.exchange.snapshot().into_iter().filter(|p| p.project == id) {
-            self.inner.exchange.fail(p.id, "o projeto foi removido");
+            self.inner.exchange.fail(p.id, "the project was removed");
         }
         let prefix = instances::scoped(id, "");
         self.inner.headless_sessions.lock().retain(|k, _| !k.starts_with(&prefix));
@@ -709,10 +710,10 @@ impl Core {
         true
     }
 
-    /// Torna `id` o projeto ativo (persistido): a pasta dele vira o workspace (árvore, git,
-    /// anexos), e o AGENTS.md e o watcher são refeitos.
+    /// Makes `id` the active project (persisted): its folder becomes the workspace (tree, git,
+    /// attachments), and the AGENTS.md and the watcher are made again.
     pub fn set_active_project(&self, id: &str) -> anyhow::Result<()> {
-        let Some(path) = self.project_path(id) else { anyhow::bail!("projeto desconhecido: {id}") };
+        let Some(path) = self.project_path(id) else { anyhow::bail!(crate::t!("unknown project: {id}", id)) };
         std::fs::create_dir_all(&path)?;
         self.update_config(|c| {
             c.active_project = id.to_owned();
@@ -722,25 +723,25 @@ impl Core {
         Ok(())
     }
 
-    /// Escreve o AGENTS.md na pasta de um projeto que não é o ativo, na primeira aba aberta nele
-    /// (o do ativo é mantido por [`Core::prepare_workspace`]).
+    /// Writes AGENTS.md in the folder of a project that is not the active one, in the first tab opened in it
+    /// (the active one's is kept by [`Core::prepare_workspace`]).
     fn ensure_project_context(&self, project: &str, path: &Path) {
         if project == self.active_project_id() || !self.inner.context_written.lock().insert(project.to_owned()) {
             return;
         }
         if let Err(e) = std::fs::create_dir_all(path) {
-            log::warn!("falha ao criar a pasta do projeto {}: {e}", path.display());
+            log::warn!("failed to create the project folder {}: {e}", path.display());
         }
         let instructions = self.bridge_instructions(None);
         if let Err(e) = workspace::ensure_agent_context(path, &self.paths().app_dir, &self.inner.home, &instructions, false) {
-            log::warn!("falha ao atualizar AGENTS.md em {}: {e}", path.display());
+            log::warn!("failed to update AGENTS.md at {}: {e}", path.display());
         }
     }
 
-    /// Para o CLI que só lê o `AGENTS.md` da pasta onde roda (ver `agents::reads_only_agents_md`): cria o arquivo em
-    /// `dir`, só com o bloco do app, se a pasta não tem um, e avisa o usuário na Conversa. Um `AGENTS.md` que já
-    /// existe fica como está aqui (o bloco dele é mantido por `prepare_workspace`/`ensure_project_context`; numa
-    /// worktree de tarefa, o arquivo é o versionado). Nunca na pasta pessoal.
+    /// For the CLI that only reads the `AGENTS.md` of the folder where it runs (see `agents::reads_only_agents_md`): creates the
+    /// file in `dir`, with only the app block, if the folder has none, and warns the user in the Conversation. An `AGENTS.md`
+    /// that already exists stays as it is here (its block is kept by `prepare_workspace`/`ensure_project_context`; in a task
+    /// worktree the file is the versioned one). Never in the home folder.
     fn ensure_agents_file(&self, project: &str, dir: &Path) {
         if dir.join("AGENTS.md").exists() {
             return;
@@ -748,23 +749,27 @@ impl Core {
         let instructions = self.bridge_instructions(None);
         match workspace::ensure_agent_context(dir, &self.paths().app_dir, &self.inner.home, &instructions, true) {
             Ok(workspace::AgentContext::Created) => {
-                log::info!("AGENTS.md criado em {} (o CLI só lê instruções de lá)", dir.display());
-                let text = "O AgentDeck criou um AGENTS.md só com as instruções dele nesta pasta, porque este CLI só lê instruções de lá.                             Ele aparece como arquivo novo no git: faça o commit ou apague-o à vontade.";
+                log::info!("AGENTS.md created at {} (the CLI only reads instructions from there)", dir.display());
+                let text = crate::t!(
+                    "AgentDeck created an AGENTS.md with only its own instructions in this folder, because this CLI only reads \
+                     instructions from there. It shows up as a new file in git: commit it or delete it as \
+                     you like."
+                );
                 self.feed(FeedEntry::system(text).in_project(project));
             }
             Ok(_) => {}
-            Err(e) => log::warn!("falha ao criar AGENTS.md em {}: {e}", dir.display()),
+            Err(e) => log::warn!("failed to create AGENTS.md at {}: {e}", dir.display()),
         }
     }
 
-    // ---------- Workspace (a pasta do projeto ativo) ----------
+    // ---------- Workspace (the active project's folder) ----------
 
-    /// Pasta do projeto ativo (vazia = nenhum projeto).
+    /// Folder of the active project (empty = no project).
     pub fn workspace(&self) -> PathBuf {
         self.inner.config.read().workspace.clone()
     }
 
-    /// Atalho: cria (se preciso) o projeto da pasta `dir` e o torna ativo.
+    /// Shortcut: creates (if needed) the project of folder `dir` and makes it active.
     pub fn set_workspace(&self, dir: PathBuf) -> anyhow::Result<()> {
         let dir = util::absolutize(&dir);
         std::fs::create_dir_all(&dir)?;
@@ -772,29 +777,29 @@ impl Core {
         self.set_active_project(&project.id)
     }
 
-    /// Cria a pasta, atualiza o AGENTS.md e (re)inicia o watcher. Equivalente a `prepareWorkspace`.
-    /// Sem projeto ativo, só solta o watcher.
+    /// Creates the folder, updates AGENTS.md and (re)starts the watcher. Equivalent to `prepareWorkspace`.
+    /// Without an active project, it only releases the watcher.
     fn prepare_workspace(&self) {
         let ws = self.workspace();
         let mut guard = self.inner.watcher.lock();
-        *guard = None; // solta o watcher anterior antes de criar o novo
+        *guard = None; // releases the previous watcher before creating the new one
         if ws.as_os_str().is_empty() {
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&ws) {
-            log::warn!("falha ao criar o workspace {}: {e}", ws.display());
+            log::warn!("failed to create the workspace {}: {e}", ws.display());
         }
         self.refresh_agent_context();
         if self.inner.watch_workspace && ws.is_dir() {
             match workspace::start_watcher(&ws, Arc::downgrade(&self.inner)) {
                 Ok(w) => *guard = Some(w),
-                Err(e) => log::warn!("falha ao iniciar o watcher do workspace: {e}"),
+                Err(e) => log::warn!("failed to start the workspace watcher: {e}"),
             }
         }
     }
 
-    /// Reescreve o bloco do AgentDeck no AGENTS.md do projeto ativo (respeitando as regras de
-    /// onde criar). Os outros projetos são reescritos na próxima aba aberta neles.
+    /// Rewrites the AgentDeck block in the AGENTS.md of the active project (respecting the rules about
+    /// where to create it). The other projects are rewritten in the next tab opened in them.
     fn refresh_agent_context(&self) {
         self.inner.context_written.lock().clear();
         let ws = self.workspace();
@@ -803,13 +808,13 @@ impl Core {
         }
         let instructions = self.bridge_instructions(None);
         if let Err(e) = workspace::ensure_agent_context(&ws, &self.paths().app_dir, &self.inner.home, &instructions, false) {
-            log::warn!("falha ao atualizar AGENTS.md: {e}");
+            log::warn!("failed to update AGENTS.md: {e}");
         }
     }
 
-    /// Lista uma pasta relativa ao workspace (`""` = raiz), já filtrada e ordenada
-    /// (pastas primeiro, nome case-insensitive). Mesmo filtro de `workspace:readDir`.
-    /// Sem projeto ativo, nada.
+    /// Lists a folder relative to the workspace (`""` = root), already filtered and sorted
+    /// (folders first, case-insensitive name). Same filter as `workspace:readDir`.
+    /// Without an active project, nothing.
     pub fn read_dir(&self, rel_dir: &str) -> Vec<DirEntry> {
         let ws = self.workspace();
         if ws.as_os_str().is_empty() {
@@ -818,25 +823,25 @@ impl Core {
         workspace::read_dir(&ws, rel_dir)
     }
 
-    /// Lê um arquivo de texto do workspace (até 1 MB) para a visualização do modo Documentos; sem
-    /// projeto ativo, erro. Ver [`workspace::read_text`].
+    /// Reads a text file of the workspace (up to 1 MB) for the Documents mode view; without an
+    /// active project, an error. See [`workspace::read_text`].
     pub fn read_text(&self, rel_path: &str) -> Result<workspace::TextFile, String> {
         workspace::read_text(&self.workspace(), rel_path)
     }
 
-    /// Grava um arquivo editado no modo Documentos, na pasta do projeto `project` (o documento pode ser de um projeto
-    /// que não é o ativo). Ver [`workspace::write_text`]. BLOQUEANTE: chame numa thread.
+    /// Writes a file edited in the Documents mode, in the folder of project `project` (the document may belong to a
+    /// project that is not the active one). See [`workspace::write_text`]. BLOCKING: call it on a thread.
     pub fn write_text(&self, project: &str, rel_path: &str, text_lf: &str, eol: Eol, bom: bool) -> Result<(), String> {
-        let ws = self.project_path(project).ok_or_else(|| "o projeto não existe mais".to_owned())?;
+        let ws = self.project_path(project).ok_or_else(|| crate::t!("the project no longer exists").to_owned())?;
         workspace::write_text(&ws, rel_path, text_lf, eol, bom)
     }
 
-    /// Abre um arquivo do workspace no app padrão do sistema. Aceita caminhos relativos ao
-    /// workspace ou absolutos dentro do workspace / da pasta `dados` (anexos).
+    /// Opens a workspace file with the system's default app. Accepts paths relative to the
+    /// workspace or absolute inside the workspace / the `dados` folder (attachments).
     pub fn open_path(&self, rel_path: &str) -> anyhow::Result<()> {
         let ws = self.workspace();
         if ws.as_os_str().is_empty() {
-            anyhow::bail!("nenhum projeto aberto");
+            anyhow::bail!(crate::t!("no project open"));
         }
         let full = match workspace::resolve_workspace_path(rel_path, &ws) {
             Ok(p) => p,
@@ -848,47 +853,48 @@ impl Core {
                 abs
             }
         };
-        open::that_detached(&full).map_err(|e| anyhow::anyhow!("falha ao abrir {}: {e}", full.display()))
+        open::that_detached(&full)
+            .map_err(|e| anyhow::anyhow!(crate::t!("failed to open {path}: {error}", path = full.display(), error = e)))
     }
 
-    // ---------- Anexos ----------
+    // ---------- Attachments ----------
 
-    /// Copia arquivos para `dados/anexos` (ignora pastas). Retorna referências para citar (`@ref`).
+    /// Copies files to `dados/anexos` (ignores folders). Returns references to cite (`@ref`).
     pub fn attach_files(&self, files: &[PathBuf]) -> Vec<String> {
         attachments::attach_files(&self.paths().data_dir, &self.workspace(), self.session_id(), files)
     }
 
-    /// Grava bytes (ex.: imagem colada) como anexo. `name` pode ser vazio.
+    /// Saves bytes (e.g. a pasted image) as an attachment. `name` may be empty.
     pub fn attach_bytes(&self, name: &str, bytes: &[u8]) -> anyhow::Result<String> {
         attachments::attach_bytes(&self.paths().data_dir, &self.workspace(), self.session_id(), name, bytes)
     }
 
-    /// Grava uma imagem RGBA (ex.: da área de transferência) como PNG anexo.
+    /// Saves an RGBA image (e.g. from the clipboard) as a PNG attachment.
     pub fn attach_rgba_png(&self, width: u32, height: u32, rgba: &[u8]) -> anyhow::Result<String> {
         attachments::attach_rgba_png(&self.paths().data_dir, &self.workspace(), self.session_id(), width, height, rgba)
     }
 
-    // ---------- Transcrição (audio:*) ----------
+    // ---------- Transcription (audio:*) ----------
 
-    /// Rótulo do melhor motor disponível ou "indisponível". Na primeira chamada no
-    /// Windows detecta as GPUs (≈1 s); prefira chamar fora da thread da UI.
+    /// Label of the best available engine or "unavailable". On the first call on
+    /// Windows it detects the GPUs (≈1 s); prefer calling it outside the UI thread.
     pub fn transcribe_engine(&self) -> String {
         whisper::transcribe_engine(self)
     }
 
-    /// Transcreve PCM mono 16 kHz (f32 -1..1). Grava WAV temporário, roda whisper.cpp
-    /// com fallback de motores e apaga o WAV. BLOQUEANTE: chame numa thread.
+    /// Transcribes mono 16 kHz PCM (f32 -1..1). Writes a temporary WAV, runs whisper.cpp
+    /// with engine fallback and deletes the WAV. BLOCKING: call it on a thread.
     pub fn transcribe_pcm16k(&self, samples: &[f32]) -> anyhow::Result<Transcription> {
         whisper::transcribe_pcm16k(self, samples)
     }
 
-    /// Garante modelo/binários do whisper (download em background com feed de progresso).
+    /// Ensures the whisper model/binaries (background download with progress feed).
     pub fn ensure_whisper_async(&self) {
         whisper::ensure_whisper_async(self);
     }
 
-    /// O que fazer com o ditado por voz ao abrir o app (ver [`whisper::Startup`]). Quem já tem o Whisper
-    /// baixado e nunca foi perguntado passa a constar como "sim" na configuração.
+    /// What to do with the voice dictation when the app opens (see [`whisper::Startup`]). Whoever already has Whisper
+    /// downloaded and was never asked starts to count as "yes" in the configuration.
     pub fn dictation_startup(&self) -> whisper::Startup {
         let installed = self.dictation_installed();
         let (startup, choice) = whisper::startup(self.config().dictation, installed);
@@ -896,25 +902,25 @@ impl Core {
         startup
     }
 
-    /// Grava a escolha do ditado (sem regravar o arquivo se não mudou).
+    /// Saves the dictation choice (without rewriting the file if it did not change).
     pub fn set_dictation_choice(&self, choice: DictationChoice) {
         if self.config().dictation != choice {
             self.update_config(|c| c.dictation = choice);
         }
     }
 
-    /// O modelo e um motor do whisper estão no disco: o ditado pode ser usado.
+    /// The whisper model and an engine are on disk: the dictation can be used.
     pub fn dictation_installed(&self) -> bool {
         whisper::is_installed(&self.paths().whisper_dir)
     }
 
-    /// Há um download do ditado em andamento.
+    /// A dictation download is in progress.
     pub fn dictation_downloading(&self) -> bool {
         whisper::is_downloading(self)
     }
 
-    /// Apaga do disco o que o ditado baixou (modelo, motor CUDA, pacotes pela metade) e passa a escolha a
-    /// "não". Recusa enquanto baixa. Devolve os bytes liberados.
+    /// Deletes from disk what the dictation downloaded (model, CUDA engine, half-done packages) and sets the choice to
+    /// "no". Refuses while it is downloading. Returns the bytes freed.
     pub fn remove_dictation(&self) -> Result<u64, String> {
         let freed = whisper::remove_downloaded(self)?;
         self.set_dictation_choice(DictationChoice::No);
@@ -922,19 +928,19 @@ impl Core {
         Ok(freed)
     }
 
-    // ---------- Ponte ----------
+    // ---------- Bridge ----------
 
     pub fn bridge_port(&self) -> u16 {
         *self.inner.state.bridge_port.lock()
     }
 
-    /// Token mestre da ponte. Os agentes recebem tokens próprios (ver [`Core::tab_token`]).
+    /// Master token of the bridge. The agents receive their own tokens (see [`Core::tab_token`]).
     pub fn bridge_token(&self) -> &str {
         &self.inner.state.bridge_token
     }
 
-    /// Token da aba da instância `id` do projeto `project` (o mesmo enquanto a instância existir;
-    /// o `claude` de cada projeto tem o seu).
+    /// Token of the tab of instance `id` of project `project` (the same while the instance exists;
+    /// the `claude` of each project has its own).
     pub(crate) fn tab_token(&self, project: &str, id: &str) -> String {
         let mut callers = self.inner.callers.lock();
         if let Some((token, _)) = callers.iter().find(|(_, c)| c.tab && c.project == project && c.id == id) {
@@ -945,14 +951,14 @@ impl Core {
         token
     }
 
-    /// Token de uma execução headless de `id` no projeto `project`, válido enquanto o guarda existir.
+    /// Token of a headless run of `id` in project `project`, valid while the guard exists.
     pub(crate) fn headless_token(&self, project: &str, id: &str) -> TokenGuard {
         let token = random_token();
         self.inner.callers.lock().insert(token.clone(), Caller { id: id.to_owned(), project: project.to_owned(), tab: false });
         TokenGuard { inner: self.inner.clone(), token }
     }
 
-    /// Quem é o dono do token (`None` = token inválido).
+    /// Who owns the token (`None` = invalid token).
     pub(crate) fn authenticate(&self, token: &str) -> Option<Auth> {
         if same_secret(token, &self.inner.state.bridge_token) {
             return Some(Auth::Master);
@@ -960,7 +966,7 @@ impl Core {
         self.inner.callers.lock().get(token).cloned().map(Auth::Agent)
     }
 
-    /// Encerra processos filhos headless (chamado ao fechar a janela), a ponte e o watcher.
+    /// Shuts down the headless child processes (called when the window closes), the bridge and the watcher.
     pub fn shutdown(&self) {
         self.inner.state.shutdown.store(true, Ordering::SeqCst);
         activation::forget(&self.paths().data_dir);
@@ -969,14 +975,14 @@ impl Core {
             server.unblock();
         }
         *self.inner.watcher.lock() = None;
-        // A trava sai agora, não quando a última cópia do `Core` sumir: threads em segundo plano (ponte, cota) ainda
-        // seguram cópias por um instante, e uma nova abertura na mesma pasta de dados recusaria nesse intervalo.
+        // The lock goes now, not when the last copy of `Core` disappears: background threads (bridge, quota) still
+        // hold copies for a moment, and a new opening in the same data folder would refuse in that interval.
         self.inner.data_lock.lock().take();
     }
 }
 
-/// Converte um caminho absoluto na referência usada para citar arquivos aos agentes
-/// (relativo ao workspace quando dentro dele, com `/`). Equivalente a `refPath`.
+/// Converts an absolute path into the reference used to cite files to the agents
+/// (relative to the workspace when inside it, with `/`). Equivalent to `refPath`.
 pub fn ref_path(workspace: &Path, abs: &Path) -> String {
     util::ref_path(workspace, abs)
 }
@@ -988,15 +994,15 @@ mod tests {
     #[test]
     fn the_data_dir_is_locked_by_one_instance() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let first = lock_data_dir(tmp.path()).expect("primeira");
-        let err = lock_data_dir(tmp.path()).expect_err("a segunda recusa").to_string();
-        assert!(err.starts_with("Outra janela do AgentDeck já está usando a pasta de dados"), "{err}");
+        let first = lock_data_dir(tmp.path()).expect("first");
+        let err = lock_data_dir(tmp.path()).expect_err("the second one refuses").to_string();
+        assert!(err.starts_with("Another AgentDeck window is already using the data folder"), "{err}");
         drop(first);
-        lock_data_dir(tmp.path()).expect("livre de novo");
+        lock_data_dir(tmp.path()).expect("free again");
     }
 
-    /// Visto no CI do Fedora: depois do `shutdown`, uma cópia do `Core` ainda viva numa thread segurava a trava, e a
-    /// reabertura na mesma pasta de dados recusava.
+    /// Seen in the Fedora CI: after `shutdown`, a copy of `Core` still alive on a thread held the lock, and
+    /// reopening in the same data folder refused.
     #[test]
     fn shutdown_frees_the_data_dir_even_with_a_copy_still_alive() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -1019,7 +1025,7 @@ mod tests {
         let (core, _rx) = Core::start_with(paths, opts).expect("start");
         let still_alive = core.clone();
         core.shutdown();
-        lock_data_dir(&root.join("dados")).expect("a pasta fica livre logo depois do shutdown");
+        lock_data_dir(&root.join("dados")).expect("the folder is free right after the shutdown");
         drop(still_alive);
     }
 }

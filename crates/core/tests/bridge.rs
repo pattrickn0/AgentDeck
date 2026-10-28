@@ -648,7 +648,7 @@ fn a_role_opens_a_new_instance_and_new_forces_another() {
     for t in [first, second, third] {
         let (st, b) = t.join().expect("thread");
         assert_eq!(st, 500);
-        assert!(b["error"].as_str().expect("erro").contains("fechada"), "{b}");
+        assert!(b["error"].as_str().expect("erro").contains("was closed"), "{b}");
     }
     env.core.shutdown();
 }
@@ -857,7 +857,7 @@ fn one_app_per_data_dir() {
     let env = start(&[]);
     let second = Core::start_with(paths_in(&env.root), StartOptions { watch_workspace: false, system_dirs: false, ..Default::default() });
     let err = second.err().expect("a segunda instância na mesma pasta de dados é recusada").to_string();
-    assert!(err.contains("já está usando a pasta de dados"), "{err}");
+    assert!(err.contains("is already using the data folder"), "{err}");
     env.core.shutdown();
 }
 
@@ -972,7 +972,7 @@ fn closing_the_askers_tab_drops_its_questions() {
     env.core.close_instance(&p, "claude@dev");
     let (st, b) = asking.join().expect("thread");
     assert_eq!(st, 500);
-    assert!(b["error"].as_str().expect("erro").contains("fechada"), "{b}");
+    assert!(b["error"].as_str().expect("erro").contains("was closed"), "{b}");
     // Sem a pergunta antiga, claude pode perguntar a claude@dev (nada de "ciclo" fantasma).
     let claude = tab_token(&env, "claude");
     let port2 = env.core.bridge_port();

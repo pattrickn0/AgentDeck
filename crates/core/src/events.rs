@@ -1,36 +1,36 @@
-//! Eventos do backend para a UI (equivalente aos canais `feed` e `workspace:changed`).
+//! Backend events for the UI (equivalent to the `feed` and `workspace:changed` channels).
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FeedKind {
-    /// Pergunta de um agente para outro via ask-agent.
+    /// A question from one agent to another through ask-agent.
     Ask,
-    /// Resposta do agente consultado.
+    /// The answer of the agent that was asked.
     Answer,
-    /// Mensagem do usuário para a aba ativa.
+    /// A message from the user to the active tab.
     User,
-    /// Indicador transitório ("⚙️ [read_file] x"). É substituído
-    /// pela próxima mensagem do mesmo `from`.
+    /// Transient indicator ("⚙️ [read_file] x"). It is replaced
+    /// by the next message from the same `from`.
     Thinking,
-    /// Mensagem do sistema (cinza, sem moldura).
+    /// System message (grey, without a frame).
     System,
-    /// Erro (borda vermelha).
+    /// Error (red border).
     Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedEntry {
-    /// Epoch em milissegundos.
+    /// Epoch in milliseconds.
     pub ts: u64,
     pub kind: FeedKind,
-    /// Id da instância que fala, sem o projeto (`claude@dev`).
+    /// Id of the instance that speaks, without the project (`claude@dev`).
     pub from: Option<String>,
-    /// Destinatário (id sem o projeto).
+    /// Recipient (id without the project).
     pub to: Option<String>,
     pub text: String,
-    /// Projeto da conversa (`None` = global, como os avisos do Whisper).
+    /// Project of the conversation (`None` = global, like the Whisper notices).
     pub project: Option<String>,
 }
 
@@ -39,7 +39,7 @@ impl FeedEntry {
         Self { ts: crate::util::now_ms(), kind, from: from.map(str::to_owned), to: to.map(str::to_owned), text: text.into(), project: None }
     }
 
-    /// A mesma entrada, no projeto `project`.
+    /// The same entry, in the project `project`.
     pub fn in_project(mut self, project: &str) -> Self {
         self.project = Some(project.to_owned());
         self
@@ -50,101 +50,102 @@ impl FeedEntry {
     }
 }
 
-/// Fase de um download em andamento (barra de progresso da interface).
+/// Phase of a download in progress (the UI's progress bar).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DownloadState {
     Downloading,
-    /// Conferindo o SHA-256 do arquivo baixado.
+    /// Checking the SHA-256 of the downloaded file.
     Verifying,
-    /// Conexão caiu: aguardando para tentar de novo.
+    /// The connection dropped: waiting to try again.
     Retrying,
     Extracting,
-    /// Download concluído, falta só o pós-processamento.
+    /// Download finished, only the post-processing is left.
     Finalizing,
     Done,
     Error,
 }
 
-/// Progresso de um download (modelo ou binários do Whisper).
+/// Progress of a download (Whisper model or binaries).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub label: String,
     pub state: DownloadState,
     pub received: u64,
     pub total: Option<u64>,
-    /// Bytes por segundo (média suavizada).
+    /// Bytes per second (smoothed average).
     pub speed: f64,
-    /// Nova tentativa em andamento (`Retrying`): número e máximo.
+    /// Retry in progress (`Retrying`): number and maximum.
     pub attempt: u32,
     pub max_attempts: u32,
     pub retry_in_ms: u64,
-    /// Mensagem de erro (`Error`) ou do último erro transitório (`Retrying`).
+    /// Error message (`Error`) or of the last transient error (`Retrying`).
     pub message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
     Feed(FeedEntry),
-    /// Algo mudou na pasta de trabalho (debounce de 300 ms) — recarregar a árvore.
+    /// Something changed in the working folder (300 ms debounce) — reload the tree.
     WorkspaceChanged,
-    /// O repositório git do workspace mudou (`.git/HEAD`, índice, refs…: commit, checkout, fetch
-    /// feitos pelo terminal ou por um agente) — reler o status.
+    /// The workspace's git repository changed (`.git/HEAD`, index, refs…: a commit, checkout or fetch
+    /// made by the terminal or by an agent) — read the status again.
     GitChanged,
-    /// Progresso de um download em segundo plano.
+    /// Progress of a download in the background.
     Download(DownloadProgress),
-    /// O ditado por voz foi baixado, removido ou o download terminou (com ou sem erro): reler
-    /// `Core::dictation_installed`.
+    /// The voice dictation was downloaded or removed, or the download finished (with or without an
+    /// error): read `Core::dictation_installed` again.
     DictationChanged,
-    /// Uma pergunta do `ask-agent` para uma instância (aba): a UI abre a aba se `create` e digita
-    /// o `prompt` no terminal dela quando estiver pronta (ver [`Delivery`]).
+    /// A question from `ask-agent` to an instance (tab): the UI opens the tab if `create` and types
+    /// the `prompt` in its terminal when it is ready (see [`Delivery`]).
     Deliver(Delivery),
-    /// O agente da instância `id` do projeto `project` avisou (por hook) que começou (`busy`) ou
-    /// terminou um turno. Mais confiável que adivinhar pela saída do terminal; ver `delivery::gate`.
+    /// The agent of instance `id` of project `project` reported (through a hook) that it started (`busy`)
+    /// or finished a turn. More reliable than guessing from the terminal output; see `delivery::gate`.
     AgentSignal {
         project: String,
         id: String,
         busy: bool,
     },
-    /// O uso de algum agente mudou (ver `Core::usage_snapshot`).
+    /// The usage of some agent changed (see `Core::usage_snapshot`).
     UsageChanged,
-    /// Resultado de uma operação assíncrona do GitHub (PRs, issues, Actions, logs).
+    /// Result of an asynchronous GitHub operation (PRs, issues, Actions, logs).
     Github(crate::github::GithubEvent),
-    /// As tarefas do projeto mudaram (criação, início, relatório, mesclagem…): reler com
-    /// `Core::tasks`. Emitido a cada gravação, também quando a mudança veio da ponte (`ask-agent --task`).
+    /// The project's tasks changed (creation, start, report, merge…): read them again with
+    /// `Core::tasks`. Emitted on every save, also when the change came from the bridge (`ask-agent --task`).
     TasksChanged {
         project: String,
     },
-    /// O core encerrou a instância `id` do projeto (tarefa mesclada ou descartada): a interface fecha
-    /// a aba dela, se estiver aberta.
+    /// The core shut down instance `id` of the project (task merged or discarded): the UI closes
+    /// its tab, if it is open.
     CloseInstance {
         project: String,
         id: String,
     },
-    /// Uma segunda abertura do app pediu (`POST /activate`) que esta instância mostre a janela.
+    /// A second opening of the app asked (`POST /activate`) this instance to show its window.
     Activate,
 }
 
-/// Mensagem a digitar no terminal de uma instância de agente.
+/// Message to type in an agent instance's terminal.
 #[derive(Debug, Clone)]
 pub struct Delivery {
-    /// Número da pergunta (para avisar o core se a entrega falhar).
+    /// Question number (to tell the core if the delivery fails).
     pub request: u64,
-    /// Projeto da instância de destino (e de quem perguntou: a ponte não cruza projetos).
+    /// Project of the destination instance (and of who asked: the bridge does not cross projects).
     pub project: String,
-    /// Instância de destino (já registrada no core).
+    /// Destination instance (already registered in the core).
     pub ident: crate::instances::Ident,
-    /// A aba ainda não existe: a UI precisa abri-la.
+    /// The tab does not exist yet: the UI has to open it.
     pub create: bool,
-    /// Quem perguntou (id sem o projeto).
+    /// Who asked (id without the project).
     pub from: String,
-    /// Texto completo a digitar (mensagem + como responder).
+    /// Full text to type (message + how to answer).
     pub prompt: String,
-    /// É a resposta (atrasada) a uma pergunta que a instância fez, não uma pergunta nova:
-    /// se a aba dela já fechou, não é reaberta.
+    /// It is the (late) answer to a question the instance asked, not a new question:
+    /// if its tab is already closed, it is not reopened.
     pub answer: bool,
-    /// Prompt inicial curto (ASCII) que substitui `prompt` quando a aba precisa ser aberta (ou reaberta):
-    /// vai na linha de comando do CLI (`Core::set_boot_prompt`) em vez de ser digitado num terminal que
-    /// ainda está subindo. Só as tarefas usam; a interface digita `prompt` se o CLI não aceita ou a aba já está viva.
+    /// Short initial prompt (ASCII) that replaces `prompt` when the tab has to be opened (or reopened):
+    /// it goes on the CLI's command line (`Core::set_boot_prompt`) instead of being typed into a terminal that
+    /// is still starting. Only tasks use it; the UI types `prompt` if the CLI does not accept it or the tab is
+    /// already alive.
     pub boot: Option<String>,
 }
