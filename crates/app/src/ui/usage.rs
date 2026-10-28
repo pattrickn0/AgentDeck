@@ -1,10 +1,11 @@
-//! Uso das assinaturas na barra de título: para cada agente com cota, o logo do modelo e duas barras
-//! empilhadas (a sessão de 5 h em cima, a semana embaixo) com as porcentagens. Passar o mouse num item abre o
-//! painel de uso daquele agente, em detalhe (quanto foi usado e quando renova; no Antigravity, por grupo de
-//! modelos, e o clique no nome de um grupo o fixa na barra). Agentes locais não têm cota nem item.
+//! Subscription usage in the title bar: for each agent with quota, the model logo and two
+//! stacked bars (5 h session on top, weekly on bottom) with percentages. Hovering an item opens
+//! that agent's usage panel in detail (how much was used and when it renews; on Antigravity, by model
+//! group, and clicking a group name pins it to the bar). Local agents have no quota and no item.
 
 use std::collections::HashMap;
 
+use agentdeck_core::t;
 use agentdeck_core::usage::{UsageGroup, UsageWindow};
 use agentdeck_core::AgentUsage;
 use egui::{Align2, Color32, Id, Order, Painter, Pos2, Rect, Sense, Ui, Vec2};
@@ -12,23 +13,23 @@ use egui::{Align2, Color32, Id, Order, Painter, Pos2, Rect, Sense, Ui, Vec2};
 use crate::deck::Deck;
 use crate::theme;
 
-/// Largura e espessura das barras.
+/// Width and height of the bars.
 const BAR_W: f32 = 40.0;
 const BAR_H: f32 = 4.0;
-/// Linha de cada porcentagem (as duas empilhadas, 1 px entre elas).
+/// Line height of each percentage (the two stacked, 1 px between them).
 const LINE_H: f32 = 10.0;
-/// Coluna das porcentagens ("100%").
+/// Column width of percentages ("100%").
 const PCT_W: f32 = 22.0;
-/// Recuo, altura do item (o fundo do hover) e espaço entre os itens.
+/// Padding, item height (hover background) and gap between items.
 const ITEM_PAD: f32 = 6.0;
 const ITEM_H: f32 = 26.0;
 const ITEM_GAP: f32 = 8.0;
-/// Largura do painel de uso.
+/// Width of the usage panel.
 const PANEL_W: f32 = 340.0;
-/// Acima disto a barra avisa (`warning`); em 100% fica vermelha.
+/// Above this threshold the bar warns (`warning`); at 100% it turns red.
 const WARN_AT: f32 = 0.8;
 
-/// A cor do preenchimento: a do agente, até o aviso e o esgotamento.
+/// Fill color: agent's color, up to warning and exhaustion.
 pub fn bar_color(used: f32, agent: Color32) -> Color32 {
     if used >= 1.0 {
         theme::pal().danger
@@ -39,7 +40,7 @@ pub fn bar_color(used: f32, agent: Color32) -> Color32 {
     }
 }
 
-/// Formata a duração até renovação da sessão (ex.: "2h10", "45 min").
+/// Formats the duration until session renewal (e.g. "2h10", "45 min").
 pub fn format_duration(ms: u64) -> String {
     let secs = ms / 1000;
     let hours = secs / 3600;
@@ -59,49 +60,52 @@ fn local_time(ms: u64) -> Option<chrono::DateTime<chrono::Local>> {
     }
 }
 
-/// A hora local de um instante (ex.: "16:40").
+/// Local time of an instant (e.g. "16:40").
 pub fn format_clock(ms: u64) -> Option<String> {
     local_time(ms).map(|t| t.format("%H:%M").to_string())
 }
 
-/// Formata o dia da semana e hora local da renovação semanal (ex.: "seg 14:00").
+/// Formats the day of the week and local time of weekly renewal (e.g. "Mon 14:00").
 pub fn format_weekday_time(ms: u64) -> Option<String> {
     use chrono::{Datelike, Weekday};
     let dt = local_time(ms)?;
     let dia = match dt.weekday() {
-        Weekday::Mon => "seg",
-        Weekday::Tue => "ter",
-        Weekday::Wed => "qua",
-        Weekday::Thu => "qui",
-        Weekday::Fri => "sex",
-        Weekday::Sat => "sáb",
-        Weekday::Sun => "dom",
+        Weekday::Mon => t!("Mon"),
+        Weekday::Tue => t!("Tue"),
+        Weekday::Wed => t!("Wed"),
+        Weekday::Thu => t!("Thu"),
+        Weekday::Fri => t!("Fri"),
+        Weekday::Sat => t!("Sat"),
+        Weekday::Sun => t!("Sun"),
     };
     Some(format!("{dia} {}", dt.format("%H:%M")))
 }
 
-/// Há quanto tempo o uso foi lido (ex.: "lido há 1 min").
+/// How long ago usage was read (e.g. "read 1 min ago").
 pub fn format_read(ms: u64) -> String {
     let secs = ms / 1000;
     if secs < 60 {
-        "lido agora".to_owned()
+        t!("read just now").to_owned()
     } else if secs < 3600 {
-        format!("lido há {} min", secs / 60)
+        let mins = secs / 60;
+        t!("read {mins} min ago", mins)
     } else if secs < 48 * 3600 {
-        format!("lido há {} h", secs / 3600)
+        let hours = secs / 3600;
+        t!("read {hours} h ago", hours)
     } else {
-        format!("lido há {} dias", secs / 86_400)
+        let days = secs / 86_400;
+        t!("read {days} days ago", days)
     }
 }
 
-/// Janela que já renovou (`resets_at` no passado) sem leitura nova depois disso: a % lida é de
-/// antes da renovação e não vale mais.
+/// Window that has already renewed (`resets_at` in the past) without a new reading since then:
+/// the read % is from before the renewal and is no longer valid.
 pub fn expired(w: &UsageWindow, updated_ms: u64, now_ms: u64) -> bool {
     w.resets_at_ms.is_some_and(|r| r <= now_ms && updated_ms < r)
 }
 
-/// O uso como vale agora: janelas vencidas zeradas (e sem data de renovação, que já passou).
-/// Devolve também quais venceram (sessão, semana), para esmaecer e explicar no painel.
+/// Usage as it applies now: expired windows zeroed (and without reset date, which has passed).
+/// Also returns which windows expired (session, weekly), to fade and explain in the panel.
 pub fn current(usage: &AgentUsage, now_ms: u64) -> (AgentUsage, bool, bool) {
     let mut u = usage.clone();
     let zero = |w: &mut Option<UsageWindow>| match w {
@@ -115,20 +119,20 @@ pub fn current(usage: &AgentUsage, now_ms: u64) -> (AgentUsage, bool, bool) {
     (u, s, wk)
 }
 
-/// Próxima renovação ainda por vir (para redesenhar quando ela passar), dos grupos também: a barra de título
-/// pode estar mostrando um grupo fixado que renova em outra hora.
+/// Next upcoming renewal (to repaint when it passes), including groups: the title bar
+/// might be showing a pinned group that renews at a different time.
 fn next_reset(usage: &AgentUsage, now_ms: u64) -> Option<u64> {
     let groups = usage.groups.iter().flat_map(|g| [g.session, g.weekly]);
     [usage.session, usage.weekly].into_iter().chain(groups).flatten().filter_map(|w| w.resets_at_ms).filter(|&r| r > now_ms).min()
 }
 
-/// Tem cota para mostrar (não é local e a fonte informou ao menos uma janela).
+/// Has quota to show (not local and source reported at least one window).
 pub fn has_quota(usage: &AgentUsage) -> bool {
     !usage.local && (usage.session.is_some() || usage.weekly.is_some())
 }
 
-/// A ordem dos agentes na barra: a do menu de agentes e, depois, os que o menu
-/// não tem, em ordem alfabética.
+/// Agent order on the bar: matching the agents menu, followed by those
+/// not in the menu in alphabetical order.
 fn ordered_models(available: &[String], usage: &HashMap<String, AgentUsage>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for id in available {
@@ -143,8 +147,8 @@ fn ordered_models(available: &[String], usage: &HashMap<String, AgentUsage>) -> 
     out
 }
 
-/// Uma janela como aparece agora: a fração usada (0..=1), quando renova e se renovou sem leitura nova
-/// (esmaecida). `None` quando a fonte não informa essa janela.
+/// A window as it appears now: fraction used (0..=1), when it renews, and whether it renewed
+/// without a new reading (faded). `None` when source does not report this window.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bar {
     pub used: f32,
@@ -152,52 +156,52 @@ pub struct Bar {
     pub faded: bool,
 }
 
-/// A sessão e a semana de um agente, como valem agora.
+/// Session and weekly windows of an agent, as they apply now.
 pub fn bars(usage: &AgentUsage, now_ms: u64) -> [Option<Bar>; 2] {
     let (fresh, session_gone, weekly_gone) = current(usage, now_ms);
     let bar = |w: Option<UsageWindow>, faded| w.map(|w| Bar { used: w.used.clamp(0.0, 1.0), resets_at_ms: w.resets_at_ms, faded });
     [bar(fresh.session, session_gone), bar(fresh.weekly, weekly_gone)]
 }
 
-/// Os grupos de modelos de um agente (nome, sessão e semana), como valem agora.
+/// Model groups of an agent (name, session, and weekly), as they apply now.
 pub fn group_bars(usage: &AgentUsage, now_ms: u64) -> Vec<(String, [Option<Bar>; 2])> {
     let as_usage = |g: &UsageGroup| AgentUsage { session: g.session, weekly: g.weekly, updated_ms: usage.updated_ms, ..Default::default() };
     usage.groups.iter().map(|g| (g.name.clone(), bars(&as_usage(g), now_ms))).collect()
 }
 
-/// A linha de baixo de cada janela no painel: quando renova ("renova em 2h10 · às 16:40" para a sessão,
-/// "renova seg 14:00" para a semana) ou por que não há número.
+/// Bottom line of each window in the panel: when it renews ("renews in 2h10 · at 16:40" for session,
+/// "renews Mon 14:00" for weekly) or why there is no number.
 pub fn reset_text(bar: Option<Bar>, weekly: bool, now_ms: u64) -> String {
-    let Some(bar) = bar else { return "a fonte não informa".to_owned() };
+    let Some(bar) = bar else { return t!("not reported by source").to_owned() };
     if bar.faded {
-        return "renovou · aguardando leitura nova".to_owned();
+        return t!("renewed · awaiting new reading").to_owned();
     }
     let Some(at) = bar.resets_at_ms.filter(|&r| r > now_ms) else { return String::new() };
     if weekly {
-        format_weekday_time(at).map(|t| format!("renova {t}")).unwrap_or_default()
+        format_weekday_time(at).map(|t| t!("renews {weekday_time}", weekday_time = t)).unwrap_or_default()
     } else {
         match format_clock(at) {
-            Some(clock) => format!("renova em {} · às {clock}", format_duration(at - now_ms)),
-            None => format!("renova em {}", format_duration(at - now_ms)),
+            Some(clock) => t!("renews in {duration} · at {clock}", duration = format_duration(at - now_ms), clock),
+            None => t!("renews in {duration}", duration = format_duration(at - now_ms)),
         }
     }
 }
 
-/// A etiqueta de quem esgotou a sessão ("bloqueado até 15:10").
+/// Label for an agent that exhausted its session ("blocked until 15:10").
 pub fn blocked_text(session: Option<Bar>, now_ms: u64) -> Option<String> {
     let s = session.filter(|s| s.used >= 1.0 && !s.faded)?;
     Some(match s.resets_at_ms.filter(|&r| r > now_ms).and_then(format_clock) {
-        Some(clock) => format!("bloqueado até {clock}"),
-        None => "bloqueado".to_owned(),
+        Some(clock) => t!("blocked until {clock}", clock),
+        None => t!("blocked").to_owned(),
     })
 }
 
-/// O texto da porcentagem ("28%", ou "–" sem dado).
+/// Percentage text ("28%", or "–" without data).
 fn pct_text(bar: Option<Bar>) -> String {
     bar.map(|b| format!("{}%", (b.used * 100.0).round() as i32)).unwrap_or_else(|| "–".to_owned())
 }
 
-/// O logo do modelo (o ponto, sem logo) em `size` px.
+/// Model logo (dot if no logo) at `size` px.
 fn paint_mark(deck: &mut Deck, p: &Painter, center: Pos2, kind: &str, color: Color32, size: f32) {
     match super::projects::agent_icon(kind) {
         Some(icon) => deck.icons.paint(p, icon, center, size, color, 0.0),
@@ -205,7 +209,7 @@ fn paint_mark(deck: &mut Deck, p: &Painter, center: Pos2, kind: &str, color: Col
     }
 }
 
-/// Uma barra (trilho e preenchimento) de `w`×`h` com o centro vertical em `cy`.
+/// A bar (track and fill) of `w`×`h` with vertical center at `cy`.
 fn paint_bar(p: &Painter, x: f32, cy: f32, w: f32, h: f32, bar: Option<Bar>, agent: Color32) {
     let track = Rect::from_min_size(Pos2::new(x, cy - h / 2.0), Vec2::new(w, h));
     p.rect_filled(track, h / 2.0, theme::pal().separator);
@@ -216,7 +220,7 @@ fn paint_bar(p: &Painter, x: f32, cy: f32, w: f32, h: f32, bar: Option<Bar>, age
     }
 }
 
-/// A cor de uma porcentagem: vermelha em 100%, esmaecida se a janela renovou sem leitura nova.
+/// Percentage color: red at 100%, faded if window renewed without a new reading.
 fn pct_color(bar: Option<Bar>, base: Color32) -> Color32 {
     match bar {
         Some(b) if b.used >= 1.0 && !b.faded => theme::pal().danger_text,
@@ -226,22 +230,22 @@ fn pct_color(bar: Option<Bar>, base: Color32) -> Color32 {
     }
 }
 
-/// Um agente com cota, como a barra e o painel o desenham.
+/// An agent with quota, as rendered by the bar and panel.
 struct Row {
     model: String,
     name: String,
     color: Color32,
-    /// O que a barra de título mostra: o grupo fixado ou, sem ele, o resumo.
+    /// What the title bar shows: pinned group or, without one, the summary.
     bars: [Option<Bar>; 2],
-    /// Os grupos de modelos (só o Antigravity tem); com eles, o painel mostra cada um no lugar do resumo.
+    /// Model groups (only Antigravity has these); with them, panel shows each group instead of summary.
     groups: Vec<(String, [Option<Bar>; 2])>,
-    /// O grupo fixado na barra, se ele ainda existe.
+    /// Group pinned to the bar, if it still exists.
     pinned: Option<String>,
     updated_ms: u64,
 }
 
-/// As barras da barra de título e o grupo fixado que vale: o grupo `pin`, se a fonte ainda o devolve; senão, o
-/// resumo (`summary`) e nenhum fixado.
+/// Title bar bars and effective pinned group: group `pin`, if source still returns it;
+/// otherwise, the summary (`summary`) and no pinned group.
 fn shown_bars(summary: [Option<Bar>; 2], groups: &[(String, [Option<Bar>; 2])], pin: Option<&str>) -> ([Option<Bar>; 2], Option<String>) {
     match pin.and_then(|pin| groups.iter().find(|(name, _)| name == pin)) {
         Some((name, bars)) => (*bars, Some(name.clone())),
@@ -249,9 +253,10 @@ fn shown_bars(summary: [Option<Bar>; 2], groups: &[(String, [Option<Bar>; 2])], 
     }
 }
 
-/// Desenha um item por agente com cota (dados de `Deck::usage`, com ou sem janela aberta), alinhados à direita até `rect.max.x` e
-/// centralizados na altura de `rect`, e o painel de uso enquanto o mouse está num item ou no painel. Devolve o x
-/// mais à esquerda ocupado (`rect.max.x` se não desenhou nada), para a barra saber onde acaba a área de arrastar.
+/// Draws one item per agent with quota (data from `Deck::usage`, with or without open window),
+/// right-aligned up to `rect.max.x` and centered vertically in `rect`, plus the usage panel while
+/// mouse is over an item or over the panel. Returns the leftmost x coordinate used (`rect.max.x`
+/// if nothing was drawn), so the bar knows where the drag area ends.
 pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     let usage_map = deck.usage();
     let now_ms = agentdeck_core::util::now_ms();
@@ -289,13 +294,13 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     let cy = rect.center().y;
     let (row1, row2) = (cy - (LINE_H + 1.0) / 2.0, cy + (LINE_H + 1.0) / 2.0);
     let panel_key = Id::new("usage-panel");
-    // O painel aberto no quadro anterior: (agente em destaque, retângulo do painel).
+    // Panel open in previous frame: (highlighted agent, panel rect).
     let open_before = ui.ctx().data(|d| d.get_temp::<(String, Rect)>(panel_key));
     let group = Rect::from_min_max(Pos2::new(start_x, cy - ITEM_H / 2.0), Pos2::new(rect.max.x, cy + ITEM_H / 2.0));
     let item_at =
         |i: usize| Rect::from_min_size(Pos2::new(start_x + i as f32 * (item_w + ITEM_GAP), cy - ITEM_H / 2.0), Vec2::new(item_w, ITEM_H));
-    // O painel fica aberto enquanto o mouse está num item, no painel ou no vão entre os dois. Ele mostra o agente do
-    // item sob o mouse; no painel, o último que esteve sob ele. Decidido antes de pintar: um item só realça.
+    // Panel stays open while pointer is over an item, the panel, or the gap between them. It shows the agent
+    // of the item under mouse; inside the panel, the last one hovered. Decided before painting: an item only highlights.
     let pointer = ui.ctx().pointer_hover_pos();
     let hovered = pointer.and_then(|ptr| (0..rows.len()).find(|&i| item_at(i).contains(ptr))).map(|i| rows[i].model.clone());
     let keep = open_before.as_ref().is_some_and(|(_, panel)| pointer.is_some_and(|ptr| group.union(*panel).contains(ptr)));
@@ -325,7 +330,7 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
         Some(i) => {
             let panel = draw_panel(deck, ui.ctx(), item_at(i), &rows[i], now_ms);
             let model = rows[i].model.clone();
-            // "renova em" e "lido há" andam com o painel aberto, mesmo com o mouse parado.
+            // "renews in" and "read ago" advance with open panel, even with mouse stationary.
             ui.ctx().request_repaint_after(std::time::Duration::from_secs(30));
             ui.ctx().data_mut(|d| d.insert_temp(panel_key, (model, panel)));
         }
@@ -334,17 +339,17 @@ pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     start_x.max(rect.min.x)
 }
 
-/// Num bloco de agente do painel: o cabeçalho (com o espaço até a primeira janela), cada janela (com o espaço
-/// depois dela), o nome de um grupo e a sobra embaixo.
+/// In an agent block in the panel: header (with space before first window), each window (with space
+/// after it), model group name, and bottom margin.
 const BLOCK_HEAD_H: f32 = 10.0 + 18.0 + 9.0;
 const WINDOW_H: f32 = 42.0 + 9.0;
 const GROUP_NAME_H: f32 = 16.0 + 2.0;
-/// Espaço a mais antes de um grupo que não é o primeiro (separa do "renova" do de cima).
+/// Extra space before a group that is not the first (separates from "renews" of the one above).
 const GROUP_GAP: f32 = 4.0;
 const BLOCK_PAD_B: f32 = 3.0;
 
-/// As janelas de um bloco, cada uma com o grupo a que pertence: sem grupos, a sessão e a semana do resumo (sempre
-/// as duas, "a fonte não informa" na que faltar); com grupos, só as que cada grupo tem.
+/// Windows of a block, each with the group it belongs to: without groups, summary session and week
+/// (always both, "not reported by source" for missing ones); with groups, only those that each group has.
 fn block_lines(row: &Row) -> Vec<(Option<&str>, usize, Option<Bar>)> {
     if row.groups.is_empty() {
         return (0..2).map(|i| (None, i, row.bars[i])).collect();
@@ -356,14 +361,14 @@ fn block_lines(row: &Row) -> Vec<(Option<&str>, usize, Option<Bar>)> {
     out
 }
 
-/// Altura do bloco de um agente no painel.
+/// Height of an agent block in the panel.
 fn block_h(row: &Row) -> f32 {
     let groups = row.groups.len() as f32;
     BLOCK_HEAD_H + groups * GROUP_NAME_H + (groups - 1.0).max(0.0) * GROUP_GAP + block_lines(row).len() as f32 * WINDOW_H + BLOCK_PAD_B
 }
 
-/// O painel de uso de um agente, embaixo do item dele (`item`), alinhado pela direita; um clique no nome de um grupo
-/// o fixa na barra (ou solta, se já estava). Devolve o retângulo dele.
+/// Usage panel of an agent, below its item (`item`), right-aligned; clicking a group name
+/// pins it to the bar (or unpins if already pinned). Returns its rect.
 fn draw_panel(deck: &mut Deck, ctx: &egui::Context, item: Rect, row: &Row, now_ms: u64) -> Rect {
     let p = theme::pal();
     let h = 12.0 + super::SECTION_LABEL_H + 2.0 + block_h(row) + 6.0;
@@ -376,7 +381,7 @@ fn draw_panel(deck: &mut Deck, ctx: &egui::Context, item: Rect, row: &Row, now_m
         super::shadow(painter, rect, 10, 8, 24, p.shadow);
         super::frame(painter, rect, 10.0, p.popup, p.glass_border);
         let head = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, rect.min.y + 12.0), Vec2::new(PANEL_W - 4.0, super::SECTION_LABEL_H));
-        super::section_label(painter, head, "USO DA ASSINATURA");
+        super::section_label(painter, head, t!("SUBSCRIPTION USAGE"));
         if let Some(t) = local_time(now_ms) {
             let when = t.format("%d/%m · %H:%M").to_string();
             super::text_in(painter, head.shrink2(Vec2::new(14.0, 0.0)), Align2::RIGHT_CENTER, &when, theme::meta(10.0), p.text_3);
@@ -390,16 +395,16 @@ fn draw_panel(deck: &mut Deck, ctx: &egui::Context, item: Rect, row: &Row, now_m
     rect
 }
 
-/// Um agente no painel: logo, nome, a etiqueta de bloqueado e "lido há"; a sessão e a semana (de cada grupo de
-/// modelos, quando há grupos, sob o nome dele), cada uma com a porcentagem, uma barra de 6 px e quando renova. O nome
-/// do grupo fixado na barra leva a etiqueta "na barra". Devolve o grupo cujo nome foi clicado.
+/// An agent in the panel: logo, name, blocked label and "read ago"; session and week (for each model
+/// group, when there are groups, under its name), each with percentage, a 6 px bar and renewal time.
+/// The name of the group pinned to the bar carries the label "on bar". Returns the group clicked.
 fn agent_block(deck: &mut Deck, ui: &Ui, block: Rect, row: &Row, now_ms: u64) -> Option<String> {
     let p = theme::pal();
     let painter = ui.painter();
     let mut clicked = None;
     let (x0, x1) = (block.min.x + 14.0, block.max.x - 14.0);
     let mut y = block.min.y + 10.0;
-    // Cabeçalho do agente.
+    // Agent header.
     let cy = y + 9.0;
     paint_mark(deck, painter, Pos2::new(x0 + 7.0, cy), &row.model, row.color, 14.0);
     let name_r = Rect::from_min_max(Pos2::new(x0 + 22.0, y), Pos2::new(x1, y + 18.0));
@@ -417,7 +422,7 @@ fn agent_block(deck: &mut Deck, ui: &Ui, block: Rect, row: &Row, now_ms: u64) ->
         }
     }
     y += 18.0 + 9.0;
-    // Sessão e semana (por grupo, se houver).
+    // Session and week (by group, if any).
     let mut group_before = None;
     for (group, i, bar) in block_lines(row) {
         if group.is_some() && group != group_before {
@@ -432,9 +437,9 @@ fn agent_block(deck: &mut Deck, ui: &Ui, block: Rect, row: &Row, now_ms: u64) ->
                 painter.rect_filled(resp.rect, 4.0, p.hover);
             }
             let tag = match (pinned, resp.hovered()) {
-                (true, true) => "soltar da barra",
-                (true, false) => "na barra",
-                (false, true) => "fixar na barra",
+                (true, true) => t!("unpin from bar"),
+                (true, false) => t!("on bar"),
+                (false, true) => t!("pin to bar"),
                 (false, false) => "",
             };
             let mut tag_w = 0.0;
@@ -453,15 +458,15 @@ fn agent_block(deck: &mut Deck, ui: &Ui, block: Rect, row: &Row, now_ms: u64) ->
                 clicked = Some(name.to_owned());
             }
             let tip = if pinned {
-                "A barra de título mostra este grupo. Clique para voltar ao resumo."
+                t!("The title bar shows this group. Click to return to the summary.")
             } else {
-                "Mostrar este grupo na barra de título"
+                t!("Show this group in the title bar")
             };
             super::tip(resp, tip);
             y += GROUP_NAME_H;
             group_before = group;
         }
-        let (label, span) = if i == 0 { ("Sessão", "5 h") } else { ("Semana", "7 dias") };
+        let (label, span) = if i == 0 { (t!("Session"), t!("5 h")) } else { (t!("Week"), t!("7 days")) };
         let line = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + 16.0));
         let l = super::text_in(painter, line, Align2::LEFT_CENTER, label, theme::ui(12.0), p.text_soft);
         let span_r = Rect::from_min_max(Pos2::new(l.max.x + 6.0, y), Pos2::new(x1, y + 16.0));
@@ -478,6 +483,7 @@ fn agent_block(deck: &mut Deck, ui: &Ui, block: Rect, row: &Row, now_ms: u64) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentdeck_core::i18n::{with_lang, Lang};
 
     fn w(used: f32, resets: Option<u64>) -> Option<UsageWindow> {
         Some(UsageWindow { used, resets_at_ms: resets })
@@ -499,14 +505,14 @@ mod tests {
         let u = AgentUsage { session: w(0.28, Some(9_000)), weekly: w(1.7, None), updated_ms: 1, ..Default::default() };
         let [s, wk] = bars(&u, 100);
         assert_eq!(s, Some(Bar { used: 0.28, resets_at_ms: Some(9_000), faded: false }));
-        // Valores fora da faixa ficam em 100%.
+        // Values outside the range clamp to 100%.
         assert_eq!(wk.map(|b| b.used), Some(1.0));
-        // Janela que a fonte não informa.
+        // Window that the source does not report.
         let only_session = AgentUsage { session: w(0.2, None), ..Default::default() };
         assert_eq!(bars(&only_session, 100)[1], None);
         assert_eq!(pct_text(None), "–");
         assert_eq!(pct_text(s), "28%");
-        // Quem tem cota: não local e com ao menos uma janela.
+        // Has quota: not local and with at least one window.
         assert!(has_quota(&only_session));
         assert!(!has_quota(&AgentUsage { local: true, ..Default::default() }));
         assert!(!has_quota(&AgentUsage::default()));
@@ -535,7 +541,7 @@ mod tests {
         let lines: Vec<(Option<&str>, usize)> = block_lines(&with).into_iter().map(|(g, i, _)| (g, i)).collect();
         assert_eq!(lines, [(Some("Gemini Models"), 0), (Some("Gemini Models"), 1), (Some("Gemini 4 Argon"), 1)]);
         assert_eq!(block_h(&with), BLOCK_HEAD_H + 2.0 * GROUP_NAME_H + GROUP_GAP + 3.0 * WINDOW_H + BLOCK_PAD_B);
-        // Sem grupos: as duas janelas do resumo, na altura de sempre.
+        // Without groups: the two summary windows at standard height.
         let without = row(Vec::new());
         assert_eq!(block_lines(&without).len(), 2);
         assert_eq!(block_h(&without), 10.0 + 18.0 + 9.0 + 42.0 + 9.0 + 42.0 + 12.0);
@@ -548,23 +554,24 @@ mod tests {
         let groups = vec![("Gemini Models".to_owned(), [b(0.1), b(0.2)]), ("Gemini 4 Argon".to_owned(), [None, b(0.94)])];
         assert_eq!(shown_bars(summary, &groups, None), (summary, None));
         assert_eq!(shown_bars(summary, &groups, Some("Gemini Models")), ([b(0.1), b(0.2)], Some("Gemini Models".to_owned())));
-        // O Argon não tem sessão: a barra diz "–" em vez de pegar a de outro grupo.
+        // Argon has no session: bar shows "–" instead of picking another group's.
         assert_eq!(shown_bars(summary, &groups, Some("Gemini 4 Argon")).0, [None, b(0.94)]);
-        // Grupo que a fonte não devolve mais: volta ao resumo.
+        // Group no longer returned by source: reverts to summary.
         assert_eq!(shown_bars(summary, &groups, Some("Gemini 3 Pro")), (summary, None));
     }
 
     #[test]
     fn a_window_past_its_reset_without_new_data_is_zeroed_and_faded() {
         let usage = AgentUsage { session: w(0.9, Some(1_000)), weekly: w(0.4, Some(9_000)), updated_ms: 500, ..Default::default() };
-        // Antes da renovação: nada muda.
+        // Before renewal: nothing changes.
         assert_eq!(current(&usage, 900), (usage.clone(), false, false));
-        // Depois: a sessão zera, perde a data e esmaece; a semana (que renova depois) fica.
+        // After: session zeroes, loses reset date, and fades; weekly (renews later) remains.
         let [s, wk] = bars(&usage, 2_000);
         assert_eq!(s, Some(Bar { used: 0.0, resets_at_ms: None, faded: true }));
         assert_eq!(wk, Some(Bar { used: 0.4, resets_at_ms: Some(9_000), faded: false }));
-        assert_eq!(reset_text(s, false, 2_000), "renovou · aguardando leitura nova");
-        // Leitura feita depois da renovação: o dado é novo, vale como está.
+        assert_eq!(with_lang(Lang::En, || reset_text(s, false, 2_000)), "renewed · awaiting new reading");
+        assert_eq!(with_lang(Lang::PtBr, || reset_text(s, false, 2_000)), "renovou · aguardando leitura nova");
+        // Reading made after renewal: fresh data, valid as is.
         let fresh = AgentUsage { updated_ms: 1_500, ..usage.clone() };
         assert!(!current(&fresh, 2_000).1);
         assert_eq!(next_reset(&usage, 2_000), Some(9_000));
@@ -574,18 +581,30 @@ mod tests {
     fn the_panel_says_when_each_window_renews_and_who_is_blocked() {
         let now = 10_000_000;
         let session = Some(Bar { used: 0.34, resets_at_ms: Some(now + 7_800_000), faded: false });
-        assert!(reset_text(session, false, now).starts_with("renova em 2h10 · às "));
-        let weekly = Some(Bar { used: 0.12, resets_at_ms: Some(now + 86_400_000), faded: false });
-        assert!(reset_text(weekly, true, now).starts_with("renova "));
-        assert_eq!(reset_text(None, true, now), "a fonte não informa");
-        // Sem data de renovação: nada a dizer.
-        assert_eq!(reset_text(Some(Bar { used: 0.3, resets_at_ms: None, faded: false }), false, now), "");
-        // Sessão esgotada bloqueia (com a hora, se a fonte disser); esmaecida ou abaixo de 100%, não.
-        let full = Some(Bar { used: 1.0, resets_at_ms: Some(now + 60_000), faded: false });
-        assert!(blocked_text(full, now).is_some_and(|t| t.starts_with("bloqueado até ")));
-        assert_eq!(blocked_text(Some(Bar { used: 1.0, resets_at_ms: None, faded: false }), now).as_deref(), Some("bloqueado"));
-        assert_eq!(blocked_text(Some(Bar { used: 1.0, resets_at_ms: None, faded: true }), now), None);
-        assert_eq!(blocked_text(session, now), None);
+        with_lang(Lang::En, || {
+            assert!(reset_text(session, false, now).starts_with("renews in 2h10 · at "));
+            let weekly = Some(Bar { used: 0.12, resets_at_ms: Some(now + 86_400_000), faded: false });
+            assert!(reset_text(weekly, true, now).starts_with("renews "));
+            assert_eq!(reset_text(None, true, now), "not reported by source");
+            // Without reset date: nothing to report.
+            assert_eq!(reset_text(Some(Bar { used: 0.3, resets_at_ms: None, faded: false }), false, now), "");
+            // Exhausted session blocks (with time if source provides it); faded or below 100% does not.
+            let full = Some(Bar { used: 1.0, resets_at_ms: Some(now + 60_000), faded: false });
+            assert!(blocked_text(full, now).is_some_and(|t| t.starts_with("blocked until ")));
+            assert_eq!(blocked_text(Some(Bar { used: 1.0, resets_at_ms: None, faded: false }), now).as_deref(), Some("blocked"));
+            assert_eq!(blocked_text(Some(Bar { used: 1.0, resets_at_ms: None, faded: true }), now), None);
+            assert_eq!(blocked_text(session, now), None);
+        });
+
+        with_lang(Lang::PtBr, || {
+            assert!(reset_text(session, false, now).starts_with("renova em 2h10 · às "));
+            let weekly = Some(Bar { used: 0.12, resets_at_ms: Some(now + 86_400_000), faded: false });
+            assert!(reset_text(weekly, true, now).starts_with("renova "));
+            assert_eq!(reset_text(None, true, now), "a fonte não informa");
+            let full = Some(Bar { used: 1.0, resets_at_ms: Some(now + 60_000), faded: false });
+            assert!(blocked_text(full, now).is_some_and(|t| t.starts_with("bloqueado até ")));
+            assert_eq!(blocked_text(Some(Bar { used: 1.0, resets_at_ms: None, faded: false }), now).as_deref(), Some("bloqueado"));
+        });
     }
 
     #[test]
@@ -602,10 +621,20 @@ mod tests {
         assert_eq!(format_duration(45 * 60 * 1000), "45 min");
         assert_eq!(format_duration(10 * 1000), "1 min");
 
-        assert_eq!(format_read(20 * 1000), "lido agora");
-        assert_eq!(format_read(60 * 1000), "lido há 1 min");
-        assert_eq!(format_read(5 * 60 * 1000), "lido há 5 min");
-        assert_eq!(format_read(3 * 3600 * 1000), "lido há 3 h");
-        assert_eq!(format_read(3 * 86_400 * 1000), "lido há 3 dias");
+        with_lang(Lang::En, || {
+            assert_eq!(format_read(20 * 1000), "read just now");
+            assert_eq!(format_read(60 * 1000), "read 1 min ago");
+            assert_eq!(format_read(5 * 60 * 1000), "read 5 min ago");
+            assert_eq!(format_read(3 * 3600 * 1000), "read 3 h ago");
+            assert_eq!(format_read(3 * 86_400 * 1000), "read 3 days ago");
+        });
+
+        with_lang(Lang::PtBr, || {
+            assert_eq!(format_read(20 * 1000), "lido agora");
+            assert_eq!(format_read(60 * 1000), "lido há 1 min");
+            assert_eq!(format_read(5 * 60 * 1000), "lido há 5 min");
+            assert_eq!(format_read(3 * 3600 * 1000), "lido há 3 h");
+            assert_eq!(format_read(3 * 86_400 * 1000), "lido há 3 dias");
+        });
     }
 }
