@@ -3,9 +3,10 @@ use std::path::Path;
 use super::text::cap_text;
 use super::{Task, MAX_STAT};
 use crate::git::{run, GitError, Repo, COMMIT_TIMEOUT, WRITE_TIMEOUT};
+use crate::t;
 use crate::util;
 
-/// Caminhos sujos de um `git status --porcelain=v1` (o destino, nas renomeações).
+/// Dirty paths from a `git status --porcelain=v1` (the destination, in renames).
 pub fn dirty_paths(porcelain: &str) -> Vec<String> {
     porcelain
         .lines()
@@ -18,24 +19,24 @@ pub fn dirty_paths(porcelain: &str) -> Vec<String> {
         .collect()
 }
 
-/// A pasta da worktree está dentro de `<raiz>/.agentdeck/worktrees` (e não é a própria pasta-pai).
+/// The worktree folder is inside `<root>/.agentdeck/worktrees` (and is not the parent folder itself).
 pub(super) fn safe_worktree(worktree: &Path, allowed: &Path) -> bool {
     let wt = util::absolutize(worktree);
     util::path_within(&wt, allowed) && !util::same_path(&wt, allowed)
 }
 
-/// Branch de tarefa (`tarefa/…`) com nome aceitável.
+/// Task branch (`tarefa/…`) with an acceptable name.
 pub(super) fn valid_task_branch(branch: &str) -> bool {
     branch.starts_with("tarefa/") && crate::git::valid_branch_name(branch)
 }
 
-/// Saída padrão de um comando do git no repositório principal (limite das operações locais).
+/// Standard output of a git command in the main repository (limit of the local operations).
 pub(super) fn git_out(repo: &Repo, args: &[&str]) -> Result<String, GitError> {
     run(repo.cmd(args), None, WRITE_TIMEOUT).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
-/// Arquivos que a branch trouxe em relação à base (`git diff --name-only base...branch`); vazio se a branch
-/// não existe mais ou o git falha.
+/// Files the branch brought relative to the base (`git diff --name-only base...branch`); empty if the branch no
+/// longer exists or git fails.
 pub(crate) fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
     if !valid_task_branch(branch) || !crate::git::valid_branch_name(base) {
         return Vec::new();
@@ -46,18 +47,19 @@ pub(crate) fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String
         .unwrap_or_default()
 }
 
-/// `git diff --stat base...branch`, cortado; "sem alterações" quando vazio.
+/// `git diff --stat base...branch`, cut; `(no changes against the base)` when empty.
 pub(super) fn diff_stat(repo: &Repo, base: &str, branch: &str) -> Result<String, String> {
     let out = git_out(repo, &["diff", "--stat", &format!("{base}...{branch}"), "--"]).map_err(|e| e.to_string())?;
     let out = out.trim();
     if out.is_empty() {
-        return Ok("(nenhuma alteração em relação à base)".into());
+        // Stored data (`Task::diff_stat`), recognized by `tasks_ui::parse_diff_stat`: plain English, not `t!`.
+        return Ok("(no changes against the base)".into());
     }
     Ok(cap_text(out, MAX_STAT))
 }
 
-/// Caminhos com alterações (inclusive novos, não rastreados) na worktree. `None` se a pasta não existe
-/// ou o git não respondeu.
+/// Paths with changes (including new, untracked ones) in the worktree. `None` if the folder does not exist
+/// or git did not answer.
 pub(super) fn worktree_dirty(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
     if !worktree.is_dir() {
         return None;
@@ -67,8 +69,8 @@ pub(super) fn worktree_dirty(repo: &Repo, worktree: &Path) -> Option<Vec<String>
     Some(dirty_paths(&String::from_utf8_lossy(&out.stdout)))
 }
 
-/// Como [`worktree_dirty`], mas pedindo ao git que não tome o `index.lock` da worktree (`--no-optional-locks`):
-/// serve para olhar a pasta de outro agente sem atrapalhar o `git add`/`commit` dele.
+/// Like [`worktree_dirty`], but asking git not to take the worktree's `index.lock` (`--no-optional-locks`): it
+/// serves to look at another agent's folder without getting in the way of its `git add`/`commit`.
 pub(crate) fn worktree_dirty_unlocked(repo: &Repo, worktree: &Path) -> Option<Vec<String>> {
     if !worktree.is_dir() {
         return None;
@@ -78,8 +80,8 @@ pub(crate) fn worktree_dirty_unlocked(repo: &Repo, worktree: &Path) -> Option<Ve
     Some(dirty_paths(&String::from_utf8_lossy(&out.stdout)))
 }
 
-/// Une os arquivos da branch com os sem commit: normalizados (`/`), sem repetição, em ordem alfabética e sem o
-/// `AGENTS.md`, que o app reescreve e não é trabalho do agente.
+/// Joins the branch's files with the uncommitted ones: normalized (`/`), without repeats, in alphabetical order and
+/// without `AGENTS.md`, which the app rewrites and is not the agent's work.
 pub(crate) fn union_files(committed: Vec<String>, dirty: Option<Vec<String>>) -> Vec<String> {
     let mut files: Vec<String> = committed
         .into_iter()
@@ -92,27 +94,27 @@ pub(crate) fn union_files(committed: Vec<String>, dirty: Option<Vec<String>>) ->
     files
 }
 
-/// O hash curto (7 caracteres) de um hash completo, para mensagens e eventos.
+/// The short hash (7 characters) of a full hash, for messages and events.
 pub(super) fn short_hash(hash: &str) -> &str {
     hash.get(..7).unwrap_or(hash)
 }
 
-/// A branch existe neste repositório.
+/// The branch exists in this repository.
 pub(super) fn branch_exists(repo: &Repo, branch: &str) -> bool {
     repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}")]).is_ok()
 }
 
-/// Põe a branch da tarefa no mesmo commit da base já mesclada, dentro da worktree (`git merge --ff-only`:
-/// a branch é ancestral do commit de mesclagem, então avança sem criar commit). Erro = a mensagem do git.
+/// Puts the task's branch on the same commit as the already merged base, inside the worktree (`git merge --ff-only`:
+/// the branch is an ancestor of the merge commit, so it advances without creating a commit). Error = git's message.
 pub(super) fn align_with_base(repo: &Repo, task: &Task) -> Result<(), String> {
     if !task.worktree.is_dir() {
-        return Err(format!("a pasta {} não existe", task.worktree.display()));
+        return Err(t!("the folder {folder} does not exist", folder = task.worktree.display()));
     }
     let cmd = crate::git::base_command(&repo.git, &task.worktree, &["merge", "--ff-only", &task.base]);
     run(cmd, None, COMMIT_TIMEOUT).map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// Apaga a branch (se existir). `force` = `-D`.
+/// Deletes the branch (if it exists). `force` = `-D`.
 pub(super) fn delete_branch(repo: &Repo, branch: &str, force: bool) -> Result<(), String> {
     if repo.read(&["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}")]).is_err() {
         return Ok(());
@@ -120,7 +122,7 @@ pub(super) fn delete_branch(repo: &Repo, branch: &str, force: bool) -> Result<()
     repo.write(&["branch", if force { "-D" } else { "-d" }, branch], None).map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// Arquivos novos do usuário (não rastreados, no repositório principal) que a branch da tarefa também cria.
+/// New files of the user's (untracked, in the main repository) that the task's branch also creates.
 pub(super) fn untracked_clash(repo: &Repo, base: &str, branch: &str) -> Vec<String> {
     let range = format!("{base}...{branch}");
     let added = git_out(repo, &["diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", &range, "--"]).unwrap_or_default();
@@ -135,8 +137,8 @@ mod tests {
 
     #[test]
     fn porcelain_paths() {
-        let text = " M src/a.rs\n?? novo arquivo.txt\nR  velho.rs -> novo.rs\nA  \"com aspas.txt\"\n";
-        assert_eq!(dirty_paths(text), ["src/a.rs", "novo arquivo.txt", "novo.rs", "com aspas.txt"]);
+        let text = " M src/a.rs\n?? new file.txt\nR  old.rs -> new.rs\nA  \"with quotes.txt\"\n";
+        assert_eq!(dirty_paths(text), ["src/a.rs", "new file.txt", "new.rs", "with quotes.txt"]);
         assert!(dirty_paths("").is_empty());
     }
 
@@ -147,14 +149,14 @@ mod tests {
             Some(vec!["c\\d.rs".into(), "a.rs".into(), "AGENTS.md".into()]),
         );
         assert_eq!(got, ["a.rs", "b.rs", "c/d.rs"]);
-        // A worktree que o git não respondeu não apaga o que a branch já tem.
+        // A worktree that git did not answer does not erase what the branch already has.
         assert_eq!(union_files(vec!["a.rs".into()], None), ["a.rs"]);
         assert!(union_files(Vec::new(), Some(Vec::new())).is_empty());
     }
 
     #[test]
     fn only_the_expected_folder_is_ever_touched() {
-        // Como no código real, a pasta permitida já vem absoluta (no Windows, `/repo` ganha a unidade).
+        // As in the real code, the allowed folder already comes absolute (on Windows, `/repo` gets the drive).
         let allowed = &util::absolutize(Path::new("/repo/.agentdeck/worktrees"));
         assert!(safe_worktree(Path::new("/repo/.agentdeck/worktrees/t1"), allowed));
         assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees"), allowed));

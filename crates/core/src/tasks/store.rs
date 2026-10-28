@@ -7,17 +7,18 @@ use serde::{Deserialize, Serialize};
 use super::{git_error, parse_task_id, Task, TaskError, TaskStatus};
 use crate::events::{CoreEvent, FeedEntry, FeedKind};
 use crate::git::{GitError, Repo};
+use crate::t;
 use crate::util::now_ms;
 use crate::Core;
 
-// ---------- Armazenamento ----------
+// ---------- Storage ----------
 
-/// Tarefas de um projeto como ficam em disco.
+/// A project's tasks as they are on disk.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct ProjectTasks {
     pub(super) version: u32,
-    /// Próximo número a usar (nunca diminui).
+    /// Next number to use (never decreases).
     pub(super) next: u64,
     pub(super) tasks: Vec<Task>,
 }
@@ -27,7 +28,7 @@ impl ProjectTasks {
         self.tasks.iter_mut().find(|t| t.id == id)
     }
 
-    /// O contador nunca fica abaixo do maior número já usado (arquivo editado à mão ou antigo).
+    /// The counter never falls below the highest number already used (hand-edited or old file).
     fn fix_counter(&mut self) {
         let max = self.tasks.iter().filter_map(|t| parse_task_id(&t.id)).filter_map(|id| id[1..].parse::<u64>().ok()).max().unwrap_or(0);
         self.next = self.next.max(max + 1).max(1);
@@ -35,30 +36,30 @@ impl ProjectTasks {
     }
 }
 
-/// Estado das tarefas no core: os projetos já lidos e a trava das operações do ciclo de vida.
+/// State of the tasks in the core: the projects already read and the lifecycle operations lock.
 #[derive(Default)]
 pub(crate) struct TaskStore {
     pub(super) projects: Mutex<HashMap<String, ProjectTasks>>,
-    /// Uma operação do ciclo de vida por vez (criar, iniciar, mesclar…): cada uma pode rodar o git.
+    /// One lifecycle operation at a time (create, start, merge…): each one may run git.
     pub(super) op: Mutex<()>,
-    /// Prompt inicial à espera da abertura do processo (`projeto/instância` → linha), ver `Core::set_boot_prompt`.
+    /// Initial prompt waiting for the process to open (`project/instance` → line), see `Core::set_boot_prompt`.
     pub(super) boot: Mutex<HashMap<String, String>>,
 }
 
 fn load_file(path: &Path) -> ProjectTasks {
     let mut tasks = match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str::<ProjectTasks>(&text).unwrap_or_else(|e| {
-            // Ilegível: guarda uma cópia antes que a próxima gravação ponha uma lista vazia por cima.
+            // Unreadable: keep a copy before the next write puts an empty list on top.
             let backup = path.with_extension(format!("json.ilegivel-{}", now_ms()));
             match std::fs::copy(path, &backup) {
-                Ok(_) => log::error!("tarefas ilegíveis em {} ({e}); cópia guardada em {}", path.display(), backup.display()),
-                Err(e2) => log::error!("tarefas ilegíveis em {} ({e}; e a cópia falhou: {e2})", path.display()),
+                Ok(_) => log::error!("unreadable tasks in {} ({e}); copy kept in {}", path.display(), backup.display()),
+                Err(e2) => log::error!("unreadable tasks in {} ({e}; and the copy failed: {e2})", path.display()),
             }
             ProjectTasks::default()
         }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => ProjectTasks::default(),
         Err(e) => {
-            log::error!("não consegui ler as tarefas em {}: {e}", path.display());
+            log::error!("could not read the tasks in {}: {e}", path.display());
             ProjectTasks::default()
         }
     };
@@ -66,7 +67,7 @@ fn load_file(path: &Path) -> ProjectTasks {
     tasks
 }
 
-/// Grava ao lado e troca: uma queda no meio não deixa o arquivo pela metade.
+/// Writes beside and swaps: a crash in the middle does not leave the file half written.
 fn save_file(path: &Path, tasks: &ProjectTasks) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -77,7 +78,7 @@ fn save_file(path: &Path, tasks: &ProjectTasks) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
-/// Id de projeto que serve de nome de arquivo (`p` + hexadecimal, na prática).
+/// Project id that works as a file name (`p` + hexadecimal, in practice).
 fn safe_project_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
@@ -87,21 +88,21 @@ impl Core {
         safe_project_id(project).then(|| self.paths().data_dir.join("tarefas").join(format!("{project}.json")))
     }
 
-    /// Aplica `f` às tarefas do projeto (lidas do disco na primeira vez). Com `save`, grava e avisa a
-    /// interface (`TasksChanged`) no fim.
+    /// Applies `f` to the project's tasks (read from disk the first time). With `save`, writes and tells the
+    /// interface (`TasksChanged`) at the end.
     pub(super) fn with_tasks<R>(&self, project: &str, save: bool, f: impl FnOnce(&mut ProjectTasks) -> R) -> R {
         let path = self.tasks_path(project);
         let out = {
             let mut all = self.inner.tasks.projects.lock();
             let Some(path) = &path else {
-                // Id estranho (não é nome de arquivo): nada é lido nem gravado.
+                // Strange id (not a file name): nothing is read or written.
                 return f(&mut ProjectTasks::default());
             };
             let entry = all.entry(project.to_owned()).or_insert_with(|| load_file(path));
             let out = f(entry);
             if save {
                 if let Err(e) = save_file(path, entry) {
-                    log::warn!("não consegui gravar as tarefas em {}: {e}", path.display());
+                    log::warn!("could not save the tasks in {}: {e}", path.display());
                 }
             }
             out
@@ -112,19 +113,19 @@ impl Core {
         out
     }
 
-    /// As tarefas do projeto, da mais antiga para a mais nova.
+    /// The project's tasks, oldest to newest.
     pub fn tasks(&self, project: &str) -> Vec<Task> {
         self.with_tasks(project, false, |p| p.tasks.clone())
     }
 
-    /// Uma tarefa do projeto (`t3`, `T3` ou `3`).
+    /// A project task (`t3`, `T3` or `3`).
     pub fn task(&self, project: &str, id: &str) -> Option<Task> {
         let id = parse_task_id(id)?;
         self.with_tasks(project, false, |p| p.tasks.iter().find(|t| t.id == id).cloned())
     }
 
-    /// Guarda a entrada do feed na linha do tempo de cada tarefa do projeto a que ela pertence (ver
-    /// [`Task::owns_message`]): uma pergunta entre duas tarefas aparece nas duas. Só grava o arquivo se houver dona.
+    /// Stores the feed entry on the timeline of each project task it belongs to (see
+    /// [`Task::owns_message`]): a question between two tasks shows up in both. Only writes the file if there is an owner.
     pub(crate) fn record_task_message(&self, entry: &FeedEntry) {
         let Some(project) = entry.project.as_deref() else { return };
         if !matches!(entry.kind, FeedKind::Ask | FeedKind::Answer | FeedKind::Error) {
@@ -144,16 +145,16 @@ impl Core {
         });
     }
 
-    /// A tarefa de que a instância `instance` é o agente (e que ainda não terminou), se houver.
+    /// The task whose agent is the instance `instance` (and which has not ended yet), if any.
     pub fn task_of_instance(&self, project: &str, instance: &str) -> Option<Task> {
         self.with_tasks(project, false, |p| {
             p.tasks.iter().find(|t| t.instance == instance && !t.status.is_terminal() && t.status != TaskStatus::Draft).cloned()
         })
     }
 
-    /// A pasta em que o terminal da instância deve abrir: a worktree da tarefa em andamento, em revisão ou
-    /// aguardando validação. Uma tarefa `Failed` que já entregou o relatório (a mesclagem falhou) também
-    /// segue na worktree: reabrir o app não pode soltar o agente no repositório principal.
+    /// The folder the instance's terminal should open in: the worktree of the task in progress, in review or
+    /// awaiting validation. A `Failed` task that already delivered the report (the merge failed) also
+    /// stays in the worktree: reopening the app must not drop the agent into the main repository.
     pub(crate) fn task_cwd(&self, project: &str, instance: &str) -> Option<PathBuf> {
         self.with_tasks(project, false, |p| {
             p.tasks
@@ -171,45 +172,43 @@ impl Core {
     }
 
     pub(super) fn task_or_404(&self, project: &str, id: &str) -> Result<Task, TaskError> {
-        self.task(project, id).ok_or_else(|| TaskError::NotFound(format!("tarefa \"{}\" não encontrada neste projeto", id.escape_debug())))
+        self.task(project, id).ok_or_else(|| TaskError::NotFound(t!("task \"{id}\" not found in this project", id = id.escape_debug())))
     }
 
-    /// Altera uma tarefa existente e grava. `None` se ela sumiu.
+    /// Changes an existing task and saves. `None` if it vanished.
     pub(super) fn update_task<R>(&self, project: &str, id: &str, f: impl FnOnce(&mut Task) -> R) -> Option<R> {
         self.with_tasks(project, true, |p| p.task_mut(id).map(f))
     }
 
-    /// Marca a tarefa como `Failed` com a mensagem e devolve o erro para quem chamou.
+    /// Marks the task as `Failed` with the message and returns the error to the caller.
     pub(super) fn fail_task(&self, project: &str, id: &str, message: String) -> TaskError {
         self.update_task(project, id, |t| {
             t.status = TaskStatus::Failed;
             t.error = Some(message.clone());
-            t.log(format!("erro: {message}"));
+            t.log(t!("error: {message}", message = &message));
         });
         TaskError::Failed(message)
     }
 
-    /// A mesclagem falhou por motivo externo (não conflito): o erro vai para o histórico e para quem chamou, e a
-    /// tarefa fica (ou volta) em `Review`, onde ainda se pode mesclar de novo, devolver ou descartar. `Failed` aqui
-    /// seria um beco: a mesa recusava devolver e concluir.
+    /// The merge failed for an external reason (not a conflict): the error goes to the history and to the caller, and the
+    /// task stays (or goes back) in `Review`, where it can still be merged again, returned or discarded. `Failed` here
+    /// would be a dead end: the desk refused to return and complete.
     pub(super) fn fail_merge(&self, project: &str, id: &str, message: String) -> TaskError {
         self.update_task(project, id, |t| {
             t.status = TaskStatus::Review;
             t.error = None;
-            t.log(format!("erro: {message}"));
+            t.log(t!("error: {message}", message = &message));
         });
         TaskError::Failed(message)
     }
 
     // ---------- Git ----------
 
-    /// O repositório do projeto (a raiz dele, mesmo que o projeto seja uma subpasta).
+    /// The project's repository (its root, even if the project is a subfolder).
     pub(super) fn task_repo(&self, project: &str) -> Result<Repo, TaskError> {
-        let path = self.project_path(project).ok_or_else(|| TaskError::NotFound(format!("projeto desconhecido: {project}")))?;
+        let path = self.project_path(project).ok_or_else(|| TaskError::NotFound(t!("unknown project: {project}", project)))?;
         self.git_repo_at(&path).map_err(|e| match e {
-            GitError::NotARepo => {
-                TaskError::Invalid("o projeto não é um repositório git; as tarefas precisam de um (rode git init)".into())
-            }
+            GitError::NotARepo => TaskError::Invalid(t!("the project is not a git repository; tasks need one (run git init)").into()),
             other => git_error(other),
         })
     }
@@ -225,10 +224,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let file = tmp.path().join("p1.json");
         let mut t = Task { instance: "claude@t3".into(), ..sample() };
-        t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("antigravity"), "pergunta"));
+        t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("antigravity"), "question"));
         save_file(&file, &ProjectTasks { next: 4, tasks: vec![t.clone()], ..ProjectTasks::default() }).expect("save");
         assert_eq!(load_file(&file).tasks[0].messages, t.messages);
-        // Um arquivo de antes da linha do tempo (sem `messages`) abre com ela vazia.
+        // A file from before the timeline (without `messages`) opens with it empty.
         std::fs::write(&file, r#"{"version":1,"next":4,"tasks":[{"id":"t3","instance":"claude@t3"}]}"#).expect("write");
         assert!(load_file(&file).tasks[0].messages.is_empty());
     }
@@ -254,21 +253,21 @@ mod tests {
         let mut p = ProjectTasks { next: 5, tasks: vec![sample()], ..ProjectTasks::default() };
         p.fix_counter();
         save_file(&file, &p).expect("save");
-        save_file(&file, &p).expect("save de novo por cima");
+        save_file(&file, &p).expect("save again on top");
         let back = load_file(&file);
         assert_eq!((back.next, back.tasks.len()), (5, 1));
         assert_eq!(back.tasks[0], sample());
-        let text = std::fs::read_to_string(&file).expect("ler");
+        let text = std::fs::read_to_string(&file).expect("read");
         assert!(text.contains("\"status\": \"draft\"") && text.contains("\"created_ms\""), "{text}");
         assert!(!file.with_extension("json.tmp").exists());
-        // Ilegível: vem vazio, mas o original fica guardado ao lado.
-        std::fs::write(&file, "{ isto não é json").expect("write");
+        // Unreadable: comes back empty, but the original is kept beside it.
+        std::fs::write(&file, "{ this is not json").expect("write");
         assert!(load_file(&file).tasks.is_empty());
-        let kept = std::fs::read_dir(file.parent().expect("pasta"))
+        let kept = std::fs::read_dir(file.parent().expect("folder"))
             .expect("dir")
             .flatten()
             .any(|e| e.file_name().to_string_lossy().contains("ilegivel"));
-        assert!(kept, "a cópia do arquivo ilegível deveria ficar");
+        assert!(kept, "the copy of the unreadable file should be kept");
     }
 
     #[test]

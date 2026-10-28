@@ -1,6 +1,6 @@
-//! Cenário compartilhado dos testes da mesa de tarefas (`tasks.rs` e `tasks_bridge.rs`): um `Core` em
-//! pastas temporárias com um projeto que é um repositório git (branch `main`, um commit), um agente
-//! `claude` (e um `aider`) falso instalado e a configuração do git do usuário isolada.
+//! Shared scenario of the tasks desk tests (`tasks.rs`, `tasks_bridge.rs` and `tasks_queue.rs`): a `Core` in
+//! temporary folders with a project that is a git repository (branch `main`, one commit), a fake `claude`
+//! (and an `aider`) agent installed and the user's git configuration isolated.
 #![allow(dead_code)]
 
 use std::io::{Read, Write};
@@ -21,13 +21,13 @@ pub fn isolated_config() {
         let dir = tempfile::tempdir().expect("tmp").keep();
         std::fs::write(
             dir.join("gitconfig"),
-            "[user]\n\tname = Teste\n\temail = teste@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n",
+            "[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n",
         )
         .expect("gitconfig");
-        // Só leitura de variáveis pelo git (filhos deste processo); definidas antes de qualquer core.
+        // Only read by git (children of this process); set before any core.
         std::env::set_var("GIT_CONFIG_GLOBAL", dir.join("gitconfig"));
         std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
-        // O git não sobe além da pasta temporária procurando um repositório.
+        // Git does not climb above the temporary folder looking for a repository.
         std::env::set_var("GIT_CEILING_DIRECTORIES", std::env::temp_dir());
         dir
     });
@@ -37,7 +37,7 @@ pub fn git_exe() -> Option<PathBuf> {
     which::which("git").ok()
 }
 
-/// Agente falso instalado: um script no PATH de busca (Unix) ou um `.exe` vazio em `~/.local/bin` (Windows).
+/// Installed fake agent: a script on the search PATH (Unix) or an empty `.exe` in `~/.local/bin` (Windows).
 pub fn install_fake_agent(root: &Path, name: &str) {
     if cfg!(windows) {
         let bin = root.join("home").join(".local").join("bin");
@@ -94,7 +94,7 @@ pub fn start_core(root: &Path, config: Config, tab_delivery: bool) -> (Core, Rec
     (core, rx)
 }
 
-/// Core com o projeto em `<tmp>/ws`: um repositório na branch `main` com um commit.
+/// Core with the project at `<tmp>/ws`: a repository on the branch `main` with one commit.
 pub fn start() -> Env {
     start_with(true, true)
 }
@@ -102,7 +102,7 @@ pub fn start() -> Env {
 pub fn start_with(tab_delivery: bool, repo: bool) -> Env {
     isolated_config();
     let tmp = tempfile::tempdir().expect("tmp");
-    // Nome longo: no runner Windows da CI o TEMP vem curto (`RUNNER~1`) e o git devolve o longo (`runneradmin`).
+    // Long name: on the CI's Windows runner TEMP comes short (`RUNNER~1`) and git returns the long one (`runneradmin`).
     let root = agentdeck_core::util::strip_verbatim(&std::fs::canonicalize(tmp.path()).expect("canonicalize"));
     install_fake_agent(&root, "claude");
     install_fake_agent(&root, "aider");
@@ -112,17 +112,17 @@ pub fn start_with(tab_delivery: bool, repo: bool) -> Env {
     let project = core.active_project_id();
     if repo {
         git(&ws, &["init", "-q"]);
-        std::fs::write(ws.join("a.txt"), "um\ndois\n").expect("w");
+        std::fs::write(ws.join("a.txt"), "one\ntwo\n").expect("w");
         git(&ws, &["add", "-A"]);
-        git(&ws, &["commit", "-q", "-m", "inicial"]);
+        git(&ws, &["commit", "-q", "-m", "initial"]);
     }
     Env { _tmp: tmp, core, rx, root, ws, project, config }
 }
 
-/// Roda o git direto (preparação do cenário e conferências); falha se o comando falhar.
+/// Runs git directly (scenario setup and checks); fails if the command fails.
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new(git_exe().expect("git")).current_dir(dir).args(args).output().expect("git");
-    assert!(out.status.success(), "git {args:?} em {}: {}", dir.display(), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "git {args:?} in {}: {}", dir.display(), String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
@@ -133,14 +133,14 @@ pub fn commit_file(dir: &Path, name: &str, content: &str, message: &str) {
 }
 
 pub fn spec(title: &str) -> TaskSpec {
-    TaskSpec { title: title.into(), brief: format!("Faça: {title}\n\nCom cuidado."), kind: "claude".into(), ..TaskSpec::default() }
+    TaskSpec { title: title.into(), brief: format!("Do: {title}\n\nCarefully."), kind: "claude".into(), ..TaskSpec::default() }
 }
 
 pub fn events(env: &Env) -> Vec<CoreEvent> {
     env.rx.try_iter().collect()
 }
 
-/// As mensagens de tarefa entregues às abas (`request: 0`) desde a última leitura.
+/// The task messages delivered to the tabs (`request: 0`) since the last read.
 pub fn deliveries(evs: &[CoreEvent]) -> Vec<(String, String)> {
     evs.iter()
         .filter_map(|e| match e {
@@ -158,12 +158,12 @@ pub fn worktree_count(dir: &Path) -> usize {
     git(dir, &["worktree", "list", "--porcelain"]).lines().filter(|l| l.starts_with("worktree ")).count()
 }
 
-/// Cria e inicia uma tarefa de claude, com um commit na worktree, e a põe em revisão.
+/// Creates and starts a claude task, with a commit in the worktree, and puts it in review.
 pub fn task_in_review(env: &Env, title: &str, file: &str) -> Task {
     let t = env.core.task_create(&env.project, spec(title)).expect("create");
     let t = env.core.task_start(&env.project, &t.id).expect("start");
-    commit_file(&t.worktree, file, "conteúdo\n", &format!("feat: {title}"));
-    env.core.task_done(&env.project, &t.id, "Feito.\n\nArquivos: tudo.").expect("done")
+    commit_file(&t.worktree, file, "content\n", &format!("feat: {title}"));
+    env.core.task_done(&env.project, &t.id, "Done.\n\nFiles: all.").expect("done")
 }
 
 pub fn http(core: &Core, method: &str, path: &str, token: &str, body: &str) -> (u16, Value) {
