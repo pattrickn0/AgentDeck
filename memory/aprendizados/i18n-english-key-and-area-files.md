@@ -19,6 +19,11 @@ at once. `agentdeck_core::t!` (import it with `use agentdeck_core::t;`):
   languages, and a scan of `crates/*/src/**/*.rs` that takes the literal after every `t!(` and fails on a key with no
   pt-BR entry or an entry no `t!` uses. Comment lines (`//`) are skipped; the key must be a plain `"..."` literal
   (the scan rejects `t!(CONST)` and raw strings).
+- `t!` is not `format!`: there is no `{{`/`}}` escape. A literal brace before a placeholder is written `{{index}}`
+  (gives `{3}`); a `const` cannot hold a `t!` (it is a runtime call), so a translated "constant" becomes a `fn`.
+- One English key carries one translation everywhere. When the same English word needs two Portuguese forms (a
+  card's "aguarda validação" against the status "aguardando validação"; "Merge" the verb against the banner's
+  "Mesclagem"), give the second its own key ("awaits validation", "Merging").
 
 **Why:** decided by the user on 2026-10-25 (app in English, Portuguese optional, agents English only). The English key
 and one file per area let several tasks convert areas in parallel without touching the same files.
