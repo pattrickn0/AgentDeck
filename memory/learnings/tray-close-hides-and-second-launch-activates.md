@@ -19,6 +19,8 @@ A second launch no longer fails with "another window is already using the folder
 which only acts if the lock `data/.agentdeck.lock` is held by another process, reads `data/.agentdeck.bridge` (port and master
 token, written after the bridge is up), and sends `POST /activate`. The file alone proves nothing: whoever acquires the lock
 deletes the file left by a crash, and an instance still starting up (lock held, file absent) is awaited for up to 6 s.
+On Wayland hiding is impossible and the window is destroyed instead (see
+`wayland-close-destroys-the-window.md`).
 **How to apply:** `/activate` only accepts the master token (an agent cannot bring the user's window to the front); on
 Windows the second instance needs `AllowSetForegroundWindow(ASFW_ANY)` before the POST, otherwise the window merely flashes. To
 test the tray without clicking: `PostMessage(hwnd, WM_CLOSE)` hides the window and opening the `.exe` again brings it back.

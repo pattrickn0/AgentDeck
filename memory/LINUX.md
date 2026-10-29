@@ -8,6 +8,9 @@ remains in [manual-tests.md](manual-tests.md); the Linux script is at the end he
 > was manually validated only on Ubuntu X11; Wayland and a real Fedora desktop have not yet been tested. There is no
 > package, installer, or `.desktop` file. Antigravity quota now reads the system keyring (t33), and under WSLg the
 > app opens via X11 (t33) — neither has been exercised on a real Linux machine.
+>
+> **2026-10-29:** the user moved to Linux; the development machine is now **openSUSE Tumbleweed with GNOME on Wayland**
+> (not covered by CI, which runs Ubuntu and Fedora). The first real Wayland run found the bugs in section 2.9.
 
 ## 1. How this verification was done
 
@@ -122,16 +125,31 @@ What the app does not resolve, and why the README advises using the native app o
 
 See [learnings/wslg-forces-x11.md](learnings/wslg-forces-x11.md).
 
+### 2.9 First real run: openSUSE Tumbleweed, GNOME on Wayland (2026-10-29)
+
+- **× did nothing**: closing to the tray used `set_visible(false)`, a no-op on Wayland. Now the window is destroyed and
+  its GL context parked (`GlWindow::park`); the tray's "Open" makes a new window on the same context
+  (`ParkedGl::reopen`), so egui's textures survive. Checked with a scripted close/reopen; X11 and Windows still hide.
+- **Crash on every exit** (`SIGSEGV` in `wl_proxy_destroy`): `run_app` closes winit's Wayland connection before `App`
+  is dropped, and egui-winit's clipboard and the window were dropped after it. `App::exiting` now drops them first.
+- **Generic icon, no app-menu entry**: Wayland ignores the window icon. The window now has app id `agentdeck`
+  (`WM_CLASS` on X11), and `cargo build --release` installs `agentdeck.desktop` (from `crates/app/assets/`, `Exec` =
+  the built binary) and the icon under `~/.local/share` (`crates/app/build.rs`; not in CI, not when cross-compiling,
+  not with `AGENTDECK_NO_DESKTOP_ENTRY`). `scripts/install-desktop.sh` does it for another binary, or `--uninstall`s.
+- **No terminal font**: openSUSE puts fonts straight in `/usr/share/fonts/truetype/`; those paths were added.
+
+See [learnings/wayland-close-destroys-the-window.md](learnings/wayland-close-destroys-the-window.md).
+
 ## 3. Dependencies
 
 ### 3.1 To compile
 
-| | Ubuntu 24.04+ | Fedora 41+ |
-| :-- | :-- | :-- |
-| Base | `build-essential pkg-config` | `gcc gcc-c++ make pkgconf-pkg-config` |
-| Audio (default) | `libasound2-dev` | `alsa-lib-devel` |
-| Window/keyboard | `libxkbcommon-dev` | `libxkbcommon-devel` |
-| Rust | 1.89+ (`rustup`) | 1.89+ (`rustup`) |
+| | Ubuntu 24.04+ | Fedora 41+ | openSUSE Tumbleweed |
+| :-- | :-- | :-- | :-- |
+| Base | `build-essential pkg-config` | `gcc gcc-c++ make pkgconf-pkg-config` | `gcc gcc-c++ make pkgconf-pkg-config` |
+| Audio (default) | `libasound2-dev` | `alsa-lib-devel` | `alsa-devel` |
+| Window/keyboard | `libxkbcommon-dev` | `libxkbcommon-devel` | `libxkbcommon-devel` |
+| Rust | 1.89+ (`rustup`) | 1.89+ (`rustup`) | 1.89+ (`rustup`) |
 
 Without audio: `cargo build -p agentdeck --no-default-features` avoids ALSA (leaves audio and microphone disabled).
 
@@ -178,12 +196,13 @@ test was `read_dir` (fixed here); the rest ran green on Ubuntu through `run 46`.
 
 ## 5. What remains unverified (or unsupported)
 
-1. **Wayland**: winit supports it, and so does `rfd`, but nobody has run the app in a Wayland session. Test window, dragging
-   splitters, paste, IME, and file dialog. Workaround: `WINIT_UNIX_BACKEND=x11`.
+1. **Wayland**: runs on GNOME (section 2.9). Still to check there: the title bar after leaving maximized (reported hidden
+   under GNOME's top bar; the app draws it correctly, so the suspect is window placement), dragging splitters, paste,
+   IME, and file dialog. Workaround: `WINIT_UNIX_BACKEND=x11`.
 2. **Real Fedora desktop**: the new job proves build and tests, not window rendering. Still needed: opening the app on a Fedora
    Workstation (GNOME/Wayland) and repeating the manual script at the end of this document.
-3. **Packaging**: no `.deb`, `.rpm`, Flatpak, AppImage, `.desktop`, or installed icon. The app runs from the compiled
-   folder; app menu integration is future work.
+3. **Packaging**: no `.deb`, `.rpm`, Flatpak or AppImage. The app runs from the compiled folder; a
+   release build adds it to the app menu (section 2.9).
 4. **Dictation with GPU**: the app does not download CUDA/Vulkan engines for Linux (only CPU). Users with a GPU need to compile
    whisper.cpp and keep `whisper-cli` in `PATH`; detection uses `lspci`/`nvidia-smi`.
 5. **File dialog without portal**: in minimal environments (i3, container, SSH) without `xdg-desktop-portal`, the dialog does

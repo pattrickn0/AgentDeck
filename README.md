@@ -115,18 +115,23 @@ Prerequisites: [Rust](https://rustup.rs) 1.89 or newer and sound and keyboard li
 sudo apt install build-essential pkg-config libasound2-dev libxkbcommon-dev
 # Fedora
 sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel libxkbcommon-devel
+# openSUSE
+sudo zypper install gcc gcc-c++ make pkgconf-pkg-config alsa-devel libxkbcommon-devel
 
 git clone https://github.com/pattrickn0/AgentDeck.git
 cd AgentDeck
 cargo build --workspace --release
-./target/release/agentdeck
 ```
+
+The release build also adds AgentDeck, with its icon, to the app menu (`~/.local/share/applications`); open it from
+there or run `./target/release/agentdeck`. To skip that, build with `AGENTDECK_NO_DESKTOP_ENTRY=1`; to remove it,
+`scripts/install-desktop.sh --uninstall`.
 
 - To open folders and links and choose files: `xdg-utils` and `xdg-desktop-portal` with a backend
   (`xdg-desktop-portal-gtk` in GNOME/XFCE, `xdg-desktop-portal-kde` in KDE).
 - Without sound or microphone (drops the ALSA requirement): `cargo build -p agentdeck --no-default-features --release`.
-- Tested on X11 (Ubuntu); Fedora is checked in CI, and in WSLg the app opens via X11 automatically. Wayland has not yet
-  been thoroughly validated: if the window does not open, use `WINIT_UNIX_BACKEND=x11`. Details and limitations in
+- Tested on X11 (Ubuntu) and on GNOME/Wayland (openSUSE Tumbleweed); Fedora is checked in CI, and in WSLg the app opens
+  via X11 automatically. If the window misbehaves on Wayland, try `WINIT_UNIX_BACKEND=x11`. Details and limitations in
   [memory/LINUX.md](memory/LINUX.md).
 
 ### The two executables

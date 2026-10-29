@@ -19,7 +19,7 @@ use crate::deck::Deck;
 use crate::smoke::{self, Smoke};
 use crate::terminal::Wake;
 use crate::tray::{self, CloseAction, Tray, TrayCommand};
-use crate::window::GlWindow;
+use crate::window::{GlWindow, ParkedGl};
 use crate::{theme, ui};
 
 #[derive(Debug, Clone, Copy)]
@@ -41,6 +41,8 @@ pub struct App {
     core_rx: Receiver<CoreStart>,
     core_frame: u64,
     gl_window: Option<GlWindow>,
+    /// Wayland, closed to the tray: the window was destroyed and its GL context waits here for the next one.
+    parked: Option<ParkedGl>,
     gl: Option<Arc<glow::Context>>,
     egui: Option<egui_glow::EguiGlow>,
     deck: Option<Deck>,
@@ -134,6 +136,7 @@ impl App {
             core_rx,
             core_frame: 0,
             gl_window: None,
+            parked: None,
             gl: None,
             egui: None,
             deck: None,
@@ -218,6 +221,32 @@ impl App {
         self.request_redraw();
     }
 
+    /// The window to create: at startup (the saved size comes later, with the configuration) and when Wayland
+    /// reopens it from the tray (with the saved size).
+    fn window_attributes(&self) -> WindowAttributes {
+        let saved = self.core.as_ref().map(|c| c.config()).and_then(|c| size_to_persist(false, (c.window_width, c.window_height)));
+        let (w, h) = saved.map_or((1280.0, 860.0), |(w, h)| (w as f64, h as f64));
+        let attrs = WindowAttributes::default()
+            .with_title("AgentDeck")
+            // The title bar is drawn by the interface (`ui/titlebar.rs`).
+            .with_decorations(false)
+            .with_inner_size(winit::dpi::LogicalSize::new(w, h))
+            // The right bar (≥ 260px) and the terminal (≥ 360px) must fit next to the left side.
+            .with_min_inner_size(winit::dpi::LogicalSize::new(820.0, 480.0))
+            .with_window_icon(window_icon());
+        // Without decoration, Windows also removes the window shadow; it comes back like this.
+        #[cfg(windows)]
+        let attrs = winit::platform::windows::WindowAttributesExtWindows::with_undecorated_shadow(attrs, true);
+        // Wayland ignores the window icon: the desktop takes the icon and the name from the `.desktop` entry whose
+        // name is the app id (`scripts/install-desktop.sh`). X11 matches it by `WM_CLASS`.
+        #[cfg(target_os = "linux")]
+        let attrs = {
+            let attrs = winit::platform::wayland::WindowAttributesExtWayland::with_name(attrs, APP_ID, "");
+            winit::platform::x11::WindowAttributesExtX11::with_name(attrs, APP_ID, APP_ID)
+        };
+        attrs
+    }
+
     fn window(&self) -> Option<&Window> {
         self.gl_window.as_ref().map(|g| &g.window)
     }
@@ -239,7 +268,7 @@ impl App {
 
     /// No frames (see `is_hidden`). Before the first frame the window is still born invisible and must be drawn.
     fn hidden(&self) -> bool {
-        self.frames > 0 && self.window().is_some_and(is_hidden)
+        self.frames > 0 && self.window().is_none_or(is_hidden)
     }
 
     /// `Deck` works without a frame and the schedule keeps when to come back. With the window hidden, this is also where
@@ -252,7 +281,7 @@ impl App {
             return;
         }
         if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.activate_requested)) {
-            self.show_window();
+            self.show_window(event_loop);
         }
     }
 
@@ -279,14 +308,32 @@ impl App {
         // To ask, the window must appear first.
         if deck.docs.confirm.is_some() {
             log::info!("quit asked: waiting for the answer to the question");
-            self.show_window();
+            self.show_window(event_loop);
         }
         self.quit_if_requested(event_loop);
     }
 
     /// Brings the window back: shows it, restores it if minimized and focuses it. Whoever hides it gets no notice from
     /// winit, and whoever shows it again needs a frame (the `request_redraw`).
-    fn show_window(&mut self) {
+    fn show_window(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(parked) = self.parked.take() {
+            let attrs = self.window_attributes().with_visible(true);
+            match parked.reopen(event_loop, attrs) {
+                Ok(glw) => {
+                    if self.core.as_ref().is_some_and(|c| c.config().window_maximized) {
+                        glw.window.set_maximized(true);
+                    }
+                    self.gl_window = Some(glw);
+                    self.viewport_first = true;
+                }
+                Err(e) => {
+                    // Without a window and with the context gone there is no way back: quit like the tray's "Quit".
+                    log::error!("could not reopen the window: {e}");
+                    self.request_quit(event_loop);
+                    return;
+                }
+            }
+        }
         let Some(w) = self.window() else { return };
         Self::show(w);
         self.viewport_stale = true;
@@ -310,7 +357,21 @@ impl App {
         }
         match tray::close_action(self.tray.is_some()) {
             CloseAction::Hide => {
-                w.set_visible(false);
+                // Wayland has no hidden window (`set_visible` does nothing): the window is destroyed and comes back
+                // from the tray as a new one.
+                if is_wayland(event_loop) {
+                    match self.gl_window.take().map(GlWindow::park) {
+                        Some(Ok(parked)) => self.parked = Some(parked),
+                        Some(Err(e)) => {
+                            log::error!("could not close the window to the tray: {e}");
+                            self.request_quit(event_loop);
+                            return;
+                        }
+                        None => {}
+                    }
+                } else {
+                    w.set_visible(false);
+                }
                 // winit gives no notice when the window is hidden from code: the frame-less work starts here.
                 self.background.wake();
             }
@@ -321,7 +382,7 @@ impl App {
     /// The user used the tray icon.
     fn on_tray(&mut self, event_loop: &ActiveEventLoop, cmd: TrayCommand) {
         match cmd {
-            TrayCommand::Open => self.show_window(),
+            TrayCommand::Open => self.show_window(event_loop),
             TrayCommand::Quit => self.request_quit(event_loop),
         }
     }
@@ -442,19 +503,7 @@ impl ApplicationHandler<UserEvent> for App {
         if self.gl_window.is_some() {
             return;
         }
-        let (w, h) = (1280.0f64, 860.0f64);
-        let attrs = WindowAttributes::default()
-            .with_title("AgentDeck")
-            // The title bar is drawn by the interface (`ui/titlebar.rs`).
-            .with_decorations(false)
-            .with_inner_size(winit::dpi::LogicalSize::new(w, h))
-            // The right bar (≥ 260px) and the terminal (≥ 360px) must fit next to the left side.
-            .with_min_inner_size(winit::dpi::LogicalSize::new(820.0, 480.0))
-            .with_window_icon(window_icon())
-            .with_visible(false);
-        // Without decoration, Windows also removes the window shadow; it comes back like this.
-        #[cfg(windows)]
-        let attrs = winit::platform::windows::WindowAttributesExtWindows::with_undecorated_shadow(attrs, true);
+        let attrs = self.window_attributes().with_visible(false);
         let (glw, gl) = match GlWindow::new(event_loop, attrs) {
             Ok(v) => v,
             Err(e) => {
@@ -639,11 +688,33 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(e) = self.egui.as_mut() {
+        // Freeing egui's GL objects needs a current context, which a closed (parked) window does not have.
+        if let (Some(e), Some(_)) = (self.egui.as_mut(), self.gl_window.as_ref()) {
             e.destroy();
         }
+        // On Wayland the clipboard (inside egui-winit) and the window hold proxies of winit's connection, which closes
+        // when `run_app` returns, before `App` is dropped: dropped later, they crash the exit (SIGSEGV in
+        // `wl_proxy_destroy`). They go now, while the connection is alive.
+        self.egui = None;
+        self.gl_window = None;
+        self.parked = None;
     }
 }
+
+/// The window runs on Wayland (where it cannot be hidden, positioned nor given an icon).
+fn is_wayland(event_loop: &ActiveEventLoop) -> bool {
+    #[cfg(target_os = "linux")]
+    return winit::platform::wayland::ActiveEventLoopExtWayland::is_wayland(event_loop);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = event_loop;
+        false
+    }
+}
+
+/// Wayland app id and X11 `WM_CLASS`: the `.desktop` entry is `agentdeck.desktop`.
+#[cfg(target_os = "linux")]
+const APP_ID: &str = "agentdeck";
 
 /// The window icon (taskbar and Alt+Tab): the app's mark, from the same drawing as the `.ico`.
 fn window_icon() -> Option<winit::window::Icon> {

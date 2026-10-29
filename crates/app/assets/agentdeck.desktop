@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AgentDeck
+Comment=Development environment for AI coding agents
+Exec="@EXEC@"
+Icon=agentdeck
+Terminal=false
+Categories=Development;
+StartupWMClass=agentdeck

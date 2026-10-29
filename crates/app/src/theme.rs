@@ -406,12 +406,14 @@ const CANDIDATES: FontCandidates = FontCandidates {
 #[cfg(all(unix, not(target_os = "macos")))]
 const CANDIDATES: FontCandidates = FontCandidates {
     // Debian/Ubuntu use `/usr/share/fonts/truetype/<family>/`; Fedora installs each
-    // subpackage in its own folder (`dejavu-sans-mono-fonts/`). Missing path does not fail:
+    // subpackage in its own folder (`dejavu-sans-mono-fonts/`); openSUSE puts them all straight in
+    // `/usr/share/fonts/truetype/`. Missing path does not fail:
     // egui falls back to embedded font.
     symbols: &[
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
     ],
@@ -420,17 +422,21 @@ const CANDIDATES: FontCandidates = FontCandidates {
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
         "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/LiberationMono-Regular.ttf",
     ],
     mono_bold: &[
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
         "/usr/share/fonts/dejavu/DejaVuSansMono-Bold.ttf",
         "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono-Bold.ttf",
+        "/usr/share/fonts/truetype/DejaVuSansMono-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMono-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
         "/usr/share/fonts/liberation-mono/LiberationMono-Bold.ttf",
+        "/usr/share/fonts/truetype/LiberationMono-Bold.ttf",
     ],
 };
 

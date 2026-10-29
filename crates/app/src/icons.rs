@@ -722,12 +722,28 @@ mod tests {
         assert_eq!(ico, logo_ico(), "the .ico is outdated: run scripts/generate-icon.ps1");
     }
 
-    /// Generates `assets/agentdeck.ico`. Does not run automatically: `scripts/generate-icon.ps1`.
+    /// The 256 px image inside the `.ico`: the Linux icon (`assets/agentdeck.png`, used by the `.desktop` entry).
+    fn largest_png(ico: &[u8]) -> &[u8] {
+        let entry = &ico[6 + 16 * (ICO_SIZES.len() - 1)..6 + 16 * ICO_SIZES.len()];
+        let size = u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]) as usize;
+        let offset = u32::from_le_bytes([entry[12], entry[13], entry[14], entry[15]]) as usize;
+        &ico[offset..offset + size]
+    }
+
     #[test]
-    #[ignore = "generates the file; use scripts/generate-icon.ps1"]
+    fn the_committed_png_is_the_largest_ico_image() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.png");
+        let png = std::fs::read(path).expect("crates/app/assets/agentdeck.png (run scripts/generate-icon.ps1)");
+        assert_eq!(png, largest_png(&logo_ico()), "the .png is outdated: run scripts/generate-icon.ps1");
+    }
+
+    /// Generates `assets/agentdeck.ico` and `assets/agentdeck.png`. Does not run automatically: `scripts/generate-icon.ps1`.
+    #[test]
+    #[ignore = "generates the files; use scripts/generate-icon.ps1"]
     fn write_the_ico_file() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.ico");
-        std::fs::write(path, logo_ico()).expect("write the .ico");
+        let ico = logo_ico();
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.ico"), &ico).expect("write the .ico");
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agentdeck.png"), largest_png(&ico)).expect("write the .png");
     }
 
     #[test]
