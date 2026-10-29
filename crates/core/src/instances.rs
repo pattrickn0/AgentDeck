@@ -1,69 +1,71 @@
-//! Instâncias de agentes: cada aba é uma instância com identidade própria.
+//! Agent instances: every tab is an instance with its own identity.
 //!
-//! O id é `<modelo>[@<cargo>[@<nome>]]`:
+//! The id is `<model>[@<role>[@<name>]]`:
 //!
-//! - `claude` — a instância principal (sem cargo), a que o usuário abre pelo "+";
-//! - `claude@dev`, `claude@design` — instâncias com cargo, abertas por um agente (ou pelo usuário);
-//! - `claude@dev@ana` — quando já existe outra do mesmo modelo **e** cargo, a nova ganha um nome.
+//! - `claude` — the main instance (without a role), the one the user opens with "+";
+//! - `claude@dev`, `claude@design` — instances with a role, opened by an agent (or by the user);
+//! - `claude@dev@ana` — when another one with the same model **and** role already exists, the new one gets a name.
 //!
-//! `claude@main@bia` é a segunda instância principal (sem cargo) do Claude. O modelo pode conter
-//! `:` e `/` (`agente:modelo`, `agente:user/modelo:tag`), por isso o separador é `@`.
+//! `claude@main@bia` is Claude's second main instance (without a role). The model may contain
+//! `:` and `/` (`agent:model`, `agent:user/model:tag`), which is why the separator is `@`.
 //!
-//! Este módulo é só lógica de nomes e de resolução de destino; quem cria abas é a interface.
+//! This module is only name logic and target resolution; the interface creates the tabs.
 
-/// Separador entre modelo, cargo e nome.
+use crate::t;
+
+/// Separator between model, role and name.
 pub const SEP: char = '@';
-/// Cargo implícito de uma instância sem cargo.
+/// Implicit role of an instance without a role.
 pub const MAIN_ROLE: &str = "main";
 
-/// Separador entre o projeto e o id nas chaves com escopo (nunca aparece num id).
+/// Separator between the project and the id in scoped keys (never appears in an id).
 pub const SCOPE_SEP: char = '#';
 
-/// Chave de uma instância com o escopo do projeto (`p1a2b3c4d#claude@dev`). É a chave usada nas
-/// perguntas pendentes, na atividade, nas filas e nas sessões headless da ponte: cada projeto
-/// tem as próprias instâncias. O que agentes e pessoas veem é sempre o id sem o projeto.
+/// Key of an instance with the project scope (`p1a2b3c4d#claude@dev`). It is the key used in pending
+/// questions, in activity, in queues and in the bridge's headless sessions: each project has its own
+/// instances. What agents and people see is always the id without the project.
 pub fn scoped(project: &str, id: &str) -> String {
     format!("{project}{SCOPE_SEP}{id}")
 }
 
-/// Desfaz [`scoped`]: `(projeto, id)`. Uma chave sem escopo é `("", chave)`.
+/// Undoes [`scoped`]: `(project, id)`. A key without scope is `("", key)`.
 pub fn unscoped(key: &str) -> (&str, &str) {
     key.split_once(SCOPE_SEP).unwrap_or(("", key))
 }
 
-/// Nomes dados a instâncias repetidas (mesmo modelo e cargo), na ordem.
+/// Names given to repeated instances (same model and role), in order.
 const NAMES: &[&str] =
     &["ana", "bia", "caio", "davi", "eva", "fabio", "gabi", "hugo", "iris", "joao", "kaua", "lia", "marco", "nina", "otto", "paula"];
 
-/// Identidade de uma instância.
+/// Identity of an instance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Ident {
-    /// Modelo/agente (`claude`, `antigravity`…).
+    /// Model/agent (`claude`, `antigravity`…).
     pub kind: String,
-    /// Cargo (`dev`, `design`…); `None` = instância principal.
+    /// Role (`dev`, `design`…); `None` = main instance.
     pub role: Option<String>,
-    /// Nome, só quando há repetição de modelo + cargo.
+    /// Name, only when model + role repeats.
     pub name: Option<String>,
 }
 
-/// Cargo e nome: letras minúsculas, números, `-` e `_`.
+/// Role and name: lowercase letters, digits, `-` and `_`.
 fn valid_word(s: &str) -> bool {
     !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-/// Modelo: letras, números e `:._/+-` (`claude`, `antigravity`…).
-/// O id vai para prompts e variáveis de ambiente: nada de espaços, aspas ou caracteres de controle.
+/// Model: letters, digits and `:._/+-` (`claude`, `antigravity`…).
+/// The id goes into prompts and environment variables: no spaces, quotes or control characters.
 fn valid_kind(s: &str) -> bool {
     !s.is_empty() && s.len() <= 128 && s.chars().all(|c| c.is_ascii_alphanumeric() || ":._/+-".contains(c))
 }
 
 impl Ident {
-    /// A instância principal de um modelo.
+    /// The main instance of a model.
     pub fn main(kind: &str) -> Self {
         Self { kind: kind.to_owned(), role: None, name: None }
     }
 
-    /// `kind[@cargo[@nome]]`.
+    /// `kind[@role[@name]]`.
     pub fn id(&self) -> String {
         match (&self.role, &self.name) {
             (None, None) => self.kind.clone(),
@@ -72,7 +74,7 @@ impl Ident {
         }
     }
 
-    /// Lê um id. `None` se vier mal formado (cargo/nome inválidos, partes demais).
+    /// Reads an id. `None` if it comes malformed (invalid role/name, too many parts).
     pub fn parse(text: &str) -> Option<Self> {
         let mut parts = text.split(SEP);
         let kind = parts.next().filter(|k| valid_kind(k))?.to_owned();
@@ -95,7 +97,7 @@ impl Ident {
         Some(Self { kind, role, name })
     }
 
-    /// Rótulo legível: `Claude`, `Claude · Dev`, `Claude · Dev · Ana`. `kind_label` é o nome do modelo.
+    /// Readable label: `Claude`, `Claude · Dev`, `Claude · Dev · Ana`. `kind_label` is the model's name.
     pub fn label(&self, kind_label: &str) -> String {
         let cap = |s: &str| {
             let mut c = s.chars();
@@ -115,7 +117,7 @@ impl Ident {
     }
 }
 
-/// Instâncias conhecidas (abas abertas e as que estão sendo abertas).
+/// Known instances (open tabs and the ones being opened).
 #[derive(Debug, Default)]
 pub struct Instances {
     list: Vec<Ident>,
@@ -134,7 +136,7 @@ impl Instances {
         self.list.iter().find(|i| i.id() == id)
     }
 
-    /// Registra uma instância já definida (restauração de abas). Idempotente.
+    /// Registers an already defined instance (tab restoration). Idempotent.
     pub fn register(&mut self, ident: Ident) {
         if !self.contains(&ident.id()) {
             self.list.push(ident);
@@ -147,22 +149,22 @@ impl Instances {
         self.list.len() != before
     }
 
-    /// Renomeia uma instância existente. Retorna erro se o id novo já estiver em uso
-    /// ou se a instância original não for encontrada.
+    /// Renames an existing instance. Returns an error if the new id is already in use
+    /// or if the original instance is not found.
     pub fn rename(&mut self, old_id: &str, new_ident: Ident) -> Result<(), String> {
         let new_id = new_ident.id();
         if old_id != new_id && self.contains(&new_id) {
-            return Err(format!("já existe uma instância com o id \"{new_id}\""));
+            return Err(t!("There is already an instance with the id \"{id}\"", id = new_id));
         }
         let Some(pos) = self.list.iter().position(|i| i.id() == old_id) else {
-            return Err(format!("instância \"{old_id}\" não encontrada"));
+            return Err(t!("Instance \"{id}\" not found", id = old_id));
         };
         self.list[pos] = new_ident;
         Ok(())
     }
 
-    /// Cria e registra uma instância **nova** do modelo/cargo: sem nome se o par modelo+cargo
-    /// está livre; senão com o primeiro nome livre. `preferred` é um nome pedido, usado se estiver livre.
+    /// Creates and registers a **new** instance of the model/role: without a name if the model+role pair
+    /// is free; otherwise with the first free name. `preferred` is a requested name, used if it is free.
     pub fn allocate(&mut self, kind: &str, role: Option<&str>, preferred: Option<&str>) -> Ident {
         let role = role.filter(|r| *r != MAIN_ROLE).map(str::to_owned);
         let make = |name: Option<String>| Ident { kind: kind.to_owned(), role: role.clone(), name };
@@ -175,20 +177,20 @@ impl Instances {
             let free = NAMES.iter().find(|n| !taken(&make(Some((**n).to_owned()))));
             match free {
                 Some(n) => make(Some((*n).to_owned())),
-                None => (2..).map(|i| make(Some(format!("n{i}")))).find(|c| !taken(c)).expect("sempre há um nome livre"),
+                None => (2..).map(|i| make(Some(format!("n{i}")))).find(|c| !taken(c)).expect("there is always a free name"),
             }
         };
         self.list.push(ident.clone());
         ident
     }
 
-    /// Resolve o destino de uma pergunta. Devolve a instância e se ela foi **criada** agora (a
-    /// interface precisa abrir a aba), ou os ids em conflito quando o destino é ambíguo.
+    /// Resolves a question's target. Returns the instance and whether it was **created** now (the
+    /// interface has to open the tab), or the ids in conflict when the target is ambiguous.
     ///
-    /// - id exato existente → ele;
-    /// - só o modelo (`claude`): a principal, senão a única do modelo; várias sem principal → ambíguo;
-    /// - modelo + cargo: a única com esse cargo; várias → ambíguo;
-    /// - nada encontrado (ou `force_new`) → cria.
+    /// - an existing exact id → it;
+    /// - only the model (`claude`): the main one, otherwise the model's only instance; several without a main → ambiguous;
+    /// - model + role: the only one with that role; several → ambiguous;
+    /// - nothing found (or `force_new`) → creates it.
     pub fn resolve_or_create(&mut self, want: &Ident, force_new: bool) -> Result<(Ident, bool), Vec<String>> {
         if !force_new {
             if let Some(found) = self.find(want)? {
@@ -198,7 +200,7 @@ impl Instances {
         Ok((self.allocate(&want.kind, want.role.as_deref(), want.name.as_deref()), true))
     }
 
-    /// Como [`Instances::resolve_or_create`], sem criar: `Ok(None)` se nenhuma instância serve.
+    /// Like [`Instances::resolve_or_create`], without creating: `Ok(None)` if no instance serves.
     pub fn find(&self, want: &Ident) -> Result<Option<Ident>, Vec<String>> {
         if let Some(found) = self.get(&want.id()) {
             return Ok(Some(found.clone()));
@@ -210,7 +212,7 @@ impl Instances {
                 n if n > 1 => return Err(same_role.iter().map(|i| i.id()).collect()),
                 _ => {}
             }
-            // Só o modelo: sem principal, serve a única instância dele.
+            // Only the model: without a main one, its single instance serves.
             if want.role.is_none() {
                 let any: Vec<&Ident> = self.list.iter().filter(|i| i.kind == want.kind).collect();
                 match any.len() {
@@ -229,7 +231,7 @@ mod tests {
     use super::*;
 
     fn id(s: &str) -> Ident {
-        Ident::parse(s).expect("id válido")
+        Ident::parse(s).expect("valid id")
     }
 
     #[test]
@@ -238,7 +240,7 @@ mod tests {
         assert_eq!(key, "p0011aabb#outro:user/custom:latest@qa@ana");
         assert_eq!(unscoped(&key), ("p0011aabb", "outro:user/custom:latest@qa@ana"));
         assert_eq!(unscoped("claude"), ("", "claude"));
-        assert!(Ident::parse(&key).is_none(), "`#` nunca aparece num id");
+        assert!(Ident::parse(&key).is_none(), "`#` never appears in an id");
     }
 
     #[test]
@@ -254,7 +256,7 @@ mod tests {
         ] {
             assert_eq!(id(s).id(), s, "{s}");
         }
-        // "main" é o cargo implícito.
+        // "main" is the implicit role.
         assert_eq!(id("claude@main"), Ident::main("claude"));
         assert_eq!(id("claude@main").id(), "claude");
         assert_eq!(id("claude@main@bia").role, None);
@@ -280,7 +282,7 @@ mod tests {
             assert!(Ident::parse(s).is_none(), "{s:?}");
         }
         assert!(Ident::parse(&format!("claude@{}", "a".repeat(33))).is_none());
-        // O modelo também é validado: o id vai para prompts digitados em outras abas.
+        // The model is validated too: the id goes into prompts typed into other tabs.
         for s in ["cla ude", "claude\"", "claude\x1b[201~", "claude\n", "a&b", "x<y", "usuário"] {
             assert!(Ident::parse(s).is_none(), "{s:?}");
         }
@@ -302,14 +304,14 @@ mod tests {
         assert_eq!(r.allocate("claude", None, None).id(), "claude");
         assert_eq!(r.allocate("claude", None, None).id(), "claude@main@ana");
         assert_eq!(r.allocate("claude", None, None).id(), "claude@main@bia");
-        // Cargo diferente não conta como repetição.
+        // A different role does not count as a repetition.
         assert_eq!(r.allocate("claude", Some("dev"), None).id(), "claude@dev");
         assert_eq!(r.allocate("claude", Some("dev"), None).id(), "claude@dev@ana");
         assert_eq!(r.allocate("antigravity", None, None).id(), "antigravity");
-        // Nome pedido, se livre; senão o próximo.
+        // A requested name, if free; otherwise the next one.
         assert_eq!(r.allocate("claude", Some("dev"), Some("zeca")).id(), "claude@dev@zeca");
         assert_eq!(r.allocate("claude", Some("dev"), Some("zeca")).id(), "claude@dev@bia");
-        // Fechar libera o nome.
+        // Closing frees the name.
         assert!(r.remove("claude@dev@ana"));
         assert_eq!(r.allocate("claude", Some("dev"), None).id(), "claude@dev@ana");
     }
@@ -325,13 +327,13 @@ mod tests {
     #[test]
     fn resolving_a_plain_model() {
         let mut r = Instances::default();
-        // Nada aberto: cria a principal.
+        // Nothing open: it creates the main one.
         let (a, created) = r.resolve_or_create(&Ident::main("claude"), false).unwrap();
         assert_eq!((a.id().as_str(), created), ("claude", true));
-        // De novo: é a mesma, já existente.
+        // Again: it is the same one, already existing.
         let (a, created) = r.resolve_or_create(&Ident::main("claude"), false).unwrap();
         assert_eq!((a.id().as_str(), created), ("claude", false));
-        // Com outras instâncias, "claude" continua sendo a principal.
+        // With other instances, "claude" is still the main one.
         r.allocate("claude", Some("dev"), None);
         assert_eq!(r.resolve_or_create(&Ident::main("claude"), false).unwrap().0.id(), "claude");
     }
@@ -352,17 +354,17 @@ mod tests {
     fn resolving_a_role() {
         let mut r = Instances::default();
         r.register(Ident::main("claude"));
-        // O cargo não existe ainda: cria.
+        // The role does not exist yet: it creates it.
         let (dev, created) = r.resolve_or_create(&id("claude@dev"), false).unwrap();
         assert_eq!((dev.id().as_str(), created), ("claude@dev", true));
-        // Pedir o mesmo cargo de novo reaproveita a instância.
+        // Asking for the same role again reuses the instance.
         assert_eq!(r.resolve_or_create(&id("claude@dev"), false).unwrap(), (id("claude@dev"), false));
-        // --new força outra: ganha nome.
+        // --new forces another one: it gets a name.
         let (second, created) = r.resolve_or_create(&id("claude@dev"), true).unwrap();
         assert_eq!((second.id().as_str(), created), ("claude@dev@ana", true));
-        // Agora "claude@dev" é o id exato da primeira (sem nome): continua resolvendo nela.
+        // Now "claude@dev" is the exact id of the first one (without a name): it keeps resolving to it.
         assert_eq!(r.resolve_or_create(&id("claude@dev"), false).unwrap().0.id(), "claude@dev");
-        // E o nome exato também.
+        // And the exact name too.
         assert_eq!(r.resolve_or_create(&id("claude@dev@ana"), false).unwrap(), (id("claude@dev@ana"), false));
     }
 
@@ -370,7 +372,7 @@ mod tests {
     fn a_role_with_only_named_instances_is_ambiguous_when_there_are_several() {
         let mut r = Instances::default();
         r.register(id("claude@dev@ana"));
-        assert_eq!(r.resolve_or_create(&id("claude@dev"), false).unwrap(), (id("claude@dev@ana"), false), "uma só: serve");
+        assert_eq!(r.resolve_or_create(&id("claude@dev"), false).unwrap(), (id("claude@dev@ana"), false), "only one: it serves");
         r.register(id("claude@dev@bia"));
         assert_eq!(r.resolve_or_create(&id("claude@dev"), false).unwrap_err().len(), 2);
     }
@@ -381,7 +383,7 @@ mod tests {
         assert_eq!(r.find(&Ident::main("claude")), Ok(None));
         assert!(r.ids().is_empty());
         r.register(id("antigravity@dev"));
-        assert_eq!(r.find(&Ident::main("antigravity")), Ok(Some(id("antigravity@dev"))), "a única do modelo");
+        assert_eq!(r.find(&Ident::main("antigravity")), Ok(Some(id("antigravity@dev"))), "the model's only one");
         assert_eq!(r.find(&id("antigravity@qa")), Ok(None));
         r.register(id("antigravity@qa"));
         assert_eq!(r.find(&Ident::main("antigravity")).unwrap_err().len(), 2);

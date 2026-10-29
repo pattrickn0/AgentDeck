@@ -1,36 +1,36 @@
-//! `ask-agent` — pergunta algo a outro agente pela ponte do AgentDeck (porta de bin/ask-agent.js).
+//! `ask-agent` — asks something to another agent through the AgentDeck bridge (port of bin/ask-agent.js).
 //!
-//! Uso: ask-agent <agente> "mensagem"     (ou "-" para ler a mensagem do stdin; "--file <arq>" de um arquivo)
-//!      ask-agent --new <agente> "mensagem"   (abre outra instância, mesmo se já houver uma)
-//!      ask-agent --model <modelo> <agente> "mensagem"   (escolhe o LLM da instância ao abri-la; combina com --new)
-//!      ask-agent --reply <n> "resposta"       (responde à pergunta número n)
+//! Usage: ask-agent <agent> "message"     (or "-" to read the message from stdin; "--file <file>" from a file)
+//!      ask-agent --new <agent> "message"   (opens another instance, even if one already exists)
+//!      ask-agent --model <model> <agent> "message"   (chooses the instance's LLM when opening it; combines with --new)
+//!      ask-agent --reply <n> "answer"       (answers question number n)
 //!      ask-agent --list
-//!      ask-agent --team                       (seu chefe e sua equipe)
-//!      ask-agent --models [agente]            (agentes instalados, modelos que o --model aceita e a cota)
-//!      ask-agent --boss "mensagem"            (pergunta/reporta ao seu chefe)
-//!      ask-agent --signal busy|idle           (hooks do agente: início/fim de turno)
-//!      ask-agent --usage                      (statusline do Claude Code: uso do plano)
-//!      ask-agent --learn [<arquivo>...]   (o que o projeto já aprendeu, no geral ou sobre esses arquivos)
-//!      ask-agent --outline <arquivo>...   (as assinaturas de cada arquivo com a linha, sem os corpos)
-//!      ask-agent --inbox [--all]          (respostas às suas perguntas ainda não entregues; --all: as 20 últimas)
-//!      ask-agent --task new "título" [--agent <modelo>] [--model <m>] [--effort low|medium|high] [--level simples|media|complexa] [--base <branch>] [--start] -|"pedido"|--file <arq> [--scope <caminho>...]
+//!      ask-agent --team                       (your boss and your crew)
+//!      ask-agent --models [agent]            (installed agents, the models --model accepts and the quota)
+//!      ask-agent --boss "message"            (asks/reports to your boss)
+//!      ask-agent --signal busy|idle           (agent hooks: start/end of turn)
+//!      ask-agent --usage                      (Claude Code statusline: plan usage)
+//!      ask-agent --learn [<file>...]   (what the project has already learned, in general or about those files)
+//!      ask-agent --outline <file>...   (each file's signatures with the line, without the bodies)
+//!      ask-agent --inbox [--all]          (answers to your questions not delivered yet; --all: the last 20)
+//!      ask-agent --task new "title" [--agent <model>] [--model <m>] [--effort low|medium|high] [--level simple|medium|complex] [--base <branch>] [--start] -|"request"|--file <file> [--scope <path>...]
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
-//!      ask-agent --task done <id> -|"relatório"|--file <arq>   (só o agente da própria tarefa)
-//!      ask-agent --task return <id> "feedback"|--file <arq>   (devolve uma tarefa em revisão)
-//!      ask-agent --task reject <id> "motivo"|--file <arq>|-   (reprova uma tarefa aguardando validação)
+//!      ask-agent --task done <id> -|"report"|--file <file>   (only the agent of the task itself)
+//!      ask-agent --task return <id> "feedback"|--file <file>   (sends a task under review back)
+//!      ask-agent --task reject <id> "reason"|--file <file>|-   (rejects a task waiting for validation)
 //!
-//! `<agente>` é `modelo[@cargo[@nome]]`: `claude`, `claude@dev`, `claude@dev@ana`.
+//! `<agent>` is `model[@role[@name]]`: `claude`, `claude@dev`, `claude@dev@ana`.
 //!
-//! `--file` lê o texto de um arquivo (UTF-8, ou UTF-16 com BOM, como o PowerShell 5.1 grava). É o
-//! caminho recomendado para textos longos ou com acentos: no Windows PowerShell, canalizar pelo shell
-//! troca acentos e travessões por `?` (o `$OutputEncoding` é US-ASCII).
+//! `--file` reads the text from a file (UTF-8, or UTF-16 with BOM, as PowerShell 5.1 writes it). It is the
+//! recommended path for long texts or ones with accents: in Windows PowerShell, piping through the shell
+//! turns accents and dashes into `?` (the `$OutputEncoding` is US-ASCII).
 //!
-//! Numa aba, o `ask-agent` espera a resposta por até `AGENTDECK_ASK_WAIT` segundos (padrão 90,
-//! abaixo do timeout padrão do Bash do Claude Code; `0` = até o fim). Se o outro agente demorar
-//! mais, ele termina avisando, e a resposta é digitada depois no terminal de quem perguntou.
+//! In a tab, `ask-agent` waits for the answer for up to `AGENTDECK_ASK_WAIT` seconds (default 90, below
+//! Claude Code's default Bash timeout; `0` = until the end). If the other agent takes longer, it ends with a
+//! notice, and the answer is typed later into the asker's terminal.
 //!
-//! Códigos de saída: 0 = sucesso; 1 = erro operacional; 2 = erro de argumentos ou fora do AgentDeck.
-//! `--signal` e `--usage` saem sempre com 0 (um hook que falha não pode atrapalhar o agente).
+//! Exit codes: 0 = success; 1 = operational error; 2 = argument error or outside AgentDeck.
+//! `--signal` and `--usage` always exit with 0 (a hook that fails must not get in the agent's way).
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{IsTerminal, Read, Write};
@@ -44,13 +44,13 @@ use agentdeck_core::{AgentUsage, Ident};
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Uso: ask-agent [--new] [--model <modelo>] <agente[@cargo[@nome]]> \"mensagem\"   |   ask-agent --reply <n> \"resposta\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agente]   |   ask-agent --boss \"mensagem\"   |   ask-agent --learn [<arquivo>...]   |   ask-agent --outline <arquivo>...   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tarefas: ask-agent --task; o esforço de uma tarefa: --task new \"título\" --effort low|medium|high; o tamanho do trabalho, que decide quais modelos dão conta: --level simples|media|complexa (padrão media); o escopo de escrita, com fila: --task new \"título\" \"pedido\" --scope <caminho>...)";
+    "Usage: ask-agent [--new] [--model <model>] <agent[@role[@name]]> \"message\"   |   ask-agent --reply <n> \"answer\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agent]   |   ask-agent --boss \"message\"   |   ask-agent --learn [<file>...]   |   ask-agent --outline <file>...   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tasks: ask-agent --task; a task's effort: --task new \"title\" --effort low|medium|high; the size of the work, which decides which models can handle it: --level simple|medium|complex (default medium); the write scope, with a queue: --task new \"title\" \"request\" --scope <path>...)";
 
-/// Segundos que o `ask-agent` espera a resposta antes de deixá-la para ser digitada depois.
+/// Seconds `ask-agent` waits for the answer before leaving it to be typed later.
 const DEFAULT_WAIT: u64 = 90;
-/// Limite do `POST /usage`: a statusline roda a cada atualização da tela do Claude.
+/// `POST /usage` limit: the statusline runs on every refresh of Claude's screen.
 const USAGE_POST_TIMEOUT: Duration = Duration::from_millis(1500);
-/// Limite da statusline própria do usuário (repassada pelo `--usage`).
+/// Limit of the user's own statusline (passed through by `--usage`).
 const USER_STATUSLINE_TIMEOUT: Duration = Duration::from_secs(3);
 
 struct Bridge {
@@ -59,7 +59,7 @@ struct Bridge {
 }
 
 impl Bridge {
-    /// Faz a requisição (`timeout` = `None`: sem limite, respostas de agentes podem levar minutos).
+    /// Makes the request (`timeout` = `None`: no limit, agent answers may take minutes).
     fn request(
         &self,
         method: &str,
@@ -78,7 +78,7 @@ impl Bridge {
         let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
         let text = resp.body_mut().with_config().limit(1 << 30).read_to_string().map_err(|e| e.to_string())?;
-        let json: Value = serde_json::from_str(&text).map_err(|e| format!("resposta inválida da ponte: {e}"))?;
+        let json: Value = serde_json::from_str(&text).map_err(|e| format!("invalid response from the bridge: {e}"))?;
         Ok((status, json))
     }
 }
@@ -99,14 +99,14 @@ fn main() -> ExitCode {
         if args.first().is_some_and(|a| a == "--signal") {
             return ExitCode::SUCCESS;
         }
-        return fail("rode este comando de dentro de um terminal do AgentDeck.", 2);
+        return fail("run this command from inside an AgentDeck terminal.", 2);
     };
     let from = env("AGENT").unwrap_or_else(|| "shell".into());
     let depth: i64 = env("DEPTH").and_then(|d| d.trim().parse::<f64>().ok()).map(|d| d as i64).unwrap_or(0);
     let bridge = Bridge { port, token };
 
     if args.first().is_some_and(|a| a == "--signal") {
-        // Hook do agente (o Codex ainda acrescenta um JSON, ignorado). Falhas são silenciosas.
+        // Agent hook (Codex still appends some JSON, ignored). Failures are silent.
         let state = args.get(1).map(String::as_str).unwrap_or("");
         let _ = bridge.request("POST", "/signal", Some(&json!({ "state": state })), Some(std::time::Duration::from_secs(3)));
         return ExitCode::SUCCESS;
@@ -138,27 +138,27 @@ fn main() -> ExitCode {
     if args.first().is_some_and(|a| a == "--reply") {
         match args.get(1).and_then(|n| n.trim_start_matches('#').parse().ok()) {
             Some(n) => reply_to = Some(n),
-            None => return fail(format!("--reply precisa do número da pergunta.\n{USAGE}"), 2),
+            None => return fail(format!("--reply needs the question number.\n{USAGE}"), 2),
         }
-        // Daqui em diante, `args[0]` faz o papel do destino (ignorado) e o resto é a mensagem.
+        // From here on, `args[0]` plays the target (ignored) and the rest is the message.
         args.drain(..2);
         args.insert(0, String::new());
         if model.is_some() {
-            return fail(format!("--model não combina com --reply (o modelo vale ao abrir uma instância).\n{USAGE}"), 2);
+            return fail(format!("--model does not combine with --reply (the model applies when opening an instance).\n{USAGE}"), 2);
         }
     }
     if args.first().is_some_and(|a| a == "--team") {
         return match team(&bridge) {
             Ok(t) => {
-                println!("Você: {}", with_model(&t.id, &t.models));
+                println!("You: {}", with_model(&t.id, &t.models));
                 match &t.boss {
-                    Some(b) => println!("Chefe: {} (reporte a ele com: ask-agent --boss \"mensagem\")", with_model(b, &t.models)),
-                    None => println!("Chefe: nenhum (você responde diretamente ao usuário)"),
+                    Some(b) => println!("Boss: {} (report to it with: ask-agent --boss \"message\")", with_model(b, &t.models)),
+                    None => println!("Boss: none (you answer directly to the user)"),
                 }
                 if t.crew.is_empty() {
-                    println!("Equipe: nenhum agente");
+                    println!("Crew: no agents");
                 } else {
-                    println!("Equipe: {}", t.crew.iter().map(|c| with_model(c, &t.models)).collect::<Vec<_>>().join(", "));
+                    println!("Crew: {}", t.crew.iter().map(|c| with_model(c, &t.models)).collect::<Vec<_>>().join(", "));
                 }
                 ExitCode::SUCCESS
             }
@@ -166,17 +166,17 @@ fn main() -> ExitCode {
         };
     }
     if args.first().is_some_and(|a| a == "--boss") {
-        // O chefe é uma instância que já existe: `--new` abriria outra em vez de falar com ele.
-        // Recusar é mais claro que ignorar em silêncio.
+        // The boss is an instance that already exists: `--new` would open another one instead of talking to it.
+        // Refusing is clearer than ignoring it silently.
         if force_new {
-            return fail(format!("--new não combina com --boss (o chefe é uma instância que já existe).\n{USAGE}"), 2);
+            return fail(format!("--new does not combine with --boss (the boss is an instance that already exists).\n{USAGE}"), 2);
         }
         if model.is_some() {
-            return fail(format!("--model não combina com --boss (o chefe é uma instância que já existe).\n{USAGE}"), 2);
+            return fail(format!("--model does not combine with --boss (the boss is an instance that already exists).\n{USAGE}"), 2);
         }
         match team(&bridge) {
             Ok(Team { boss: Some(boss), .. }) => args[0] = boss,
-            Ok(_) => return fail("você não tem chefe: responde diretamente ao usuário (escreva a resposta no seu terminal).", 1),
+            Ok(_) => return fail("you have no boss: you answer directly to the user (write the answer in your terminal).", 1),
             Err(e) => return fail(e, 1),
         }
     }
@@ -194,7 +194,7 @@ fn main() -> ExitCode {
                     println!("{}", names.join("\n"));
                     ExitCode::SUCCESS
                 }
-                None => fail(json.get("error").and_then(Value::as_str).unwrap_or("resposta inválida da ponte"), 1),
+                None => fail(json.get("error").and_then(Value::as_str).unwrap_or("invalid response from the bridge"), 1),
             },
             Err(e) => fail(e, 1),
         };
@@ -207,28 +207,28 @@ fn main() -> ExitCode {
         },
         None => args.get(1..).map(|a| a.join(" ")).unwrap_or_default(),
     };
-    // O stdin só é lido com "-" ou quando vem de um pipe/arquivo: num terminal, sem mensagem,
-    // a leitura travaria sem aviso. `decode_text`: UTF-8 (ou UTF-16 com BOM) sem erro, e arquivos
-    // em cp1252 viram substituições em vez de falhar.
+    // stdin is only read with "-" or when it comes from a pipe/file: in a terminal, with no message, reading
+    // would hang without a notice. `decode_text`: UTF-8 (or UTF-16 with BOM) without error, and cp1252 files
+    // become replacement characters instead of failing.
     if file_body.is_none() && (message == "-" || (message.is_empty() && !std::io::stdin().is_terminal())) {
         let mut raw = Vec::new();
         if let Err(e) = std::io::stdin().read_to_end(&mut raw) {
-            return fail(format!("falha ao ler o stdin: {e}"), 1);
+            return fail(format!("failed to read stdin: {e}"), 1);
         }
         message = decode_text(&raw);
     }
     if message.trim().is_empty() {
-        return fail("mensagem vazia.", 2);
+        return fail("empty message.", 2);
     }
 
     if reply_to.is_none() {
         if let Some(note) = quota_advisory_for_target(&bridge, to) {
-            println!("Aviso de cota: {note}. A mensagem será enviada.");
+            println!("Quota warning: {note}. The message will be sent.");
         }
     }
 
     let wait = env("ASK_WAIT").and_then(|w| w.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_WAIT);
-    // `ack`: a ponte só dá a resposta por entregue quando este processo confirma (ver `confirm_delivered`).
+    // `ack`: the bridge only counts the answer as delivered when this process confirms it (see `confirm_delivered`).
     let mut body = json!({ "from": from, "to": to, "message": message, "depth": depth, "new": force_new, "wait": wait, "ack": true });
     if let Some(n) = reply_to {
         body["reply_to"] = json!(n);
@@ -237,7 +237,7 @@ fn main() -> ExitCode {
         body["model"] = json!(m);
     }
     match bridge.request("POST", "/ask", Some(&body), None) {
-        // 202: a resposta ainda não chegou e será digitada depois neste terminal (o texto explica).
+        // 202: the answer has not arrived yet and will be typed later into this terminal (the text explains).
         Ok((200 | 202, json)) => {
             let answer = match json.get("answer") {
                 Some(Value::String(s)) => s.clone(),
@@ -249,7 +249,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok((_, json)) => {
-            let code = fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1);
+            let code = fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1);
             confirm_delivered(&bridge, &json);
             code
         }
@@ -257,17 +257,17 @@ fn main() -> ExitCode {
     }
 }
 
-/// Avisa a ponte que a resposta da pergunta (o `request` do corpo) foi impressa, para ela sair da caixa de
-/// entrada. Sem isso (este processo morreu antes), a resposta continua em `ask-agent --inbox`. Uma falha
-/// aqui só faz a resposta aparecer de novo no `--inbox`.
+/// Tells the bridge that the question's answer (the body's `request`) was printed, so that it leaves the
+/// inbox. Without this (this process died first), the answer stays in `ask-agent --inbox`. A failure here
+/// only makes the answer show up again in `--inbox`.
 fn confirm_delivered(bridge: &Bridge, json: &Value) {
     if let Some(request) = json.get("request").and_then(Value::as_u64) {
         let _ = bridge.request("POST", "/inbox/delivered", Some(&json!({ "request": request })), Some(std::time::Duration::from_secs(5)));
     }
 }
 
-/// Opções do começo da linha de comando, em qualquer ordem: `--new`, `--model <m>` e `--model=<m>`.
-/// Devolve `(--new, modelo)` e deixa em `args` o resto (destino e mensagem).
+/// Options at the start of the command line, in any order: `--new`, `--model <m>` and `--model=<m>`.
+/// Returns `(--new, model)` and leaves the rest (target and message) in `args`.
 fn take_flags(args: &mut Vec<String>) -> Result<(bool, Option<String>), String> {
     let (mut force_new, mut model) = (false, None);
     loop {
@@ -275,14 +275,14 @@ fn take_flags(args: &mut Vec<String>) -> Result<(bool, Option<String>), String> 
             Some("--new") => force_new = true,
             Some("--model") => {
                 if args.len() < 2 || args[1].is_empty() || args[1].starts_with("--") {
-                    return Err("--model precisa do nome do modelo (ex.: --model sonnet).".into());
+                    return Err("--model needs the model name (e.g. --model sonnet).".into());
                 }
                 model = Some(args.remove(1));
             }
             Some(a) if a.starts_with("--model=") => {
                 let m = a["--model=".len()..].to_owned();
                 if m.is_empty() {
-                    return Err("--model precisa do nome do modelo (ex.: --model=sonnet).".into());
+                    return Err("--model needs the model name (e.g. --model=sonnet).".into());
                 }
                 model = Some(m);
             }
@@ -292,24 +292,24 @@ fn take_flags(args: &mut Vec<String>) -> Result<(bool, Option<String>), String> 
     }
 }
 
-/// `--models [agente]`: os agentes instalados neste computador e os modelos que o `--model` aceita.
+/// `--models [agent]`: the agents installed on this computer and the models `--model` accepts.
 fn models_command(bridge: &Bridge, only: Option<&str>) -> ExitCode {
     let route = match only {
         Some(a) => format!("/models?agent={a}"),
         None => "/models".to_owned(),
     };
-    // Os CLIs podem levar até 15 s na primeira consulta (depois vem do cache da ponte).
+    // The CLIs may take up to 15 s on the first query (afterwards it comes from the bridge's cache).
     match bridge.request("GET", &route, None, Some(Duration::from_secs(40))) {
         Ok((200, json)) => {
             println!("{}", json.get("text").and_then(Value::as_str).unwrap_or_default());
             ExitCode::SUCCESS
         }
-        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1),
         Err(e) => fail(e, 1),
     }
 }
 
-/// Lê a linha de cota do inventário (`--models`) sem impedir o envio se a leitura falhar.
+/// Reads the quota line of the inventory (`--models`) without blocking the send if the read fails.
 fn quota_advisory_for_target(bridge: &Bridge, target: &str) -> Option<String> {
     let target = Ident::parse(target)?;
     let kind = agentdeck_core::agents::resolve_alias(&target.kind);
@@ -325,7 +325,9 @@ fn quota_advisory_for_target(bridge: &Bridge, target: &str) -> Option<String> {
     quota_advisory(kind, &choices, &used)
 }
 
-/// Extrai o maior grupo relevante de cada linha `cota:` no inventário textual do `--models`.
+/// Extracts the biggest relevant group of each quota line in the `--models` text inventory.
+/// The inventory is written by another area: it may come with `cota:`/`quota:` and `ESGOTADA`/`EXHAUSTED`,
+/// so both spellings are read here.
 fn quota_usage_from_inventory(text: &str) -> (Vec<String>, HashMap<String, f32>) {
     let official = ["claude", "antigravity", "codex"];
     let mut choices = Vec::new();
@@ -333,7 +335,7 @@ fn quota_usage_from_inventory(text: &str) -> (Vec<String>, HashMap<String, f32>)
     let mut current: Option<&str> = None;
     for line in text.lines() {
         if line.starts_with(' ') {
-            if let (Some(kind), Some(note)) = (current, line.trim_start().strip_prefix("cota:")) {
+            if let (Some(kind), Some(note)) = (current, quota_note(line.trim_start())) {
                 if let Some(value) = quota_used_from_note(note) {
                     used.insert(kind.to_owned(), value);
                 }
@@ -351,6 +353,11 @@ fn quota_usage_from_inventory(text: &str) -> (Vec<String>, HashMap<String, f32>)
     (choices, used)
 }
 
+/// The text after the quota label of an indented inventory line, in either language.
+fn quota_note(line: &str) -> Option<&str> {
+    line.strip_prefix("cota:").or_else(|| line.strip_prefix("quota:")).map(str::trim_start)
+}
+
 fn quota_used_from_note(note: &str) -> Option<f32> {
     let groups: Vec<&str> = note.split(',').map(str::trim).collect();
     let has_gemini = groups.iter().any(|group| group.to_ascii_lowercase().contains("gemini"));
@@ -358,7 +365,8 @@ fn quota_used_from_note(note: &str) -> Option<f32> {
         .iter()
         .filter(|group| !has_gemini || group.to_ascii_lowercase().contains("gemini"))
         .filter_map(|group| {
-            if group.to_ascii_uppercase().contains("ESGOTADA") {
+            let upper = group.to_ascii_uppercase();
+            if upper.contains("ESGOTADA") || upper.contains("EXHAUSTED") {
                 return Some(1.0);
             }
             group.split_whitespace().find_map(|part| {
@@ -369,7 +377,7 @@ fn quota_used_from_note(note: &str) -> Option<f32> {
         .max_by(f32::total_cmp)
 }
 
-/// `claude@dev (sonnet)` quando a instância tem modelo.
+/// `claude@dev (sonnet)` when the instance has a model.
 fn with_model(id: &str, models: &BTreeMap<String, String>) -> String {
     match models.get(id) {
         Some(m) => format!("{id} ({m})"),
@@ -377,8 +385,8 @@ fn with_model(id: &str, models: &BTreeMap<String, String>) -> String {
     }
 }
 
-/// O mapa `models` (id → modelo) de uma resposta da ponte, com o aviso de cota (`quota`) de quem está sem ou perto do
-/// fim: "gemini-4-argon-high; cota de Gemini 4 Argon esgotada, renova em 9 h".
+/// The `models` map (id → model) of a bridge response, with the quota note (`quota`) of whoever is out or
+/// near the end: "gemini-4-argon-high; Gemini 4 Argon quota exhausted, renews in 9 h".
 fn models_of(json: &Value) -> BTreeMap<String, String> {
     let map = |key: &str| -> BTreeMap<String, String> {
         json.get(key)
@@ -396,20 +404,20 @@ fn models_of(json: &Value) -> BTreeMap<String, String> {
     models
 }
 
-/// Resposta de `GET /team`.
+/// `GET /team` response.
 struct Team {
     id: String,
     boss: Option<String>,
     crew: Vec<String>,
-    /// Modelo de quem aparece acima (id → modelo).
+    /// Model of whoever appears above (id → model).
     models: BTreeMap<String, String>,
 }
 
-/// `GET /team`: eu, chefe, equipe e os modelos.
+/// `GET /team`: me, boss, crew and the models.
 fn team(bridge: &Bridge) -> Result<Team, String> {
     let (status, json) = bridge.request("GET", "/team", None, Some(Duration::from_secs(10)))?;
     if status != 200 {
-        return Err(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido").to_owned());
+        return Err(json.get("error").and_then(Value::as_str).unwrap_or("unknown error").to_owned());
     }
     let id = json.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
     let boss = json.get("boss").and_then(Value::as_str).map(str::to_owned);
@@ -417,12 +425,12 @@ fn team(bridge: &Bridge) -> Result<Team, String> {
     Ok(Team { id, boss, crew: crew.unwrap_or_default(), models: models_of(&json) })
 }
 
-// ---------- Aprendizados (`--learn`) ----------
+// ---------- Learnings (`--learn`) ----------
 
-const LEARN_USAGE: &str = "Uso: ask-agent --learn [<arquivo>...]   (o que o projeto já aprendeu, no geral ou sobre esses arquivos)";
+const LEARN_USAGE: &str = "Usage: ask-agent --learn [<file>...]   (what the project has already learned, in general or about those files)";
 
-/// `ask-agent --learn [<caminho>...]`: imprime os aprendizados (`memory/aprendizados/`) que valem para os
-/// arquivos; sem caminhos, os globais e o índice dos demais.
+/// `ask-agent --learn [<path>...]`: prints the learnings (`memory/aprendizados/`) that apply to the files;
+/// with no paths, the global ones and the index of the others.
 fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
     if paths.iter().any(|p| p == "-h" || p == "--help") {
         println!("{LEARN_USAGE}");
@@ -433,17 +441,17 @@ fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
             println!("{}", json.get("text").and_then(Value::as_str).unwrap_or(""));
             ExitCode::SUCCESS
         }
-        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1),
         Err(e) => fail(e, 1),
     }
 }
 
-// ---------- Resumo de um arquivo (`--outline`) ----------
+// ---------- Outline of a file (`--outline`) ----------
 
 const OUTLINE_USAGE: &str =
-    "Uso: ask-agent --outline <arquivo>...   (as assinaturas de cada arquivo com o número da linha, sem os corpos: leia só o trecho de que precisa)";
+    "Usage: ask-agent --outline <file>...   (each file's signatures with the line number, without the bodies: read only the part you need)";
 
-/// `ask-agent --outline <caminho>...`: imprime o esqueleto de cada arquivo (itens com assinatura e linha).
+/// `ask-agent --outline <path>...`: prints the skeleton of each file (items with signature and line).
 fn outline_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
     if paths.iter().any(|p| p == "-h" || p == "--help") {
         println!("{OUTLINE_USAGE}");
@@ -457,48 +465,48 @@ fn outline_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
             println!("{}", json.get("text").and_then(Value::as_str).unwrap_or(""));
             ExitCode::SUCCESS
         }
-        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1),
         Err(e) => fail(e, 1),
     }
 }
 
-// ---------- Caixa de entrada (`--inbox`) ----------
+// ---------- Inbox (`--inbox`) ----------
 
 const INBOX_USAGE: &str =
-    "Uso: ask-agent --inbox [--all]   (as respostas às suas perguntas que ainda não foram entregues; --all: as 20 últimas)";
+    "Usage: ask-agent --inbox [--all]   (the answers to your questions that were not delivered yet; --all: the last 20)";
 
-/// Há quanto tempo foi `ts_ms` (epoch em ms), em texto curto.
+/// How long ago `ts_ms` was (epoch in ms), in short text.
 fn age_text(ts_ms: u64, now_ms: u64) -> String {
     let secs = now_ms.saturating_sub(ts_ms) / 1000;
     match secs {
-        0..=59 => "agora há pouco".into(),
-        60..=3599 => format!("há {} min", secs / 60),
-        3600..=86_399 => format!("há {} h", secs / 3600),
-        _ => format!("há {} d", secs / 86_400),
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{} min ago", secs / 60),
+        3600..=86_399 => format!("{} h ago", secs / 3600),
+        _ => format!("{} d ago", secs / 86_400),
     }
 }
 
-/// Uma resposta da caixa de entrada, em texto.
+/// An inbox answer, as text.
 fn inbox_entry_text(entry: &Value, now_ms: u64) -> String {
     let text = |k: &str| entry.get(k).and_then(Value::as_str).unwrap_or("");
     let request = entry.get("request").and_then(Value::as_u64).unwrap_or(0);
     let failed = entry.get("failed").and_then(Value::as_bool).unwrap_or(false);
     let delivered = entry.get("delivered").and_then(Value::as_bool).unwrap_or(false);
-    let kind = if failed { "Sem resposta" } else { "Resposta" };
+    let kind = if failed { "No answer" } else { "Answer" };
     let age = age_text(entry.get("ts").and_then(Value::as_u64).unwrap_or(0), now_ms);
-    let state = if delivered { "já entregue no terminal" } else { "não entregue" };
-    format!("[{kind} do agente \"{}\" à sua pergunta #{request}, {age}, {state}]\n\n{}", text("from"), text("text"))
+    let state = if delivered { "already delivered in the terminal" } else { "not delivered" };
+    format!("[{kind} from the agent \"{}\" to your question #{request}, {age}, {state}]\n\n{}", text("from"), text("text"))
 }
 
-/// `ask-agent --inbox [--all]`: imprime as respostas às perguntas deste agente que ainda não chegaram a ele
-/// (ou as 20 últimas, com `--all`). As impressas passam a entregues.
+/// `ask-agent --inbox [--all]`: prints the answers to this agent's questions that have not reached it yet
+/// (or the last 20, with `--all`). The printed ones become delivered.
 fn inbox_command(bridge: &Bridge, flags: &[String]) -> ExitCode {
     if flags.iter().any(|f| f == "-h" || f == "--help") {
         println!("{INBOX_USAGE}");
         return ExitCode::SUCCESS;
     }
     if let Some(bad) = flags.iter().find(|f| *f != "--all") {
-        return fail(format!("opção desconhecida \"{bad}\".\n{INBOX_USAGE}"), 2);
+        return fail(format!("unknown option \"{bad}\".\n{INBOX_USAGE}"), 2);
     }
     let all = !flags.is_empty();
     let route = if all { "/inbox?all=1" } else { "/inbox" };
@@ -506,36 +514,36 @@ fn inbox_command(bridge: &Bridge, flags: &[String]) -> ExitCode {
         Ok((200, json)) => {
             let answers = json.get("answers").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
             if answers.is_empty() {
-                println!("{}", if all { "A caixa de entrada está vazia." } else { "Nenhuma resposta pendente." });
+                println!("{}", if all { "The inbox is empty." } else { "No pending answer." });
                 return ExitCode::SUCCESS;
             }
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
             println!("{}", answers.iter().map(|e| inbox_entry_text(e, now)).collect::<Vec<_>>().join("\n\n---\n\n"));
             ExitCode::SUCCESS
         }
-        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1),
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1),
         Err(e) => fail(e, 1),
     }
 }
 
-// ---------- Tarefas (`--task`) ----------
+// ---------- Tasks (`--task`) ----------
 
-const TASK_USAGE: &str = "Uso: ask-agent --task new \"título\" [--agent <modelo>] [--model <m>] [--effort low|medium|high] [--level simples|media|complexa] [--base <branch>] [--start] -|\"pedido\"|--file <arq> [--scope <caminho> [<caminho>...]]   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|validate|discard <id>   |   ask-agent --task done <id> -|\"relatório\"|--file <arq>   |   ask-agent --task return|reject <id> \"feedback\"|--file <arq>|-   |   --scope lista os caminhos (arquivos ou pastas, relativos à raiz do repositório, sem curingas) que a tarefa vai mexer e vale até a próxima opção: ponha o pedido antes dela ou use --file; tarefa com escopo sobreposto ao de outra em andamento espera na fila e começa sozinha (memory/ e Cargo.lock não contam)";
+const TASK_USAGE: &str = "Usage: ask-agent --task new \"title\" [--agent <model>] [--model <m>] [--effort low|medium|high] [--level simple|medium|complex] [--base <branch>] [--start] -|\"request\"|--file <file> [--scope <path> [<path>...]]   |   ask-agent --task list   |   ask-agent --task show <id>   |   ask-agent --task start|merge|validate|discard <id>   |   ask-agent --task done <id> -|\"report\"|--file <file>   |   ask-agent --task return|reject <id> \"feedback\"|--file <file>|-   |   --scope lists the paths (files or folders, relative to the repository root, no wildcards) the task will touch and lasts until the next option: put the request before it or use --file; a task whose scope overlaps another one in progress waits in the queue and starts by itself (memory/ and Cargo.lock do not count)";
 
-/// De onde vem um texto longo (pedido, relatório, feedback).
+/// Where a long text (request, report, feedback) comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Body {
-    /// Escrito na linha de comando.
+    /// Written on the command line.
     Inline(String),
-    /// `-`: entrada padrão.
+    /// `-`: standard input.
     Stdin,
-    /// `--file <caminho>`: lido do arquivo (UTF-8, ou UTF-16 com BOM).
+    /// `--file <path>`: read from the file (UTF-8, or UTF-16 with BOM).
     File(String),
-    /// Não foi dado: vale a entrada padrão se ela for um pipe/arquivo.
+    /// Not given: standard input counts if it is a pipe/file.
     Missing,
 }
 
-/// Um subcomando de `--task`.
+/// A `--task` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TaskCmd {
     New {
@@ -569,27 +577,27 @@ enum TaskCmd {
     },
 }
 
-/// `-` sozinho = entrada padrão; `--file <caminho>` = arquivo; texto = linha de comando; nada = `Missing`.
+/// A lone `-` = standard input; `--file <path>` = file; text = command line; nothing = `Missing`.
 fn body_of(words: &[String]) -> Result<Body, String> {
     match words {
         [] => Ok(Body::Missing),
         [dash] if dash == "-" => Ok(Body::Stdin),
         [flag, path] if flag == "--file" => Ok(Body::File(path.clone())),
         [one] if one.starts_with("--file=") => Ok(Body::File(one["--file=".len()..].to_owned())),
-        [flag, ..] if flag == "--file" => Err("--file precisa do caminho do arquivo.".into()),
+        [flag, ..] if flag == "--file" => Err("--file needs the file path.".into()),
         words => Ok(Body::Inline(words.join(" "))),
     }
 }
 
-/// Tira um `--file <caminho>` (ou `--file=<caminho>`) da linha de comando e devolve o caminho.
-/// Vale para a mensagem genérica (`ask-agent <agente> --file <arq>`, `--reply ... --file <arq>`).
+/// Takes a `--file <path>` (or `--file=<path>`) out of the command line and returns the path.
+/// It applies to the generic message (`ask-agent <agent> --file <file>`, `--reply ... --file <file>`).
 fn take_body_file(args: &mut Vec<String>) -> Result<Option<String>, String> {
     let mut path = None;
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--file" {
             let value = args.get(i + 1).cloned().filter(|v| !v.is_empty() && !v.starts_with("--"));
-            path = Some(value.ok_or("--file precisa do caminho do arquivo.")?);
+            path = Some(value.ok_or("--file needs the file path.")?);
             args.drain(i..=i + 1);
         } else if let Some(p) = args[i].strip_prefix("--file=") {
             path = Some(p.to_owned());
@@ -601,24 +609,24 @@ fn take_body_file(args: &mut Vec<String>) -> Result<Option<String>, String> {
     Ok(path)
 }
 
-/// O id de tarefa (`t3`, `3`) como a ponte o espera.
+/// The task id (`t3`, `3`) the way the bridge expects it.
 fn task_id(arg: Option<&String>) -> Result<String, String> {
-    let arg = arg.ok_or("falta o id da tarefa (ex.: t3).")?;
-    agentdeck_core::tasks::parse_task_id(arg).ok_or_else(|| format!("id de tarefa inválido: \"{arg}\" (use t3 ou 3)."))
+    let arg = arg.ok_or("missing the task id (e.g. t3).")?;
+    agentdeck_core::tasks::parse_task_id(arg).ok_or_else(|| format!("invalid task id: \"{arg}\" (use t3 or 3)."))
 }
 
-/// Lê o que vem depois de `--task`.
+/// Reads what comes after `--task`.
 fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
-    let Some(sub) = args.first().map(String::as_str) else { return Err("falta o subcomando de --task.".into()) };
+    let Some(sub) = args.first().map(String::as_str) else { return Err("missing the --task subcommand.".into()) };
     let rest = &args[1..];
     match sub {
         "list" | "ls" => match rest {
             [] => Ok(TaskCmd::List),
-            _ => Err("--task list não recebe argumentos.".into()),
+            _ => Err("--task list takes no arguments.".into()),
         },
         "show" | "start" | "merge" | "validate" | "discard" => {
             if rest.len() > 1 {
-                return Err(format!("--task {sub} recebe só o id da tarefa."));
+                return Err(format!("--task {sub} takes only the task id."));
             }
             let id = task_id(rest.first())?;
             Ok(match sub {
@@ -639,7 +647,7 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
             let mut words: Vec<String> = Vec::new();
             let mut it = rest.iter().peekable();
             while let Some(a) = it.next() {
-                // `--scope` leva todos os caminhos até a próxima opção (ou um `-`, a entrada padrão do pedido).
+                // `--scope` takes all paths up to the next option (or a `-`, the request's standard input).
                 if a == "--scope" || a.starts_with("--scope=") {
                     let before = scope.len();
                     scope.extend(a.strip_prefix("--scope=").filter(|p| !p.is_empty()).map(str::to_owned));
@@ -649,7 +657,7 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                         }
                     }
                     if scope.len() == before {
-                        return Err("--scope precisa de pelo menos um caminho.".into());
+                        return Err("--scope needs at least one path.".into());
                     }
                     continue;
                 }
@@ -658,7 +666,7 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                         Some(v) => Some(v.to_owned()),
                         None => it.next().cloned(),
                     };
-                    v.filter(|v| !v.is_empty() && !v.starts_with("--")).ok_or_else(|| format!("{name} precisa de um valor."))
+                    v.filter(|v| !v.is_empty() && !v.starts_with("--")).ok_or_else(|| format!("{name} needs a value."))
                 };
                 match a.as_str() {
                     "--start" => start = true,
@@ -674,12 +682,12 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
                     s if s.starts_with("--level=") => level = Some(value("--level", Some(&s["--level=".len()..]))?),
                     s if s.starts_with("--base=") => base = Some(value("--base", Some(&s["--base=".len()..]))?),
                     s if s.starts_with("--file=") => brief_file = Some(value("--file", Some(&s["--file=".len()..]))?),
-                    s if s.starts_with("--") && s.len() > 2 => return Err(format!("opção desconhecida de --task new: {s}")),
+                    s if s.starts_with("--") && s.len() > 2 => return Err(format!("unknown option of --task new: {s}")),
                     _ => words.push(a.clone()),
                 }
             }
             if words.is_empty() || words[0].trim().is_empty() || words[0] == "-" {
-                return Err("falta o título da tarefa: ask-agent --task new \"título\" ... -".into());
+                return Err("missing the task title: ask-agent --task new \"title\" ... -".into());
             }
             let title = words.remove(0);
             let brief = match brief_file {
@@ -688,12 +696,12 @@ fn parse_task(args: &[String]) -> Result<TaskCmd, String> {
             };
             Ok(TaskCmd::New { title, brief, agent, model, effort, level, base, start, scope })
         }
-        other => Err(format!("subcomando desconhecido de --task: {other}")),
+        other => Err(format!("unknown --task subcommand: {other}")),
     }
 }
 
-/// Texto de um `Body`: a linha de comando, a entrada padrão ou um arquivo. Sem nada e num terminal,
-/// erro (ler travaria sem aviso).
+/// The text of a `Body`: the command line, standard input or a file. With nothing and in a terminal,
+/// an error (reading would hang without a notice).
 fn read_body(body: Body, what: &str) -> Result<String, String> {
     let text = match body {
         Body::Inline(text) => text,
@@ -701,7 +709,7 @@ fn read_body(body: Body, what: &str) -> Result<String, String> {
         Body::File(path) => read_text_file(&path)?,
         Body::Missing if !std::io::stdin().is_terminal() => read_stdin()?,
         Body::Missing => {
-            return Err(format!("falta {what}: passe o texto como argumento, pela entrada padrão (-) ou em --file <arquivo>."))
+            return Err(format!("missing {what}: pass the text as an argument, through standard input (-) or in --file <file>."))
         }
     };
     Ok(text)
@@ -709,44 +717,44 @@ fn read_body(body: Body, what: &str) -> Result<String, String> {
 
 fn read_stdin() -> Result<String, String> {
     let mut raw = Vec::new();
-    std::io::stdin().read_to_end(&mut raw).map_err(|e| format!("falha ao ler o stdin: {e}"))?;
+    std::io::stdin().read_to_end(&mut raw).map_err(|e| format!("failed to read stdin: {e}"))?;
     Ok(decode_text(&raw))
 }
 
-/// Lê um arquivo como texto (UTF-8 ou UTF-16 com BOM; ver `decode_text`). É o caminho que mantém os
-/// acentos: o shell do agente (PowerShell) os trocaria por `?` ao canalizar pelo `stdin`.
+/// Reads a file as text (UTF-8 or UTF-16 with BOM; see `decode_text`). It is the path that keeps the
+/// accents: the agent's shell (PowerShell) would turn them into `?` when piping through `stdin`.
 fn read_text_file(path: &str) -> Result<String, String> {
-    let raw = std::fs::read(path).map_err(|e| format!("falha ao ler o arquivo {path}: {e}"))?;
+    let raw = std::fs::read(path).map_err(|e| format!("failed to read the file {path}: {e}"))?;
     Ok(decode_text(&raw))
 }
 
-/// Texto de um campo da tarefa na resposta da ponte.
+/// The text of a task field in the bridge response.
 fn field<'a>(task: &'a Value, key: &str) -> &'a str {
     task.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
 fn status_label(status: &str) -> &str {
     match status {
-        "draft" => "rascunho",
-        "queued" => "na fila",
-        "running" => "andamento",
-        "review" => "revisão",
-        "validating" => "validação",
-        "merged" => "concluída",
-        "discarded" => "descartada",
-        "failed" => "erro",
+        "draft" => "draft",
+        "queued" => "queued",
+        "running" => "running",
+        "review" => "review",
+        "validating" => "validating",
+        "merged" => "done",
+        "discarded" => "discarded",
+        "failed" => "error",
         other => other,
     }
 }
 
-/// `claude@t3 (sonnet, esforço high)` ou só a instância.
+/// `claude@t3 (sonnet, effort high)` or just the instance.
 fn who(task: &Value) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(m) = task.get("model").and_then(Value::as_str) {
         parts.push(m.to_owned());
     }
     if let Some(e) = task.get("effort").and_then(Value::as_str) {
-        parts.push(format!("esforço {e}"));
+        parts.push(format!("effort {e}"));
     }
     match parts.is_empty() {
         true => field(task, "instance").to_owned(),
@@ -754,7 +762,7 @@ fn who(task: &Value) -> String {
     }
 }
 
-/// O nível da tarefa (`media` quando o servidor não manda).
+/// The task's level (`media` when the server does not send it; it is the CLI value).
 fn level_text(task: &Value) -> &str {
     match field(task, "level") {
         "" => "media",
@@ -762,36 +770,36 @@ fn level_text(task: &Value) -> &str {
     }
 }
 
-/// Uma linha de `--task list`: id, estado, agente com modelo e título.
+/// One `--task list` line: id, state, agent with model and title.
 fn task_line(task: &Value) -> String {
     let waiting = match field(task, "waiting_for") {
         "" => String::new(),
-        id => format!(" (espera {id})"),
+        id => format!(" (waits for {id})"),
     };
     format!("{:<5} {:<10} {:<26} {}{waiting}", field(task, "id"), status_label(field(task, "status")), who(task), field(task, "title"))
 }
 
-/// Os caminhos de uma lista de textos do JSON (`scope`, `outside_scope`), separados por vírgula.
+/// The paths of a list of texts in the JSON (`scope`, `outside_scope`), separated by commas.
 fn paths_of(task: &Value, key: &str) -> String {
     let list = task.get(key).and_then(Value::as_array);
     list.map(|l| l.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default()
 }
 
-/// `--task show`: tudo o que a pessoa (ou o agente) precisa para revisar.
+/// `--task show`: everything the person (or the agent) needs to review it.
 fn task_detail(task: &Value) -> String {
-    let mut out = format!("Tarefa {}: {}\n", field(task, "id"), field(task, "title"));
-    out.push_str(&format!("Estado: {}\n", status_label(field(task, "status"))));
+    let mut out = format!("Task {}: {}\n", field(task, "id"), field(task, "title"));
+    out.push_str(&format!("State: {}\n", status_label(field(task, "status"))));
     if let Some(id) = task.get("waiting_for").and_then(Value::as_str) {
-        out.push_str(&format!("Na fila: espera a tarefa {id} (o escopo se sobrepõe); começa sozinha quando ela sair\n"));
+        out.push_str(&format!("Queued: waits for task {id} (the scope overlaps); it starts by itself when that one leaves\n"));
     }
-    out.push_str(&format!("Agente: {} · nível: {}\n", who(task), level_text(task)));
+    out.push_str(&format!("Agent: {} · level: {}\n", who(task), level_text(task)));
     let scope = paths_of(task, "scope");
     if !scope.is_empty() {
-        out.push_str(&format!("Escopo: {scope}\n"));
+        out.push_str(&format!("Scope: {scope}\n"));
     }
     let outside = paths_of(task, "outside_scope");
     if !outside.is_empty() {
-        out.push_str(&format!("Aviso: mexeu fora do escopo: {outside}\n"));
+        out.push_str(&format!("Warning: touched files outside the scope: {outside}\n"));
     }
     out.push_str(&format!("Base: {} · branch: {}\n", field(task, "base"), field(task, "branch")));
     let wt = field(task, "worktree");
@@ -799,19 +807,19 @@ fn task_detail(task: &Value) -> String {
         out.push_str(&format!("Worktree: {wt}\n"));
     }
     if let Some(c) = task.get("creator").and_then(Value::as_str) {
-        out.push_str(&format!("Criada por: {c}\n"));
+        out.push_str(&format!("Created by: {c}\n"));
     }
     if let Some(e) = task.get("error").and_then(Value::as_str) {
-        out.push_str(&format!("Erro: {e}\n"));
+        out.push_str(&format!("Error: {e}\n"));
     }
     if let Some(stat) = task.get("diff_stat").and_then(Value::as_str) {
-        out.push_str(&format!("\nAlterações (git diff --stat {}...{}):\n{stat}\n", field(task, "base"), field(task, "branch")));
+        out.push_str(&format!("\nChanges (git diff --stat {}...{}):\n{stat}\n", field(task, "base"), field(task, "branch")));
     }
     if let Some(report) = task.get("report").and_then(Value::as_str) {
-        out.push_str(&format!("\nRelatório:\n{report}\n"));
+        out.push_str(&format!("\nReport:\n{report}\n"));
     }
     if let Some(events) = task.get("events").and_then(Value::as_array) {
-        out.push_str("\nHistórico:\n");
+        out.push_str("\nHistory:\n");
         let skip = events.len().saturating_sub(10);
         for e in events.iter().skip(skip) {
             out.push_str(&format!("  - {}\n", field(e, "text")));
@@ -820,13 +828,13 @@ fn task_detail(task: &Value) -> String {
     out
 }
 
-/// `ask-agent --task ...`: fala com `/tasks` da ponte.
+/// `ask-agent --task ...`: talks to the bridge's `/tasks`.
 fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
     let cmd = match parse_task(args) {
         Ok(c) => c,
         Err(e) => return fail(format!("{e}\n{TASK_USAGE}"), 2),
     };
-    // Corpo já lido (a entrada padrão antes de falar com a ponte) e o pedido HTTP.
+    // Body already read (standard input before talking to the bridge) and the HTTP request.
     let (method, route, body) = match cmd {
         TaskCmd::List => ("GET", "/tasks".to_owned(), None),
         TaskCmd::Show(id) => ("GET", format!("/tasks/{id}"), None),
@@ -834,22 +842,22 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
         TaskCmd::Merge(id) => ("POST", format!("/tasks/{id}/merge"), Some(json!({}))),
         TaskCmd::Validate(id) => ("POST", format!("/tasks/{id}/validate"), Some(json!({}))),
         TaskCmd::Discard(id) => ("POST", format!("/tasks/{id}/discard"), Some(json!({}))),
-        TaskCmd::Done { id, report } => match read_body(report, "o relatório") {
-            Ok(r) if r.trim().is_empty() => return fail("relatório vazio: diga o que foi feito, os arquivos, os testes e o que falta.", 2),
+        TaskCmd::Done { id, report } => match read_body(report, "the report") {
+            Ok(r) if r.trim().is_empty() => return fail("empty report: say what was done, the files, the tests and what is missing.", 2),
             Ok(r) => ("POST", format!("/tasks/{id}/done"), Some(json!({ "report": r }))),
             Err(e) => return fail(e, 2),
         },
-        TaskCmd::Return { id, feedback } => match read_body(feedback, "o feedback") {
-            Ok(f) if f.trim().is_empty() => return fail("feedback vazio: diga o que precisa mudar.", 2),
+        TaskCmd::Return { id, feedback } => match read_body(feedback, "the feedback") {
+            Ok(f) if f.trim().is_empty() => return fail("empty feedback: say what has to change.", 2),
             Ok(f) => ("POST", format!("/tasks/{id}/return"), Some(json!({ "feedback": f }))),
             Err(e) => return fail(e, 2),
         },
-        TaskCmd::Reject { id, feedback } => match read_body(feedback, "o motivo") {
-            Ok(f) if f.trim().is_empty() => return fail("motivo vazio: diga o que não funcionou no teste.", 2),
+        TaskCmd::Reject { id, feedback } => match read_body(feedback, "the reason") {
+            Ok(f) if f.trim().is_empty() => return fail("empty reason: say what did not work in the test.", 2),
             Ok(f) => ("POST", format!("/tasks/{id}/reject"), Some(json!({ "feedback": f }))),
             Err(e) => return fail(e, 2),
         },
-        TaskCmd::New { title, brief, agent, model, effort, level, base, start, scope } => match read_body(brief, "o pedido da tarefa") {
+        TaskCmd::New { title, brief, agent, model, effort, level, base, start, scope } => match read_body(brief, "the task request") {
             Ok(b) => {
                 let mut body = json!({ "title": title, "brief": b, "start": start });
                 if !scope.is_empty() {
@@ -867,17 +875,17 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
     };
     let new = route == "/tasks" && method == "POST";
     let verb = route.rsplit('/').next().unwrap_or("").to_owned();
-    // Iniciar ou mesclar roda o git (pode levar um tempo): o limite é folgado.
+    // Starting or merging runs git (it may take a while): the limit is generous.
     let (status, json) = match bridge.request(method, &route, body.as_ref(), Some(Duration::from_secs(600))) {
         Ok(v) => v,
         Err(e) => return fail(e, 1),
     };
     if status != 200 {
-        return fail(json.get("error").and_then(Value::as_str).unwrap_or("erro desconhecido"), 1);
+        return fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1);
     }
     if let Some(list) = json.get("tasks").and_then(Value::as_array) {
         if list.is_empty() {
-            println!("Nenhuma tarefa neste projeto.");
+            println!("No tasks in this project.");
         }
         for task in list {
             println!("{}", task_line(task));
@@ -888,9 +896,9 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
     let id = field(&task, "id").to_owned();
     match (new, verb.as_str()) {
         (true, _) => {
-            println!("Tarefa {id} criada: {}", field(&task, "title"));
+            println!("Task {id} created: {}", field(&task, "title"));
             println!(
-                "  agente: {} · nível: {} · base: {} · branch: {}",
+                "  agent: {} · level: {} · base: {} · branch: {}",
                 who(&task),
                 level_text(&task),
                 field(&task, "base"),
@@ -899,9 +907,14 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
             if let Some(events) = task.get("events").and_then(Value::as_array) {
                 for event in events {
                     if let Some(text) = event.get("text").and_then(Value::as_str) {
-                        if text.starts_with("agente escolhido automaticamente")
-                            || text.starts_with("aviso de cota:")
-                            || text.starts_with("aviso de capacidade:")
+                        // Event texts are written by the tasks area, which may be in either language.
+                        let lowered = text.to_lowercase();
+                        if lowered.starts_with("agente escolhido automaticamente")
+                            || lowered.starts_with("agent chosen automatically")
+                            || lowered.starts_with("aviso de cota:")
+                            || lowered.starts_with("quota warning:")
+                            || lowered.starts_with("aviso de capacidade:")
+                            || lowered.starts_with("capacity warning:")
                         {
                             println!("  {text}");
                         }
@@ -910,51 +923,54 @@ fn task_command(bridge: &Bridge, args: &[String]) -> ExitCode {
             }
             let scope = paths_of(&task, "scope");
             if !scope.is_empty() {
-                println!("  escopo: {scope}");
+                println!("  scope: {scope}");
             }
             if field(&task, "status") == "queued" {
                 println!(
-                    "  na fila: o escopo se sobrepõe ao da {}; começa sozinha quando ela for mesclada, descartada ou falhar",
+                    "  queued: the scope overlaps that of {}; it starts by itself when that one is merged, discarded or fails",
                     field(&task, "waiting_for")
                 );
             } else if field(&task, "status") == "running" {
-                println!("  iniciada na worktree {}", field(&task, "worktree"));
+                println!("  started in the worktree {}", field(&task, "worktree"));
                 println!(
-                    "  o agente avisa com: ask-agent --task done {id} --file <arquivo>  (o relatório fica em: ask-agent --task show {id})"
+                    "  the agent reports with: ask-agent --task done {id} --file <file>  (the report is in: ask-agent --task show {id})"
                 );
             } else {
-                println!("  inicie com: ask-agent --task start {id}");
+                println!("  start it with: ask-agent --task start {id}");
             }
         }
         (_, "start") if field(&task, "status") == "queued" => println!(
-            "Tarefa {id} na fila: o escopo se sobrepõe ao da {}; começa sozinha quando ela for mesclada, descartada ou falhar.",
+            "Task {id} queued: the scope overlaps that of {}; it starts by itself when that one is merged, discarded or fails.",
             field(&task, "waiting_for")
         ),
-        (_, "start") => println!("Tarefa {id} iniciada: {} trabalha na worktree {}", who(&task), field(&task, "worktree")),
+        (_, "start") => println!("Task {id} started: {} works in the worktree {}", who(&task), field(&task, "worktree")),
         (_, "merge") => {
-            println!("Tarefa {id} mesclada em {}; aguardando validação (o agente, a worktree e a branch continuam).", field(&task, "base"))
+            println!(
+                "Task {id} merged into {}; waiting for validation (the agent, the worktree and the branch stay).",
+                field(&task, "base")
+            )
         }
-        (_, "validate") => println!("Tarefa {id} validada e concluída; worktree e branch removidas."),
-        (_, "reject") => println!("Tarefa {id} reprovada; {} recebeu o motivo e volta a trabalhar.", field(&task, "instance")),
-        (_, "discard") => println!("Tarefa {id} descartada; worktree e branch removidas."),
-        (_, "done") => println!("Relatório da tarefa {id} entregue; ela está em revisão."),
-        (_, "return") => println!("Tarefa {id} devolvida a {} com o seu feedback.", field(&task, "instance")),
+        (_, "validate") => println!("Task {id} validated and done; worktree and branch removed."),
+        (_, "reject") => println!("Task {id} rejected; {} received the reason and goes back to work.", field(&task, "instance")),
+        (_, "discard") => println!("Task {id} discarded; worktree and branch removed."),
+        (_, "done") => println!("Report of task {id} delivered; it is in review."),
+        (_, "return") => println!("Task {id} sent back to {} with your feedback.", field(&task, "instance")),
         _ => print!("{}", task_detail(&task)),
     }
     ExitCode::SUCCESS
 }
 
-// ---------- Statusline do Claude Code (`--usage`) ----------
+// ---------- Claude Code statusline (`--usage`) ----------
 
-/// `--usage`: lê o JSON que o Claude Code passa à statusline, manda o uso do plano à ponte
-/// (`POST /usage`) e imprime a linha: a da statusline própria do usuário, se ele tiver uma (o
-/// nosso `--settings` a substitui), ou "sessão 34% · semana 12%". Sem dados, não imprime nada.
+/// `--usage`: reads the JSON Claude Code passes to the statusline, sends the plan usage to the bridge
+/// (`POST /usage`) and prints the line: the user's own statusline, if they have one (our `--settings`
+/// replaces it), or "session 34% · week 12%". Without data, it prints nothing.
 fn statusline(bridge: Option<Bridge>) -> ExitCode {
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let status: Value = serde_json::from_str(&input).unwrap_or(Value::Null);
     let usage = from_claude_statusline(&status);
-    // A requisição corre junto com a statusline do usuário.
+    // The request runs alongside the user's statusline.
     let post = bridge.filter(|_| usage.session.is_some() || usage.weekly.is_some()).map(|bridge| {
         let body = usage_to_json(&usage);
         std::thread::spawn(move || {
@@ -971,11 +987,11 @@ fn statusline(bridge: Option<Bridge>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// "sessão 34% · semana 12%", com quebra de linha (vazio sem dados).
+/// "session 34% · week 12%", with a line break (empty without data).
 fn usage_line(u: &AgentUsage) -> String {
     let pct = |w: Option<agentdeck_core::UsageWindow>| w.map(|w| format!("{:.0}%", w.used * 100.0));
     let parts: Vec<String> =
-        [("sessão", pct(u.session)), ("semana", pct(u.weekly))].into_iter().filter_map(|(k, v)| Some(format!("{k} {}", v?))).collect();
+        [("session", pct(u.session)), ("week", pct(u.weekly))].into_iter().filter_map(|(k, v)| Some(format!("{k} {}", v?))).collect();
     if parts.is_empty() {
         String::new()
     } else {
@@ -983,8 +999,8 @@ fn usage_line(u: &AgentUsage) -> String {
     }
 }
 
-/// Comando da statusline do usuário, na ordem de precedência do Claude Code: projeto local,
-/// projeto e usuário (`CLAUDE_CONFIG_DIR` ou `~/.claude`). A nossa própria é ignorada.
+/// The user's statusline command, in Claude Code's order of precedence: local project, project and user
+/// (`CLAUDE_CONFIG_DIR` or `~/.claude`). Our own is ignored.
 fn user_statusline(status: &Value) -> Option<String> {
     let project = ["project_dir", "current_dir"]
         .iter()
@@ -1013,7 +1029,7 @@ fn statusline_in(file: &Path) -> Option<String> {
     (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| cmd.to_owned())
 }
 
-/// Roda a statusline do usuário com o mesmo stdin; `None` se ela não roda ou demora demais.
+/// Runs the user's statusline with the same stdin; `None` if it does not run or takes too long.
 fn run_user_statusline(cmd: &str, input: &str) -> Option<String> {
     let mut child = shell(cmd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
     if let Some(mut stdin) = child.stdin.take() {
@@ -1041,8 +1057,8 @@ fn run_user_statusline(cmd: &str, input: &str) -> Option<String> {
     }
 }
 
-/// O shell em que o Claude Code roda a statusline: `sh` no Unix; no Windows, o Git Bash
-/// (`CLAUDE_CODE_GIT_BASH_PATH` ou o `bash.exe` do PATH, sem o do WSL em `System32`), ou o `cmd`.
+/// The shell Claude Code runs the statusline in: `sh` on Unix; on Windows, Git Bash
+/// (`CLAUDE_CODE_GIT_BASH_PATH` or the `bash.exe` on PATH, without the WSL one in `System32`), or `cmd`.
 fn shell(cmd: &str) -> Command {
     if cfg!(windows) {
         let windir = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
@@ -1066,8 +1082,8 @@ fn shell(cmd: &str) -> Command {
     }
 }
 
-/// `cmd /D /S /C "<comando>"` com a linha crua: a citação do Rust trocaria `"` por `\"`, que o
-/// `cmd` não entende. Com `/S`, o `cmd` tira só as aspas de fora.
+/// `cmd /D /S /C "<command>"` with the raw line: Rust's quoting would turn `"` into `\"`, which `cmd`
+/// does not understand. With `/S`, `cmd` strips only the outer quotes.
 #[cfg(windows)]
 fn cmd_shell(cmd: &str) -> Command {
     use std::os::windows::process::CommandExt;
@@ -1089,18 +1105,18 @@ mod tests {
 
     #[test]
     fn inbox_entries_read_as_a_message_with_age_and_state() {
-        let entry = json!({"request": 4, "from": "antigravity", "text": "pronto", "failed": false, "ts": 1_000_000, "delivered": false});
+        let entry = json!({"request": 4, "from": "antigravity", "text": "ready", "failed": false, "ts": 1_000_000, "delivered": false});
         let text = inbox_entry_text(&entry, 1_000_000 + 5 * 60_000);
         assert_eq!(
             text,
-            "[Resposta do agente \"antigravity\" à sua pergunta #4, há 5 min, não entregue]
+            "[Answer from the agent \"antigravity\" to your question #4, 5 min ago, not delivered]
 
-pronto"
+ready"
         );
-        let failed = json!({"request": 5, "from": "claude@dev", "text": "não respondeu", "failed": true, "ts": 0, "delivered": true});
+        let failed = json!({"request": 5, "from": "claude@dev", "text": "did not answer", "failed": true, "ts": 0, "delivered": true});
         assert!(inbox_entry_text(&failed, 3 * 3_600_000)
-            .starts_with("[Sem resposta do agente \"claude@dev\" à sua pergunta #5, há 3 h, já entregue no terminal]"));
-        assert_eq!(age_text(10_000, 20_000), "agora há pouco");
+            .starts_with("[No answer from the agent \"claude@dev\" to your question #5, 3 h ago, already delivered in the terminal]"));
+        assert_eq!(age_text(10_000, 20_000), "just now");
     }
 
     type Parsed = (Result<(bool, Option<String>), String>, Vec<String>);
@@ -1135,46 +1151,43 @@ pronto"
             start,
             scope: Vec::new(),
         };
-        assert_eq!(task(&["new", "Corrigir login", "-"]), Ok(new("Corrigir login", Body::Stdin, None, None, None, false)));
-        assert_eq!(task(&["new", "Corrigir login"]), Ok(new("Corrigir login", Body::Missing, None, None, None, false)));
-        assert_eq!(
-            task(&["new", "T", "Faça", "isto", "agora"]),
-            Ok(new("T", Body::Inline("Faça isto agora".into()), None, None, None, false))
-        );
+        assert_eq!(task(&["new", "Fix login", "-"]), Ok(new("Fix login", Body::Stdin, None, None, None, false)));
+        assert_eq!(task(&["new", "Fix login"]), Ok(new("Fix login", Body::Missing, None, None, None, false)));
+        assert_eq!(task(&["new", "T", "Do", "this", "now"]), Ok(new("T", Body::Inline("Do this now".into()), None, None, None, false)));
         assert_eq!(
             task(&["new", "T", "--agent", "opencode", "--model", "opencode/glm", "--base", "dev", "--start", "-"]),
             Ok(new("T", Body::Stdin, Some("opencode"), Some("opencode/glm"), Some("dev"), true))
         );
-        // As opções valem em qualquer posição e com `=`.
+        // The options work in any position and with `=`.
         assert_eq!(
-            task(&["new", "--start", "--agent=claude", "T", "--model=sonnet", "--base=main", "pedido"]),
-            Ok(new("T", Body::Inline("pedido".into()), Some("claude"), Some("sonnet"), Some("main"), true))
+            task(&["new", "--start", "--agent=claude", "T", "--model=sonnet", "--base=main", "request"]),
+            Ok(new("T", Body::Inline("request".into()), Some("claude"), Some("sonnet"), Some("main"), true))
         );
-        // O pedido vem de um arquivo (mantém os acentos): `--file <arq>` ou `--file=<arq>`.
-        assert_eq!(task(&["new", "T", "--file", "pedido.md"]), Ok(new("T", Body::File("pedido.md".into()), None, None, None, false)));
+        // The request comes from a file (it keeps the accents): `--file <file>` or `--file=<file>`.
+        assert_eq!(task(&["new", "T", "--file", "request.md"]), Ok(new("T", Body::File("request.md".into()), None, None, None, false)));
         assert_eq!(
-            task(&["new", "T", "--start", "--file=pedido.md"]),
-            Ok(new("T", Body::File("pedido.md".into()), None, None, None, true))
+            task(&["new", "T", "--start", "--file=request.md"]),
+            Ok(new("T", Body::File("request.md".into()), None, None, None, true))
         );
-        // O esforço vale em qualquer posição, com `=`; a ponte confere o valor.
-        let TaskCmd::New { effort, .. } = task(&["new", "T", "--effort", "high", "pedido"]).expect("effort") else { panic!("new") };
+        // The effort works in any position, with `=`; the bridge checks the value.
+        let TaskCmd::New { effort, .. } = task(&["new", "T", "--effort", "high", "request"]).expect("effort") else { panic!("new") };
         assert_eq!(effort.as_deref(), Some("high"));
         let TaskCmd::New { effort, .. } = task(&["new", "--effort=low", "T", "-"]).expect("effort=") else { panic!("new") };
         assert_eq!(effort.as_deref(), Some("low"));
-        let TaskCmd::New { level, .. } = task(&["new", "T", "--level", "complexa", "pedido"]).expect("level") else { panic!("new") };
-        assert_eq!(level.as_deref(), Some("complexa"));
-        let TaskCmd::New { level, .. } = task(&["new", "--level=simples", "T", "-"]).expect("level=") else { panic!("new") };
-        assert_eq!(level.as_deref(), Some("simples"));
-        let TaskCmd::New { level, .. } = task(&["new", "T", "-"]).expect("sem level") else { panic!("new") };
+        let TaskCmd::New { level, .. } = task(&["new", "T", "--level", "complex", "request"]).expect("level") else { panic!("new") };
+        assert_eq!(level.as_deref(), Some("complex"));
+        let TaskCmd::New { level, .. } = task(&["new", "--level=simple", "T", "-"]).expect("level=") else { panic!("new") };
+        assert_eq!(level.as_deref(), Some("simple"));
+        let TaskCmd::New { level, .. } = task(&["new", "T", "-"]).expect("no level") else { panic!("new") };
         assert_eq!(level, None);
-        // `--scope` leva os caminhos até a próxima opção ou um `-`; pode repetir e vale com `=`.
+        // `--scope` takes the paths up to the next option or a `-`; it may repeat and works with `=`.
         let scope_of = |args: &[&str]| match task(args).expect("scope") {
             TaskCmd::New { scope, brief, .. } => (scope, brief),
             other => panic!("{other:?}"),
         };
         assert_eq!(
-            scope_of(&["new", "T", "pedido", "--scope", "crates/core", "crates/cli/src/lib.rs", "--start"]),
-            (vec!["crates/core".to_owned(), "crates/cli/src/lib.rs".to_owned()], Body::Inline("pedido".into()))
+            scope_of(&["new", "T", "request", "--scope", "crates/core", "crates/cli/src/lib.rs", "--start"]),
+            (vec!["crates/core".to_owned(), "crates/cli/src/lib.rs".to_owned()], Body::Inline("request".into()))
         );
         assert_eq!(scope_of(&["new", "T", "--scope", "a", "b", "-"]), (vec!["a".to_owned(), "b".to_owned()], Body::Stdin));
         assert_eq!(
@@ -1214,28 +1227,25 @@ pronto"
         assert_eq!(task(&["discard", "t6"]), Ok(TaskCmd::Discard("t6".into())));
         assert_eq!(task(&["done", "t3", "-"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::Stdin }));
         assert_eq!(task(&["done", "t3"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::Missing }));
+        assert_eq!(task(&["done", "t3", "all", "done"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::Inline("all done".into()) }));
         assert_eq!(
-            task(&["done", "t3", "feito", "tudo"]),
-            Ok(TaskCmd::Done { id: "t3".into(), report: Body::Inline("feito tudo".into()) })
-        );
-        assert_eq!(
-            task(&["return", "t3", "Faltou o teste."]),
-            Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Inline("Faltou o teste.".into()) })
+            task(&["return", "t3", "The test is missing."]),
+            Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Inline("The test is missing.".into()) })
         );
         assert_eq!(task(&["return", "t3", "-"]), Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::Stdin }));
         assert_eq!(
-            task(&["reject", "t3", "Não", "salva."]),
-            Ok(TaskCmd::Reject { id: "t3".into(), feedback: Body::Inline("Não salva.".into()) })
+            task(&["reject", "t3", "It", "does not save."]),
+            Ok(TaskCmd::Reject { id: "t3".into(), feedback: Body::Inline("It does not save.".into()) })
         );
         assert_eq!(task(&["reject", "t3", "-"]), Ok(TaskCmd::Reject { id: "t3".into(), feedback: Body::Stdin }));
         assert_eq!(task(&["reject", "t3", "--file", "m.md"]), Ok(TaskCmd::Reject { id: "t3".into(), feedback: Body::File("m.md".into()) }));
-        // Relatório/feedback de um arquivo (mantém os acentos).
+        // Report/feedback from a file (it keeps the accents).
         assert_eq!(task(&["done", "t3", "--file", "r.md"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::File("r.md".into()) }));
         assert_eq!(task(&["done", "t3", "--file=r.md"]), Ok(TaskCmd::Done { id: "t3".into(), report: Body::File("r.md".into()) }));
         assert_eq!(task(&["return", "t3", "--file", "f.md"]), Ok(TaskCmd::Return { id: "t3".into(), feedback: Body::File("f.md".into()) }));
         for bad in [
             &[][..],
-            &["explodir"],
+            &["explode"],
             &["list", "x"],
             &["show"],
             &["show", "claude@t3"],
@@ -1255,36 +1265,35 @@ pronto"
     #[test]
     fn task_output_is_readable() {
         let t = json!({
-            "id": "t3", "title": "Corrigir login", "status": "review", "base": "main", "branch": "tarefa/t3-corrigir-login",
+            "id": "t3", "title": "Fix login", "status": "review", "base": "main", "branch": "tarefa/t3-fix-login",
             "instance": "claude@t3", "model": "sonnet", "creator": "claude", "worktree": "/r/.agentdeck/worktrees/t3",
-            "diff_stat": " a.rs | 2 +-", "report": "Feito.", "events": [{ "at_ms": 1, "text": "criada" }, { "at_ms": 2, "text": "iniciada" }]
+            "diff_stat": " a.rs | 2 +-", "report": "Done.", "events": [{ "at_ms": 1, "text": "created" }, { "at_ms": 2, "text": "started" }]
         });
-        assert_eq!(task_line(&t), "t3    revisão    claude@t3 (sonnet)         Corrigir login");
-        assert_eq!(who(&json!({ "instance": "claude@t3", "model": "sonnet", "effort": "high" })), "claude@t3 (sonnet, esforço high)");
-        assert_eq!(who(&json!({ "instance": "claude@t3", "effort": "low" })), "claude@t3 (esforço low)");
+        assert_eq!(task_line(&t), "t3    review     claude@t3 (sonnet)         Fix login");
+        assert_eq!(who(&json!({ "instance": "claude@t3", "model": "sonnet", "effort": "high" })), "claude@t3 (sonnet, effort high)");
+        assert_eq!(who(&json!({ "instance": "claude@t3", "effort": "low" })), "claude@t3 (effort low)");
         let d = task_detail(&t);
         for needle in [
-            "Tarefa t3: Corrigir login",
-            "Estado: revisão",
-            "Agente: claude@t3 (sonnet)",
-            "Base: main · branch: tarefa/t3-corrigir-login",
-            "Criada por: claude",
+            "Task t3: Fix login",
+            "State: review",
+            "Agent: claude@t3 (sonnet)",
+            "Base: main · branch: tarefa/t3-fix-login",
+            "Created by: claude",
             "a.rs | 2 +-",
-            "Relatório:\nFeito.",
-            "  - iniciada",
+            "Report:\nDone.",
+            "  - started",
         ] {
             assert!(d.contains(needle), "{needle}\n{d}");
         }
         let draft = json!({ "id": "t4", "title": "T", "status": "draft", "instance": "opencode@t4" });
-        assert_eq!(task_line(&draft), "t4    rascunho   opencode@t4                T");
+        assert_eq!(task_line(&draft), "t4    draft      opencode@t4                T");
         let queued = json!({
             "id": "t5", "title": "U", "status": "queued", "instance": "claude@t5", "waiting_for": "t3",
             "scope": ["crates/core", "crates/cli"], "outside_scope": ["crates/app/x.rs"]
         });
-        assert_eq!(task_line(&queued), "t5    na fila    claude@t5                  U (espera t3)");
+        assert_eq!(task_line(&queued), "t5    queued     claude@t5                  U (waits for t3)");
         let d = task_detail(&queued);
-        for needle in
-            ["Estado: na fila", "Na fila: espera a tarefa t3", "Escopo: crates/core, crates/cli", "mexeu fora do escopo: crates/app/x.rs"]
+        for needle in ["State: queued", "Queued: waits for task t3", "Scope: crates/core, crates/cli", "outside the scope: crates/app/x.rs"]
         {
             assert!(
                 d.contains(needle),
@@ -1292,18 +1301,18 @@ pronto"
 {d}"
             );
         }
-        assert!(!task_detail(&draft).contains("Escopo:"));
+        assert!(!task_detail(&draft).contains("Scope:"));
     }
 
     #[test]
     fn model_flag_is_parsed_in_any_order_before_the_target() {
-        assert_eq!(flags(&["claude@dev", "oi"]), (Ok((false, None)), rest(&["claude@dev", "oi"])));
-        assert_eq!(flags(&["--new", "claude", "oi"]).0, Ok((true, None)));
-        assert_eq!(flags(&["--model", "sonnet", "claude@dev", "oi"]), (Ok((false, Some("sonnet".into()))), rest(&["claude@dev", "oi"])));
-        assert_eq!(flags(&["--new", "--model", "opencode/glm-5.3", "opencode", "oi"]).0, Ok((true, Some("opencode/glm-5.3".into()))));
-        assert_eq!(flags(&["--model", "opus", "--new", "claude", "oi"]).0, Ok((true, Some("opus".into()))));
-        assert_eq!(flags(&["--model=haiku", "claude", "oi"]), (Ok((false, Some("haiku".into()))), rest(&["claude", "oi"])));
-        // O que vem depois do destino é mensagem, mesmo que pareça uma opção.
+        assert_eq!(flags(&["claude@dev", "hi"]), (Ok((false, None)), rest(&["claude@dev", "hi"])));
+        assert_eq!(flags(&["--new", "claude", "hi"]).0, Ok((true, None)));
+        assert_eq!(flags(&["--model", "sonnet", "claude@dev", "hi"]), (Ok((false, Some("sonnet".into()))), rest(&["claude@dev", "hi"])));
+        assert_eq!(flags(&["--new", "--model", "opencode/glm-5.3", "opencode", "hi"]).0, Ok((true, Some("opencode/glm-5.3".into()))));
+        assert_eq!(flags(&["--model", "opus", "--new", "claude", "hi"]).0, Ok((true, Some("opus".into()))));
+        assert_eq!(flags(&["--model=haiku", "claude", "hi"]), (Ok((false, Some("haiku".into()))), rest(&["claude", "hi"])));
+        // What comes after the target is a message, even if it looks like an option.
         assert_eq!(flags(&["claude", "--model", "x"]), (Ok((false, None)), rest(&["claude", "--model", "x"])));
     }
 
@@ -1317,7 +1326,7 @@ pronto"
     #[test]
     fn the_message_body_can_come_from_a_file() {
         for (args, path, left) in [
-            (&["claude", "oi"][..], None, &["claude", "oi"][..]),
+            (&["claude", "hi"][..], None, &["claude", "hi"][..]),
             (&["claude", "--file", "m.md"], Some("m.md"), &["claude"]),
             (&["--reply", "3", "--file=m.md"], Some("m.md"), &["--reply", "3"]),
         ] {
@@ -1338,20 +1347,23 @@ pronto"
         assert_eq!(with_model("claude@dev", &models), "claude@dev (sonnet)");
         assert_eq!(with_model("claude", &models), "claude");
         assert!(models_of(&json!({})).is_empty());
-        // O aviso de cota vai junto do modelo.
-        let json =
-            json!({ "models": { "antigravity@arquiteto": "gemini-4-argon-high" }, "quota": { "antigravity@arquiteto": "cota esgotada" } });
-        assert_eq!(with_model("antigravity@arquiteto", &models_of(&json)), "antigravity@arquiteto (gemini-4-argon-high; cota esgotada)");
+        // The quota note goes next to the model.
+        let json = json!({ "models": { "antigravity@arquiteto": "gemini-4-argon-high" }, "quota": { "antigravity@arquiteto": "quota exhausted" } });
+        assert_eq!(with_model("antigravity@arquiteto", &models_of(&json)), "antigravity@arquiteto (gemini-4-argon-high; quota exhausted)");
     }
 
     #[test]
     fn quota_inventory_uses_gemini_groups_and_excludes_opencode() {
-        let inventory = "claude --model: opus\n  cota: 74% usada\nantigravity --model: gemini-4-argon-high\n  cota: Gemini Models 45% usada, Gemini 4 Argon 48% usada, Claude and GPT models 98% usada\ncodex --model <nome> (este computador não lista os modelos)\n  cota: sem leitura\nopencode --model <provedor>/<modelo>: \n  cota: 0% usada";
+        // The inventory is written by another area: both spellings are read (`cota:`/`quota:`, `ESGOTADA`/`EXHAUSTED`).
+        let inventory = "claude --model: opus\n  cota: 74% usada\nantigravity --model: gemini-4-argon-high\n  quota: Gemini Models 45% usada, Gemini 4 Argon 48% usada, Claude and GPT models 98% usada\ncodex --model <nome> (este computador não lista os modelos)\n  cota: sem leitura\nopencode --model <provedor>/<modelo>: \n  cota: 0% usada";
         let (choices, used) = quota_usage_from_inventory(inventory);
         assert_eq!(choices, ["claude", "antigravity", "codex"]);
         assert_eq!(used.get("claude"), Some(&0.74));
         assert_eq!(used.get("antigravity"), Some(&0.48));
         assert!(!used.contains_key("codex"));
         assert!(!choices.iter().any(|kind| kind == "opencode"));
+        // The exhausted note, in either language, counts as full.
+        assert_eq!(quota_used_from_note("Gemini 4 Argon ESGOTADA (renova em 9 h)"), Some(1.0));
+        assert_eq!(quota_used_from_note("Gemini 4 Argon EXHAUSTED (renews in 9 h)"), Some(1.0));
     }
 }

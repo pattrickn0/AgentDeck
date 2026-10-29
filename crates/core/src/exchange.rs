@@ -1,16 +1,16 @@
-//! Perguntas entre abas que aguardam resposta.
+//! Questions between tabs that wait for an answer.
 //!
-//! Com abas interativas, `ask-agent A "msg"` digita a mensagem no terminal da instância A e o
-//! `ask-agent` de quem perguntou fica **esperando**. A resposta chega quando A roda
-//! `ask-agent <quem-perguntou> "resposta"`: essa chamada é reconhecida como resposta (há uma
-//! pergunta pendente no sentido contrário) e entregue a quem espera. Nada de raspar a tela.
+//! With interactive tabs, `ask-agent A "msg"` types the message into instance A's terminal and the
+//! `ask-agent` of whoever asked stays **waiting**. The answer arrives when A runs
+//! `ask-agent <who-asked> "answer"`: that call is recognized as an answer (there is a pending
+//! question in the opposite direction) and delivered to whoever is waiting. No screen scraping.
 
 use std::collections::HashMap;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use parking_lot::Mutex;
 
-/// O que quem espera recebe.
+/// What whoever waits receives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     Answer(String),
@@ -21,22 +21,23 @@ struct Pending {
     id: u64,
     asker: String,
     target: String,
-    /// Quantas perguntas pendentes há antes desta na cadeia (0 = quem perguntou não estava
-    /// respondendo a ninguém).
+    /// How many pending questions come before this one in the chain (0 = whoever asked was not
+    /// answering anyone).
     depth: i64,
-    /// Quando a pergunta foi feita (epoch ms).
+    /// When the question was asked (epoch ms).
     since_ms: u64,
-    /// O `ask-agent` de quem perguntou já voltou (HTTP 202): a resposta será digitada depois no
-    /// terminal dele. Quem perguntou não está bloqueado, então a pergunta não entra na detecção de
-    /// ciclos (mas continua contando na profundidade).
+    /// The asker's `ask-agent` has already returned (HTTP 202): the answer will be typed later into its
+    /// terminal. Whoever asked is not blocked, so the question does not enter cycle detection (but it
+    /// still counts in the depth).
     detached: bool,
     tx: Sender<Reply>,
 }
 
-/// Retrato de uma pergunta pendente entre instâncias (projeto, quem perguntou, para quem).
+/// Snapshot of a pending question between instances (project, who asked, to whom).
 ///
-/// As chaves internas têm o escopo do projeto (`<projeto>#<id>`, ver [`crate::instances::scoped`]);
-/// aqui vêm separadas: `project` e os ids sem o projeto. Uma chave sem escopo dá `project` vazio.
+/// The internal keys carry the project scope (`<project>#<id>`, see [`crate::instances::scoped`]);
+/// here they come separated: `project` and the ids without the project. A key without scope gives an
+/// empty `project`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingInfo {
     pub id: u64,
@@ -52,14 +53,14 @@ pub struct PendingInfo {
 struct State {
     next: u64,
     list: Vec<Pending>,
-    /// Perguntas já concluídas (respondidas ou falhas) cujo `ask-agent` ainda não foi atrás do
-    /// resultado: número → (quem perguntou, destino), com os nomes atuais (seguem as renomeações).
-    /// Saem em [`Exchange::remove`].
+    /// Questions already concluded (answered or failed) whose `ask-agent` has not fetched the
+    /// result yet: number → (who asked, target), with the current names (they follow renames).
+    /// They leave in [`Exchange::remove`].
     finished: HashMap<u64, (String, String)>,
 }
 
 impl State {
-    /// Tira a pergunta da posição `pos` da lista e manda `reply` a quem espera.
+    /// Takes the question at position `pos` out of the list and sends `reply` to whoever waits.
     fn conclude(&mut self, pos: usize, reply: Reply) -> Pending {
         let p = self.list.remove(pos);
         self.finished.insert(p.id, (p.asker.clone(), p.target.clone()));
@@ -67,7 +68,7 @@ impl State {
         p
     }
 
-    /// Conclui com `reason` todas as perguntas que satisfazem `pred`.
+    /// Concludes with `reason` every question that satisfies `pred`.
     fn fail_where(&mut self, pred: impl Fn(&Pending) -> bool, reason: &str) -> usize {
         let mut n = 0;
         while let Some(pos) = self.list.iter().position(&pred) {
@@ -83,7 +84,7 @@ pub struct Exchange {
     state: Mutex<State>,
 }
 
-/// Há um caminho `from → … → to` seguindo as perguntas pendentes (quem espera → quem responde)?
+/// Is there a path `from → … → to` following the pending questions (who waits → who answers)?
 fn reaches(list: &[Pending], from: &str, to: &str) -> bool {
     let mut seen = vec![from.to_owned()];
     let mut stack = vec![from.to_owned()];
@@ -102,18 +103,18 @@ fn reaches(list: &[Pending], from: &str, to: &str) -> bool {
 }
 
 impl Exchange {
-    /// Registra que `asker` espera resposta de `target`. Recusa se isso fecharia um ciclo de
-    /// espera (A espera B, B espera C, C espera A): ninguém responderia nunca.
+    /// Records that `asker` waits for an answer from `target`. Refuses if that would close a wait
+    /// cycle (A waits for B, B waits for C, C waits for A): nobody would ever answer.
     pub fn register(&self, asker: &str, target: &str) -> Result<(u64, Receiver<Reply>), String> {
         self.register_at(asker, target, 0)
     }
 
-    /// Como [`Exchange::register`], guardando a profundidade da pergunta na cadeia (ver
+    /// Like [`Exchange::register`], storing the question's depth in the chain (see
     /// [`Exchange::chain_depth`]).
     pub fn register_at(&self, asker: &str, target: &str, depth: i64) -> Result<(u64, Receiver<Reply>), String> {
         let mut st = self.state.lock();
         if asker == target || reaches(&st.list, target, asker) {
-            return Err(format!("\"{target}\" já está esperando uma resposta de \"{asker}\" (ciclo de espera)"));
+            return Err(format!("\"{target}\" is already waiting for an answer from \"{asker}\" (wait cycle)"));
         }
         let id = st.next;
         st.next += 1;
@@ -123,12 +124,12 @@ impl Exchange {
         Ok((id, rx))
     }
 
-    /// `asker` esperar `target` fecharia um ciclo de espera?
+    /// Would `asker` waiting for `target` close a wait cycle?
     pub fn would_cycle(&self, asker: &str, target: &str) -> bool {
         asker == target || reaches(&self.state.lock().list, target, asker)
     }
 
-    /// Renomeia uma instância nas perguntas pendentes (e nas concluídas que ainda não foram lidas).
+    /// Renames an instance in the pending questions (and in the concluded ones not read yet).
     pub fn rename(&self, old_id: &str, new_id: &str) {
         let mut st = self.state.lock();
         let st = &mut *st;
@@ -142,31 +143,31 @@ impl Exchange {
         }
     }
 
-    /// Quem fez a pergunta `id` e a quem, com os nomes de agora (uma renomeação no meio da pergunta
-    /// conta). Vale até [`Exchange::remove`], mesmo depois de respondida.
+    /// Who made question `id` and to whom, with the current names (a rename in the middle of the
+    /// question counts). Valid until [`Exchange::remove`], even after it is answered.
     pub fn parties(&self, id: u64) -> Option<(String, String)> {
         let st = self.state.lock();
         st.list.iter().find(|p| p.id == id).map(|p| (p.asker.clone(), p.target.clone())).or_else(|| st.finished.get(&id).cloned())
     }
 
-    /// Profundidade de uma pergunta nova feita por `asker`: 0 se ninguém espera resposta dele;
-    /// senão, uma a mais que a pergunta mais profunda que ele está respondendo. Com abas, a
-    /// profundidade não viaja pelo ambiente (a pergunta é digitada), então é medida aqui.
+    /// Depth of a new question asked by `asker`: 0 if nobody waits for its answer; otherwise one
+    /// more than the deepest question it is answering. With tabs, the depth does not travel through
+    /// the environment (the question is typed), so it is measured here.
     pub fn chain_depth(&self, asker: &str) -> i64 {
         self.state.lock().list.iter().filter(|p| p.target == asker).map(|p| p.depth + 1).max().unwrap_or(0)
     }
 
-    /// `from` respondeu a `to`: entrega ao pedido pendente mais antigo de `to` para `from`.
+    /// `from` answered `to`: delivers to the oldest pending request from `to` to `from`.
     ///
-    /// Uma pergunta nova de `from` para `to` enquanto `to` espera `from` fecharia um ciclo de
-    /// espera (recusado em [`Exchange::register`]); por isso essa mensagem só pode ser resposta.
+    /// A new question from `from` to `to` while `to` waits for `from` would close a wait cycle
+    /// (refused in [`Exchange::register`]); that is why such a message can only be an answer.
     pub fn reply(&self, from: &str, to: &str, text: &str) -> bool {
         self.reply_where(from, to, text, |_| true)
     }
 
-    /// Como [`Exchange::reply`], mas só para quem **ainda está esperando** (o `ask-agent` dele não
-    /// voltou com 202). Depois do 202 quem perguntou está livre, então `ask-agent <ele> "…"` pode ser
-    /// uma pergunta nova; a resposta a uma pergunta destacada vai pelo número (`--reply N`).
+    /// Like [`Exchange::reply`], but only for whoever is **still waiting** (its `ask-agent` did not
+    /// return with 202). After the 202 the asker is free, so `ask-agent <it> "…"` may be a new
+    /// question; the answer to a detached question goes by number (`--reply N`).
     pub fn reply_waiting(&self, from: &str, to: &str, text: &str) -> bool {
         self.reply_where(from, to, text, |p| !p.detached)
     }
@@ -178,42 +179,42 @@ impl Exchange {
         true
     }
 
-    /// `from` respondeu à pergunta número `id`. Só vale se a pergunta foi feita a `from`.
-    /// Devolve quem perguntou.
+    /// `from` answered question number `id`. Only valid if the question was asked to `from`.
+    /// Returns who asked.
     pub fn reply_id(&self, id: u64, from: &str, text: &str) -> Option<String> {
         let mut st = self.state.lock();
         let pos = st.list.iter().position(|p| p.id == id && p.target == from)?;
         Some(st.conclude(pos, Reply::Answer(text.to_owned())).asker)
     }
 
-    /// Há alguém esperando resposta de `from` para `to`? (`ask-agent` de `from` para `to` seria resposta.)
+    /// Is someone waiting for an answer from `from` to `to`? (`ask-agent` from `from` to `to` would be an answer.)
     pub fn is_waiting(&self, asker: &str, target: &str) -> bool {
         self.state.lock().list.iter().any(|p| p.asker == asker && p.target == target)
     }
 
-    /// O pedido `id` ainda espera resposta (não foi respondido, cancelado nem expirou).
+    /// The request `id` still waits for an answer (it was not answered, cancelled or expired).
     pub fn is_pending(&self, id: u64) -> bool {
         self.state.lock().list.iter().any(|p| p.id == id)
     }
 
-    /// Encerra um pedido sem resposta (timeout ou falha). Idempotente.
+    /// Ends a request without an answer (timeout or failure). Idempotent.
     pub fn fail(&self, id: u64, reason: &str) {
         self.state.lock().fail_where(|p| p.id == id, reason);
     }
 
-    /// Falha todos os pedidos que aguardam `target` (a aba dele foi fechada ou morreu).
+    /// Fails every request waiting for `target` (its tab was closed or died).
     pub fn fail_target(&self, target: &str, reason: &str) -> usize {
         self.state.lock().fail_where(|p| p.target == target, reason)
     }
 
-    /// Falha todos os pedidos feitos por `asker` (a aba dele foi fechada: ninguém lê a resposta).
+    /// Fails every request made by `asker` (its tab was closed: nobody reads the answer).
     pub fn fail_asker(&self, asker: &str, reason: &str) -> usize {
         self.state.lock().fail_where(|p| p.asker == asker, reason)
     }
 
-    /// Esquece o pedido (quem esperava desistiu ou já recebeu). Devolve se ele ainda estava
-    /// pendente: `false` = já foi concluído, e o resultado está no canal de quem espera (uma
-    /// resposta que chegou no instante em que o prazo acabou não se perde).
+    /// Forgets the request (whoever waited gave up or already received it). Returns whether it was
+    /// still pending: `false` = it was already concluded, and the result is in the waiter's channel
+    /// (an answer that arrived at the moment the deadline ended is not lost).
     pub fn remove(&self, id: u64) -> bool {
         let mut st = self.state.lock();
         st.finished.remove(&id);
@@ -222,14 +223,14 @@ impl Exchange {
         st.list.len() != before
     }
 
-    /// O `ask-agent` de quem fez a pergunta `id` voltou sem a resposta (202). Idempotente.
+    /// The asker's `ask-agent` for question `id` returned without the answer (202). Idempotent.
     pub fn detach(&self, id: u64) {
         if let Some(p) = self.state.lock().list.iter_mut().find(|p| p.id == id) {
             p.detached = true;
         }
     }
 
-    /// Perguntas pendentes, da mais antiga para a mais nova.
+    /// Pending questions, oldest first.
     pub fn snapshot(&self) -> Vec<PendingInfo> {
         self.state
             .lock()
@@ -271,11 +272,11 @@ mod tests {
         let ex = Exchange::default();
         let (_, rx) = ex.register("claude", "claude@dev").unwrap();
         assert!(ex.is_waiting("claude", "claude@dev"));
-        assert!(ex.reply("claude@dev", "claude", "pronto"));
-        assert_eq!(rx.recv_timeout(T), Ok(Reply::Answer("pronto".into())));
+        assert!(ex.reply("claude@dev", "claude", "ready"));
+        assert_eq!(rx.recv_timeout(T), Ok(Reply::Answer("ready".into())));
         assert!(ex.is_empty());
-        // Sem ninguém esperando, uma "resposta" não é resposta.
-        assert!(!ex.reply("claude@dev", "claude", "de novo"));
+        // With nobody waiting, an "answer" is not an answer.
+        assert!(!ex.reply("claude@dev", "claude", "again"));
     }
 
     #[test]
@@ -283,17 +284,17 @@ mod tests {
         let ex = Exchange::default();
         let (_, first) = ex.register("a", "b").unwrap();
         let (_, second) = ex.register("a", "b").unwrap();
-        ex.reply("b", "a", "um");
-        ex.reply("b", "a", "dois");
-        assert_eq!(first.recv_timeout(T), Ok(Reply::Answer("um".into())));
-        assert_eq!(second.recv_timeout(T), Ok(Reply::Answer("dois".into())));
+        ex.reply("b", "a", "one");
+        ex.reply("b", "a", "two");
+        assert_eq!(first.recv_timeout(T), Ok(Reply::Answer("one".into())));
+        assert_eq!(second.recv_timeout(T), Ok(Reply::Answer("two".into())));
     }
 
     #[test]
     fn the_direction_matters() {
         let ex = Exchange::default();
         let (_, rx) = ex.register("a", "b").unwrap();
-        // c respondendo a a, ou b respondendo a c, não é a resposta esperada.
+        // c answering a, or b answering c, is not the expected answer.
         assert!(!ex.reply("c", "a", "x"));
         assert!(!ex.reply("b", "c", "x"));
         assert!(rx.try_recv().is_err());
@@ -304,13 +305,13 @@ mod tests {
         let ex = Exchange::default();
         ex.register("a", "b").unwrap();
         ex.register("b", "c").unwrap();
-        // c esperar a fecharia a → b → c → a.
+        // c waiting for a would close a → b → c → a.
         let err = ex.register("c", "a").unwrap_err();
-        assert!(err.contains("ciclo"), "{err}");
-        // Sem ciclo: d espera a, e a espera d só se d não depender de a… (a → b → c; d → a)
+        assert!(err.contains("cycle"), "{err}");
+        // Without a cycle: d waits for a, and a waiting for d would close it… (a → b → c; d → a)
         ex.register("d", "a").unwrap();
         assert!(ex.register("a", "d").is_err(), "a → d → a");
-        // Perguntar a si mesmo também.
+        // Asking yourself too.
         assert!(ex.register("x", "x").is_err());
     }
 
@@ -318,17 +319,17 @@ mod tests {
     fn failing_a_request_or_a_target_unblocks_the_waiters() {
         let ex = Exchange::default();
         let (id, rx) = ex.register("a", "b").unwrap();
-        ex.fail(id, "tempo esgotado");
-        assert_eq!(rx.recv_timeout(T), Ok(Reply::Failed("tempo esgotado".into())));
-        ex.fail(id, "de novo"); // idempotente
+        ex.fail(id, "timed out");
+        assert_eq!(rx.recv_timeout(T), Ok(Reply::Failed("timed out".into())));
+        ex.fail(id, "again"); // idempotent
 
         let (_, r1) = ex.register("a", "b").unwrap();
         let (_, r2) = ex.register("c", "b").unwrap();
         let (_, r3) = ex.register("a", "z").unwrap();
-        assert_eq!(ex.fail_target("b", "a aba foi fechada"), 2);
-        assert_eq!(r1.recv_timeout(T), Ok(Reply::Failed("a aba foi fechada".into())));
-        assert_eq!(r2.recv_timeout(T), Ok(Reply::Failed("a aba foi fechada".into())));
-        assert!(r3.try_recv().is_err(), "quem espera outro alvo segue esperando");
+        assert_eq!(ex.fail_target("b", "the tab was closed"), 2);
+        assert_eq!(r1.recv_timeout(T), Ok(Reply::Failed("the tab was closed".into())));
+        assert_eq!(r2.recv_timeout(T), Ok(Reply::Failed("the tab was closed".into())));
+        assert!(r3.try_recv().is_err(), "whoever waits for another target keeps waiting");
         assert_eq!(ex.len(), 1);
     }
 
@@ -337,12 +338,12 @@ mod tests {
         let ex = Exchange::default();
         let (first, r1) = ex.register("a", "b").unwrap();
         let (second, r2) = ex.register("a", "b").unwrap();
-        assert_eq!(ex.reply_id(second, "c", "intruso"), None, "só quem recebeu a pergunta responde");
-        assert_eq!(ex.reply_id(second, "b", "dois").as_deref(), Some("a"));
-        assert_eq!(r2.recv_timeout(T), Ok(Reply::Answer("dois".into())));
-        assert!(r1.try_recv().is_err(), "a outra pergunta segue pendente");
-        assert_eq!(ex.reply_id(second, "b", "de novo"), None);
-        assert_eq!(ex.reply_id(first, "b", "um").as_deref(), Some("a"));
+        assert_eq!(ex.reply_id(second, "c", "intruder"), None, "only whoever received the question answers");
+        assert_eq!(ex.reply_id(second, "b", "two").as_deref(), Some("a"));
+        assert_eq!(r2.recv_timeout(T), Ok(Reply::Answer("two".into())));
+        assert!(r1.try_recv().is_err(), "the other question stays pending");
+        assert_eq!(ex.reply_id(second, "b", "again"), None);
+        assert_eq!(ex.reply_id(first, "b", "one").as_deref(), Some("a"));
     }
 
     #[test]
@@ -350,7 +351,7 @@ mod tests {
         let ex = Exchange::default();
         assert_eq!(ex.chain_depth("a"), 0);
         ex.register_at("a", "b", 0).unwrap();
-        assert_eq!(ex.chain_depth("b"), 1, "b responde a uma pergunta de profundidade 0");
+        assert_eq!(ex.chain_depth("b"), 1, "b answers a question of depth 0");
         ex.register_at("b", "c", 1).unwrap();
         assert_eq!(ex.chain_depth("c"), 2);
         assert_eq!(ex.chain_depth("a"), 0);
@@ -361,11 +362,11 @@ mod tests {
         let ex = Exchange::default();
         let (_, r1) = ex.register("a", "b").unwrap();
         let (_, r2) = ex.register("c", "b").unwrap();
-        assert_eq!(ex.fail_asker("a", "fechada"), 1);
-        assert_eq!(r1.recv_timeout(T), Ok(Reply::Failed("fechada".into())));
+        assert_eq!(ex.fail_asker("a", "closed"), 1);
+        assert_eq!(r1.recv_timeout(T), Ok(Reply::Failed("closed".into())));
         assert!(r2.try_recv().is_err());
         assert!(!ex.is_waiting("a", "b"));
-        // Sem a pergunta antiga, b pode perguntar a a sem "ciclo".
+        // Without the old question, b can ask a without a "cycle".
         assert!(ex.register("b", "a").is_ok());
     }
 
@@ -385,23 +386,23 @@ mod tests {
         assert!(ex.snapshot()[0].detached);
         ex.reply("b", "a", "ok");
         assert_eq!(ex.snapshot().len(), 1);
-        assert_eq!(ex.snapshot()[0].project, "", "chave sem escopo");
-        ex.detach(a); // já removida: nada acontece
+        assert_eq!(ex.snapshot()[0].project, "", "key without scope");
+        ex.detach(a); // already removed: nothing happens
         assert_eq!(ex.snapshot().len(), 1);
     }
 
     #[test]
     fn a_detached_question_does_not_block_and_makes_no_cycle() {
-        // claude espera claude@dev, que espera antigravity: antigravity perguntar a claude fecharia o ciclo…
+        // claude waits for claude@dev, which waits for antigravity: antigravity asking claude would close the cycle…
         let ex = Exchange::default();
         let (first, _r1) = ex.register("claude", "claude@dev").unwrap();
         ex.register("claude@dev", "antigravity").unwrap();
         assert!(ex.would_cycle("antigravity", "claude"));
-        // …mas o ask-agent de claude já voltou (202): claude está livre, então não há ciclo.
+        // …but claude's ask-agent has already returned (202): claude is free, so there is no cycle.
         ex.detach(first);
         assert!(!ex.would_cycle("antigravity", "claude"));
         assert!(ex.register("antigravity", "claude").is_ok());
-        // A profundidade continua contando a pergunta destacada.
+        // The depth still counts the detached question.
         assert_eq!(ex.chain_depth("claude@dev"), 1);
     }
 
@@ -411,12 +412,12 @@ mod tests {
         let ex = Exchange::default();
         let (a, b) = ("p00000001", "p00000002");
         ex.register_at(&scoped(a, "claude"), &scoped(a, "claude@dev"), 0).unwrap();
-        // O mesmo par em outro projeto não é ciclo nem conta na profundidade de lá.
+        // The same pair in another project is not a cycle and does not count in its depth.
         assert!(!ex.would_cycle(&scoped(b, "claude@dev"), &scoped(b, "claude")));
         assert!(ex.would_cycle(&scoped(a, "claude@dev"), &scoped(a, "claude")));
         assert_eq!(ex.chain_depth(&scoped(b, "claude@dev")), 0);
         assert_eq!(ex.chain_depth(&scoped(a, "claude@dev")), 1);
-        // Responder no projeto errado não entrega.
+        // Answering in the wrong project does not deliver.
         assert!(!ex.reply(&scoped(b, "claude@dev"), &scoped(b, "claude"), "x"));
         let snap = ex.snapshot();
         assert_eq!((snap[0].project.as_str(), snap[0].asker.as_str(), snap[0].target.as_str()), (a, "claude", "claude@dev"));
@@ -429,11 +430,11 @@ mod tests {
         ex.rename("b", "b@dev");
         assert_eq!(ex.parties(id), Some(("a".into(), "b@dev".into())));
         assert_eq!(ex.reply_id(id, "b@dev", "ok").as_deref(), Some("a"));
-        // Respondida, mas quem espera ainda não leu: os nomes continuam disponíveis (e seguem renomeações).
+        // Answered, but the waiter has not read it yet: the names remain available (and follow renames).
         ex.rename("a", "a@qa");
         assert_eq!(ex.parties(id), Some(("a@qa".into(), "b@dev".into())));
         assert_eq!(rx.recv_timeout(T), Ok(Reply::Answer("ok".into())));
-        assert!(!ex.remove(id), "já não estava pendente");
+        assert!(!ex.remove(id), "it was no longer pending");
         assert_eq!(ex.parties(id), None);
     }
 
@@ -441,11 +442,11 @@ mod tests {
     fn a_reply_right_at_the_deadline_is_not_lost() {
         let ex = Exchange::default();
         let (id, rx) = ex.register("a", "b").unwrap();
-        // O prazo de quem espera acabou, mas a resposta chega antes de ele desistir.
-        assert!(ex.reply("b", "a", "na hora"));
-        assert!(!ex.remove(id), "remove avisa que a pergunta já foi concluída");
-        assert_eq!(rx.try_recv(), Ok(Reply::Answer("na hora".into())));
-        // Sem resposta, remove tira a pergunta pendente.
+        // The waiter's deadline ended, but the answer arrives before it gives up.
+        assert!(ex.reply("b", "a", "on time"));
+        assert!(!ex.remove(id), "remove tells that the question was already concluded");
+        assert_eq!(rx.try_recv(), Ok(Reply::Answer("on time".into())));
+        // Without an answer, remove takes the pending question out.
         let (id, _rx) = ex.register("a", "b").unwrap();
         assert!(ex.remove(id));
     }
@@ -455,17 +456,17 @@ mod tests {
         let ex = Exchange::default();
         let (id, rx) = ex.register("a", "b").unwrap();
         ex.detach(id);
-        // `ask-agent a "…"` de b não é mais resposta: a está livre e pode receber uma pergunta nova.
-        assert!(!ex.reply_waiting("b", "a", "pergunta nova"));
+        // `ask-agent a "…"` from b is no longer an answer: a is free and may receive a new question.
+        assert!(!ex.reply_waiting("b", "a", "new question"));
         assert!(!ex.would_cycle("b", "a"));
         assert!(rx.try_recv().is_err());
-        // Enquanto a espera, a forma antiga continua valendo.
+        // While it waits, the old form still works.
         let (_, rx2) = ex.register("c", "b").unwrap();
-        assert!(ex.reply_waiting("b", "c", "resposta"));
-        assert_eq!(rx2.recv_timeout(T), Ok(Reply::Answer("resposta".into())));
-        // A rota /reply (nunca cria pergunta) e o número continuam respondendo a destacada.
-        assert!(ex.reply("b", "a", "pela rota"));
-        assert_eq!(rx.recv_timeout(T), Ok(Reply::Answer("pela rota".into())));
+        assert!(ex.reply_waiting("b", "c", "answer"));
+        assert_eq!(rx2.recv_timeout(T), Ok(Reply::Answer("answer".into())));
+        // The /reply route (which never creates a question) and the number keep answering the detached one.
+        assert!(ex.reply("b", "a", "through the route"));
+        assert_eq!(rx.recv_timeout(T), Ok(Reply::Answer("through the route".into())));
     }
 
     #[test]
@@ -474,7 +475,7 @@ mod tests {
         let (id, _rx) = ex.register("a", "b").unwrap();
         ex.remove(id);
         assert!(!ex.is_waiting("a", "b"));
-        // Depois de removido, o ciclo some.
+        // Once removed, the cycle is gone.
         assert!(ex.register("b", "a").is_ok());
     }
 }

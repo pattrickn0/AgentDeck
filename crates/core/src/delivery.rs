@@ -1,49 +1,49 @@
-//! Quando digitar uma mensagem de outro agente no terminal de uma aba.
+//! When to type another agent's message into a tab's terminal.
 //!
-//! A pergunta do `ask-agent` é digitada no terminal da instância (ver `bridge.rs`). Digitar na hora
-//! errada mistura o texto com o que o usuário está digitando ou com a resposta que o agente ainda
-//! está escrevendo. Esta é a regra, sem interface, para a UI consultar a cada quadro.
+//! The `ask-agent` question is typed into the instance's terminal (see `bridge.rs`). Typing at the wrong
+//! moment mixes the text with what the user is typing or with the answer the agent is still writing. This is
+//! the rule, without any interface, for the UI to consult on every frame.
 //!
-//! Sinais usados, do mais confiável ao menos:
-//! 1. **Teclado do usuário**: nada é digitado logo depois de uma tecla, e espera-se bem mais
-//!    quando há texto começado e ainda não enviado.
-//! 2. **Hooks do agente** (`ask-agent --signal busy|idle`, ligados no Claude e no Codex): com
-//!    eles, a aba só está livre depois do aviso de fim de turno.
-//! 3. **Heurística da saída**: sem hooks, a aba está livre quando o terminal fica parado por
-//!    [`READY_IDLE`]. Se nunca sossegar, a mensagem vai depois de [`READY_TIMEOUT`] na fila
-//!    (contado de quando *entrou na fila*, não de quando a aba abriu).
+//! Signals used, from the most reliable to the least:
+//! 1. **The user's keyboard**: nothing is typed right after a key, and a much longer wait applies when there
+//!    is started text not yet sent.
+//! 2. **Agent hooks** (`ask-agent --signal busy|idle`, wired into Claude and Codex): with them, the tab is
+//!    only free after the end-of-turn notice.
+//! 3. **Output heuristic**: without hooks, the tab is free when the terminal has been still for
+//!    [`READY_IDLE`]. If it never settles, the message goes after [`READY_TIMEOUT`] in the queue
+//!    (counted from when it *entered the queue*, not from when the tab opened).
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// Sem hooks, o terminal precisa ficar parado por este tempo.
+/// Without hooks, the terminal must stay still for this long.
 pub const READY_IDLE: Duration = Duration::from_millis(1500);
-/// Com hooks, basta a saída assentar depois do aviso de fim de turno.
+/// With hooks, it is enough for the output to settle after the end-of-turn notice.
 pub const HOOK_SETTLE: Duration = Duration::from_millis(300);
-/// Sem hooks, se o terminal nunca sossegar, a mensagem é digitada depois deste tempo na fila.
+/// Without hooks, if the terminal never settles, the message is typed after this long in the queue.
 pub const READY_TIMEOUT: Duration = Duration::from_secs(30);
-/// Depois de uma tecla do usuário (sem texto pendente: Enter, Ctrl+C, setas…).
+/// After a user key (with no pending text: Enter, Ctrl+C, arrows…).
 pub const USER_QUIET: Duration = Duration::from_secs(2);
-/// Depois de uma tecla do usuário que deixou texto começado na linha (sem Enter).
+/// After a user key that left started text on the line (no Enter).
 pub const TYPING_QUIET: Duration = Duration::from_secs(20);
-/// Aba recém-aberta (sem hooks): nada é digitado antes disso, mesmo que a saída já tenha sossegado.
-/// Uma TUI pode ficar calada mais de [`READY_IDLE`] entre o primeiro desenho e o campo de entrada
-/// estar de pé (carregando sessão, MCP, modelo); o texto colado nessa janela se perde.
+/// A freshly opened tab (without hooks): nothing is typed before this, even if the output has already
+/// settled. A TUI may stay quiet for more than [`READY_IDLE`] between the first drawing and the input field
+/// being up (loading a session, MCP, model); text pasted in that window is lost.
 pub const BOOT_GRACE: Duration = Duration::from_secs(5);
-/// Intervalo para conferir de novo enquanto a aba está ocupada.
+/// Interval to check again while the tab is busy.
 pub const POLL: Duration = Duration::from_millis(300);
-/// No Codex do Windows, quanto o Enter espera a mais por caractere colado (ver [`enter_delay`]).
+/// On Windows Codex, how much longer the Enter waits per pasted character (see [`enter_delay`]).
 pub const CODEX_ENTER_PER_CHAR: Duration = Duration::from_millis(1);
-/// Teto da espera do Enter: um texto enorme não segura a aba para sempre.
+/// Cap on the Enter wait: an enormous text does not hold the tab forever.
 pub const MAX_ENTER_DELAY: Duration = Duration::from_secs(10);
 
-/// Quanto o Enter espera depois de colar `text` na aba do CLI `kind` (`base` para quase todos).
+/// How long the Enter waits after pasting `text` into the tab of CLI `kind` (`base` for almost all).
 ///
-/// No Windows o Codex não recebe a colagem como colagem: lê tecla por tecla e trata o Enter que chega
-/// antes de terminar como quebra de linha, e a mensagem fica parada no campo ("[Pasted Content N
-/// chars]"). Medido em 2026-10-25 (Codex 0.164.0): 1.735 caracteres perdem o Enter em 600 ms e
-/// pegam em 1.200 ms; 3.593 perdem em 1.200 e pegam em 2.400. A espera cresce 1 ms por caractere,
-/// com folga de ~1,5×.
+/// On Windows Codex does not receive the paste as a paste: it reads it key by key and treats an Enter that
+/// arrives before it finishes as a line break, and the message stays stuck in the field ("[Pasted Content N
+/// chars]"). Measured on 2026-10-25 (Codex 0.164.0): 1,735 characters lose the Enter at 600 ms and catch it
+/// at 1,200 ms; 3,593 lose it at 1,200 and catch it at 2,400. The wait grows 1 ms per character, with ~1.5×
+/// of margin.
 pub fn enter_delay(kind: &str, text: &str, base: Duration) -> Duration {
     if kind != "codex" || !cfg!(windows) {
         return base;
@@ -52,37 +52,37 @@ pub fn enter_delay(kind: &str, text: &str, base: Duration) -> Duration {
     (base + CODEX_ENTER_PER_CHAR.saturating_mul(chars)).min(MAX_ENTER_DELAY)
 }
 
-/// O que a UI sabe da aba agora.
+/// What the UI knows about the tab right now.
 #[derive(Debug, Clone, Copy)]
 pub struct TabState {
-    /// O processo está rodando.
+    /// The process is running.
     pub alive: bool,
-    /// O agente está no meio de um turno (Enter do usuário, mensagem enviada ou hook `busy`).
+    /// The agent is in the middle of a turn (the user's Enter, a sent message or the `busy` hook).
     pub busy: bool,
-    /// A aba já recebeu algum aviso por hook: `busy` vem do agente, não da heurística.
+    /// The tab has already received some hook notice: `busy` comes from the agent, not from the heuristic.
     pub hooked: bool,
-    /// Quando o processo da aba foi iniciado.
+    /// When the tab's process was started.
     pub spawned_at: Option<Instant>,
-    /// Última saída do processo.
+    /// Last output from the process.
     pub last_output: Option<Instant>,
-    /// Última tecla do usuário nesta aba.
+    /// Last user key in this tab.
     pub last_key: Option<Instant>,
-    /// O usuário começou a digitar algo e ainda não enviou (nem apagou com Ctrl+C/Ctrl+U/Esc).
+    /// The user started typing something and has not sent it yet (nor erased it with Ctrl+C/Ctrl+U/Esc).
     pub typing: bool,
 }
 
-/// Decisão para a primeira mensagem da fila.
+/// Decision for the first message in the queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gate {
-    /// Pode digitar agora.
+    /// It can be typed now.
     Ready,
-    /// Conferir de novo neste instante.
+    /// Check again at this instant.
     WaitUntil(Instant),
-    /// Não há como entregar (a aba não está rodando).
+    /// There is no way to deliver (the tab is not running).
     Fail,
 }
 
-/// Pode digitar no terminal da aba uma mensagem que está na fila desde `queued_at`?
+/// Can a message that has been in the queue since `queued_at` be typed into the tab's terminal?
 pub fn gate(tab: &TabState, queued_at: Instant, now: Instant) -> Gate {
     if !tab.alive {
         return Gate::Fail;
@@ -96,7 +96,7 @@ pub fn gate(tab: &TabState, queued_at: Instant, now: Instant) -> Gate {
     if tab.busy {
         return Gate::WaitUntil(now + POLL);
     }
-    // Com hooks o agente já provou que está de pé; sem eles, dê tempo de a TUI subir.
+    // With hooks the agent has already proved it is up; without them, give the TUI time to come up.
     if let Some(boot) = tab.spawned_at.filter(|_| !tab.hooked).map(|at| at + BOOT_GRACE) {
         if now < boot {
             return Gate::WaitUntil(boot);
@@ -108,13 +108,13 @@ pub fn gate(tab: &TabState, queued_at: Instant, now: Instant) -> Gate {
         _ if !tab.hooked && now >= queued_at + READY_TIMEOUT => Gate::Ready,
         Some(out) if tab.hooked => Gate::WaitUntil(out + settle),
         Some(out) => Gate::WaitUntil((out + settle).min(queued_at + READY_TIMEOUT)),
-        // Com hooks e sem nenhuma saída ainda: a TUI não desenhou nada, espere.
+        // With hooks and no output yet: the TUI has drawn nothing, wait.
         None if tab.hooked => Gate::WaitUntil(now + POLL),
         None => Gate::WaitUntil(queued_at + READY_TIMEOUT),
     }
 }
 
-/// Fila de mensagens de uma aba, com o instante em que cada uma entrou.
+/// A tab's message queue, with the instant each message entered it.
 #[derive(Debug)]
 pub struct Mailbox<T> {
     items: VecDeque<(Instant, T)>,
@@ -131,7 +131,7 @@ impl<T> Mailbox<T> {
         self.items.push_back((now, item));
     }
 
-    /// Quando a primeira mensagem entrou na fila.
+    /// When the first message entered the queue.
     pub fn front_since(&self) -> Option<Instant> {
         self.items.front().map(|(t, _)| *t)
     }
@@ -148,7 +148,7 @@ impl<T> Mailbox<T> {
         self.items.is_empty()
     }
 
-    /// As mensagens na ordem da fila.
+    /// The messages in queue order.
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.items.iter().map(|(_, item)| item)
     }
@@ -158,13 +158,13 @@ impl<T> Mailbox<T> {
     }
 }
 
-/// Efeito de uma tecla do usuário sobre "há texto começado na linha?".
-/// `bytes` é o que a tecla manda ao processo.
+/// Effect of a user key on "is there started text on the line?".
+/// `bytes` is what the key sends to the process.
 pub fn typing_after(bytes: &[u8], was_typing: bool) -> bool {
     match bytes {
-        // Enter envia; Ctrl+C, Ctrl+U e Esc (sozinho) costumam limpar a linha.
+        // Enter sends; Ctrl+C, Ctrl+U and Esc (alone) usually clear the line.
         b"\r" | b"\n" | [0x03] | [0x15] | [0x1b] => false,
-        // Teclas de controle e sequências (setas, Backspace…) não mudam o estado.
+        // Control keys and sequences (arrows, Backspace…) do not change the state.
         [b] if *b < 0x20 || *b == 0x7f => was_typing,
         [0x1b, ..] => was_typing,
         _ => true,
@@ -183,14 +183,14 @@ mod tests {
     fn the_codex_enter_waits_for_the_paste_on_windows() {
         let base = ms(250);
         let long = "x".repeat(1735);
-        assert_eq!(enter_delay("claude", &long, base), base, "só o Codex espera mais");
+        assert_eq!(enter_delay("claude", &long, base), base, "only Codex waits longer");
         if cfg!(windows) {
             assert_eq!(enter_delay("codex", "oi", base), ms(252));
-            assert!(enter_delay("codex", &long, base) > ms(1200), "1.735 caracteres pegaram com 1.200 ms");
-            assert!(enter_delay("codex", &"x".repeat(3593), base) > ms(2400), "3.593 caracteres pegaram com 2.400 ms");
+            assert!(enter_delay("codex", &long, base) > ms(1200), "1,735 characters caught it at 1,200 ms");
+            assert!(enter_delay("codex", &"x".repeat(3593), base) > ms(2400), "3,593 characters caught it at 2,400 ms");
             assert_eq!(enter_delay("codex", &"x".repeat(200_000), base), MAX_ENTER_DELAY);
         } else {
-            assert_eq!(enter_delay("codex", &long, base), base, "fora do Windows a colagem chega inteira");
+            assert_eq!(enter_delay("codex", &long, base), base, "outside Windows the paste arrives whole");
         }
     }
 
@@ -215,15 +215,15 @@ mod tests {
 
     #[test]
     fn the_timeout_counts_from_the_queue_not_from_the_spawn() {
-        // A aba existe há horas e ainda está escrevendo: antes a mensagem saía na hora (o prazo
-        // contava de quando a aba abriu). Agora espera sossegar ou READY_TIMEOUT na fila.
+        // The tab has existed for hours and is still writing: before, the message went out right away (the
+        // deadline counted from when the tab opened). Now it waits to settle or READY_TIMEOUT in the queue.
         let t0 = Instant::now() + Duration::from_secs(3600);
         let queued = t0;
         let writing = |now: Instant| TabState { last_output: Some(now), ..idle_tab(t0) };
         let now = queued + ms(100);
         assert_eq!(gate(&writing(now), queued, now), Gate::WaitUntil(now + READY_IDLE));
         let now = queued + READY_TIMEOUT;
-        assert_eq!(gate(&writing(now), queued, now), Gate::Ready, "nunca sossegou: vai mesmo assim");
+        assert_eq!(gate(&writing(now), queued, now), Gate::Ready, "never settled: it goes anyway");
     }
 
     #[test]
@@ -238,10 +238,10 @@ mod tests {
     fn user_keys_hold_the_delivery() {
         let t0 = Instant::now();
         let now = t0 + ms(10_000);
-        // Tecla há 1 s, sem texto começado: espera completar USER_QUIET.
+        // Key 1 s ago, no started text: waits for USER_QUIET to complete.
         let tab = TabState { last_key: Some(now - ms(1000)), ..idle_tab(t0) };
         assert_eq!(gate(&tab, t0, now), Gate::WaitUntil(now - ms(1000) + USER_QUIET));
-        // Texto começado e não enviado: espera bem mais, e o timeout da fila não fura isso.
+        // Text started and not sent: waits much longer, and the queue timeout does not break that.
         let tab = TabState { last_key: Some(now - ms(1000)), typing: true, ..idle_tab(t0) };
         let late = t0 + READY_TIMEOUT * 2;
         let tab_late = TabState { last_key: Some(late - ms(1000)), ..tab };
@@ -253,13 +253,13 @@ mod tests {
     fn with_hooks_only_the_end_of_turn_frees_the_tab() {
         let t0 = Instant::now();
         let hooked = TabState { hooked: true, ..idle_tab(t0) };
-        // Pausa longa sem saída no meio do turno (hook disse busy): continua esperando.
+        // A long pause without output in the middle of the turn (the hook said busy): keeps waiting.
         let busy = TabState { busy: true, ..hooked };
         assert!(matches!(gate(&busy, t0, t0 + ms(60_000)), Gate::WaitUntil(_)));
-        // Fim de turno: basta a saída assentar por HOOK_SETTLE.
+        // End of turn: it is enough for the output to settle for HOOK_SETTLE.
         assert_eq!(gate(&hooked, t0, t0 + ms(100)), Gate::WaitUntil(t0 + HOOK_SETTLE));
         assert_eq!(gate(&hooked, t0, t0 + HOOK_SETTLE), Gate::Ready);
-        // Com hooks não há "vai mesmo assim": sem saída nenhuma, espera.
+        // With hooks there is no "it goes anyway": with no output at all, it waits.
         let blank = TabState { last_output: None, ..hooked };
         assert!(matches!(gate(&blank, t0, t0 + READY_TIMEOUT * 2), Gate::WaitUntil(_)));
     }
@@ -267,12 +267,12 @@ mod tests {
     #[test]
     fn a_fresh_tab_waits_for_the_boot_grace_even_when_quiet() {
         let t0 = Instant::now();
-        // Saída parada há 2 s (> READY_IDLE), mas o processo subiu há 2 s: a TUI ainda pode estar carregando.
+        // Output still for 2 s (> READY_IDLE), but the process came up 2 s ago: the TUI may still be loading.
         let tab = TabState { spawned_at: Some(t0), last_output: Some(t0), ..idle_tab(t0) };
         let now = t0 + ms(2000);
         assert_eq!(gate(&tab, t0, now), Gate::WaitUntil(t0 + BOOT_GRACE));
         assert_eq!(gate(&tab, t0, t0 + BOOT_GRACE), Gate::Ready);
-        // Com hooks o agente já se apresentou: vale só a saída assentada.
+        // With hooks the agent has already introduced itself: only the settled output matters.
         let hooked = TabState { hooked: true, ..tab };
         assert_eq!(gate(&hooked, t0, t0 + HOOK_SETTLE), Gate::Ready);
     }
@@ -293,8 +293,8 @@ mod tests {
         assert!(!typing_after(&[0x03], true), "Ctrl+C");
         assert!(!typing_after(&[0x15], true), "Ctrl+U");
         assert!(!typing_after(&[0x1b], true), "Esc");
-        assert!(typing_after(&[0x7f], true), "Backspace não sabe se apagou tudo");
-        assert!(typing_after(b"\x1b[D", true), "seta");
+        assert!(typing_after(&[0x7f], true), "Backspace does not know whether it erased everything");
+        assert!(typing_after(b"\x1b[D", true), "arrow");
         assert!(!typing_after(b"\x1b[D", false));
     }
 
