@@ -27,6 +27,27 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "A tarefa e a branch \"{base}\" mudaram as mesmas linhas ({files}). Nada foi mesclado e a tarefa continua em revisão. Peça ao agente para juntar as duas versões e entregar de novo.",
     ),
     ("unidentified files", "arquivos não identificados"),
+    // Conflicts handed to the agent (the merge waits for its delivery).
+    (
+        "The task and the branch \"{base}\" changed the same lines ({files}). Nothing was merged. I asked the agent to combine the two versions; the task merges by itself when it delivers.",
+        "A tarefa e a branch \"{base}\" mudaram as mesmas linhas ({files}). Nada foi mesclado. Pedi ao agente para juntar as duas versões; a tarefa é mesclada sozinha quando ele entregar.",
+    ),
+    (
+        "The agent was already asked {count} times and the base keeps changing under it.",
+        "O agente já foi acionado {count} vezes e a base continua mudando por baixo dele.",
+    ),
+    (
+        "conflict with {base}; asked the agent to resolve it (the merge is already approved)",
+        "conflito com {base}; pedi ao agente para resolver (a mesclagem já está aprovada)",
+    ),
+    ("delivery refused: the branch conflicts with {base}", "entrega recusada: a branch conflita com {base}"),
+    ("merge already approved: merging the new delivery", "mesclagem já aprovada: mesclando a nova entrega"),
+    (
+        "Task {id} was not merged automatically, a person has to look: {reason}",
+        "A tarefa {id} não foi mesclada sozinha, uma pessoa precisa olhar: {reason}",
+    ),
+    ("task {id} has no automatic merge waiting", "a tarefa {id} não tem mesclagem automática esperando"),
+    ("automatic merge cancelled; it will wait for the review", "mesclagem automática cancelada; a tarefa espera a revisão"),
     ("not identified", "não identificados"),
     // Text helpers.
     ("the task title cannot be empty", "o título da tarefa não pode ficar vazio"),

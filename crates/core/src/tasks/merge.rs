@@ -3,7 +3,7 @@ use super::git_ops::{
 };
 use super::stash::{stash_pop, stash_push, Stash};
 use super::text::short_list;
-use super::{dirty_paths, git_error, MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskStatus};
+use super::{dirty_paths, git_error, MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskStatus, MAX_CONFLICT_ASKS};
 use crate::events::{CoreEvent, FeedEntry};
 use crate::git::{run, RepoState, COMMIT_TIMEOUT};
 use crate::t;
@@ -23,8 +23,16 @@ impl Core {
     /// the error in the history and returned to the caller. If the main folder's `AGENTS.md` differs only by the
     /// app's block and the branch changes it, it goes back to the HEAD's during the merge and the block is rewritten
     /// afterwards.
+    ///
+    /// A conflict does not stop at the refusal when the agent can be asked: the request to resolve it goes to the
+    /// agent at once (see [`Core::task_merge_assisted`]) and the call still answers `Conflict`, now saying so. The merge
+    /// stays approved and happens by itself when the agent delivers again.
     pub fn task_merge(&self, project: &str, id: &str) -> Result<Task, TaskError> {
-        self.merge_task(project, id, false).map(|o| o.task).map_err(|r| r.error)
+        match self.merge_task(project, id, false) {
+            Ok(MergeOutcome { note: Some(note), resolving: true, .. }) => Err(TaskError::Conflict(note)),
+            Ok(o) => Ok(o.task),
+            Err(r) => Err(r.error),
+        }
     }
 
     /// Like [`Core::task_merge`], for the interface: the refusal that has a way out comes with the structured reason
@@ -33,12 +41,25 @@ impl Core {
     /// the task) and come back (`stash pop`) after the merge, whatever the outcome. If they do not come back clean
     /// (conflict with what the task brought), they stay in the stash, intact, and the notice says how to recover
     /// them. Only the user's click turns this on: the command line (`task_merge`) never stashes anything.
+    ///
+    /// On a conflict with the base (the base moved after the delivery), if the agent can be asked, the request to merge
+    /// the base and resolve goes to it right away (the tab is reopened if needed), the task goes back to `Running`
+    /// with [`Task::merge_approved`] and the answer is `Ok` with [`MergeOutcome::resolving`]. When the agent delivers
+    /// again, `task_done` merges by itself; if that conflicts again, the agent is asked again, up to
+    /// [`super::MAX_CONFLICT_ASKS`] times in all, and then the refusal (with the reason) comes back as before.
     pub fn task_merge_assisted(&self, project: &str, id: &str, stash_main: bool) -> Result<MergeOutcome, MergeRefusal> {
         self.merge_task(project, id, stash_main)
     }
 
     fn merge_task(&self, project: &str, id: &str, stash_main: bool) -> Result<MergeOutcome, MergeRefusal> {
         let _op = self.inner.tasks.op.lock();
+        self.merge_locked(project, id, stash_main)
+    }
+
+    /// The merge, with the operations lock held. A task that still carries [`Task::merge_approved`] is the one the app
+    /// merges by itself on a new delivery after a conflict: the requests already made keep counting. Otherwise the
+    /// count starts over.
+    pub(super) fn merge_locked(&self, project: &str, id: &str, stash_main: bool) -> Result<MergeOutcome, MergeRefusal> {
         let task = self.task_or_404(project, id)?;
         let retry = task.status == TaskStatus::Failed && task.report.is_some();
         if task.status != TaskStatus::Review && !retry {
@@ -120,6 +141,9 @@ impl Core {
                     t.status = TaskStatus::Validating;
                     t.finished_ms = Some(now_ms());
                     t.error = None;
+                    t.merge_approved = false;
+                    t.conflict_asks = 0;
+                    t.merge_stopped = None;
                     t.log(t!("no new commits since the last merge ({hash}); awaiting validation again", hash = &short));
                     t.clone()
                 });
@@ -132,7 +156,7 @@ impl Core {
                     ))
                     .in_project(project),
                 );
-                return Ok(MergeOutcome { task, note: None });
+                return Ok(MergeOutcome { task, note: None, resolving: false });
             }
             return Err(refuse(
                 &task,
@@ -238,13 +262,39 @@ impl Core {
                     Ok(_) => {
                         restore_block();
                         let note = give_back();
+                        self.update_task(project, &task.id, |t| t.log(t!("conflict in the merge ({files}); undone", files = short_list(&files))));
+                        // The reviewer already decided to merge: the agent is asked to resolve the conflict right now and
+                        // the merge happens by itself when it delivers (`Core::task_done`).
+                        let asks = if task.merge_approved { task.conflict_asks } else { 0 };
+                        if self.tab_delivery() && asks < MAX_CONFLICT_ASKS {
+                            let ask = MergeBlock::Conflict(files.clone()).return_feedback(&task).unwrap_or_default();
+                            if let Ok(back) = self.return_locked(project, &task, &ask, Some(asks + 1)) {
+                                let said = t!(
+                                    "The task and the branch \"{base}\" changed the same lines ({files}). Nothing was merged. I asked the agent to combine the two versions; the task merges by itself when it delivers.",
+                                    base = &task.base,
+                                    files = if files.is_empty() { t!("unidentified files").to_owned() } else { short_list(&files) }
+                                );
+                                return Ok(MergeOutcome { task: back, note: Some(with_note(said, note)), resolving: true });
+                            }
+                        }
                         let msg = t!(
                             "conflict while merging {branch} into \"{base}\" (files: {files}); the merge was undone and the task is still in review. Return it to the agent asking it to update the branch with the base, or resolve it by hand",
                             branch = &task.branch,
                             base = &task.base,
                             files = if files.is_empty() { t!("not identified").to_owned() } else { short_list(&files) }
                         );
-                        self.update_task(project, &task.id, |t| t.log(t!("conflict in the merge ({files}); undone", files = short_list(&files))));
+                        if asks > 0 {
+                            // Gave up: the person looks at it from here (the approval no longer waits for a delivery).
+                            self.update_task(project, &task.id, |t| {
+                                t.merge_approved = false;
+                                t.conflict_asks = 0;
+                            });
+                        }
+                        let msg = if asks > 0 {
+                            format!("{msg} {}", t!("The agent was already asked {count} times and the base keeps changing under it.", count = asks))
+                        } else {
+                            msg
+                        };
                         Err(MergeRefusal {
                             error: TaskError::Conflict(with_note(msg, note.clone())),
                             block: Some(MergeBlock::Conflict(files)),
@@ -289,6 +339,9 @@ impl Core {
             t.finished_ms = Some(now_ms());
             t.error = None;
             t.merge_commit = Some(full_head.clone()).filter(|h| !h.is_empty());
+            t.merge_approved = false;
+            t.conflict_asks = 0;
+            t.merge_stopped = None;
             t.log(t!("merged into {base} ({hash}); awaiting validation", base = &t.base, hash = &head));
             if let Err(e) = &aligned {
                 t.log(t!(
@@ -313,7 +366,7 @@ impl Core {
         );
         // The task no longer holds the scope: whoever waited for it departs from the base already with this merge.
         self.advance_queue_locked(project);
-        Ok(MergeOutcome { task, note })
+        Ok(MergeOutcome { task, note, resolving: false })
     }
 }
 

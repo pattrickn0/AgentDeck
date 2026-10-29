@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use holt_core::t;
+
 /// What the tray menu (or a click on the icon) requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayCommand {
@@ -37,7 +39,26 @@ pub fn close_action(tray_up: bool) -> CloseAction {
 
 /// The tray icon; disappears when dropped.
 pub struct Tray {
-    _icon: imp::Icon,
+    icon: imp::Icon,
+    /// The counts the tooltip shows now (`set_waiting` only touches the system when they change).
+    waiting: (usize, usize),
+}
+
+/// The tooltip's lines: the name, then what waits for the user (tasks in review, tasks awaiting validation).
+/// Empty counts give just the name.
+pub fn tooltip_lines(review: usize, validating: usize) -> Vec<String> {
+    let mut lines = vec!["Holt".to_owned()];
+    match review {
+        0 => {}
+        1 => lines.push(t!("1 task waiting for your review").to_owned()),
+        n => lines.push(t!("{count} tasks waiting for your review", count = n)),
+    }
+    match validating {
+        0 => {}
+        1 => lines.push(t!("1 task awaiting your validation").to_owned()),
+        n => lines.push(t!("{count} tasks awaiting your validation", count = n)),
+    }
+    lines
 }
 
 impl Tray {
@@ -45,12 +66,24 @@ impl Tray {
     /// Call from the event loop thread (on Windows the icon lives on it).
     pub fn start(rgba: Vec<u8>, size: u32, on: OnCommand) -> Option<Tray> {
         match imp::start(rgba, size, on) {
-            Ok(icon) => Some(Tray { _icon: icon }),
+            Ok(icon) => Some(Tray { icon, waiting: (0, 0) }),
             Err(e) => {
                 log::warn!("system tray unavailable ({e}): window close button will minimize");
                 None
             }
         }
+    }
+}
+
+impl Tray {
+    /// Shows in the icon's tooltip what waits for the user's decision (tasks in review and awaiting validation), so a
+    /// delivered task is not forgotten while the window is hidden. Cheap to call every frame.
+    pub fn set_waiting(&mut self, review: usize, validating: usize) {
+        if self.waiting == (review, validating) {
+            return;
+        }
+        self.waiting = (review, validating);
+        imp::set_tooltip(&self.icon, tooltip_lines(review, validating));
     }
 }
 
@@ -69,6 +102,12 @@ mod imp {
     use super::{OnCommand, TrayCommand};
 
     pub type Icon = TrayIcon;
+
+    pub fn set_tooltip(icon: &Icon, lines: Vec<String>) {
+        if let Err(e) = icon.set_tooltip(Some(lines.join("\n"))) {
+            log::warn!("could not update the tray tooltip: {e}");
+        }
+    }
 
     pub fn start(rgba: Vec<u8>, size: u32, on: OnCommand) -> Result<Icon, String> {
         let (open, quit) = (MenuItem::with_id("open", t!("Open"), true, None), MenuItem::with_id("quit", t!("Quit"), true, None));
@@ -111,6 +150,8 @@ mod imp {
         argb: Vec<u8>,
         size: i32,
         on: OnCommand,
+        /// The tooltip's lines: the title, then the description.
+        lines: Vec<String>,
     }
 
     impl ksni::Tray for Sni {
@@ -124,6 +165,14 @@ mod imp {
 
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {
             vec![ksni::Icon { width: self.size, height: self.size, data: self.argb.clone() }]
+        }
+
+        fn tool_tip(&self) -> ksni::ToolTip {
+            ksni::ToolTip {
+                title: self.lines.first().cloned().unwrap_or_default(),
+                description: self.lines.iter().skip(1).cloned().collect::<Vec<_>>().join("\n"),
+                ..Default::default()
+            }
         }
 
         fn activate(&mut self, _x: i32, _y: i32) {
@@ -140,9 +189,14 @@ mod imp {
 
     pub type Icon = Handle<Sni>;
 
+    pub fn set_tooltip(icon: &Icon, lines: Vec<String>) {
+        // `None` = the tray service is gone; there is nothing to update.
+        let _ = icon.update(|tray| tray.lines = lines);
+    }
+
     pub fn start(rgba: Vec<u8>, size: u32, on: OnCommand) -> Result<Icon, String> {
         // Without `StatusNotifierWatcher` on D-Bus, `spawn` returns an error (we do not use `assume_sni_available`).
-        Sni { argb: rgba_to_argb(&rgba), size: size as i32, on }.spawn().map_err(|e| e.to_string())
+        Sni { argb: rgba_to_argb(&rgba), size: size as i32, on, lines: vec!["Holt".to_owned()] }.spawn().map_err(|e| e.to_string())
     }
 }
 
@@ -152,6 +206,8 @@ mod imp {
 
     pub struct Icon;
 
+    pub fn set_tooltip(_icon: &Icon, _lines: Vec<String>) {}
+
     pub fn start(_rgba: Vec<u8>, _size: u32, _on: OnCommand) -> Result<Icon, String> {
         Err("no system tray on this system".into())
     }
@@ -160,6 +216,16 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tooltip_says_what_waits_for_the_user() {
+        use holt_core::i18n::english;
+        english(|| {
+            assert_eq!(tooltip_lines(0, 0), ["Holt"]);
+            assert_eq!(tooltip_lines(1, 0), ["Holt", "1 task waiting for your review"]);
+            assert_eq!(tooltip_lines(3, 2), ["Holt", "3 tasks waiting for your review", "2 tasks awaiting your validation"]);
+        });
+    }
 
     #[test]
     fn closing_hides_only_when_there_is_a_tray_to_come_back_from() {

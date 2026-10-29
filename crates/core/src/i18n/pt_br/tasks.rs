@@ -24,6 +24,19 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("discarded", "descartada"),
     ("failed", "falhou"),
     ("{state} · waits for {holder}", "{state} · espera {holder}"),
+    ("waiting for your review", "aguardando a sua revisão"),
+    ("resolving a conflict", "resolvendo um conflito"),
+    (
+        "Resolving a conflict with {base} — merges by itself when the agent delivers",
+        "Resolvendo um conflito com {base} — mescla sozinha quando o agente entregar",
+    ),
+    ("Cancel automatic merge", "Cancelar a mesclagem automática"),
+    (
+        "The task will wait in review when the agent delivers, and you merge it yourself",
+        "A tarefa espera em revisão quando o agente entregar, e você mescla por conta própria",
+    ),
+    ("The task was not merged by itself: {reason}", "A tarefa não foi mesclada sozinha: {reason}"),
+    ("Cancelling…", "Cancelando…"),
     // History filter
     ("Completed and discarded", "Concluídas e descartadas"),
     ("Completed only", "Só concluídas"),

@@ -7,6 +7,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // Tray icon (tray.rs)
     ("Open", "Abrir"),
     ("Quit", "Encerrar"),
+    ("1 task waiting for your review", "1 tarefa aguardando a sua revisão"),
+    ("{count} tasks waiting for your review", "{count} tarefas aguardando a sua revisão"),
+    ("1 task awaiting your validation", "1 tarefa aguardando a sua validação"),
+    ("{count} tasks awaiting your validation", "{count} tarefas aguardando a sua validação"),
     // Voice dictation (dictation.rs)
     ("about 1.6 GB", "cerca de 1,6 GB"),
     ("Stop recording and transcribe ({shortcut}) (up to {minutes} min)", "Parar gravação e transcrever ({shortcut}) (até {minutes} min)"),

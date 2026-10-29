@@ -120,6 +120,7 @@ pub fn start_message(task: &Task, boss: Option<&str>, memory: &str) -> String {
 Rules for task {id}:\n\
 - Work ONLY in the folder {wt}, on the branch {branch} (created from {base}). Do not touch the main repository or any other folder.\n\
 - Make small commits on that branch. Do not merge or push: Holt does the merge, after the review.\n\
+- Delivering (--task done) needs {base} merged into your branch: it is refused while your branch would conflict with {base}. Before delivering, run git merge {base} in your folder, resolve any conflicts keeping what both sides brought, run the checks and commit; if {base} moved again, repeat.\n\
 - Do not ask anyone (another agent or the user) to merge or to run ask-agent --task merge: that decision belongs to whoever reviews. Your work ends at --task done.\n\
 - Before touching a file for the first time, run ask-agent --learn <file> (shows what the project has already learned about it).\n\
 - If you find something non-obvious that the next agent would need to know (a trap, a decision, a convention), create a file in memory/learnings/ on this branch (format in memory/learnings/README.md) and cite it in the report: it goes through the same review and merge as the code.\n\
@@ -247,6 +248,7 @@ mod tests {
         assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(m.contains("Do not merge or push"), "{m}");
         assert!(m.contains("Do not ask anyone") && m.contains("ends at --task done"), "{m}");
+        assert!(m.contains("run git merge main in your folder") && m.contains("refused while your branch would conflict with main"), "{m}");
         assert!(m.contains("ask-agent --boss") && m.contains("\"claude\""), "{m}");
         // The brief ends with an order: the agent does not sit waiting for a "you may start".
         assert!(m.ends_with("Do not wait for confirmation or ask whether you can start."), "{m}");

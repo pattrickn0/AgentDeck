@@ -51,6 +51,36 @@ pub(crate) fn changed_files(repo: &Repo, base: &str, branch: &str) -> Vec<String
         .unwrap_or_default()
 }
 
+/// Result of [`merge_check`].
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum MergeCheck {
+    Clean,
+    /// Conflicts (the files, which may come empty if git does not name them).
+    Conflicts(Vec<String>),
+    /// Could not check (old git, missing ref, error).
+    Unknown,
+}
+
+/// Whether merging `branch` into `base` would conflict, without touching any folder (`git merge-tree --write-tree`,
+/// git 2.38+).
+pub(super) fn merge_check(repo: &Repo, base: &str, branch: &str) -> MergeCheck {
+    if !valid_task_branch(branch) || !crate::git::valid_branch_name(base) {
+        return MergeCheck::Unknown;
+    }
+    let Ok(out) = repo.cmd(&["merge-tree", "--write-tree", "--name-only", "--no-messages", base, branch]).output() else {
+        return MergeCheck::Unknown;
+    };
+    match out.status.code() {
+        Some(0) => MergeCheck::Clean,
+        Some(1) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            // The first line is the tree; the conflicting files come after it, up to an empty line.
+            MergeCheck::Conflicts(text.lines().skip(1).take_while(|l| !l.is_empty()).map(str::to_owned).collect())
+        }
+        _ => MergeCheck::Unknown,
+    }
+}
+
 /// `git diff --stat base...branch`, cut; `(no changes against the base)` when empty.
 pub(super) fn diff_stat(repo: &Repo, base: &str, branch: &str) -> Result<String, String> {
     let out = git_out(repo, &["diff", "--stat", &format!("{base}...{branch}"), "--"]).map_err(|e| e.to_string())?;
