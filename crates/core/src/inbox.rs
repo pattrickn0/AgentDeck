@@ -1,46 +1,46 @@
-//! Caixa de entrada de respostas (`ask-agent --inbox`).
+//! Inbox of answers (`ask-agent --inbox`).
 //!
-//! Toda pergunta de um agente a uma aba que termina (com resposta, no prazo ou depois, ou com falha)
-//! deixa uma entrada aqui, na caixa de quem perguntou. A entrada nasce "não entregue" e passa a
-//! entregue quando a resposta chega de fato a ele: o 200 da ponte foi escrito sem erro, ou a interface
-//! digitou a resposta atrasada no terminal dele. Se nada disso aconteceu (a aba fechou, a conexão já
-//! tinha sido abandonada), a resposta continua aqui, e `ask-agent --inbox` a mostra. A caixa vive na
-//! memória do app: guarda as últimas [`INBOX_LIMIT`] respostas de cada instância.
+//! Every question from an agent to a tab that finishes (with an answer, on time or later, or with a failure)
+//! leaves an entry here, in the box of whoever asked. The entry is born "not delivered" and becomes
+//! delivered when the answer actually reaches that agent: the bridge's 200 was written without error, or the
+//! interface typed the late answer into its terminal. If none of that happened (the tab closed, the connection
+//! had already been abandoned), the answer stays here, and `ask-agent --inbox` shows it. The inbox lives in
+//! the app's memory: it keeps the last [`INBOX_LIMIT`] answers of each instance.
 
 use std::collections::{HashMap, VecDeque};
 
 use parking_lot::Mutex;
 use serde::Serialize;
 
-/// Respostas guardadas por instância que perguntou.
+/// Answers kept per instance that asked.
 pub const INBOX_LIMIT: usize = 20;
 
-/// Uma resposta recebida por quem perguntou.
+/// An answer received by whoever asked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InboxEntry {
-    /// Número da pergunta.
+    /// Question number.
     pub request: u64,
-    /// Quem respondeu (id da instância, sem o projeto).
+    /// Who answered (instance id, without the project).
     pub from: String,
-    /// O texto da resposta, ou o motivo da falha.
+    /// The answer text, or the reason for the failure.
     pub text: String,
-    /// A pergunta terminou sem resposta (`text` é o motivo).
+    /// The question ended without an answer (`text` is the reason).
     pub failed: bool,
-    /// Epoch em milissegundos.
+    /// Epoch in milliseconds.
     pub ts: u64,
-    /// A resposta já chegou a quem perguntou.
+    /// The answer already reached whoever asked.
     pub delivered: bool,
 }
 
-/// Caixas por instância que perguntou (chave com o escopo do projeto: `instances::scoped`).
+/// Boxes per instance that asked (key with the project scope: `instances::scoped`).
 #[derive(Default)]
 pub struct Inbox {
     boxes: Mutex<HashMap<String, VecDeque<InboxEntry>>>,
 }
 
 impl Inbox {
-    /// Guarda a resposta na caixa de `asker`. Uma pergunta que já tem entrada ali é substituída; passando
-    /// de [`INBOX_LIMIT`], sai a mais antiga.
+    /// Stores the answer in `asker`'s box. A question that already has an entry there is replaced; going
+    /// past [`INBOX_LIMIT`], the oldest one leaves.
     pub fn push(&self, asker: &str, entry: InboxEntry) {
         let mut boxes = self.boxes.lock();
         let list = boxes.entry(asker.to_owned()).or_default();
@@ -51,16 +51,16 @@ impl Inbox {
         }
     }
 
-    /// Marca a resposta da pergunta `request` como entregue. `false` = não está em nenhuma caixa.
+    /// Marks the answer to question `request` as delivered. `false` = it is in no box.
     pub fn mark_delivered(&self, request: u64) -> bool {
         let mut boxes = self.boxes.lock();
         let entry = boxes.values_mut().flat_map(|l| l.iter_mut()).find(|e| e.request == request);
         entry.map(|e| e.delivered = true).is_some()
     }
 
-    /// A instância `old` foi renomeada para `new` (chaves com escopo): a caixa vai junto, depois do que já
-    /// houver em `new`, para o `--inbox` da aba renomeada achar as respostas e outra aba aberta depois com o
-    /// nome antigo não ler as dela.
+    /// The instance `old` was renamed to `new` (scoped keys): the box goes along, after whatever already
+    /// exists in `new`, so that the renamed tab's `--inbox` finds the answers and another tab opened later
+    /// with the old name does not read them.
     pub fn rename(&self, old: &str, new: &str) {
         let mut boxes = self.boxes.lock();
         let Some(moved) = boxes.remove(old) else { return };
@@ -71,14 +71,14 @@ impl Inbox {
         }
     }
 
-    /// A resposta da pergunta `request` e a quem ela pertence (chave de `asker`).
+    /// The answer to question `request` and whom it belongs to (`asker` key).
     pub fn find(&self, request: u64) -> Option<(String, InboxEntry)> {
         let boxes = self.boxes.lock();
         boxes.iter().find_map(|(asker, l)| l.iter().find(|e| e.request == request).map(|e| (asker.clone(), e.clone())))
     }
 
-    /// As respostas de `asker`, da mais antiga para a mais nova: só as não entregues, ou as
-    /// [`INBOX_LIMIT`] com `all`. Quem pede as não entregues as recebe aqui, então elas passam a entregues.
+    /// `asker`'s answers, oldest first: only the undelivered ones, or the [`INBOX_LIMIT`] with `all`.
+    /// Whoever asks for the undelivered ones receives them here, so they become delivered.
     pub fn read(&self, asker: &str, all: bool) -> Vec<InboxEntry> {
         let mut boxes = self.boxes.lock();
         let Some(list) = boxes.get_mut(asker) else { return Vec::new() };
@@ -95,7 +95,7 @@ mod tests {
     use super::*;
 
     fn entry(request: u64) -> InboxEntry {
-        InboxEntry { request, from: "antigravity".into(), text: format!("resposta {request}"), failed: false, ts: 1, delivered: false }
+        InboxEntry { request, from: "antigravity".into(), text: format!("answer {request}"), failed: false, ts: 1, delivered: false }
     }
 
     #[test]
@@ -121,7 +121,7 @@ mod tests {
         inbox.rename("p::claude", "p::claude@dev");
         let got: Vec<u64> = inbox.read("p::claude@dev", false).iter().map(|e| e.request).collect();
         assert_eq!(got, [2, 1]);
-        assert!(inbox.read("p::claude", true).is_empty(), "outra aba aberta com o nome antigo não lê as respostas");
+        assert!(inbox.read("p::claude", true).is_empty(), "another tab opened with the old name does not read the answers");
         inbox.rename("p::ninguem", "p::outro");
         assert!(inbox.read("p::outro", true).is_empty());
     }
@@ -135,7 +135,7 @@ mod tests {
         assert!(!inbox.mark_delivered(9));
         let pending: Vec<u64> = inbox.read("p::claude", false).iter().map(|e| e.request).collect();
         assert_eq!(pending, [2]);
-        // Ler as pendentes as entrega: a próxima leitura não as repete.
+        // Reading the pending ones delivers them: the next read does not repeat them.
         assert!(inbox.read("p::claude", false).is_empty());
         let all: Vec<u64> = inbox.read("p::claude", true).iter().map(|e| e.request).collect();
         assert_eq!(all, [1, 2]);
@@ -146,9 +146,9 @@ mod tests {
         let inbox = Inbox::default();
         inbox.push("p::claude", entry(3));
         assert!(inbox.mark_delivered(3));
-        inbox.push("p::claude", InboxEntry { text: "nova".into(), ..entry(3) });
+        inbox.push("p::claude", InboxEntry { text: "new".into(), ..entry(3) });
         let (asker, found) = inbox.find(3).unwrap();
-        assert_eq!((asker.as_str(), found.text.as_str(), found.delivered), ("p::claude", "nova", false));
+        assert_eq!((asker.as_str(), found.text.as_str(), found.delivered), ("p::claude", "new", false));
         assert_eq!(inbox.read("p::claude", true).len(), 1);
         assert!(inbox.find(4).is_none());
     }

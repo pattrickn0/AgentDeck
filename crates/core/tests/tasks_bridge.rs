@@ -137,7 +137,7 @@ fn a_task_agent_cannot_merge_discard_or_create() {
         let (st, b) = call(&agent, "POST", path, body);
         assert_eq!(st, 403, "{path}: {b}");
         // The wording of the bridge's error belongs to `bridge.rs` (another area): it stays as that area has it.
-        assert!(b["error"].as_str().is_some_and(|e| e.contains("só consulta tarefas")), "{b}");
+        assert!(b["error"].as_str().is_some_and(|e| e.contains("only reads tasks")), "{b}");
     }
     // Another task's report neither.
     let (st, b) = call(&agent, "POST", "/tasks/t2/done", json!({ "report": "posing as t2" }));
@@ -302,7 +302,7 @@ fn the_bridge_reads_the_effort_of_a_new_task() {
     assert_eq!((status, &body["task"]["effort"]), (200, &serde_json::Value::Null));
     let (status, body) = post(r#"{"title":"Maximum","kind":"claude","effort":"max"}"#);
     assert_eq!(status, 400);
-    assert!(body["error"].as_str().is_some_and(|e| e.contains("esforço inválido")), "{body}");
+    assert!(body["error"].as_str().is_some_and(|e| e.contains("invalid effort")), "{body}");
     let (status, _) = post(r#"{"title":"Number","kind":"claude","effort":3}"#);
     assert_eq!(status, 400);
     env.core.shutdown();
@@ -322,7 +322,7 @@ fn the_bridge_reads_the_level_of_a_new_task() {
     assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("media")));
     let (status, body) = post(r#"{"title":"Huge","kind":"claude","level":"enorme"}"#);
     assert_eq!(status, 400);
-    assert!(body["error"].as_str().is_some_and(|e| e.contains("nível inválido")), "{body}");
+    assert!(body["error"].as_str().is_some_and(|e| e.contains("invalid level")), "{body}");
     env.core.shutdown();
 }
 

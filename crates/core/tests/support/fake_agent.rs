@@ -1,21 +1,21 @@
-//! Agente falso dos testes da ponte, no lugar dos antigos scripts de shell: um binário de verdade,
-//! que roda igual no Windows e no Unix (é o `[[bin]]` de teste do `agentdeck-core`, ver `Cargo.toml`).
+//! Fake agent for the bridge tests, in place of the old shell scripts: a real binary that behaves
+//! the same on Windows and Unix (it is the `agentdeck-core` test `[[bin]]`, see `Cargo.toml`).
 //!
-//! O teste copia este binário para a pasta de busca com o nome que o app procura (`claude.exe` no
-//! Windows, `claude` no Unix) e escreve o comportamento ao lado, em `<nome>.fake.json`; o app só o
-//! executa nos testes. Campos do JSON (todos opcionais):
+//! The test copies this binary into the search folder under the name the app looks for (`claude.exe`
+//! on Windows, `claude` on Unix) and writes the behaviour next to it, in `<name>.fake.json`; the app
+//! only runs it in tests. JSON fields (all optional):
 //!
-//! - `stdout`: texto impresso (uma linha);
-//! - `stderr`: texto impresso no erro; `exit`: código de saída (padrão 0);
-//! - `echo_args`: imprime `ARGS: [arg]…`; argumento com "AgentDeck" (as instruções) vira `[<sys>]`;
-//! - `echo_env`: imprime `ENV: <valores…>` das variáveis listadas;
-//! - `print_env`: imprime só o valor da variável;
-//! - `echo_stdin`: copia a entrada padrão para a saída (como `cat`);
-//! - `fail_on_arg`: se um argumento for igual a ele, imprime `stderr` e sai com `fail_exit` (padrão 1);
-//! - `log`: arquivo onde escreve `log_first` antes do `sleep_ms` e `log_last` depois.
+//! - `stdout`: printed text (one line);
+//! - `stderr`: text printed on error; `exit`: exit code (default 0);
+//! - `echo_args`: prints `ARGS: [arg]…`; an argument containing "AgentDeck" (the instructions) becomes `[<sys>]`;
+//! - `echo_env`: prints `ENV: <values…>` of the listed variables;
+//! - `print_env`: prints only the variable's value;
+//! - `echo_stdin`: copies stdin to stdout (like `cat`);
+//! - `fail_on_arg`: if an argument equals it, prints `stderr` and exits with `fail_exit` (default 1);
+//! - `log`: file where it writes `log_first` before `sleep_ms` and `log_last` after.
 //!
-//! A entrada padrão é sempre lida até o fim: sem isso o `ask-agent` poderia travar escrevendo o
-//! prompt num pipe que ninguém lê.
+//! Stdin is always read to the end: without that `ask-agent` could hang writing the prompt into a
+//! pipe nobody reads.
 
 use std::io::{Read, Write};
 use std::time::Duration;
@@ -67,7 +67,7 @@ fn main() {
         append(path, spec["log_last"].as_str().unwrap_or(""));
     }
 
-    // `process::exit` não roda destrutores: os fluxos precisam ser descarregados antes.
+    // `process::exit` does not run destructors: the streams must be flushed first.
     let mut stdout = std::io::stdout().lock();
     let _ = stdout.write_all(&out);
     let _ = stdout.flush();
@@ -79,15 +79,15 @@ fn main() {
     std::process::exit(spec["exit"].as_i64().unwrap_or(0) as i32);
 }
 
-/// O comportamento fica ao lado do executável, com o nome dele menos a extensão: `claude.fake.json`.
+/// The behaviour lives next to the executable, named after it minus the extension: `claude.fake.json`.
 fn read_spec() -> Value {
-    let exe = std::env::current_exe().expect("caminho do agente falso");
+    let exe = std::env::current_exe().expect("path of the fake agent");
     let path = exe.with_extension("fake.json");
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("sem o comportamento do agente falso em {}: {e}", path.display()));
-    serde_json::from_str(&text).unwrap_or_else(|e| panic!("comportamento inválido em {}: {e}", path.display()))
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("no behaviour of the fake agent at {}: {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("invalid behaviour at {}: {e}", path.display()))
 }
 
 fn append(path: &str, line: &str) {
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).expect("log do agente falso");
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).expect("fake agent log");
     let _ = writeln!(file, "{line}");
 }

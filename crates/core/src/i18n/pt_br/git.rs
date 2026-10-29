@@ -56,7 +56,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ),
     ("No operation in progress", "nenhuma operação em andamento"),
     ("Conflict block not found (the file changed)", "bloco de conflito não encontrado (o arquivo mudou)"),
-    ("No project open", "nenhum projeto aberto"),
+    ("No project open", "Nenhum projeto aberto"),
     (
         "I do not create a repository in your home folder; choose a project folder",
         "não crio um repositório na sua pasta pessoal; escolha uma pasta de projeto",
@@ -154,7 +154,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Unstaging hunk…", "Removendo trecho…"),
     ("Hunk staged", "Trecho preparado"),
     ("Staging hunk…", "Preparando trecho…"),
-    ("Discarded", "Descartado"),
+    ("Changes discarded", "Alterações descartadas"),
     ("Discarding…", "Descartando…"),
     ("Hunk discarded", "Trecho descartado"),
     ("Discarding hunk…", "Descartando trecho…"),

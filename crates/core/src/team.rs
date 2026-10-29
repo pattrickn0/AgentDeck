@@ -1,22 +1,22 @@
-//! Hierarquia das instâncias de um projeto (quem é chefe de quem), guardada em
-//! `ProjectCfg.tab_parents` (id da instância → id do chefe). Funções puras; o `Core` aplica.
+//! Hierarchy of a project's instances (who is whose boss), stored in
+//! `ProjectCfg.tab_parents` (instance id → boss id). Pure functions; the `Core` applies them.
 
 use std::collections::BTreeMap;
 
-/// Chefe e equipe de uma instância.
+/// Boss and crew of an instance.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Team {
-    /// A quem a instância responde (`None` = ao usuário).
+    /// Who the instance answers to (`None` = the user).
     pub boss: Option<String>,
-    /// Quem responde a ela, na ordem de `open`.
+    /// Who answers to it, in `open` order.
     pub crew: Vec<String>,
 }
 
-/// Pôr `child` sob `parent` criaria um ciclo (`parent` é o próprio `child` ou alguém da equipe dele).
+/// Putting `child` under `parent` would create a cycle (`parent` is `child` itself or someone in its crew).
 pub fn would_cycle(parents: &BTreeMap<String, String>, child: &str, parent: &str) -> bool {
     let mut cur = Some(parent);
-    // Sem ciclo, a cadeia tem no máximo `len + 1` ids até acabar; o limite cobre um mapa já
-    // corrompido com ciclo (não trava).
+    // Without a cycle the chain has at most `len + 1` ids before it ends; the limit covers a map already
+    // corrupted with a cycle (it does not hang).
     for _ in 0..parents.len() + 2 {
         match cur {
             Some(id) if id == child => return true,
@@ -27,7 +27,7 @@ pub fn would_cycle(parents: &BTreeMap<String, String>, child: &str, parent: &str
     true
 }
 
-/// Chefe e equipe de `id`, considerando só as instâncias abertas (`open`).
+/// Boss and crew of `id`, considering only the open instances (`open`).
 pub fn team_of(parents: &BTreeMap<String, String>, id: &str, open: &[String]) -> Team {
     Team {
         boss: parents.get(id).filter(|b| open.contains(b)).cloned(),
@@ -35,8 +35,8 @@ pub fn team_of(parents: &BTreeMap<String, String>, id: &str, open: &[String]) ->
     }
 }
 
-/// A instância `closed` saiu: a equipe dela passa ao chefe dela (ou à raiz). Devolve quem mudou de
-/// chefe (para avisar), mais o chefe dela, se houver: ele perdeu um subordinado (e talvez herdou a equipe).
+/// The instance `closed` left: its crew passes to its boss (or to the root). Returns who changed boss
+/// (to be told), plus its own boss, if any: it lost a subordinate (and may have inherited the crew).
 pub fn remove(parents: &mut BTreeMap<String, String>, closed: &str) -> Vec<String> {
     let boss = parents.remove(closed);
     let crew: Vec<String> = parents.iter().filter(|(_, p)| *p == closed).map(|(c, _)| c.clone()).collect();
@@ -51,7 +51,7 @@ pub fn remove(parents: &mut BTreeMap<String, String>, closed: &str) -> Vec<Strin
     touched
 }
 
-/// A instância `old` passou a se chamar `new`.
+/// The instance `old` is now called `new`.
 pub fn rename(parents: &mut BTreeMap<String, String>, old: &str, new: &str) {
     if let Some(p) = parents.remove(old) {
         parents.insert(new.to_owned(), p);
@@ -63,16 +63,16 @@ pub fn rename(parents: &mut BTreeMap<String, String>, old: &str, new: &str) {
     }
 }
 
-/// Aviso anexado à próxima mensagem entregue a uma instância cuja posição na equipe mudou.
+/// Notice attached to the next message delivered to an instance whose place in the team changed.
 pub fn notice(team: &Team) -> String {
     let boss = match &team.boss {
-        Some(b) => format!("você responde a \"{b}\" (reporte a ele com ask-agent --boss \"mensagem\")"),
-        None => "você responde diretamente ao usuário".to_owned(),
+        Some(b) => format!("you answer to \"{b}\" (report to him with ask-agent --boss \"message\")"),
+        None => "you answer directly to the user".to_owned(),
     };
-    let crew = if team.crew.is_empty() { "nenhum agente".to_owned() } else { team.crew.join(", ") };
+    let crew = if team.crew.is_empty() { "no agents".to_owned() } else { team.crew.join(", ") };
     format!(
-        "[AgentDeck] Sua posição na equipe mudou: {boss}; sua equipe: {crew}. Delegue de preferência à sua equipe. \
-Consulte a qualquer momento com ask-agent --team."
+        "[AgentDeck] Your place in the team changed: {boss}; your crew: {crew}. Delegate preferably to your crew. \
+Check it at any time with ask-agent --team."
     )
 }
 
@@ -89,18 +89,18 @@ mod tests {
     }
 
     #[test]
-    fn ciclo_e_recusado() {
+    fn a_cycle_is_refused() {
         let m = map(&[("claude@dev", "claude"), ("codex", "claude@dev")]);
-        assert!(would_cycle(&m, "claude", "claude"), "chefe de si mesmo");
-        assert!(would_cycle(&m, "claude", "codex"), "o chefe ficaria abaixo do subordinado");
+        assert!(would_cycle(&m, "claude", "claude"), "boss of itself");
+        assert!(would_cycle(&m, "claude", "codex"), "the boss would end up below its own subordinate");
         assert!(!would_cycle(&m, "codex", "claude"));
         assert!(!would_cycle(&m, "antigravity", "codex"));
-        // Mapa já corrompido não trava.
+        // A map already corrupted does not hang.
         assert!(would_cycle(&map(&[("a", "b"), ("b", "a")]), "c", "a"));
     }
 
     #[test]
-    fn equipe_so_com_abertos() {
+    fn the_team_only_has_open_instances() {
         let m = map(&[("claude@dev", "claude"), ("antigravity", "claude"), ("claude", "fechado")]);
         let open = ids(&["claude", "claude@dev", "antigravity"]);
         assert_eq!(team_of(&m, "claude", &open), Team { boss: None, crew: ids(&["claude@dev", "antigravity"]) });
@@ -108,28 +108,28 @@ mod tests {
     }
 
     #[test]
-    fn fechar_passa_a_equipe_ao_avo() {
+    fn closing_hands_the_crew_to_the_grandparent() {
         let mut m = map(&[("dev", "claude"), ("codex", "dev"), ("qa", "dev")]);
         let mut touched = remove(&mut m, "dev");
         touched.sort();
         assert_eq!(touched, ids(&["claude", "codex", "qa"]));
         assert_eq!(m, map(&[("codex", "claude"), ("qa", "claude")]));
-        // Sem chefe, a equipe vai para a raiz.
+        // Without a boss, the crew goes to the root.
         assert_eq!(remove(&mut m, "claude"), ids(&["codex", "qa"]));
         assert!(m.is_empty());
     }
 
     #[test]
-    fn o_chefe_que_perde_um_subordinado_sem_equipe_e_avisado() {
+    fn the_boss_that_loses_a_subordinate_without_crew_is_told() {
         let mut m = map(&[("dev", "claude"), ("qa", "claude")]);
         assert_eq!(remove(&mut m, "dev"), ids(&["claude"]));
         assert_eq!(m, map(&[("qa", "claude")]));
-        // Sem chefe nem equipe, ninguém muda de posição.
+        // Without boss or crew, nobody changes place.
         assert!(remove(&mut m, "solto").is_empty());
     }
 
     #[test]
-    fn renomear_mantem_a_arvore() {
+    fn renaming_keeps_the_tree() {
         let mut m = map(&[("dev", "claude"), ("codex", "dev")]);
         rename(&mut m, "dev", "dev@ana");
         assert_eq!(m, map(&[("dev@ana", "claude"), ("codex", "dev@ana")]));

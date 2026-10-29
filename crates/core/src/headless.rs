@@ -1,5 +1,5 @@
-//! Execução headless (modo `-p`) dos agentes, usada pela ponte
-//! (equivalente a `runHeadless`, `agyPromptArg`, `parseAgyOutput` e `cleanAgentOutput`).
+//! Headless execution (mode `-p`) of the agents, used by the bridge
+//! (equivalent to `runHeadless`, `agyPromptArg`, `parseAgyOutput` and `cleanAgentOutput`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -11,48 +11,48 @@ use crate::context::{self, ContextRequest};
 use crate::process::{run_captured, Exit};
 use crate::Core;
 
-/// A linha de comando do Windows tem limite de ~32 mil caracteres.
+/// The Windows command line is limited to ~32 thousand characters.
 pub const MAX_ARG_PROMPT: usize = 24_000;
-/// Timeout máximo de uma resposta headless.
+/// Maximum timeout of a headless answer.
 pub const HEADLESS_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
-/// Opções de [`Core::run_headless`].
+/// Options of [`Core::run_headless`].
 #[derive(Debug, Clone, Default)]
 pub struct HeadlessOptions {
-    /// Chave da conversa (`"<de>-><para>"`, com o escopo do projeto: ver `instances::scoped`);
-    /// `None` = sem histórico.
+    /// Conversation key (`"<from>-><to>"`, with the project scope: see `instances::scoped`);
+    /// `None` = no history.
     pub session_key: Option<String>,
-    /// Projeto de quem pergunta: o `ask-agent` do agente só enxerga as instâncias dele.
+    /// Project of whoever asks: the agent's `ask-agent` only sees its own instances.
     pub project: String,
-    /// Pasta onde o agente roda (a do projeto); vazia = a do projeto ativo.
+    /// Folder where the agent runs (the project's); empty = the active project's.
     pub cwd: std::path::PathBuf,
     pub depth: i64,
-    /// Substitui as instruções da ponte no prompt de sistema (Claude).
+    /// Replaces the bridge instructions in the system prompt (Claude).
     pub extra_system: Option<String>,
     pub attachments: Vec<String>,
-    /// Modelo de LLM (`--model`; no OpenCode, `run -m`). Ignorado nos agentes que não escolhem modelo.
+    /// LLM model (`--model`; in OpenCode, `run -m`). Ignored in the agents that do not choose a model.
     pub model: Option<String>,
 }
 
-/// Limpa formatação ANSI e tags residuais de raciocínio (`<think>…</think>`).
+/// Cleans ANSI formatting and leftover reasoning tags (`<think>…</think>`).
 pub fn clean_agent_output(text: &str) -> String {
     static THINK: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     static ANSI: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let think = THINK.get_or_init(|| regex::Regex::new(r"(?is)<think>.*?</think>").expect("regex válida"));
-    let ansi = ANSI.get_or_init(|| regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").expect("regex válida"));
+    let think = THINK.get_or_init(|| regex::Regex::new(r"(?is)<think>.*?</think>").expect("valid regex"));
+    let ansi = ANSI.get_or_init(|| regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").expect("valid regex"));
     let t = think.replace_all(text, "");
     let t = ansi.replace_all(&t, "");
     t.replace("\r\n", "\n").replace('\r', "\n").trim().to_owned()
 }
 
-/// Texto e id da conversa extraídos de `agy --output-format json`.
+/// Text and conversation id extracted from `agy --output-format json`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgyOutput {
     pub text: String,
     pub id: Option<String>,
 }
 
-/// Extrai a resposta e o id da conversa da saída JSON do agy. Erro quando o status é
+/// Extracts the answer and the conversation id from agy's JSON output. Error when the status is
 /// `ERROR`/`INVALID`/`CANCELED`.
 pub fn parse_agy_output(out: &str) -> Result<AgyOutput, String> {
     let json: Option<Value> = serde_json::from_str(out)
@@ -74,7 +74,7 @@ pub fn parse_agy_output(out: &str) -> Result<AgyOutput, String> {
                 .or_else(|| err.and_then(Value::as_str).map(str::to_owned))
                 .or_else(|| err.filter(|e| !e.is_null()).map(|e| e.to_string()))
                 .or_else(|| text.clone().filter(|t| !t.is_empty()))
-                .unwrap_or_else(|| format!("agy retornou status {status}"));
+                .unwrap_or_else(|| format!("agy returned status {status}"));
             return Err(msg);
         }
     }
@@ -91,7 +91,7 @@ fn walk_agy(v: &Value, text: &mut Option<String>, id: &mut Option<String>) {
         Value::Object(map) => {
             for (k, val) in map {
                 if let Value::String(s) = val {
-                    // `!id` / `!text` no JS: string vazia também conta como "ainda não achou".
+                    // `!id` / `!text` in JS: an empty string also counts as "not found yet".
                     if id.as_deref().is_none_or(str::is_empty) && is_id(k) {
                         *id = Some(s.clone());
                     }
@@ -105,7 +105,7 @@ fn walk_agy(v: &Value, text: &mut Option<String>, id: &mut Option<String>) {
         }
         Value::Array(arr) => {
             for val in arr {
-                // Strings soltas em arrays não têm chave; o JS só olha valores com chave.
+                // Loose strings in arrays have no key; the JS only looks at values with a key.
                 if !val.is_string() {
                     walk_agy(val, text, id);
                 }
@@ -116,8 +116,8 @@ fn walk_agy(v: &Value, text: &mut Option<String>, id: &mut Option<String>) {
 }
 
 impl Core {
-    /// Executa `agent` em modo headless e devolve a resposta limpa. BLOQUEANTE.
-    /// Equivalente a `runHeadless`.
+    /// Runs `agent` in headless mode and returns the cleaned answer. BLOCKING.
+    /// Equivalent to `runHeadless`.
     /// The answer and its errors go to an agent: always English (see `i18n::english`), whatever thread calls it.
     pub fn run_headless(&self, agent: &str, prompt: &str, opts: HeadlessOptions) -> anyhow::Result<String> {
         crate::i18n::english(|| self.run_headless_with(agent, prompt, opts, &self.inner.state.shutdown))
@@ -131,7 +131,7 @@ impl Core {
         cancel: &AtomicBool,
     ) -> anyhow::Result<String> {
         let base = resolve_alias(agent);
-        let def = agent_def(base).ok_or_else(|| anyhow::anyhow!("Agente desconhecido: {agent}"))?;
+        let def = agent_def(base).ok_or_else(|| anyhow::anyhow!("Unknown agent: {agent}"))?;
         let reg = &self.inner.agents;
         let workspace = if opts.cwd.as_os_str().is_empty() { self.workspace() } else { opts.cwd.clone() };
         let project = opts.project.clone();
@@ -139,7 +139,7 @@ impl Core {
         let resolved = reg.resolve(base).ok_or_else(|| anyhow::anyhow!("{}", def.missing))?;
         let data_dir = self.paths().data_dir.to_string_lossy().into_owned();
 
-        // Ponto de extensão (RAG futuro): nenhum provedor registrado hoje.
+        // Extension point (future RAG): no provider registered today.
         let chunks = context::gather(&self.inner.providers, &ContextRequest { agent, prompt, workspace: &workspace });
         let extra_ctx = context::render(&chunks);
         let prompt_owned;
@@ -151,7 +151,7 @@ impl Core {
         };
 
         let (program, mut args) = resolved.command();
-        // Shim `.cmd` (Windows): texto livre não vai na linha de comando; o prompt vai por arquivo.
+        // `.cmd` shim (Windows): free text does not go on the command line; the prompt goes by file.
         let via_cmd = resolved.shim.is_some();
         let mut sid = opts.session_key.as_ref().and_then(|k| self.inner.headless_sessions.lock().get(k).cloned());
         let is_new = opts.session_key.is_some() && sid.is_none();
@@ -216,7 +216,7 @@ impl Core {
                 args.extend(["-y".into(), "--prompt".into(), self.prompt_arg(&workspace, prompt, via_cmd)]);
                 stdin.clear();
             }
-            // `codex exec -`: o prompt vem pela entrada padrão; só a resposta final vai ao stdout.
+            // `codex exec -`: the prompt comes through standard input; only the final answer goes to stdout.
             "codex" => {
                 args.push("exec".into());
                 args.extend(model.iter().flat_map(|m| crate::models::headless_args(base, m)));
@@ -232,20 +232,20 @@ impl Core {
         }
 
         if via_cmd {
-            // Arquivos em lote não recebem quebras de linha nos argumentos (ex.: o prompt de sistema).
+            // Batch files do not receive line breaks in the arguments (e.g. the system prompt).
             args = args.into_iter().map(|a| a.replace("\r\n", " ").replace(['\r', '\n'], " ")).collect();
         }
         let guard = self.headless_token(&project, agent);
         let mut cmd = std::process::Command::new(&program);
         cmd.args(&args).current_dir(&workspace).env_clear().envs(agents::agent_env(self, agent, opts.depth, &guard.token));
         let captured = run_captured(cmd, Some(stdin.into_bytes()), HEADLESS_TIMEOUT, Some(cancel), Some(&self.inner.processes))
-            .map_err(|e| anyhow::anyhow!("falha ao iniciar \"{}\": {e}", program.display()))?;
+            .map_err(|e| anyhow::anyhow!("failed to start \"{}\": {e}", program.display()))?;
         drop(guard);
         if captured.exit == Exit::TimedOut {
-            anyhow::bail!("agente \"{agent}\" excedeu o tempo limite de resposta (timeout de 10 minutos)");
+            anyhow::bail!("agent \"{agent}\" exceeded the answer time limit (10 minute timeout)");
         }
         if captured.exit == Exit::Cancelled {
-            anyhow::bail!("execução interrompida");
+            anyhow::bail!("execution interrupted");
         }
 
         let resumed = opts.session_key.is_some() && !is_new;
@@ -269,11 +269,11 @@ impl Core {
             }
         }
         if resumed {
-            // Encerrando (ou cancelado): refazer abriria um processo órfão depois do `kill_all`.
+            // Shutting down (or cancelled): retrying would open an orphan process after `kill_all`.
             if self.stopping(cancel) {
-                anyhow::bail!("execução interrompida");
+                anyhow::bail!("execution interrupted");
             }
-            // Sessão expirada/inválida: descarta e tenta de novo, limpa.
+            // Expired/invalid session: drop it and try again, clean.
             if let Some(key) = &opts.session_key {
                 self.inner.headless_sessions.lock().remove(key);
             }
@@ -287,19 +287,19 @@ impl Core {
                 Exit::Code(Some(c)) => c.to_string(),
                 _ => "null".into(),
             };
-            anyhow::bail!("processo saiu com código {code}");
+            anyhow::bail!("process exited with code {code}");
         }
         anyhow::bail!("{msg}")
     }
 
-    /// Cancelado ou o app encerrando (`Core::shutdown`): não se abre mais nenhum processo.
+    /// Cancelled or the app shutting down (`Core::shutdown`): no more processes are opened.
     fn stopping(&self, cancel: &AtomicBool) -> bool {
         cancel.load(Ordering::SeqCst) || self.inner.state.shutdown.load(Ordering::SeqCst)
     }
 
-    /// Grava o prompt em `dados/prompts` quando ele não pode ir na linha de comando: longo demais
-    /// (a do Windows tem ~32 mil caracteres) ou `force` (passaria por um shim `.cmd`). Devolve o
-    /// caminho do arquivo; `None` = vai como argumento mesmo.
+    /// Writes the prompt to `dados/prompts` when it cannot go on the command line: too long
+    /// (the Windows one has ~32 thousand characters) or `force` (it would go through a `.cmd` shim).
+    /// Returns the file path; `None` = it goes as an argument anyway.
     fn prompt_file_if(&self, prompt: &str, force: bool) -> Option<String> {
         if !force && prompt.chars().count() <= MAX_ARG_PROMPT {
             return None;
@@ -309,18 +309,18 @@ impl Core {
         match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, prompt)) {
             Ok(()) => Some(file.to_string_lossy().into_owned()),
             Err(e) => {
-                log::warn!("não consegui gravar o prompt em {}: {e}", file.display());
+                log::warn!("could not write the prompt to {}: {e}", file.display());
                 None
             }
         }
     }
 
-    /// O prompt como argumento, ou a instrução de ler o arquivo dele (ver [`Core::prompt_file_if`]).
-    /// Equivalente a `agyPromptArg`.
+    /// The prompt as an argument, or the instruction to read its file (see [`Core::prompt_file_if`]).
+    /// Equivalent to `agyPromptArg`.
     fn prompt_arg(&self, workspace: &std::path::Path, prompt: &str, force: bool) -> String {
         match self.prompt_file_if(prompt, force) {
             Some(file) => format!(
-                "A mensagem completa está no arquivo {}. Leia o arquivo inteiro e responda seguindo o que ele pede.",
+                "The full message is in the file {}. Read the whole file and answer following what it asks.",
                 crate::util::ref_path(workspace, std::path::Path::new(&file))
             ),
             None => prompt.to_owned(),
@@ -334,31 +334,31 @@ mod tests {
 
     #[test]
     fn clean_output() {
-        assert_eq!(clean_agent_output("<think>\nhmm\n</think>\x1b[1;32mOlá\x1b[0m\r\nmundo\r!  "), "Olá\nmundo\n!");
+        assert_eq!(clean_agent_output("<think>\nhmm\n</think>\x1b[1;32mHi\x1b[0m\r\nworld\r!  "), "Hi\nworld\n!");
         assert_eq!(clean_agent_output("<THINK>a</THINK>b<think>c</think>"), "b");
         assert_eq!(clean_agent_output(""), "");
     }
 
     #[test]
     fn agy_parsing() {
-        let p = parse_agy_output(r#"{"status":"OK","response":"  resposta  ","conversation_id":"c-1"}"#).expect("ok");
-        assert_eq!(p, AgyOutput { text: "resposta".into(), id: Some("c-1".into()) });
+        let p = parse_agy_output(r#"{"status":"OK","response":"  answer  ","conversation_id":"c-1"}"#).expect("ok");
+        assert_eq!(p, AgyOutput { text: "answer".into(), id: Some("c-1".into()) });
 
-        // Aninhado e com ruído antes da última linha JSON.
-        let out = "log de progresso\n{\"data\":{\"result\":\"r\",\"meta\":{\"sessionId\":\"s9\"}}}\n";
+        // Nested and with noise before the last JSON line.
+        let out = "progress log\n{\"data\":{\"result\":\"r\",\"meta\":{\"sessionId\":\"s9\"}}}\n";
         let p = parse_agy_output(out).expect("ok");
         assert_eq!(p, AgyOutput { text: "r".into(), id: Some("s9".into()) });
 
-        // Sem JSON: texto bruto.
-        assert_eq!(parse_agy_output(" só texto \n").expect("ok"), AgyOutput { text: "só texto".into(), id: None });
+        // Without JSON: raw text.
+        assert_eq!(parse_agy_output(" only text \n").expect("ok"), AgyOutput { text: "only text".into(), id: None });
 
-        // JSON sem campo de texto: devolve a saída inteira.
+        // JSON without a text field: returns the whole output.
         let p = parse_agy_output(r#"{"x":1}"#).expect("ok");
         assert_eq!(p.text, r#"{"x":1}"#);
 
-        // Status de erro.
-        assert_eq!(parse_agy_output(r#"{"status":"ERROR","error":{"message":"falhou"}}"#).expect_err("erro"), "falhou");
-        assert_eq!(parse_agy_output(r#"{"status":"canceled"}"#).expect_err("erro"), "agy retornou status canceled");
-        assert_eq!(parse_agy_output(r#"{"status":"INVALID","error":"ruim"}"#).expect_err("erro"), "ruim");
+        // Error status.
+        assert_eq!(parse_agy_output(r#"{"status":"ERROR","error":{"message":"failed"}}"#).expect_err("error"), "failed");
+        assert_eq!(parse_agy_output(r#"{"status":"canceled"}"#).expect_err("error"), "agy returned status canceled");
+        assert_eq!(parse_agy_output(r#"{"status":"INVALID","error":"bad"}"#).expect_err("error"), "bad");
     }
 }
