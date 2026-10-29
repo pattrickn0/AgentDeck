@@ -1,17 +1,17 @@
-//! Log do app em disco: um app de janela no Windows não tem stderr, então o que o `log` escreve
-//! (nível info por padrão) também vai para `<dados>/agentdeck.log`.
+//! The app's log on disk: a window app on Windows has no stderr, so what `log` writes
+//! (info level by default) also goes to `<dados>/agentdeck.log`.
 //!
-//! O arquivo passa para `agentdeck.log.1` (substituindo o anterior) quando passa de `MAX_LOG`;
-//! o teste é feito a cada escrita, não só ao abrir o app.
+//! The file moves to `agentdeck.log.1` (replacing the previous one) when it grows past `MAX_LOG`;
+//! the check runs on every write, not only when the app opens.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Tamanho a partir do qual o log é girado.
+/// Size from which the log is rotated.
 const MAX_LOG: u64 = 2 * 1024 * 1024;
 
-/// Destino do `env_logger`: o stderr (quando houver) e o arquivo.
+/// `env_logger` destination: stderr (when there is one) and the file.
 pub struct LogFile {
     path: PathBuf,
     file: Option<File>,
@@ -20,7 +20,7 @@ pub struct LogFile {
 }
 
 impl LogFile {
-    /// Abre (ou cria) `<dir>/agentdeck.log`. Sem conseguir abrir, só o stderr recebe o log.
+    /// Opens (or creates) `<dir>/agentdeck.log`. When it cannot open, only stderr gets the log.
     pub fn open(dir: &Path) -> Self {
         Self::with_max(dir.join("agentdeck.log"), MAX_LOG)
     }
@@ -34,7 +34,7 @@ impl LogFile {
         log
     }
 
-    /// Abre o arquivo para acrescentar, girando antes se já passou do tamanho.
+    /// Opens the file to append, rotating first if it is already past the size.
     fn reopen(&mut self) {
         self.file = None;
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > self.max) {
@@ -49,7 +49,7 @@ impl LogFile {
 
 impl Write for LogFile {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        // Sem console (app de janela) o stderr falha ou some: o arquivo é o que importa.
+        // Without a console (window app) stderr fails or goes nowhere: the file is what matters.
         let _ = std::io::stderr().write_all(buf);
         if self.size > self.max {
             self.reopen();
@@ -79,19 +79,19 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cd-logfile-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut log = LogFile::with_max(dir.join("agentdeck.log"), 100);
-        log.write_all(b"primeira\n").unwrap();
+        log.write_all(b"first\n").unwrap();
         log.write_all(&[b'x'; 120]).unwrap();
-        // Passou do limite: a próxima escrita começa um arquivo novo e o anterior vira .log.1.
-        log.write_all(b"depois\n").unwrap();
+        // Past the limit: the next write starts a new file and the previous one becomes .log.1.
+        log.write_all(b"after\n").unwrap();
         log.flush().unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("agentdeck.log")).unwrap(), "depois\n");
+        assert_eq!(std::fs::read_to_string(dir.join("agentdeck.log")).unwrap(), "after\n");
         let old = std::fs::read_to_string(dir.join("agentdeck.log.1")).unwrap();
-        assert!(old.starts_with("primeira\n") && old.len() == 9 + 120);
-        // Reabrir o app continua o arquivo que já existe.
+        assert!(old.starts_with("first\n") && old.len() == "first\n".len() + 120);
+        // Reopening the app continues the file that already exists.
         drop(log);
         let mut again = LogFile::with_max(dir.join("agentdeck.log"), 100);
-        again.write_all(b"mais\n").unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("agentdeck.log")).unwrap(), "depois\nmais\n");
+        again.write_all(b"more\n").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("agentdeck.log")).unwrap(), "after\nmore\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

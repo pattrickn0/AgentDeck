@@ -1,15 +1,15 @@
-//! Registro de agentes do lado da UI: cores/nomes (COLORS/NAMES do renderer) e listas dos
-//! menus (`buildMenus`).
+//! UI-side agent registry: colors/names (the renderer's COLORS/NAMES) and the menu lists
+//! (`buildMenus`).
 
 use std::collections::HashMap;
 
 use agentdeck_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_SHELL};
-use agentdeck_core::{AgentInfo, Ident};
+use agentdeck_core::{t, AgentInfo, Ident};
 use egui::Color32;
 
 use crate::theme;
 
-/// Nome exibido para o terminal comum (o renderer original sempre usa "PowerShell").
+/// Label shown for the plain terminal (the original renderer always uses "PowerShell").
 pub fn shell_label(core_label: Option<&str>) -> String {
     if cfg!(windows) {
         "PowerShell".into()
@@ -18,7 +18,7 @@ pub fn shell_label(core_label: Option<&str>) -> String {
     }
 }
 
-/// Item de menu (nova aba / estado vazio).
+/// Menu item (new tab / empty state).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MenuItem {
     pub kind: String,
@@ -26,7 +26,7 @@ pub struct MenuItem {
     pub color: Color32,
 }
 
-/// Estado derivado da lista de agentes.
+/// State derived from the agent list.
 #[derive(Debug, Default, Clone)]
 pub struct Agents {
     pub loaded: bool,
@@ -34,9 +34,9 @@ pub struct Agents {
     names: HashMap<String, String>,
     /// `availableAgents`
     pub available: Vec<AgentInfo>,
-    /// Itens do menu "+" (`renderNewTabMenu`).
+    /// "+" menu items (`renderNewTabMenu`).
     pub new_tab_menu: Vec<MenuItem>,
-    /// Botões do estado vazio (`renderEmptyStateActions`).
+    /// Empty-state buttons (`renderEmptyStateActions`).
     pub empty_actions: Vec<MenuItem>,
 }
 
@@ -45,7 +45,7 @@ impl Agents {
         Self::default()
     }
 
-    /// Porta de `buildMenus(agents)`.
+    /// Port of `buildMenus(agents)`.
     pub fn build(&mut self, agents: &[AgentInfo]) {
         let color_of = |a: &AgentInfo| theme::parse_hex_color(&a.color).unwrap_or(theme::SHELL);
         for a in agents {
@@ -68,15 +68,15 @@ impl Agents {
             .iter()
             .map(|a| MenuItem {
                 kind: a.id.clone(),
-                label: format!("{}{}", a.label, if a.installed { "" } else { " (não instalado)" }),
+                label: if a.installed { a.label.clone() } else { t!("{agent} (not installed)", agent = a.label) },
                 color: color_of(a),
             })
             .chain(std::iter::once(MenuItem { kind: "shell".into(), label: shell_name.clone(), color: shell_color }))
             .collect();
         self.empty_actions = ai
             .iter()
-            .map(|a| MenuItem { kind: a.id.clone(), label: format!("Abrir {}", a.label), color: color_of(a) })
-            .chain(std::iter::once(MenuItem { kind: "shell".into(), label: format!("Abrir {shell_name}"), color: shell_color }))
+            .map(|a| MenuItem { kind: a.id.clone(), label: t!("Open {agent}", agent = a.label), color: color_of(a) })
+            .chain(std::iter::once(MenuItem { kind: "shell".into(), label: t!("Open {agent}", agent = shell_name), color: shell_color }))
             .collect();
         self.loaded = true;
     }
@@ -86,8 +86,8 @@ impl Agents {
         self.colors.get(kind).copied()
     }
 
-    /// Cor da aba: `COLORS[kind] || '#9aa0a6'`, com as cores oficiais como fallback quando o
-    /// backend ainda não listou o agente.
+    /// Tab color: `COLORS[kind] || '#9aa0a6'`, with the official colors as a fallback when the
+    /// backend has not listed the agent yet.
     pub fn tab_color(&self, kind: &str) -> Color32 {
         self.color(kind).unwrap_or_else(|| {
             let hex = match kind {
@@ -99,7 +99,7 @@ impl Agents {
         })
     }
 
-    /// `NAMES[kind] || kind` (com rótulos oficiais como fallback).
+    /// `NAMES[kind] || kind` (with the official labels as a fallback).
     pub fn name(&self, kind: &str) -> String {
         if let Some(n) = self.names.get(kind) {
             return n.clone();
@@ -112,7 +112,7 @@ impl Agents {
         }
     }
 
-    /// `whoColor(name)`; uma instância (`claude@dev`) usa a cor do modelo.
+    /// `whoColor(name)`; an instance (`claude@dev`) uses the model's color.
     pub fn who_color(&self, name: Option<&str>) -> Color32 {
         if name == Some("você") {
             return theme::pal().user;
@@ -121,7 +121,7 @@ impl Agents {
             .unwrap_or(theme::pal().text_2)
     }
 
-    /// `whoName(name)`; uma instância vira `Claude · Dev · Ana`.
+    /// `whoName(name)`; an instance becomes `Claude · Dev · Ana`.
     pub fn who_name(&self, name: &str) -> String {
         if let Some(n) = self.names.get(name) {
             return n.clone();
@@ -132,12 +132,12 @@ impl Agents {
         }
     }
 
-    /// Restauração só abre abas de tipos conhecidos (`if (COLORS[kind])`).
+    /// Restoration only opens tabs of known kinds (`if (COLORS[kind])`).
     pub fn knows(&self, kind: &str) -> bool {
         self.colors.contains_key(kind)
     }
 
-    /// Kind padrão do Ctrl+T sem aba ativa.
+    /// Default kind for Ctrl+T with no active tab.
     pub fn fallback_kind(&self) -> String {
         self.available.iter().find(|a| a.id != "shell").or(self.available.first()).map(|a| a.id.clone()).unwrap_or_else(|| "shell".into())
     }
@@ -162,13 +162,13 @@ mod tests {
         ]);
         let kinds: Vec<&str> = a.new_tab_menu.iter().map(|m| m.kind.as_str()).collect();
         assert_eq!(kinds, vec!["claude", "opencode", "shell"]);
-        assert_eq!(a.new_tab_menu[0].label, "Claude (não instalado)");
-        assert_eq!(a.empty_actions[0].label, "Abrir Claude");
+        assert_eq!(a.new_tab_menu[0].label, "Claude (not installed)");
+        assert_eq!(a.empty_actions[0].label, "Open Claude");
         assert!(a.knows("opencode") && !a.knows("ollama"));
         assert_eq!(a.name("opencode"), "OpenCode");
-        assert_eq!(a.name("desconhecido"), "desconhecido");
+        assert_eq!(a.name("unknown"), "unknown");
         assert_eq!(a.fallback_kind(), "claude");
         assert_eq!(a.who_color(Some("você")), theme::pal().user);
-        assert_eq!(a.who_color(Some("desconhecido")), theme::pal().text_2);
+        assert_eq!(a.who_color(Some("unknown")), theme::pal().text_2);
     }
 }

@@ -1,10 +1,10 @@
-//! Projetos (API da barra lateral).
+//! Projects (sidebar API).
 
 use super::*;
 
 impl Deck {
-    /// Projetos para a barra lateral, na ordem salva, com os agentes de cada um (de um projeto
-    /// ainda não aberto nesta sessão, os salvos, sem aba).
+    /// Projects for the sidebar, in the saved order, with each one's agents (for a project
+    /// not yet opened in this session, the saved ones, with no tab).
     pub fn project_views(&self) -> Vec<ProjectView> {
         if let Some(demo) = &self.debug_projects {
             return demo.clone();
@@ -56,28 +56,28 @@ impl Deck {
             .collect()
     }
 
-    /// Mostra ou esconde a lista de agentes do projeto `id` na barra lateral (gravado na config).
+    /// Shows or hides the agent list of project `id` in the sidebar (saved in the config).
     pub fn toggle_project_expanded(&mut self, id: &str) {
         self.core.update_project(id, |p| p.collapsed = !p.collapsed);
     }
 
-    /// Mostra (`true`) ou esconde a lista de agentes de todos os projetos.
+    /// Shows (`true`) or hides the agent list of every project.
     pub fn set_all_projects_expanded(&mut self, expanded: bool) {
         for p in self.core.projects() {
             self.core.update_project(&p.id, |p| p.collapsed = !expanded);
         }
     }
 
-    /// Agente arrastado na barra lateral: passa a responder a `boss` (`None` = ao usuário). O core
-    /// recusa ciclos; o aviso de equipe vai na próxima mensagem dos afetados.
+    /// Agent dragged in the sidebar: from now on it answers to `boss` (`None` = the user). The core
+    /// refuses cycles; the team notice goes with the next message of the affected agents.
     pub fn set_agent_boss(&mut self, project: &str, id: &str, boss: Option<&str>) {
         if let Err(e) = self.core.set_boss(project, id, boss) {
-            self.system(format!("Não foi possível mudar a equipe: {e}."));
+            self.system(t!("Could not change the team: {error}.", error = e));
         }
     }
 
-    /// Clique num agente da barra lateral: traz o projeto dele para a tela (abrindo as abas salvas,
-    /// se ainda não abriram) e ativa a aba.
+    /// Click on an agent in the sidebar: brings its project to the screen (opening the saved tabs,
+    /// if they have not opened yet) and activates the tab.
     pub fn focus_agent(&mut self, project: &str, id: &str) {
         self.switch_project(project);
         self.show_agents();
@@ -86,12 +86,12 @@ impl Deck {
         }
     }
 
-    /// "+" da seção PROJETOS: escolhe a pasta do projeto novo.
+    /// "+" of the PROJECTS section: chooses the new project's folder.
     pub fn new_project_dialog(&self) {
         self.pick_workspace();
     }
 
-    /// Dá outro nome ao projeto (não muda a pasta).
+    /// Gives the project another name (does not change the folder).
     pub fn rename_project(&mut self, id: &str, name: &str) {
         let name = name.trim();
         if !name.is_empty() {
@@ -99,8 +99,8 @@ impl Deck {
         }
     }
 
-    /// Tira o projeto da lista e fecha as abas dele (a pasta fica). Se era o da tela, o core ativa
-    /// o primeiro que sobrar (ou nenhum).
+    /// Takes the project off the list and closes its tabs (the folder stays). If it was the one on
+    /// screen, the core activates the first one left (or none).
     pub fn remove_project_by_id(&mut self, id: &str) {
         while let Some(i) = self.tabs.iter().position(|t| t.project == id) {
             self.close_tab(i);

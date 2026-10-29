@@ -1,9 +1,10 @@
-//! Loop do winit (`ApplicationHandler`): janela, cola GL/egui e roteamento de eventos.
+//! The winit loop (`ApplicationHandler`): window, GL/egui glue and event routing.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use agentdeck_core::t;
 use agentdeck_core::{Core, CoreEvent};
 use crossbeam_channel::Receiver;
 use glow::HasContext;
@@ -23,15 +24,15 @@ use crate::{theme, ui};
 
 #[derive(Debug, Clone, Copy)]
 pub enum UserEvent {
-    /// Algo mudou em segundo plano (evento do core, saída de PTY, tarefa concluída).
+    /// Something changed in the background (core event, PTY output, finished task).
     Wake,
-    /// Pedido de repintura do egui após `delay`.
+    /// egui repaint request after `delay`.
     Repaint(Duration),
-    /// O usuário usou o ícone da bandeja.
+    /// The user used the tray icon.
     Tray(TrayCommand),
 }
 
-/// Resultado de `Core::start` (feito numa thread: pode levar alguns segundos).
+/// Result of `Core::start` (done on a thread: it can take a few seconds).
 pub type CoreStart = anyhow::Result<(Core, Receiver<CoreEvent>)>;
 
 pub struct App {
@@ -49,31 +50,31 @@ pub struct App {
     smoke: Option<Smoke>,
     dropped: Vec<PathBuf>,
     size_persist_at: Option<Instant>,
-    /// Estado da janela entregue ao egui a cada quadro (`ViewportInfo::maximized` etc.): o `EguiGlow` não o preenche.
+    /// Window state handed to egui every frame (`ViewportInfo::maximized` etc.): `EguiGlow` does not fill it.
     viewport_info: egui::ViewportInfo,
     viewport_first: bool,
-    /// A janela mudou (tamanho, posição, foco, escala): relê o `viewport_info` no próximo quadro. Ler a cada quadro
-    /// custaria várias chamadas ao sistema de janelas, e o terminal pede muitos quadros.
+    /// The window changed (size, position, focus, scale): rereads `viewport_info` on the next frame. Reading every
+    /// frame would cost several calls to the windowing system, and the terminal asks for many frames.
     viewport_stale: bool,
-    /// O trabalho do `Deck` que roda sem quadro, enquanto a janela está escondida ou minimizada.
+    /// The `Deck` work that runs without a frame, while the window is hidden or minimized.
     background: Background,
-    /// O ícone da bandeja; `None` = indisponível (o × passa a minimizar em vez de esconder).
+    /// The tray icon; `None` = unavailable (the × then minimizes instead of hiding).
     tray: Option<Tray>,
 }
 
-/// Agenda do `Deck::background`: com a janela escondida ou minimizada não há `RedrawRequested` (no Windows, nem
-/// `WM_PAINT`), então entregas, saída dos processos e temporizadores rodam a partir dos eventos do laço. Sem laço
-/// contínuo: roda quando algo acorda o app (`dirty`) ou no prazo que o próprio trabalho devolveu (`next`).
+/// `Deck::background` schedule: with the window hidden or minimized there is no `RedrawRequested` (on Windows, not even
+/// `WM_PAINT`), so deliveries, process output and timers run from the loop events. No continuous loop: it runs when
+/// something wakes the app (`dirty`) or at the deadline the work itself returned (`next`).
 #[derive(Default)]
 struct Background {
-    /// Algo mudou desde a última vez (evento do core, saída de PTY, prazo do quadro anterior).
+    /// Something changed since the last time (core event, PTY output, previous frame's deadline).
     dirty: bool,
-    /// Próximo prazo devolvido por `Deck::background`.
+    /// Next deadline returned by `Deck::background`.
     next: Option<Instant>,
     last: Option<Instant>,
 }
 
-/// Menor intervalo entre duas rodadas por `dirty`: um terminal que despeja saída acorda o app a cada pedaço.
+/// Smallest interval between two runs due to `dirty`: a terminal that pours output wakes the app on every chunk.
 const BACKGROUND_GAP: Duration = Duration::from_millis(50);
 
 impl Background {
@@ -81,7 +82,7 @@ impl Background {
         self.dirty = true;
     }
 
-    /// Um quadro desenhado faz o mesmo trabalho: a agenda recomeça quando a janela esconder de novo.
+    /// A drawn frame does the same work: the schedule starts over when the window hides again.
     fn clear(&mut self) {
         *self = Self::default();
     }
@@ -96,15 +97,15 @@ impl Background {
         self.deadline(now).is_some_and(|t| now >= t)
     }
 
-    /// Quando o laço precisa acordar para rodar de novo (`None`: só um evento acorda).
+    /// When the loop has to wake up to run again (`None`: only an event wakes it).
     fn deadline(&self, now: Instant) -> Option<Instant> {
         let woken = self.dirty.then(|| self.last.map_or(now, |l| l + BACKGROUND_GAP));
         [woken, self.next].into_iter().flatten().min()
     }
 }
 
-/// A janela não recebe quadros: minimizada (0×0 no Windows), com área zero ou escondida. Desenhar assim é pior que inútil:
-/// o `fit_tab` de um terminal de 0×0 estraga o CLI (ver `claude-code-sem-esc3j-no-windows.md`).
+/// The window gets no frames: minimized (0×0 on Windows), with zero area or hidden. Drawing like that is worse than
+/// useless: the `fit_tab` of a 0×0 terminal ruins the CLI (see `claude-code-sem-esc3j-no-windows.md`).
 fn hidden_by(minimized: Option<bool>, visible: Option<bool>, size: (u32, u32)) -> bool {
     minimized == Some(true) || visible == Some(false) || size.0 == 0 || size.1 == 0
 }
@@ -113,14 +114,14 @@ fn is_hidden(w: &Window) -> bool {
     hidden_by(w.is_minimized(), w.is_visible(), w.inner_size().into())
 }
 
-/// Lado (px) do ícone da bandeja.
+/// Side (px) of the tray icon.
 const TRAY_ICON_SIZE: usize = 32;
 
-/// Menor tamanho gravado/restaurado: abaixo disso é janela minimizada (0x0 no Windows) ou lixo.
+/// Smallest size saved/restored: below it the window is minimized (0x0 on Windows) or garbage.
 const MIN_SAVED_SIZE: (f32, f32) = (640.0, 480.0);
 
-/// Tamanho a gravar na `Config`, ou `None` para manter o que está lá. Maximizada, o tamanho da tela inteira
-/// não é "o tamanho da janela": gravá-lo faria a janela normal reabrir (ou restaurar) do tamanho da tela.
+/// Size to save in `Config`, or `None` to keep what is there. Maximized, the full-screen size
+/// is not "the window size": saving it would make the normal window reopen (or restore) at the screen size.
 fn size_to_persist(maximized: bool, size: (f32, f32)) -> Option<(f32, f32)> {
     (!maximized && size.0 >= MIN_SAVED_SIZE.0 && size.1 >= MIN_SAVED_SIZE.1).then_some(size)
 }
@@ -150,16 +151,16 @@ impl App {
         }
     }
 
-    /// Função que acorda o loop (usada pelo core e pelas threads do PTY).
+    /// Function that wakes the loop (used by the core and by the PTY threads).
     pub fn waker(proxy: &Arc<Mutex<EventLoopProxy<UserEvent>>>) -> Wake {
         let proxy = proxy.clone();
-        // Coalesce: vários acordes antes do próximo quadro viram um só evento.
+        // Coalesce: several wakes before the next frame become a single event.
         Arc::new(move || {
             let _ = proxy.lock().send_event(UserEvent::Wake);
         })
     }
 
-    /// Quando o core termina de iniciar: cria o estado da interface.
+    /// When the core finishes starting: creates the interface state.
     fn try_init_core(&mut self, event_loop: &ActiveEventLoop) {
         if self.core.is_some() || self.egui.is_none() {
             return;
@@ -168,12 +169,12 @@ impl App {
         let (core, events) = match res {
             Ok(v) => v,
             Err(e) => {
-                log::error!("falha ao iniciar o backend: {e:#}");
-                // Sem console no Windows: sem a caixa, o app só fecharia sem explicação.
+                log::error!("failed to start the backend: {e:#}");
+                // No console on Windows: without the dialog, the app would just close with no explanation.
                 rfd::MessageDialog::new()
                     .set_level(rfd::MessageLevel::Error)
                     .set_title("AgentDeck")
-                    .set_description(format!("{e:#}"))
+                    .set_description(t!("AgentDeck could not start: {error}", error = format!("{e:#}")))
                     .set_buttons(rfd::MessageButtons::Ok)
                     .show();
                 event_loop.exit();
@@ -181,27 +182,27 @@ impl App {
             }
         };
         core.set_waker(Self::waker(&self.proxy));
-        // SOMENTE DEPURAÇÃO: grava porta e token da ponte para testes ponta a ponta com `ask-agent`.
+        // DEBUG ONLY: writes the bridge port and token for end-to-end tests with `ask-agent`.
         if let Some(file) = agentdeck_core::env_var_os("DEBUG_BRIDGE") {
             let _ = std::fs::write(file, format!("{}\n{}\n", core.bridge_port(), core.bridge_token()));
         }
-        // Tamanho salvo da janela (a janela abre antes de a configuração ser lida).
+        // Saved window size (the window opens before the configuration is read).
         let cfg = core.config();
         if let Some(w) = self.window() {
             if size_to_persist(false, (cfg.window_width, cfg.window_height)).is_some() {
                 let _ = w.request_inner_size(winit::dpi::LogicalSize::new(cfg.window_width as f64, cfg.window_height as f64));
             }
-            // O tamanho normal fica guardado: ao restaurar, a janela volta a ele.
+            // The normal size stays stored: when restored, the window goes back to it.
             if cfg.window_maximized {
                 w.set_maximized(true);
             }
         }
-        // SOMENTE DEPURAÇÃO: capturas e estados fictícios não gravam na configuração (um "empty" ou
-        // "sidebar-collapsed" ficaria salvo e apagaria as abas de verdade).
+        // DEBUG ONLY: screenshots and fake states do not write to the configuration (an "empty" or
+        // "sidebar-collapsed" would stay saved and erase the real tabs).
         if self.smoke.is_some() || agentdeck_core::env_var_os("DEBUG_UI").is_some() {
             core.disable_config_writes();
         }
-        // Capturas e estados fictícios não deixam ícone na bandeja do usuário.
+        // Screenshots and fake states leave no icon in the user's tray.
         if self.smoke.is_none() && agentdeck_core::env_var_os("DEBUG_UI").is_none() && agentdeck_core::env_var_os("SMOKE").is_none() {
             let proxy = self.proxy.clone();
             let on_command: tray::OnCommand = Arc::new(move |cmd| {
@@ -227,7 +228,7 @@ impl App {
         }
     }
 
-    /// Algo mudou: um quadro (que faz o trabalho do `Deck` e desenha) ou, sem quadros, só o trabalho.
+    /// Something changed: a frame (which does the `Deck` work and draws) or, with no frames, only the work.
     fn request_work(&mut self) {
         if self.hidden() {
             self.background.wake();
@@ -236,13 +237,13 @@ impl App {
         }
     }
 
-    /// Sem quadros (ver `is_hidden`). Antes do primeiro quadro a janela ainda nasce invisível e precisa ser desenhada.
+    /// No frames (see `is_hidden`). Before the first frame the window is still born invisible and must be drawn.
     fn hidden(&self) -> bool {
         self.frames > 0 && self.window().is_some_and(is_hidden)
     }
 
-    /// O `Deck` trabalha sem quadro e a agenda guarda quando voltar. Com a janela escondida, é também aqui que se vê o
-    /// que só o trabalho sem quadro decide: encerrar (gravação concluída) e a segunda abertura pedindo a janela.
+    /// `Deck` works without a frame and the schedule keeps when to come back. With the window hidden, this is also where
+    /// we see what only the frame-less work decides: exit (recording finished) and the second launch asking for the window.
     fn run_background(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let next = self.deck.as_mut().and_then(Deck::background);
@@ -255,7 +256,7 @@ impl App {
         }
     }
 
-    /// O app foi mandado encerrar (o "Encerrar" da bandeja, ou o "Sair" depois da pergunta): encerra tudo.
+    /// The app was told to quit (the tray's "Quit", or "Exit" after the question): shuts everything down.
     fn quit_if_requested(&mut self, event_loop: &ActiveEventLoop) -> bool {
         if !self.deck.as_ref().is_some_and(|d| d.quit_requested) {
             return false;
@@ -265,8 +266,8 @@ impl App {
         true
     }
 
-    /// Traz a janela de volta: mostra, restaura se minimizada e foca. Quem a esconde não é avisado pelo winit, e quem a
-    /// mostra de novo precisa de um quadro (o `request_redraw`).
+    /// Brings the window back: shows it, restores it if minimized and focuses it. Whoever hides it gets no notice from
+    /// winit, and whoever shows it again needs a frame (the `request_redraw`).
     fn show_window(&mut self) {
         let Some(w) = self.window() else { return };
         Self::show(w);
@@ -282,8 +283,8 @@ impl App {
         w.request_redraw();
     }
 
-    /// O × da janela (e o da barra de título): esconde na bandeja, sem perguntar; sem bandeja, minimiza. Os CLIs, a
-    /// ponte e as entregas seguem rodando pelo `Deck::background`.
+    /// The window's × (and the title bar's): hides it in the tray, without asking; with no tray, minimizes. The CLIs, the
+    /// bridge and the deliveries keep running through `Deck::background`.
     fn close_window(&mut self) {
         let Some(w) = self.gl_window.as_ref().map(|g| &g.window) else { return };
         if let Some(core) = self.core.as_ref() {
@@ -292,25 +293,25 @@ impl App {
         match tray::close_action(self.tray.is_some()) {
             CloseAction::Hide => {
                 w.set_visible(false);
-                // O winit não avisa quando a janela é escondida por código: o trabalho sem quadro começa daqui.
+                // winit gives no notice when the window is hidden from code: the frame-less work starts here.
                 self.background.wake();
             }
             CloseAction::Minimize => w.set_minimized(true),
         }
     }
 
-    /// O usuário usou o ícone da bandeja.
+    /// The user used the tray icon.
     fn on_tray(&mut self, event_loop: &ActiveEventLoop, cmd: TrayCommand) {
         match cmd {
             TrayCommand::Open => self.show_window(),
             TrayCommand::Quit => {
                 let Some(deck) = self.deck.as_mut() else {
-                    // O backend ainda nem iniciou: não há CLI a perder.
+                    // The backend has not even started: there is no CLI to lose.
                     event_loop.exit();
                     return;
                 };
                 deck.request_quit();
-                // Para perguntar, a janela precisa aparecer primeiro.
+                // To ask, the window must appear first.
                 if deck.docs.confirm.is_some() {
                     self.show_window();
                 }
@@ -320,7 +321,7 @@ impl App {
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
-        // Um pedido de quadro que chega com a janela escondida (a minimizada informa 0×0) vira trabalho sem quadro.
+        // A frame request that arrives with the window hidden (the minimized one reports 0×0) becomes frame-less work.
         if self.hidden() {
             self.run_background(event_loop);
             return;
@@ -328,7 +329,7 @@ impl App {
         self.background.clear();
         let (Some(glw), Some(gl), Some(egui)) = (self.gl_window.as_ref(), self.gl.as_ref(), self.egui.as_mut()) else { return };
         let mut deck = self.deck.as_mut();
-        // Sem isto `viewport().maximized` é sempre `None` (o `EguiGlow` não chama `update_viewport_info`).
+        // Without this `viewport().maximized` is always `None` (`EguiGlow` does not call `update_viewport_info`).
         if self.viewport_stale {
             egui_winit::update_viewport_info(&mut self.viewport_info, &egui.egui_ctx, &glw.window, self.viewport_first);
             self.viewport_first = false;
@@ -340,12 +341,12 @@ impl App {
                 deck.before_frame(ui.ctx());
                 ui::draw(deck, ui);
             }
-            // Enquanto o backend inicia: só o fundo.
+            // While the backend starts: only the background.
             None => {
                 ui.painter().rect_filled(ui.max_rect(), 0.0, theme::pal().bg);
             }
         });
-        // SAFETY: contexto GL corrente nesta thread.
+        // SAFETY: GL context current on this thread.
         unsafe {
             let c = theme::pal().bg;
             gl.clear_color(c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, 1.0);
@@ -353,17 +354,17 @@ impl App {
         }
         egui.paint(&glw.window);
 
-        // A segunda abertura do app pediu a janela (já visível: só foca).
+        // The app's second launch asked for the window (already visible: just focuses it).
         if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.activate_requested)) {
             Self::show(&glw.window);
         }
-        // Encerrar (depois da pergunta, quando havia o que perguntar).
+        // Quit (after the question, when there was something to ask).
         if self.deck.as_ref().is_some_and(|d| d.quit_requested) {
             self.shutdown();
             event_loop.exit();
             return;
         }
-        // O "×" da barra de título: o mesmo caminho do fechar do sistema.
+        // The title bar's "×": the same path as the system close.
         if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.close_requested)) {
             self.close_window();
             return;
@@ -372,11 +373,11 @@ impl App {
         if self.smoke.as_ref().is_some_and(|s| s.armed) {
             let size = glw.window.inner_size();
             let pixels = smoke::read_framebuffer(gl, size.width, size.height);
-            let smoke = self.smoke.take().expect("smoke armado");
+            let smoke = self.smoke.take().expect("smoke armed");
             let path = smoke.dir.join("screen.png");
             match smoke::save_png(&path, size.width, size.height, &pixels) {
-                Ok(()) => log::info!("captura salva em {}", path.display()),
-                Err(e) => log::error!("falha ao salvar {}: {e}", path.display()),
+                Ok(()) => log::info!("screenshot saved to {}", path.display()),
+                Err(e) => log::error!("failed to save {}: {e}", path.display()),
             }
             self.shutdown();
             event_loop.exit();
@@ -390,10 +391,10 @@ impl App {
         if self.frames == 1 {
             glw.window.set_visible(true);
         }
-        // Captura (AGENTDECK_SMOKE) não baixa o whisper nem pergunta: cada pasta temporária começaria 1,6 GB.
+        // A screenshot (AGENTDECK_SMOKE) does not download whisper nor ask: every temporary folder would start 1.6 GB.
         if self.frames == self.core_frame && agentdeck_core::env_var_os("SMOKE").is_none() {
-            // Depois do primeiro quadro: quem já usa o ditado baixa o que faltar em segundo plano; quem nunca foi
-            // perguntado vê a pergunta (o Whisper é opcional e só baixa com o "sim").
+            // After the first frame: whoever already uses dictation downloads what is missing in the background; whoever
+            // was never asked sees the question (Whisper is optional and only downloads with a "yes").
             if let Some(deck) = self.deck.as_mut() {
                 deck.dictation_startup();
             }
@@ -412,9 +413,9 @@ impl App {
     }
 }
 
-/// Grava o estado da janela: maximizada ou não, e o tamanho normal (só fora do maximizado).
+/// Saves the window state: maximized or not, and the normal size (only when not maximized).
 fn persist_window(core: &Core, w: &Window) {
-    // Minimizada, o winit no Windows perde o "maximizada": gravar agora faria a janela reabrir normal.
+    // Minimized, winit on Windows loses the "maximized": saving now would make the window reopen normal.
     if w.is_minimized() == Some(true) {
         return;
     }
@@ -438,27 +439,27 @@ impl ApplicationHandler<UserEvent> for App {
         let (w, h) = (1280.0f64, 860.0f64);
         let attrs = WindowAttributes::default()
             .with_title("AgentDeck")
-            // A barra de título é desenhada pela interface (`ui/titlebar.rs`).
+            // The title bar is drawn by the interface (`ui/titlebar.rs`).
             .with_decorations(false)
             .with_inner_size(winit::dpi::LogicalSize::new(w, h))
-            // A barra direita (≥ 260px) e o terminal (≥ 360px) precisam caber ao lado da esquerda.
+            // The right bar (≥ 260px) and the terminal (≥ 360px) must fit next to the left side.
             .with_min_inner_size(winit::dpi::LogicalSize::new(820.0, 480.0))
             .with_window_icon(window_icon())
             .with_visible(false);
-        // Sem decoração, o Windows tira também a sombra da janela; ela volta assim.
+        // Without decoration, Windows also removes the window shadow; it comes back like this.
         #[cfg(windows)]
         let attrs = winit::platform::windows::WindowAttributesExtWindows::with_undecorated_shadow(attrs, true);
         let (glw, gl) = match GlWindow::new(event_loop, attrs) {
             Ok(v) => v,
             Err(e) => {
-                log::error!("não foi possível criar a janela OpenGL: {e}");
+                log::error!("could not create the OpenGL window: {e}");
                 event_loop.exit();
                 return;
             }
         };
         let egui = egui_glow::EguiGlow::new(event_loop, gl.clone(), None, None, true);
         let fonts = theme::install_fonts(&egui.egui_ctx);
-        log::info!("fontes: ui={:?} mono={:?}", fonts.ui, fonts.mono);
+        log::info!("fonts: ui={:?} mono={:?}", fonts.ui, fonts.mono);
         theme::install_style(&egui.egui_ctx);
         let proxy = self.proxy.clone();
         egui.egui_ctx.set_request_repaint_callback(move |info| {
@@ -467,8 +468,8 @@ impl ApplicationHandler<UserEvent> for App {
         self.egui = Some(egui);
         self.gl = Some(gl);
         self.gl_window = Some(glw);
-        // No Windows, uma janela invisível não recebe WM_PAINT: `request_redraw` nunca vira
-        // `RedrawRequested` e o `set_visible(true)` do primeiro quadro não roda. Desenha já.
+        // On Windows an invisible window gets no WM_PAINT: `request_redraw` never becomes
+        // `RedrawRequested` and the first frame's `set_visible(true)` never runs. Draw right away.
         self.redraw(event_loop);
         self.try_init_core(event_loop);
     }
@@ -497,7 +498,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        // Maximizar, restaurar e minimizar chegam como `Resized`.
+        // Maximize, restore and minimize arrive as `Resized`.
         if matches!(
             event,
             WindowEvent::Resized(_)
@@ -507,7 +508,7 @@ impl ApplicationHandler<UserEvent> for App {
                 | WindowEvent::Occluded(_)
         ) {
             self.viewport_stale = true;
-            // A janela acabou de sumir (minimizar chega como `Resized` 0×0): assume o que o quadro fazia.
+            // The window just vanished (minimize arrives as `Resized` 0×0): take over what the frame used to do.
             if self.hidden() {
                 self.background.wake();
             }
@@ -526,7 +527,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             return;
         }
-        // O × (e Alt+F4, e fechar pela barra de tarefas) não encerra: esconde na bandeja. Encerrar é o menu dela.
+        // The × (and Alt+F4, and closing from the taskbar) does not quit: it hides in the tray. Quitting is its menu.
         if matches!(event, WindowEvent::CloseRequested) {
             self.close_window();
             return;
@@ -551,7 +552,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 glw.window.request_redraw();
             }
-            // Com o terminal focado o IME é do terminal (não do egui).
+            // With the terminal focused the IME belongs to the terminal (not to egui).
             WindowEvent::Ime(ime) if deck.term_focus => {
                 deck.handle_ime(ime);
                 forward = false;
@@ -589,7 +590,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Arquivos soltos numa mesma operação são anexados juntos no painel/formulário sob o ponteiro.
+        // Files dropped in the same operation are attached together in the panel/form under the pointer.
         if !self.dropped.is_empty() {
             let files = std::mem::take(&mut self.dropped);
             let pointer = self.egui.as_ref().and_then(|e| e.egui_ctx.input(|i| i.pointer.latest_pos()));
@@ -637,7 +638,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// O ícone da janela (barra de tarefas e Alt+Tab): a marca do app, a partir do mesmo desenho do `.ico`.
+/// The window icon (taskbar and Alt+Tab): the app's mark, from the same drawing as the `.ico`.
 fn window_icon() -> Option<winit::window::Icon> {
     const SIZE: usize = 64;
     let rgba = crate::icons::logo_rgba(SIZE, theme::pal().bg);
@@ -657,9 +658,9 @@ mod tests {
     #[test]
     fn a_window_without_area_or_visibility_gets_no_frames() {
         assert!(!hidden_by(Some(false), Some(true), (1280, 860)));
-        assert!(!hidden_by(None, None, (1280, 860)), "sem resposta do sistema de janelas (Linux/X11): desenha");
+        assert!(!hidden_by(None, None, (1280, 860)), "no answer from the windowing system (Linux/X11): draw");
         assert!(hidden_by(Some(true), Some(true), (1280, 860)));
-        assert!(hidden_by(None, None, (0, 0)), "o Windows informa 0×0 para a minimizada");
+        assert!(hidden_by(None, None, (0, 0)), "Windows reports 0×0 for the minimized window");
         assert!(hidden_by(Some(false), None, (1280, 0)));
         assert!(hidden_by(Some(false), Some(false), (1280, 860)));
     }
@@ -669,25 +670,25 @@ mod tests {
         let t0 = Instant::now();
         let ms = Duration::from_millis;
         let mut bg = Background::default();
-        assert!(!bg.due(t0) && bg.deadline(t0).is_none(), "nada pedido, nada agendado: o laço dorme");
+        assert!(!bg.due(t0) && bg.deadline(t0).is_none(), "nothing requested, nothing scheduled: the loop sleeps");
 
-        // Acordado pela primeira vez: roda já; depois só uma rodada a cada BACKGROUND_GAP, por mais acordes que cheguem.
+        // Woken for the first time: it runs right away; after that, only one run per BACKGROUND_GAP, however many wakes arrive.
         bg.wake();
         assert!(bg.due(t0 + ms(1)));
         bg.ran(t0 + ms(1), None);
-        assert!(!bg.due(t0 + ms(2)) && bg.deadline(t0).is_none(), "rodou e nada ficou agendado");
+        assert!(!bg.due(t0 + ms(2)) && bg.deadline(t0).is_none(), "it ran and nothing stayed scheduled");
         bg.wake();
         bg.wake();
-        assert!(!bg.due(t0 + ms(10)), "acordes em rajada esperam o intervalo");
+        assert!(!bg.due(t0 + ms(10)), "wakes in a burst wait for the interval");
         assert_eq!(bg.deadline(t0), Some(t0 + ms(1) + BACKGROUND_GAP));
         assert!(bg.due(t0 + ms(1) + BACKGROUND_GAP));
 
-        // O prazo devolvido pelo trabalho acorda o laço sem ninguém pedir.
+        // The deadline returned by the work wakes the loop with nobody asking.
         bg.ran(t0 + ms(100), Some(t0 + ms(400)));
         assert!(!bg.due(t0 + ms(399)) && bg.due(t0 + ms(400)));
         assert_eq!(bg.deadline(t0), Some(t0 + ms(400)));
 
-        // Um quadro desenhado faz esse trabalho e zera a agenda.
+        // A drawn frame does that work and resets the schedule.
         bg.clear();
         assert!(!bg.due(t0 + ms(500)) && bg.deadline(t0).is_none());
     }

@@ -1,9 +1,9 @@
-//! Quadro: processa eventos, mensagens e temporizadores antes de pintar.
+//! Frame: processes events, messages and timers before painting.
 
 use super::*;
 
 impl Deck {
-    /// Processa eventos, mensagens e temporizadores antes de pintar.
+    /// Processes events, messages and timers before painting.
     pub fn before_frame(&mut self, ctx: &egui::Context) {
         if self.metrics.is_none() {
             self.metrics = Some(Metrics::measure(ctx));
@@ -19,14 +19,14 @@ impl Deck {
         }
     }
 
-    /// O trabalho do `before_frame` que não depende de pintar (eventos do core, respostas das threads, entregas aos
-    /// terminais, temporizadores), para a janela escondida ou minimizada, que não recebe quadros (nem teclado, nem
-    /// ações). Devolve quando chamar de novo; `None` é nada agendado (acorda pelos eventos do core).
+    /// The `before_frame` work that does not depend on painting (core events, thread replies, deliveries to the
+    /// terminals, timers), for the hidden or minimized window, which gets no frames (nor keyboard, nor
+    /// actions). Returns when to call it again; `None` means nothing scheduled (wake on core events).
     pub fn background(&mut self) -> Option<Instant> {
         self.work(None)
     }
 
-    /// Eventos, mensagens e `tick`: o mesmo trabalho com ou sem quadro (`ctx`), e só uma vez por vez que o laço o pede.
+    /// Events, messages and `tick`: the same work with or without a frame (`ctx`), and only once per loop request.
     fn work(&mut self, ctx: Option<&egui::Context>) -> Option<Instant> {
         while let Ok(ev) = self.events.try_recv() {
             self.on_core_event(ev);
@@ -40,7 +40,7 @@ impl Deck {
     fn apply_action(&mut self, ctx: &egui::Context, a: Action) {
         match a {
             Action::NewTabShortcut if self.sidebar_collapsed => {
-                // Sem a barra lateral não há "+ Novo agente": o atalho abre o menu de agentes.
+                // With no sidebar there is no "+ New agent": the shortcut opens the agent menu.
                 self.new_tab_menu_open = true;
                 self.settings_open = false;
                 self.refresh_agents();
@@ -63,7 +63,7 @@ impl Deck {
             }
             Action::CycleTab { back } if self.docs.view == CenterView::Docs => self.docs.cycle(&self.active_project, back),
             Action::CycleTab { back } => {
-                // Só entre as abas da janela focada.
+                // Only among the tabs of the focused window.
                 let ring = self.focused_pane_tabs();
                 let n = ring.len();
                 if n > 0 {
@@ -104,7 +104,7 @@ impl Deck {
             CoreEvent::Activate => self.activate_requested = true,
             CoreEvent::TasksChanged { project } => self.tasks_changed(&project),
             CoreEvent::CloseInstance { project, id } => {
-                // Tarefa mesclada ou descartada: o core já esqueceu a instância; a aba (se aberta) fecha aqui.
+                // Merged or discarded task: the core already forgot the instance; the tab (if open) closes here.
                 if let Some(idx) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == id) {
                     self.close_tab(idx);
                 }
@@ -113,10 +113,10 @@ impl Deck {
             CoreEvent::Download(p) => {
                 self.download = match p.state {
                     DownloadState::Done => None,
-                    // O erro fica visível por alguns segundos (o detalhe também vai para a Conversa integrada).
+                    // The error stays visible for a few seconds (the detail also goes to the Integrated conversation).
                     DownloadState::Error => Some((p, Some(Instant::now() + Duration::from_secs(8)))),
                     _ => Some((p, None)),
-                }
+                };
             }
         }
     }
@@ -165,10 +165,10 @@ impl Deck {
                                 }
                             }
                             TabDelivery::TabDead => {
-                                self.system("O processo da aba encerrou antes de receber o anexo.");
+                                self.system(t!("The tab's process ended before receiving the attachment."));
                             }
                             TabDelivery::TabClosed => {
-                                self.system("A aba do anexo foi fechada antes da cópia terminar.");
+                                self.system(t!("The attachment's tab was closed before the copy finished."));
                             }
                         }
                     }
@@ -187,7 +187,7 @@ impl Deck {
                 let text = match res {
                     Ok(t) => t.trim().to_owned(),
                     Err(e) => {
-                        self.system(format!("Não foi possível transcrever: {e}."));
+                        self.system(t!("Could not transcribe: {error}.", error = e));
                         return;
                     }
                 };
@@ -202,10 +202,10 @@ impl Deck {
                         self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                     }
                     TabDelivery::TabDead => {
-                        self.system("O processo da aba encerrou durante a transcrição: o texto foi descartado.");
+                        self.system(t!("The tab's process ended during the transcription: the text was discarded."));
                     }
                     TabDelivery::TabClosed => {
-                        self.system("A aba do ditado foi fechada antes do fim da transcrição: o texto foi descartado.");
+                        self.system(t!("The dictation's tab was closed before the transcription finished: the text was discarded."));
                     }
                 }
             }
@@ -222,9 +222,9 @@ impl Deck {
         }
     }
 
-    /// Temporizadores (setTimeout do renderer). Sem `ctx` (janela escondida) nada depende do quadro: o que precisa
-    /// dele (copiar para a área de transferência, o mouse pressionado) espera o próximo quadro ou é dado como solto.
-    /// Devolve o próximo instante em que há o que fazer.
+    /// Timers (the renderer's setTimeout). Without `ctx` (hidden window) nothing depends on the frame: what needs
+    /// it (copying to the clipboard, the mouse held down) waits for the next frame or is taken as released.
+    /// Returns the next instant when there is something to do.
     fn tick(&mut self, ctx: Option<&egui::Context>) -> Option<Instant> {
         let now = Instant::now();
         let mut next: Option<Instant> = None;
@@ -255,9 +255,9 @@ impl Deck {
             let end = since + Duration::from_secs(audio::MAX_RECORDING_SECS.into());
             if now >= end {
                 self.stop_recording();
-                self.system(format!(
-                    "A gravação chegou ao limite de {} minutos: parei e estou transcrevendo o que foi gravado.",
-                    audio::MAX_RECORDING_SECS / 60
+                self.system(t!(
+                    "The recording reached the {minutes}-minute limit: I stopped and am transcribing what was recorded.",
+                    minutes = audio::MAX_RECORDING_SECS / 60
                 ));
             } else {
                 want(end);
@@ -286,7 +286,7 @@ impl Deck {
         let dragging = ctx.is_some_and(|ctx| ctx.input(|i| i.pointer.primary_down()));
         let mut exits = Vec::new();
         let active = self.active;
-        // Lendo documentos, nenhuma aba está à vista: o fim de um turno também conta como "não visto".
+        // While reading documents no tab is in view: the end of a turn also counts as "unseen".
         let reading = self.docs.view == CenterView::Docs;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             if let Some(code) = tab.session.take_exit() {
@@ -295,7 +295,7 @@ impl Deck {
             if tab.session.take_bell() {
                 chime = true;
             }
-            // OSC 52 das outras abas é descartado. Sem quadro, o pedido fica para o próximo (é o `ctx` que copia).
+            // OSC 52 from the other tabs is discarded. Without a frame, the request waits for the next one (`ctx` is what copies).
             if let Some(ctx) = ctx {
                 if let Some(text) = tab.session.take_clipboard() {
                     if crate::terminal::clipboard_allowed(i, active, &tab.project, &self.active_project) {
@@ -303,7 +303,7 @@ impl Deck {
                     }
                 }
             }
-            // Enters agendados por `submit`; as teclas seguradas nesse meio-tempo vão logo depois.
+            // Enters scheduled by `submit`; the keys held meanwhile go right after.
             while let Some(&at) = tab.pending_enter.front() {
                 if now < at {
                     want(at);
@@ -323,14 +323,14 @@ impl Deck {
                 self.core.touch_activity(&tab.project, &tab.ident.id(), last);
                 tab.busy_output |= tab.busy;
                 if tab.busy && tab.turn_confirmed {
-                    // Quem libera é o hook de fim de turno; isto só cobre um aviso perdido.
+                    // The end-of-turn hook is what frees it; this only covers a lost notice.
                     tab.idle_deadline = Some(last + HOOK_STALE);
                 } else if tab.busy {
                     tab.idle_deadline = Some(last + IDLE_CHIME);
                 }
             }
             if tab.busy {
-                // Num turno longo o prazo das perguntas a esta aba só começa a correr quando ele acabar.
+                // In a long turn the deadline for questions to this tab only starts running when it ends.
                 self.core.touch_activity(&tab.project, &tab.ident.id(), now);
             }
             if let Some(at) = tab.idle_deadline {
@@ -357,10 +357,10 @@ impl Deck {
             }
             if let Some((size, at)) = tab.pending_resize {
                 if !resize_due(now, at, dragging) {
-                    // Mouse ainda pressionado ou tamanho ainda mudando: soltar já pede um quadro; isto é só a garantia.
+                    // Mouse still pressed or size still changing: releasing already asks for a frame; this is only the guarantee.
                     want(if now < at { at } else { now + RESIZE_DEBOUNCE });
                 } else if let Some(ready) = tab.resize_blocked_until(now) {
-                    // O CLI ainda está reimprimindo a conversa do redimensionamento anterior.
+                    // The CLI is still reprinting the conversation from the previous resize.
                     want(ready);
                 } else {
                     tab.pending_resize = None;
@@ -378,17 +378,17 @@ impl Deck {
             tab.done = false;
             for q in tab.queue.drain() {
                 if q.answer {
-                    log::warn!("resposta atrasada #{} para \"{}\" perdida: a aba encerrou antes de recebê-la", q.request, tab.ident.id());
-                    self.core.answer_lost(&tab.project, q.request, "a aba encerrou antes de recebê-la");
+                    log::warn!("late answer #{} to \"{}\" lost: the tab ended before receiving it", q.request, tab.ident.id());
+                    self.core.answer_lost(&tab.project, q.request, "the tab ended before receiving it");
                 } else if q.request != 0 {
-                    self.core.fail_delivery(q.request, "a aba encerrou antes de receber a mensagem");
+                    self.core.fail_delivery(q.request, "the tab ended before receiving the message");
                 }
             }
             self.core.instance_ended(&tab.project, &tab.ident.id());
-            tab.session.print(&format!("\r\n\x1b[90m[processo encerrado (código {code}) — pressione Enter para reiniciar]\x1b[0m\r\n"));
+            tab.session.print(&format!("\r\n\x1b[90m[{}]\x1b[0m\r\n", t!("process ended (code {code}) — press Enter to restart", code)));
         }
-        // Mensagens de outros agentes: digitadas no terminal quando a aba fica livre (uma por vez;
-        // regra em `agentdeck_core::delivery`).
+        // Messages from other agents: typed into the terminal when the tab becomes free (one at a time;
+        // rule in `agentdeck_core::delivery`).
         for i in 0..self.tabs.len() {
             let Some(since) = self.tabs[i].queue.front_since() else { continue };
             match delivery::gate(&self.tab_state(i), since, now) {
@@ -396,21 +396,21 @@ impl Deck {
                     let tab = &mut self.tabs[i];
                     for q in tab.queue.drain() {
                         if q.answer {
-                            log::warn!("resposta atrasada #{} perdida: a aba não está rodando", q.request);
-                            self.core.answer_lost(&tab.project, q.request, "a aba não estava rodando");
+                            log::warn!("late answer #{} lost: the tab is not running", q.request);
+                            self.core.answer_lost(&tab.project, q.request, "the tab was not running");
                         } else if q.request != 0 {
-                            self.core.fail_delivery(q.request, "a aba não está rodando");
+                            self.core.fail_delivery(q.request, "the tab is not running");
                         }
                     }
                 }
                 Gate::Ready => {
                     if let Some(q) = self.tabs[i].queue.pop() {
-                        // Pergunta cancelada na fila (expirou, quem perguntou fechou): não faz o agente
-                        // trabalhar à toa nem pedir um `--reply` que daria 404.
+                        // Question canceled in the queue (expired, the asker closed): does not make the agent
+                        // work for nothing nor ask for a `--reply` that would return 404.
                         if q.request != 0 && !q.answer && !self.core.question_pending(q.request) {
-                            log::info!("pergunta #{} descartada antes de ser digitada: não espera mais resposta", q.request);
+                            log::info!("question #{} dropped before being typed: no answer is expected any more", q.request);
                         } else {
-                            // O aviso de equipe só é gasto quando a mensagem é digitada de fato.
+                            // The team notice is only spent when the message is actually typed.
                             let mut prompt = q.prompt;
                             if let Some(notice) = self.core.take_team_notice(&self.tabs[i].project, &self.tabs[i].ident.id()) {
                                 prompt.push_str("\n\n");

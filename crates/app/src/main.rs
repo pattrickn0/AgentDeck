@@ -1,8 +1,8 @@
-//! AgentDeck — interface nativa (winit 0.30 + glutin/glow + egui).
+//! AgentDeck — native interface (winit 0.30 + glutin/glow + egui).
 //!
-//! Porta de `renderer/` + `preload.js` da versão Electron. O backend fica em
-//! `agentdeck_core::Core`; esta crate cuida da janela, dos terminais (PTY + emulação VT),
-//! da árvore de arquivos, da "Conversa integrada" e do áudio.
+//! Port of `renderer/` + `preload.js` from the Electron version. The backend lives in
+//! `agentdeck_core::Core`; this crate takes care of the window, the terminals (PTY + VT emulation),
+//! the file tree, the "Integrated conversation" and the audio.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -38,11 +38,11 @@ use agentdeck_core::Core;
 use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {
-    // O `ureq-proto` despeja os cabeçalhos da requisição em TRACE, inclusive o `Authorization` com o
-    // token do GitHub, e o `ureq` registra em DEBUG cada pedido (cabeçalhos, IPs). Os dois ficam em WARN,
-    // mesmo com RUST_LOG=trace: o `filter_module` fixa o nível (não é um teto), e em DEBUG eles enchiam o log
-    // a cada consulta de uso.
-    // O log vai também para `<dados>/agentdeck.log`: o app de janela não tem stderr.
+    // `ureq-proto` dumps the request headers at TRACE, including the `Authorization` with the
+    // GitHub token, and `ureq` logs every request at DEBUG (headers, IPs). Both stay at WARN,
+    // even with RUST_LOG=trace: `filter_module` pins the level (it is not a ceiling), and at
+    // DEBUG they filled the log on every usage query.
+    // The log also goes to `<dados>/agentdeck.log`: a window app has no stderr.
     let data_dir = AppPaths::detect().data_dir;
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .filter_module("ureq_proto", log::LevelFilter::Warn)
@@ -51,26 +51,26 @@ fn main() -> anyhow::Result<()> {
         .init();
     crash::install(&data_dir);
 
-    // Segunda abertura: a janela da instância viva volta (pode estar escondida na bandeja) e esta sai em silêncio. Se ela
-    // não responder (travada), segue o início normal, que mostra o erro da trava.
+    // Second launch: the live instance's window comes back (it may be hidden in the tray) and this one exits
+    // silently. If it does not answer (hung), the normal startup continues, which shows the lock error.
     if agentdeck_core::activation::activate_running(&data_dir) {
-        log::info!("outra instância do AgentDeck já está aberta: pedi a ela que mostre a janela");
+        log::info!("another AgentDeck instance is already open: I asked it to show its window");
         return Ok(());
     }
 
     let mut event_loop_builder = EventLoop::<app::UserEvent>::with_user_event();
-    // No WSLg o Wayland (Weston 9 + rdprail) quebra a janela e chega a derrubar o Weston: o XWayland
-    // ao lado é o caminho estável. Fora do WSLg, o backend continua sendo escolhido pelo winit, e um
-    // `WINIT_UNIX_BACKEND` explícito manda (útil para testar o Wayland de lá).
+    // On WSLg the Wayland backend (Weston 9 + rdprail) breaks the window and even takes Weston down: the
+    // XWayland next to it is the stable path. Outside WSLg, winit keeps choosing the backend, and an explicit
+    // `WINIT_UNIX_BACKEND` wins (useful to test the Wayland from there).
     #[cfg(target_os = "linux")]
     if wslg::on_wslg() && std::env::var_os("WINIT_UNIX_BACKEND").is_none_or(|v| v.is_empty()) {
-        log::info!("WSLg detectado: abrindo pelo X11 (o Wayland do WSLg quebra a janela)");
+        log::info!("WSLg detected: opening through X11 (the WSLg Wayland breaks the window)");
         winit::platform::x11::EventLoopBuilderExtX11::with_x11(&mut event_loop_builder);
     }
     let event_loop = event_loop_builder.build()?;
     let proxy = std::sync::Arc::new(parking_lot::Mutex::new(event_loop.create_proxy()));
-    // O backend pode levar alguns segundos para iniciar (descoberta de CLIs):
-    // a janela abre já, e a interface aparece quando ele fica pronto.
+    // The backend can take a few seconds to start (CLI discovery):
+    // the window opens right away, and the interface shows up when it is ready.
     let (tx, rx) = crossbeam_channel::bounded(1);
     let wake = app::App::waker(&proxy);
     std::thread::Builder::new().name("core-start".into()).spawn(move || {

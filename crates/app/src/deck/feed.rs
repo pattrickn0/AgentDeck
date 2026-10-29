@@ -1,11 +1,11 @@
-//! Conversa integrada.
+//! Integrated conversation.
 
 use super::*;
 
 impl Deck {
     pub fn add_feed(&mut self, e: FeedEntry) {
-        // Entradas de outro projeto vão para a conversa dele (guardada até ele voltar à tela);
-        // as globais (sem projeto, ex.: o Whisper) e as da interface ficam na do projeto ativo.
+        // Entries from another project go to its conversation (kept until it comes back to the screen);
+        // the global ones (no project, e.g. Whisper) and the interface ones stay in the active project's.
         let elsewhere = e.project.clone().filter(|p| *p != self.active_project && !self.active_project.is_empty());
         let thinking_key = |from: &str| format!("{}#{from}", e.project.as_deref().unwrap_or(&self.active_project));
         let thinking_prev = e.from.as_deref().map(thinking_key).and_then(|k| self.thinking.remove(&k));
@@ -46,7 +46,7 @@ impl Deck {
         }
     }
 
-    /// Troca o que a barra direita mostra (voltar à Conversa zera as não vistas).
+    /// Switches what the right bar shows (coming back to the Conversation clears the unseen count).
     pub fn set_right_view(&mut self, view: RightView) {
         let opening_git = view == RightView::Git && self.right_view != RightView::Git;
         let opening_github = view == RightView::GitHub && self.right_view != RightView::GitHub;
@@ -70,12 +70,12 @@ impl Deck {
         self.add_feed(FeedEntry { ts: 0, kind: FeedKind::System, from: None, to: None, text: text.into(), project: None });
     }
 
-    /// Aviso na conversa do projeto `project` (que pode não ser o da tela).
+    /// Notice in the conversation of project `project` (which may not be the one on screen).
     pub(super) fn system_in(&mut self, project: &str, text: impl Into<String>) {
         self.add_feed(FeedEntry::new(FeedKind::System, None, None, text).in_project(project));
     }
 
-    /// "Limpar": só a conversa do projeto da tela.
+    /// "Clear": only the conversation of the project on screen.
     pub fn clear_feed(&mut self) {
         self.feed.clear();
         let prefix = format!("{}#", self.active_project);
@@ -84,21 +84,16 @@ impl Deck {
 
     pub(super) fn debug_feed(&mut self) {
         let mk = |kind, from: Option<&str>, to: Option<&str>, text: &str| FeedEntry::new(kind, from, to, text);
-        self.add_feed(mk(FeedKind::User, Some("você"), Some("claude"), "Revise o @README.md e proponha melhorias."));
-        self.add_feed(mk(
-            FeedKind::Ask,
-            Some("claude"),
-            Some("antigravity"),
-            "Você pode verificar se o build do Windows ainda usa o ConPTY?",
-        ));
+        self.add_feed(mk(FeedKind::User, Some("você"), Some("claude"), "Review @README.md and propose improvements."));
+        self.add_feed(mk(FeedKind::Ask, Some("claude"), Some("antigravity"), "Can you check whether the Windows build still uses ConPTY?"));
         self.add_feed(mk(
             FeedKind::Answer,
             Some("antigravity"),
             Some("claude"),
-            "Sim — portable-pty usa ConPTY no Windows 10+.\nNada a mudar.",
+            "Yes — portable-pty uses ConPTY on Windows 10+.\nNothing to change.",
         ));
-        self.add_feed(mk(FeedKind::System, None, None, "Projeto ativo alterado para: workspace"));
-        self.add_feed(mk(FeedKind::Error, Some("opencode"), None, "Falha ao contatar o provedor do modelo."));
+        self.add_feed(mk(FeedKind::System, None, None, "Active project changed to: workspace"));
+        self.add_feed(mk(FeedKind::Error, Some("opencode"), None, "Failed to reach the model provider."));
         self.add_feed(mk(FeedKind::Thinking, Some("claude"), None, "⚙️ [read_file] README.md"));
     }
 }
