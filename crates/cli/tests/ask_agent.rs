@@ -3,11 +3,17 @@
 
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
+use std::time::Duration;
 
 use holt_core::paths::AppPaths;
 use holt_core::{Config, Core, StartOptions};
 
 fn start_core(root: &std::path::Path) -> Core {
+    start_core_with_events(root).0
+}
+
+/// The core and a function that waits for the next message the core asks the interface to type into a tab.
+fn start_core_with_events(root: &std::path::Path) -> (Core, Box<dyn Fn() -> holt_core::Delivery>) {
     let paths = AppPaths {
         app_dir: root.to_path_buf(),
         bin_dir: root.join("bin"),
@@ -32,7 +38,19 @@ fn start_core(root: &std::path::Path) -> Core {
         config: Some(Config::with_project(paths.default_workspace.clone())),
         system_dirs: false,
     };
-    Core::start_with(paths, opts).expect("start").0
+    let (core, rx) = Core::start_with(paths, opts).expect("start");
+    let next_delivery = move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(holt_core::CoreEvent::Deliver(d)) => return d,
+                Ok(_) => continue,
+                Err(_) => panic!("no delivery requested from the interface"),
+            }
+        }
+    };
+    (core, Box::new(next_delivery))
 }
 
 /// Removes the app's variables from the test's environment (the test may run inside a tab).
@@ -286,5 +304,84 @@ fn the_session_hook_saves_the_new_conversation_id_of_the_tab() {
     // The id can also come as an argument (for CLIs whose hook does not use stdin).
     assert_eq!(session_hook(&core, &token, &["abc-123"], "").status.code(), Some(0));
     assert_eq!(core.tab_session(&project, "claude@dev").as_deref(), Some("abc-123"));
+    core.shutdown();
+}
+
+/// `ask-agent` run by the tab of agent `agent` (its own token), not by the master token.
+fn ask_agent_as(core: &Core, agent: &str, args: &[&str], stdin: &str) -> Output {
+    let ident = holt_core::Ident::parse(agent).expect("id");
+    let token = core.spawn_spec_for(&core.active_project_id(), &ident).expect("spec").env["HOLT_TOKEN"].clone();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    cmd.args(args);
+    scrub_app_env(&mut cmd);
+    cmd.env("HOLT_PORT", core.bridge_port().to_string()).env("HOLT_TOKEN", token).env("HOLT_AGENT", agent);
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn ask-agent");
+    let _ = child.stdin.take().expect("stdin").write_all(stdin.as_bytes());
+    child.wait_with_output().expect("output")
+}
+
+#[test]
+fn a_long_question_arrives_as_mail_that_only_its_addressee_reads() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let (core, next_delivery) = start_core_with_events(tmp.path());
+    if cfg!(windows) {
+        let bin = tmp.path().join("home").join(".local").join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        std::fs::write(bin.join("claude.exe"), b"").expect("write");
+    }
+    core.enable_tab_delivery();
+    let project = core.active_project_id();
+    core.restore_instance(&project, "claude@dev");
+    core.restore_instance(&project, "claude@qa");
+    let long = "Please review everything in the branch and tell me what is missing.\nSecond line, with accents: ação.\n".repeat(4);
+
+    // A short message is typed as it always was.
+    let asking = std::thread::spawn({
+        let core = core.clone();
+        move || ask_agent(Some(&core), &["claude@dev", "short question"], None)
+    });
+    let short = next_delivery();
+    assert!(short.mail.is_none() && short.prompt.contains("short question"), "{short:?}");
+    core.fail_delivery(short.request, "end of the step");
+    assert_eq!(asking.join().expect("thread").status.code(), Some(1));
+
+    // A long one: a notice, and the text is read with --read.
+    let asking = std::thread::spawn({
+        let (core, long) = (core.clone(), long.clone());
+        move || ask_agent(Some(&core), &["claude@dev", "-"], Some(&long))
+    });
+    let d = next_delivery();
+    let n = d.mail.expect("mail");
+    assert!(d.prompt.starts_with(&format!("[mail #{n} from shell: \"Please review everything")), "{}", d.prompt);
+    assert!(d.prompt.ends_with(&format!("read with: ask-agent --read {n}]")) && !d.prompt.contains('\n'), "{}", d.prompt);
+
+    let out = ask_agent_as(&core, "claude@qa", &["--read", &n.to_string()], "");
+    assert_eq!(out.status.code(), Some(1), "someone else cannot read it");
+    assert!(text(&out.stderr).contains(&format!("mail #{n} is not addressed to \"claude@qa\"")), "{}", text(&out.stderr));
+    assert!(!text(&out.stdout).contains("Please review"));
+
+    let out = ask_agent_as(&core, "claude@dev", &["--inbox"], "");
+    assert!(text(&out.stdout).contains(&format!("[Mail #{n} from \"shell\"")), "{}", text(&out.stdout));
+    assert!(text(&out.stdout).contains(&format!("read with: ask-agent --read {n}")), "{}", text(&out.stdout));
+
+    let out = ask_agent_as(&core, "claude@dev", &["--read", &format!("#{n}")], "");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let shown = text(&out.stdout);
+    assert!(shown.contains(&long) || shown.contains("Second line, with accents: ação."), "{shown}");
+    assert!(shown.contains(&format!("ask-agent --reply {} \"your answer\"", d.request)), "{shown}");
+    let out = ask_agent_as(&core, "claude@dev", &["--inbox"], "");
+    assert_eq!(text(&out.stdout).trim(), "No pending answer or mail.");
+
+    // The answer reaches the asker as with any question.
+    let out = ask_agent_as(&core, "claude@dev", &["--reply", &d.request.to_string(), "reviewed"], "");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let asked = asking.join().expect("thread");
+    assert_eq!((asked.status.code(), text(&asked.stdout).trim().to_owned()), (Some(0), "reviewed".to_owned()));
+
+    // Usage errors.
+    assert_eq!(ask_agent_as(&core, "claude@dev", &["--read"], "").status.code(), Some(2));
+    assert_eq!(ask_agent_as(&core, "claude@dev", &["--read", "x"], "").status.code(), Some(2));
+    assert_eq!(ask_agent_as(&core, "claude@dev", &["--read", "99"], "").status.code(), Some(1));
     core.shutdown();
 }

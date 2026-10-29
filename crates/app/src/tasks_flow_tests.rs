@@ -1375,6 +1375,7 @@ fn a_hidden_window_still_types_the_queued_messages_and_the_late_answers_and_neve
         prompt: prompt.into(),
         answer,
         boot: None,
+        mail: None,
     };
 
     // Minimized window: no frame, only `background`. Another agent's message is typed when the tab becomes free.

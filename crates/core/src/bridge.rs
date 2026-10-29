@@ -22,6 +22,7 @@ use crate::exchange::Reply;
 use crate::headless::HeadlessOptions;
 use crate::inbox::InboxEntry;
 use crate::instances::{scoped, unscoped, Ident};
+use crate::mail::{MailKind, Waiting};
 use crate::usage::AgentUsage;
 use crate::util::terminal_text;
 use crate::{Auth, Caller};
@@ -298,7 +299,17 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             return reply(req, 400, json!({ "error": "only an agent has an inbox" }));
         };
         let all = route.split_once('?').is_some_and(|(_, q)| q.split('&').any(|kv| kv == "all=1"));
-        return reply(req, 200, json!({ "answers": core.inner.inbox.read(&c.key(&c.id), all) }));
+        let answers = core.inner.inbox.read(&c.key(&c.id), all);
+        // An answer shown in full here does not need to be read again as mail.
+        for a in &answers {
+            core.inner.mail.mark_answer_read(&c.project, a.request);
+        }
+        let mail: Vec<Value> = core.inner.mail.list_for(&c.project, &c.id, all, crate::inbox::INBOX_LIMIT).iter().map(mail_json).collect();
+        return reply(req, 200, json!({ "answers": answers, "mail": mail }));
+    }
+    if *req.method() == Method::Get && route.starts_with("/mail/") {
+        let (status, body) = read_mail(&core, &auth, &route["/mail/".len()..]);
+        return reply(req, status, body);
     }
     if *req.method() == Method::Post && route == "/inbox/delivered" {
         let Auth::Agent(c) = &auth else {
@@ -460,13 +471,33 @@ const TAB_REPLY_TIMEOUT: Duration = Duration::from_secs(600);
 /// Absolute cap, even if the tab stays active: it avoids waiting forever for a stuck agent.
 const TAB_REPLY_MAX: Duration = Duration::from_secs(3600);
 
-/// Until when to wait for `target`'s (scoped key) answer to a question delivered at `sent`.
+/// Until when to wait for `target`'s (scoped key) answer to question `request` delivered at `sent`.
 ///
 /// It is [`TAB_REPLY_TIMEOUT`] after the question *or* after the tab's last activity (terminal output
 /// or a turn in progress), whichever is later: an agent busy with a long task does not blow the
-/// deadline, which only starts running when it settles. Limited to [`TAB_REPLY_MAX`].
-fn reply_deadline(core: &Core, target: &str, sent: Instant) -> Instant {
-    deadline_after(sent, core.inner.activity.last(target))
+/// deadline, which only starts running when it settles. Limited to [`TAB_REPLY_MAX`]. A question that went
+/// through the mail counts from when the mail is read (see [`mail_deadline`]).
+fn reply_deadline(core: &Core, project: &str, request: u64, target: &str, sent: Instant) -> Instant {
+    mail_deadline(sent, core.inner.mail.waiting(project, request), core.inner.activity.last(target))
+}
+
+/// [`deadline_after`] counted from the reading when the question is mail: a receiver busy with something else does not time the asker
+/// out before it even looked at the message. Unread, the wait is only limited by [`TAB_REPLY_MAX`].
+fn mail_deadline(sent: Instant, waiting: Waiting, last_activity: Option<Instant>) -> Instant {
+    match waiting {
+        Waiting::NoMail => deadline_after(sent, last_activity),
+        Waiting::Unread => sent + TAB_REPLY_MAX,
+        Waiting::Read(at) => deadline_after(at.max(sent), last_activity),
+    }
+}
+
+/// Why a question ended at its deadline.
+fn timeout_text(core: &Core, project: &str, request: u64, target: &str) -> String {
+    if core.inner.mail.waiting(project, request) == Waiting::Unread {
+        format!("\"{target}\" did not read the mail within {} minutes", TAB_REPLY_MAX.as_secs() / 60)
+    } else {
+        format!("\"{target}\" did not answer within {} minutes", TAB_REPLY_TIMEOUT.as_secs() / 60)
+    }
 }
 
 impl Caller {
@@ -489,6 +520,63 @@ fn deadline_after(sent: Instant, last_activity: Option<Instant>) -> Instant {
 /// Message that accompanies an answer delivered to whoever asked.
 fn delivered(to: &str) -> Value {
     json!({ "answer": format!("Answer delivered to \"{to}\".") })
+}
+
+/// A message in the listings (`--inbox`): no text, only what is needed to find it.
+fn mail_json(m: &crate::mail::Mail) -> Value {
+    json!({ "mail": m.id, "from": m.from, "kind": m.kind, "request": m.request, "ts": m.ts, "read": m.is_read(), "preview": m.preview })
+}
+
+/// `GET /mail/<n>`: the full text of a message, for its addressee only (the token says who is asking), which marks it
+/// as read. 403 for anyone else (another agent, or the master token: the user reads it in the Conversation tab).
+fn read_mail(core: &Core, auth: &Auth, number: &str) -> (u16, Value) {
+    let Auth::Agent(c) = auth else {
+        return (403, json!({ "error": "only the addressee can read a mail" }));
+    };
+    let Ok(id) = number.trim_start_matches('#').parse::<u64>() else {
+        return (400, json!({ "error": "invalid mail number" }));
+    };
+    let Some(mail) = core.inner.mail.get(&c.project, id) else {
+        return (404, json!({ "error": format!("no mail #{id} for you") }));
+    };
+    if mail.to != c.id {
+        return (403, json!({ "error": format!("mail #{id} is not addressed to \"{}\"", c.id) }));
+    }
+    let Some(text) = core.inner.mail.body(&c.project, id) else {
+        return (404, json!({ "error": format!("the text of mail #{id} is missing from the data folder") }));
+    };
+    core.inner.mail.mark_read(&c.project, id);
+    if mail.kind == MailKind::Answer {
+        core.inner.inbox.mark_delivered(mail.request);
+    }
+    let waiting = mail.kind == MailKind::Question && core.inner.exchange.is_pending(mail.request);
+    let mut out = mail_json(&mail);
+    out["text"] = json!(terminal_text(&text));
+    out["answerable"] = json!(waiting);
+    (200, out)
+}
+
+/// What is typed for `text` sent by `from` to `to`: `typed` (the text itself, as always) if it is short; if
+/// it is long or multi-line, it is saved as mail and the one-line notice is typed. Returns the text to type
+/// and the mail number. If the mail cannot be written, the text is typed as before.
+fn mail_or_text(
+    core: &Core,
+    project: &str,
+    (from, to): (&str, &str),
+    (kind, request): (MailKind, u64),
+    text: &str,
+    typed: impl FnOnce() -> String,
+) -> (String, Option<u64>) {
+    if !crate::mail::is_long(text) {
+        return (typed(), None);
+    }
+    match core.inner.mail.save(project, from, to, kind, request, text) {
+        Ok(mail) => (crate::mail::notice(&mail), Some(mail.id)),
+        Err(e) => {
+            log::warn!("could not save the mail for \"{to}\" ({e}): typing the message");
+            (typed(), None)
+        }
+    }
 }
 
 /// `POST /reply` `{"to","message"[,"reply_to"]}`: the caller answers the question `to` made (or
@@ -540,6 +628,9 @@ fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
         _ => return (400, json!({ "error": "invalid state (use busy, idle or session)" })),
     };
     core.emit(CoreEvent::AgentSignal { project: project.clone(), id: id.clone(), busy });
+    if !busy {
+        core.mail_turn_ended(project, id);
+    }
     (200, json!({ "ok": true }))
 }
 
@@ -601,15 +692,17 @@ fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request:
     };
     // It stays in the inbox until the interface types it into the terminal (`Core::answer_typed`).
     inbox_push(core, &scoped(project, &asker.id()), request, target, text, failed);
-    let prompt = match outcome {
-        Reply::Answer(text) => format!(
-            "[Answer from the agent \"{target}\" to your question #{request}, received by Holt]\n\n{}\n\n\
+    let (prompt, mail) = match outcome {
+        Reply::Answer(text) => mail_or_text(core, project, (target, &asker.id()), (MailKind::Answer, request), &text, || {
+            format!(
+                "[Answer from the agent \"{target}\" to your question #{request}, received by Holt]\n\n{}\n\n\
 Continue the task based on this answer. The user follows the conversation in the Conversation tab.",
-            terminal_text(&text)
-        ),
+                terminal_text(&text)
+            )
+        }),
         Reply::Failed(text) => {
             core.feed(FeedEntry::new(FeedKind::Error, Some(target), Some(&asker.id()), text.clone()).in_project(project));
-            format!("[Holt] Question #{request} to \"{target}\" ended without an answer: {}", terminal_text(&text))
+            (format!("[Holt] Question #{request} to \"{target}\" ended without an answer: {}", terminal_text(&text)), None)
         }
     };
     core.emit(CoreEvent::Deliver(Delivery {
@@ -621,6 +714,7 @@ Continue the task based on this answer. The user follows the conversation in the
         prompt,
         answer: true,
         boot: None,
+        mail,
     }));
 }
 
@@ -714,7 +808,8 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     }
     // The pending team notice goes when the interface types it (`Core::take_team_notice`): if the delivery
     // is discarded, it is not lost.
-    let prompt = tab_prompt(from, request, message);
+    let (prompt, mail) =
+        mail_or_text(core, project, (from, &id), (MailKind::Question, request), message, || tab_prompt(from, request, message));
     core.emit(CoreEvent::Deliver(Delivery {
         request,
         project: project.to_owned(),
@@ -724,6 +819,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
         prompt,
         answer: false,
         boot: None,
+        mail,
     }));
 
     let sent = Instant::now();
@@ -736,7 +832,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
     };
     // The target is read by the number on every round: renaming the tab in the middle of the question does
     // not lose its activity (the deadline counts from it).
-    let deadline = || reply_deadline(core, &target_now(core, request, &target_key), sent);
+    let deadline = || reply_deadline(core, project, request, &target_now(core, request, &target_key), sent);
     let waited = wait_reply(core, &rx, || detach_at.map_or_else(deadline, |d| d.min(deadline())));
     let (asker_key, target_key_now) = core.inner.exchange.parties(request).unwrap_or_else(|| (from_key, target_key.clone()));
     let (asker_id, target_id) = (unscoped(&asker_key).1.to_owned(), unscoped(&target_key_now).1.to_owned());
@@ -751,7 +847,7 @@ fn ask_tab(core: &Core, caller: &Caller, asked: &str, message: &str, opts: TabAs
                     Err(_) => return detach(core, project, request, rx, sent, asker, target_key_now, slot),
                 }
             }
-            _ => give_up(core, request, &rx, format!("\"{target_id}\" did not answer within 10 minutes")),
+            _ => give_up(core, request, &rx, timeout_text(core, project, request, &target_id)),
         },
     };
     core.inner.exchange.remove(request);
@@ -797,13 +893,14 @@ fn detach(
         crate::i18n::english(|| {
             let _slot = slot;
             let core = core2;
-            let waited = wait_reply(&core, &rx, || reply_deadline(&core, &target_now(&core, request, &target_key), sent));
+            let waited =
+                wait_reply(&core, &rx, || reply_deadline(&core, &project, request, &target_now(&core, request, &target_key), sent));
             let parties = core.inner.exchange.parties(request);
             let (asker, target) = match &parties {
                 Some((a, t)) => (Ident::parse(unscoped(a).1).unwrap_or(asker), unscoped(t).1.to_owned()),
                 None => (asker, unscoped(&target_key).1.to_owned()),
             };
-            let outcome = waited.unwrap_or_else(|| give_up(&core, request, &rx, format!("\"{target}\" did not answer within 10 minutes")));
+            let outcome = waited.unwrap_or_else(|| give_up(&core, request, &rx, timeout_text(&core, &project, request, &target)));
             core.inner.exchange.remove(request);
             deliver_late(&core, &project, asker, &target, request, outcome);
         })
@@ -1344,5 +1441,22 @@ mod deadline_tests {
         assert_eq!(deadline_after(t0, Some(t0 + min(30))), t0 + min(40));
         // 60 min cap even with continuous activity
         assert_eq!(deadline_after(t0, Some(t0 + min(55))), t0 + min(60));
+    }
+
+    #[test]
+    fn a_question_sent_as_mail_starts_its_deadline_when_the_mail_is_read() {
+        let t0 = Instant::now();
+        let min = |n: u64| Duration::from_secs(n * 60);
+        // Not mail: as always.
+        assert_eq!(mail_deadline(t0, Waiting::NoMail, None), t0 + min(10));
+        // Unread, even with the receiver busy for 30 minutes: the asker is not timed out at 10 or 40; only the cap.
+        assert_eq!(mail_deadline(t0, Waiting::Unread, None), t0 + min(60));
+        assert_eq!(mail_deadline(t0, Waiting::Unread, Some(t0 + min(30))), t0 + min(60));
+        // Read 45 minutes later: the 10 minutes start there, not at the sending.
+        assert_eq!(mail_deadline(t0, Waiting::Read(t0 + min(45)), None), t0 + min(55));
+        assert_eq!(mail_deadline(t0, Waiting::Read(t0 + min(45)), Some(t0 + min(50))), t0 + min(60));
+        // Read right away, the receiver working on it: it follows the activity, up to 60 min after the reading.
+        assert_eq!(mail_deadline(t0, Waiting::Read(t0 + min(1)), Some(t0 + min(20))), t0 + min(30));
+        assert_eq!(mail_deadline(t0, Waiting::Read(t0 + min(1)), Some(t0 + min(80))), t0 + min(61));
     }
 }

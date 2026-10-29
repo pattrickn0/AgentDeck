@@ -148,4 +148,7 @@ pub struct Delivery {
     /// is still starting. Only tasks use it; the UI types `prompt` if the CLI does not accept it or the tab is
     /// already alive.
     pub boot: Option<String>,
+    /// `prompt` is the notice of this mail (see [`crate::mail`]): the interface tells the core when it typed it
+    /// (`Core::mail_typed`) or lost it (`Core::mail_dropped`), and does not type it if the mail was read meanwhile.
+    pub mail: Option<u64>,
 }
