@@ -166,6 +166,9 @@ pub struct Tab {
     last_resize: Option<Instant>,
     /// When the current process was started (the delivery rule gives the TUI time to come up).
     pub(crate) spawned_at: Option<Instant>,
+    /// Antigravity: how much of its log (`SpawnSpec::session_log`) was read, and when to look at it again.
+    pub(crate) session_log_pos: u64,
+    pub(crate) session_poll_at: Instant,
 }
 
 impl Tab {
@@ -461,6 +464,8 @@ const HIGHLIGHT_RESIZE_DEBOUNCE: Duration = Duration::from_millis(600);
 const RESIZE_SETTLE: Duration = Duration::from_millis(300);
 /// …but an agent that never stops writing cannot hold the resize forever.
 const RESIZE_SETTLE_MAX: Duration = Duration::from_secs(3);
+/// How often an Antigravity tab's log is read for its conversation id.
+const SESSION_LOG_POLL: Duration = Duration::from_secs(2);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
 /// An Enter (or submit) that produced no output at all (empty prompt, menu): the tab is freed after
 /// this time, silently. Without it the tab stayed "working" forever and held the bridge queue.
@@ -708,6 +713,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         double_enter_on_mention: false,
         model: None,
         resumed: false,
+        session_log: None,
     }
 }
 

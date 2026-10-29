@@ -320,6 +320,8 @@ impl Deck {
             pending_resize: None,
             last_resize: None,
             spawned_at: None,
+            session_log_pos: 0,
+            session_poll_at: Instant::now(),
         };
         self.next_uid += 1;
         // The tab of another project runs hidden: it does not touch the windows or the focus.
@@ -371,6 +373,8 @@ impl Deck {
             Ok(spec) => {
                 tab.alive = true;
                 tab.spawned_at = Some(Instant::now());
+                tab.session_log_pos = 0;
+                tab.session_poll_at = Instant::now();
                 tab.model = spec.model.clone();
                 tab.spec = Some(spec);
             }

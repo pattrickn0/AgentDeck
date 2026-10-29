@@ -1857,9 +1857,128 @@ fn an_opencode_tab_keeps_one_session_id_next_to_its_own_server_flag() {
     assert!(env.core.set_tab_session(&p, "opencode", "ses_newone"));
     assert_eq!(arg_after(&env.core.spawn_spec_for(&p, &ident).expect("third").args, "--session"), Some("ses_newone"));
     // Agents that cannot resume get nothing.
-    fake_cli(&env, "codex");
-    let codex = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("codex").expect("id")).expect("codex");
-    assert!(!codex.resumed && !codex.args.iter().any(|a| a.contains("session") || a == "resume"), "{:?}", codex.args);
-    assert_eq!(env.core.tab_session(&p, "codex"), None);
+    fake_cli(&env, "aider");
+    let aider = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("aider").expect("id")).expect("aider");
+    assert!(!aider.resumed && !aider.args.iter().any(|a| a.contains("session") || a == "resume"), "{:?}", aider.args);
+    assert_eq!(env.core.tab_session(&p, "aider"), None);
+    env.core.shutdown();
+}
+
+const AGY_CONVERSATION: &str = "36ee4ddf-9114-4939-ba85-72a3cf8bda98";
+
+#[test]
+fn an_antigravity_tab_learns_its_conversation_from_its_log_and_resumes_it() {
+    let env = start(&[]);
+    install_fake(&env.root.join("fake-bin"), "agy", &json!({ "echo_args": true }));
+    let p = env.core.active_project_id();
+    let ident = agentdeck_core::Ident::parse("antigravity@dev").expect("id");
+
+    // First launch: nothing to resume, no id invented, but the log is asked for (one file per tab, in the data folder).
+    let first = env.core.spawn_spec_for(&p, &ident).expect("first");
+    let log = std::path::PathBuf::from(arg_after(&first.args, "--log-file").expect("--log-file"));
+    assert!(log.starts_with(&env.core.paths().data_dir) && first.session_log.as_deref() == Some(log.as_path()), "{log:?}");
+    assert!(!first.resumed && !first.args.iter().any(|a| a == "--conversation" || a == "--continue" || a == "-c"), "{:?}", first.args);
+    assert_eq!(env.core.tab_session(&p, "antigravity@dev"), None);
+    let (code, out) = run_spec(&first);
+    assert_eq!((code, out.contains("[--log-file]")), (0, true), "{out}");
+    // Another tab of the same CLI gets a log of its own.
+    let other = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("antigravity@qa").expect("id")).expect("other");
+    assert_ne!(arg_after(&other.args, "--log-file"), arg_after(&first.args, "--log-file"));
+
+    // The user sends the first message: `agy` writes the conversation it created into the log, and the tab saves it.
+    std::fs::create_dir_all(log.parent().expect("dir")).expect("mkdir");
+    let mut pos = 0;
+    std::fs::write(&log, "I1029 10:37:40 manager.go:1015] Full redraw completed for conversation  (epoch 0)\n").expect("log");
+    assert!(!env.core.sync_agy_session(&p, "antigravity@dev", &log, &mut pos), "no conversation yet");
+    assert_eq!(env.core.tab_session(&p, "antigravity@dev"), None);
+    let created = format!("I1029 10:37:48 server.go:1235] Created conversation {AGY_CONVERSATION} (backend=BACKEND_TYPE_UNSPECIFIED)\n");
+    let mut text = std::fs::read_to_string(&log).expect("read");
+    text.push_str(&created);
+    std::fs::write(&log, text).expect("log");
+    assert!(env.core.sync_agy_session(&p, "antigravity@dev", &log, &mut pos));
+    assert_eq!(env.core.tab_session(&p, "antigravity@dev").as_deref(), Some(AGY_CONVERSATION));
+    assert!(!env.core.sync_agy_session(&p, "antigravity@dev", &log, &mut pos), "nothing new");
+
+    // Reopened with the conversation on disk: resumed by its own id, in a fresh log.
+    let convs = env.root.join("home").join(".gemini").join("antigravity-cli").join("conversations");
+    std::fs::create_dir_all(&convs).expect("mkdir");
+    std::fs::write(convs.join(format!("{AGY_CONVERSATION}.db")), "").expect("db");
+    let resumed = env.core.spawn_spec_for(&p, &ident).expect("resumed");
+    assert!(resumed.resumed && arg_after(&resumed.args, "--conversation") == Some(AGY_CONVERSATION), "{:?}", resumed.args);
+    assert!(resumed.args.iter().all(|a| a != "--continue" && a != "-c"));
+    assert!(!log.exists(), "the old log is removed so its id is never read again");
+    let (code, out) = run_spec(&resumed);
+    assert_eq!((code, out.contains(&format!("[--conversation] [{AGY_CONVERSATION}]"))), (0, true), "{out}");
+
+    // `/new` inside the TUI: the log names a new conversation and it replaces the saved one.
+    let fresh = "d6ddf2a5-1df9-40d0-a8d5-156ff3e16853";
+    let mut pos = 0;
+    std::fs::create_dir_all(log.parent().expect("dir")).expect("mkdir");
+    std::fs::write(&log, format!("Resuming conversation {AGY_CONVERSATION}\nCreated conversation {fresh} (backend=X)\n")).expect("log");
+    assert!(env.core.sync_agy_session(&p, "antigravity@dev", &log, &mut pos));
+    assert_eq!(env.core.tab_session(&p, "antigravity@dev").as_deref(), Some(fresh));
+
+    // The conversation is gone from disk (the CLI's folder was cleaned): a new one opens, the dead id is dropped.
+    let gone = env.core.spawn_spec_for(&p, &ident).expect("gone");
+    assert!(!gone.resumed && !gone.args.iter().any(|a| a == "--conversation"), "{:?}", gone.args);
+    assert_eq!(env.core.tab_session(&p, "antigravity@dev"), None);
+    env.core.shutdown();
+}
+
+#[test]
+fn a_codex_tab_learns_its_thread_from_notify_and_resumes_it() {
+    let env = start(&[]);
+    install_fake(&env.root.join("fake-bin"), "codex", &json!({ "echo_args": true }));
+    let p = env.core.active_project_id();
+    let ident = agentdeck_core::Ident::parse("codex@dev").expect("id");
+    let thread = "01a187e4-5d25-7c61-9416-9143d2b8a5e5";
+    let title_thread = "01a187e4-9778-7e20-8302-a5c03b0d4cb1";
+
+    // First launch: a plain `codex`, with the hook that reports each turn (the program is ask-agent, then its arguments).
+    let first = env.core.spawn_spec_for(&p, &ident).expect("first");
+    assert!(!first.resumed && first.args.iter().all(|a| a != "resume" && a != "--last"), "{:?}", first.args);
+    let notify = first.args.iter().find(|a| a.starts_with("notify=")).expect("notify");
+    let list: Value = serde_json::from_str(notify.trim_start_matches("notify=")).expect("a TOML array that is also JSON");
+    assert_eq!(list.as_array().map(|l| l[1..].to_vec()), Some(vec![json!("--signal"), json!("idle")]));
+    assert!(list[0].as_str().is_some_and(|p| p.contains("ask-agent")), "{list}");
+
+    // The end of the first turn: Codex calls the hook with its JSON as the last argument; `ask-agent` turns it into this signal.
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let token = tab_token(&env, "codex@dev");
+    let idle = |session: &str| json!({"state": "idle", "session": session}).to_string();
+    // The hidden title thread calls `notify` too, but is not a conversation (no rollout on disk): the signal works, nothing is saved.
+    assert_eq!(http(port, "POST", "/signal", &host, &token, &idle(title_thread)).0, 200);
+    assert_eq!(env.core.tab_session(&p, "codex@dev"), None);
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| env.root.join("home").join(".codex"));
+    let day = codex_home.join("sessions").join("2026").join("10").join("29");
+    std::fs::create_dir_all(&day).expect("mkdir");
+    let rollout = day.join(format!("rollout-2026-10-29T10-40-52-{thread}.jsonl"));
+    std::fs::write(&rollout, "{}\n").expect("rollout");
+    assert_eq!(http(port, "POST", "/signal", &host, &token, &idle(thread)).0, 200);
+    assert_eq!(env.core.tab_session(&p, "codex@dev").as_deref(), Some(thread));
+    // A plain idle (no JSON) changes nothing; neither does a made-up id.
+    assert_eq!(http(port, "POST", "/signal", &host, &token, &json!({"state": "idle"}).to_string()).0, 200);
+    assert_eq!(http(port, "POST", "/signal", &host, &token, &idle("a b;c")).0, 200);
+    assert_eq!(env.core.tab_session(&p, "codex@dev").as_deref(), Some(thread));
+
+    // Reopened: `resume <id>` right after the program, before every other option; never `--last`.
+    let resumed = env.core.spawn_spec_for(&p, &ident).expect("resumed");
+    assert!(resumed.resumed, "{:?}", resumed.args);
+    let at = resumed.args.iter().position(|a| a == "resume").expect("resume");
+    assert_eq!((at, resumed.args.get(at + 1).map(String::as_str)), (0, Some(thread)), "{:?}", resumed.args);
+    assert!(resumed.args.iter().all(|a| a != "--last" && a != "--continue"));
+    assert!(resumed.args.iter().any(|a| a.starts_with("notify=")), "the resumed conversation keeps reporting its turns");
+    let (code, out) = run_spec(&resumed);
+    assert_eq!((code, out.contains(&format!("[resume] [{thread}]"))), (0, true), "{out}");
+
+    // The rollout is gone: nothing to resume, the dead id is dropped and Codex opens a new conversation.
+    std::fs::remove_file(&rollout).expect("rm");
+    let gone = env.core.spawn_spec_for(&p, &ident).expect("gone");
+    assert!(!gone.resumed && gone.args.iter().all(|a| a != "resume"), "{:?}", gone.args);
+    assert_eq!(env.core.tab_session(&p, "codex@dev"), None);
     env.core.shutdown();
 }

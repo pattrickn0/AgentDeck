@@ -514,6 +514,8 @@ fn reply_pending(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
 /// `POST /signal` `{"state":"busy"|"idle"}`: agent hook saying that it started or ended a turn
 /// (`ask-agent --signal`). `{"state":"session","session":"<id>"}` reports the CLI's conversation id (Claude's
 /// `SessionStart` hook, which fires again after `/clear`): it is saved for the tab so reopening the app resumes it.
+/// `{"state":"idle","session":"<id>"}` is Codex's `notify` at the end of a turn, which carries its thread id: saved the same
+/// way, but a refused id (the hidden title thread of a chat is not a conversation) does not fail the signal.
 /// Only a tab's process signals.
 fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
     let Auth::Agent(Caller { id, project, tab: true }) = auth else {
@@ -521,7 +523,12 @@ fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
     };
     let busy = match msg.get("state").and_then(Value::as_str) {
         Some("busy") => true,
-        Some("idle") => false,
+        Some("idle") => {
+            if let Some(session) = msg.get("session").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                core.set_tab_session(project, id, session);
+            }
+            false
+        }
         Some("session") => {
             let session = msg.get("session").and_then(Value::as_str).unwrap_or("");
             return if core.set_tab_session(project, id, session) {

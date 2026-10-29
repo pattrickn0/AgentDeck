@@ -333,6 +333,14 @@ impl Deck {
                 // In a long turn the deadline for questions to this tab only starts running when it ends.
                 self.core.touch_activity(&tab.project, &tab.ident.id(), now);
             }
+            // Antigravity names its conversation in its log: save it as soon as it shows up (and again after `/new`).
+            if let Some(log) = tab.spec.as_ref().filter(|_| tab.alive).and_then(|s| s.session_log.as_deref()) {
+                if now >= tab.session_poll_at {
+                    tab.session_poll_at = now + SESSION_LOG_POLL;
+                    self.core.sync_agy_session(&tab.project, &tab.ident.id(), log, &mut tab.session_log_pos);
+                }
+                want(tab.session_poll_at);
+            }
             if let Some(at) = tab.idle_deadline {
                 if now >= at {
                     tab.idle_deadline = None;
