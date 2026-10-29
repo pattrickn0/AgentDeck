@@ -204,12 +204,20 @@ fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(LOCK_FILE);
     let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
-    let busy = match file.try_lock() {
-        Ok(()) => false,
-        Err(std::fs::TryLockError::WouldBlock) => true,
-        Err(std::fs::TryLockError::Error(e)) => {
-            log::warn!("could not lock {}: {e}", path.display());
-            false
+    // A lock just released can still look held for a moment: a process forked by the previous instance (a PTY spawn)
+    // keeps a copy of the descriptor until it execs. Restarting inside that window failed ~1 in 8 restart tests.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let busy = loop {
+        match file.try_lock() {
+            Ok(()) => break false,
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => break true,
+            Err(std::fs::TryLockError::Error(e)) => {
+                log::warn!("could not lock {}: {e}", path.display());
+                break false;
+            }
         }
     };
     if busy {
