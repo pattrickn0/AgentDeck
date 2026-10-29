@@ -15,8 +15,8 @@ test that fails becomes an item here. Product direction and decision-makers are 
    (`ask-agent --models antigravity`, `--team`), and choice by model capability (`t52`: task level,
    "capability" block in `--models`; see manual-tests.md). When the metric has enough tasks, review the `capability.json` table and
    default models per agent (`defaults`). Also from the user, after the rename to Holt (`t1`): rename the GitHub repository
-   `pattrickn0/AgentDeck` → `pattrickn0/Holt` (update `origin`) and, optionally, the local folder `~/AgentDeck` → `~/Holt`
-   (then rebuild so the menu entry points at the new path); steps in [MAINTENANCE.md](MAINTENANCE.md), section 6.
+   to `pattrickn0/Holt` (update `origin`) and, optionally, the local folder to `~/Holt` (then rebuild so the menu entry
+   points at the new path); steps in [MAINTENANCE.md](MAINTENANCE.md), section 6.
 2. [ ] **Background and system tray** (decided on 2026-10-24). T1a (`t44`): `Deck::tick` was moved out of rendering and
    `Deck::background` runs from the event loop with the window hidden or minimized. T1b (`t48`, done, needs validation in use):
    the X hides the window to the tray, without asking (Windows: `tray-icon`; Linux: `ksni`; without `StatusNotifierWatcher` the X
@@ -45,5 +45,4 @@ test that fails becomes an item here. Product direction and decision-makers are 
 
 ## Later (on the list, not yet)
 
-8. [ ] **Installer for Windows**, and in the same version (0.4) remove the AgentDeck → Holt migration (config copy, `data/`
-   renames, old env vars/header/marker/worktree root; the list is in [MAINTENANCE.md](MAINTENANCE.md), section 6).
+8. [ ] **Installer for Windows** (0.4).

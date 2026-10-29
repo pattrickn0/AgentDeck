@@ -81,9 +81,6 @@ const MAX_OUTSIDE: usize = 100;
 const MAX_STAT: usize = 8_000;
 /// Name of the folder, at the repository root, that holds the worktrees.
 pub const HOLT_DIR: &str = ".holt";
-/// Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): the folder AgentDeck used. Tasks opened before the rename keep
-/// their `<root>/.agentdeck/worktrees/<id>` path (it is stored in the task), so the path guards accept both roots.
-pub const LEGACY_HOLT_DIR: &str = ".agentdeck";
 /// Attempts (and wait between them) to delete a worktree folder while the agent's terminal still holds it
 /// (on Windows the process takes a moment to die after the tab closes).
 const REMOVE_TRIES: u32 = 10;

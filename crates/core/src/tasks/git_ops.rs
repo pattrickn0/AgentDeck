@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::text::cap_text;
-use super::{Task, HOLT_DIR, LEGACY_HOLT_DIR, MAX_STAT};
+use super::{Task, HOLT_DIR, MAX_STAT};
 use crate::git::{run, GitError, Repo, COMMIT_TIMEOUT, WRITE_TIMEOUT};
 use crate::t;
 use crate::util;
@@ -19,14 +19,11 @@ pub fn dirty_paths(porcelain: &str) -> Vec<String> {
         .collect()
 }
 
-/// The worktree folder is inside `<root>/.holt/worktrees` (or the `<root>/.agentdeck/worktrees` of tasks opened before the
-/// rename), and is not that parent folder itself.
+/// The worktree folder is inside `<root>/.holt/worktrees` and is not that parent folder itself.
 pub(super) fn safe_worktree(worktree: &Path, root: &Path) -> bool {
     let wt = util::absolutize(worktree);
-    [HOLT_DIR, LEGACY_HOLT_DIR].into_iter().any(|dir| {
-        let allowed = util::absolutize(&root.join(dir).join("worktrees"));
-        util::path_within(&wt, &allowed) && !util::same_path(&wt, &allowed)
-    })
+    let allowed = util::absolutize(&root.join(HOLT_DIR).join("worktrees"));
+    util::path_within(&wt, &allowed) && !util::same_path(&wt, &allowed)
 }
 
 /// Task branch (`task/…`, or the `tarefa/…` of tasks created before the English rename) with an acceptable name.
@@ -196,16 +193,6 @@ mod tests {
         assert!(!safe_worktree(Path::new("/repo/src"), root));
         assert!(!safe_worktree(Path::new("/repo/.holt/worktrees/../../src"), root));
         assert!(!safe_worktree(Path::new("/other/.holt/worktrees/t1"), root));
-    }
-
-    /// Migration: a task opened before the rename keeps its `.agentdeck/worktrees` path, and it is accepted.
-    #[test]
-    fn worktrees_of_tasks_opened_as_agentdeck_are_still_accepted() {
-        let root = Path::new("/repo");
-        assert!(safe_worktree(Path::new("/repo/.agentdeck/worktrees/t1"), root));
-        assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees"), root));
-        assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees/../../src"), root));
-        assert!(!safe_worktree(Path::new("/repo/.agentdeck/t1"), root));
     }
 
     #[test]

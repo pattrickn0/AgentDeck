@@ -198,18 +198,14 @@ fn same_secret(a: &str, b: &str) -> bool {
 
 /// Lock file of the data folder: one instance of the app per folder.
 const LOCK_FILE: &str = ".holt.lock";
-/// Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): the lock of an AgentDeck. While one runs on the folder, a
-/// Holt must not start on it as well.
-const LEGACY_LOCK_FILE: &str = ".agentdeck.lock";
 
-/// Locks `data/.holt.lock`. Error if another instance of the app already uses the folder (an AgentDeck holding
-/// `.agentdeck.lock` counts as one).
+/// Locks `data/.holt.lock`. Error if another instance of the app already uses the folder.
 fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(LOCK_FILE);
     let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
     let busy = match file.try_lock() {
-        Ok(()) => activation::lock_held(data_dir, LEGACY_LOCK_FILE),
+        Ok(()) => false,
         Err(std::fs::TryLockError::WouldBlock) => true,
         Err(std::fs::TryLockError::Error(e)) => {
             log::warn!("could not lock {}: {e}", path.display());
@@ -1012,19 +1008,6 @@ mod tests {
         let err = lock_data_dir(tmp.path()).expect_err("the second one refuses").to_string();
         assert!(err.starts_with("Another Holt window is already using the data folder"), "{err}");
         drop(first);
-        lock_data_dir(tmp.path()).expect("free again");
-    }
-
-    /// Migration: a Holt does not start on a folder that a running AgentDeck still holds (`.agentdeck.lock`).
-    #[test]
-    fn a_running_agentdeck_blocks_the_data_dir() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let old =
-            std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(tmp.path().join(LEGACY_LOCK_FILE)).expect("open");
-        old.try_lock().expect("lock");
-        let err = lock_data_dir(tmp.path()).expect_err("refuses").to_string();
-        assert!(err.starts_with("Another Holt window is already using the data folder"), "{err}");
-        drop(old);
         lock_data_dir(tmp.path()).expect("free again");
     }
 

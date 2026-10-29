@@ -15,9 +15,6 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 desktop="$data/applications/holt.desktop"
 icon="$data/icons/hicolor/256x256/apps/holt.png"
-# Migration (remove after 0.4, memory/MAINTENANCE.md section 6): what the AgentDeck days installed.
-legacy_desktop="$data/applications/agentdeck.desktop"
-legacy_icon="$data/icons/hicolor/256x256/apps/agentdeck.png"
 
 refresh() {
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "$data/applications" || true
@@ -25,9 +22,9 @@ refresh() {
 }
 
 if [ "${1:-}" = "--uninstall" ]; then
-    rm -f "$desktop" "$icon" "$legacy_desktop" "$legacy_icon"
+    rm -f "$desktop" "$icon"
     refresh
-    echo "removed $desktop and $icon (and the AgentDeck ones, if any)"
+    echo "removed $desktop and $icon"
     exit 0
 fi
 
@@ -41,6 +38,5 @@ bin=$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")
 mkdir -p "$(dirname "$desktop")" "$(dirname "$icon")"
 cp "$repo/crates/app/assets/holt.png" "$icon"
 sed "s|@EXEC@|$bin|" "$repo/crates/app/assets/holt.desktop" > "$desktop"
-rm -f "$legacy_desktop" "$legacy_icon"
 refresh
 echo "installed $desktop (Exec=$bin)"

@@ -77,7 +77,7 @@ fn start_core(root: &Path) -> Core {
 /// `ask-agent` with the master token (user) or a tab's (`agent = Some((id, token))`).
 fn run(core: &Core, agent: Option<(&str, &str)>, args: &[&str], stdin: &str) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    cmd.args(args).env_remove("HOLT_DEPTH").env_remove("AGENTDECK_DEPTH").env("HOLT_PORT", core.bridge_port().to_string());
+    cmd.args(args).env_remove("HOLT_DEPTH").env("HOLT_PORT", core.bridge_port().to_string());
     match agent {
         Some((id, token)) => cmd.env("HOLT_TOKEN", token).env("HOLT_AGENT", id),
         None => cmd.env("HOLT_TOKEN", core.bridge_token()).env("HOLT_AGENT", "shell"),

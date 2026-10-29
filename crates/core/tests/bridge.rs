@@ -147,7 +147,7 @@ fn ask(env: &Env, body: Value) -> (u16, Value) {
     http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), env.core.bridge_token(), &body.to_string())
 }
 
-/// The CommandDeck header (`x-commanddeck-token`) no longer works: only `x-holt-token` authenticates.
+/// Any other header name does not authenticate: only `x-holt-token` authenticates.
 #[test]
 fn the_old_token_header_is_refused() {
     let env = start(&[("claude", says("ok"))]);
@@ -155,23 +155,9 @@ fn the_old_token_header_is_refused() {
     let token = env.core.bridge_token().to_owned();
     let host = format!("127.0.0.1:{port}");
 
-    let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, &token, "");
+    let (st, b) = http_with_token_header(port, "x-old-token", "GET", "/agents", &host, &token, "");
     assert_eq!((st, b), (403, json!({"error": "invalid token"})));
     assert_eq!(http(port, "GET", "/agents", &host, &token, "").0, 200);
-}
-
-/// Migration (remove after 0.4): an `ask-agent` of the AgentDeck days sends `x-agentdeck-token`, and the new header wins
-/// when both come.
-#[test]
-fn the_old_agentdeck_token_header_still_authenticates() {
-    let env = start(&[("claude", says("ok"))]);
-    let port = env.core.bridge_port();
-    let token = env.core.bridge_token().to_owned();
-    let host = format!("127.0.0.1:{port}");
-
-    assert_eq!(http_with_token_header(port, "x-agentdeck-token", "GET", "/agents", &host, &token, "").0, 200);
-    let (st, _) = http_with_token_header(port, "x-agentdeck-token", "GET", "/agents", &host, "wrong", "");
-    assert_eq!(st, 403);
 }
 
 /// Waits for `CoreEvent::Activate` (the other events that arrive first are ignored).

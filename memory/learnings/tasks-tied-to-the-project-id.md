@@ -8,7 +8,7 @@ project from the list does not delete this file, but re-adding the same director
 board appeared empty. Worktrees (`.holt/worktrees/`) move along with the folder, but each task's `worktree` field
 and git's internal records (`.git/worktrees/*/gitdir`) still referenced the old path.
 
-**Why:** on 2026-10-24, directory `commanddeck-dev` was renamed to `agentdeck`, the project was removed and re-added, and 47
+**Why:** on 2026-10-24, a project directory was renamed, the project was removed and re-added, and 47
 tasks vanished from the board (id changed from `pfdaeded2` to `p76d8a279`).
 
 **How to apply:** since `t50` (2026-10-24), removing a project preserves the id + path pair in `Config.removed_projects`

@@ -79,8 +79,7 @@ what goes into `main` (`main` is the stable version; day-to-day work happens on 
    gains "document tabs" alongside terminal tabs, and a task diff (and later file editor and a more
    useful explorer) opens in them, in full-screen width. It is what was missing for the human to validate without leaving the app.
    Phase 2 (side-by-side diff, editor extras, explorer) is in [ideas.md](ideas.md).
-5. **Rename (AgentDeck, then Holt) and visual identity** (agreed on 2026-10-22). **Done**: the name (task `t20` renamed
-   CommandDeck to AgentDeck; task `t1` renamed it to **Holt** on 2026-10-29, with the migration of the old names: see
+5. **Rename to Holt and visual identity** (agreed on 2026-10-22). **Done**: the name (task `t1` renamed it to **Holt** on 2026-10-29, and the old names were dropped the same day: see
    [MAINTENANCE.md](MAINTENANCE.md), section 6) and visual design (`t21`–`t23`). **Themes** were set aside on
    2026-10-24 ([ideas.md](ideas.md)). An otter logo is an idea ([ideas.md](ideas.md)).
 6. **Replace `main` with `dev`**: **done on 2026-10-24**. `main` is the Rust rewrite; the TypeScript pilot

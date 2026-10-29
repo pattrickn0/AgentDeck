@@ -26,9 +26,7 @@ fn main() {
 /// Writes `~/.local/share/applications/holt.desktop` (pointing at the binary this build makes) and the icon, so
 /// the app shows up in the menu right after `cargo build --release`; Wayland desktops take the icon from there
 /// (the window's app id is `holt`). Only for release builds on the machine that runs them: not in CI, not when
-/// cross-compiling, not with `HOLT_NO_DESKTOP_ENTRY`. `scripts/install-desktop.sh` does the same by hand. It also removes
-/// the `agentdeck.desktop` and `agentdeck.png` of the AgentDeck days, so the menu does not show two entries
-/// (migration, remove after 0.4: `memory/MAINTENANCE.md` §6).
+/// cross-compiling, not with `HOLT_NO_DESKTOP_ENTRY`. `scripts/install-desktop.sh` does the same by hand.
 fn install_desktop_entry() {
     println!("cargo:rerun-if-changed=assets/holt.desktop");
     println!("cargo:rerun-if-changed=assets/holt.png");
@@ -49,7 +47,6 @@ fn install_desktop_entry() {
     let Some(bin) = var("OUT_DIR").and_then(|o| Path::new(&o).ancestors().nth(3).map(|d| d.join("holt"))) else { return };
     let desktop = data.join("applications/holt.desktop");
     let icon = data.join("icons/hicolor/256x256/apps/holt.png");
-    let legacy = [data.join("applications/agentdeck.desktop"), data.join("icons/hicolor/256x256/apps/agentdeck.png")];
     // Deleted by hand (or uninstalled): the next build writes them again.
     println!("cargo:rerun-if-changed={}", desktop.display());
     println!("cargo:rerun-if-changed={}", icon.display());
@@ -58,9 +55,6 @@ fn install_desktop_entry() {
         std::fs::create_dir_all(desktop.parent().expect("parent"))?;
         std::fs::create_dir_all(icon.parent().expect("parent"))?;
         std::fs::copy("assets/holt.png", &icon)?;
-        for old in legacy.iter().filter(|f| f.exists()) {
-            std::fs::remove_file(old)?;
-        }
         std::fs::write(&desktop, template.replace("@EXEC@", &bin.display().to_string()))?;
         // Written now, they would look newer than this run and every build would run this again (and recompile the
         // app): they take the template's time instead.

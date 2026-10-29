@@ -325,9 +325,8 @@ impl Config {
             None => Self::default_for(paths),
         };
         let from_legacy = file.filter(|f| **f != paths.config_file);
-        // From the AgentDeck configuration comes everything (it is the same format). From the older ones
-        // the tabs do not come: the first opening starts without agents.
-        if from_legacy.is_some_and(|f| !is_agentdeck_config(f)) {
+        // From the older configurations the tabs do not come: the first opening starts without agents.
+        if from_legacy.is_some() {
             cfg.open_tabs.clear();
             cfg.active_tab_index = -1;
             for p in &mut cfg.project_list {
@@ -336,14 +335,6 @@ impl Config {
             }
         }
         cfg.fix_workspace(paths, home);
-        // Name migration: copies the AgentDeck configuration to the new place (the old one stays as
-        // it is, for whoever still opens the previous version).
-        if let Some(f) = from_legacy.filter(|f| is_agentdeck_config(f)) {
-            match cfg.save(&paths.config_file) {
-                Ok(()) => log::info!("config copied from {} to {}", f.display(), paths.config_file.display()),
-                Err(e) => log::warn!("could not copy the config from {} to {}: {e}", f.display(), paths.config_file.display()),
-            }
-        }
         cfg
     }
 
@@ -499,15 +490,10 @@ impl Config {
     }
 }
 
-/// Configurations of earlier versions: `AgentDeck` (the name before Holt, in the same format) and the old name
-/// "orquestra". The first one that exists is the source when `Holt/config.json` does not exist yet.
-///
-/// Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): whoever never opened Holt would lose the project list and
-/// the tabs. It goes away (this function, `is_agentdeck_config`, the copy in `load_from` and the tests
-/// `*_agentdeck_*`) one release after the rename.
+/// Configuration of the old name "orquestra": the source (without tabs) when `Holt/config.json` does not exist yet.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
-    vec![base.join("AgentDeck").join("config.json"), base.join("orquestra").join("config.json")]
+    vec![base.join("orquestra").join("config.json")]
 }
 
 /// The text of `config.json`: UTF-8, with or without BOM, or UTF-16 with BOM (edited with PowerShell 5.1: `Set-Content
@@ -531,12 +517,6 @@ pub(crate) fn config_candidates(paths: &AppPaths) -> Vec<PathBuf> {
         candidates.extend(legacy_config_files());
     }
     candidates
-}
-
-/// `true` if `file` is the AgentDeck configuration: the same format as Holt's, so tabs and
-/// layout apply and the file is copied to the new place.
-fn is_agentdeck_config(file: &Path) -> bool {
-    file.parent().and_then(Path::file_name).is_some_and(|d| d == "AgentDeck")
 }
 
 #[cfg(test)]
@@ -839,44 +819,12 @@ mod tests {
         assert_eq!(project.active_tab, -1);
     }
 
-    /// Name migration: the AgentDeck configuration becomes the Holt one, with projects and tabs, and the
-    /// old file stays there.
-    #[test]
-    fn the_agentdeck_config_is_copied_to_the_new_place() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let p = paths(tmp.path());
-        let old = tmp.path().join("AgentDeck").join("config.json");
-        std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
-        let mut project = ProjectCfg::new(tmp.path().join("my-project"), None, &[]);
-        project.open_tabs = vec!["claude".into(), "claude@dev".into()];
-        project.active_tab = 1;
-        let before = Config {
-            active_project: project.id.clone(),
-            project_list: vec![project.clone()],
-            whisper_lang: "es".into(),
-            ..Config::default()
-        };
-        before.save(&old).expect("writes the old one");
-        let old_text = std::fs::read_to_string(&old).expect("read");
-        assert!(!p.config_file.exists());
-
-        let cfg = Config::load_from(&[p.config_file.clone(), old.clone()], &p, no_home());
-        assert_eq!(cfg.whisper_lang, "es");
-        assert_eq!(cfg.project_list, vec![project.clone()], "projects and tabs come along");
-        // Wrote to the new place and left the old one as it was.
-        assert!(p.config_file.is_file());
-        assert_eq!(std::fs::read_to_string(&old).expect("old"), old_text);
-        let again = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
-        assert_eq!(again.project_list, vec![project]);
-        assert_eq!(again.whisper_lang, "es");
-    }
-
     /// With the new configuration already in place, the old one is neither read nor overwrites anything.
     #[test]
-    fn the_new_config_wins_over_the_agentdeck_one() {
+    fn the_new_config_wins_over_the_old_one() {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
-        let old = tmp.path().join("AgentDeck").join("config.json");
+        let old = tmp.path().join("orquestra").join("config.json");
         std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
         std::fs::write(&old, r#"{"whisperLang": "es"}"#).expect("write");
         Config { whisper_lang: "en".into(), ..Config::default() }.save(&p.config_file).expect("writes the new one");
@@ -886,13 +834,13 @@ mod tests {
     }
 
     #[test]
-    fn candidates_start_with_the_new_file_then_agentdeck() {
+    fn candidates_start_with_the_new_file_then_orquestra() {
         let tmp = tempfile::tempdir().expect("tmp");
         let normal = AppPaths { config_file: tmp.path().join("cfg-do-usuario").join("config.json"), ..paths(&tmp.path().join("app")) };
         let c = config_candidates(&normal);
         assert_eq!(c[0], normal.config_file);
         if dirs::config_dir().is_some() {
-            assert_eq!(c[1].parent().and_then(Path::file_name).and_then(|n| n.to_str()), Some("AgentDeck"));
+            assert_eq!(c[1].parent().and_then(Path::file_name).and_then(|n| n.to_str()), Some("orquestra"));
             assert_eq!(legacy_config_files().len(), c.len() - 1);
         }
         // Isolated (`HOLT_HOME`): does not read the user's configurations.

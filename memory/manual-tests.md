@@ -378,7 +378,7 @@ Git — with working folder in a git repository:
 - [ ] Git: in branch list, click remote branch (`origin/x`) whose local already exists: switches to local without error.
 - [ ] Project that is a git worktree (`git worktree add`) or subfolder of repository: commit, `git cherry-pick`/`git revert` conflict, and `git rebase -i` via terminal update Git tab without reloading project.
 - [x] Repository with `core.autocrlf=true` and `AGENTS.md` in CRLF: opening app leaves file clean in `git status`.
-  - Verified on `commanddeck-dev`: content matches HEAD hash. The `M` previously appearing was stale index; clean `git add AGENTS.md` cleared it.
+  - Verified on a repository of that kind: content matches HEAD hash. The `M` previously appearing was stale index; clean `git add AGENTS.md` cleared it.
 
 Git — hunks, history, stash, merge/rebase, and conflicts:
 
@@ -419,18 +419,6 @@ Windows, with app open and an agent tab:
 - [ ] **Quit** with unsaved edited file: window appears prompting "There are unsaved changes".
 - [ ] **Quit** with agent mid-turn: window appears with "Agents are currently working" (Cancel keeps app running).
 - [ ] Linux with tray (KDE, or GNOME with AppIndicator): same test script with `ksni`. Without `StatusNotifierWatcher` (pure GNOME): × **quits** (asking first if an agent is mid-turn or a document is unsaved), and the app is never left invisible without an icon.
-
-## Name migration (AgentDeck → Holt) ★
-
-With a copy of a real AgentDeck install (config in `%APPDATA%\AgentDeck\config.json` or `~/.config/AgentDeck/`, the `data/` folder, a project with an open task worktree in `.agentdeck/worktrees/` and an `AGENTS.md` with the `agentdeck:` block), without `HOLT_HOME`:
-
-- [ ] Launch Holt (while the old AgentDeck is closed): window is named Holt, projects and open tabs from the old install appear, and `Holt/config.json` was created (`AgentDeck/config.json` remains intact).
-- [ ] `data/` now has `.holt.lock`, `holt.log` and `holt-instructions.md` instead of the `agentdeck` ones; existing tasks (`data/tasks/`), chat history and conversations resumed per tab continue.
-- [ ] The project's `AGENTS.md` has a single `holt:` block (the `agentdeck:` one is gone), and a git merge of a task that also touched `AGENTS.md` still works.
-- [ ] The task opened before the rename (worktree under `.agentdeck/worktrees/<id>`) can be validated and merged; a new task goes to `.holt/worktrees` and `.holt/` is in `.git/info/exclude`.
-- [ ] With the old AgentDeck still running on the same `data/`: opening Holt brings the old window to the front and exits (no second instance).
-- [ ] In a tab opened before the update (still has `AGENTDECK_*`), `ask-agent --list` works; in a new tab `echo $HOLT_PORT` has a value.
-- [ ] Linux: the app menu shows "Holt" with its icon and no leftover "AgentDeck" entry (`~/.local/share/applications/agentdeck.desktop` and `agentdeck.png` are gone after `cargo build --release`).
 
 ## Final checklist
 
