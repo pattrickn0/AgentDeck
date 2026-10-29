@@ -301,13 +301,15 @@ impl Deck {
         use holt_core::chat::{PermState, PermissionCard, ToolCall, ToolOutcome};
         use serde_json::json;
         let Some(chat) = self.active.and_then(|i| self.tabs.get_mut(i)).and_then(|t| t.chat.as_mut()) else { return };
-        let ok = |id: &str, text: &str| Some(ToolOutcome { tool_use_id: id.into(), text: text.into(), is_error: false });
+        let ok = |id: &str, text: &str| Some(ToolOutcome { tool_use_id: id.into(), text: text.into(), is_error: false, patch: vec![] });
         let tool = |id: &str, name: &str, input: serde_json::Value, outcome| {
             Item::Tool(ToolCall { id: id.into(), name: name.into(), input, outcome })
         };
         let t = &mut chat.transcript;
         t.model = "claude-sonnet-5-5".into();
         t.cost_usd = 0.12;
+        t.context_tokens = 310_000;
+        t.context_window = 1_000_000;
         t.commands = ["context", "compact", "cost", "clear", "review"].iter().map(|s| (*s).to_owned()).collect();
         t.items = vec![
             Item::User { text: "The tab menu has no \"close others\". Add it, and keep the order of the remaining tabs.".into(), from: None },
@@ -322,8 +324,24 @@ impl Deck {
             tool(
                 "t3",
                 "Edit",
-                json!({ "file_path": "crates/app/src/ui/menus.rs", "old_string": "    items.push((TabAction::Close, tr(\"Close\"), None));", "new_string": "    items.push((TabAction::Close, tr(\"Close\"), None));\n    if siblings > 1 {\n        items.push((TabAction::CloseOthers, label, None));\n    }" }),
-                ok("t3", "updated"),
+                json!({ "file_path": "crates/app/src/ui/menus.rs", "old_string": "x", "new_string": "y" }),
+                Some(ToolOutcome {
+                    tool_use_id: "t3".into(),
+                    text: "updated".into(),
+                    is_error: false,
+                    patch: vec![holt_core::chat::PatchHunk {
+                        old_start: 418,
+                        new_start: 418,
+                        lines: vec![
+                            "     items.push(item(tr(\"Rename\"), Act::Rename));".into(),
+                            "-    items.push(item(tr(\"Close\"), Act::Close));".into(),
+                            "+    items.push(item(tr(\"Close\"), Act::Close));".into(),
+                            "+    if siblings > 1 {".into(),
+                            "+        items.push(item(tr(\"Close others\"), Act::CloseOthers));".into(),
+                            "+    }".into(),
+                        ],
+                    }],
+                }),
             ),
             Item::User { text: "Which key did you pick for the new menu entry? I'm documenting it in the manual tests.".into(), from: Some("claude@dev".into()) },
             Item::Assistant { message: "m3".into(), text: "There is no shortcut yet. I'll answer claude@dev with that, then run the tests once you allow them.".into(), streaming: false },

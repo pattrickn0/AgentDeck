@@ -21,6 +21,7 @@ use holt_core::Organization;
 pub const HEAD_H: f32 = 30.0;
 const GRIP_W: f32 = 18.0;
 const ICON_BTN: f32 = 20.0;
+const VIEW_TOGGLE_W: f32 = 122.0;
 
 /// Terminal area inside a window (below the header).
 pub fn pane_body(rect: Rect) -> Rect {
@@ -36,6 +37,8 @@ enum Click {
     Swap(usize, usize),
     Mic(u64),
     Attach(u64),
+    /// The Chat | Terminal switch of a tab: `true` = chat.
+    View(usize, bool),
 }
 
 /// The islands of the center: one per window (or the whole area, in the empty state).
@@ -83,6 +86,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             Click::Swap(a, b) => deck.swap_panes(a, b),
             Click::Mic(uid) => deck.toggle_tab_mic(uid),
             Click::Attach(uid) => deck.pick_tab_attachments(uid),
+            Click::View(i, chat) => deck.set_tab_view(i, chat),
         }
     }
 }
@@ -159,7 +163,13 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         .then(|| Rect::from_min_size(Pos2::new(mic.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN)));
 
     // ---------- Tabs ----------
-    let strip_end = bring.unwrap_or(mic).min.x - 4.0;
+    // Claude's tabs switch between the chat and the terminal view of the same conversation.
+    let toggle = holt_core::chat::supports(&deck.tabs[plan.shown].kind)
+        .then(|| {
+            Rect::from_min_size(Pos2::new(bring.unwrap_or(mic).min.x - 8.0 - VIEW_TOGGLE_W, cy - 11.0), Vec2::new(VIEW_TOGGLE_W, 22.0))
+        })
+        .filter(|r| r.min.x - x0 > 120.0);
+    let strip_end = toggle.unwrap_or(bring.unwrap_or(mic)).min.x - 4.0;
     let strip_rect = Rect::from_min_max(Pos2::new(x0, head.min.y), Pos2::new(strip_end.max(x0), head.max.y - 1.0));
     // A click on the empty space of the tab strip focuses the window (the tabs, on top, have their own action).
     if ui.interact(strip_rect, Id::new(("pane-head", &group)), Sense::click()).clicked() {
@@ -171,6 +181,14 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         Some(StripClick::Rename(i)) => deck.start_rename_tab(i),
         Some(StripClick::ContextMenu(i, pos)) => deck.tab_context_menu = Some((i, pos)),
         None => {}
+    }
+
+    if let Some(r) = toggle {
+        let in_chat = deck.tabs[plan.shown].chat.is_some();
+        if let Some(i) = super::segmented(ui, r, Id::new(("pane-view", &group)), &[t!("Chat"), t!("Terminal")], usize::from(!in_chat), true)
+        {
+            clicks.push(Click::View(plan.shown, i == 0));
+        }
     }
 
     if let Some(bring) = bring {

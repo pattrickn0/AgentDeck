@@ -77,6 +77,53 @@ pub struct ToolOutcome {
     pub tool_use_id: String,
     pub text: String,
     pub is_error: bool,
+    /// What an edit changed, with the line numbers (`structuredPatch` of the result); empty for other tools.
+    pub patch: Vec<PatchHunk>,
+}
+
+/// One hunk of an edit: `lines` start with ` ` (unchanged), `-` or `+`, like a unified diff.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatchHunk {
+    pub old_start: u32,
+    pub new_start: u32,
+    pub lines: Vec<String>,
+}
+
+/// The `tool_result` blocks of a user line. `extra` is the line's `tool_use_result` (`toolUseResult` in the CLI's file): it
+/// belongs to the call when the line has a single result.
+fn tool_results(content: &Value, extra: &Value) -> Vec<ToolOutcome> {
+    let mut results: Vec<ToolOutcome> = content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|b| str_of(b, "type") == "tool_result")
+        .map(|b| ToolOutcome {
+            tool_use_id: str_of(b, "tool_use_id").to_owned(),
+            text: result_text(b.get("content").unwrap_or(&Value::Null)),
+            is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+            patch: Vec::new(),
+        })
+        .collect();
+    if let [only] = results.as_mut_slice() {
+        only.patch = patch_of(extra);
+    }
+    results
+}
+
+fn patch_of(result: &Value) -> Vec<PatchHunk> {
+    let num = |h: &Value, k: &str| h.get(k).and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(1);
+    result
+        .get("structuredPatch")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|h| PatchHunk {
+            old_start: num(h, "oldStart"),
+            new_start: num(h, "newStart"),
+            // "\\ No newline at end of file" is not a line of the file.
+            lines: strings(h.get("lines")).into_iter().filter(|l| !l.starts_with('\\')).collect(),
+        })
+        .collect()
 }
 
 /// The CLI asks whether a tool may run (`control_request` / `can_use_tool`).
@@ -100,6 +147,8 @@ pub struct TurnResult {
     pub cost_usd: f64,
     pub duration_ms: u64,
     pub session: String,
+    /// The model's context window in tokens (`modelUsage`), 0 = unknown.
+    pub context_window: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,6 +170,7 @@ pub enum ChatEvent {
     Assistant {
         message: String,
         blocks: Vec<Block>,
+        context_tokens: u64,
     },
     ToolResults(Vec<ToolOutcome>),
     Permission(PermissionRequest),
@@ -171,6 +221,14 @@ fn clip(text: &str, max: usize) -> String {
     }
 }
 
+/// Tokens the conversation takes in the model's context, from the `usage` of an assistant message.
+fn context_tokens(usage: &Value) -> u64 {
+    ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
+        .iter()
+        .filter_map(|k| usage.get(k).and_then(Value::as_u64))
+        .sum()
+}
+
 fn blocks_of(content: &Value) -> Vec<Block> {
     let Some(list) = content.as_array() else { return Vec::new() };
     list.iter()
@@ -219,24 +277,18 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                 return Vec::new();
             }
             let msg = v.get("message").unwrap_or(&Value::Null);
-            ChatEvent::Assistant { message: str_of(msg, "id").to_owned(), blocks: blocks_of(msg.get("content").unwrap_or(&Value::Null)) }
+            ChatEvent::Assistant {
+                message: str_of(msg, "id").to_owned(),
+                blocks: blocks_of(msg.get("content").unwrap_or(&Value::Null)),
+                context_tokens: context_tokens(msg.get("usage").unwrap_or(&Value::Null)),
+            }
         }
         "user" => {
             if !v.get("parent_tool_use_id").is_none_or(Value::is_null) {
                 return Vec::new();
             }
             let content = v.get("message").and_then(|m| m.get("content")).unwrap_or(&Value::Null);
-            let results: Vec<ToolOutcome> = content
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|b| str_of(b, "type") == "tool_result")
-                .map(|b| ToolOutcome {
-                    tool_use_id: str_of(b, "tool_use_id").to_owned(),
-                    text: result_text(b.get("content").unwrap_or(&Value::Null)),
-                    is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-                })
-                .collect();
+            let results = tool_results(content, v.get("tool_use_result").unwrap_or(&Value::Null));
             if !results.is_empty() {
                 ChatEvent::ToolResults(results)
             } else if user_text(content).starts_with(INTERRUPTED) {
@@ -270,6 +322,11 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                 cost_usd: v.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
                 duration_ms: v.get("duration_ms").and_then(Value::as_u64).unwrap_or(0),
                 session: str_of(&v, "session_id").to_owned(),
+                context_window: v
+                    .get("modelUsage")
+                    .and_then(Value::as_object)
+                    .and_then(|m| m.values().find_map(|u| u.get("contextWindow").and_then(Value::as_u64)))
+                    .unwrap_or(0),
             })
         }
         _ => ChatEvent::Ignored,
@@ -388,11 +445,20 @@ pub struct Transcript {
     /// Commands the CLI itself says only work in the terminal.
     pub terminal_commands: Vec<String>,
     pub cost_usd: f64,
+    /// Tokens in the context after the last message, and the model's window (0 = unknown).
+    pub context_tokens: u64,
+    pub context_window: u64,
     /// Bumped on every change, for the interface to know when to lay the text out again.
     pub version: u64,
 }
 
 impl Transcript {
+    /// How much of the context window the conversation fills, in percent (None until both numbers are known).
+    pub fn context_percent(&self) -> Option<u32> {
+        (self.context_window > 0 && self.context_tokens > 0)
+            .then(|| u32::try_from((self.context_tokens * 100 / self.context_window).min(100)).unwrap_or(100))
+    }
+
     pub fn busy(&self) -> bool {
         self.pending_turns > 0
     }
@@ -486,7 +552,10 @@ impl Transcript {
                 Some(Item::Assistant { message: m, text: t, streaming: true }) if m == message => t.push_str(text),
                 _ => self.push(Item::Assistant { message: message.clone(), text: text.clone(), streaming: true }),
             },
-            ChatEvent::Assistant { message, blocks } => {
+            ChatEvent::Assistant { message, blocks, context_tokens } => {
+                if *context_tokens > 0 {
+                    self.context_tokens = *context_tokens;
+                }
                 for block in blocks {
                     self.apply_block(message, block);
                 }
@@ -529,6 +598,9 @@ impl Transcript {
                 self.finish_streaming();
                 self.cancel_permissions();
                 self.cost_usd = r.cost_usd;
+                if r.context_window > 0 {
+                    self.context_window = r.context_window;
+                }
                 if !r.session.is_empty() {
                     self.session = Some(r.session.clone());
                 }
@@ -580,17 +652,7 @@ impl Transcript {
             let content = v.get("message").and_then(|m| m.get("content")).unwrap_or(&Value::Null);
             match str_of(&v, "type") {
                 "user" => {
-                    let results: Vec<ToolOutcome> = content
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter(|b| str_of(b, "type") == "tool_result")
-                        .map(|b| ToolOutcome {
-                            tool_use_id: str_of(b, "tool_use_id").to_owned(),
-                            text: result_text(b.get("content").unwrap_or(&Value::Null)),
-                            is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-                        })
-                        .collect();
+                    let results = tool_results(content, v.get("toolUseResult").unwrap_or(&Value::Null));
                     if !results.is_empty() {
                         t.apply(&ChatEvent::ToolResults(results));
                         continue;
@@ -606,7 +668,8 @@ impl Transcript {
                     if str_of(msg, "model") == "<synthetic>" && !t.items.iter().any(|i| matches!(i, Item::User { .. })) {
                         continue;
                     }
-                    t.apply(&ChatEvent::Assistant { message: str_of(msg, "id").to_owned(), blocks: blocks_of(content) });
+                    let context_tokens = context_tokens(msg.get("usage").unwrap_or(&Value::Null));
+                    t.apply(&ChatEvent::Assistant { message: str_of(msg, "id").to_owned(), blocks: blocks_of(content), context_tokens });
                 }
                 _ => {}
             }
@@ -964,13 +1027,40 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_result_carries_the_patch_with_its_line_numbers() {
+        let t = replay(TOOLS);
+        let edit = t.items.iter().find_map(|i| match i {
+            Item::Tool(c) if c.name == "Edit" => c.outcome.clone(),
+            _ => None,
+        });
+        let patch = edit.expect("the Edit result").patch;
+        assert_eq!(patch.len(), 1);
+        assert_eq!((patch[0].old_start, patch[0].new_start), (1, 1));
+        // The "no newline" markers are not lines of the file.
+        assert_eq!(patch[0].lines, ["-hi", "+hello"]);
+    }
+
+    #[test]
+    fn the_context_percent_comes_from_the_last_message_and_the_window() {
+        let mut t = replay(TOOLS);
+        assert!(t.context_tokens > 0);
+        assert_eq!(t.context_percent(), None, "the window is unknown until a result says it");
+        let line = r#"{"type":"result","is_error":false,"total_cost_usd":0.1,"session_id":"s","modelUsage":{"claude-opus-5-5":{"contextWindow":1000000}}}"#;
+        for ev in parse_line(line) {
+            t.apply(&ev);
+        }
+        t.context_tokens = 310_000;
+        assert_eq!(t.context_percent(), Some(31));
+    }
+
+    #[test]
     fn the_history_of_a_saved_conversation_shows_what_was_said() {
         let jsonl = [
             json!({ "type": "queue-operation" }),
             json!({ "type": "user", "message": { "content": "Add a menu entry" } }),
             json!({ "type": "attachment" }),
             json!({ "type": "assistant", "message": { "id": "m1", "content": [{ "type": "tool_use", "id": "t1", "name": "Edit", "input": { "file_path": "a.rs" } }] } }),
-            json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": "ok" }] } }),
+            json!({ "type": "user", "toolUseResult": { "structuredPatch": [{ "oldStart": 4, "newStart": 4, "lines": [" a", "-b", "+c"] }] }, "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": "ok" }] } }),
             json!({ "type": "user", "isMeta": true, "message": { "content": "<local-command-caveat>x</local-command-caveat>" } }),
             json!({ "type": "user", "message": { "content": "<command-name>/context</command-name>\n<command-message>context</command-message>\n<command-args></command-args>" } }),
             json!({ "type": "user", "isSidechain": true, "message": { "content": "sub-agent prompt" } }),
@@ -984,7 +1074,7 @@ mod tests {
         assert!(!t.busy());
         assert_eq!(t.items.len(), 4, "{:?}", t.items);
         assert!(matches!(&t.items[0], Item::User { text, .. } if text == "Add a menu entry"));
-        assert!(matches!(&t.items[1], Item::Tool(c) if c.name == "Edit" && c.outcome.is_some()));
+        assert!(matches!(&t.items[1], Item::Tool(c) if c.name == "Edit" && c.outcome.as_ref().is_some_and(|o| o.patch[0].old_start == 4)));
         assert!(matches!(&t.items[2], Item::User { text, .. } if text == "/context"));
         assert!(matches!(&t.items[3], Item::Assistant { text, .. } if text == "Done."));
         assert_eq!(Transcript::from_history(&jsonl, 2).items.len(), 2);

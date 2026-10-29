@@ -173,8 +173,11 @@ replaced, the conversation continues (same session id, `--resume`). Other CLIs k
 - **View (`ui/chat.rs`):** a scroll area of items in a centered column; each item's height is remembered (`ChatTab::heights`), so only the
   items near the viewport are laid out (markdown is the cost; a resumed conversation can have a thousand items). Assistant text is
   `egui_commonmark` like Documents; a tool call is a collapsible row (Edit/Write open by default, with the diff of `old_string`/`new_string`);
-  a pending permission is an amber card (Allow / Allow for this session / Deny; Enter and Esc when the composer is empty); the composer
-  grows to 8 lines, Enter sends, Shift+Enter newline, ↑/↓ history, `/` suggestions, Esc interrupts. Keys: with a chat tab active
+  a pending permission is a card in the agent's color (Allow ⏎ / Allow for this session / Deny ⎋, with the keys printed on the buttons; Enter and Esc work while the
+  composer is empty); under an assistant avatar the run of text, calls and cards sits in one indented column (the avatar is drawn once per run); a message from another agent is
+  a recessed card with a dashed edge ("claude@dev asks"); an edit's diff uses the line numbers and context of the result's `structuredPatch` (`ToolOutcome::patch`).
+  The composer box holds the text and a row with attach, mic, `model · N% context` (`Transcript::context_percent` = last message's usage / the window in `modelUsage`), the cost and
+  Send (Stop while a turn runs, Restart when the process ended); under it the keys and `working 00:14 · Esc interrupts`. The Chat | Terminal switch is in the tab header (`ui/panes.rs`). The composer grows to 8 lines, Enter sends, Shift+Enter newline, ↑/↓ history, `/` suggestions, Esc interrupts. Keys: with a chat tab active
   `term_focus` is off, so the terminal key path and IME are not used.
 - **Resume across restarts:** the session id is in `tab_sessions` as for terminal tabs; the chat reloads the transcript file and restarts the CLI
   with `--resume`. `reopen_without_resume` also applies (a resume that fails within 10 s starts from scratch).
@@ -189,7 +192,7 @@ replaced, the conversation continues (same session id, `--resume`). Other CLIs k
   (Agent Client Protocol, JSON-RPC over stdio: `session/prompt`, `session/update` notifications, `session/request_permission`) would cover
   every CLI that speaks it with one client. Until then they keep the terminal. Also not done: `AskUserQuestion` (denied with a
   "ask as text" hint), images in the composer, a setting in Settings for the default view (`chat_by_default` is only in `config.json`),
-  context-window percentage (needs the `usage` of the assistant messages), Windows with a `.cmd` shim (the arguments are escaped for the
+  Windows with a `.cmd` shim (the arguments are escaped for the
   PTY path; the chat path was not run on Windows).
 
 ## Tasks desk (`crates/core/src/tasks/`, `scope.rs`, `crates/app/src/tasks_ui.rs`)
