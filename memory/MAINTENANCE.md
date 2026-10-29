@@ -239,6 +239,7 @@ Remove all of it in 0.4 (or later, once nobody runs an AgentDeck any more):
 | Task worktrees opened under `.agentdeck/worktrees/<id>` (path stored in the task JSON) | `tasks::LEGACY_HOLT_DIR`, `tasks::safe_worktree` (accepts both roots); `workspace::IGNORED`/`WATCH_IGNORED` list `.agentdeck`; `is_app_data_dir` accepts `.agentdeck.lock`; test `worktrees_of_tasks_opened_as_agentdeck_are_still_accepted` | the legacy root and entries |
 | Env vars `AGENTDECK_*` in tabs opened before the update | `env::LEGACY_PREFIX` (`env_var_os`, `is_app_var`, `is_app_var_named`); tests in `env.rs` and `old_agentdeck_variables_still_work_in_old_tabs` (cli) | the prefix |
 | Bridge header `x-agentdeck-token` | `bridge::token_header`; test `the_old_agentdeck_token_header_still_authenticates` | the `or_else` |
+| `ask-agent` also sends `x-agentdeck-token`: agents of an AgentDeck app still running find the new `ask-agent` in `PATH` (it said "invalid token") | `Client::request` in `crates/cli/src/bin/ask-agent.rs` | the second `.header(...)` |
 | Linux menu: delete `agentdeck.desktop` and `agentdeck.png` when installing Holt's | `crates/app/build.rs` (`legacy`), `scripts/install-desktop.sh` | the `legacy` lines |
 
 Not migrated on purpose: `data/` keeps its name (so `target/release/data/` keeps working); `ask-agent` keeps its name;
