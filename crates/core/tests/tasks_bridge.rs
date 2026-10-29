@@ -204,7 +204,7 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
     assert!(
         none["text"]
             .as_str()
-            .is_some_and(|t| t.contains("Nenhum aprendizado específico") && t.contains("memory/aprendizados/src.md — Rule for src.")),
+            .is_some_and(|t| t.contains("No specific learning") && t.contains("memory/aprendizados/src.md — Rule for src.")),
         "{none}"
     );
     // Without paths: the globals and the index of the specific ones. The orchestrator (no task) reads from the project's repository.
@@ -213,7 +213,7 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
         st == 200
             && b["text"]
                 .as_str()
-                .is_some_and(|t| t.starts_with("Aprendizados do projeto:") && t.contains("memory/aprendizados/src.md — Rule for src.")),
+                .is_some_and(|t| t.starts_with("Project learnings:") && t.contains("memory/aprendizados/src.md — Rule for src.")),
         "{st} {b}"
     );
     let (st, b) = ask(&boss, json!(["src/lib.rs"]));
@@ -262,7 +262,7 @@ impl S {
     let (st, rel) = ask(&agent, json!(["src/lib.rs"]));
     assert_eq!(st, 200, "{rel}");
     let rel = rel["text"].as_str().expect("text").to_owned();
-    assert!(rel.contains("src/lib.rs — 1 linha, Rust") && rel.contains("    1  pub fn only_in_the_task()"), "{rel}");
+    assert!(rel.contains("src/lib.rs — 1 line, Rust") && rel.contains("    1  pub fn only_in_the_task()"), "{rel}");
     // An absolute path inside the worktree gives the same answer.
     let absolute = Path::new(&worktree).join("src").join("lib.rs").to_string_lossy().into_owned();
     let (st, abs) = ask(&agent, json!([absolute]));
@@ -276,9 +276,9 @@ impl S {
     let text = b["text"].as_str().unwrap_or("");
     assert!(
         st == 200
-            && text.contains("does-not-exist.rs — não existe")
-            && text.contains("../outside.rs — recusado")
-            && text.contains("src — é uma pasta")
+            && text.contains("does-not-exist.rs — does not exist")
+            && text.contains("../outside.rs — refused: the path is outside the project root")
+            && text.contains("src — it is a folder, not a file")
             && text.contains("only_in_the_task"),
         "{st} {b}"
     );

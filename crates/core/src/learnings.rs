@@ -1,73 +1,73 @@
-//! Memória de longo prazo: os "aprendizados" do projeto.
+//! Long-term memory: the project's "learnings".
 //!
-//! Cada aprendizado é um arquivo `.md` em `memory/aprendizados/`, versionado no git, com um frontmatter:
+//! Each learning is a `.md` file in `memory/aprendizados/`, versioned in git, with a frontmatter:
 //!
 //! ```text
 //! ---
-//! title: Acentos se perdem na entrada padrão do Windows
-//! summary: PowerShell 5.1 manda stdin em ASCII; texto com acento vai por --file.
+//! title: Accents get lost on the Windows standard input
+//! summary: PowerShell 5.1 sends stdin as ASCII; text with accents goes through --file.
 //! touches: [crates/core/src/bridge.rs, crates/cli/**]
 //! ---
-//! O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
+//! The fact, then **Why:** and **How to apply:** in a few lines.
 //! ```
 //!
 //! The old Portuguese keys `titulo:`/`resumo:` are still accepted; `title:`/`summary:` are preferred.
 //!
-//! `touches` são globs relativos à raiz do repositório (`*` não cruza `/`, `**` cruza; um padrão sem `/`
-//! vale para o nome do arquivo em qualquer pasta). Vazio ou ausente = o aprendizado vale para o projeto todo.
+//! `touches` are globs relative to the repository root (`*` does not cross `/`, `**` does; a pattern without
+//! `/` applies to the file name in any folder). Empty or missing = the learning applies to the whole project.
 //!
-//! Este módulo só tem funções puras (mais a leitura da pasta): o app entrega o pedaço certo a cada agente
-//! ([`render`], usado no início da tarefa e por `ask-agent --learn`). Um arquivo mal formado é ignorado com um
-//! aviso no log; nunca derruba a entrega dos outros.
+//! This module has only pure functions (plus reading the folder): the app hands the right piece to each agent
+//! ([`render`], used at the start of a task and by `ask-agent --learn`). A malformed file is skipped with a
+//! warning in the log; it never takes down the delivery of the others.
 
 use std::path::Path;
 
 use regex::Regex;
 
-/// Pasta dos aprendizados, relativa à raiz do repositório.
+/// Folder of the learnings, relative to the repository root.
 pub const DIR: &str = "memory/aprendizados";
-/// Orçamento (em caracteres) dos textos completos entregues no início da tarefa; o que passar vira só a linha do índice.
+/// Budget (in characters) of the full texts delivered at the start of a task; what goes over becomes only the index line.
 pub const START_BUDGET: usize = 6_000;
-/// Orçamento dos textos completos de `ask-agent --learn`.
+/// Budget of the full texts of `ask-agent --learn`.
 pub const LEARN_BUDGET: usize = 12_000;
-/// Orçamento do índice (uma linha por aprendizado); passando, termina em "e mais N".
+/// Budget of the index (one line per learning); going over it ends with "and N more".
 const INDEX_BUDGET: usize = 2_500;
-/// Arquivos lidos da pasta, e tamanho máximo de cada um: o que passar é ignorado.
+/// Files read from the folder, and the maximum size of each: what goes over is ignored.
 const MAX_FILES: usize = 200;
 const MAX_FILE_BYTES: u64 = 64 * 1024;
-/// Caminhos extraídos de um texto (o resto é ignorado).
+/// Paths extracted from one text (the rest is ignored).
 const MAX_PATHS: usize = 60;
 
-/// Um aprendizado lido da pasta.
+/// A learning read from the folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Learning {
-    /// Caminho relativo à raiz do repositório (`memory/aprendizados/acentos.md`), com `/`.
+    /// Path relative to the repository root (`memory/aprendizados/accents.md`), with `/`.
     pub file: String,
     pub titulo: String,
     pub resumo: String,
-    /// Globs dos arquivos a que se aplica; vazio = o projeto todo.
+    /// Globs of the files it applies to; empty = the whole project.
     pub touches: Vec<String>,
-    /// O texto depois do frontmatter.
+    /// The text after the frontmatter.
     pub body: String,
 }
 
 impl Learning {
-    /// Vale para o projeto todo (sem `touches`).
+    /// Applies to the whole project (no `touches`).
     pub fn is_global(&self) -> bool {
         self.touches.is_empty()
     }
 
-    /// Algum dos `touches` casa com algum dos caminhos (já normalizados, relativos à raiz).
+    /// Any of the `touches` matches any of the paths (already normalized, relative to the root).
     pub fn touches_any(&self, paths: &[String]) -> bool {
         self.touches.iter().any(|g| paths.iter().any(|p| glob_match(g, p)))
     }
 
-    /// A linha do índice: `- <arquivo> — <resumo>`.
+    /// The index line: `- <file> — <summary>`.
     fn index_line(&self) -> String {
         format!("- {} — {}", self.file, self.resumo)
     }
 
-    /// O texto completo: título, arquivo e corpo.
+    /// The full text: title, file and body.
     pub fn full_text(&self) -> String {
         format!("### {} ({})\n{}", self.titulo, self.file, self.body)
     }
@@ -75,7 +75,7 @@ impl Learning {
 
 // ---------- Frontmatter ----------
 
-/// Normaliza um caminho: `\` vira `/`, sem `./` no começo nem `/` sobrando nas pontas.
+/// Normalizes a path: `\` becomes `/`, no `./` at the start nor a leftover `/` at the ends.
 pub fn normalize_path(p: &str) -> String {
     let mut s = p.trim().replace('\\', "/");
     while let Some(rest) = s.strip_prefix("./") {
@@ -84,7 +84,7 @@ pub fn normalize_path(p: &str) -> String {
     s.trim_matches('/').to_owned()
 }
 
-/// Um glob de `touches` aceitável: relativo, sem `..`.
+/// An acceptable `touches` glob: relative, without `..`.
 fn valid_glob(g: &str) -> bool {
     !g.is_empty() && !g.starts_with('/') && !g.chars().nth(1).is_some_and(|c| c == ':') && !g.split('/').any(|s| s == "..")
 }
@@ -99,20 +99,20 @@ fn unquote(s: &str) -> &str {
     s
 }
 
-/// Lê um arquivo de aprendizado. `file` é só o nome que vai para [`Learning::file`]. Erro = por que foi
-/// ignorado (frontmatter ausente ou aberto, título/resumo/corpo vazios, glob inválido).
+/// Reads a learning file. `file` is only the name that goes to [`Learning::file`]. Error = why it was
+/// ignored (missing or unclosed frontmatter, empty title/summary/body, invalid glob).
 pub fn parse(file: &str, text: &str) -> Result<Learning, String> {
     let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
     let mut lines = text.split_inclusive('\n');
     let first = lines.next().unwrap_or("");
     if first.trim_end() != "---" {
-        return Err("falta o frontmatter (o arquivo precisa começar com ---)".into());
+        return Err("missing frontmatter (the file must start with ---)".into());
     }
-    // Posição, no texto, em que a linha seguinte começa: o corpo é o que vem depois do `---` final.
+    // Position, in the text, where the next line starts: the body is what comes after the final `---`.
     let mut offset = first.len();
     let (mut titulo, mut resumo, mut touches) = (String::new(), String::new(), Vec::<String>::new());
     let mut closed = false;
-    // `touches:` pode vir em lista de uma linha (`[a, b]`) ou em itens `- a` nas linhas seguintes.
+    // `touches:` may come as a one-line list (`[a, b]`) or as `- a` items on the following lines.
     let mut in_list = false;
     for line in lines {
         offset += line.len();
@@ -143,21 +143,21 @@ pub fn parse(file: &str, text: &str) -> Result<Learning, String> {
         }
     }
     if !closed {
-        return Err("o frontmatter não foi fechado (falta o --- final)".into());
+        return Err("the frontmatter is not closed (the final --- is missing)".into());
     }
     let (titulo, resumo) = (one_line(&titulo), one_line(&resumo));
     if titulo.is_empty() || resumo.is_empty() {
-        return Err("title e summary (ou titulo e resumo) são obrigatórios".into());
+        return Err("title and summary (or titulo and resumo) are required".into());
     }
-    // Valida antes de normalizar: `normalize_path` tira a `/` inicial e esconderia um caminho absoluto.
+    // Validate before normalizing: `normalize_path` strips the leading `/` and would hide an absolute path.
     let touches: Vec<String> = touches.iter().map(|g| g.trim().replace('\\', "/")).filter(|g| !g.is_empty()).collect();
     if let Some(bad) = touches.iter().find(|g| !valid_glob(g)) {
-        return Err(format!("touches inválido: \"{bad}\" (use caminhos relativos à raiz do repositório, sem ..)"));
+        return Err(format!("invalid touches: \"{bad}\" (use paths relative to the repository root, without ..)"));
     }
     let touches: Vec<String> = touches.iter().map(|g| normalize_path(g)).collect();
     let body = text.get(offset..).unwrap_or("").trim().to_owned();
     if body.is_empty() {
-        return Err("o corpo está vazio: conte o fato, o porquê e como aplicar".into());
+        return Err("the body is empty: tell the fact, the why and how to apply".into());
     }
     Ok(Learning { file: file.to_owned(), titulo, resumo, touches, body })
 }
@@ -166,8 +166,8 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Lê `memory/aprendizados/*.md` de `root`, em ordem de nome. Pasta ausente = nenhum aprendizado. Arquivo
-/// inválido, grande demais ou ilegível é ignorado com um aviso no log (o `README.md` da pasta nunca conta).
+/// Reads `memory/aprendizados/*.md` from `root`, in name order. Missing folder = no learning. Invalid, too
+/// large or unreadable file is skipped with a warning in the log (the folder `README.md` never counts).
 pub fn load(root: &Path) -> Vec<Learning> {
     let dir = root.join(DIR);
     let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
@@ -182,15 +182,15 @@ pub fn load(root: &Path) -> Vec<Learning> {
         let name = entry.file_name().to_string_lossy().into_owned();
         let rel = format!("{DIR}/{name}");
         if entry.metadata().map_or(true, |m| !m.is_file() || m.len() > MAX_FILE_BYTES) {
-            log::warn!("aprendizado ignorado ({rel}): não é um arquivo ou passa de {} KB", MAX_FILE_BYTES / 1024);
+            log::warn!("learning ignored ({rel}): it is not a file or it goes over {} KB", MAX_FILE_BYTES / 1024);
             continue;
         }
         match std::fs::read(entry.path()) {
             Ok(raw) => match parse(&rel, &crate::util::decode_text(&raw)) {
                 Ok(l) => out.push(l),
-                Err(e) => log::warn!("aprendizado ignorado ({rel}): {e}"),
+                Err(e) => log::warn!("learning ignored ({rel}): {e}"),
             },
-            Err(e) => log::warn!("aprendizado ignorado ({rel}): {e}"),
+            Err(e) => log::warn!("learning ignored ({rel}): {e}"),
         }
     }
     out
@@ -198,7 +198,7 @@ pub fn load(root: &Path) -> Vec<Learning> {
 
 // ---------- Globs ----------
 
-/// `*` (qualquer coisa menos `/`) e `?` (um caractere) dentro de um segmento; sem diferença de caixa.
+/// `*` (anything but `/`) and `?` (one character) inside a segment; no case difference.
 fn segment_match(pattern: &str, text: &str) -> bool {
     let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
     let (mut pi, mut ti) = (0, 0);
@@ -229,9 +229,9 @@ fn segments_match(pattern: &[&str], path: &[&str]) -> bool {
     }
 }
 
-/// Se o glob `pattern` casa com o caminho `path` (ambos relativos à raiz, com `/`). Um padrão sem `/`
-/// (`*.rs`, `Cargo.toml`) vale para o nome do arquivo em qualquer pasta. `crates/cli/**` casa com tudo
-/// dentro de `crates/cli`.
+/// Whether the glob `pattern` matches the path `path` (both relative to the root, with `/`). A pattern without
+/// `/` (`*.rs`, `Cargo.toml`) applies to the file name in any folder. `crates/cli/**` matches everything
+/// inside `crates/cli`.
 pub fn glob_match(pattern: &str, path: &str) -> bool {
     let (pattern, path) = (normalize_path(pattern), normalize_path(path));
     if pattern.is_empty() || path.is_empty() {
@@ -244,38 +244,38 @@ pub fn glob_match(pattern: &str, path: &str) -> bool {
     segments_match(&pattern.split('/').collect::<Vec<_>>(), &segs)
 }
 
-/// Os aprendizados que valem para `paths`: os globais e os cujo `touches` casa. Primeiro os específicos
-/// (mais relevantes), depois os globais; cada grupo na ordem da pasta.
+/// The learnings that apply to `paths`: the global ones and the ones whose `touches` match. The specific ones
+/// first (most relevant), then the global ones; each group in the folder order.
 pub fn matching<'a>(all: &'a [Learning], paths: &[String]) -> Vec<&'a Learning> {
     let specific = all.iter().filter(|l| !l.is_global() && l.touches_any(paths));
     let global = all.iter().filter(|l| l.is_global());
     specific.chain(global).collect()
 }
 
-// ---------- Caminhos citados num texto ----------
+// ---------- Paths cited in a text ----------
 
-/// Os arquivos que `text` cita e que existem em `root` (só arquivos, dentro do repositório), sem repetição, na
-/// ordem em que aparecem. Aceita `/` e `\`; ignora `..` e caminhos absolutos.
+/// The files that `text` cites and that exist in `root` (files only, inside the repository), without repetition,
+/// in the order they appear. Accepts `/` and `\`; ignores `..` and absolute paths.
 pub fn paths_in_text(text: &str, root: &Path) -> Vec<String> {
     paths_in_text_where(text, |path| root.join(path).is_file())
 }
 
-/// Como [`paths_in_text`], com `exists` no lugar da checagem no disco (recebe o caminho já normalizado, relativo à raiz).
-/// Serve a quem confere os caminhos contra outra fonte, como a árvore de um commit.
+/// Like [`paths_in_text`], with `exists` in place of the disk check (it receives the path already normalized,
+/// relative to the root). It serves whoever checks the paths against another source, such as a commit tree.
 pub fn paths_in_text_where(text: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
     use std::sync::OnceLock;
     static TOKEN: OnceLock<Regex> = OnceLock::new();
-    let token = TOKEN.get_or_init(|| Regex::new(r"[A-Za-z0-9_.\-]+(?:[/\\][A-Za-z0-9_.\-]+)*").expect("regex fixa"));
+    let token = TOKEN.get_or_init(|| Regex::new(r"[A-Za-z0-9_.\-]+(?:[/\\][A-Za-z0-9_.\-]+)*").expect("fixed regex"));
     let mut out: Vec<String> = Vec::new();
     for m in token.find_iter(text) {
-        // Caminho absoluto (`/etc/x`, `C:\repo\x`: o pedaço depois da `/` ou `\`) ou com `..` não vale: o
-        // repositório é a raiz, e nada sai dele.
+        // An absolute path (`/etc/x`, `C:\repo\x`: the piece after the `/` or `\`) or one with `..` does not
+        // count: the repository is the root, and nothing leaves it.
         let after_separator = text[..m.start()].ends_with(['/', '\\']);
         if after_separator || m.as_str().split(['/', '\\']).any(|s| s == "..") {
             continue;
         }
         let path = normalize_path(m.as_str().trim_end_matches('.'));
-        // Uma palavra solta sem ponto (`tasks`) não é um arquivo.
+        // A lone word without a dot (`tasks`) is not a file.
         if path.is_empty() || !path.contains(['/', '.']) || path.split('/').any(|s| s.is_empty() || s == "." || s == "..") {
             continue;
         }
@@ -290,9 +290,9 @@ pub fn paths_in_text_where(text: &str, exists: impl Fn(&str) -> bool) -> Vec<Str
     out
 }
 
-// ---------- Entrega ----------
+// ---------- Delivery ----------
 
-/// Corta `text` em `max` caracteres, com reticências.
+/// Cuts `text` at `max` characters, with an ellipsis.
 fn clip(text: &str, max: usize) -> String {
     let (head, cut) = crate::util::truncate_chars(text, max);
     if cut {
@@ -302,18 +302,17 @@ fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// O texto a entregar a um agente: os aprendizados que valem para `paths` por inteiro, enquanto couberem em
-/// `budget` caracteres; o que passar do orçamento e os demais aprendizados viram uma linha de índice
-/// (arquivo + resumo). Vazio quando a pasta não tem aprendizado algum.
+/// The text to hand to an agent: the learnings that apply to `paths` in full, while they fit in `budget`
+/// characters; what goes over the budget and the remaining learnings become one index line (file + summary).
+/// Empty when the folder has no learning at all.
 pub fn render(all: &[Learning], paths: &[String], budget: usize) -> String {
     render_with(all, paths, budget, INDEX_BUDGET)
 }
 
-/// Cabeçalho do índice em [`render_with`].
-const INDEX_HEADER: &str =
-    "Outros aprendizados (abra o arquivo, ou rode ask-agent --learn <arquivo> antes de mexer num arquivo relacionado):\n";
+/// Header of the index in [`render_with`].
+const INDEX_HEADER: &str = "Other learnings (open the file, or run ask-agent --learn <file> before touching a related file):\n";
 
-/// Como [`render`], com o teto das linhas do índice em `index_budget` caracteres; `0` tira o índice.
+/// Like [`render`], with the cap of the index lines in `index_budget` characters; `0` drops the index.
 pub fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budget: usize) -> String {
     if all.is_empty() {
         return String::new();
@@ -336,7 +335,7 @@ pub fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budg
 
     let mut out = String::new();
     if !full.is_empty() {
-        out.push_str("Valem para este trabalho (projeto todo ou os arquivos em questão):\n\n");
+        out.push_str("Apply to this work (whole project or the files in question):\n\n");
         out.push_str(&full.join("\n\n"));
     }
     if !index.is_empty() && index_budget > 0 {
@@ -348,7 +347,7 @@ pub fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budg
         for (n, l) in index.iter().enumerate() {
             let line = clip(&l.index_line(), 220);
             if lines.chars().count() + line.chars().count() + 1 > index_budget {
-                lines.push_str(&format!("- … e mais {} (veja a pasta {DIR})\n", index.len() - n));
+                lines.push_str(&format!("- … and {} more (see the {DIR} folder)\n", index.len() - n));
                 break;
             }
             lines.push_str(&line);
@@ -359,23 +358,23 @@ pub fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budg
     out
 }
 
-/// Como criar um aprendizado, para o projeto que ainda não tem a pasta nem o `README.md` com o formato.
-const FORMAT_HELP: &str = "Para criar um, grave memory/aprendizados/<nome-curto>.md (um por armadilha, decisão ou convenção que custou tempo e o código não mostra):
+/// How to create a learning, for the project that has neither the folder nor the `README.md` with the format.
+const FORMAT_HELP: &str = "To create one, write memory/aprendizados/<short-name>.md (one per trap, decision or convention that cost time and the code does not show):
 
 ---
-title: uma linha
-summary: uma linha (é o que aparece no índice)
-touches: [globs/dos/arquivos/**, outro.rs]   # opcional; sem ele vale para o projeto todo
+title: one line
+summary: one line (it is what shows in the index)
+touches: [globs/of/files/**, another.rs]   # optional; without it, it applies to the whole project
 ---
-O fato, e depois **Por quê:** e **Como aplicar:** em poucas linhas.
+The fact, then **Why:** and **How to apply:** in a few lines.
 
-Versionado no git, passa pela mesma revisão que o código.";
+Versioned in git, it goes through the same review as the code.";
 
-/// Orçamento dos aprendizados entregues numa devolução ou reprovação ([`render_specific`]).
+/// Budget of the learnings delivered in a return or a rejection ([`render_specific`]).
 pub const FEEDBACK_BUDGET: usize = 3_000;
 
-/// Só os aprendizados específicos que casam com `paths`, por inteiro, enquanto couberem em `budget` caracteres;
-/// sem índice e sem os globais (o agente já os recebeu no início da tarefa). Vazio se `paths` é vazio ou nada casa.
+/// Only the specific learnings that match `paths`, in full, while they fit in `budget` characters; no index and
+/// no global ones (the agent already got them at the start of the task). Empty if `paths` is empty or nothing matches.
 pub fn render_specific(all: &[Learning], paths: &[String], budget: usize) -> String {
     let mut used = 0usize;
     let mut full: Vec<String> = Vec::new();
@@ -391,24 +390,24 @@ pub fn render_specific(all: &[Learning], paths: &[String], budget: usize) -> Str
     full.join("\n\n")
 }
 
-/// Resposta de `ask-agent --learn [<caminho>…]`: o que o projeto aprendeu sobre esses arquivos; sem caminhos, os
-/// globais por inteiro e o índice dos específicos.
+/// Answer of `ask-agent --learn [<path>…]`: what the project learned about those files; without paths, the
+/// global ones in full and the index of the specific ones.
 pub fn learn_report(all: &[Learning], paths: &[String]) -> String {
     learn_report_with(all, paths, LEARN_BUDGET, INDEX_BUDGET)
 }
 
-/// [`learn_report`] com os tetos dos aprendizados por inteiro (`budget`) e das linhas do índice (`index_budget`).
+/// [`learn_report`] with the caps of the full learnings (`budget`) and of the index lines (`index_budget`).
 fn learn_report_with(all: &[Learning], paths: &[String], budget: usize, index_budget: usize) -> String {
     if all.is_empty() {
         return format!(
-            "O projeto ainda não tem aprendizados ({DIR}/ está vazia ou não existe).
+            "The project has no learnings yet ({DIR}/ is empty or does not exist).
 
 {FORMAT_HELP}"
         );
     }
     if paths.is_empty() {
         return format!(
-            "Aprendizados do projeto:
+            "Project learnings:
 
 {}",
             render_with(all, &[], budget, index_budget)
@@ -417,15 +416,15 @@ fn learn_report_with(all: &[Learning], paths: &[String], budget: usize, index_bu
     let specific = all.iter().filter(|l| !l.is_global() && l.touches_any(paths)).count();
     let body = render_with(all, paths, budget, index_budget);
     let head = if specific == 0 {
-        format!("Nenhum aprendizado específico para: {}. Valem só os globais, se houver:\n\n", paths.join(", "))
+        format!("No specific learning for: {}. Only the global ones apply, if any:\n\n", paths.join(", "))
     } else {
-        format!("Aprendizados para: {}\n\n", paths.join(", "))
+        format!("Learnings for: {}\n\n", paths.join(", "))
     };
     format!("{head}{body}")
 }
 
-/// `path` relativo a uma das `roots` (um caminho absoluto dentro da worktree ou do repositório vira o caminho
-/// do repositório); qualquer outro é só normalizado.
+/// `path` relative to one of the `roots` (an absolute path inside the worktree or the repository becomes the
+/// repository path); any other is only normalized.
 pub fn relativize(path: &str, roots: &[std::path::PathBuf]) -> String {
     let norm = normalize_path(path);
     for root in roots {
@@ -440,17 +439,17 @@ pub fn relativize(path: &str, roots: &[std::path::PathBuf]) -> String {
 }
 
 impl crate::Core {
-    /// Resposta de `ask-agent --learn`: o que o projeto aprendeu sobre `paths`. Lê a pasta de aprendizados da
-    /// worktree da tarefa de `instance` (onde o agente trabalha, com os aprendizados que ele mesmo criou) ou, sem
-    /// tarefa, do repositório do projeto. Soma a situação atual do projeto ([`crate::situation`]): com `paths`, no
-    /// topo, o aviso dos que outra tarefa em andamento também mexe; sem `paths`, no fim, a seção inteira. O agente
-    /// de uma tarefa não se vê nela.
+    /// Answer of `ask-agent --learn`: what the project learned about `paths`. It reads the learnings folder of the
+    /// worktree of `instance`'s task (where the agent works, with the learnings it created itself) or, without a
+    /// task, of the project repository. It adds the current situation of the project ([`crate::situation`]): with
+    /// `paths`, at the top, the warning about the ones another running task also touches; without `paths`, at the
+    /// end, the whole section. The agent of a task does not see itself in it.
     pub fn learn(&self, project: &str, instance: &str, paths: &[String]) -> Result<String, String> {
         let repo = self.project_path(project).and_then(|p| self.git_repo_at(&p).ok());
         let project_root = repo.as_ref().map(|r| r.root.clone());
         let work_root = self.task_cwd(project, instance).or_else(|| project_root.clone());
         let Some(work_root) = work_root else {
-            return Err("não achei o repositório do projeto: os aprendizados moram em memory/aprendizados/ dele".into());
+            return Err("could not find the project repository: the learnings live in its memory/aprendizados/".into());
         };
         let roots: Vec<std::path::PathBuf> = [Some(work_root.clone()), project_root].into_iter().flatten().collect();
         let paths: Vec<String> = paths.iter().map(|p| relativize(p, &roots)).filter(|p| !p.is_empty()).collect();
@@ -460,7 +459,7 @@ impl crate::Core {
         if !paths.is_empty() {
             let report = learn_report(&all, &paths);
             let warnings = crate::situation::clash_warnings(&others, &paths);
-            return Ok(if warnings.is_empty() { report } else { format!("ATENÇÃO:\n{warnings}\n\n{report}") });
+            return Ok(if warnings.is_empty() { report } else { format!("WARNING:\n{warnings}\n\n{report}") });
         }
         let base = self.task_of_instance(project, instance).map(|t| t.base).or_else(|| current_branch(&repo));
         let base = base.unwrap_or_else(|| "HEAD".into());
@@ -470,11 +469,11 @@ impl crate::Core {
     }
 }
 
-/// `--learn` sem arquivos: os aprendizados e a situação atual sob um teto só (`LEARN_BUDGET`). Cabe tudo? Senão
-/// corta primeiro os commits da situação (`lean_situation` é ela sem eles), depois o índice dos aprendizados e por
-/// último os globais por inteiro.
+/// `--learn` without files: the learnings and the current situation under a single cap (`LEARN_BUDGET`). Does
+/// everything fit? If not, it cuts the commits of the situation first (`lean_situation` is it without them), then
+/// the learnings index and finally the global ones in full.
 fn learn_with_situation(all: &[Learning], full_situation: &str, lean_situation: &str) -> String {
-    let join = |report: String, situation: &str| format!("{report}\n\nSituação atual:\n{situation}");
+    let join = |report: String, situation: &str| format!("{report}\n\nCurrent situation:\n{situation}");
     let size = |text: &str| text.chars().count();
     for situation in [full_situation, lean_situation] {
         let text = join(learn_report(all, &[]), situation);
@@ -482,9 +481,9 @@ fn learn_with_situation(all: &[Learning], full_situation: &str, lean_situation: 
             return text;
         }
     }
-    // O índice ocupa o que sobra depois dos globais e da situação enxuta (o cabeçalho dele também conta).
+    // The index takes what is left after the global ones and the lean situation (its header also counts).
     let without_index = join(learn_report_with(all, &[], LEARN_BUDGET, 0), lean_situation);
-    // A linha final "… e mais N" passa um pouco do teto do índice: sobra uma margem para ela.
+    // The final "… and N more" line goes a little over the index cap: leave a margin for it.
     let spare = LEARN_BUDGET.saturating_sub(size(&without_index) + size(INDEX_HEADER) + 100);
     if spare > 0 {
         let text = join(learn_report_with(all, &[], LEARN_BUDGET, spare), lean_situation);
@@ -495,11 +494,11 @@ fn learn_with_situation(all: &[Learning], full_situation: &str, lean_situation: 
     if size(&without_index) <= LEARN_BUDGET {
         return without_index;
     }
-    let overhead = size(&join("Aprendizados do projeto:\n\n".to_owned(), lean_situation));
+    let overhead = size(&join("Project learnings:\n\n".to_owned(), lean_situation));
     join(learn_report_with(all, &[], LEARN_BUDGET.saturating_sub(overhead), 0), lean_situation)
 }
 
-/// A branch em que o repositório principal está (vazio em HEAD solto).
+/// The branch the main repository is on (empty in a detached HEAD).
 fn current_branch(repo: &crate::git::Repo) -> Option<String> {
     let out = repo.read(&["branch", "--show-current"]).ok()?;
     Some(String::from_utf8_lossy(&out.stdout).trim().to_owned()).filter(|b| !b.is_empty())
@@ -509,7 +508,7 @@ fn current_branch(repo: &crate::git::Repo) -> Option<String> {
 mod tests {
     use super::*;
 
-    const GOOD: &str = "---\ntitulo: Acentos\nresumo: Use --file.\ntouches: [crates/cli/**, \"crates/core/src/bridge.rs\"]\n---\nO fato.\n\n**Por quê:** x.\n";
+    const GOOD: &str = "---\ntitulo: Acentos\nresumo: Use --file.\ntouches: [crates/cli/**, \"crates/core/src/bridge.rs\"]\n---\nThe fact.\n\n**Why:** x.\n";
 
     fn learning(file: &str, touches: &[&str], body: &str) -> Learning {
         Learning {
@@ -530,7 +529,7 @@ mod tests {
         let l = parse("memory/aprendizados/a.md", GOOD).unwrap();
         assert_eq!((l.titulo.as_str(), l.resumo.as_str()), ("Acentos", "Use --file."));
         assert_eq!(l.touches, ["crates/cli/**", "crates/core/src/bridge.rs"]);
-        assert_eq!(l.body, "O fato.\n\n**Por quê:** x.");
+        assert_eq!(l.body, "The fact.\n\n**Why:** x.");
         assert!(!l.is_global());
     }
 
@@ -546,28 +545,28 @@ mod tests {
 
     #[test]
     fn touches_can_be_missing_empty_or_a_dash_list() {
-        let global = "---\ntitulo: A\nresumo: B\n---\ncorpo";
+        let global = "---\ntitulo: A\nresumo: B\n---\nbody";
         assert!(parse("a.md", global).unwrap().is_global());
-        assert!(parse("a.md", "---\ntitulo: A\nresumo: B\ntouches: []\n---\ncorpo").unwrap().is_global());
-        let list = "---\ntitulo: A\nresumo: B\ntouches:\n  - src/a.rs\n  - \"x/**\"\n---\ncorpo";
+        assert!(parse("a.md", "---\ntitulo: A\nresumo: B\ntouches: []\n---\nbody").unwrap().is_global());
+        let list = "---\ntitulo: A\nresumo: B\ntouches:\n  - src/a.rs\n  - \"x/**\"\n---\nbody";
         assert_eq!(parse("a.md", list).unwrap().touches, ["src/a.rs", "x/**"]);
-        // CRLF e BOM (o Windows grava assim).
-        let crlf = "\u{feff}---\r\ntitulo: A\r\nresumo: B\r\ntouches: [a.rs]\r\n---\r\ncorpo\r\n";
+        // CRLF and BOM (Windows writes them that way).
+        let crlf = "\u{feff}---\r\ntitulo: A\r\nresumo: B\r\ntouches: [a.rs]\r\n---\r\nbody\r\n";
         let l = parse("a.md", crlf).unwrap();
-        assert_eq!((l.touches, l.body.as_str()), (strings(&["a.rs"]), "corpo"));
+        assert_eq!((l.touches, l.body.as_str()), (strings(&["a.rs"]), "body"));
     }
 
     #[test]
     fn a_broken_frontmatter_is_rejected_with_a_reason() {
         for (text, why) in [
-            ("sem frontmatter", "frontmatter"),
-            ("---\ntitulo: A\nresumo: B\ncorpo sem fechar", "fechado"),
-            ("---\nresumo: B\n---\ncorpo", "obrigatórios"),
-            ("---\ntitulo: A\n---\ncorpo", "obrigatórios"),
-            ("---\ntitulo: A\nresumo: B\n---\n   \n", "corpo"),
-            ("---\ntitulo: A\nresumo: B\ntouches: [../fora.rs]\n---\ncorpo", "touches"),
-            ("---\ntitulo: A\nresumo: B\ntouches: [/abs/a.rs]\n---\ncorpo", "touches"),
-            ("---\ntitulo: A\nresumo: B\ntouches: [C:/a.rs]\n---\ncorpo", "touches"),
+            ("no frontmatter", "frontmatter"),
+            ("---\ntitulo: A\nresumo: B\nbody without closing", "closed"),
+            ("---\nresumo: B\n---\nbody", "required"),
+            ("---\ntitulo: A\n---\nbody", "required"),
+            ("---\ntitulo: A\nresumo: B\n---\n   \n", "body"),
+            ("---\ntitulo: A\nresumo: B\ntouches: [../outside.rs]\n---\nbody", "touches"),
+            ("---\ntitulo: A\nresumo: B\ntouches: [/abs/a.rs]\n---\nbody", "touches"),
+            ("---\ntitulo: A\nresumo: B\ntouches: [C:/a.rs]\n---\nbody", "touches"),
         ] {
             let err = parse("a.md", text).unwrap_err();
             assert!(err.contains(why), "{text:?} → {err}");
@@ -576,7 +575,7 @@ mod tests {
 
     #[test]
     fn globs_follow_star_and_double_star() {
-        // `*` não cruza pasta; `**` cruza (e casa zero pastas).
+        // `*` does not cross a folder; `**` does (and matches zero folders).
         assert!(glob_match("crates/core/src/*.rs", "crates/core/src/tasks.rs"));
         assert!(!glob_match("crates/core/src/*.rs", "crates/core/src/usage/mod.rs"));
         assert!(glob_match("crates/cli/**", "crates/cli/src/bin/ask-agent.rs"));
@@ -586,14 +585,14 @@ mod tests {
         assert!(glob_match("crates/core/src/ta?ks.rs", "crates/core/src/tasks.rs"));
         assert!(glob_match("memory/*.md", "memory/GERAL.md"));
         assert!(!glob_match("memory/*.md", "memory/aprendizados/a.md"));
-        // Sem barra: o nome do arquivo em qualquer pasta. Barras invertidas e `./` são normalizados.
+        // Without a slash: the file name in any folder. Backslashes and `./` are normalized.
         assert!(glob_match("*.rs", "crates/core/src/tasks.rs"));
         assert!(glob_match("Cargo.toml", "crates/cli/Cargo.toml"));
         assert!(!glob_match("*.rs", "crates/core/README.md"));
         assert!(glob_match("crates/cli/**", ".\\crates\\cli\\src\\a.rs"));
-        // Sem diferença de caixa (o Windows não distingue).
+        // No case difference (Windows does not tell them apart).
         assert!(glob_match("Crates/CLI/**", "crates/cli/a.rs"));
-        // Padrão ou caminho vazio nunca casa.
+        // An empty pattern or path never matches.
         assert!(!glob_match("", "a.rs") && !glob_match("a.rs", ""));
     }
 
@@ -603,7 +602,7 @@ mod tests {
             vec![learning("a-global", &[], "g"), learning("b-cli", &["crates/cli/**"], "c"), learning("c-ui", &["crates/app/**"], "u")];
         let got: Vec<&str> = matching(&all, &strings(&["crates/cli/src/x.rs"])).iter().map(|l| l.file.as_str()).collect();
         assert_eq!(got, [format!("{DIR}/b-cli.md"), format!("{DIR}/a-global.md")]);
-        // Sem arquivos citados, só os globais.
+        // Without cited files, only the global ones.
         assert_eq!(matching(&all, &[]).len(), 1);
     }
 
@@ -615,11 +614,11 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, "x").unwrap();
         }
-        let text = "Leia `memory/AGENTDECK.md` e crates/core/src/tasks.rs (ver `start_message`); \
-                    crates\\core\\src\\tasks.rs de novo, Cargo.toml, ../fora.rs, crates/core/src/nao_existe.rs e crates/core (pasta).";
+        let text = "Read `memory/AGENTDECK.md` and crates/core/src/tasks.rs (see `start_message`); \
+                    crates\\core\\src\\tasks.rs again, Cargo.toml, ../outside.rs, crates/core/src/does_not_exist.rs and crates/core (folder).";
         assert_eq!(paths_in_text(text, dir.path()), ["memory/AGENTDECK.md", "crates/core/src/tasks.rs", "Cargo.toml"]);
-        assert!(paths_in_text("nada aqui, só palavras. e ponto.", dir.path()).is_empty());
-        // Uma pasta não é arquivo; `..` e caminhos absolutos não escapam do repositório.
+        assert!(paths_in_text("nothing here, only words. and a period.", dir.path()).is_empty());
+        // A folder is not a file; `..` and absolute paths do not escape the repository.
         assert!(paths_in_text("crates/core ../Cargo.toml /etc/passwd", dir.path()).is_empty());
     }
 
@@ -632,15 +631,15 @@ mod tests {
             learning("c-ui", &["crates/app/**"], "u"),
         ];
         let out = render(&all, &strings(&["crates/cli/a.rs"]), 400);
-        // Só o primeiro cabe por inteiro; o segundo vira linha de índice, junto com o que não casa.
+        // Only the first one fits in full; the second becomes an index line, together with the ones that do not match.
         assert!(out.contains("### T a-cli") && !out.contains("### T b-cli") && !out.contains("### T c-ui"), "{out}");
         assert!(out.contains(&format!("- {DIR}/b-cli.md — R b-cli")), "{out}");
         assert!(out.contains(&format!("- {DIR}/c-ui.md — R c-ui")), "{out}");
-        // Com folga, tudo o que casa vem por inteiro e o resto fica no índice.
+        // With room, everything that matches comes in full and the rest stays in the index.
         let out = render(&all, &strings(&["crates/cli/a.rs"]), 10_000);
         assert!(out.contains("### T a-cli") && out.contains("### T b-cli") && !out.contains("### T c-ui"), "{out}");
         assert!(out.contains("c-ui.md — R c-ui") && !out.contains("b-cli.md — R"), "{out}");
-        // Pasta vazia: nada a entregar.
+        // Empty folder: nothing to deliver.
         assert_eq!(render(&[], &[], 100), "");
     }
 
@@ -654,107 +653,108 @@ mod tests {
             learning("d-cli", &["crates/cli/**"], &big),
         ];
         let out = render_specific(&all, &strings(&["crates/cli/a.rs"]), 10_000);
-        // Sem globais, sem os que não casam e sem linha de índice.
+        // No global ones, none that does not match and no index line.
         assert!(out.contains("### T b-cli") && out.contains("### T d-cli"), "{out}");
         assert!(!out.contains("T a-global") && !out.contains("T c-ui") && !out.contains("- memory/"), "{out}");
-        // O que passa do orçamento fica de fora (e não vira índice).
+        // What goes over the budget stays out (and does not become an index line).
         let out = render_specific(&all, &strings(&["crates/cli/a.rs"]), 100);
         assert!(out.contains("### T b-cli") && !out.contains("T d-cli"), "{out}");
-        // Sem caminhos ou sem nada que case: vazio.
+        // Without paths or without anything matching: empty.
         assert_eq!(render_specific(&all, &[], 10_000), "");
         assert_eq!(render_specific(&all, &strings(&["docs/x.md"]), 10_000), "");
     }
 
     #[test]
     fn a_long_index_ends_with_a_count() {
-        let all: Vec<Learning> = (0..80).map(|n| learning(&format!("n{n:03}"), &["x/**"], &"corpo ".repeat(40))).collect();
+        let all: Vec<Learning> = (0..80).map(|n| learning(&format!("n{n:03}"), &["x/**"], &"body ".repeat(40))).collect();
         let out = render(&all, &[], 0);
-        assert!(out.contains("- … e mais ") && out.chars().count() < INDEX_BUDGET + 400, "{}", out.chars().count());
+        assert!(out.contains("- … and ") && out.chars().count() < INDEX_BUDGET + 400, "{}", out.chars().count());
     }
 
     #[test]
     fn the_learn_report_says_when_nothing_matches() {
         let all = vec![learning("a", &["crates/cli/**"], "c"), learning("g", &[], "global")];
         let hit = learn_report(&all, &strings(&["crates/cli/x.rs"]));
-        assert!(hit.starts_with("Aprendizados para: crates/cli/x.rs") && hit.contains("### T a") && hit.contains("### T g"), "{hit}");
+        assert!(hit.starts_with("Learnings for: crates/cli/x.rs") && hit.contains("### T a") && hit.contains("### T g"), "{hit}");
         let miss = learn_report(&all, &strings(&["docs/x.md"]));
-        assert!(miss.contains("Nenhum aprendizado específico") && !miss.contains("### T a") && miss.contains("### T g"), "{miss}");
+        assert!(miss.contains("No specific learning") && !miss.contains("### T a") && miss.contains("### T g"), "{miss}");
         let empty = learn_report(&[], &strings(&["a.rs"]));
-        assert!(empty.contains("ainda não tem aprendizados"));
-        // Sem aprendizados (projeto novo), o relatório ensina o formato: lá não há `memory/aprendizados/README.md`.
-        assert!(empty.contains("memory/aprendizados/<nome-curto>.md") && empty.contains("title:") && empty.contains("summary:"), "{empty}");
+        assert!(empty.contains("has no learnings yet"));
+        // With no learnings (new project), the report teaches the format: there is no `memory/aprendizados/README.md` there.
+        assert!(empty.contains("memory/aprendizados/<short-name>.md") && empty.contains("title:") && empty.contains("summary:"), "{empty}");
     }
 
     #[test]
     fn the_learn_report_without_paths_gives_the_globals_and_the_index() {
         let all = vec![learning("a", &["crates/cli/**"], "c"), learning("g", &[], "global")];
         let out = learn_report(&all, &[]);
-        assert!(out.starts_with("Aprendizados do projeto:") && !out.contains("Nenhum aprendizado específico"), "{out}");
+        assert!(out.starts_with("Project learnings:") && !out.contains("No specific learning"), "{out}");
         assert!(out.contains("### T g") && out.contains("global"), "{out}");
         assert!(!out.contains("### T a") && out.contains(&format!("- {DIR}/a.md — R a")), "{out}");
-        assert!(learn_report(&[], &[]).contains("ainda não tem aprendizados"));
+        assert!(learn_report(&[], &[]).contains("has no learnings yet"));
     }
 
     #[test]
     fn the_learn_with_situation_cuts_the_commits_then_the_index_then_the_globals() {
         let size = |t: &str| t.chars().count();
-        let specific: Vec<Learning> = (0..30).map(|n| learning(&format!("e{n}"), &["crates/**"], "corpo")).collect();
-        let (full, lean) = ("situação completa\ncommits".to_owned(), "situação enxuta".to_owned());
-        // Cabe tudo: nada é cortado.
+        let specific: Vec<Learning> = (0..30).map(|n| learning(&format!("e{n}"), &["crates/**"], "body")).collect();
+        let (full, lean) = ("full situation\ncommits".to_owned(), "lean situation".to_owned());
+        // Everything fits: nothing is cut.
         let mut all = vec![learning("g", &[], "global")];
         all.extend(specific.clone());
         let text = learn_with_situation(&all, &full, &lean);
-        assert!(text.contains("situação completa") && text.contains("### T g") && !text.contains("- … e mais"), "{text}");
-        // Os globais ocupam quase tudo: a situação perde os commits, o índice encolhe, os globais ficam.
+        assert!(text.contains("full situation") && text.contains("### T g") && !text.contains("- … and "), "{text}");
+        // The global ones take almost everything: the situation loses the commits, the index shrinks, the global ones stay.
         let big = "x".repeat(LEARN_BUDGET - 700);
         let mut all = vec![learning("g", &[], &big)];
         all.extend(specific.clone());
         let text = learn_with_situation(&all, &"c".repeat(1_500), &lean);
-        assert!(size(&text) <= LEARN_BUDGET && text.contains(&big) && text.contains("situação enxuta"), "{}", size(&text));
-        assert!(text.contains("- … e mais"), "o índice encolheu: {} {}", size(&text), text.split("Outros").nth(1).unwrap_or("sem índice"));
-        // Nem os globais cabem com a situação: o índice some, depois os globais; a situação enxuta fica.
-        let huge = "x".repeat(LEARN_BUDGET - 60);
-        let all = vec![learning("g", &[], &huge), learning("e", &["crates/**"], "corpo")];
-        let text = learn_with_situation(&all, &full, &lean);
+        assert!(size(&text) <= LEARN_BUDGET && text.contains(&big) && text.contains("lean situation"), "{}", size(&text));
         assert!(
-            size(&text) <= LEARN_BUDGET && text.ends_with("situação enxuta") && !text.contains("Outros aprendizados"),
-            "{}",
-            size(&text)
+            text.contains("- … and "),
+            "the index shrank: {} {}",
+            size(&text),
+            text.split("Other learnings").nth(1).unwrap_or("no index")
         );
+        // Not even the global ones fit with the situation: the index goes, then the global ones; the lean situation stays.
+        let huge = "x".repeat(LEARN_BUDGET - 60);
+        let all = vec![learning("g", &[], &huge), learning("e", &["crates/**"], "body")];
+        let text = learn_with_situation(&all, &full, &lean);
+        assert!(size(&text) <= LEARN_BUDGET && text.ends_with("lean situation") && !text.contains("Other learnings"), "{}", size(&text));
     }
 
     #[test]
     fn the_folder_is_read_and_a_bad_file_is_skipped() {
         let dir = tempfile::tempdir().unwrap();
-        // Pasta ausente: nenhum aprendizado, nenhum erro.
+        // Missing folder: no learning, no error.
         assert!(load(dir.path()).is_empty());
         let learn = dir.path().join(DIR);
         std::fs::create_dir_all(&learn).unwrap();
         std::fs::write(learn.join("b.md"), GOOD).unwrap();
-        std::fs::write(learn.join("a.md"), "---\ntitulo: A\nresumo: B\n---\ncorpo").unwrap();
-        std::fs::write(learn.join("quebrado.md"), "sem frontmatter").unwrap();
-        std::fs::write(learn.join("README.md"), "---\ntitulo: R\nresumo: R\n---\nnão conta").unwrap();
-        std::fs::write(learn.join("nota.txt"), GOOD).unwrap();
+        std::fs::write(learn.join("a.md"), "---\ntitulo: A\nresumo: B\n---\nbody").unwrap();
+        std::fs::write(learn.join("broken.md"), "no frontmatter").unwrap();
+        std::fs::write(learn.join("README.md"), "---\ntitulo: R\nresumo: R\n---\ndoes not count").unwrap();
+        std::fs::write(learn.join("note.txt"), GOOD).unwrap();
         let got = load(dir.path());
         assert_eq!(got.iter().map(|l| l.file.as_str()).collect::<Vec<_>>(), [format!("{DIR}/a.md"), format!("{DIR}/b.md")]);
     }
 
     #[test]
     fn every_learning_in_the_repository_is_valid() {
-        // Os aprendizados reais do projeto: um frontmatter quebrado seria ignorado em silêncio no app.
+        // The real learnings of the project: a broken frontmatter would be silently ignored in the app.
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let files = std::fs::read_dir(root.join(DIR))
-            .expect("memory/aprendizados existe")
+            .expect("memory/aprendizados exists")
             .filter_map(Result::ok)
             .filter(|e| e.path().extension().is_some_and(|x| x == "md") && e.file_name() != "README.md")
             .count();
         let loaded = load(&root);
-        assert!(files >= 4, "o projeto deve ter aprendizados semeados");
-        assert_eq!(loaded.len(), files, "algum aprendizado da pasta não passou na validação");
-        // Cada `touches` literal (sem curinga) aponta para um arquivo que existe.
+        assert!(files >= 4, "the project must have seeded learnings");
+        assert_eq!(loaded.len(), files, "some learning in the folder did not pass validation");
+        // Every literal `touches` (without a wildcard) points to a file that exists.
         for l in &loaded {
             for g in l.touches.iter().filter(|g| !g.contains(['*', '?'])) {
-                assert!(root.join(g).exists(), "{}: touches aponta para {g}, que não existe", l.file);
+                assert!(root.join(g).exists(), "{}: touches points to {g}, which does not exist", l.file);
             }
         }
     }
@@ -765,8 +765,8 @@ mod tests {
         assert_eq!(relativize(r"C:\repo\.agentdeck\worktrees\t13\crates\cli\a.rs", &roots), "crates/cli/a.rs");
         assert_eq!(relativize("c:/REPO/crates/core/x.rs", &roots), "crates/core/x.rs");
         assert_eq!(relativize(r"./crates\app\y.rs", &roots), "crates/app/y.rs");
-        // Fora das raízes, e prefixo parcial de nome de pasta: só normaliza.
-        assert_eq!(relativize("C:/outro/z.rs", &roots), "C:/outro/z.rs");
+        // Outside the roots, and a partial folder-name prefix: only normalized.
+        assert_eq!(relativize("C:/other/z.rs", &roots), "C:/other/z.rs");
         assert_eq!(relativize("C:/repository/z.rs", &roots), "C:/repository/z.rs");
     }
 }

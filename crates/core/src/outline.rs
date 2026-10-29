@@ -1,43 +1,45 @@
-//! `ask-agent --outline <arquivo>...`: o esqueleto de um arquivo (assinaturas com o número da linha, sem os corpos), para o
-//! agente ler só o trecho de que precisa em vez do arquivo inteiro.
+//! `ask-agent --outline <file>...`: the skeleton of a file (signatures with the line number, without the bodies),
+//! so the agent reads only the part it needs instead of the whole file.
 //!
-//! O léxico é o de [`crate::highlight`] (o mesmo que pinta o modo Documentos): as faixas de texto entre aspas e de comentário
-//! saem do código antes de contar chaves e de procurar assinaturas, então `"{"`, `'}'`, `r#"fn x() {"#` e `// fn y() {` não
-//! enganam. Não é um analisador de verdade: acha os itens de topo (e os membros de `impl`/`trait`/`mod`/`class`) pela
-//! profundidade das chaves e pela palavra que abre a linha, o que basta para um índice.
+//! The lexer is the one of [`crate::highlight`] (the same that paints the Documents mode): the ranges of quoted
+//! text and comments are taken out of the code before counting braces and looking for signatures, so `"{"`, `'}'`,
+//! `r#"fn x() {"#` and `// fn y() {` do not fool it. It is not a real parser: it finds the top-level items (and the
+//! members of `impl`/`trait`/`mod`/`class`) by the brace depth and by the word that opens the line, which is
+//! enough for an index.
 //!
-//! Nada aqui pode dar pânico com texto qualquer (o arquivo é do usuário): os cortes de texto passam por `get`/`chars`, e o
-//! teste `any_text_gives_an_outline_without_panicking` confere.
+//! Nothing here may panic with any text (the file belongs to the user): the text cuts go through `get`/`chars`,
+//! and the test `any_text_gives_an_outline_without_panicking` checks it.
 
 use std::path::{Path, PathBuf};
 
 use crate::highlight::{highlight_lines, Lang, Span, Tok};
 
-/// Caracteres da resposta de um arquivo e da chamada inteira (como o `LEARN_BUDGET` do `--learn`). Um arquivo tem
-/// pelo menos `FILE_BUDGET`; pedido sozinho (ou com poucos), divide a chamada inteira com os outros.
+/// Characters of the answer for one file and of the whole call (like the `LEARN_BUDGET` of `--learn`). One file
+/// gets at least `FILE_BUDGET`; asked alone (or with a few others), it shares the whole call with the others.
 pub const FILE_BUDGET: usize = 6_000;
 pub const OUTLINE_BUDGET: usize = 16_000;
-/// Passou disto o arquivo não é lido: vira uma linha de aviso.
+/// Past this size the file is not read: it becomes a warning line.
 const MAX_BYTES: u64 = 1024 * 1024;
-/// Largura máxima do texto de um item (sem o número da linha).
+/// Maximum width of an item's text (without the line number).
 const MAX_ITEM: usize = 150;
-/// Linhas olhadas à procura do fim de uma assinatura que quebra em várias.
+/// Lines looked at while searching for the end of a signature that breaks over several lines.
 const MAX_SIGNATURE_LINES: usize = 30;
-/// Reserva para a linha "… e mais N itens".
+/// Reserve for the "… and N more items" line.
 const TAIL_RESERVE: usize = 70;
 
-/// Uma linha do resumo.
+/// One line of the outline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Item {
-    /// Linha do arquivo, de 1 em diante.
+    /// Line of the file, from 1 on.
     line: usize,
-    /// Nível de aninhamento (cada um recua dois espaços).
+    /// Nesting level (each one indents two spaces).
     depth: usize,
     text: String,
 }
 
-/// O texto separado em linhas, com duas versões de cada: `code` sem texto entre aspas nem comentário (para achar chaves e
-/// palavras) e `shown` só sem comentário (para mostrar). Têm o mesmo tamanho em bytes, então um índice de uma vale na outra.
+/// The text split into lines, with two versions of each: `code` without quoted text or comments (to find braces
+/// and words) and `shown` only without comments (to show). They have the same size in bytes, so an index of one
+/// works on the other.
 struct Source<'a> {
     raw: Vec<&'a str>,
     code: Vec<String>,
@@ -69,9 +71,9 @@ impl<'a> Source<'a> {
     }
 }
 
-// ---------- Texto ----------
+// ---------- Text ----------
 
-/// Junta e limpa o que veio de várias linhas: espaços repetidos, `( a` e `a, )`.
+/// Joins and cleans what came from several lines: repeated spaces, `( a` and `a, )`.
 fn collapse(s: &str) -> String {
     let joined = s.split_whitespace().collect::<Vec<_>>().join(" ");
     joined
@@ -84,7 +86,7 @@ fn collapse(s: &str) -> String {
         .to_owned()
 }
 
-/// `s` com no máximo `max` caracteres; o que passa vira `…`.
+/// `s` with at most `max` characters; what goes over becomes `…`.
 fn clip(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_owned();
@@ -94,13 +96,13 @@ fn clip(s: &str, max: usize) -> String {
     out
 }
 
-/// A palavra (letras, dígitos e `_`) que abre `s`.
+/// The word (letters, digits and `_`) that opens `s`.
 fn first_word(s: &str) -> &str {
     let end = s.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(s.len());
     &s[..end]
 }
 
-/// Profundidade de chaves no começo de cada linha (só no código: sem aspas nem comentário).
+/// Brace depth at the start of each line (code only: without quotes or comments).
 fn brace_depths(code: &[String]) -> Vec<usize> {
     let mut depth = 0usize;
     let mut out = Vec::with_capacity(code.len());
@@ -117,9 +119,9 @@ fn brace_depths(code: &[String]) -> Vec<usize> {
     out
 }
 
-/// A assinatura que começa na linha `from`: o texto até o primeiro `stops` fora de parênteses, colchetes e chaves
-/// (que podem quebrar linha). Devolve o texto limpo, a linha onde parou e qual `stops` achou (`None` se não achou até o
-/// limite).
+/// The signature that starts on line `from`: the text up to the first `stops` outside parentheses, brackets and
+/// braces (which may break the line). It returns the cleaned text, the line where it stopped and which `stops` it
+/// found (`None` if it did not find one before the limit).
 fn signature(src: &Source, from: usize, stops: &[&str]) -> (String, usize, Option<usize>) {
     let mut text = String::new();
     let mut depth = 0usize;
@@ -170,7 +172,7 @@ enum Kind {
     Use,
 }
 
-/// O tipo de item que a linha abre (`code` já sem aspas e comentários) e se é `pub`.
+/// What kind of item the line opens (`code` already without quotes and comments) and whether it is `pub`.
 fn item_kind(t: &str) -> Option<(Kind, bool)> {
     if t.starts_with("macro_rules!") {
         return Some((Kind::Macro, false));
@@ -220,7 +222,7 @@ fn item_kind(t: &str) -> Option<(Kind, bool)> {
     Some((kind, public))
 }
 
-/// Quantos `#[test]` (ou `#[tokio::test]`...) o arquivo tem.
+/// How many `#[test]` (or `#[tokio::test]`...) the file has.
 fn count_tests(code: &[String]) -> usize {
     code.iter()
         .filter(|l| {
@@ -233,7 +235,8 @@ fn count_tests(code: &[String]) -> usize {
         .count()
 }
 
-/// Os nomes de campo de uma `struct` ou de variante de `enum` que moram nas linhas `from..` (até a chave fechar).
+/// The field names of a `struct` or the variant names of an `enum` that live on the lines `from..` (until the
+/// brace closes).
 fn member_names(src: &Source, depths: &[usize], from: usize, body_depth: usize, variants: bool) -> Vec<String> {
     let mut names = Vec::new();
     for (code, &depth) in src.code.iter().zip(depths).skip(from) {
@@ -268,7 +271,7 @@ fn member_names(src: &Source, depths: &[usize], from: usize, body_depth: usize, 
     names
 }
 
-/// `header { a, b, c }`, com os nomes cortados para a linha caber.
+/// `header { a, b, c }`, with the names cut so the line fits.
 fn with_members(header: &str, names: &[String]) -> String {
     if names.is_empty() {
         return header.to_owned();
@@ -292,10 +295,11 @@ fn with_members(header: &str, names: &[String]) -> String {
 fn rust_items(src: &Source) -> Vec<Item> {
     let n = src.len();
     let depths = brace_depths(&src.code);
-    // Os `#[test]` do arquivo inteiro: a linha do `mod tests` diz quantos são, sem casar o aninhamento dos módulos.
+    // The `#[test]` of the whole file: the line of `mod tests` says how many there are, without matching the
+    // nesting of the modules.
     let tests = count_tests(&src.code);
     let mut out = Vec::new();
-    // Profundidade (de chaves) dos itens `impl`/`trait`/`mod` abertos: os membros moram um nível abaixo.
+    // (Brace) depth of the open `impl`/`trait`/`mod` items: the members live one level below.
     let mut stack: Vec<usize> = Vec::new();
     let mut attrs: Vec<String> = Vec::new();
     let mut i = 0;
@@ -367,11 +371,8 @@ fn rust_items(src: &Source) -> Vec<Item> {
                 text = with_members(&sig, &names);
             }
             Kind::Mod if opens_body && (cfg_test || name_is_tests) => {
-                text = format!(
-                    "{}{sig} — {tests} {}",
-                    if cfg_test { "#[cfg(test)] " } else { "" },
-                    if tests == 1 { "teste" } else { "testes" }
-                );
+                text =
+                    format!("{}{sig} — {tests} {}", if cfg_test { "#[cfg(test)] " } else { "" }, if tests == 1 { "test" } else { "tests" });
             }
             Kind::Mod | Kind::Impl | Kind::Trait if opens_body => container = true,
             _ => {}
@@ -423,9 +424,9 @@ fn markdown_items(src: &Source) -> Vec<Item> {
     out
 }
 
-// ---------- Resumo de um arquivo ----------
+// ---------- Outline of one file ----------
 
-/// Os itens de `text` na linguagem de `lang`; `None` se não há resumo para ela.
+/// The items of `text` in the language of `lang`; `None` if there is no outline for it.
 fn items(lang: Lang, text: &str) -> Option<Vec<Item>> {
     match lang {
         Lang::Rust => Some(rust_items(&Source::new(lang, text))),
@@ -434,18 +435,27 @@ fn items(lang: Lang, text: &str) -> Option<Vec<Item>> {
     }
 }
 
-/// O resumo de um arquivo: o cabeçalho (caminho, linhas, linguagem) e os itens com o número da linha, até `budget`
-/// caracteres; o que passa vira "… e mais N itens (linhas X–Y)".
+/// `one` when `n` is 1, `many` otherwise (for the line and item counts).
+fn plural<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
+    if n == 1 {
+        one
+    } else {
+        many
+    }
+}
+
+/// The outline of one file: the header (path, lines, language) and the items with the line number, up to `budget`
+/// characters; what goes over becomes "… and N more items (lines X–Y)".
 pub fn outline(path: &str, text: &str, budget: usize) -> String {
     let lang = Lang::from_path(path);
     let lines = text.split('\n').count() - usize::from(text.ends_with('\n'));
-    let head = format!("{path} — {lines} linha{}, {}", if lines == 1 { "" } else { "s" }, lang.label());
+    let head = format!("{path} — {lines} {}, {}", plural(lines, "line", "lines"), lang.label());
     let Some(items) = items(lang, text) else {
-        let what = if lang == Lang::Plain { "este tipo de arquivo".to_owned() } else { lang.label().to_owned() };
-        return format!("{head}\n      (sem resumo para {what}; leia o arquivo, são {lines} linhas)");
+        let what = if lang == Lang::Plain { "this kind of file".to_owned() } else { lang.label().to_owned() };
+        return format!("{head}\n      (no outline for {what}; read the file, it has {lines} {})", plural(lines, "line", "lines"));
     };
     if items.is_empty() {
-        return format!("{head}\n      (nenhum item encontrado)");
+        return format!("{head}\n      (no item found)");
     }
     let limit = budget.saturating_sub(TAIL_RESERVE);
     let keep = fit_members(&head, &items, limit);
@@ -459,7 +469,7 @@ pub fn outline(path: &str, text: &str, budget: usize) -> String {
         let mut line = format!("\n{:>5}  {}{}", it.line, "  ".repeat(it.depth), it.text);
         let hidden = items[i + 1..].iter().take_while(|m| m.depth > it.depth).zip(&keep[i + 1..]).filter(|(_, k)| !**k).count();
         if hidden > 0 {
-            line.push_str(&format!(" (+{hidden} {} dentro)", if hidden == 1 { "item" } else { "itens" }));
+            line.push_str(&format!(" (+{hidden} {} inside)", plural(hidden, "item", "items")));
         }
         if out.chars().count() + line.chars().count() > limit && shown > 0 {
             cut = Some(i);
@@ -471,22 +481,18 @@ pub fn outline(path: &str, text: &str, budget: usize) -> String {
     if let Some(cut) = cut {
         let rest = &items[cut..];
         let (first, last) = (rest[0].line, rest[rest.len() - 1].line);
-        out.push_str(&format!(
-            "\n      … e mais {} {} (linhas {first}–{last})",
-            rest.len(),
-            if rest.len() == 1 { "item" } else { "itens" }
-        ));
+        out.push_str(&format!("\n      … and {} {} (lines {first}–{last})", rest.len(), plural(rest.len(), "item", "items")));
     }
     out
 }
 
-/// Reserva, por item de topo com membros, para a nota "(+N itens dentro)".
+/// Reserve, per top-level item with members, for the note "(+N items inside)".
 const HIDDEN_NOTE: usize = 20;
 
-/// Quais itens entram quando nem todos cabem em `limit`: os de topo (a menor profundidade do arquivo) sempre, e os
-/// membros (de `impl`, `mod`, seção) em ordem enquanto sobra lugar. Assim o orçamento estourado tira detalhe do meio,
-/// não o fim do arquivo (o `impl Core` e os testes, que costumam vir por último). Se nem os de topo cabem, `outline`
-/// corta o fim como antes.
+/// Which items go in when not all of them fit in `limit`: the top-level ones (the smallest depth of the file)
+/// always, and the members (of `impl`, `mod`, section) in order while there is room. That way going over the budget
+/// takes detail from the middle, not the end of the file (the `impl Core` and the tests, which usually come last). If
+/// not even the top-level ones fit, `outline` cuts the end as before.
 fn fit_members(head: &str, items: &[Item], limit: usize) -> Vec<bool> {
     let size = |it: &Item| format!("{:>5}  {}{}", it.line, "  ".repeat(it.depth), it.text).chars().count() + 1;
     if head.chars().count() + items.iter().map(size).sum::<usize>() <= limit {
@@ -514,47 +520,48 @@ fn fit_members(head: &str, items: &[Item], limit: usize) -> Vec<bool> {
 
 // ---------- Core ----------
 
-/// `rel` já normalizado (barras `/`) sem `..` e dentro da raiz? (`..`, caminho absoluto e letra de unidade saem.)
+/// `rel` already normalized (`/` slashes) without `..` and inside the root? (`..`, an absolute path and a drive
+/// letter are out.)
 fn escapes_root(rel: &str) -> bool {
     rel.split('/').any(|c| c == "..") || rel.starts_with('/') || rel.as_bytes().get(1) == Some(&b':')
 }
 
-/// O resumo de `rel` dentro de `root`, ou a linha de aviso do porquê não deu.
+/// The outline of `rel` inside `root`, or the warning line saying why it did not work.
 fn outline_path(root: &Path, canonical_root: &Path, rel: &str, budget: usize) -> String {
     if escapes_root(rel) {
-        return format!("{rel} — recusado: o caminho sai da raiz do projeto");
+        return format!("{rel} — refused: the path is outside the project root");
     }
     let full: PathBuf = root.join(rel);
-    let Ok(canonical) = full.canonicalize() else { return format!("{rel} — não existe") };
+    let Ok(canonical) = full.canonicalize() else { return format!("{rel} — does not exist") };
     if !canonical.starts_with(canonical_root) {
-        return format!("{rel} — recusado: o caminho sai da raiz do projeto");
+        return format!("{rel} — refused: the path is outside the project root");
     }
-    let Ok(meta) = std::fs::metadata(&canonical) else { return format!("{rel} — não consegui ler") };
+    let Ok(meta) = std::fs::metadata(&canonical) else { return format!("{rel} — could not read it") };
     if !meta.is_file() {
-        return format!("{rel} — é uma pasta, não um arquivo");
+        return format!("{rel} — it is a folder, not a file");
     }
     if meta.len() > MAX_BYTES {
-        return format!("{rel} — grande demais para resumir ({} KB; o limite é {} KB)", meta.len() / 1024, MAX_BYTES / 1024);
+        return format!("{rel} — too large to outline ({} KB; the limit is {} KB)", meta.len() / 1024, MAX_BYTES / 1024);
     }
-    let Ok(raw) = std::fs::read(&canonical) else { return format!("{rel} — não consegui ler") };
+    let Ok(raw) = std::fs::read(&canonical) else { return format!("{rel} — could not read it") };
     if raw.iter().take(8192).any(|b| *b == 0) && !raw.starts_with(&[0xFF, 0xFE]) && !raw.starts_with(&[0xFE, 0xFF]) {
-        return format!("{rel} — arquivo binário");
+        return format!("{rel} — binary file");
     }
     outline(rel, &crate::util::decode_text(&raw), budget)
 }
 
 impl crate::Core {
-    /// Resposta de `ask-agent --outline`: o esqueleto de cada arquivo de `paths`. Lê da worktree da tarefa de `instance`
-    /// (onde o agente trabalha) ou, sem tarefa, do repositório do projeto. Arquivo que não existe, binário, grande demais
-    /// ou fora da raiz vira uma linha de aviso, não erro.
+    /// Answer of `ask-agent --outline`: the skeleton of each file of `paths`. It reads from the worktree of
+    /// `instance`'s task (where the agent works) or, without a task, from the project repository. A file that does
+    /// not exist, is binary, is too large or is outside the root becomes a warning line, not an error.
     pub fn outline(&self, project: &str, instance: &str, paths: &[String]) -> Result<String, String> {
         if paths.is_empty() {
-            return Err("informe ao menos um arquivo: ask-agent --outline <arquivo>...".into());
+            return Err("name at least one file: ask-agent --outline <file>...".into());
         }
         let project_root = self.project_path(project).and_then(|p| self.git_repo_at(&p).ok()).map(|r| r.root);
         let work_root = self.task_cwd(project, instance).or_else(|| project_root.clone());
         let Some(work_root) = work_root else {
-            return Err("não achei o repositório do projeto: o resumo lê os arquivos dele".into());
+            return Err("could not find the project repository: the outline reads its files".into());
         };
         let roots: Vec<PathBuf> = [Some(work_root.clone()), project_root].into_iter().flatten().collect();
         let canonical_root = work_root.canonicalize().unwrap_or_else(|_| work_root.clone());
@@ -567,7 +574,7 @@ impl crate::Core {
                 continue;
             }
             if left < 400 {
-                parts.push(format!("{rel} — fora do orçamento desta resposta; peça este arquivo sozinho"));
+                parts.push(format!("{rel} — over this response's budget; ask for this file alone"));
                 continue;
             }
             let part = outline_path(&work_root, &canonical_root, &rel, share.min(left));
@@ -587,12 +594,12 @@ mod tests {
     }
 
     fn rust(text: &str) -> Vec<String> {
-        texts(&items(Lang::Rust, text).expect("Rust tem resumo"))
+        texts(&items(Lang::Rust, text).expect("Rust has an outline"))
     }
 
     #[test]
     fn rust_top_level_items_have_signatures_and_lines_without_bodies() {
-        let src = "use std::io;\npub use crate::a::{b, c};\n\n/// Faz a coisa. Detalhes.\npub fn work(x: u32) -> u32 {\n    let y = x + 1;\n    fn inner() {}\n    y\n}\n\npub const MAX: usize = 10;\nstatic NAME: &str = \"a { b\";\ntype Alias = Vec<u8>;\nmacro_rules! m {\n    () => {};\n}\n";
+        let src = "use std::io;\npub use crate::a::{b, c};\n\n/// Does the thing. Details.\npub fn work(x: u32) -> u32 {\n    let y = x + 1;\n    fn inner() {}\n    y\n}\n\npub const MAX: usize = 10;\nstatic NAME: &str = \"a { b\";\ntype Alias = Vec<u8>;\nmacro_rules! m {\n    () => {}\n}\n";
         assert_eq!(
             rust(src),
             [
@@ -614,13 +621,13 @@ mod tests {
 
     #[test]
     fn a_signature_over_several_lines_becomes_one_line() {
-        let src = "pub fn long(\n    a: u32,\n    b: &str, // dois\n) -> Result<(), String>\nwhere\n    T: Clone,\n{\n    todo!()\n}\n";
+        let src = "pub fn long(\n    a: u32,\n    b: &str, // two\n) -> Result<(), String>\nwhere\n    T: Clone,\n{\n    todo!()\n}\n";
         assert_eq!(rust(src), ["1:pub fn long(a: u32, b: &str) -> Result<(), String> where T: Clone"]);
     }
 
     #[test]
     fn impl_and_trait_members_are_indented_under_them() {
-        let src = "impl Core {\n    pub fn new() -> Self {\n        Self\n    }\n\n    /// Lê.\n    pub(crate) async fn read(&self, p: &Path) -> String {\n        String::new()\n    }\n    const ID: u8 = 1;\n}\n\npub trait Tr {\n    type Out;\n    fn go(&self);\n}\n\nimpl Tr for Core {\n    fn go(&self) {}\n}\n";
+        let src = "impl Core {\n    pub fn new() -> Self {\n        Self\n    }\n\n    /// Reads.\n    pub(crate) async fn read(&self, p: &Path) -> String {\n        String::new()\n    }\n    const ID: u8 = 1;\n}\n\npub trait Tr {\n    type Out;\n    fn go(&self);\n}\n\nimpl Tr for Core {\n    fn go(&self) {}\n}\n";
         assert_eq!(
             rust(src),
             [
@@ -654,7 +661,7 @@ mod tests {
 
     #[test]
     fn a_long_list_of_fields_is_cut_to_fit_the_line() {
-        let fields: String = (0..60).map(|i| format!("    campo_numero_{i}: u8,\n")).collect();
+        let fields: String = (0..60).map(|i| format!("    field_number_{i}: u8,\n")).collect();
         let lines = rust(&format!("struct Big {{\n{fields}}}\n"));
         assert_eq!(lines.len(), 1);
         assert!(lines[0].chars().count() <= MAX_ITEM + 4 && lines[0].ends_with(", … }"), "{lines:?}");
@@ -663,8 +670,8 @@ mod tests {
     #[test]
     fn cfg_test_module_becomes_one_line_with_the_number_of_tests() {
         let src = "fn a() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn one() {\n        assert!(true);\n    }\n\n    #[test]\n    fn two() {}\n\n    #[tokio::test]\n    async fn three() {}\n\n    fn helper() {}\n}\n";
-        assert_eq!(rust(src), ["1:fn a()", "4:#[cfg(test)] mod tests — 3 testes"]);
-        assert_eq!(rust("#[cfg(test)]\nmod tests {\n    #[test]\n    fn only() {}\n}\n"), ["2:#[cfg(test)] mod tests — 1 teste"]);
+        assert_eq!(rust(src), ["1:fn a()", "4:#[cfg(test)] mod tests — 3 tests"]);
+        assert_eq!(rust("#[cfg(test)]\nmod tests {\n    #[test]\n    fn only() {}\n}\n"), ["2:#[cfg(test)] mod tests — 1 test"]);
     }
 
     #[test]
@@ -682,7 +689,7 @@ mod tests {
     fn b() {}
 }
 ";
-        assert_eq!(rust(src), ["5:#[cfg(test)] mod tests — 3 testes"]);
+        assert_eq!(rust(src), ["5:#[cfg(test)] mod tests — 3 tests"]);
     }
 
     #[test]
@@ -699,20 +706,17 @@ mod tests {
 
     #[test]
     fn markdown_gives_the_headings_with_their_lines_and_ignores_code_fences() {
-        let src = "---\ntitulo: x\n# nao e titulo\n---\n# Um\n\ntexto\n\n## Dois\n\n```sh\n# comentario\n```\n\n### Tres\n\n#### Quatro\n####Sem espaco\n";
-        let got = texts(&items(Lang::Markdown, src).expect("Markdown tem resumo"));
-        assert_eq!(got, ["5:# Um", "9:  ## Dois", "15:    ### Tres"]);
+        let src = "---\ntitle: x\n# not a heading\n---\n# One\n\ntext\n\n## Two\n\n```sh\n# comment\n```\n\n### Three\n\n#### Four\n####No space\n";
+        let got = texts(&items(Lang::Markdown, src).expect("Markdown has an outline"));
+        assert_eq!(got, ["5:# One", "9:  ## Two", "15:    ### Three"]);
     }
 
     #[test]
     fn a_language_without_outline_says_so_with_the_number_of_lines() {
         let out = outline("Cargo.toml", "[package]\nname = \"x\"\n", FILE_BUDGET);
-        assert!(
-            out.starts_with("Cargo.toml — 2 linhas, TOML") && out.contains("sem resumo para TOML") && out.contains("2 linhas"),
-            "{out}"
-        );
+        assert!(out.starts_with("Cargo.toml — 2 lines, TOML") && out.contains("no outline for TOML") && out.contains("2 lines"), "{out}");
         let out = outline("a.html", "<p>x</p>", FILE_BUDGET);
-        assert!(out.contains("sem resumo para este tipo de arquivo"), "{out}");
+        assert!(out.contains("no outline for this kind of file"), "{out}");
         let out = outline(
             "a.py",
             "def f():
@@ -722,51 +726,51 @@ mod tests {
         );
         assert_eq!(
             out,
-            "a.py — 2 linhas, Python
-      (sem resumo para Python; leia o arquivo, são 2 linhas)"
+            "a.py — 2 lines, Python
+      (no outline for Python; read the file, it has 2 lines)"
         );
     }
 
     #[test]
     fn the_outline_has_a_header_and_numbered_lines() {
         let out = outline("src/a.rs", "pub fn a() {}\n\nfn b() {}\n", FILE_BUDGET);
-        assert_eq!(out, "src/a.rs — 3 linhas, Rust\n    1  pub fn a()\n    3  fn b()");
-        assert_eq!(outline("src/a.rs", "", FILE_BUDGET), "src/a.rs — 1 linha, Rust\n      (nenhum item encontrado)");
+        assert_eq!(out, "src/a.rs — 3 lines, Rust\n    1  pub fn a()\n    3  fn b()");
+        assert_eq!(outline("src/a.rs", "", FILE_BUDGET), "src/a.rs — 1 line, Rust\n      (no item found)");
     }
 
     #[test]
     fn the_budget_cuts_the_items_and_reports_what_was_left_out() {
-        let text: String = (1..=40).map(|i| format!("fn funcao_numero_{i}() {{}}\n")).collect();
+        let text: String = (1..=40).map(|i| format!("fn function_number_{i}() {{}}\n")).collect();
         let out = outline("a.rs", &text, 600);
         assert!(out.chars().count() <= 600, "{}", out.chars().count());
-        let tail = out.lines().last().expect("última linha");
-        assert!(tail.contains("… e mais ") && tail.contains("itens (linhas ") && tail.ends_with("–40)"), "{tail}");
-        // Dentro do orçamento, nada é cortado.
-        assert!(!outline("a.rs", &text, 10_000).contains("… e mais"));
+        let tail = out.lines().last().expect("last line");
+        assert!(tail.contains("… and ") && tail.contains("items (lines ") && tail.ends_with("–40)"), "{tail}");
+        // Inside the budget, nothing is cut.
+        assert!(!outline("a.rs", &text, 10_000).contains("… and"));
     }
 
     #[test]
     fn over_budget_the_members_go_before_the_end_of_the_file() {
-        let members: String = (1..=40).map(|i| format!("    pub fn metodo_numero_{i}(&self) {{}}\n")).collect();
+        let members: String = (1..=40).map(|i| format!("    pub fn method_number_{i}(&self) {{}}\n")).collect();
         let text = format!(
-            "pub struct Core;\n\nimpl Core {{\n{members}}}\n\npub fn ultima() {{}}\n\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn t() {{}}\n}}\n"
+            "pub struct Core;\n\nimpl Core {{\n{members}}}\n\npub fn last() {{}}\n\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn t() {{}}\n}}\n"
         );
         let out = outline("a.rs", &text, 600);
         assert!(out.chars().count() <= 600, "{}", out.chars().count());
-        assert!(out.contains("impl Core (+") && out.contains("itens dentro)"), "{out}");
-        assert!(out.contains("pub fn ultima()") && out.contains("mod tests — 1 teste"), "{out}");
-        assert!(out.contains("metodo_numero_1(") && !out.contains("… e mais"), "{out}");
-        // Markdown sem título de nível 1: os `##` são o topo.
-        let md: String = (1..=30).map(|i| format!("## Seção {i}\n\n### Detalhe longo da seção número {i}\n\n")).collect();
+        assert!(out.contains("impl Core (+") && out.contains("items inside)"), "{out}");
+        assert!(out.contains("pub fn last()") && out.contains("mod tests — 1 test"), "{out}");
+        assert!(out.contains("method_number_1(") && !out.contains("… and"), "{out}");
+        // Markdown without a level-1 heading: the `##` are the top level.
+        let md: String = (1..=30).map(|i| format!("## Section {i}\n\n### Long detail of section number {i}\n\n")).collect();
         let out = outline("a.md", &md, 1500);
-        assert!(out.contains("## Seção 30") && !out.contains("… e mais"), "{out}");
+        assert!(out.contains("## Section 30") && !out.contains("… and"), "{out}");
     }
 
     #[test]
     fn any_text_gives_an_outline_without_panicking() {
         let nasty = [
             "",
-            "ção \"não fechada 中文 🙂 /* x",
+            "acción \"unclosed 中文 🙂 /* x",
             "'é' 'ab 'ç' r#\"ü\" \\ \"\\",
             "fn é(",
             "pub fn 🙂(a: \"x\" {{{{ } } }",
@@ -792,7 +796,7 @@ mod tests {
                 let _ = outline(path, text, FILE_BUDGET);
             }
         }
-        // Todas as fatias de um texto multibyte.
+        // Every slice of a multibyte text.
         let text = "fn ação(é: &str) -> 🙂 {\n    let s = \"ü{\";\n}\nstruct Ç { ã: u8 }\n";
         for end in 0..=text.len() {
             if text.is_char_boundary(end) {
