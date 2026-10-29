@@ -490,19 +490,18 @@ pub fn last_move(task: &Task) -> Option<(String, u64)> {
 /// Which pane of the detail shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailTab {
+    /// The report and, under it, the changed files: what a review reads in one go.
     Report,
-    Changes,
     Timeline,
     Request,
 }
 
 impl DetailTab {
-    pub const ALL: [DetailTab; 4] = [DetailTab::Report, DetailTab::Changes, DetailTab::Timeline, DetailTab::Request];
+    pub const ALL: [DetailTab; 3] = [DetailTab::Report, DetailTab::Timeline, DetailTab::Request];
 
     pub fn label(self) -> &'static str {
         match self {
             DetailTab::Report => t!("Report"),
-            DetailTab::Changes => t!("Changes"),
             DetailTab::Timeline => t!("Timeline"),
             DetailTab::Request => t!("Request"),
         }

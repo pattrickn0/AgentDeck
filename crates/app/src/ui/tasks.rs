@@ -50,8 +50,6 @@ enum Act {
     New,
     Back,
     Open(String),
-    /// Opens the task's detail with the return/reject field already open.
-    ReturnFromCard(String),
     ToggleHistoryMenu,
     CloseHistoryMenu,
     /// Cancels the automatic merge of a task whose conflict is with the agent.
@@ -126,10 +124,6 @@ fn apply(deck: &mut Deck, ctx: &egui::Context, act: Act) {
         Act::New => deck.tasks_open_new(),
         Act::Back => deck.tasks_back(),
         Act::Open(id) => deck.tasks_open_detail(&id),
-        Act::ReturnFromCard(id) => {
-            deck.tasks_open_detail(&id);
-            deck.tasks.return_open = true;
-        }
         Act::ToggleHistoryMenu => deck.tasks.history_menu = !deck.tasks.history_menu,
         Act::CloseHistoryMenu => deck.tasks.history_menu = false,
         Act::SetHistoryFilter(f) => {
@@ -667,50 +661,29 @@ fn row_note(task: &Task) -> Option<(String, Color32)> {
     }
 }
 
-/// The two (or three) actions on a row that needs you: (label, act, kind, tooltip).
+/// The actions on a row that needs you: the main move and, at most, one quiet look (the diff). What needs typing (Return,
+/// Reject) or is rarely wanted from the list (Discard) lives in the detail, so a row never becomes a wall of buttons.
 fn row_actions(task: &Task) -> Vec<(String, Act, ButtonKind, &'static str)> {
     let id = || task.id.clone();
     let diff = |label: &str| (label.to_owned(), Act::OpenDiff(id()), ButtonKind::Ghost, tasks_ui::diff_button_tip(task));
-    match mark_of(task) {
-        Mark::Review => {
-            let mut v = vec![
-                (TaskAct::Merge.label(task), Act::Task(id(), TaskAct::Merge), ButtonKind::Primary, TaskAct::Merge.tip()),
-                (t!("Return").to_owned(), Act::ReturnFromCard(id()), ButtonKind::Secondary, TaskAct::Return.tip()),
-            ];
-            if can_show_diff(task) {
-                v.push(diff(t!("Diff")));
-            }
-            v
-        }
+    let mut v = match mark_of(task) {
+        Mark::Review => vec![(TaskAct::Merge.label(task), Act::Task(id(), TaskAct::Merge), ButtonKind::Primary, TaskAct::Merge.tip())],
         Mark::Validate => {
-            let mut v = vec![
-                (t!("Validate").to_owned(), Act::Task(id(), TaskAct::Validate), ButtonKind::Primary, TaskAct::Validate.tip()),
-                (t!("Reject").to_owned(), Act::ReturnFromCard(id()), ButtonKind::Secondary, TaskAct::Reject.tip()),
-            ];
-            if can_show_diff(task) {
-                v.push(diff(t!("What changed")));
-            }
-            v
+            vec![(t!("Validate").to_owned(), Act::Task(id(), TaskAct::Validate), ButtonKind::Primary, TaskAct::Validate.tip())]
         }
-        Mark::Stopped => {
-            let mut v = Vec::new();
-            if task.merge_stopped.as_ref().is_some_and(|s| s.conflict_files.is_some()) {
-                v.push((
-                    t!("Ask agent to resolve").to_owned(),
-                    Act::AskAgent(id()),
-                    ButtonKind::Primary,
-                    t!("Sends the task back to the agent asking it to merge the base into its branch (git merge) and resolve the conflicting files"),
-                ));
-            }
-            v.push((t!("Details").to_owned(), Act::Open(id()), ButtonKind::Ghost, t!("Opens the task")));
-            v
-        }
-        Mark::Failed => vec![
-            (TaskAct::Retry.label(task), Act::Task(id(), TaskAct::Retry), ButtonKind::Primary, TaskAct::Retry.tip()),
-            (t!("Discard").to_owned(), Act::Task(id(), TaskAct::Discard), ButtonKind::Ghost, TaskAct::Discard.tip()),
-        ],
+        Mark::Stopped if task.merge_stopped.as_ref().is_some_and(|s| s.conflict_files.is_some()) => vec![(
+            t!("Ask agent to resolve").to_owned(),
+            Act::AskAgent(id()),
+            ButtonKind::Primary,
+            t!("Sends the task back to the agent asking it to merge the base into its branch (git merge) and resolve the conflicting files"),
+        )],
+        Mark::Failed => vec![(TaskAct::Retry.label(task), Act::Task(id(), TaskAct::Retry), ButtonKind::Primary, TaskAct::Retry.tip())],
         _ => Vec::new(),
+    };
+    if matches!(mark_of(task), Mark::Review | Mark::Validate) && can_show_diff(task) {
+        v.push(diff(if task.status == TaskStatus::Validating { t!("What changed") } else { t!("Diff") }));
     }
+    v
 }
 
 /// A row of the queue:
@@ -1081,8 +1054,12 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
         detail_tabs(ui, task, tab, acts);
         ui.add_space(10.0);
         match tab {
-            DetailTab::Report => report_pane(ui, task, acts),
-            DetailTab::Changes => changes_pane(ui, task, acts),
+            DetailTab::Report => {
+                report_pane(ui, task, acts);
+                ui.add_space(14.0);
+                pane_label(ui, t!("Changes"));
+                changes_pane(ui, task, acts);
+            }
             DetailTab::Timeline => timeline_pane(deck, ui, task, acts),
             DetailTab::Request => request_pane(ui, task, acts),
         }
@@ -1305,7 +1282,6 @@ fn callouts(deck: &mut Deck, ui: &mut Ui, task: &Task, working: bool, acts: &mut
 /// The count shown on a pane's tab (files, timeline items), when there is one.
 fn tab_count(task: &Task, tab: DetailTab) -> Option<usize> {
     match tab {
-        DetailTab::Changes => task.diff_stat.as_deref().and_then(parse_diff_stat).map(|s| s.files as usize).filter(|n| *n > 0),
         DetailTab::Timeline => Some(task.events.len() + task.messages.len()).filter(|n| *n > 0),
         DetailTab::Report | DetailTab::Request => None,
     }
@@ -1365,6 +1341,14 @@ fn detail_tabs(ui: &mut Ui, task: &Task, current: DetailTab, acts: &mut Vec<Act>
             acts.push(Act::SetTab(*tab));
         }
     }
+}
+
+/// A label inside a pane (the app's section label), for the second block of the Report pane.
+fn pane_label(ui: &mut Ui, text: &str) {
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
+    let p = theme::pal();
+    let g = galley_spaced(ui.painter(), &text.to_uppercase(), theme::label(10.0), p.text_3, 10.0 * theme::LABEL_SPACING_EM);
+    place(ui.painter(), Rect::from_min_max(Pos2::new(r.min.x + PAD, r.min.y), r.max), Align2::LEFT_CENTER, g, p.text_3);
 }
 
 /// "Open in Documents" (secondary), under the request and the report.

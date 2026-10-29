@@ -120,12 +120,13 @@ to the system font.
   lines) with the wait on the right (`age_short`, 10.5 px `text_3`), then the state word (11 px 600 in `mark_color`: accent
   for what needs you, `warning`, `danger_text`, `text_2`), the agent's 12 px logo + model tag · effort, the id (`meta`) and
   `+N −M` right-aligned (`paint_diff_counts`, `success`/`danger_text`). NEEDS YOU rows have a 3.5 % white fill and their
-  24 px actions (primary, secondary, ghost); only the first one gets `accent_wash` + `accent_edge`. FINISHED rows are 24 px.
+  24 px actions: the main move (primary) and at most one ghost (the diff); what needs typing stays in the detail; only the first one gets `accent_wash` + `accent_edge`. FINISHED rows are 24 px.
   The fixed `+ New task` footer stays.
 - Task detail: header (← · id in `meta` · title · ⋯ menu), title 15 px 600, the state sentence with its glyph, agent and
   branch lines, the **lifecycle track** (five 12 px stops on a 2 px line: done `text_2`, current accent/amber/red with a
   9 px halo, label 10.5 px and time `meta(10)` under each), callouts (`notice_box`), the **pane switch** (26 px `recess`
-  track, segments sized to their text + count, selected `selected`), the pane, and the **actions pinned at the bottom**
+  track, three segments sized to their text + count, selected `selected`; Report carries the changed files under a
+  CHANGES label), the pane, and the **actions pinned at the bottom**
   (Return/Reject open their field there). Changes rows: path cut from the start, a 44×4 green/red bar, the count.
   Timeline: a 1 px guide (reserved with `painter.add(Shape::Noop)` and filled at the end so it sits behind the dots),
   hollow dots for events, filled dots in the speaker's colour for messages, messages in a 7 px-corner bubble.

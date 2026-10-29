@@ -122,11 +122,12 @@ Inside a task, every exchange appears in the task's **timeline**; system notices
   (base and scope fold under "Branch and scope"). The list is a **queue grouped by who moves next**: *Needs you* (review,
   test it, a merge that stopped, a failure; each row carries its two actions and the next one to handle gets the accent
   frame), *Agents working* (working, resolving a conflict with "Cancel automatic merge", queued), *Drafts*, and *Finished*
-  (with a filter). Each row has one state glyph, the state word, the agent's logo and model, the id and the diff size. The
+  (with a filter). Each row has one state glyph, the state word, the agent's logo and model, the id and the diff size; a row
+  that needs you carries its main move (Merge, Validate, Ask agent to resolve, Try again) and, at most, the diff. The
   detail opens on a **lifecycle track** (Created → Worked → Review → Merged → Validated, with real times), the explanation
-  of the state (queue, files outside the scope, conflict being resolved, merge refusal with its way out), four panes
-  (**Report**, **Changes** with each file's +/− split, **Timeline** with events and agent messages in one stream, and
-  **Request**), the actions pinned at the bottom (Return/Reject open their field there) and a "⋯" menu (tab, open in
+  of the state (queue, files outside the scope, conflict being resolved, merge refusal with its way out), three panes
+  (**Report** with the changed files and each file's +/− split under it, **Timeline** with events and agent messages in
+  one stream, and **Request**), the actions pinned at the bottom (Return/Reject open their field there) and a "⋯" menu (tab, open in
   Documents, Discard).
 - **Git tab and GitHub tab:** the **Git** tab operates the local repository (Changes with stage/discard per file or per
   chunk/hunk, commit, paginated History, Stash, branches with merge/rebase, and Conflict resolution), updating automatically

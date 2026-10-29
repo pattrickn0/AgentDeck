@@ -36,8 +36,6 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Diff", "Diff"),
     ("What changed", "O que mudou"),
     ("Ask agent to resolve", "Pedir ao agente para resolver"),
-    ("Details", "Detalhes"),
-    ("Opens the task", "Abre a tarefa"),
     ("Last: {what} · {age}", "Último: {what} · {age}"),
     ("in {base} · {hash}", "em {base} · {hash}"),
     ("after {holder}", "depois de {holder}"),
