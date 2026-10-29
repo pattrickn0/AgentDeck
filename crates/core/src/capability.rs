@@ -1,15 +1,16 @@
-//! A capacidade de cada modelo diante do tamanho da tarefa.
+//! The capacity of each model for the size of the task.
 //!
-//! Escolher só pela cota manda o modelo mais folgado fazer qualquer coisa, inclusive o que ele não dá conta. A
-//! escolha tem duas peças: o **nível da tarefa** ([`Level`]: `simples`, `media`, `complexa`; não é o esforço, que
-//! continua sendo o raciocínio do modelo) e o **nível que o modelo alcança**. Este vem de duas fontes:
+//! Choosing by quota alone sends the model with the most headroom to do anything, including what it cannot handle.
+//! The choice has two pieces: the **task level** ([`Level`]: `simples`, `media`, `complexa`; it is not the effort, which
+//! stays as the model's reasoning) and the **level the model reaches**. This comes from two sources:
 //!
-//! 1. a tabela de benchmarks públicos (`capability.json`, embutida; o usuário a sobrepõe com
-//!    `dados/capacidade.json`), com a nota, a fonte, a data e o nível que sai dela;
-//! 2. a medida do que o modelo já entregou aqui ([`measure`]): com pelo menos [`MIN_SAMPLE`] tarefas num nível, a
-//!    medida manda sobre a tabela (desce um nível quem falha, sobe quem acerta de primeira em sequência).
+//! 1. the table of public benchmarks (`capability.json`, embedded; the user overrides it with
+//!    `dados/capacidade.json`), with the score, the source, the date and the level that comes from it;
+//! 2. the measure of what the model has already delivered here ([`measure`]): with at least [`MIN_SAMPLE`] tasks in a
+//!    level, the measure wins over the table (whoever fails drops one level, whoever gets it right on the first try
+//!    in a row goes up).
 //!
-//! Aqui ficam as regras puras (com testes) e o `impl Core` que as aplica a quem chama: `task_create` e o
+//! Here live the pure rules (with tests) and the `impl Core` that applies them to the caller: `task_create` and
 //! `ask-agent --models`.
 
 use std::collections::{BTreeMap, HashMap};
@@ -17,25 +18,26 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::t;
 use crate::tasks::{Task, TaskStatus};
 use crate::usage::{select_agent_by_quota, AgentQuotaCandidate, EXHAUSTED};
 use crate::Core;
 
-/// A tabela embutida (benchmarks de outubro de 2026).
+/// The embedded table (October 2026 benchmarks).
 const BUILTIN: &str = include_str!("capability.json");
 
-/// O arquivo (em `dados/`) que sobrepõe a tabela embutida: o mesmo formato, entradas pelo `name`.
+/// The file (in `dados/`) that overrides the embedded table: the same format, entries by `name`.
 pub const OVERRIDE_FILE: &str = "capacidade.json";
 
-/// Tarefas num nível a partir das quais a medida manda sobre a tabela.
+/// Tasks in a level from which the measure wins over the table.
 pub const MIN_SAMPLE: u32 = 3;
 
-/// O tamanho de uma tarefa, ou o maior tamanho que um modelo dá conta.
+/// The size of a task, or the biggest size a model can handle.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Level {
     #[serde(rename = "simples")]
     Simple,
-    /// O valor de uma tarefa sem nível informado.
+    /// The value of a task with no level informed.
     #[default]
     #[serde(rename = "media")]
     Medium,
@@ -46,7 +48,7 @@ pub enum Level {
 impl Level {
     pub const ALL: [Level; 3] = [Level::Simple, Level::Medium, Level::Complex];
 
-    /// O valor de `--level`, do JSON e da tabela.
+    /// The value of `--level`, of the JSON and of the table.
     pub fn as_str(self) -> &'static str {
         match self {
             Level::Simple => "simples",
@@ -55,16 +57,25 @@ impl Level {
         }
     }
 
-    /// O nome na interface.
+    /// The name in the interface.
     pub fn label(self) -> &'static str {
         match self {
-            Level::Simple => "Simples",
-            Level::Medium => "Média",
-            Level::Complex => "Complexa",
+            Level::Simple => t!("Simple"),
+            Level::Medium => t!("Medium"),
+            Level::Complex => t!("Complex"),
         }
     }
 
-    /// Lê `simples|media|complexa` (ou `média`, `simple`, `medium`, `complex`), sem diferenciar maiúsculas.
+    /// The name inside a sentence, without the capital and in the current language ("complex" / "complexa").
+    fn in_sentence(self) -> &'static str {
+        match self {
+            Level::Simple => t!("simple"),
+            Level::Medium => t!("medium"),
+            Level::Complex => t!("complex"),
+        }
+    }
+
+    /// Reads `simples|media|complexa` (or `média`, `simple`, `medium`, `complex`), case-insensitive.
     pub fn parse(s: &str) -> Option<Level> {
         match s.trim().to_lowercase().as_str() {
             "simples" | "simple" | "low" => Some(Level::Simple),
@@ -78,7 +89,7 @@ impl Level {
         self as usize
     }
 
-    /// Um nível abaixo (o `simples` fica onde está).
+    /// One level below (`simples` stays where it is).
     pub fn down(self) -> Level {
         match self {
             Level::Complex => Level::Medium,
@@ -86,7 +97,7 @@ impl Level {
         }
     }
 
-    /// Um nível acima; `None` no `complexa`.
+    /// One level above; `None` at `complexa`.
     pub fn up(self) -> Option<Level> {
         match self {
             Level::Simple => Some(Level::Medium),
@@ -96,29 +107,29 @@ impl Level {
     }
 }
 
-// ---------- A tabela ----------
+// ---------- The table ----------
 
-/// Uma linha da tabela: um modelo, a nota e de onde ela veio.
+/// A row of the table: a model, the score and where it came from.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Entry {
     pub name: String,
-    /// Os ids de CLI que casam com o modelo (`opus`, `claude-opus-5-5`…): o id do modelo, sem o provedor nem a
-    /// `#variante`, é igual ao apelido ou começa com ele seguido de `-`.
+    /// The CLI ids that match the model (`opus`, `claude-opus-5-5`…): the model id, without the provider or the
+    /// `#variant`, is equal to the alias or starts with it followed by `-`.
     pub aliases: Vec<String>,
-    /// A nota na régua; `None` quando o modelo não tem (o nível então é estimado).
+    /// The score on the ruler; `None` when the model has none (the level is then estimated).
     pub score: Option<f32>,
-    /// O nível que sai da nota; ausente = calculado pelos limiares da tabela.
+    /// The level that comes from the score; absent = computed by the table thresholds.
     pub level: Option<Level>,
-    /// O nível é um palpite, não sai de uma nota da régua.
+    /// The level is a guess, it does not come from a score on the ruler.
     pub estimated: bool,
     pub source: String,
-    /// `AAAA-MM` da fonte.
+    /// `YYYY-MM` of the source.
     pub date: String,
     pub url: String,
 }
 
-/// Os limiares da régua: `complexa` a partir de `complexa`, `media` a partir de `media`, `simples` abaixo.
+/// The ruler thresholds: `complexa` from `complexa`, `media` from `media`, `simples` below.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Thresholds {
     pub complexa: f32,
@@ -131,19 +142,19 @@ impl Default for Thresholds {
     }
 }
 
-/// A tabela de capacidade por benchmark.
+/// The capacity table by benchmark.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Table {
-    /// A régua (nome e condições do benchmark).
+    /// The ruler (benchmark name and conditions).
     pub ruler: String,
     pub thresholds: Thresholds,
-    /// O modelo que se presume para um agente aberto sem `--model` (o padrão do CLI não é informado).
+    /// The model assumed for an agent opened without `--model` (the CLI default is not informed).
     pub defaults: BTreeMap<String, String>,
     pub models: Vec<Entry>,
 }
 
-/// O id de um modelo para casar com os apelidos: minúsculo, sem provedor, sem `#variante` nem `[contexto]`.
+/// A model's id to match the aliases: lowercase, without provider, without `#variant` or `[context]`.
 fn normalize(model: &str) -> String {
     let m = model.trim().to_lowercase().replace([' ', '_'], "-");
     let m = m.rsplit('/').next().unwrap_or_default();
@@ -151,8 +162,8 @@ fn normalize(model: &str) -> String {
     m.to_owned()
 }
 
-/// Quantos caracteres do apelido casam com o modelo (0 = não casa): igual, ou o modelo continua depois de um
-/// separador (`-`, `:`…; o `.` não conta, para `gpt-6` não casar com `gpt-6.1-sol`).
+/// How many characters of the alias match the model (0 = no match): equal, or the model continues after a
+/// separator (`-`, `:`…; the `.` does not count, so `gpt-6` does not match `gpt-6.1-sol`).
 fn alias_len(alias: &str, model: &str) -> usize {
     let alias = normalize(alias);
     if alias.is_empty() || !model.starts_with(&alias) {
@@ -165,20 +176,20 @@ fn alias_len(alias: &str, model: &str) -> usize {
     }
 }
 
-/// O modelo é de esforço baixo (os do Antigravity trazem `-low` no nome).
+/// The model is a low-effort one (the Antigravity ones carry `-low` in the name).
 fn low_effort_model(model: &str) -> bool {
     let m = model.trim().to_lowercase();
     m.split(['#', '[']).next().unwrap_or_default().ends_with("-low") || m.ends_with("#low")
 }
 
 impl Table {
-    /// A tabela embutida.
+    /// The embedded table.
     pub fn builtin() -> Table {
-        serde_json::from_str(BUILTIN).expect("capability.json embutido é válido")
+        serde_json::from_str(BUILTIN).expect("the embedded capability.json is valid")
     }
 
-    /// A embutida com as entradas de `<data_dir>/capacidade.json` por cima (mesmo `name` = substitui; nome novo =
-    /// acrescenta; `defaults` somam-se). Arquivo ausente ou ilegível: fica só a embutida (o erro vai ao log).
+    /// The embedded one with the entries of `<data_dir>/capacidade.json` on top (same `name` = replaces; a new name =
+    /// adds; `defaults` are merged). Missing or unreadable file: only the embedded one stays (the error goes to the log).
     pub fn load(data_dir: &Path) -> Table {
         let mut table = Table::builtin();
         let path = data_dir.join(OVERRIDE_FILE);
@@ -186,14 +197,14 @@ impl Table {
             Ok(t) => t,
             Err(e) => {
                 if e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("não consegui ler {}: {e}", path.display());
+                    log::warn!("could not read {}: {e}", path.display());
                 }
                 return table;
             }
         };
         match serde_json::from_str::<Table>(text.trim_start_matches('\u{feff}')) {
             Ok(user) => table.merge(user),
-            Err(e) => log::warn!("{} ilegível, usando só a tabela embutida: {e}", path.display()),
+            Err(e) => log::warn!("{} is unreadable, using only the embedded table: {e}", path.display()),
         }
         table
     }
@@ -211,12 +222,12 @@ impl Table {
         }
     }
 
-    /// O modelo que vale para `kind`: o pedido ou, sem ele, o que a tabela presume para o agente.
+    /// The model that applies to `kind`: the requested one or, without it, the one the table assumes for the agent.
     pub fn assumed_model(&self, kind: &str, model: Option<&str>) -> Option<String> {
         model.map(str::to_owned).or_else(|| self.defaults.get(kind).cloned())
     }
 
-    /// A linha da tabela do modelo `model` (já o presumido, ver [`Table::assumed_model`]); a de apelido mais longo vence.
+    /// The table row of the model `model` (already the assumed one, see [`Table::assumed_model`]); the longest alias wins.
     pub fn find(&self, model: &str) -> Option<&Entry> {
         let model = normalize(model);
         self.models
@@ -226,7 +237,7 @@ impl Table {
             .map(|(e, _)| e)
     }
 
-    /// O nível que a nota da linha dá (o `level` gravado vence; sem nota nem nível, `simples`).
+    /// The level the row score gives (a saved `level` wins; with neither score nor level, `simples`).
     pub fn level_of(&self, entry: &Entry) -> Level {
         let by_score = match entry.score {
             Some(s) if s >= self.thresholds.complexa => Level::Complex,
@@ -236,98 +247,100 @@ impl Table {
         entry.level.unwrap_or(by_score)
     }
 
-    /// O nível da tabela para o modelo (`simples` se ele não está nela).
+    /// The table level for the model (`simples` if it is not in it).
     pub fn table_level(&self, model: Option<&str>) -> Level {
         model.and_then(|m| self.find(m)).map_or(Level::Simple, |e| self.level_of(e))
     }
 
-    /// A chave com que a medida agrupa as tarefas do modelo: o nome da linha da tabela, ou `agente modelo`.
+    /// The key with which the measure groups the model's tasks: the table row name, or `agent model`.
+    /// It is an internal identity, always in English: the table row names must not change with the language.
     pub fn key(&self, kind: &str, model: Option<&str>) -> String {
         let model = self.assumed_model(kind, model);
         match model.as_deref().and_then(|m| self.find(m)) {
             Some(e) => e.name.clone(),
-            None => format!("{kind} {}", model.as_deref().unwrap_or("padrão")),
+            None => format!("{kind} {}", model.as_deref().unwrap_or("default")),
         }
     }
 
-    /// "Coding Agent Index 59.3 (2026-10)" ou "nível estimado (…)": o que o `--models` mostra da fonte.
+    /// "Coding Agent Index 59.3 (2026-10)" or "estimated, no score (…)": what `--models` shows of the source.
     pub fn note(&self, entry: &Entry) -> String {
         let ruler = self.ruler.split(" (").next().unwrap_or(&self.ruler).replace("Artificial Analysis ", "");
         let ruler = ruler.trim_end_matches(" v2.0").to_owned();
         match entry.score {
             Some(s) => format!("{ruler} {s:.1} ({})", entry.date),
-            None => format!("estimado, sem nota ({}): {}", entry.date, entry.source),
+            None => format!("estimated, no score ({}): {}", entry.date, entry.source),
         }
     }
 }
 
-// ---------- A medida ----------
+// ---------- The measure ----------
 
-/// O que o modelo entregou num nível.
+/// What the model delivered in a level.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LevelStats {
-    /// Concluídas na primeira entrega.
+    /// Finished on the first delivery.
     pub first: u32,
-    /// Concluídas depois de devolvidas.
+    /// Finished after being returned.
     pub returned: u32,
-    /// Quantas devoluções (revisão ou validação) essas e as demais tarefas tiveram, no total.
+    /// How many returns (review or validation) those and the other tasks had, in total.
     pub returns: u32,
     pub discarded: u32,
-    /// Tarefas reprovadas na validação (já contadas em `first`/`returned` se foram mescladas depois).
+    /// Tasks rejected in validation (already counted in `first`/`returned` if they were merged later).
     pub rejected: u32,
-    /// Descartada ou devolvida [`BAD_RETURNS`] vezes ou mais.
+    /// Discarded or returned [`BAD_RETURNS`] times or more.
     bad: u32,
-    /// As entregas na ordem em que terminaram: `true` = de primeira.
+    /// The deliveries in the order they finished: `true` = on the first try.
     recent: Vec<bool>,
 }
 
-/// Devolvida tantas vezes ou mais, a tarefa conta como mal-sucedida.
+/// Returned this many times or more, the task counts as unsuccessful.
 pub const BAD_RETURNS: usize = 2;
 
 impl LevelStats {
-    /// As tarefas que já têm desfecho (concluídas ou descartadas).
+    /// The tasks that already have an outcome (finished or discarded).
     pub fn total(&self) -> u32 {
         self.first + self.returned + self.discarded
     }
 
-    /// Amostra suficiente e mais da metade das tarefas descartada ou devolvida 2 vezes ou mais: o modelo não dá
-    /// conta deste nível.
+    /// Enough sample and more than half of the tasks discarded or returned 2 times or more: the model cannot
+    /// handle this level.
     pub fn demotes(&self) -> bool {
         self.total() >= MIN_SAMPLE && self.bad * 2 > self.total()
     }
 
-    /// As [`MIN_SAMPLE`] últimas tarefas do nível foram todas de primeira: o modelo dá conta deste nível.
+    /// The last [`MIN_SAMPLE`] tasks of the level were all on the first try: the model can handle this level.
     pub fn promotes(&self) -> bool {
         let n = MIN_SAMPLE as usize;
         self.recent.len() >= n && self.recent[self.recent.len() - n..].iter().all(|ok| *ok)
     }
 
-    /// "4 de 5 de primeira, 1 devolvida, 1 descartada"; vazio sem tarefa.
+    /// "1 of 4 on the first try, 2 finished after being returned (3 returns), 1 discarded, 1 rejected in validation";
+    /// empty with no task.
     pub fn text(&self) -> String {
         if self.total() == 0 {
             return String::new();
         }
-        let mut parts = vec![format!("{} de {} de primeira", self.first, self.total())];
+        let mut parts = vec![format!("{} of {} on the first try", self.first, self.total())];
         if self.returned > 0 {
-            let times = if self.returns == 1 { "1 devolução".to_owned() } else { format!("{} devoluções", self.returns) };
-            parts.push(format!("{} concluída{} depois de devolvida ({times})", self.returned, if self.returned == 1 { "" } else { "s" }));
+            let times = if self.returns == 1 { "1 return".to_owned() } else { format!("{} returns", self.returns) };
+            parts.push(format!("{} finished after being returned ({times})", self.returned));
         }
         if self.discarded > 0 {
-            parts.push(format!("{} descartada{}", self.discarded, if self.discarded == 1 { "" } else { "s" }));
+            parts.push(format!("{} discarded", self.discarded));
         }
         if self.rejected > 0 {
-            parts.push(format!("{} rejeitada{} na validação", self.rejected, if self.rejected == 1 { "" } else { "s" }));
+            parts.push(format!("{} rejected in validation", self.rejected));
         }
         parts.join(", ")
     }
 }
 
-/// A medida de um modelo, por nível (na ordem de [`Level::ALL`]).
+/// The measure of a model, by level (in the order of [`Level::ALL`]).
 pub type Record = [LevelStats; 3];
 
-/// Mede cada modelo pelas tarefas: só entram as que o agente chegou a executar e que já têm desfecho
-/// (mesclada, em validação ou descartada). Uma tarefa sem nível gravado conta como `media`. As tarefas vêm
-/// em qualquer ordem; a sequência de acertos segue a de término.
+/// Measures each model by the tasks: only those the agent got to run and that already have an outcome
+/// (merged, validating or discarded) are counted. A task with no saved level counts as `media`. The tasks come
+/// in any order; the sequence of hits follows the order they finished.
 pub fn measure<'a>(tasks: impl IntoIterator<Item = &'a Task>, table: &Table) -> HashMap<String, Record> {
     let mut tasks: Vec<&Task> = tasks.into_iter().filter(|t| t.started_ms.is_some() || t.report.is_some()).collect();
     tasks.sort_by_key(|t| t.finished_ms.unwrap_or(t.created_ms));
@@ -358,47 +371,53 @@ pub fn measure<'a>(tasks: impl IntoIterator<Item = &'a Task>, table: &Table) -> 
     out
 }
 
-/// O nível que o modelo alcança, e por quê.
+/// The level the model reaches, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capacity {
     pub level: Level,
-    /// O que mudou em relação à tabela (esforço baixo, medida), para o motivo registrado.
+    /// What changed compared to the table (low effort, measure), for the recorded reason.
     pub notes: Vec<String>,
 }
 
-/// O nível que vale para um modelo: o da tabela, menos um com esforço `low` (a nota é do esforço máximo), e então
-/// a medida: sobe quem acertou de primeira as últimas tarefas do nível acima; desce quem falha no nível em que está.
+/// The level that applies to a model: the table one, minus one with `low` effort (the score is of the maximum effort),
+/// and then the measure: whoever got the last tasks of the level above right on the first try goes up; whoever fails
+/// in the level it is in goes down.
 pub fn capacity(table_level: Level, low_effort: bool, record: Option<&Record>) -> Capacity {
     let mut level = table_level;
     let mut notes = Vec::new();
     if low_effort && level > Level::Simple {
         level = level.down();
-        notes.push(format!("esforço baixo: desce para {}", level.as_str()));
+        notes.push(t!("low effort: down to {level}", level = level.in_sentence()));
     }
     if let Some(record) = record {
         while let Some(next) = level.up().filter(|n| record[n.index()].promotes()) {
             level = next;
-            notes.push(format!("medida: {MIN_SAMPLE} tarefas {} seguidas de primeira, sobe para {}", next.as_str(), next.as_str()));
+            notes.push(t!(
+                "measured: {count} {level} tasks in a row on the first try, up to {next}",
+                count = MIN_SAMPLE,
+                level = next.in_sentence(),
+                next = next.in_sentence()
+            ));
         }
         while level > Level::Simple && record[level.index()].demotes() {
-            notes.push(format!("medida: falhou em {}, desce para {}", level.as_str(), level.down().as_str()));
+            notes.push(t!("measured: failed at {level}, down to {next}", level = level.in_sentence(), next = level.down().in_sentence()));
             level = level.down();
         }
     }
     Capacity { level, notes }
 }
 
-// ---------- A escolha ----------
+// ---------- The choice ----------
 
-/// Um modelo que pode receber a tarefa.
+/// A model that can receive the task.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
     pub kind: String,
-    /// O modelo (pedido ou presumido) que o motivo cita.
+    /// The model (requested or assumed) that the reason cites.
     pub model: Option<String>,
-    /// A fração da cota usada; `None` = sem leitura.
+    /// The fraction of the quota used; `None` = no reading.
     pub used: Option<f32>,
-    /// O maior nível que o modelo alcança.
+    /// The biggest level the model reaches.
     pub capacity: Level,
 }
 
@@ -415,7 +434,7 @@ impl Candidate {
     }
 }
 
-/// O escolhido, o motivo para registrar na tarefa e o aviso quando a escolha não é a ideal.
+/// The chosen one, the reason to record in the task and the warning when the choice is not the ideal one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selection {
     pub kind: String,
@@ -424,73 +443,104 @@ pub struct Selection {
     pub warning: Option<String>,
 }
 
-/// O candidato de `pool` com mais folga na cota.
+/// The `pool` candidate with the most headroom in the quota.
 fn by_quota<'a>(pool: &[&'a Candidate]) -> Option<&'a Candidate> {
     let list: Vec<AgentQuotaCandidate> = pool.iter().map(|c| AgentQuotaCandidate { kind: c.kind.clone(), used: c.used }).collect();
     let picked = select_agent_by_quota(&list)?;
     pool.iter().find(|c| c.kind == picked.kind).copied()
 }
 
-/// Entre os candidatos capazes do `level`, o de mais folga na cota (a regra de [`select_agent_by_quota`]).
-/// Sem nenhum capaz com cota, o capaz menos gasto, com aviso; sem nenhum capaz, o que mais alcança (desempate
-/// pela cota), com aviso. Nunca desce a um modelo incapaz sem dizer.
+/// Among the capable candidates at `level`, the one with the most headroom in the quota (the rule of [`select_agent_by_quota`]).
+/// With no capable one with quota, the least spent capable one, with a warning; with no capable one, the one that reaches
+/// furthest (tie-break by quota), with a warning. It never drops to an incapable model without saying so.
 pub fn select(candidates: &[Candidate], level: Level) -> Option<Selection> {
     let capable: Vec<&Candidate> = candidates.iter().filter(|c| c.capacity >= level).collect();
     let with_quota: Vec<&Candidate> = capable.iter().copied().filter(|c| c.has_quota()).collect();
     let (chosen, warning) = if let Some(c) = by_quota(&with_quota) {
         (c, None)
     } else if let Some(c) = by_quota(&capable) {
-        (c, Some(format!("nenhum modelo capaz de tarefa {} tem cota; usei {}, o menos gasto", level.as_str(), c.label())))
+        (
+            c,
+            Some(t!(
+                "no model capable of a {level} task has quota; I used {agent}, the least spent",
+                level = level.in_sentence(),
+                agent = c.label()
+            )),
+        )
     } else {
         let best = candidates.iter().map(|c| c.capacity).max()?;
         let top: Vec<&Candidate> = candidates.iter().filter(|c| c.capacity == best).collect();
         let usable: Vec<&Candidate> = top.iter().copied().filter(|c| c.has_quota()).collect();
         let c = by_quota(&usable).or_else(|| by_quota(&top))?;
-        (c, Some(format!("nenhum modelo disponível dá conta de tarefa {}; {} vai até {}", level.as_str(), c.label(), best.as_str())))
+        (
+            c,
+            Some(t!(
+                "no available model can handle a {level} task; {agent} only reaches {capacity}",
+                level = level.in_sentence(),
+                agent = c.label(),
+                capacity = best.in_sentence()
+            )),
+        )
     };
     let mut parts = vec![match chosen.used {
-        _ if chosen.capacity < level => format!("{}, o que mais alcança (até {})", chosen.label(), chosen.capacity.as_str()),
-        Some(used) if chosen.has_quota() => format!("{}, capaz e com {:.0}% livre", chosen.label(), (1.0 - used).clamp(0.0, 1.0) * 100.0),
-        Some(_) => format!("{}, capaz e sem cota", chosen.label()),
-        None => format!("{}, capaz (sem leitura de cota)", chosen.label()),
+        _ if chosen.capacity < level => t!(
+            "{agent}, the one that reaches furthest (up to {capacity})",
+            agent = chosen.label(),
+            capacity = chosen.capacity.in_sentence()
+        ),
+        Some(used) if chosen.has_quota() => {
+            t!(
+                "{agent}, capable and with {free}% free",
+                agent = chosen.label(),
+                free = format!("{:.0}", (1.0 - used).clamp(0.0, 1.0) * 100.0)
+            )
+        }
+        Some(_) => t!("{agent}, capable and without quota", agent = chosen.label()),
+        None => t!("{agent}, capable (no quota reading)", agent = chosen.label()),
     }];
     for other in candidates.iter().filter(|c| c.kind != chosen.kind) {
         parts.push(if other.capacity < level {
-            format!("{} só vai até {}", other.label(), other.capacity.as_str())
+            t!("{agent} only reaches {capacity}", agent = other.label(), capacity = other.capacity.in_sentence())
         } else {
             match other.used {
-                Some(u) => format!("{} {:.0}% usada", other.label(), u * 100.0),
-                None => format!("{} sem leitura de cota", other.label()),
+                Some(u) => t!("{agent} {used}% used", agent = other.label(), used = format!("{:.0}", u * 100.0)),
+                None => t!("{agent} no quota reading", agent = other.label()),
             }
         });
     }
-    let reason = format!("{}: {}", level.as_str(), parts.join("; "));
+    let reason = t!("{level}: {parts}", level = level.in_sentence(), parts = parts.join("; "));
     Some(Selection { kind: chosen.kind.clone(), used: chosen.used, reason, warning })
 }
 
-/// O aviso quando a tarefa está acima do que o modelo alcança; `None` se ele dá conta.
+/// The warning when the task is above what the model reaches; `None` if it can handle it.
 pub fn advisory(label: &str, capacity: &Capacity, level: Level) -> Option<String> {
     (capacity.level < level).then(|| {
         let why = if capacity.notes.is_empty() { String::new() } else { format!(" ({})", capacity.notes.join("; ")) };
-        format!("a tarefa é {} e {label} só vai até {}{why}", level.as_str(), capacity.level.as_str())
+        t!(
+            "the task is {level} and {agent} only reaches {capacity}{why}",
+            level = level.in_sentence(),
+            agent = label,
+            capacity = capacity.level.in_sentence(),
+            why
+        )
     })
 }
 
 // ---------- No Core ----------
 
 impl Core {
-    /// A tabela de capacidade (a embutida com a de `dados/capacidade.json` por cima), lida a cada chamada.
+    /// The capacity table (the embedded one with `dados/capacidade.json` on top), read on each call.
     pub fn capability_table(&self) -> Table {
         Table::load(&self.paths().data_dir)
     }
 
-    /// A medida de cada modelo pelas tarefas de todos os projetos (modelo → nível → desfechos).
+    /// The measure of each model, from the tasks of every project (model → level → outcomes).
     pub fn capability_records(&self, table: &Table) -> HashMap<String, Record> {
         let tasks: Vec<Task> = self.projects().iter().flat_map(|p| self.tasks(&p.id)).collect();
         measure(&tasks, table)
     }
 
-    /// O que o modelo (`kind` com `model`, ou o presumido) alcança, pela tabela, pelo esforço e pela medida.
+    /// What the model (`kind` with `model`, or the assumed one) reaches, by the table, by the effort and by the measure.
     pub fn model_capacity(
         &self,
         table: &Table,
@@ -504,8 +554,8 @@ impl Core {
         capacity(table.table_level(model.as_deref()), low, records.get(&table.key(kind, model.as_deref())))
     }
 
-    /// Os candidatos da escolha automática: os CLIs oficiais disponíveis em `choices`, cada um com o modelo que
-    /// abriria (`role_models` ou o presumido pela tabela), a cota e o que alcança.
+    /// The candidates of the automatic choice: the official CLIs available in `choices`, each with the model it
+    /// would open (`role_models` or the one assumed by the table), the quota and what it reaches.
     pub fn capability_candidates(&self, choices: &[String], effort: Option<crate::models::Effort>) -> Vec<Candidate> {
         let (table, used) = (self.capability_table(), self.quota_used());
         let records = self.capability_records(&table);
@@ -527,7 +577,7 @@ impl Core {
             .collect()
     }
 
-    /// O aviso de capacidade de uma escolha explícita (ou do formulário): a tarefa está acima do que o modelo alcança.
+    /// The capacity warning of an explicit choice (or of the form): the task is above what the model reaches.
     pub fn capability_advisory(
         &self,
         kind: &str,
@@ -547,13 +597,14 @@ impl Core {
         advisory(&label, &capacity, level)
     }
 
-    /// As linhas de capacidade do `--models`, uma por modelo (da tabela, dos listados em `items` e dos medidos):
-    /// "Claude Sonnet 5.5 (sonnet): complexa, Coding Agent Index 59.3 (2026-10) · medida media: 4 de 5 de primeira".
+    /// The capacity lines of `--models`, one per model (from the table, from those listed in `items` and from the measured
+    /// ones): "Claude Sonnet 5.5 (sonnet): complexa, Coding Agent Index 59.3 (2026-10) · measured media: 1 of 5 on the
+    /// first try".
     pub fn capability_lines(&self, items: &[crate::models::AgentModels]) -> Vec<String> {
         let table = self.capability_table();
         let records = self.capability_records(&table);
         let role_models = self.config().role_models;
-        // (chave da medida, nome do modelo, ids com que ele aparece), na ordem em que aparecem.
+        // (measure key, model name, ids with which it appears), in the order they appear.
         let mut rows: Vec<(String, String, Vec<String>)> = Vec::new();
         let mut add = |kind: &str, model: Option<&str>| {
             let key = table.key(kind, model);
@@ -588,7 +639,7 @@ impl Core {
                 let entry = table.models.iter().find(|e| &e.name == key);
                 let head = match entry {
                     Some(e) => format!("{name} ({}): {}, {}", ids.join(", "), table.level_of(e).as_str(), table.note(e)),
-                    None => format!("{name}: fora da tabela, simples"),
+                    None => format!("{name}: not in the table, simples"),
                 };
                 let measured: Vec<String> = Level::ALL
                     .iter()
@@ -601,10 +652,10 @@ impl Core {
                 let eff = capacity(table_level, false, rec);
                 let mut line = head;
                 if !measured.is_empty() {
-                    line.push_str(&format!(" · medida {}", measured.join(" | ")));
+                    line.push_str(&format!(" · measured {}", measured.join(" | ")));
                 }
                 if eff.level != table_level {
-                    line.push_str(&format!(" · vale {} ({})", eff.level.as_str(), eff.notes.join("; ")));
+                    line.push_str(&format!(" · counts as {} ({})", eff.level.as_str(), eff.notes.join("; ")));
                 }
                 line
             })
@@ -674,8 +725,8 @@ mod tests {
         assert_eq!(level("gpt-6-luna"), Level::Simple);
         assert_eq!(level("gpt-6.1-sol"), Level::Complex);
         assert_eq!(level("gpt-5.6-terra"), Level::Medium);
-        // Fora da tabela: simples. Um prefixo sem separador não casa.
-        assert_eq!(level("modelo-novo"), Level::Simple);
+        // Outside the table: simples. A prefix without a separator does not match.
+        assert_eq!(level("new-model"), Level::Simple);
         assert_eq!(level("opuscule"), Level::Simple);
         assert!(t.find("gpt-6").is_none());
     }
@@ -688,7 +739,7 @@ mod tests {
         assert_eq!(t.assumed_model("shell", None), None);
         assert_eq!(t.key("claude", None), "Claude Sonnet 5.5");
         assert_eq!(t.key("opencode", Some("opencode/deepseek-v4.1-flash-free")), "DeepSeek V4.1 Flash");
-        assert_eq!(t.key("goose", None), "goose padrão");
+        assert_eq!(t.key("goose", None), "goose default");
     }
 
     #[test]
@@ -697,20 +748,20 @@ mod tests {
         std::fs::write(
             dir.path().join(OVERRIDE_FILE),
             r#"{"defaults":{"codex":"gpt-5.6-terra"},"models":[
-                {"name":"gpt-6 luna","aliases":["gpt-6-luna"],"score":50.0,"source":"meu teste","date":"2026-11"},
-                {"name":"Modelo Novo","aliases":["novo"],"level":"complexa","source":"x","date":"2026-11"}]}"#,
+                {"name":"gpt-6 luna","aliases":["gpt-6-luna"],"score":50.0,"source":"my test","date":"2026-11"},
+                {"name":"New Model","aliases":["novo"],"level":"complexa","source":"x","date":"2026-11"}]}"#,
         )
-        .expect("grava");
+        .expect("write");
         let t = Table::load(dir.path());
         assert_eq!(t.models.len(), 19);
         assert_eq!(t.table_level(Some("gpt-6-luna")), Level::Medium);
         assert_eq!(t.table_level(Some("novo")), Level::Complex);
         assert_eq!(t.assumed_model("codex", None).as_deref(), Some("gpt-5.6-terra"));
         assert_eq!(t.assumed_model("claude", None).as_deref(), Some("sonnet"));
-        // Um arquivo ilegível não derruba a tabela embutida.
-        std::fs::write(dir.path().join(OVERRIDE_FILE), "{ não é json").expect("grava");
+        // An unreadable file does not bring the embedded table down.
+        std::fs::write(dir.path().join(OVERRIDE_FILE), "{ not json").expect("write");
         assert_eq!(Table::load(dir.path()), Table::builtin());
-        assert_eq!(Table::load(&dir.path().join("nao-existe")), Table::builtin());
+        assert_eq!(Table::load(&dir.path().join("does-not-exist")), Table::builtin());
     }
 
     #[test]
@@ -731,9 +782,9 @@ mod tests {
         assert_eq!(medium.total(), 4);
         assert_eq!(
             medium.text(),
-            "1 de 4 de primeira, 2 concluídas depois de devolvida (3 devoluções), 1 descartada, 1 rejeitada na validação"
+            "1 of 4 on the first try, 2 finished after being returned (3 returns), 1 discarded, 1 rejected in validation"
         );
-        assert_eq!(rec["Claude Sonnet 5.5"][Level::Complex.index()].text(), "1 de 1 de primeira");
+        assert_eq!(rec["Claude Sonnet 5.5"][Level::Complex.index()].text(), "1 of 1 on the first try");
         assert_eq!(rec["Claude Sonnet 5.5"][Level::Simple.index()].text(), "");
     }
 
@@ -755,7 +806,7 @@ mod tests {
     #[test]
     fn a_model_that_fails_goes_down_a_level() {
         let t = table();
-        // Mais da metade descartada ou devolvida duas vezes ou mais: 2 de 3.
+        // More than half discarded or returned twice or more: 2 of 3.
         let tasks = vec![
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Discarded, &[], 1),
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &["revisão", "revisão"], 2),
@@ -765,7 +816,7 @@ mod tests {
         let c = capacity(Level::Complex, false, rec.get("Claude Sonnet 5.5"));
         assert_eq!(c.level, Level::Medium);
         assert_eq!(c.notes.len(), 1);
-        // Metade exata não derruba; uma devolução só não é falha.
+        // An exact half does not bring it down; a single return is not a failure.
         let tasks = vec![
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Discarded, &[], 1),
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &["revisão"], 2),
@@ -774,13 +825,13 @@ mod tests {
         ];
         let rec = measure(&tasks, &t);
         assert_eq!(capacity(Level::Complex, false, rec.get("Claude Sonnet 5.5")).level, Level::Complex);
-        // Falhar no media derruba também o que já tinha descido, até o simples.
+        // Failing at the medium level also brings down what had already dropped, down to simple.
         let tasks: Vec<Task> = (1..=6)
             .map(|n| task("claude", Some("sonnet"), if n <= 3 { Level::Complex } else { Level::Medium }, TaskStatus::Discarded, &[], n))
             .collect();
         let rec = measure(&tasks, &t);
         assert_eq!(capacity(Level::Complex, false, rec.get("Claude Sonnet 5.5")).level, Level::Simple);
-        // O simples é o piso.
+        // Simple is the floor.
         assert_eq!(capacity(Level::Simple, false, rec.get("Claude Sonnet 5.5")).level, Level::Simple);
     }
 
@@ -792,10 +843,10 @@ mod tests {
         let c = capacity(Level::Simple, false, rec.get("GPT-6 Luna"));
         assert_eq!(c.level, Level::Medium);
         assert_eq!(c.notes.len(), 1);
-        // Uma devolvida no meio da sequência (as 3 últimas) não promove.
+        // One returned in the middle of the sequence (the last 3) does not promote.
         let rec = measure(&[win(1), task("codex", Some("gpt-6-luna"), Level::Medium, TaskStatus::Merged, &["revisão"], 2), win(3)], &t);
         assert_eq!(capacity(Level::Simple, false, rec.get("GPT-6 Luna")).level, Level::Simple);
-        // Mas um tropeço antigo, fora das 3 últimas, não impede.
+        // But an old stumble, outside the last 3, does not prevent it.
         let rec = measure(&[task("codex", Some("gpt-6-luna"), Level::Medium, TaskStatus::Discarded, &[], 0), win(1), win(2), win(3)], &t);
         assert_eq!(capacity(Level::Simple, false, rec.get("GPT-6 Luna")).level, Level::Medium);
     }
@@ -821,17 +872,17 @@ mod tests {
         assert_eq!(s.warning, None);
         assert_eq!(
             s.reason,
-            "complexa: antigravity antigravity-m, capaz e com 50% livre; claude claude-m 74% usada; codex codex-m só vai até simples"
+            "complex: antigravity antigravity-m, capable and with 50% free; claude claude-m 74% used; codex codex-m only reaches simple"
         );
-        // Em tarefa simples todos são capazes e a folga decide.
+        // On a simple task all are capable and the free quota decides.
         assert_eq!(select(&c, Level::Simple).expect("escolha").kind, "codex");
-        // Sem leitura de cota perde para quem tem folga, mas é capaz.
+        // Without a quota reading it loses to whoever has free quota, but it is capable.
         let c = [candidate("claude", None, Level::Complex), candidate("antigravity", Some(0.9), Level::Complex)];
         assert_eq!(select(&c, Level::Medium).expect("escolha").kind, "antigravity");
         let c = [candidate("claude", None, Level::Complex), candidate("codex", Some(0.1), Level::Simple)];
         let s = select(&c, Level::Complex).expect("escolha");
         assert_eq!((s.kind.as_str(), s.warning), ("claude", None));
-        assert!(s.reason.contains("capaz (sem leitura de cota)"), "{}", s.reason);
+        assert!(s.reason.contains("capable (no quota reading)"), "{}", s.reason);
     }
 
     #[test]
@@ -844,8 +895,8 @@ mod tests {
         let s = select(&c, Level::Complex).expect("escolha");
         assert_eq!(s.kind, "antigravity");
         let warning = s.warning.expect("aviso");
-        assert!(warning.contains("nenhum modelo capaz de tarefa complexa tem cota") && warning.contains("antigravity"), "{warning}");
-        assert!(s.reason.contains("sem cota"), "{}", s.reason);
+        assert!(warning.contains("no model capable of a complex task has quota") && warning.contains("antigravity"), "{warning}");
+        assert!(s.reason.contains("without quota"), "{}", s.reason);
     }
 
     #[test]
@@ -858,16 +909,16 @@ mod tests {
         let s = select(&c, Level::Complex).expect("escolha");
         assert_eq!(s.kind, "claude");
         let warning = s.warning.expect("aviso");
-        assert!(warning.contains("nenhum modelo disponível dá conta de tarefa complexa") && warning.contains("vai até media"), "{warning}");
+        assert!(warning.contains("no available model can handle a complex task") && warning.contains("only reaches medium"), "{warning}");
         assert!(select(&[], Level::Medium).is_none());
     }
 
     #[test]
     fn the_advisory_appears_only_above_the_capacity() {
-        let low = Capacity { level: Level::Simple, notes: vec!["esforço baixo: desce para simples".into()] };
+        let low = Capacity { level: Level::Simple, notes: vec!["low effort: down to simple".into()] };
         assert_eq!(
             advisory("codex gpt-6-luna", &low, Level::Complex).as_deref(),
-            Some("a tarefa é complexa e codex gpt-6-luna só vai até simples (esforço baixo: desce para simples)")
+            Some("the task is complex and codex gpt-6-luna only reaches simple (low effort: down to simple)")
         );
         assert_eq!(advisory("codex gpt-6-luna", &low, Level::Simple), None);
     }

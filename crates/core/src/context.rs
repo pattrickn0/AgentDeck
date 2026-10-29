@@ -1,10 +1,10 @@
-//! Ponto de extensão para contexto adicional de prompts (futuro RAG local/remoto).
+//! Extension point for extra prompt context (a future local/remote RAG).
 //!
-//! Hoje nenhum provedor é registrado: injeção de prompt e RAG ficam para uma etapa
-//! futura. O executor headless chama [`ContextProvider::augment`]
-//! antes de enviar a mensagem, então plugar um RAG não exige mexer neles.
+//! Today no provider is registered: prompt injection and RAG are left for a later
+//! step. The headless executor calls [`ContextProvider::augment`]
+//! before sending the message, so plugging in a RAG does not require touching them.
 
-/// Pedido de contexto para uma mensagem prestes a ser enviada a um agente.
+/// A context request for a message about to be sent to an agent.
 #[derive(Debug, Clone)]
 pub struct ContextRequest<'a> {
     pub agent: &'a str,
@@ -12,7 +12,7 @@ pub struct ContextRequest<'a> {
     pub workspace: &'a std::path::Path,
 }
 
-/// Trecho de contexto recuperado (ex.: chunk de documento com origem).
+/// A retrieved piece of context (e.g. a document chunk with its source).
 #[derive(Debug, Clone)]
 pub struct ContextChunk {
     pub source: String,
@@ -21,24 +21,24 @@ pub struct ContextChunk {
 
 pub trait ContextProvider: Send + Sync {
     fn name(&self) -> &str;
-    /// Retorna trechos relevantes. Deve ser rápido ou respeitar um orçamento de tempo.
+    /// Returns the relevant pieces. It must be fast or respect a time budget.
     fn augment(&self, req: &ContextRequest<'_>) -> Vec<ContextChunk>;
 }
 
-/// Lista compartilhada de provedores registrados (vazia por padrão).
+/// Shared list of registered providers (empty by default).
 pub type Providers = std::sync::Arc<parking_lot::RwLock<Vec<std::sync::Arc<dyn ContextProvider>>>>;
 
-/// Consulta todos os provedores registrados, na ordem de registro.
+/// Asks every registered provider, in registration order.
 pub fn gather(providers: &Providers, req: &ContextRequest<'_>) -> Vec<ContextChunk> {
     let list: Vec<_> = providers.read().iter().cloned().collect();
     list.iter().flat_map(|p| p.augment(req)).collect()
 }
 
-/// Formata os trechos para anexar a um prompt (vazio quando não há trechos).
+/// Formats the pieces to append to a prompt (empty when there are no pieces).
 pub fn render(chunks: &[ContextChunk]) -> String {
     if chunks.is_empty() {
         return String::new();
     }
     let body: Vec<String> = chunks.iter().map(|c| format!("[{}]\n{}", c.source, c.text.trim())).collect();
-    format!("=== CONTEXTO ADICIONAL ===\n{}", body.join("\n\n"))
+    format!("=== ADDITIONAL CONTEXT ===\n{}", body.join("\n\n"))
 }

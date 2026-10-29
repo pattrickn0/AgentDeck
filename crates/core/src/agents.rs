@@ -1,6 +1,6 @@
-//! Registro de agentes: resolução dos executáveis oficiais, montagem do comando
-//! interativo (PTY) e instruções da ponte (equivalente a `AGENTS`, `resolve*`, `peers`,
-//! `bridgeInstructions` e `pty:spawn` do main.js).
+//! Agent registry: resolution of the official executables, assembly of the interactive
+//! command (PTY) and the bridge instructions (equivalent to `AGENTS`, `resolve*`, `peers`,
+//! `bridgeInstructions` and `pty:spawn` in main.js).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -11,73 +11,73 @@ use parking_lot::Mutex;
 
 use crate::instances::Ident;
 use crate::models;
+use crate::t;
 use crate::Core;
 
-/// Item de menu de agente (equivalente ao retorno de `agents:list`).
+/// Agent menu item (equivalent to the return of `agents:list`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentInfo {
     /// `claude`, `antigravity`, `codex`, ..., `shell`.
     pub id: String,
     pub label: String,
-    /// Cor `#rrggbb`.
+    /// `#rrggbb` color.
     pub color: String,
     pub installed: bool,
     pub peer: bool,
 }
 
-/// Comando completo para abrir uma aba interativa num pseudo-terminal.
+/// Full command to open an interactive tab in a pseudo-terminal.
 #[derive(Debug, Clone)]
 pub struct SpawnSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub cwd: PathBuf,
-    /// Ambiente COMPLETO a usar (já derivado do ambiente do processo, com PATH/AGENTDECK_* injetados
-    /// e CLAUDECODE & cia removidos). A UI deve limpar o ambiente herdado e aplicar este.
+    /// COMPLETE environment to use (already derived from the process environment, with PATH/AGENTDECK_* injected
+    /// and CLAUDECODE & co. removed). The UI must clear the inherited environment and apply this one.
     pub env: BTreeMap<String, String>,
-    /// Rótulo da aba (ex.: "Claude").
+    /// Tab label (e.g. "Claude").
     pub label: String,
     pub color: String,
-    /// `kind` original pedido.
+    /// Original `kind` requested.
     pub kind: String,
-    /// Se `true`, a entrega de uma mensagem à aba deve mandar um `\r` extra após 600 ms quando o
-    /// texto contém `@` (autocomplete de arquivo do Claude/Antigravity).
+    /// If `true`, delivering a message to the tab must send an extra `\r` after 600 ms when the
+    /// text contains `@` (Claude/Antigravity file autocomplete).
     pub double_enter_on_mention: bool,
-    /// Modelo de LLM da instância (já resolvido e gravado em `tab_models`); `None` = o padrão do CLI.
+    /// LLM model of the instance (already resolved and saved in `tab_models`); `None` = the CLI default.
     pub model: Option<String>,
 }
 
-/// Cores oficiais (usadas também pela UI como fallback).
+/// Official colors (also used by the UI as a fallback).
 pub const COLOR_CLAUDE: &str = "#d97757";
 pub const COLOR_ANTIGRAVITY: &str = "#4f8cf7";
 pub const COLOR_SHELL: &str = "#9aa0a6";
 
-/// Definição estática de um agente (equivalente a uma entrada de `AGENTS`).
+/// Static definition of an agent (equivalent to an `AGENTS` entry).
 #[derive(Debug, Clone, Copy)]
 pub struct AgentDef {
     pub id: &'static str,
     pub label: &'static str,
     pub color: &'static str,
     pub peer: bool,
-    /// Mensagem de "não instalado" (com `\r\n`, pois vai direto para o terminal).
+    /// "Not installed" message (with `\r\n`, since it goes straight to the terminal).
     pub missing: &'static str,
 }
 
-/// O instalador do Antigravity é um script de PowerShell no Windows; nos outros sistemas, o do site.
+/// The Antigravity installer is a PowerShell script on Windows; on the other systems, the one from the site.
 #[cfg(windows)]
 const ANTIGRAVITY_MISSING: &str =
-    "Antigravity CLI (agy) não encontrado. Instale no PowerShell com:\r\n  irm https://antigravity.google/cli/install.ps1 | iex";
+    "Antigravity CLI (agy) not found. Install from PowerShell with:\r\n  irm https://antigravity.google/cli/install.ps1 | iex";
 #[cfg(not(windows))]
-const ANTIGRAVITY_MISSING: &str =
-    "Antigravity CLI (agy) não encontrado. Veja o instalador para o seu sistema em:\r\n  https://antigravity.google";
+const ANTIGRAVITY_MISSING: &str = "Antigravity CLI (agy) not found. See the installer for your system at:\r\n  https://antigravity.google";
 
-/// Todos os agentes, na ordem dos menus.
+/// All agents, in menu order.
 pub const AGENTS: &[AgentDef] = &[
     AgentDef {
         id: "claude",
         label: "Claude",
         color: COLOR_CLAUDE,
         peer: true,
-        missing: "Claude Code CLI (claude) não encontrado. Instale com:\r\n  npm install -g @anthropic-ai/claude-code",
+        missing: "Claude Code CLI (claude) not found. Install with:\r\n  npm install -g @anthropic-ai/claude-code",
     },
     AgentDef { id: "antigravity", label: "Antigravity", color: COLOR_ANTIGRAVITY, peer: true, missing: ANTIGRAVITY_MISSING },
     AgentDef {
@@ -85,48 +85,79 @@ pub const AGENTS: &[AgentDef] = &[
         label: "Codex",
         color: "#10a37f",
         peer: true,
-        missing: "Codex CLI não encontrado. Instale com:\r\n  npm install -g @openai/codex",
+        missing: "Codex CLI not found. Install with:\r\n  npm install -g @openai/codex",
     },
     AgentDef {
         id: "opencode",
         label: "OpenCode",
         color: "#f97316",
         peer: true,
-        missing: "OpenCode não encontrado. Instale com:\r\n  npm install -g opencode-ai",
+        missing: "OpenCode not found. Install with:\r\n  npm install -g opencode-ai",
     },
     AgentDef {
         id: "aider",
         label: "Aider",
         color: "#22c55e",
         peer: true,
-        missing: "Aider CLI não encontrado. Instale com:\r\n  pip install aider-chat",
+        missing: "Aider CLI not found. Install with:\r\n  pip install aider-chat",
     },
     AgentDef {
         id: "goose",
         label: "Goose",
         color: "#10b981",
         peer: true,
-        missing: "Goose CLI não encontrado. Instale a partir de: https://github.com/block/goose",
+        missing: "Goose CLI not found. Install from: https://github.com/block/goose",
     },
     AgentDef {
         id: "copilot",
         label: "Copilot",
         color: "#6e40c9",
         peer: true,
-        missing: "GitHub Copilot CLI não encontrado. Instale com:\r\n  gh extension install github/gh-copilot",
+        missing: "GitHub Copilot CLI not found. Install with:\r\n  gh extension install github/gh-copilot",
     },
-    AgentDef { id: "q", label: "Amazon Q", color: "#ff9900", peer: true, missing: "Amazon Q Developer CLI não encontrado." },
+    AgentDef { id: "q", label: "Amazon Q", color: "#ff9900", peer: true, missing: "Amazon Q Developer CLI not found." },
     AgentDef {
         id: "interpreter",
         label: "Interpreter",
         color: "#8b5cf6",
         peer: true,
-        missing: "Open Interpreter não encontrado. Instale com:\r\n  pip install open-interpreter",
+        missing: "Open Interpreter not found. Install with:\r\n  pip install open-interpreter",
     },
-    AgentDef { id: "shell", label: "Terminal", color: COLOR_SHELL, peer: false, missing: "Shell não encontrado." },
+    AgentDef { id: "shell", label: "Terminal", color: COLOR_SHELL, peer: false, missing: "Shell not found." },
 ];
 
-/// Apelidos aceitos pela ponte (`ask-agent agy ...`).
+impl AgentDef {
+    /// The "not installed" message for the app: user-facing text, so it follows the interface language. The agents
+    /// get [`AgentDef::missing`] instead, which is always English.
+    pub fn install_hint(&self) -> &'static str {
+        match self.id {
+            "claude" => t!("Claude Code CLI (claude) not found. Install with:\r\n  npm install -g @anthropic-ai/claude-code"),
+            "antigravity" => antigravity_hint(),
+            "codex" => t!("Codex CLI not found. Install with:\r\n  npm install -g @openai/codex"),
+            "opencode" => t!("OpenCode not found. Install with:\r\n  npm install -g opencode-ai"),
+            "aider" => t!("Aider CLI not found. Install with:\r\n  pip install aider-chat"),
+            "goose" => t!("Goose CLI not found. Install from: https://github.com/block/goose"),
+            "copilot" => t!("GitHub Copilot CLI not found. Install with:\r\n  gh extension install github/gh-copilot"),
+            "q" => t!("Amazon Q Developer CLI not found."),
+            "interpreter" => t!("Open Interpreter not found. Install with:\r\n  pip install open-interpreter"),
+            _ => t!("Shell not found."),
+        }
+    }
+}
+
+/// [`AgentDef::install_hint`] for the Antigravity errors, in the wording of [`ANTIGRAVITY_MISSING`].
+#[cfg(windows)]
+fn antigravity_hint() -> &'static str {
+    t!("Antigravity CLI (agy) not found. Install from PowerShell with:\r\n  irm https://antigravity.google/cli/install.ps1 | iex")
+}
+
+/// [`AgentDef::install_hint`] for the Antigravity errors, in the wording of [`ANTIGRAVITY_MISSING`].
+#[cfg(not(windows))]
+fn antigravity_hint() -> &'static str {
+    t!("Antigravity CLI (agy) not found. See the installer for your system at:\r\n  https://antigravity.google")
+}
+
+/// Aliases accepted by the bridge (`ask-agent agy ...`).
 pub const ALIASES: &[(&str, &str)] = &[
     ("agy", "antigravity"),
     ("claudecode", "claude"),
@@ -140,18 +171,18 @@ pub fn agent_def(id: &str) -> Option<&'static AgentDef> {
     AGENTS.iter().find(|a| a.id == id)
 }
 
-/// Resolve um apelido (`agy` → `antigravity`); nomes desconhecidos voltam iguais.
+/// Resolves an alias (`agy` → `antigravity`); unknown names come back unchanged.
 pub fn resolve_alias(name: &str) -> &str {
     ALIASES.iter().find(|(a, _)| *a == name).map(|(_, t)| *t).unwrap_or(name)
 }
 
-/// Executável resolvido + argumentos fixos iniciais (ex.: `cmd.exe /d /c claude`).
+/// Resolved executable + initial fixed arguments (e.g. `cmd.exe /d /c claude`).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Resolved {
     pub program: PathBuf,
     pub pre: Vec<String>,
-    /// Windows: o agente é um shim `.cmd` (npm/pip), aberto via `cmd.exe /d /c <nome>`. O cmd.exe
-    /// interpreta `& | < > ^ % "` e quebras de linha nos argumentos: nada de texto livre neles.
+    /// Windows: the agent is a `.cmd` shim (npm/pip), opened via `cmd.exe /d /c <name>`. cmd.exe
+    /// interprets `& | < > ^ % "` and line breaks in the arguments: no free text in them.
     pub shim: Option<PathBuf>,
 }
 
@@ -160,9 +191,9 @@ impl Resolved {
         Self { program: p, pre: Vec::new(), shim: None }
     }
 
-    /// `cmd.exe /d /e:on /v:off /c <nome> [extra…]` para o shim em `path`. Extensões ligadas e
-    /// expansão atrasada desligada mesmo que o registro diga o contrário: o escape de
-    /// [`cmd_safe_arg`] conta com isso (`%cd:~,%` e `!` literal).
+    /// `cmd.exe /d /e:on /v:off /c <name> [extra…]` for the shim at `path`. Extensions enabled and
+    /// delayed expansion off even if the registry says otherwise: the escaping of
+    /// [`cmd_safe_arg`] relies on that (`%cd:~,%` and a literal `!`).
     fn via_cmd(path: PathBuf, name: &str, extra: &[&str]) -> Self {
         let mut pre: Vec<String> = CMD_FLAGS.map(String::from).to_vec();
         pre.push(name.to_owned());
@@ -170,9 +201,9 @@ impl Resolved {
         Self { program: "cmd.exe".into(), pre, shim: Some(path) }
     }
 
-    /// Programa e argumentos fixos para `std::process::Command`. Um shim `.cmd` é chamado
-    /// direto: assim a std do Rust aplica o escape próprio de arquivos em lote (e recusa o que
-    /// não dá para escapar), o que não acontece com um `cmd.exe /c` explícito.
+    /// Program and fixed arguments for `std::process::Command`. A `.cmd` shim is called
+    /// directly: that way Rust's std applies its own batch-file escaping (and refuses what
+    /// cannot be escaped), which does not happen with an explicit `cmd.exe /c`.
     pub fn command(&self) -> (PathBuf, Vec<String>) {
         match &self.shim {
             Some(path) => (path.clone(), self.pre.iter().skip(CMD_FLAGS.len() + 1).cloned().collect()),
@@ -181,20 +212,20 @@ impl Resolved {
     }
 }
 
-/// Opções do `cmd.exe` que abre um shim `.cmd` numa aba (antes do nome do shim).
+/// `cmd.exe` options that open a `.cmd` shim in a tab (before the shim name).
 const CMD_FLAGS: [&str; 4] = ["/d", "/e:on", "/v:off", "/c"];
 
-/// Escapa um argumento para o `cmd.exe /c <shim>` das abas no Windows. O texto passa por dois
-/// interpretadores do cmd: a linha do `cmd.exe /c` e a linha do shim que repassa `%*`.
-/// - o portable-pty põe entre aspas o argumento com espaço ou tabulação (e só ele): entre aspas,
-///   `& | < > ^ ( )` já são literais nas duas passagens;
-/// - sem aspas, cada um desses vira `^^^c` (a primeira passagem deixa `^c`, a segunda, `c`);
-/// - `%` vira `%%cd:~,%` (como na std do Rust), que a linha de comando expande para `%` e não é
-///   expandido de novo no `%*`; `!` fica literal com `/v:off`;
-/// - aspas são removidas (não aparecem em caminhos) e quebras de linha viram espaço.
+/// Escapes an argument for the `cmd.exe /c <shim>` of the tabs on Windows. The text goes through two
+/// cmd interpreters: the `cmd.exe /c` line and the shim line that forwards `%*`.
+/// - portable-pty quotes the argument with a space or tab (and only it): inside quotes,
+///   `& | < > ^ ( )` are already literal in both passes;
+/// - without quotes, each of those becomes `^^^c` (the first pass leaves `^c`, the second, `c`);
+/// - `%` becomes `%%cd:~,%` (like Rust's std), which the command line expands to `%` and is not
+///   expanded again in `%*`; `!` stays literal with `/v:off`;
+/// - quotes are removed (they do not appear in paths) and line breaks become a space.
 ///
-/// Só para textos gerados pelo app (instruções, caminhos como `C:\Users\Ana&Bia`): texto livre
-/// de outros agentes nunca vai pela linha de comando de um shim.
+/// Only for text generated by the app (instructions, paths such as `C:\Users\Ana&Bia`): free text
+/// from other agents never goes through a shim's command line.
 pub(crate) fn cmd_safe_arg(arg: &str) -> String {
     let arg: String = arg.replace("\r\n", " ").replace(['\r', '\n'], " ").chars().filter(|&c| c != '"').collect();
     let quoted = arg.is_empty() || arg.contains([' ', '\t', '\x0b']);
@@ -212,19 +243,19 @@ pub(crate) fn cmd_safe_arg(arg: &str) -> String {
     out
 }
 
-/// Opções de descoberta (substituíveis para testes/embutir).
+/// Discovery options (replaceable for tests/embedding).
 #[derive(Debug, Clone)]
 pub(crate) struct Discovery {
     pub search_path: Option<OsString>,
     pub home: PathBuf,
-    /// Procurar CLIs nas pastas do sistema (`APPDATA`, `LOCALAPPDATA`, `ProgramFiles`). Desligado
-    /// nos testes: essas pastas passam a ser procuradas dentro de `home`.
+    /// Look for CLIs in the system folders (`APPDATA`, `LOCALAPPDATA`, `ProgramFiles`). Off
+    /// in tests: those folders are then looked up inside `home`.
     pub system_dirs: bool,
 }
 
 const COPILOT_CACHE_TTL: Duration = Duration::from_secs(30);
 
-/// Estado do registro: cache da detecção do Copilot.
+/// Registry state: Copilot detection cache.
 pub(crate) struct Registry {
     disc: Discovery,
     copilot: Mutex<Option<(Instant, Option<Resolved>)>>,
@@ -247,8 +278,8 @@ impl Registry {
         &self.disc.home
     }
 
-    /// Pasta do sistema da variável `key` (`APPDATA`…). Nos testes (`system_dirs = false`), fica
-    /// dentro de `home`, para o resultado não depender do que está instalado na máquina.
+    /// System folder from the `key` variable (`APPDATA`…). In tests (`system_dirs = false`) it sits
+    /// inside `home`, so the result does not depend on what is installed on the machine.
     pub(crate) fn system_dir(&self, key: &str) -> Option<PathBuf> {
         if self.disc.system_dirs {
             std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from)
@@ -257,9 +288,9 @@ impl Registry {
         }
     }
 
-    // ---------- Resolução dos executáveis ----------
+    // ---------- Executable resolution ----------
 
-    /// Resolve um agente base.
+    /// Resolves a base agent.
     pub fn resolve(&self, id: &str) -> Option<Resolved> {
         match id {
             "copilot" => self.resolve_copilot(),
@@ -269,7 +300,7 @@ impl Registry {
         }
     }
 
-    /// Resolução padrão: candidatos conhecidos → `where`/`which` → shim `.cmd` via `cmd.exe`.
+    /// Default resolution: known candidates → `where`/`which` → `.cmd` shim via `cmd.exe`.
     fn resolve_cli(&self, id: &str) -> Option<Resolved> {
         let name = if id == "antigravity" { "agy" } else { id };
         let first_existing = |c: Vec<Option<PathBuf>>| c.into_iter().flatten().find(|p| p.is_file());
@@ -317,7 +348,7 @@ impl Registry {
             if let Some(p) = first_existing(candidates) {
                 return Some(Resolved::direct(p));
             }
-            // Shims do npm/pip (`.cmd`) precisam passar pelo cmd.exe.
+            // npm/pip shims (`.cmd`) must go through cmd.exe.
             let shim =
                 if id == "antigravity" { self.which("agy.cmd") } else { self.which(&format!("{name}.cmd")).or_else(|| self.which(name)) };
             shim.map(|p| {
@@ -339,8 +370,8 @@ impl Registry {
         }
     }
 
-    /// GitHub Copilot: `gh` com a extensão `gh-copilot` (resultado em cache por 30 s,
-    /// pois exige rodar `gh extension list`).
+    /// GitHub Copilot: `gh` with the `gh-copilot` extension (result cached for 30 s,
+    /// because it requires running `gh extension list`).
     fn resolve_copilot(&self) -> Option<Resolved> {
         if let Some((at, r)) = self.copilot.lock().as_ref() {
             if at.elapsed() < COPILOT_CACHE_TTL {
@@ -374,53 +405,52 @@ impl Registry {
         None
     }
 
-    // ---------- Pares e instruções ----------
+    // ---------- Peers and instructions ----------
 
-    /// Só os agentes instalados e habilitados como peer entram na ponte.
+    /// Only installed agents enabled as peers join the bridge.
     pub fn peers(&self) -> Vec<String> {
         AGENTS.iter().filter(|a| a.peer && self.resolve(a.id).is_some()).map(|a| a.id.to_owned()).collect()
     }
 
-    /// Como [`Registry::bridge_instructions`], para a instância `ident`, com o cargo dela.
+    /// Like [`Registry::bridge_instructions`], for the instance `ident`, with its role.
     pub fn bridge_instructions_for(&self, ident: &Ident) -> String {
         let mut text = self.bridge_instructions(Some(&ident.id()));
         if let Some(role) = &ident.role {
-            text.push_str(&format!("\nSeu cargo nesta instância: {role}. Aja de acordo com ele."));
+            text.push_str(&format!("\nYour role in this instance: {role}. Act accordingly."));
         }
         text
     }
 
-    /// As instruções do AgentDeck, a "memória geral" igual para todos os agentes. Com `self_id`, leva o nome da
-    /// instância e a lista dos outros agentes; sem ele (texto de arquivo, igual para qualquer aba), manda ler o
-    /// nome na variável de ambiente e não lista ninguém, para o arquivo não mudar de máquina para máquina.
+    /// The AgentDeck instructions, the "general memory" shared by every agent. With `self_id`, it carries the
+    /// instance name and the list of the other agents; without it (file text, the same for any tab), it tells the
+    /// agent to read the name from the environment variable and lists nobody, so the file does not change from machine to machine.
     pub fn bridge_instructions(&self, self_id: Option<&str>) -> String {
-        const INTRO: &str = "Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA.";
+        const INTRO: &str = "You are running inside AgentDeck, an environment that connects several AI agents.";
         let (first, listed) = match self_id {
             Some(id) => {
                 let others: Vec<String> = self.peers().into_iter().filter(|p| p != id).collect();
-                (format!("{INTRO} Seu nome aqui é \"{id}\"."), format!(" (agentes: {})", others.join(",")))
+                (format!("{INTRO} Your name here is \"{id}\"."), format!(" (agents: {})", others.join(",")))
             }
             None => (
-                format!("{INTRO} Seu nome e cargo estão nas variáveis AGENTDECK_AGENT e AGENTDECK_ROLE; nunca pergunte a si mesmo."),
+                format!("{INTRO} Your name and role are in the AGENTDECK_AGENT and AGENTDECK_ROLE variables; never ask who you are."),
                 String::new(),
             ),
         };
         [
             first,
-            format!("Para falar com outro agente, rode no shell: ask-agent <agente> \"mensagem\"{listed}. Precisando de outro agente, abra-o no AgentDeck (ask-agent <agente>, ask-agent <agente>@<cargo> ou ask-agent --task new): NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça."),
-            "A resposta sai no stdout e pode levar minutos (timeout de até 600000 ms). Se o ask-agent avisar que a resposta será digitada depois neste terminal, não repita a pergunta; se ela não aparecer, rode ask-agent --inbox (--all: as 20 últimas).".to_owned(),
-            "ask-agent --models [<agente>] lista os agentes, os modelos desta máquina e a cota de cada um (do mais folgado ao mais gasto): antes de delegar ou de abrir tarefas, veja a cota de todos e escolha entre os modelos capazes do tamanho do trabalho e, entre eles, o de mais folga, em vez de ir sempre no mesmo (a ponte recusa o que está esgotado). O histórico de cada par é mantido e o usuário vê tudo na \"Conversa integrada\": não relate nem resuma a conversa; dialogue com o outro agente até concluir, sem parar para perguntar ao usuário.".to_owned(),
-            "Cada aba é uma instância <modelo>[@<cargo>[@<nome>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev \"tarefa\" abre a aba se não existir; --new abre outra do mesmo cargo; --model <modelo> escolhe o LLM ao abrir. Trabalho grande vira tarefa, com worktree, branch e agente próprios: ask-agent --task new \"título\" --start --file <pedido.md>.".to_owned(),
-            "Texto com acento vai num arquivo (--file <arquivo>): pela entrada padrão o shell do Windows troca os acentos por \"?\".".to_owned(),
-            "Quando outro agente lhe mandar uma mensagem, responda com o comando indicado nela (ask-agent --reply <número> \"resposta\" ou --file <arquivo>): só assim a resposta chega a ele.".to_owned(),
-            "Os agentes formam uma equipe (chefe e subordinados; o usuário pode reorganizá-la). Antes de delegar ou reportar, veja a sua posição com ask-agent --team; delegue de preferência à equipe e, ao concluir algo que o chefe pediu, reporte com ask-agent --boss \"mensagem\".".to_owned(),
-            "Memória do projeto: memory/aprendizados/, um .md por armadilha, decisão ou convenção que custou tempo e o código não mostra. Formato: cabeçalho --- titulo: … / resumo: uma linha / touches: [globs dos arquivos; opcional] --- e o corpo curto, com Por quê e Como aplicar. Antes de mexer em arquivos, rode ask-agent --learn <arquivo>... (sem argumentos: o índice e a situação das tarefas; com arquivos, avisa se outra tarefa mexe neles); ao descobrir algo assim, crie o arquivo. ask-agent --outline <arquivo>... mostra as assinaturas com a linha, para ler só o trecho necessário de um arquivo grande (offset).".to_owned(),
+            format!("To talk to another agent, run this in the shell: ask-agent <agent> \"message\"{listed}. If you need another agent, open it in AgentDeck (ask-agent <agent>, ask-agent <agent>@<role> or ask-agent --task new): do NOT use your CLI's internal subagents (Task/Agent tool, sub-agents) unless the user asks for it."),
+            "The answer comes on stdout and can take minutes (timeout up to 600000 ms). If ask-agent warns that the answer will be typed later in this terminal, do not repeat the question; if it does not show up, run ask-agent --inbox (--all: the last 20).".to_owned(),
+            "ask-agent --models [<agent>] lists the agents, this machine's models and the quota of each one (from the most free to the most spent): before delegating or opening tasks, look at everyone's quota and choose among the models capable of the size of the work, and among them the one with the most free quota, instead of always using the same one (the bridge refuses the exhausted ones). The history of each pair is kept and the user sees everything in the \"Integrated chat\": do not report or summarize the conversation; talk with the other agent until it is done, without stopping to ask the user.".to_owned(),
+            "Each tab is an instance <model>[@<role>[@<name>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev \"task\" opens the tab if it does not exist; --new opens another one with the same role; --model <model> picks the LLM when opening. Large work becomes a task, with its own worktree, branch and agent: ask-agent --task new \"title\" --start --file <request.md>.".to_owned(),
+            "Text with accents goes in a file (--file <file>): through standard input the Windows shell turns accents into \"?\".".to_owned(),
+            "When another agent sends you a message, answer with the command it shows (ask-agent --reply <number> \"answer\" or --file <file>): only then does the answer reach it.".to_owned(),
+            "The agents form a team (boss and subordinates; the user can reorganize it). Before delegating or reporting, see your position with ask-agent --team; delegate preferably to the team and, when you finish something the boss asked for, report with ask-agent --boss \"message\".".to_owned(),
+            "Project memory: memory/aprendizados/, one .md per trap, decision or convention that cost time and the code does not show. Format: header --- title: … / summary: one line / touches: [globs of the files; optional] --- and a short body, with Why and How to apply. Before touching files, run ask-agent --learn <file>... (without arguments: the index and the state of the tasks; with files, it warns if another task touches them); when you find out something like that, create the file. ask-agent --outline <file>... shows the signatures with the line, so you read only the part of a large file you need (offset).".to_owned(),
         ]
-        .join("
-")
+        .join("\n")
     }
 
-    /// Lista para menus (equivalente a `agents:list`).
+    /// List for menus (equivalent to `agents:list`).
     pub fn list(&self) -> Vec<AgentInfo> {
         AGENTS
             .iter()
@@ -435,11 +465,11 @@ impl Registry {
     }
 }
 
-/// Shell da aba "Terminal": PowerShell no Windows; `$SHELL` (ou /bin/bash) nos demais.
+/// Shell of the "Terminal" tab: PowerShell on Windows; `$SHELL` (or /bin/bash) on the others.
 fn shell_resolved() -> Resolved {
     if cfg!(windows) {
-        // No Windows, força UTF-8 sem BOM no console e no pipeline para evitar que
-        // pipes para o ask-agent ou outros executáveis troquem acentos por "?".
+        // On Windows, force UTF-8 without BOM in the console and in the pipeline to keep
+        // pipes to ask-agent or other executables from turning accents into "?".
         Resolved {
             program: "powershell.exe".into(),
             pre: vec![
@@ -456,15 +486,15 @@ fn shell_resolved() -> Resolved {
     }
 }
 
-// ---------- Ambiente e comando interativo ----------
+// ---------- Environment and interactive command ----------
 
-/// Separador de PATH da plataforma.
+/// The platform's PATH separator.
 pub const PATH_SEP: &str = if cfg!(windows) { ";" } else { ":" };
 
-/// Ambiente dos agentes (equivalente a `agentEnv`): herda o do processo, remove marcas de
-/// sessões aninhadas do Claude Code, põe a pasta dos binários no início do PATH e injeta
-/// as variáveis da ponte.
-/// `token` é o do processo (ver [`Core::tab_token`] e [`Core::headless_token`]), nunca o mestre.
+/// Agent environment (equivalent to `agentEnv`): inherits the process one, removes marks of
+/// nested Claude Code sessions, puts the binaries folder at the start of PATH and injects
+/// the bridge variables.
+/// `token` is the process one (see [`Core::tab_token`] and [`Core::headless_token`]), never the master.
 pub(crate) fn agent_env(core: &Core, agent_id: &str, depth: i64, token: &str) -> BTreeMap<String, String> {
     let base: Vec<(String, String)> =
         std::env::vars_os().map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())).collect();
@@ -479,8 +509,8 @@ pub(crate) fn build_agent_env(
     agent_id: &str,
     depth: i64,
 ) -> BTreeMap<String, String> {
-    // `OPENCODE_CONFIG_CONTENT` é a configuração (modelo) da aba do OpenCode que abriu este processo; a de cada
-    // aba nova é inserida depois deste filtro (`spawn_spec_for`, via `models::opencode_tui`).
+    // `OPENCODE_CONFIG_CONTENT` is the configuration (model) of the OpenCode tab that opened this process; the one
+    // for each new tab is inserted after this filter (`spawn_spec_for`, via `models::opencode_tui`).
     const REMOVE: &[&str] = &[
         "CLAUDECODE",
         "CLAUDE_CODE_ENTRYPOINT",
@@ -492,7 +522,7 @@ pub(crate) fn build_agent_env(
     let mut env = BTreeMap::new();
     let mut old_path = String::new();
     for (k, v) in base {
-        // No Windows as variáveis não diferenciam maiúsculas ("Path" vs "PATH").
+        // On Windows variables are not case-sensitive ("Path" vs "PATH").
         let is_path = if cfg!(windows) { k.eq_ignore_ascii_case("PATH") } else { k == "PATH" };
         if is_path {
             if old_path.is_empty() {
@@ -501,8 +531,8 @@ pub(crate) fn build_agent_env(
             continue;
         }
         let removed = if cfg!(windows) { REMOVE.iter().any(|r| r.eq_ignore_ascii_case(&k)) } else { REMOVE.contains(&k.as_str()) }
-            // Nada do AgentDeck que abriu este app (ex.: o app rodando dentro de uma aba de
-            // outro AgentDeck) vaza para os agentes: cargo, pasta de dados, depuração…
+            // Nothing from the AgentDeck that opened this app (e.g. the app running inside a tab of
+            // another AgentDeck) leaks to the agents: role, data folder, debug…
             || (crate::env::is_app_var(&k) && !crate::env::is_app_var_named(&k, "ASK_WAIT"));
         if !removed {
             env.insert(k, v);
@@ -518,19 +548,19 @@ pub(crate) fn build_agent_env(
     if cfg!(windows) {
         env.insert("PYTHONUTF8".into(), "1".into());
         env.insert("PYTHONIOENCODING".into(), "utf-8".into());
-        // O Git Bash (o do Claude Code) reescreve argumentos que começam com "/" como caminhos
-        // (`ask-agent claude@dev "/review src"` viraria `C:/Program Files/Git/review src`).
+        // Git Bash (the one from Claude Code) rewrites arguments that start with "/" as paths
+        // (`ask-agent claude@dev "/review src"` would become `C:/Program Files/Git/review src`).
         env.insert("MSYS_NO_PATHCONV".into(), "1".into());
         env.insert("MSYS2_ARG_CONV_EXCL".into(), "*".into());
     }
     env
 }
 
-/// Grava `dados/hooks/claude-settings.json`: hooks que avisam a ponte quando o Claude começa
-/// (`UserPromptSubmit`) e termina (`Stop`) um turno, que se somam às configurações do usuário, e
-/// a statusline (`ask-agent --usage`), que manda o uso do plano à ponte. Esta substitui a do
-/// usuário, por isso o `ask-agent --usage` roda a dele e mostra a saída dela; o `padding` dele,
-/// se houver, é mantido aqui (quem o aplica é o Claude Code, não a nossa linha).
+/// Writes `dados/hooks/claude-settings.json`: hooks that tell the bridge when Claude starts
+/// (`UserPromptSubmit`) and ends (`Stop`) a turn, which add to the user's settings, and
+/// the statusline (`ask-agent --usage`), which sends the plan usage to the bridge. Ours replaces the
+/// user's, so `ask-agent --usage` runs theirs and shows its output; its `padding`,
+/// if any, is kept here (Claude Code applies it, not our line).
 fn write_claude_hooks(data_dir: &Path, project_dir: &Path) -> std::io::Result<PathBuf> {
     let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|v| !v.is_empty())
@@ -539,7 +569,7 @@ fn write_claude_hooks(data_dir: &Path, project_dir: &Path) -> std::io::Result<Pa
     write_claude_hooks_with(data_dir, project_dir, &config_dir)
 }
 
-/// Como [`write_claude_hooks`], com a pasta de configuração do Claude explícita (teste).
+/// Like [`write_claude_hooks`], with the Claude configuration folder explicit (test).
 fn write_claude_hooks_with(data_dir: &Path, project_dir: &Path, config_dir: &Path) -> std::io::Result<PathBuf> {
     let dir = data_dir.join("hooks");
     std::fs::create_dir_all(&dir)?;
@@ -557,8 +587,8 @@ fn write_claude_hooks_with(data_dir: &Path, project_dir: &Path, config_dir: &Pat
     Ok(path)
 }
 
-/// `padding` da statusline própria do usuário, na ordem de precedência do Claude Code (projeto
-/// local, projeto e usuário). Sem statusline dele, 0 (o padrão).
+/// `padding` of the user's own statusline, in Claude Code's order of precedence (local project,
+/// project and user). Without one of theirs, 0 (the default).
 fn user_statusline_padding(project_dir: &Path, config_dir: &Path) -> serde_json::Value {
     let files = [
         project_dir.join(".claude").join("settings.local.json"),
@@ -568,8 +598,8 @@ fn user_statusline_padding(project_dir: &Path, config_dir: &Path) -> serde_json:
     files.iter().find_map(|f| user_statusline_in(f)).and_then(|sl| sl.get("padding").cloned()).unwrap_or_else(|| serde_json::Value::from(0))
 }
 
-/// `statusLine` de um arquivo de configuração do Claude Code, quando é um comando do usuário (a
-/// nossa própria `ask-agent --usage` não conta).
+/// `statusLine` of a Claude Code configuration file, when it is a user command (our own
+/// `ask-agent --usage` does not count).
 fn user_statusline_in(file: &Path) -> Option<serde_json::Value> {
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()?;
     let sl = v.get("statusLine")?;
@@ -580,10 +610,10 @@ fn user_statusline_in(file: &Path) -> Option<serde_json::Value> {
     (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| sl.clone())
 }
 
-/// Nome do arquivo (em `dados/`) com as instruções do AgentDeck, para os CLIs que leem instruções de um arquivo.
+/// Name of the file (in `dados/`) with the AgentDeck instructions, for the CLIs that read instructions from a file.
 const INSTRUCTIONS_FILE: &str = "agentdeck-instructions.md";
 
-/// Grava `dados/agentdeck-instructions.md` (só se mudou) e devolve o caminho. Fica fora do repositório do usuário.
+/// Writes `dados/agentdeck-instructions.md` (only if it changed) and returns the path. It stays outside the user's repository.
 fn write_instructions_file(data_dir: &Path, text: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(INSTRUCTIONS_FILE);
@@ -597,12 +627,12 @@ fn write_instructions_file(data_dir: &Path, text: &str) -> std::io::Result<PathB
     Ok(path)
 }
 
-/// Argumentos que passam as instruções do AgentDeck a `kind`, sem mexer no repositório do usuário. O Claude
-/// (`--append-system-prompt`) e o OpenCode (configuração, ver [`models::opencode_tui`]) são montados à parte.
-/// - Codex: `-c developer_instructions=…` (o valor é TOML; num shim `.cmd` as aspas não sobrevivem e o texto vai
-///   cru, que o Codex aceita como texto quando não é TOML válido);
-/// - Aider: `--read <arquivo>` (arquivo só de leitura);
-/// - Open Interpreter: `--custom_instructions` (acrescenta ao prompt de sistema).
+/// Arguments that pass the AgentDeck instructions to `kind`, without touching the user's repository. Claude
+/// (`--append-system-prompt`) and OpenCode (configuration, see [`models::opencode_tui`]) are assembled separately.
+/// - Codex: `-c developer_instructions=…` (the value is TOML; in a `.cmd` shim the quotes do not survive and the text
+///   goes raw, which Codex accepts as text when it is not valid TOML);
+/// - Aider: `--read <file>` (read-only file);
+/// - Open Interpreter: `--custom_instructions` (adds to the system prompt).
 fn instruction_args(kind: &str, text: &str, file: Option<&Path>, shim: bool) -> Vec<String> {
     match kind {
         "codex" => {
@@ -615,17 +645,17 @@ fn instruction_args(kind: &str, text: &str, file: Option<&Path>, shim: bool) -> 
     }
 }
 
-/// CLIs sem opção de instruções que só leem o `AGENTS.md` da pasta onde rodam: sem o arquivo, não sabem do
-/// `ask-agent`. Para eles o app cria o `AGENTS.md` só com o bloco dele quando a pasta não tem um (ver
-/// [`Core::ensure_agents_file`]). O Antigravity saiu daqui: ele lê o `AGENTS.md` de uma pasta passada em `--add-dir`
-/// (ver [`write_agy_instructions`]).
+/// CLIs without an instructions option that only read the `AGENTS.md` of the folder they run in: without the
+/// file, they do not know about `ask-agent`. For them the app creates an `AGENTS.md` with only its block when the
+/// folder has none (see [`Core::ensure_agents_file`]). Antigravity left this group: it reads the `AGENTS.md` of a folder
+/// passed in `--add-dir` (see [`write_agy_instructions`]).
 fn reads_only_agents_md(kind: &str) -> bool {
     matches!(kind, "goose" | "copilot")
 }
 
-/// Grava `dados/agy/<instância>/AGENTS.md` com as instruções da instância (só se mudou) e devolve a pasta, para o
-/// `--add-dir` do Antigravity: o `agy` lê o `AGENTS.md` das pastas adicionadas junto com o do projeto (conferido em
-/// 2026-10-24 com o 1.4.7), então nada é criado no repositório do usuário.
+/// Writes `dados/agy/<instance>/AGENTS.md` with the instance instructions (only if it changed) and returns the folder, for
+/// Antigravity's `--add-dir`: `agy` reads the `AGENTS.md` of the added folders together with the project one (checked on
+/// 2026-10-24 with 1.4.7), so nothing is created in the user's repository.
 fn write_agy_instructions(data_dir: &Path, id: &str, text: &str) -> std::io::Result<PathBuf> {
     let dir = data_dir.join("agy").join(id);
     std::fs::create_dir_all(&dir)?;
@@ -637,43 +667,43 @@ fn write_agy_instructions(data_dir: &Path, id: &str, text: &str) -> std::io::Res
     Ok(dir)
 }
 
-/// Monta o comando de uma aba interativa (equivalente a `pty:spawn`).
+/// Assembles the command of an interactive tab (equivalent to `pty:spawn`).
 pub(crate) fn spawn_spec(core: &Core, project: &str, kind: &str) -> Result<SpawnSpec, String> {
     spawn_spec_for(core, project, &Ident::main(kind))
 }
 
-/// Como [`spawn_spec`], para uma instância: `AGENTDECK_AGENT` leva o id dela e o cargo vai
-/// em `AGENTDECK_ROLE` e no prompt de sistema. O terminal abre na pasta do projeto `project`
-/// (na primeira aba de um projeto que não é o ativo, o AGENTS.md dele é escrito).
+/// Like [`spawn_spec`], for an instance: `AGENTDECK_AGENT` gets its id and the role goes
+/// in `AGENTDECK_ROLE` and in the system prompt. The terminal opens in the folder of project `project`
+/// (on the first tab of a project that is not the active one, its AGENTS.md is written).
 pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
-    let project_dir = core.project_path(project).ok_or_else(|| format!("Projeto desconhecido: {project}"))?;
+    let project_dir = core.project_path(project).ok_or_else(|| t!("Unknown project: {project}", project))?;
     let kind = ident.kind.as_str();
     let id = ident.id();
-    // A instância de uma tarefa trabalha na worktree dela, não na pasta do projeto.
+    // A task instance works in its own worktree, not in the project folder.
     let cwd = match core.task_cwd(project, &id) {
         Some(dir) if dir.is_dir() => dir,
-        Some(dir) => return Err(format!("A pasta da tarefa não existe mais ({}). Descarte a tarefa na mesa de tarefas.", dir.display())),
+        Some(dir) => return Err(t!("The task folder no longer exists ({dir}). Discard the task on the tasks desk.", dir = dir.display())),
         None => project_dir.clone(),
     };
     let reg = &core.inner.agents;
-    let def = agent_def(kind).ok_or_else(|| format!("Agente desconhecido: {kind}"))?;
+    let def = agent_def(kind).ok_or_else(|| t!("Unknown agent: {kind}", kind))?;
     let data_dir = core.paths().data_dir.to_string_lossy().into_owned();
-    // Nenhum CLI depende do `AGENTS.md` do usuário: cada um recebe as instruções pelo canal que ele tem.
+    // No CLI depends on the user's `AGENTS.md`: each one gets the instructions through the channel it has.
     let instructions = reg.bridge_instructions_for(ident);
     let generic_file = write_instructions_file(&core.paths().data_dir, &reg.bridge_instructions(None))
-        .map_err(|e| log::warn!("não consegui gravar o arquivo de instruções do AgentDeck: {e}"))
+        .map_err(|e| log::warn!("could not write the AgentDeck instructions file: {e}"))
         .ok();
     let mut env = agent_env(core, &id, 0, &core.tab_token(project, &id));
     if let Some(role) = &ident.role {
         env.insert("AGENTDECK_ROLE".into(), role.clone());
     }
 
-    // Pedido > gravado > padrão do cargo; fica gravado para a interface e para reabrir o app.
+    // Requested > saved > role default; it is saved for the interface and for reopening the app.
     let model = core.assign_model(project, ident, None);
-    let resolved = reg.resolve(kind).ok_or_else(|| def.missing.to_owned())?;
+    let resolved = reg.resolve(kind).ok_or_else(|| def.install_hint().to_owned())?;
     let mut args = Vec::new();
-    // Prompt inicial de uma tarefa recém-aberta (ver `Core::set_boot_prompt`). No Claude é posicional e vai
-    // primeiro: `--add-dir` e `--allowedTools` aceitam vários valores e engoliriam o texto.
+    // Initial prompt of a newly opened task (see `Core::set_boot_prompt`). In Claude it is positional and goes
+    // first: `--add-dir` and `--allowedTools` accept several values and would swallow the text.
     let boot = models::boot_prompt_flag(kind).and_then(|flag| core.take_boot_prompt(project, &id).map(|p| (flag, p)));
     if let Some((None, prompt)) = &boot {
         args.push(prompt.clone());
@@ -681,26 +711,26 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     if kind == "claude" {
         args.push("--append-system-prompt".into());
         args.push(instructions.clone());
-        // Responder a outro agente é rodar `ask-agent`: libera só esse comando, sem perguntar.
+        // Answering another agent means running `ask-agent`: allow only that command, without asking.
         args.push("--allowedTools".into());
         args.push("Bash(ask-agent:*)".into());
-        // Hooks avisam o início e o fim de cada turno (ver `delivery.rs`).
+        // Hooks tell the start and the end of each turn (see `delivery.rs`).
         match write_claude_hooks(&core.paths().data_dir, &project_dir) {
             Ok(path) => {
                 args.push("--settings".into());
                 args.push(path.to_string_lossy().into_owned());
             }
-            Err(e) => log::warn!("não consegui gravar os hooks do Claude: {e}"),
+            Err(e) => log::warn!("could not write the Claude hooks: {e}"),
         }
     }
     if kind == "codex" && resolved.shim.is_none() {
-        // Fim de turno do Codex → `ask-agent --signal idle <json>`. Pelo cmd.exe o valor TOML
-        // (com aspas) não sobrevive, então só com o executável direto.
+        // Codex end of turn → `ask-agent --signal idle <json>`. Through cmd.exe the TOML value
+        // (with quotes) does not survive, so only with the direct executable.
         args.push("-c".into());
         args.push(r#"notify=["ask-agent","--signal","idle"]"#.into());
     }
     args.extend(instruction_args(kind, &instructions, generic_file.as_deref(), resolved.shim.is_some()));
-    // Sem a pergunta "Do you trust this folder?", que deixava parada a aba aberta em segundo plano.
+    // Without the "Do you trust this folder?" question, which left the tab opened in the background stuck.
     args.extend(crate::trust::prepare(kind, &cwd, &project_dir, &core.inner.home));
     if kind == "claude" || kind == "antigravity" {
         args.push("--add-dir".into());
@@ -712,19 +742,19 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
                 args.push("--add-dir".into());
                 args.push(dir.to_string_lossy().into_owned());
             }
-            Err(e) => log::warn!("não consegui gravar as instruções do Antigravity: {e}"),
+            Err(e) => log::warn!("could not write the Antigravity instructions: {e}"),
         }
     }
     if kind == "opencode" {
-        // O TUI não tem --model nem --system: servidor próprio + modelo e instruções na configuração
-        // (ver `models::opencode_tui`).
+        // The TUI has no --model or --system: its own server + model and instructions in the configuration
+        // (see `models::opencode_tui`).
         let (extra, (key, value)) = models::opencode_tui(model.as_deref(), generic_file.as_deref());
         args.extend(extra);
         env.insert(key, value);
     } else if let Some(m) = &model {
         args.extend(models::cli_args(kind, m));
     }
-    // Esforço da tarefa (o do Antigravity já está no nome do modelo; ver `Task::effort`).
+    // Task effort (Antigravity's is already in the model name; see `Task::effort`).
     if let Some(effort) = core.task_of_instance(project, &id).and_then(|t| t.effort) {
         args.extend(models::effort_args(kind, effort));
     }
@@ -763,37 +793,37 @@ mod tests {
         Registry::new(Discovery { search_path: Some(OsString::new()), home: PathBuf::from("/h"), system_dirs: false })
     }
 
-    /// As instruções não crescem além do necessário (eram 2580 caracteres antes da t38; a t40 acrescentou o `--outline`) e
-    /// trazem a regra dos subagentes, a ponte e a memória geral.
+    /// The instructions do not grow beyond what is needed (they were 2580 characters before t38; t40 added `--outline`
+    /// and t64's English text went a little past the old limit) and carry the subagent rule, the bridge and the general memory.
     #[test]
     fn the_instructions_carry_the_rules_and_stay_short() {
         let reg = registry();
         let text = reg.bridge_instructions(Some("claude@dev"));
-        assert!(text.chars().count() <= 2740, "{} caracteres", text.chars().count());
+        assert!(text.chars().count() <= 2800, "{} characters", text.chars().count());
         for needle in [
-            "NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça",
-            "ask-agent <agente>@<cargo> ou ask-agent --task new",
-            "escolha entre os modelos capazes do tamanho do trabalho e, entre eles, o de mais folga",
+            "do NOT use your CLI's internal subagents (Task/Agent tool, sub-agents) unless the user asks for it",
+            "ask-agent <agent>@<role> or ask-agent --task new",
+            "choose among the models capable of the size of the work, and among them the one with the most free quota",
             "memory/aprendizados/",
-            "titulo:",
-            "resumo:",
+            "title:",
+            "summary:",
             "touches:",
             "ask-agent --learn",
-            "ask-agent --outline <arquivo>",
+            "ask-agent --outline <file>",
             "ask-agent --reply",
             "ask-agent --boss",
         ] {
-            assert!(text.contains(needle), "falta {needle:?}");
+            assert!(text.contains(needle), "missing {needle:?}");
         }
-        assert!(text.contains("Seu nome aqui é \"claude@dev\"") && text.contains("(agentes: )"), "{text}");
+        assert!(text.contains("Your name here is \"claude@dev\"") && text.contains("(agents: )"), "{text}");
     }
 
-    /// O texto de arquivo (igual para qualquer aba) não lista agentes: não muda de máquina para máquina.
+    /// The file text (the same for any tab) does not list agents: it does not change from machine to machine.
     #[test]
     fn the_generic_instructions_do_not_list_the_installed_agents() {
         let reg = registry();
         let text = reg.bridge_instructions(None);
-        assert!(text.contains("AGENTDECK_AGENT") && text.contains("AGENTDECK_ROLE") && !text.contains("(agentes:"), "{text}");
+        assert!(text.contains("AGENTDECK_AGENT") && text.contains("AGENTDECK_ROLE") && !text.contains("(agents:"), "{text}");
     }
 
     #[test]
@@ -801,7 +831,7 @@ mod tests {
         let file = Path::new("/dados/agentdeck-instructions.md");
         let text = "Você \"é\"
 ok";
-        // Codex: valor TOML (string básica) com aspas e quebra de linha escapadas; num shim, o texto cru.
+        // Codex: TOML value (basic string) with quotes and line break escaped; in a shim, the raw text.
         assert_eq!(instruction_args("codex", text, Some(file), false), ["-c", r#"developer_instructions="Você \"é\"\nok""#]);
         assert_eq!(
             instruction_args("codex", text, Some(file), true),
@@ -814,7 +844,7 @@ ok"
         assert_eq!(instruction_args("aider", text, Some(file), false), ["--read", "/dados/agentdeck-instructions.md"]);
         assert!(instruction_args("aider", text, None, false).is_empty());
         assert_eq!(instruction_args("interpreter", text, Some(file), false), ["--custom_instructions", text]);
-        // Claude e OpenCode são montados à parte; o Antigravity lê o AGENTS.md.
+        // Claude and OpenCode are assembled separately; Antigravity reads the AGENTS.md.
         for kind in ["claude", "opencode", "antigravity", "goose", "shell"] {
             assert!(instruction_args(kind, text, Some(file), false).is_empty(), "{kind}");
         }
@@ -826,20 +856,20 @@ ok"
     fn the_instructions_file_is_rewritten_only_when_it_changes() {
         let tmp = tempfile::tempdir().expect("tmp");
         let dados = tmp.path().join("dados");
-        let path = write_instructions_file(&dados, "um").expect("gravar");
+        let path = write_instructions_file(&dados, "one").expect("write");
         assert_eq!(path, dados.join(INSTRUCTIONS_FILE));
         assert_eq!(
             std::fs::read_to_string(&path).expect("ler"),
-            "um
+            "one
 "
         );
         let before = std::fs::metadata(&path).and_then(|m| m.modified()).expect("mtime");
-        write_instructions_file(&dados, "um").expect("de novo");
+        write_instructions_file(&dados, "one").expect("again");
         assert_eq!(std::fs::metadata(&path).and_then(|m| m.modified()).expect("mtime"), before);
-        write_instructions_file(&dados, "dois").expect("muda");
+        write_instructions_file(&dados, "two").expect("changes");
         assert_eq!(
-            std::fs::read_to_string(&path).expect("ler"),
-            "dois
+            std::fs::read_to_string(&path).expect("read"),
+            "two
 "
         );
     }
@@ -858,25 +888,25 @@ ok"
             ("CLAUDE_CODE_ENTRYPOINT".to_owned(), "cli".to_owned()),
             ("HOME".to_owned(), "/h".to_owned()),
             ("PATH".to_owned(), "/usr/bin".to_owned()),
-            // Herdados de um AgentDeck que abriu este (app rodando dentro de uma aba).
+            // Inherited from an AgentDeck that opened this one (app running inside a tab).
             ("AGENTDECK_ROLE".to_owned(), "dev".to_owned()),
             ("AGENTDECK_HOME".to_owned(), "/outro".to_owned()),
             ("AGENTDECK_TOKEN".to_owned(), "velho".to_owned()),
             ("AGENTDECK_DEBUG_UI".to_owned(), "1".to_owned()),
-            // Configuração do usuário: continua valendo.
+            // User's configuration: still valid.
             ("AGENTDECK_ASK_WAIT".to_owned(), "300".to_owned()),
-            // Modelo da aba do OpenCode que abriu este app: não passa para os agentes.
+            // Model of the OpenCode tab that opened this app: it does not reach the agents.
             ("OPENCODE_CONFIG_CONTENT".to_owned(), r#"{"model":"herdado"}"#.to_owned()),
         ];
         let env = build_agent_env(base, Path::new("/app/bin"), 1234, "tok", "claude", 1);
         for k in ["AGENTDECK_ROLE", "AGENTDECK_HOME", "AGENTDECK_DEBUG_UI"] {
-            assert!(!env.contains_key(k), "{k} herdado");
+            assert!(!env.contains_key(k), "{k} inherited");
         }
         assert_eq!(env["AGENTDECK_TOKEN"], "tok");
         assert_eq!(env["AGENTDECK_ASK_WAIT"], "300");
         assert!(!env.contains_key("CLAUDECODE"));
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
-        assert!(!env.contains_key("OPENCODE_CONFIG_CONTENT"), "a configuração da aba do OpenCode que abriu o app vazou");
+        assert!(!env.contains_key("OPENCODE_CONFIG_CONTENT"), "the configuration of the OpenCode tab that opened the app leaked");
         assert_eq!(env["HOME"], "/h");
         assert_eq!(env["PATH"], format!("/app/bin{PATH_SEP}/usr/bin"));
         assert_eq!(env["AGENTDECK_PORT"], "1234");
@@ -889,16 +919,16 @@ ok"
 
     #[test]
     fn cmd_args_are_escaped_not_mangled() {
-        // Com espaço o portable-pty põe aspas: só `%`, aspas e quebras de linha mudam.
+        // With a space portable-pty adds quotes: only `%`, quotes and line breaks change.
         assert_eq!(cmd_safe_arg("a \"b\" & calc | x <y> ^z %PATH% !v!\r\nfim\n"), "a b & calc | x <y> ^z %%cd:~,%PATH%%cd:~,% !v! fim ");
         assert_eq!(cmd_safe_arg(r"C:\Users\ana\dados"), r"C:\Users\ana\dados");
-        // Sem espaço, sem aspas: circunflexos para as duas passagens do cmd.
+        // Without a space, without quotes: carets for the two cmd passes.
         assert_eq!(cmd_safe_arg(r"C:\Users\Ana&Bia\dados"), r"C:\Users\Ana^^^&Bia\dados");
         assert_eq!(cmd_safe_arg("Bash(ask-agent:*)"), "Bash^^^(ask-agent:*^^^)");
         assert_eq!(cmd_safe_arg("50%!"), "50%%cd:~,%!");
     }
 
-    /// Linha de comando como o portable-pty monta (`append_quoted`) para argumentos sem aspas.
+    /// Command line as portable-pty assembles it (`append_quoted`) for arguments without quotes.
     #[cfg(windows)]
     fn pty_quoted(arg: &str) -> String {
         if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '\x0b', '"']) {
@@ -908,8 +938,8 @@ ok"
         format!("\"{arg}{}\"", "\\".repeat(trailing))
     }
 
-    /// Caminhos e textos do app atravessam o `cmd.exe /c` e o `%*` de um shim (os dois formatos do
-    /// npm: linha única e bloco `IF … ( … ) ELSE ( … )`) sem quebrar nem expandir nada.
+    /// Paths and app text go through the `cmd.exe /c` and the `%*` of a shim (the two npm
+    /// formats: single line and `IF … ( … ) ELSE ( … )` block) without breaking or expanding anything.
     #[cfg(windows)]
     #[test]
     fn escaped_args_reach_the_shim_intact() {
@@ -928,7 +958,7 @@ ok"
         let expected: Vec<String> = args.iter().map(|a| pty_quoted(&a.replace('"', ""))).collect();
         for shim in ["linha", "bloco"] {
             let mut tail: Vec<String> = CMD_FLAGS.map(String::from).to_vec();
-            tail.push(format!(r".\{shim}")); // sem depender de NoDefaultCurrentDirectoryInExePath
+            tail.push(format!(r".\{shim}")); // without depending on NoDefaultCurrentDirectoryInExePath
             tail.extend(args.iter().map(|a| pty_quoted(&cmd_safe_arg(a))));
             let out = std::process::Command::new("cmd.exe")
                 .raw_arg(tail.join(" "))
@@ -972,7 +1002,7 @@ ok"
         let data = tmp.path().join("dados");
         let project = tmp.path().join("projeto");
         let config = tmp.path().join("claude");
-        let statusline = |padding: serde_json::Value| serde_json::json!({ "statusLine": { "type": "command", "command": "minha-status", "padding": padding } });
+        let statusline = |padding: serde_json::Value| serde_json::json!({ "statusLine": { "type": "command", "command": "my-status", "padding": padding } });
         let write = |file: &Path, json: &serde_json::Value| {
             std::fs::create_dir_all(file.parent().expect("pai")).expect("mkdir");
             std::fs::write(file, json.to_string()).expect("write");
@@ -983,18 +1013,18 @@ ok"
             v["statusLine"]["padding"].clone()
         };
 
-        // Sem statusline do usuário: 0, como antes.
+        // Without the user's statusline: 0, as before.
         assert_eq!(statusline_padding(), serde_json::json!(0));
 
-        // O padding do usuário é o da nossa statusline (quem o aplica é o Claude Code).
+        // The user padding is the one of our statusline (Claude Code applies it).
         write(&config.join("settings.json"), &statusline(serde_json::json!(2)));
         assert_eq!(statusline_padding(), serde_json::json!(2));
 
-        // O projeto local vale mais que o do usuário.
+        // The local project wins over the user one.
         write(&project.join(".claude").join("settings.local.json"), &statusline(serde_json::json!(1)));
         assert_eq!(statusline_padding(), serde_json::json!(1));
 
-        // A nossa própria statusline (`ask-agent --usage`) não conta como a do usuário.
+        // Our own statusline (`ask-agent --usage`) does not count as the user's.
         write(
             &project.join(".claude").join("settings.local.json"),
             &serde_json::json!({ "statusLine": { "type": "command", "command": "ask-agent --usage", "padding": 7 } }),
@@ -1009,7 +1039,7 @@ ok"
         let env = build_agent_env(base, Path::new("C:\\app"), 1, "t", "shell", 0);
         assert!(!env.contains_key("Path"));
         assert_eq!(env["PATH"], "C:\\app;C:\\Windows");
-        // O Git Bash não converte "/review" em caminho.
+        // Git Bash does not turn "/review" into a path.
         assert_eq!((env["MSYS_NO_PATHCONV"].as_str(), env["MSYS2_ARG_CONV_EXCL"].as_str()), ("1", "*"));
     }
 }
