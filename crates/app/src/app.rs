@@ -277,11 +277,19 @@ impl App {
         let now = Instant::now();
         let next = self.deck.as_mut().and_then(Deck::background);
         self.background.ran(now, next);
+        self.sync_tray();
         if self.quit_if_requested(event_loop) {
             return;
         }
         if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.activate_requested)) {
             self.show_window(event_loop);
+        }
+    }
+
+    /// The tray icon's tooltip says what waits for the user (tasks in review or awaiting validation).
+    fn sync_tray(&mut self) {
+        if let (Some(tray), Some(deck)) = (self.tray.as_mut(), self.deck.as_ref()) {
+            tray.set_waiting(deck.tasks.review_count(), deck.tasks.validating_count());
         }
     }
 
@@ -420,6 +428,9 @@ impl App {
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
         egui.paint(&glw.window);
+        if let (Some(tray), Some(deck)) = (self.tray.as_mut(), self.deck.as_ref()) {
+            tray.set_waiting(deck.tasks.review_count(), deck.tasks.validating_count());
+        }
 
         // The app's second launch asked for the window (already visible: just focuses it).
         if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.activate_requested)) {

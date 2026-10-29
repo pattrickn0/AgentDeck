@@ -597,7 +597,7 @@ impl Core {
         let _op = self.inner.tasks.op.lock();
         let task = self.task_or_404(project, id)?;
         if !task.merge_approved {
-            return Err(TaskError::Conflict(t!("task {id} has no automatic merge waiting", id = &task.id).into()));
+            return Err(TaskError::Conflict(t!("task {id} has no automatic merge waiting", id = &task.id)));
         }
         let updated = self.update_task(project, &task.id, |t| {
             t.merge_approved = false;

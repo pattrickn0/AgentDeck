@@ -50,6 +50,8 @@ enum Act {
     ReturnFromCard(String),
     ToggleHistoryMenu,
     CloseHistoryMenu,
+    /// Cancels the automatic merge of a task whose conflict is with the agent.
+    CancelAutoMerge(String),
     SetHistoryFilter(HistoryFilter),
     ToggleSection(Section),
     /// Opens or collapses a timeline message (task id, message time).
@@ -134,6 +136,7 @@ fn apply(deck: &mut Deck, act: Act) {
         Act::DismissNotice => deck.tasks_clear_notice(),
         Act::MergeStash(id) => deck.tasks_merge_stash(&id),
         Act::AskAgent(id) => deck.tasks_ask_agent(&id),
+        Act::CancelAutoMerge(id) => deck.tasks_cancel_auto_merge(&id),
         Act::ToggleNoticeFiles => deck.tasks.notice_files = !deck.tasks.notice_files,
         Act::ConfirmYes => deck.tasks_confirm_accepted(),
         Act::ConfirmNo => deck.tasks.confirm = None,
@@ -623,10 +626,7 @@ fn task_card(deck: &mut Deck, ui: &mut Ui, task: &Task, now: u64, acts: &mut Vec
     } else {
         p.text_2
     };
-    let state_text = match (task.status, task.waiting_for.as_deref()) {
-        (TaskStatus::Queued, Some(holder)) => t!("{state} · waits for {holder}", state = card_state_label(task.status), holder),
-        _ => card_state_label(task.status).to_owned(),
-    };
+    let state_text = tasks_ui::card_state_text(task);
     let state_g = galley(&painter, &state_text, theme::ui_semibold(10.5), state_color);
     place(
         &painter,
@@ -957,6 +957,32 @@ fn detail_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, task: &Task, now: u64, 
                 t!("Touched outside the scope: {files}", files)
             };
             notice_box(ui, &text, false, false);
+        }
+
+        // A conflict handed to the agent: the merge is approved and happens by itself when the agent delivers.
+        if task.status == TaskStatus::Running && task.merge_approved {
+            let text = t!(
+                "Resolving a conflict with {base} — merges by itself when the agent delivers",
+                base = task.base
+            );
+            notice_box(ui, &text, false, false);
+            let b = [(
+                t!("Cancel automatic merge").to_owned(),
+                BtnKind::Secondary,
+                !working,
+                t!("The task will wait in review when the agent delivers, and you merge it yourself"),
+            )];
+            if button_flow(ui, &b, "cancel-auto-merge").is_some() {
+                acts.push(Act::CancelAutoMerge(task.id.clone()));
+            }
+        }
+        // The automatic merge of a delivery did not happen: why, and (for a conflict) the way out.
+        if let Some(stop) = task.merge_stopped.as_ref().filter(|_| task.status == TaskStatus::Review && notice.is_none()) {
+            let text = t!("The task was not merged by itself: {reason}", reason = &stop.reason);
+            error_box(ui, &text, false);
+            if let Some(files) = &stop.conflict_files {
+                refusal_buttons(ui, task, &MergeBlock::Conflict(files.clone()), false, !working, acts);
+            }
         }
 
         // The task's error (Failed) and the last action's.

@@ -95,6 +95,18 @@ pub fn card_state_label(status: TaskStatus) -> &'static str {
     }
 }
 
+/// The state shown on the card: the status name, except where the status hides what is going on. A task in review is
+/// finished work waiting for the reviewer (the agent is idle), and a task whose merge conflicted is the agent
+/// resolving it with the merge already approved.
+pub fn card_state_text(task: &Task) -> String {
+    match (task.status, task.waiting_for.as_deref()) {
+        (TaskStatus::Queued, Some(holder)) => t!("{state} · waits for {holder}", state = card_state_label(task.status), holder),
+        (TaskStatus::Review, _) => t!("waiting for your review").to_owned(),
+        (TaskStatus::Running, _) if task.merge_approved => t!("resolving a conflict").to_owned(),
+        _ => card_state_label(task.status).to_owned(),
+    }
+}
+
 /// The card asks for the user's immediate action (`Review` or `Validating`) and gets a visual highlight.
 pub fn is_focused_card(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::Review | TaskStatus::Validating)
@@ -751,6 +763,8 @@ pub enum TaskOp {
     Discard,
     Return(String),
     Reject(String),
+    /// "Cancel automatic merge" on a task whose conflict was handed to the agent.
+    CancelAutoMerge,
 }
 
 impl TaskOp {
@@ -763,6 +777,7 @@ impl TaskOp {
             TaskOp::Discard => t!("Discarding…"),
             TaskOp::Return(_) => t!("Returning…"),
             TaskOp::Reject(_) => t!("Rejecting…"),
+            TaskOp::CancelAutoMerge => t!("Cancelling…"),
         }
     }
 }
@@ -1007,6 +1022,7 @@ impl Deck {
                 TaskOp::Discard => core.task_discard(&project, &id),
                 TaskOp::Return(feedback) => core.task_return(&project, &id, feedback),
                 TaskOp::Reject(feedback) => core.task_reject(&project, &id, feedback),
+                TaskOp::CancelAutoMerge => core.task_cancel_auto_merge(&project, &id),
             });
             Some(UiMsg::Tasks(generation, TaskReply::Done { id, op, result, merge }))
         });
@@ -1040,6 +1056,11 @@ impl Deck {
     /// "Stash my changes, merge and give them back" in the refusal notice: with no other confirmation, the click is already the request.
     pub fn tasks_merge_stash(&mut self, id: &str) {
         self.tasks_run(id.to_owned(), TaskOp::MergeStash);
+    }
+
+    /// "Cancel automatic merge": the task stays with the agent and waits for the review when it delivers.
+    pub fn tasks_cancel_auto_merge(&mut self, id: &str) {
+        self.tasks_run(id.to_owned(), TaskOp::CancelAutoMerge);
     }
 
     /// "Ask the agent to commit" / "…resolve the conflict": sends the task back with the request ready from the refusal reason.
