@@ -20,17 +20,18 @@ pub type OnCommand = Arc<dyn Fn(TrayCommand) + Send + Sync>;
 /// What the window's close button (×) does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseAction {
-    /// Hides the window; the tray icon brings it back.
+    /// Hides the window; the tray icon brings it back (and its "Quit" closes the app).
     Hide,
-    /// Minimizes: without a tray icon, hiding would leave the app with no way to return.
-    Minimize,
+    /// Quits, as the tray's "Quit" does: without a tray icon there is nothing to come back from and nowhere else to
+    /// quit (common on Linux: GNOME without the AppIndicator extension, WSLg).
+    Quit,
 }
 
 pub fn close_action(tray_up: bool) -> CloseAction {
     if tray_up {
         CloseAction::Hide
     } else {
-        CloseAction::Minimize
+        CloseAction::Quit
     }
 }
 
@@ -40,7 +41,7 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// Creates the icon with brand `rgba` (`size`×`size`). `None`: tray is unavailable (close button minimizes instead).
+    /// Creates the icon with brand `rgba` (`size`×`size`). `None`: tray is unavailable (the close button quits instead).
     /// Call from the event loop thread (on Windows the icon lives on it).
     pub fn start(rgba: Vec<u8>, size: u32, on: OnCommand) -> Option<Tray> {
         match imp::start(rgba, size, on) {
@@ -163,7 +164,7 @@ mod tests {
     #[test]
     fn closing_hides_only_when_there_is_a_tray_to_come_back_from() {
         assert_eq!(close_action(true), CloseAction::Hide);
-        assert_eq!(close_action(false), CloseAction::Minimize, "without tray the app never becomes invisible with no icon");
+        assert_eq!(close_action(false), CloseAction::Quit, "without a tray the × quits: nothing else could close the app");
     }
 
     #[test]

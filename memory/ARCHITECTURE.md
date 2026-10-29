@@ -93,7 +93,7 @@ Every request requires `x-agentdeck-token` (constant-time comparison) and `Host:
 ### Single instance and system tray (`activation.rs`, `app/src/tray.rs`)
 
 - **Second launch:** the core holds the `data/.agentdeck.lock` lock and writes port + master token to `data/.agentdeck.bridge`. A second launch detects the occupied lock, calls `AllowSetForegroundWindow` (on Windows) + `POST /activate`, and exits; the running instance restores and focuses the window.
-- **System tray:** closing the window (×, `Alt+F4`, or title bar button) hides the window to the tray (`tray-icon` on Windows, `ksni`/StatusNotifierItem on Linux), keeping agents and bridge active in the background; without a tray on Linux, minimizes. Only **Exit** in the tray menu closes the app, prompting for confirmation in the window if there is an unsaved document or an agent in turn.
+- **System tray:** closing the window (×, `Alt+F4`, or title bar button) hides the window to the tray (`tray-icon` on Windows, `ksni`/StatusNotifierItem on Linux), keeping agents and bridge active in the background; without a tray (Linux without `StatusNotifierWatcher`), the × quits instead. **Exit** in the tray menu (or the × without a tray) closes the app, prompting for confirmation in the window if there is an unsaved document or an agent in turn.
 
 ---
 

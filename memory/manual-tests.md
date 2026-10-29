@@ -397,7 +397,7 @@ Windows, with app open and an agent tab:
 - [ ] **Quit** with nothing pending: closes everything (icon vanishes, process exits, tab CLIs terminate).
 - [ ] **Quit** with unsaved edited file: window appears prompting "There are unsaved changes".
 - [ ] **Quit** with agent mid-turn: window appears with "Agents are currently working" (Cancel keeps app running).
-- [ ] Linux with tray (KDE, or GNOME with AppIndicator): same test script with `ksni`. Without `StatusNotifierWatcher` (pure GNOME): × **minimizes**, and app is never left invisible without an icon.
+- [ ] Linux with tray (KDE, or GNOME with AppIndicator): same test script with `ksni`. Without `StatusNotifierWatcher` (pure GNOME): × **quits** (asking first if an agent is mid-turn or a document is unsaved), and the app is never left invisible without an icon.
 
 ## Name migration (CommandDeck → AgentDeck) ★
 

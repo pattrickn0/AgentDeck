@@ -41,7 +41,7 @@ The "backend" is the `core` crate, with no UI. The UI only talks to it via `Core
 | `%APPDATA%\AgentDeck\config.json` | configuration (on first run, copied from `%APPDATA%\CommandDeck\config.json` if it exists). With `AGENTDECK_HOME`, everything stays inside that folder |
 
 **One window per data folder:** opening the app again with the same `data/` brings the live instance back (`POST /activate`)
-and exits silently; the window × hides to the system tray (or minimizes without a tray) and exit is handled by the icon menu. For another
+and exits silently; the window × hides to the system tray (or quits, without a tray) and exit is handled by the icon menu. For another
 isolated instance, use `AGENTDECK_HOME`.
 
 ### Tabs are instances

@@ -11,8 +11,9 @@ touches "closing" must decide which of the two it wants; `Deck`'s `quit_requeste
 **Why:** the user wants Discord-like behavior, with long turns finishing without the window being open. A hidden window
 receives no frames, so three things work only because they were handled manually: `Background::wake` when hiding (winit gives
 no notification), `show_window` upon returning (a `request_redraw` and `viewport_stale`), and the "Quit" confirmation prompt only appears after
-showing the window. Without a system tray (Linux without `StatusNotifierWatcher`), the × **minimizes**: hiding would leave the app invisible and
-with no way to bring it back (`tray::close_action`).
+showing the window. Without a system tray (Linux without `StatusNotifierWatcher`), the × **quits** (with the same question as the tray's "Quit"): hiding would leave the app
+invisible with no way back, and minimizing (the old behavior) left no way to quit at all, since the tray menu is the only
+other exit (`tray::close_action`).
 
 A second launch no longer fails with "another window is already using the folder": `main` calls `activation::activate_running`,
 which only acts if the lock `data/.agentdeck.lock` is held by another process, reads `data/.agentdeck.bridge` (port and master

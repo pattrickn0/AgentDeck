@@ -79,5 +79,6 @@ fn main() -> anyhow::Result<()> {
     })?;
     let mut app = app::App::new(rx, proxy);
     event_loop.run_app(&mut app)?;
+    log::info!("event loop ended: exiting");
     Ok(())
 }

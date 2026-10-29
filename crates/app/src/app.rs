@@ -58,7 +58,7 @@ pub struct App {
     viewport_stale: bool,
     /// The `Deck` work that runs without a frame, while the window is hidden or minimized.
     background: Background,
-    /// The tray icon; `None` = unavailable (the × then minimizes instead of hiding).
+    /// The tray icon; `None` = unavailable (the × then quits instead of hiding).
     tray: Option<Tray>,
 }
 
@@ -261,9 +261,27 @@ impl App {
         if !self.deck.as_ref().is_some_and(|d| d.quit_requested) {
             return false;
         }
+        log::info!("quitting");
         self.shutdown();
         event_loop.exit();
         true
+    }
+
+    /// The user asked to quit (the tray's "Quit", or the × when there is no tray): asks first when there is an unsaved
+    /// edit or an agent in the middle of a turn, showing the window for the question; otherwise quits now.
+    fn request_quit(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(deck) = self.deck.as_mut() else {
+            // The backend has not even started: there is no CLI to lose.
+            event_loop.exit();
+            return;
+        };
+        deck.request_quit();
+        // To ask, the window must appear first.
+        if deck.docs.confirm.is_some() {
+            log::info!("quit asked: waiting for the answer to the question");
+            self.show_window();
+        }
+        self.quit_if_requested(event_loop);
     }
 
     /// Brings the window back: shows it, restores it if minimized and focuses it. Whoever hides it gets no notice from
@@ -283,9 +301,9 @@ impl App {
         w.request_redraw();
     }
 
-    /// The window's × (and the title bar's): hides it in the tray, without asking; with no tray, minimizes. The CLIs, the
-    /// bridge and the deliveries keep running through `Deck::background`.
-    fn close_window(&mut self) {
+    /// The window's × (and the title bar's): hides it in the tray, without asking; the CLIs, the bridge and the
+    /// deliveries keep running through `Deck::background`. With no tray, quits (see [`CloseAction::Quit`]).
+    fn close_window(&mut self, event_loop: &ActiveEventLoop) {
         let Some(w) = self.gl_window.as_ref().map(|g| &g.window) else { return };
         if let Some(core) = self.core.as_ref() {
             persist_window(core, w);
@@ -296,7 +314,7 @@ impl App {
                 // winit gives no notice when the window is hidden from code: the frame-less work starts here.
                 self.background.wake();
             }
-            CloseAction::Minimize => w.set_minimized(true),
+            CloseAction::Quit => self.request_quit(event_loop),
         }
     }
 
@@ -304,19 +322,7 @@ impl App {
     fn on_tray(&mut self, event_loop: &ActiveEventLoop, cmd: TrayCommand) {
         match cmd {
             TrayCommand::Open => self.show_window(),
-            TrayCommand::Quit => {
-                let Some(deck) = self.deck.as_mut() else {
-                    // The backend has not even started: there is no CLI to lose.
-                    event_loop.exit();
-                    return;
-                };
-                deck.request_quit();
-                // To ask, the window must appear first.
-                if deck.docs.confirm.is_some() {
-                    self.show_window();
-                }
-                self.quit_if_requested(event_loop);
-            }
+            TrayCommand::Quit => self.request_quit(event_loop),
         }
     }
 
@@ -366,7 +372,7 @@ impl App {
         }
         // The title bar's "×": the same path as the system close.
         if self.deck.as_mut().is_some_and(|d| std::mem::take(&mut d.close_requested)) {
-            self.close_window();
+            self.close_window(event_loop);
             return;
         }
 
@@ -528,8 +534,9 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
         // The × (and Alt+F4, and closing from the taskbar) does not quit: it hides in the tray. Quitting is its menu.
+        // Without a tray, it quits.
         if matches!(event, WindowEvent::CloseRequested) {
-            self.close_window();
+            self.close_window(event_loop);
             return;
         }
         let (Some(glw), Some(egui), Some(deck)) = (self.gl_window.as_ref(), self.egui.as_mut(), self.deck.as_mut()) else { return };

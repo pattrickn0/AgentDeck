@@ -19,7 +19,7 @@ test that fails becomes an item here. Product direction and decision-makers are 
 2. [ ] **Background and system tray** (decided on 2026-10-24). T1a (`t44`): `Deck::tick` was moved out of rendering and
    `Deck::background` runs from the event loop with the window hidden or minimized. T1b (`t48`, done, needs validation in use):
    the X hides the window to the tray, without asking (Windows: `tray-icon`; Linux: `ksni`; without `StatusNotifierWatcher` the X
-   minimizes); the tray has Open and Exit (Exit prompts if there is an unsaved edit or a tab mid-turn); opening the
+   quits); the tray has Open and Exit (Exit prompts if there is an unsaved edit or a tab mid-turn); opening the
    program again brings the instance back (`POST /activate`, see ARCHITECTURE.md, "Single instance and
    system tray"). Remaining to verify in use: the walkthrough is in manual-tests.md ("Tray and second instance"), especially a long turn
    ending with the window hidden and the icon on Linux (vanilla GNOME tray lacks `StatusNotifierWatcher`; requires
