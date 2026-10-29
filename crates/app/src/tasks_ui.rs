@@ -1,37 +1,37 @@
-//! Estado e ações da aba "Tarefas" da barra direita (a pintura fica em `ui/tasks.rs`).
+//! State and actions of the right bar's "Tasks" tab (the painting lives in `ui/tasks.rs`).
 //!
-//! Toda chamada de tarefa do core roda em git (criar, iniciar, mesclar, descartar, diff), então vai
-//! para uma thread (`Deck::spawn_bg`) e a resposta volta como `UiMsg::Tasks`. A lista é relida quando
-//! a aba abre, quando o core avisa (`CoreEvent::TasksChanged`) e depois de cada ação. Aqui também
-//! ficam as funções puras que decidem o que a tela mostra (grupos, textos, ações por estado), com testes.
+//! Every task call into the core runs git (create, start, merge, discard, diff), so it goes to a
+//! thread (`Deck::spawn_bg`) and the answer comes back as `UiMsg::Tasks`. The list is re-read when
+//! the tab opens, when the core says so (`CoreEvent::TasksChanged`) and after every action. The pure
+//! functions that decide what the screen shows (groups, texts, actions per status) live here too, with tests.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use agentdeck_core::capability::{self, Level};
 use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{FeedKind, MergeBlock, Task, TaskError, TaskEvent, TaskMessage, TaskSpec, TaskStatus};
+use agentdeck_core::{t, FeedKind, MergeBlock, Task, TaskError, TaskEvent, TaskMessage, TaskSpec, TaskStatus};
 
 use crate::deck::{AttachTarget, Deck, UiMsg};
 
 // ---------------------------------------------------------------------------
-// Funções puras
+// Pure functions
 // ---------------------------------------------------------------------------
 
-/// Grupos da lista, na ordem em que aparecem (o que precisa do humano vem primeiro).
+/// Groups of the list, in the order they appear (what needs the human comes first).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Group {
     Review,
-    /// Mescladas, esperando o usuário testar.
+    /// Merged, waiting for the user to test them.
     Validating,
     Running,
-    /// Iniciadas, mas esperando o escopo liberar (ver `agentdeck_core::scope`).
+    /// Started, but waiting for the scope to free up (see `agentdeck_core::scope`).
     Queued,
     Draft,
     Failed,
-    /// Validadas (concluídas).
+    /// Validated (completed).
     Done,
-    /// Descartadas (canceladas): ficam à parte das concluídas.
+    /// Discarded (cancelled): kept apart from the completed ones.
     Cancelled,
 }
 
@@ -42,14 +42,14 @@ impl Group {
     #[cfg(test)]
     pub fn title(self) -> &'static str {
         match self {
-            Group::Review => "Em revisão",
-            Group::Validating => "Aguardando validação",
-            Group::Running => "Em andamento",
-            Group::Queued => "Na fila",
-            Group::Draft => "Rascunho",
-            Group::Failed => "Falhou",
-            Group::Done => "Concluídas",
-            Group::Cancelled => "Canceladas",
+            Group::Review => t!("In review"),
+            Group::Validating => t!("Awaiting validation"),
+            Group::Running => t!("In progress"),
+            Group::Queued => t!("Queued"),
+            Group::Draft => t!("Draft"),
+            Group::Failed => t!("Failed"),
+            Group::Done => t!("Finished"),
+            Group::Cancelled => t!("Cancelled"),
         }
     }
 
@@ -67,40 +67,40 @@ impl Group {
     }
 }
 
-/// Nome do estado para o chip (com inicial maiúscula, ao contrário de `TaskStatus::label`).
+/// Status name for the chip (capitalized, unlike `TaskStatus::label`).
 pub fn status_name(status: TaskStatus) -> &'static str {
     match status {
-        TaskStatus::Draft => "Rascunho",
-        TaskStatus::Queued => "Na fila",
-        TaskStatus::Running => "Em andamento",
-        TaskStatus::Review => "Em revisão",
-        TaskStatus::Validating => "Aguardando validação",
-        TaskStatus::Merged => "Concluída",
-        TaskStatus::Discarded => "Descartada",
-        TaskStatus::Failed => "Falhou",
+        TaskStatus::Draft => t!("Draft"),
+        TaskStatus::Queued => t!("Queued"),
+        TaskStatus::Running => t!("In progress"),
+        TaskStatus::Review => t!("In review"),
+        TaskStatus::Validating => t!("Awaiting validation"),
+        TaskStatus::Merged => t!("Completed"),
+        TaskStatus::Discarded => t!("Discarded"),
+        TaskStatus::Failed => t!("Failed"),
     }
 }
 
-/// Nome curto do estado para o cartão e o histórico (`em revisão`, `aguarda validação`, `concluída`…).
+/// Short status name for the card and the history (`in review`, `awaiting validation`, `completed`…).
 pub fn card_state_label(status: TaskStatus) -> &'static str {
     match status {
-        TaskStatus::Draft => "rascunho",
-        TaskStatus::Queued => "na fila",
-        TaskStatus::Running => "em andamento",
-        TaskStatus::Review => "em revisão",
-        TaskStatus::Validating => "aguarda validação",
-        TaskStatus::Merged => "concluída",
-        TaskStatus::Discarded => "descartada",
-        TaskStatus::Failed => "falhou",
+        TaskStatus::Draft => t!("draft"),
+        TaskStatus::Queued => t!("queued"),
+        TaskStatus::Running => t!("in progress"),
+        TaskStatus::Review => t!("in review"),
+        TaskStatus::Validating => t!("awaits validation"),
+        TaskStatus::Merged => t!("completed"),
+        TaskStatus::Discarded => t!("discarded"),
+        TaskStatus::Failed => t!("failed"),
     }
 }
 
-/// O cartão pede ação imediata do usuário (`Review` ou `Validating`) e recebe destaque visual.
+/// The card asks for the user's immediate action (`Review` or `Validating`) and gets a visual highlight.
 pub fn is_focused_card(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::Review | TaskStatus::Validating)
 }
 
-/// Etapa atual da barra de progresso de 5 segmentos (`1..=5`; `0` para descartada).
+/// Current step of the 5-segment progress bar (`1..=5`; `0` for discarded).
 pub fn task_step(status: TaskStatus) -> usize {
     match status {
         TaskStatus::Draft | TaskStatus::Queued => 1,
@@ -112,7 +112,7 @@ pub fn task_step(status: TaskStatus) -> usize {
     }
 }
 
-/// Filtro da seção "HISTÓRICO" (tarefas encerradas).
+/// Filter of the "HISTORY" section (finished tasks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HistoryFilter {
     #[default]
@@ -126,9 +126,9 @@ impl HistoryFilter {
 
     pub fn label(self) -> &'static str {
         match self {
-            HistoryFilter::All => "Concluídas e descartadas",
-            HistoryFilter::Done => "Só concluídas",
-            HistoryFilter::Discarded => "Só descartadas",
+            HistoryFilter::All => t!("Completed and discarded"),
+            HistoryFilter::Done => t!("Completed only"),
+            HistoryFilter::Discarded => t!("Discarded only"),
         }
     }
 
@@ -141,25 +141,25 @@ impl HistoryFilter {
     }
 }
 
-/// Tarefas em andamento (não encerradas: `Draft`, `Running`, `Review`, `Validating`, `Failed`),
-/// ordenadas por prioridade do grupo (quem pede ação do humano vem primeiro) e atividade recente.
+/// Tasks in progress (not finished: `Draft`, `Running`, `Review`, `Validating`, `Failed`),
+/// sorted by group priority (what asks for the human's action comes first) and recent activity.
 pub fn active_tasks(tasks: &[Task]) -> Vec<&Task> {
     group_tasks(tasks).into_iter().filter(|(g, _)| !matches!(g, Group::Done | Group::Cancelled)).flat_map(|(_, list)| list).collect()
 }
 
-/// Tarefas encerradas (`Merged`, `Discarded`) filtradas por `filter`, da mais recente para a mais antiga.
+/// Finished tasks (`Merged`, `Discarded`) filtered by `filter`, from the newest to the oldest.
 pub fn history_tasks(tasks: &[Task], filter: HistoryFilter) -> Vec<&Task> {
     let mut list: Vec<&Task> = tasks.iter().filter(|t| filter.matches(t.status)).collect();
     list.sort_by(|a, b| last_activity(b).cmp(&last_activity(a)).then_with(|| task_number(&b.id).cmp(&task_number(&a.id))));
     list
 }
 
-/// Tempo relativo da última atividade da tarefa (`agora`, `há 6 min`, `há 2 h`).
+/// Relative time of the task's last activity (`now`, `6 min ago`, `2 h ago`).
 pub fn task_age(task: &Task, now_ms: u64) -> String {
     age_text(now_ms, last_activity(task))
 }
 
-/// Data curta `dd/mm` do encerramento (ou última atividade) para a linha do histórico.
+/// Short `dd/mm` date of the end (or last activity) for the history row.
 pub fn task_date_ddmm(task: &Task) -> String {
     use chrono::TimeZone;
     let at_ms = task.finished_ms.unwrap_or_else(|| last_activity(task));
@@ -169,12 +169,12 @@ pub fn task_date_ddmm(task: &Task) -> String {
     }
 }
 
-/// A última coisa que aconteceu com a tarefa (ms): o último evento do histórico, ou a criação.
+/// The last thing that happened to the task (ms): the last history event, or the creation.
 pub fn last_activity(task: &Task) -> u64 {
     task.events.iter().map(|e| e.at_ms).max().unwrap_or(0).max(task.created_ms)
 }
 
-/// Tarefas por grupo (só os que têm alguma), cada um da atividade mais recente para a mais antiga.
+/// Tasks per group (only the groups that have any), each from the most recent activity to the oldest.
 pub fn group_tasks(tasks: &[Task]) -> Vec<(Group, Vec<&Task>)> {
     Group::ORDER
         .iter()
@@ -186,22 +186,22 @@ pub fn group_tasks(tasks: &[Task]) -> Vec<(Group, Vec<&Task>)> {
         .collect()
 }
 
-/// `t12` → 12 (0 se não for um id de tarefa).
+/// `t12` → 12 (0 if it is not a task id).
 fn task_number(id: &str) -> u64 {
     id.trim_start_matches('t').parse().unwrap_or(0)
 }
 
-/// Quantas tarefas esperam a revisão do humano.
+/// How many tasks wait for the human's review.
 pub fn review_count(tasks: &[Task]) -> usize {
     tasks.iter().filter(|t| t.status == TaskStatus::Review).count()
 }
 
-/// Quantas tarefas, já mescladas, esperam o teste do humano.
+/// How many tasks, already merged, wait for the human's test.
 pub fn validating_count(tasks: &[Task]) -> usize {
     tasks.iter().filter(|t| t.status == TaskStatus::Validating).count()
 }
 
-/// O resumo do `git diff --stat`: arquivos, linhas novas e linhas removidas.
+/// The `git diff --stat` summary: files, added lines and removed lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffSummary {
     pub files: u32,
@@ -210,16 +210,16 @@ pub struct DiffSummary {
 }
 
 impl DiffSummary {
-    /// `3 arquivos` (singular com 1; "sem alterações" com 0).
+    /// `3 files` (singular with 1; "no changes" with 0).
     pub fn files_text(&self) -> String {
         match self.files {
-            0 => "sem alterações".to_owned(),
-            1 => "1 arquivo".to_owned(),
-            n => format!("{n} arquivos"),
+            0 => t!("no changes").to_owned(),
+            1 => t!("1 file").to_owned(),
+            n => t!("{n} files", n),
         }
     }
 
-    /// `3 arquivos, +120 −8` (sem o lado que é zero).
+    /// `3 files, +120 −8` (without the side that is zero).
     pub fn text(&self) -> String {
         let mut out = self.files_text();
         let lines: Vec<String> =
@@ -231,10 +231,11 @@ impl DiffSummary {
     }
 }
 
-/// Lê a última linha do `git diff --stat` ("3 files changed, 120 insertions(+), 8 deletions(-)").
-/// "(nenhuma alteração em relação à base)" (o que o core guarda sem diferenças) vira zero arquivos.
+/// Reads the last line of `git diff --stat` ("3 files changed, 120 insertions(+), 8 deletions(-)").
+/// "(no changes against the base)" (what the core stores when there are no differences; tasks saved by an
+/// older version have the Portuguese "(nenhuma alteração em relação à base)") becomes zero files.
 pub fn parse_diff_stat(stat: &str) -> Option<DiffSummary> {
-    if stat.contains("nenhuma alteração") {
+    if stat.contains("nenhuma alteração") || stat.trim_start().starts_with("(no changes") {
         return Some(DiffSummary { files: 0, insertions: 0, deletions: 0 });
     }
     let line = stat.lines().rev().map(str::trim).find(|l| l.contains("changed"))?;
@@ -255,15 +256,15 @@ pub fn parse_diff_stat(stat: &str) -> Option<DiffSummary> {
     found.then_some(sum)
 }
 
-/// Uma linha por arquivo do `git diff --stat`.
+/// One line per file of `git diff --stat`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatLine {
     pub path: String,
-    /// Linhas mudadas (`412`), ou `Bin 0 -> 1234 bytes` num arquivo binário.
+    /// Changed lines (`412`), or `Bin 0 -> 1234 bytes` for a binary file.
     pub changes: String,
 }
 
-/// Os arquivos do `git diff --stat` (` caminho | 12 ++++--`); a linha do total não entra.
+/// The files of `git diff --stat` (` path | 12 ++++--`); the total line is not included.
 pub fn parse_stat_lines(stat: &str) -> Vec<StatLine> {
     stat.lines()
         .filter_map(|line| {
@@ -279,63 +280,66 @@ pub fn parse_stat_lines(stat: &str) -> Vec<StatLine> {
         .collect()
 }
 
-/// `agora`, `há 5 min`, `há 3 h`, `há 2 d` (`then` no futuro conta como agora).
+/// `now`, `5 min ago`, `3 h ago`, `2 d ago` (a `then` in the future counts as now).
 pub fn age_text(now_ms: u64, then_ms: u64) -> String {
     let secs = now_ms.saturating_sub(then_ms) / 1000;
     match secs {
-        0..=59 => "agora".to_owned(),
-        60..=3599 => format!("há {} min", secs / 60),
-        3600..=86_399 => format!("há {} h", secs / 3600),
-        _ => format!("há {} d", secs / 86_400),
+        0..=59 => t!("now").to_owned(),
+        60..=3599 => t!("{n} min ago", n = secs / 60),
+        3600..=86_399 => t!("{n} h ago", n = secs / 3600),
+        _ => t!("{n} d ago", n = secs / 86_400),
     }
 }
 
-/// O que aconteceu e quando, para a segunda linha do cartão (`pronta há 3 min`).
+/// What happened and when, for the card's second line (`ready 3 min ago`).
 pub fn status_age(task: &Task, now_ms: u64) -> String {
-    let (verb, at) = match task.status {
-        TaskStatus::Draft => ("criada", task.created_ms),
-        TaskStatus::Queued => ("na fila", task.queued_ms.unwrap_or(task.created_ms)),
-        TaskStatus::Running => ("iniciada", task.started_ms.unwrap_or(task.created_ms)),
-        TaskStatus::Review => ("pronta", task.finished_ms.unwrap_or_else(|| last_activity(task))),
-        TaskStatus::Failed => ("falhou", last_activity(task)),
-        TaskStatus::Validating => ("mesclada", task.finished_ms.unwrap_or_else(|| last_activity(task))),
-        TaskStatus::Merged => ("concluída", task.finished_ms.unwrap_or_else(|| last_activity(task))),
-        TaskStatus::Discarded => ("descartada", task.finished_ms.unwrap_or_else(|| last_activity(task))),
+    let finished = || task.finished_ms.unwrap_or_else(|| last_activity(task));
+    let at = match task.status {
+        TaskStatus::Draft => task.created_ms,
+        TaskStatus::Queued => task.queued_ms.unwrap_or(task.created_ms),
+        TaskStatus::Running => task.started_ms.unwrap_or(task.created_ms),
+        TaskStatus::Failed => last_activity(task),
+        TaskStatus::Review | TaskStatus::Validating | TaskStatus::Merged | TaskStatus::Discarded => finished(),
     };
     let age = age_text(now_ms, at);
-    if age == "agora" {
-        format!("{verb} agora")
-    } else {
-        format!("{verb} {age}")
+    match task.status {
+        TaskStatus::Draft => t!("created {age}", age),
+        TaskStatus::Queued => t!("queued {age}", age),
+        TaskStatus::Running => t!("started {age}", age),
+        TaskStatus::Review => t!("ready {age}", age),
+        TaskStatus::Failed => t!("failed {age}", age),
+        TaskStatus::Validating => t!("merged {age}", age),
+        TaskStatus::Merged => t!("completed {age}", age),
+        TaskStatus::Discarded => t!("discarded {age}", age),
     }
 }
 
-/// Modelo de LLM para mostrar (`opencode/glm-5.3` → `glm-5.3`); vazio quando é o padrão do CLI.
+/// LLM model to show (`opencode/glm-5.3` → `glm-5.3`); empty when it is the CLI's default.
 pub fn model_text(task: &Task) -> Option<&str> {
     task.model.as_deref().map(models::short_model).filter(|m| !m.is_empty())
 }
 
-/// Esforço para mostrar ao lado do modelo ("alto"); vazio no padrão. No Antigravity o esforço já aparece no
-/// nome do modelo (`…-high`), então não se repete.
+/// Effort to show next to the model ("high"); empty for the default. On Antigravity the effort already shows in the
+/// model name (`…-high`), so it is not repeated.
 pub fn effort_text(task: &Task) -> Option<&'static str> {
     let effort = task.effort?;
     let in_name = task.model.as_deref().is_some_and(|m| m.ends_with(&format!("-{}", effort.as_str())));
     (!in_name).then(|| effort.label())
 }
 
-/// "sonnet · alto", "alto", "sonnet" ou nada: o que acompanha o agente no cartão e no detalhe da tarefa.
+/// "sonnet · high", "high", "sonnet" or nothing: what goes with the agent on the card and in the task detail.
 pub fn model_effort_text(task: &Task) -> Option<String> {
     let parts: Vec<&str> = [model_text(task), effort_text(task)].into_iter().flatten().collect();
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-/// O escopo digitado no formulário: um caminho por linha ou separados por vírgula; linhas vazias somem. A
-/// normalização e a recusa do que não é caminho (curingas, absolutos, `..`) são do core, ao criar a tarefa.
+/// The scope typed in the form: one path per line or separated by commas; empty lines disappear. The
+/// normalization and the refusal of what is not a path (wildcards, absolute paths, `..`) belong to the core, when the task is created.
 pub fn parse_scope(text: &str) -> Vec<String> {
     text.split(['\n', ',']).map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned).collect()
 }
 
-/// Botões do detalhe de uma tarefa. A ordem é a da tela (o primeiro botão é a ação principal).
+/// Buttons of a task's detail. The order is the one on screen (the first button is the main action).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskAct {
     Start,
@@ -352,111 +356,113 @@ pub enum TaskAct {
 impl TaskAct {
     pub fn label(self, task: &Task) -> String {
         match self {
-            TaskAct::Start => "Iniciar".to_owned(),
-            TaskAct::Retry => "Tentar de novo".to_owned(),
-            TaskAct::Merge => format!("Mesclar em {}", task.base),
-            TaskAct::Return => "Devolver".to_owned(),
-            TaskAct::Validate => "Validar".to_owned(),
-            TaskAct::Reject => "Reprovar".to_owned(),
-            TaskAct::GoToTab => "Ir para a aba".to_owned(),
-            TaskAct::ReopenTab => "Reabrir aba".to_owned(),
-            TaskAct::Discard => "Descartar".to_owned(),
+            TaskAct::Start => t!("Start").to_owned(),
+            TaskAct::Retry => t!("Try again").to_owned(),
+            TaskAct::Merge => t!("Merge into {base}", base = task.base),
+            TaskAct::Return => t!("Return").to_owned(),
+            TaskAct::Validate => t!("Validate").to_owned(),
+            TaskAct::Reject => t!("Reject").to_owned(),
+            TaskAct::GoToTab => t!("Go to tab").to_owned(),
+            TaskAct::ReopenTab => t!("Reopen tab").to_owned(),
+            TaskAct::Discard => t!("Discard").to_owned(),
         }
     }
 
     pub fn tip(self) -> &'static str {
         match self {
-            TaskAct::Start => "Cria a worktree e a branch, abre o agente e entrega o pedido",
-            TaskAct::Retry => "Tenta de novo o que falhou (iniciar, ou mesclar se o agente já entregou o relatório)",
-            TaskAct::Merge => "Mescla a branch da tarefa na base (git merge --no-ff); o agente e a worktree ficam até você validar",
-            TaskAct::Return => "Devolve a tarefa ao agente com um pedido de ajustes",
-            TaskAct::Validate => "Você testou e está certo: conclui a tarefa e apaga a worktree e a branch",
-            TaskAct::Reject => "Você testou e reprovou: devolve a tarefa ao mesmo agente, com o motivo",
-            TaskAct::GoToTab => "Mostra o terminal do agente desta tarefa",
-            TaskAct::ReopenTab => "Abre de novo a aba do agente, no terminal da worktree da tarefa",
-            TaskAct::Discard => "Descarta a tarefa: apaga a worktree e a branch (sem mesclar)",
+            TaskAct::Start => t!("Creates the worktree and the branch, opens the agent and hands over the request"),
+            TaskAct::Retry => t!("Tries again what failed (start, or merge if the agent already delivered the report)"),
+            TaskAct::Merge => {
+                t!("Merges the task branch into the base (git merge --no-ff); the agent and the worktree stay until you validate")
+            }
+            TaskAct::Return => t!("Sends the task back to the agent with a request for changes"),
+            TaskAct::Validate => t!("You tested it and it is right: completes the task and deletes the worktree and the branch"),
+            TaskAct::Reject => t!("You tested it and it failed: sends the task back to the same agent, with the reason"),
+            TaskAct::GoToTab => t!("Shows the terminal of this task's agent"),
+            TaskAct::ReopenTab => t!("Opens the agent's tab again, in the terminal of the task's worktree"),
+            TaskAct::Discard => t!("Discards the task: deletes the worktree and the branch (without merging)"),
         }
     }
 
-    /// Ação principal (botão cheio).
+    /// Main action (filled button).
     pub fn is_primary(self) -> bool {
         matches!(self, TaskAct::Start | TaskAct::Retry | TaskAct::Merge | TaskAct::Validate)
     }
 
-    /// Pede confirmação dentro do painel antes de rodar.
+    /// Asks for confirmation inside the panel before running.
     pub fn needs_confirm(self, task: &Task) -> bool {
         match self {
             TaskAct::Discard | TaskAct::Merge => true,
-            // Tentar de novo com relatório é uma mesclagem.
+            // Trying again with a report is a merge.
             TaskAct::Retry => task.report.is_some(),
             _ => false,
         }
     }
 }
 
-/// Os botões de cada estado. `tab_open`: a aba do agente está aberta (senão, "Reabrir aba").
+/// The buttons of each status. `tab_open`: the agent's tab is open (otherwise, "Reopen tab").
 pub fn actions_for(task: &Task, tab_open: bool) -> Vec<TaskAct> {
     let tab = if tab_open { TaskAct::GoToTab } else { TaskAct::ReopenTab };
     match task.status {
         TaskStatus::Draft => vec![TaskAct::Start, TaskAct::Discard],
-        // Começa sozinha quando o escopo liberar; sem aba nem worktree ainda.
+        // Starts by itself when the scope frees up; no tab or worktree yet.
         TaskStatus::Queued => vec![TaskAct::Discard],
         TaskStatus::Running => vec![tab, TaskAct::Discard],
         TaskStatus::Review => vec![TaskAct::Merge, TaskAct::Return, tab, TaskAct::Discard],
         TaskStatus::Validating => vec![TaskAct::Validate, TaskAct::Reject, tab, TaskAct::Discard],
-        // Com relatório, a mesclagem falhou (de uma versão anterior): dá para devolver ao agente como em revisão.
+        // With a report, the merge failed (in an earlier version): it can be sent back to the agent as in review.
         TaskStatus::Failed if task.report.is_some() => vec![TaskAct::Retry, TaskAct::Return, tab, TaskAct::Discard],
         TaskStatus::Failed => vec![TaskAct::Retry, TaskAct::Discard],
         TaskStatus::Merged | TaskStatus::Discarded => Vec::new(),
     }
 }
 
-/// Aguardando validação ou concluída, com o commit da mesclagem guardado: o diff é o que a mesclagem trouxe
-/// (a branch já é a própria base, e `base...branch` ficaria vazio).
+/// Awaiting validation or completed, with the merge commit stored: the diff is what the merge brought
+/// (the branch is already the base itself, and `base...branch` would be empty).
 pub fn shows_merged_diff(task: &Task) -> bool {
     matches!(task.status, TaskStatus::Validating | TaskStatus::Merged) && task.merge_commit.as_deref().is_some_and(|h| !h.is_empty())
 }
 
-/// Dá para ver o diff: a branch existe (a tarefa foi iniciada e não terminou) ou, depois da mesclagem, o
-/// commit dela está guardado.
+/// The diff can be viewed: the branch exists (the task was started and has not finished) or, after the merge, its
+/// commit is stored.
 pub fn can_show_diff(task: &Task) -> bool {
     shows_merged_diff(task)
         || (task.started_ms.is_some() && matches!(task.status, TaskStatus::Running | TaskStatus::Review | TaskStatus::Failed))
 }
 
-/// O rótulo do botão que abre o diff.
+/// The label of the button that opens the diff.
 pub fn diff_button_label(task: &Task) -> &'static str {
     if shows_merged_diff(task) {
-        "Ver o que foi mesclado"
+        t!("View what was merged")
     } else {
-        "Ver diff completo"
+        t!("View full diff")
     }
 }
 
-/// A dica do botão que abre o diff.
+/// The tooltip of the button that opens the diff.
 pub fn diff_button_tip(task: &Task) -> &'static str {
     if shows_merged_diff(task) {
-        "Abre o diff do commit de mesclagem: o que a tarefa trouxe para a base"
+        t!("Opens the diff of the merge commit: what the task brought into the base")
     } else {
-        "Abre o git diff da branch da tarefa em relação à base"
+        t!("Opens the git diff of the task branch against the base")
     }
 }
 
-/// O título da tela do diff.
+/// The title of the diff screen.
 pub fn diff_title(task: &Task) -> String {
     if shows_merged_diff(task) {
-        format!("{} · o que a mesclagem trouxe para {}", task.id, task.base)
+        t!("{id} · what the merge brought into {base}", id = task.id, base = task.base)
     } else {
-        format!("{} · alterações em relação a {}", task.id, task.base)
+        t!("{id} · changes against {base}", id = task.id, base = task.base)
     }
 }
 
-/// O hash curto (7 caracteres) do commit da última mesclagem, se a tarefa já foi mesclada.
+/// The short hash (7 characters) of the last merge commit, if the task has already been merged.
 pub fn merge_short(task: &Task) -> Option<&str> {
     task.merge_commit.as_deref().filter(|h| !h.is_empty()).map(|h| h.get(..7).unwrap_or(h))
 }
 
-/// `branch → base`, com o hash curto da mesclagem ao lado quando há.
+/// `branch → base`, with the short merge hash next to it when there is one.
 pub fn branch_line(task: &Task) -> String {
     match merge_short(task) {
         Some(h) => format!("{} → {} · {h}", task.branch, task.base),
@@ -464,7 +470,7 @@ pub fn branch_line(task: &Task) -> String {
     }
 }
 
-/// Troca a tarefa de mesmo id na lista (ou a acrescenta).
+/// Replaces the task with the same id in the list (or appends it).
 pub fn upsert(tasks: &mut Vec<Task>, task: Task) {
     match tasks.iter_mut().find(|t| t.id == task.id) {
         Some(slot) => *slot = task,
@@ -472,7 +478,7 @@ pub fn upsert(tasks: &mut Vec<Task>, task: Task) {
     }
 }
 
-/// Data e hora locais de um evento do histórico (`17/10 14:32`).
+/// Local date and time of a history event (`17/10 14:32`).
 pub fn event_time(at_ms: u64) -> String {
     use chrono::TimeZone;
     match chrono::Local.timestamp_millis_opt(at_ms as i64) {
@@ -481,55 +487,56 @@ pub fn event_time(at_ms: u64) -> String {
     }
 }
 
-/// Texto cortado em `max` caracteres, com reticências e o aviso (relatórios e pedidos podem ter 200 mil).
+/// Text cut at `max` characters, with an ellipsis and the notice (reports and requests can have 200 thousand).
 pub fn clip_text(text: &str, max: usize) -> std::borrow::Cow<'_, str> {
     match text.char_indices().nth(max) {
         Some((i, _)) => {
-            std::borrow::Cow::Owned(format!("{}\n\n[… texto cortado na tela: {} de {} caracteres]", &text[..i], max, text.chars().count()))
+            let notice = t!("[… text cut on screen: {shown} of {total} characters]", shown = max, total = text.chars().count());
+            std::borrow::Cow::Owned(format!("{}\n\n{notice}", &text[..i]))
         }
         None => std::borrow::Cow::Borrowed(text),
     }
 }
 
-/// Histórico da tarefa, do mais novo para o mais antigo.
+/// The task's history, from the newest to the oldest.
 pub fn events_newest_first(task: &Task) -> Vec<&TaskEvent> {
     let mut list: Vec<&TaskEvent> = task.events.iter().collect();
     list.sort_by_key(|e| std::cmp::Reverse(e.at_ms));
     list
 }
 
-/// Mensagens da linha do tempo mostradas de uma vez (as mais novas); as anteriores viram uma linha de aviso.
+/// Timeline messages shown at once (the newest ones); the earlier ones become a notice line.
 pub const MESSAGES_SHOWN: usize = 40;
-/// Uma mensagem recolhida mostra no máximo isto (em caracteres); o clique abre inteira.
+/// A collapsed message shows at most this much (in characters); a click opens it whole.
 pub const MESSAGE_PREVIEW_CHARS: usize = 280;
 
-/// A linha do tempo da tarefa, da mais antiga para a mais nova (a ordem de chegada já é essa; o `sort` estável só
-/// protege contra um arquivo editado à mão).
+/// The task's timeline, from the oldest to the newest (the order of arrival is already that; the stable `sort` only
+/// protects against a file edited by hand).
 pub fn messages_in_order(task: &Task) -> Vec<&TaskMessage> {
     let mut list: Vec<&TaskMessage> = task.messages.iter().collect();
     list.sort_by_key(|m| m.at_ms);
     list
 }
 
-/// Rótulo do tipo da mensagem na linha do tempo.
+/// Label of the message kind in the timeline.
 pub fn message_kind_label(kind: FeedKind) -> &'static str {
     match kind {
-        FeedKind::Ask => "pergunta",
-        FeedKind::Answer => "resposta",
-        FeedKind::Error => "erro",
-        FeedKind::User => "você",
-        FeedKind::System => "aviso",
-        FeedKind::Thinking => "andamento",
+        FeedKind::Ask => t!("question"),
+        FeedKind::Answer => t!("answer"),
+        FeedKind::Error => t!("error"),
+        FeedKind::User => t!("you"),
+        FeedKind::System => t!("notice"),
+        FeedKind::Thinking => t!("progress"),
     }
 }
 
-/// `de → para` de uma mensagem (um lado ausente vira `…`).
+/// `from → to` of a message (a missing side becomes `…`).
 pub fn message_route(m: &TaskMessage) -> String {
     format!("{} → {}", m.from.as_deref().unwrap_or("…"), m.to.as_deref().unwrap_or("…"))
 }
 
-/// O texto recolhido da mensagem: as primeiras linhas, até [`MESSAGE_PREVIEW_CHARS`], com reticências. O segundo valor
-/// diz se algo ficou de fora (ou seja, se há o que abrir).
+/// The collapsed text of the message: the first lines, up to [`MESSAGE_PREVIEW_CHARS`], with an ellipsis. The second value
+/// says whether something was left out (that is, whether there is something to open).
 pub fn message_preview(text: &str) -> (String, bool) {
     let text = text.trim();
     let lines: Vec<&str> = text.lines().collect();
@@ -543,21 +550,21 @@ pub fn message_preview(text: &str) -> (String, bool) {
 }
 
 // ---------------------------------------------------------------------------
-// Estado
+// State
 // ---------------------------------------------------------------------------
 
-/// O que a aba mostra.
+/// What the tab shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TasksView {
     #[default]
     List,
-    /// Detalhe da tarefa (id).
+    /// The task's detail (id).
     Detail(String),
-    /// Formulário de nova tarefa.
+    /// New task form.
     New,
 }
 
-/// Seções recolhíveis do detalhe.
+/// Collapsible sections of the detail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
     Brief,
@@ -567,59 +574,59 @@ pub enum Section {
     History,
 }
 
-/// Ação perigosa esperando o "sim" no painel.
+/// Dangerous action waiting for the "yes" in the panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Confirm {
     Merge(String),
     Discard(String),
 }
 
-/// Uma operação do ciclo de vida em andamento (botões desligados, rodinha girando).
+/// A lifecycle operation in progress (buttons off, spinner turning).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Busy {
     pub id: String,
     pub label: &'static str,
 }
 
-/// Menu aberto do formulário.
+/// Open menu of the form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormMenu {
     Agent,
     Model,
 }
 
-/// Formulário "Nova tarefa".
+/// "New task" form.
 #[derive(Debug, Clone)]
 pub struct NewForm {
     pub title: String,
     pub brief: String,
-    /// Arquivos anexados ao pedido (caminhos absolutos em `dados/anexos`).
+    /// Files attached to the request (absolute paths in `dados/anexos`).
     pub attachments: Vec<PathBuf>,
-    /// Agente (`claude`); vazio até o formulário abrir.
+    /// Agent (`claude`); empty until the form opens.
     pub kind: String,
-    /// O agente atual veio da recomendação automática, não de uma escolha do usuário.
+    /// The current agent came from the automatic recommendation, not from a choice by the user.
     pub kind_is_auto: bool,
-    /// `None` = "Padrão".
+    /// `None` = "Default".
     pub model: Option<String>,
-    /// `None` = "Padrão" (nada vai ao CLI). Só vale onde `models::effort_unavailable` não objeta.
+    /// `None` = "Default" (nothing goes to the CLI). Only applies where `models::effort_unavailable` does not object.
     pub effort: Option<Effort>,
-    /// O tamanho do trabalho; decide quais modelos dão conta e, no agente automático, quem é recomendado.
+    /// The size of the work; decides which models can handle it and, with the automatic agent, who is recommended.
     pub level: Level,
-    /// O aviso de capacidade do agente e do modelo escolhidos (a tarefa está acima do que alcançam); recalculado
-    /// por `tasks_form_refresh`, não a cada quadro (lê as tarefas e a tabela de capacidade).
+    /// The capacity notice for the chosen agent and model (the task is above what they reach); recalculated
+    /// by `tasks_form_refresh`, not on every frame (it reads the tasks and the capacity table).
     pub capacity_note: Option<String>,
-    /// Provedor do passo do menu de modelo (`opencode`): `None` = a lista de provedores aparece
-    /// primeiro. Só vale enquanto o menu está aberto (o OpenCode mistura vários provedores).
+    /// Provider of the model menu step (`opencode`): `None` = the list of providers shows
+    /// first. Only applies while the menu is open (OpenCode mixes several providers).
     pub provider: Option<String>,
     pub base: String,
-    /// Escopo de escrita: um caminho por linha (ou separados por vírgula). Vazio = sem escopo. Ver [`parse_scope`].
+    /// Write scope: one path per line (or separated by commas). Empty = no scope. See [`parse_scope`].
     pub scope: String,
     pub start_now: bool,
     pub error: Option<String>,
-    /// Criando (o botão fica desligado).
+    /// Creating (the button is off).
     pub busy: bool,
     pub menu: Option<FormMenu>,
-    /// O título pede o foco do teclado no próximo quadro (o formulário acabou de abrir).
+    /// The title asks for keyboard focus on the next frame (the form just opened).
     pub focus_title: bool,
 }
 
@@ -647,40 +654,40 @@ impl Default for NewForm {
     }
 }
 
-/// Estado da aba Tarefas no `Deck`.
+/// State of the Tasks tab in the `Deck`.
 pub struct TasksUi {
     pub view: TasksView,
     pub tasks: Vec<Task>,
-    /// A primeira leitura já chegou.
+    /// The first read has already arrived.
     pub loaded: bool,
     pub refreshing: bool,
-    /// Pediram outra leitura enquanto uma estava em andamento.
+    /// Another read was requested while one was in progress.
     dirty: bool,
     pub collapsed: HashSet<Group>,
     pub history_filter: HistoryFilter,
     pub history_menu: bool,
     pub closed_sections: HashSet<Section>,
-    /// Mensagens da linha do tempo abertas por inteiro (`id da tarefa`, hora da mensagem).
+    /// Timeline messages opened whole (`task id`, message time).
     pub open_messages: HashSet<(String, u64)>,
     pub confirm: Option<Confirm>,
-    /// O campo de feedback do "Devolver" (em revisão) ou do "Reprovar" (aguardando validação) está aberto.
+    /// The feedback field of "Return" (in review) or "Reject" (awaiting validation) is open.
     pub return_open: bool,
     pub feedback: String,
     pub busy: Option<Busy>,
-    /// Erro da última ação (faixa vermelha no detalhe) ou, com `notice_info`, o aviso de uma ação que deu certo.
+    /// Error of the last action (red strip in the detail) or, with `notice_info`, the notice of an action that worked.
     pub notice: Option<String>,
-    /// O aviso é só informação (a mesclagem passou, mas há o que o usuário precisa saber): faixa neutra.
+    /// The notice is only information (the merge went through, but there is something the user needs to know): neutral strip.
     pub notice_info: bool,
-    /// O motivo estruturado da recusa da mesclagem, quando há saída para oferecer num botão.
+    /// The structured reason for the merge refusal, when there is a way out to offer on a button.
     pub notice_block: Option<MergeBlock>,
-    /// O aviso do stash que veio com a recusa (`MergeRefusal::stash_note`), mostrado depois da explicação.
+    /// The stash notice that came with the refusal (`MergeRefusal::stash_note`), shown after the explanation.
     pub notice_stash: Option<String>,
-    /// A lista completa de arquivos da recusa está aberta ("Ver o que está sem commit").
+    /// The full list of files of the refusal is open ("See what is uncommitted").
     pub notice_files: bool,
     pub form: NewForm,
-    /// Muda a cada troca de projeto: respostas de pedidos do projeto anterior são descartadas.
+    /// Changes on every project switch: answers to requests from the previous project are discarded.
     pub generation: u64,
-    /// SOMENTE DEPURAÇÃO: estado fictício que as releituras não substituem.
+    /// DEBUGGING ONLY: a fake state that re-reads do not replace.
     pub debug_hold: bool,
 }
 
@@ -692,7 +699,7 @@ impl Default for TasksUi {
             loaded: false,
             refreshing: false,
             dirty: false,
-            // As concluídas e as canceladas já foram resolvidas: começam recolhidas.
+            // The completed and cancelled ones are already resolved: they start collapsed.
             collapsed: HashSet::from([Group::Done, Group::Cancelled]),
             history_filter: HistoryFilter::All,
             history_menu: false,
@@ -727,18 +734,18 @@ impl TasksUi {
         validating_count(&self.tasks)
     }
 
-    /// O número do selo do ícone da aba: o que espera uma decisão do humano (revisar ou validar).
+    /// The number on the tab icon's badge: what waits for a human decision (review or validate).
     pub fn attention_count(&self) -> usize {
         self.review_count() + self.validating_count()
     }
 }
 
-/// O que uma operação do ciclo de vida faz.
+/// What a lifecycle operation does.
 #[derive(Debug, Clone)]
 pub enum TaskOp {
     Start,
     Merge,
-    /// "Guardar minhas alterações, mesclar e devolvê-las" (`Core::task_merge_assisted` com o stash ligado).
+    /// "Stash my changes, merge and give them back" (`Core::task_merge_assisted` with the stash on).
     MergeStash,
     Validate,
     Discard,
@@ -749,55 +756,55 @@ pub enum TaskOp {
 impl TaskOp {
     fn busy_label(&self) -> &'static str {
         match self {
-            TaskOp::Start => "Iniciando…",
-            TaskOp::Merge => "Mesclando…",
-            TaskOp::MergeStash => "Guardando e mesclando…",
-            TaskOp::Validate => "Validando…",
-            TaskOp::Discard => "Descartando…",
-            TaskOp::Return(_) => "Devolvendo…",
-            TaskOp::Reject(_) => "Reprovando…",
+            TaskOp::Start => t!("Starting…"),
+            TaskOp::Merge => t!("Merging…"),
+            TaskOp::MergeStash => t!("Stashing and merging…"),
+            TaskOp::Validate => t!("Validating…"),
+            TaskOp::Discard => t!("Discarding…"),
+            TaskOp::Return(_) => t!("Returning…"),
+            TaskOp::Reject(_) => t!("Rejecting…"),
         }
     }
 }
 
-/// O que a mesclagem devolve além da tarefa.
+/// What the merge returns besides the task.
 #[derive(Debug, Default)]
 pub struct MergeExtra {
     pub block: Option<MergeBlock>,
     pub note: Option<String>,
 }
 
-/// Respostas das chamadas em segundo plano.
+/// Answers of the background calls.
 pub enum TaskReply {
     List(Vec<Task>),
     Created {
         result: Box<Result<Task, TaskError>>,
-        /// O resultado de iniciar logo em seguida (só com "Iniciar agora").
+        /// The result of starting right after (only with "Start now").
         started: Option<Box<Result<Task, TaskError>>>,
     },
     Done {
         id: String,
         op: TaskOp,
         result: Box<Result<Task, TaskError>>,
-        /// Só na mesclagem: o motivo da recusa que tem saída e o aviso sobre as alterações guardadas.
+        /// Only on the merge: the reason for a refusal that has a way out and the notice about the stashed changes.
         merge: Box<MergeExtra>,
     },
 }
 
 // ---------------------------------------------------------------------------
-// Ações
+// Actions
 // ---------------------------------------------------------------------------
 
 impl Deck {
-    /// O projeto da tela mudou: esquece a lista, o detalhe e o formulário do anterior e ignora as
-    /// respostas que ainda vierem dele. Os grupos recolhidos ficam.
+    /// The project on screen changed: forgets the previous one's list, detail and form and ignores the
+    /// answers that still come from it. The collapsed groups stay.
     pub fn tasks_reset_for_project(&mut self) {
         let generation = self.tasks.generation + 1;
         let collapsed = std::mem::take(&mut self.tasks.collapsed);
         self.tasks = TasksUi { generation, collapsed, ..TasksUi::default() };
     }
 
-    /// Relê a lista (uma por vez; um pedido no meio repete a leitura ao terminar).
+    /// Re-reads the list (one at a time; a request in the middle repeats the read when it finishes).
     pub fn tasks_refresh(&mut self) {
         if self.tasks.debug_hold || self.active_project.is_empty() {
             return;
@@ -811,7 +818,7 @@ impl Deck {
         self.spawn_bg("tasks-list", move |core| Some(UiMsg::Tasks(generation, TaskReply::List(core.tasks(&project)))));
     }
 
-    /// O core gravou as tarefas de `project`.
+    /// The core saved the tasks of `project`.
     pub fn tasks_changed(&mut self, project: &str) {
         if project == self.active_project {
             self.tasks_refresh();
@@ -824,7 +831,7 @@ impl Deck {
         self.tasks_clear_notice();
     }
 
-    /// Tira o aviso da tela, com o motivo da recusa e a lista de arquivos que iam com ele.
+    /// Takes the notice off the screen, with the refusal reason and the list of files that went with it.
     pub fn tasks_clear_notice(&mut self) {
         self.tasks.notice = None;
         self.tasks.notice_info = false;
@@ -833,7 +840,7 @@ impl Deck {
         self.tasks.notice_files = false;
     }
 
-    /// Mostra um erro simples (faixa vermelha, sem botão de saída).
+    /// Shows a plain error (red strip, no way-out button).
     fn tasks_set_error(&mut self, msg: String) {
         self.tasks_clear_notice();
         self.tasks.notice = Some(msg);
@@ -845,7 +852,7 @@ impl Deck {
         self.tasks.feedback.clear();
     }
 
-    /// "←": do detalhe e do formulário à lista.
+    /// "←": from the detail and from the form to the list.
     pub fn tasks_back(&mut self) {
         self.tasks.view = TasksView::List;
         self.tasks_clear_detail_state();
@@ -855,12 +862,12 @@ impl Deck {
         self.tasks.form.provider = None;
     }
 
-    /// Agentes que uma tarefa pode usar: instalados, com aba (nada de terminal comum).
+    /// Agents a task can use: installed, with a tab (no plain terminal).
     pub fn tasks_agent_choices(&self) -> Vec<String> {
         self.agents.available.iter().filter(|a| a.installed && a.peer && a.id != "shell").map(|a| a.id.clone()).collect()
     }
 
-    /// Abre o formulário: agente padrão `claude` (ou o primeiro disponível) e a branch atual de base.
+    /// Opens the form: default agent `claude` (or the first available) and the current branch as the base.
     pub fn tasks_open_new(&mut self) {
         let choices = self.tasks_agent_choices();
         let form = &mut self.tasks.form;
@@ -885,8 +892,8 @@ impl Deck {
         self.tasks_clear_notice();
     }
 
-    /// Recalcula o que depende do nível, do agente, do modelo e do esforço do formulário: o agente recomendado
-    /// (enquanto o agente é o automático: o capaz do nível com mais folga na cota) e o aviso de capacidade.
+    /// Recalculates what depends on the form's level, agent, model and effort: the recommended agent
+    /// (while the agent is the automatic one: the one capable of the level with the most quota to spare) and the capacity notice.
     pub fn tasks_form_refresh(&mut self) {
         let choices = self.tasks_agent_choices();
         let (level, effort) = (self.tasks.form.level, self.tasks.form.effort);
@@ -904,13 +911,13 @@ impl Deck {
         self.tasks.form.capacity_note = note;
     }
 
-    /// Escolheu outro tamanho de trabalho no formulário.
+    /// Chose another size of work in the form.
     pub fn tasks_form_set_level(&mut self, level: Level) {
         self.tasks.form.level = level;
         self.tasks_form_refresh();
     }
 
-    /// Escolheu outro agente no formulário: o modelo e o esforço voltam ao padrão.
+    /// Chose another agent in the form: the model and the effort go back to the default.
     pub fn tasks_form_set_kind(&mut self, kind: String) {
         if self.tasks.form.kind != kind {
             self.tasks.form.model = None;
@@ -924,12 +931,12 @@ impl Deck {
         self.tasks_form_refresh();
     }
 
-    /// Botão "Anexar arquivos" do formulário "Nova tarefa".
+    /// "Attach files" button of the "New task" form.
     pub fn tasks_pick_attachments(&self) {
         self.pick_attachments_for(AttachTarget::TaskForm(self.active_project.clone()));
     }
 
-    /// "×" do chip de anexo no formulário "Nova tarefa": tira da lista e apaga a cópia em `dados/anexos`.
+    /// "×" of the attachment chip in the "New task" form: removes it from the list and deletes the copy in `dados/anexos`.
     pub fn tasks_remove_attachment(&mut self, i: usize) {
         if i >= self.tasks.form.attachments.len() {
             return;
@@ -938,7 +945,7 @@ impl Deck {
         self.delete_attachment_copy(path);
     }
 
-    /// Cria a tarefa (e a inicia, com "Iniciar agora") numa thread.
+    /// Creates the task (and starts it, with "Start now") in a thread.
     pub fn tasks_submit_form(&mut self) {
         let f = &mut self.tasks.form;
         if f.busy || f.title.trim().is_empty() || self.active_project.is_empty() {
@@ -954,7 +961,7 @@ impl Deck {
             kind: f.kind.clone(),
             level: f.level,
             model: f.model.clone(),
-            // O esforço escolhido antes de trocar de modelo pode já não valer (Antigravity sem versões por esforço).
+            // The effort chosen before switching model may no longer apply (Antigravity without per-effort versions).
             effort: f.effort.filter(|_| models::effort_unavailable(&f.kind, f.model.as_deref()).is_none()),
             base: Some(f.base.trim().to_owned()).filter(|b| !b.is_empty()),
             creator: None,
@@ -972,7 +979,7 @@ impl Deck {
         });
     }
 
-    /// Roda uma operação do ciclo de vida numa thread.
+    /// Runs a lifecycle operation in a thread.
     pub fn tasks_run(&mut self, id: String, op: TaskOp) {
         if self.tasks.busy.is_some() || self.active_project.is_empty() {
             return;
@@ -1005,7 +1012,7 @@ impl Deck {
         });
     }
 
-    /// Clique num botão do detalhe.
+    /// Click on a button of the detail.
     pub fn tasks_act(&mut self, id: &str, act: TaskAct) {
         let Some(task) = self.tasks.task(id).cloned() else { return };
         if act.needs_confirm(&task) {
@@ -1030,19 +1037,19 @@ impl Deck {
         }
     }
 
-    /// "Guardar minhas alterações, mesclar e devolvê-las" no aviso da recusa: sem outra confirmação, o clique já é o pedido.
+    /// "Stash my changes, merge and give them back" in the refusal notice: with no other confirmation, the click is already the request.
     pub fn tasks_merge_stash(&mut self, id: &str) {
         self.tasks_run(id.to_owned(), TaskOp::MergeStash);
     }
 
-    /// "Pedir ao agente para fazer o commit" / "…resolver o conflito": devolve a tarefa com o pedido pronto do motivo da recusa.
+    /// "Ask the agent to commit" / "…resolve the conflict": sends the task back with the request ready from the refusal reason.
     pub fn tasks_ask_agent(&mut self, id: &str) {
         let Some(task) = self.tasks.task(id) else { return };
         let Some(feedback) = self.tasks.notice_block.as_ref().and_then(|b| b.return_feedback(task)) else { return };
         self.tasks_run(id.to_owned(), TaskOp::Return(feedback));
     }
 
-    /// O "sim" do painel de confirmação.
+    /// The "yes" of the confirmation panel.
     pub fn tasks_confirm_accepted(&mut self) {
         match self.tasks.confirm.take() {
             Some(Confirm::Merge(id)) => self.tasks_run(id, TaskOp::Merge),
@@ -1051,7 +1058,7 @@ impl Deck {
         }
     }
 
-    /// Envia o feedback do formulário: "Devolver" (em revisão) ou "Reprovar" (aguardando validação).
+    /// Sends the form's feedback: "Return" (in review) or "Reject" (awaiting validation).
     pub fn tasks_send_return(&mut self, id: &str) {
         let feedback = self.tasks.feedback.trim().to_owned();
         let Some(task) = self.tasks.task(id) else { return };
@@ -1062,20 +1069,20 @@ impl Deck {
         self.tasks_run(id.to_owned(), op);
     }
 
-    /// A aba do agente da tarefa está aberta?
+    /// Is the task's agent tab open?
     pub fn tasks_tab_open(&self, task: &Task) -> bool {
         self.tabs.iter().any(|t| t.project == self.active_project && t.ident.id() == task.instance)
     }
 
     pub fn on_tasks(&mut self, generation: u64, reply: TaskReply) {
         if generation != self.tasks.generation || self.tasks.debug_hold {
-            return; // pedida no projeto anterior (ou estado fictício de captura de tela)
+            return; // requested in the previous project (or a fake screenshot state)
         }
         match reply {
             TaskReply::List(list) => {
                 self.tasks.refreshing = false;
-                // Na primeira leitura do projeto: se algo ficou na fila (o app fechou entre a vez da tarefa chegar
-                // e ela começar), o core confere se já pode começar.
+                // On the project's first read: if something stayed in the queue (the app closed between the task's turn
+                // arriving and it starting), the core checks whether it can start now.
                 if !self.tasks.loaded && list.iter().any(|t| t.status == TaskStatus::Queued) {
                     let project = self.active_project.clone();
                     self.spawn_bg("tasks-queue", move |core| {
@@ -1104,7 +1111,7 @@ impl Deck {
                             }
                             None => upsert(&mut self.tasks.tasks, task),
                         }
-                        // Pronto: o formulário volta vazio (agente, base e "Iniciar agora" ficam).
+                        // Done: the form goes back empty (agent, base and "Start now" stay).
                         let form = &mut self.tasks.form;
                         form.title.clear();
                         form.brief.clear();
@@ -1126,7 +1133,7 @@ impl Deck {
                     Ok(task) => {
                         upsert(&mut self.tasks.tasks, task);
                         self.tasks_clear_notice();
-                        // A mesclagem passou, mas há o que dizer sobre as alterações guardadas (voltaram, ou ficaram no stash).
+                        // The merge went through, but there is something to say about the stashed changes (they came back, or stayed in the stash).
                         if let Some(note) = merge.note {
                             if self.tasks.view != TasksView::Detail(id.clone()) {
                                 self.tasks_open_detail(&id);
@@ -1140,9 +1147,9 @@ impl Deck {
                         }
                     }
                     Err(e) => {
-                        // O aviso só aparece no detalhe da tarefa: uma ação recusada pelo botão do cartão (na
-                        // lista), ou enquanto se olhava outra tarefa ou o formulário, abre o detalhe dela, senão a
-                        // recusa passa sem ninguém ver (ou aparece na tarefa errada).
+                        // The notice only shows in the task's detail: an action refused through the card's button (in the
+                        // list), or while looking at another task or the form, opens its detail, otherwise the
+                        // refusal goes by unseen (or shows on the wrong task).
                         if self.tasks.view != TasksView::Detail(id.clone()) {
                             self.tasks_open_detail(&id);
                         }
@@ -1156,7 +1163,7 @@ impl Deck {
         }
     }
 
-    /// O detalhe aberto aponta para uma tarefa que sumiu da lista: volta à lista.
+    /// The open detail points to a task that disappeared from the list: back to the list.
     fn tasks_drop_stale_view(&mut self) {
         if let TasksView::Detail(id) = &self.tasks.view {
             if self.tasks.task(id).is_none() {
@@ -1166,17 +1173,17 @@ impl Deck {
         }
     }
 
-    /// Chamado quando a barra direita passa a mostrar a aba Tarefas.
+    /// Called when the right bar starts showing the Tasks tab.
     pub fn tasks_on_open(&mut self) {
         self.tasks_refresh();
     }
 }
 
 // ---------------------------------------------------------------------------
-// Estados fictícios (capturas de tela, `AGENTDECK_DEBUG_UI=tasks-*`)
+// Fake states (screenshots, `AGENTDECK_DEBUG_UI=tasks-*`)
 // ---------------------------------------------------------------------------
 
-/// Uma tarefa de cada estado, com dados realistas.
+/// One task of each status, with realistic data.
 pub fn demo_tasks() -> Vec<Task> {
     let now = agentdeck_core::util::now_ms();
     let min = 60_000u64;
@@ -1194,7 +1201,7 @@ pub fn demo_tasks() -> Vec<Task> {
         status,
         base: "dev".into(),
         branch: format!("tarefa/{id}-{}", agentdeck_core::tasks::slugify(title, 40)),
-        worktree: format!(r"C:\Users\voce\agentdeck-dev\.agentdeck\worktrees\{id}").into(),
+        worktree: format!(r"C:\Users\you\agentdeck-dev\.agentdeck\worktrees\{id}").into(),
         kind: kind.to_owned(),
         model: model.map(str::to_owned),
         instance: format!("{kind}@{id}"),
@@ -1202,27 +1209,27 @@ pub fn demo_tasks() -> Vec<Task> {
     };
 
     let review = Task {
-        brief: "Mostrar na barra direita uma aba **Tarefas** com a lista agrupada por estado.\n\n- cartão com o título, o agente e o tempo\n- detalhe com o relatório e o diff\n- botões de mesclar, devolver e descartar".into(),
+        brief: "Show a **Tasks** tab in the right bar with the list grouped by status.\n\n- card with the title, the agent and the time\n- detail with the report and the diff\n- merge, return and discard buttons".into(),
         created_ms: now - 95 * min,
         started_ms: Some(now - 90 * min),
         finished_ms: Some(now - 6 * min),
-        report: Some("Fiz a aba Tarefas completa.\n\nArquivos: crates/app/src/ui/tasks.rs (pintura), crates/app/src/tasks_ui.rs (estado e ações), right_panel.rs (ícone e badge).\n\nTestes: cargo test --workspace passa; as funções puras (grupos, resumo do diff, ações por estado) têm testes.\n\nFalta: conferir a aba no Windows com várias tarefas ao mesmo tempo.".into()),
+        report: Some("I built the whole Tasks tab.\n\nFiles: crates/app/src/ui/tasks.rs (painting), crates/app/src/tasks_ui.rs (state and actions), right_panel.rs (icon and badge).\n\nTests: cargo test --workspace passes; the pure functions (groups, diff summary, actions per status) have tests.\n\nMissing: check the tab on Windows with several tasks at the same time.".into()),
         diff_stat: Some(" crates/app/src/tasks_ui.rs       | 412 +++++++++++++++++++++++++++\n crates/app/src/ui/tasks.rs      | 688 ++++++++++++++++++++++++++++++++++++\n crates/app/src/ui/right_panel.rs |  14 +-\n crates/core/src/tasks.rs        |  23 ++\n 4 files changed, 1129 insertions(+), 8 deletions(-)\n".into()),
         events: vec![
-            ev(95, "criada"),
-            ev(90, "iniciada: worktree C:\\Users\\voce\\agentdeck-dev\\.agentdeck\\worktrees\\t4 na branch tarefa/t4-aba-tarefas-na-barra-direita"),
-            ev(90, "brief entregue ao agente"),
-            ev(6, "relatório recebido; em revisão"),
+            ev(95, "created"),
+            ev(90, "started: worktree C:\\Users\\you\\agentdeck-dev\\.agentdeck\\worktrees\\t4 on branch tarefa/t4-tasks-tab-in-the-right-bar"),
+            ev(90, "brief delivered to the agent"),
+            ev(6, "report received; in review"),
         ],
         effort: Some(Effort::High),
-        ..base("t4", "Aba Tarefas na barra direita", TaskStatus::Review, "claude", Some("claude-opus-5-5"))
+        ..base("t4", "Tasks tab in the right bar", TaskStatus::Review, "claude", Some("claude-opus-5-5"))
     };
     let review = Task {
         messages: vec![
-            msg(92, FeedKind::Ask, "claude@t4", "antigravity", "Como o egui recorta o texto de um galley que já foi medido? Preciso de reticências no fim sem medir de novo a cada quadro."),
-            msg(91, FeedKind::Answer, "antigravity", "claude@t4", "Use `galley_trunc` de ui/mod.rs: ele já corta com reticências e devolve o galley final.\n\nSe o texto muda a cada quadro, guarde o galley pela impressão digital do texto.\n\nO custo grande é medir; pintar é barato. Para listas longas, só meça as linhas visíveis (ScrollArea::show_rows) e mantenha uma altura fixa por linha.\n\nExemplo:\n  let g = galley_trunc(painter, text, font, color, max_w);\n  place(painter, rect, Align2::LEFT_CENTER, g, color);"),
-            msg(40, FeedKind::Ask, "claude@t4", "opencode", "Pode revisar o diff do crate app?"),
-            msg(39, FeedKind::Error, "opencode", "claude@t4", "Sem cota: o modelo deepseek-v4.1-flash-free esgotou a semana."),
+            msg(92, FeedKind::Ask, "claude@t4", "antigravity", "How does egui clip the text of a galley that was already measured? I need an ellipsis at the end without measuring again on every frame."),
+            msg(91, FeedKind::Answer, "antigravity", "claude@t4", "Use `galley_trunc` from ui/mod.rs: it already cuts with an ellipsis and returns the final galley.\n\nIf the text changes on every frame, cache the galley by the text's fingerprint.\n\nThe big cost is measuring; painting is cheap. For long lists, only measure the visible rows (ScrollArea::show_rows) and keep a fixed height per row.\n\nExample:\n  let g = galley_trunc(painter, text, font, color, max_w);\n  place(painter, rect, Align2::LEFT_CENTER, g, color);"),
+            msg(40, FeedKind::Ask, "claude@t4", "opencode", "Can you review the app crate diff?"),
+            msg(39, FeedKind::Error, "opencode", "claude@t4", "No quota: the deepseek-v4.1-flash-free model used up the week."),
         ],
         ..review
     };
@@ -1230,75 +1237,74 @@ pub fn demo_tasks() -> Vec<Task> {
         created_ms: now - 50 * min,
         started_ms: Some(now - 48 * min),
         finished_ms: Some(now - 2 * 60 * min),
-        report: Some("Corrigi o vazamento de handle no PTY.".into()),
+        report: Some("Fixed the handle leak in the PTY.".into()),
         diff_stat: Some(" crates/app/src/terminal/mod.rs | 6 +++---\n 1 file changed, 3 insertions(+), 3 deletions(-)\n".into()),
-        events: vec![ev(150, "relatório recebido; em revisão")],
+        events: vec![ev(150, "report received; in review")],
         effort: Some(Effort::High),
-        ..base("t5", "Corrigir vazamento de handle ao fechar a aba", TaskStatus::Review, "antigravity", Some("gemini-4-argon-high"))
+        ..base("t5", "Fix handle leak when closing the tab", TaskStatus::Review, "antigravity", Some("gemini-4-argon-high"))
     };
     let running = Task {
         created_ms: now - 25 * min,
         started_ms: Some(now - 24 * min),
-        events: vec![ev(25, "criada"), ev(24, "iniciada: worktree … na branch tarefa/t6")],
+        events: vec![ev(25, "created"), ev(24, "started: worktree … on branch tarefa/t6")],
         effort: Some(Effort::Medium),
         scope: vec!["crates/core".into(), "memory/ARCHITECTURE.md".into()],
-        ..base("t6", "Documentar as rotas /tasks da ponte", TaskStatus::Running, "claude", Some("claude-sonnet-5-5"))
+        ..base("t6", "Document the bridge /tasks routes", TaskStatus::Running, "claude", Some("claude-sonnet-5-5"))
     };
     let queued = Task {
-        brief: "Trocar o executor de git por um que reaproveite o processo.".into(),
+        brief: "Replace the git executor with one that reuses the process.".into(),
         created_ms: now - 12 * min,
         queued_ms: Some(now - 12 * min),
         waiting_for: Some("t6".into()),
         scope: vec!["crates/core/src/git.rs".into()],
-        events: vec![ev(12, "criada"), ev(12, "na fila: o escopo se sobrepõe ao da t6; começa quando ela terminar")],
-        ..base("t9", "Reaproveitar o processo do git", TaskStatus::Queued, "claude", Some("claude-sonnet-5-5"))
+        events: vec![ev(12, "created"), ev(12, "queued: the scope overlaps t6's; starts when it finishes")],
+        ..base("t9", "Reuse the git process", TaskStatus::Queued, "claude", Some("claude-sonnet-5-5"))
     };
     let draft = Task {
-        brief: "Rodar o clippy com -D warnings e corrigir o que aparecer.".into(),
+        brief: "Run clippy with -D warnings and fix whatever shows up.".into(),
         created_ms: now - 3 * 60 * min,
-        events: vec![ev(180, "criada")],
-        ..base("t7", "Limpar os avisos do clippy no crate app", TaskStatus::Draft, "opencode", None)
+        events: vec![ev(180, "created")],
+        ..base("t7", "Clean up the clippy warnings in the app crate", TaskStatus::Draft, "opencode", None)
     };
     let failed = Task {
         created_ms: now - 5 * 60 * min,
-        error: Some("não consegui criar a worktree: a branch tarefa/t3-nova-branch já existe neste repositório".into()),
+        error: Some("could not create the worktree: branch tarefa/t3-new-branch already exists in this repository".into()),
         events: vec![
-            ev(300, "criada"),
-            ev(299, "erro: não consegui criar a worktree: a branch tarefa/t3-nova-branch já existe neste repositório"),
+            ev(300, "created"),
+            ev(299, "error: could not create the worktree: branch tarefa/t3-new-branch already exists in this repository"),
         ],
-        ..base("t3", "Trocar o parser de markdown do relatório", TaskStatus::Failed, "opencode", Some("opencode/deepseek-v4.1-flash-free"))
+        ..base("t3", "Swap the report's markdown parser", TaskStatus::Failed, "opencode", Some("opencode/deepseek-v4.1-flash-free"))
     };
     let validating = Task {
-        brief: "Mostrar o estado da mesclagem no cabeçalho do detalhe.".into(),
+        brief: "Show the merge status in the detail header.".into(),
         created_ms: now - 3 * 60 * min,
         started_ms: Some(now - 170 * min),
         finished_ms: Some(now - 8 * min),
         report: Some(
-            "Cabeçalho do detalhe mostra a mesclagem.\n\nArquivos: crates/app/src/ui/tasks.rs.\n\nTestes: cargo test --workspace passa."
-                .into(),
+            "The detail header shows the merge.\n\nFiles: crates/app/src/ui/tasks.rs.\n\nTests: cargo test --workspace passes.".into(),
         ),
         diff_stat: Some(" crates/app/src/ui/tasks.rs | 18 ++++++++++++++----\n 1 file changed, 14 insertions(+), 4 deletions(-)\n".into()),
         merge_commit: Some("a1b2c3d4e5f60123456789abcdef0123456789ab".into()),
         events: vec![
-            ev(180, "criada"),
-            ev(170, "iniciada: worktree … na branch tarefa/t8"),
-            ev(20, "relatório recebido; em revisão"),
-            ev(8, "mesclada em dev (a1b2c3d); aguardando validação"),
+            ev(180, "created"),
+            ev(170, "started: worktree … on branch tarefa/t8"),
+            ev(20, "report received; in review"),
+            ev(8, "merged into dev (a1b2c3d); awaiting validation"),
         ],
-        ..base("t8", "Estado da mesclagem no cabeçalho do detalhe", TaskStatus::Validating, "claude", Some("claude-sonnet-5-5"))
+        ..base("t8", "Merge status in the detail header", TaskStatus::Validating, "claude", Some("claude-sonnet-5-5"))
     };
     let merged = Task {
         created_ms: now - 26 * 60 * min,
         started_ms: Some(now - 26 * 60 * min),
         finished_ms: Some(now - 24 * 60 * min),
-        events: vec![ev(24 * 60, "validada; concluída; worktree e branch removidas")],
-        ..base("t2", "Rotas /tasks na ponte", TaskStatus::Merged, "claude", Some("claude-opus-5-5"))
+        events: vec![ev(24 * 60, "validated; completed; worktree and branch removed")],
+        ..base("t2", "/tasks routes on the bridge", TaskStatus::Merged, "claude", Some("claude-opus-5-5"))
     };
     let discarded = Task {
         created_ms: now - 50 * 60 * min,
         finished_ms: Some(now - 48 * 60 * min),
-        events: vec![ev(48 * 60, "descartada; worktree e branch removidas")],
-        ..base("t1", "Experimento com cache de galleys", TaskStatus::Discarded, "claude", None)
+        events: vec![ev(48 * 60, "discarded; worktree and branch removed")],
+        ..base("t1", "Galley cache experiment", TaskStatus::Discarded, "claude", None)
     };
     vec![discarded, merged, failed, review, running, queued, draft, review2, validating]
 }
@@ -1306,6 +1312,7 @@ pub fn demo_tasks() -> Vec<Task> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentdeck_core::i18n::{with_lang, Lang};
 
     fn task(id: &str, status: TaskStatus, activity: u64) -> Task {
         Task { id: id.into(), status, created_ms: 1, events: vec![TaskEvent { at_ms: activity, text: "x".into() }], ..Task::default() }
@@ -1335,7 +1342,7 @@ mod tests {
                 (Group::Cancelled, vec!["t5"]),
             ]
         );
-        // Grupos vazios não aparecem.
+        // Empty groups do not show up.
         assert_eq!(group_tasks(&tasks[..1]).len(), 1);
         assert!(group_tasks(&[]).is_empty());
         assert_eq!(review_count(&tasks), 2);
@@ -1362,15 +1369,15 @@ mod tests {
                 (Group::Done, vec!["t1"]),
             ]
         );
-        assert_eq!(Group::Validating.title(), "Aguardando validação");
+        assert_eq!(Group::Validating.title(), "Awaiting validation");
         assert_eq!(Group::of(TaskStatus::Validating), Group::Validating);
-        assert_eq!(status_name(TaskStatus::Validating), "Aguardando validação");
-        // Concluída é o nome da tarefa validada (o estado gravado continua `Merged`).
-        assert_eq!(status_name(TaskStatus::Merged), "Concluída");
-        // Os grupos que esperam o humano contam no selo; as validadas não.
+        assert_eq!(status_name(TaskStatus::Validating), "Awaiting validation");
+        // "Completed" is the name of the validated task (the stored status is still `Merged`).
+        assert_eq!(status_name(TaskStatus::Merged), "Completed");
+        // The groups that wait for the human count on the badge; the validated ones do not.
         let ui = TasksUi { tasks, ..TasksUi::default() };
         assert_eq!((ui.review_count(), ui.validating_count(), ui.attention_count()), (1, 2, 3));
-        // Grupo "Aguardando validação" começa aberto: é trabalho para você.
+        // The "Awaiting validation" group starts open: it is work for you.
         assert!(!ui.collapsed.contains(&Group::Validating));
     }
 
@@ -1378,12 +1385,12 @@ mod tests {
     fn cancelled_tasks_are_apart_from_the_merged_ones() {
         assert_eq!(Group::of(TaskStatus::Merged), Group::Done);
         assert_eq!(Group::of(TaskStatus::Discarded), Group::Cancelled);
-        assert_eq!(Group::Done.title(), "Concluídas");
-        assert_eq!(Group::Cancelled.title(), "Canceladas");
-        // Os dois no fim, nessa ordem.
+        assert_eq!(Group::Done.title(), "Finished");
+        assert_eq!(Group::Cancelled.title(), "Cancelled");
+        // Both at the end, in that order.
         let n = Group::ORDER.len();
         assert_eq!(Group::ORDER[n - 2..], [Group::Done, Group::Cancelled]);
-        // Os grupos resolvidos começam recolhidos.
+        // The resolved groups start collapsed.
         let ui = TasksUi::default();
         assert!(ui.collapsed.contains(&Group::Done));
         assert!(ui.collapsed.contains(&Group::Cancelled));
@@ -1392,7 +1399,7 @@ mod tests {
 
     #[test]
     fn the_real_list_with_two_discarded_keeps_them_out_of_the_merged_group() {
-        // O caso que apareceu na revisão: t8 e t4 descartadas convivendo com t1 e t2 mescladas.
+        // The case that showed up in the review: t8 and t4 discarded living alongside t1 and t2 merged.
         let tasks = vec![
             task("t1", TaskStatus::Merged, 100),
             task("t2", TaskStatus::Merged, 200),
@@ -1409,8 +1416,8 @@ mod tests {
         };
         assert_eq!(ids(Group::Done), ["t2", "t1"]);
         assert_eq!(ids(Group::Cancelled), ["t8", "t4"]);
-        // Nenhuma descartada pode sobrar em "Concluídas".
-        let done = groups.iter().find(|(g, _)| *g == Group::Done).expect("concluídas");
+        // No discarded task can be left in "Finished".
+        let done = groups.iter().find(|(g, _)| *g == Group::Done).expect("finished group");
         assert!(done.1.iter().all(|t| t.status == TaskStatus::Merged));
     }
 
@@ -1424,16 +1431,17 @@ mod tests {
     #[test]
     fn the_diff_stat_becomes_a_one_line_summary() {
         let stat = " a.rs | 10 +++++++---\n b.rs | 2 +-\n 3 files changed, 120 insertions(+), 8 deletions(-)\n";
-        let s = parse_diff_stat(stat).expect("resumo");
+        let s = parse_diff_stat(stat).expect("summary");
         assert_eq!(s, DiffSummary { files: 3, insertions: 120, deletions: 8 });
-        assert_eq!(s.text(), "3 arquivos, +120 −8");
-        // Singular e só um dos lados.
-        assert_eq!(parse_diff_stat(" a.rs | 1 +\n 1 file changed, 1 insertion(+)\n").map(|s| s.text()).as_deref(), Some("1 arquivo, +1"));
-        assert_eq!(parse_diff_stat(" 2 files changed, 4 deletions(-)").map(|s| s.text()).as_deref(), Some("2 arquivos, −4"));
-        // Sem diferenças (texto do core) e lixo.
-        assert_eq!(parse_diff_stat("(nenhuma alteração em relação à base)").map(|s| s.text()).as_deref(), Some("sem alterações"));
+        assert_eq!(s.text(), "3 files, +120 −8");
+        // Singular and only one of the sides.
+        assert_eq!(parse_diff_stat(" a.rs | 1 +\n 1 file changed, 1 insertion(+)\n").map(|s| s.text()).as_deref(), Some("1 file, +1"));
+        assert_eq!(parse_diff_stat(" 2 files changed, 4 deletions(-)").map(|s| s.text()).as_deref(), Some("2 files, −4"));
+        // No differences (the core's text, in both languages) and garbage.
+        assert_eq!(parse_diff_stat("(no changes against the base)").map(|s| s.text()).as_deref(), Some("no changes"));
+        assert_eq!(parse_diff_stat("(nenhuma alteração em relação à base)").map(|s| s.text()).as_deref(), Some("no changes"));
         assert_eq!(parse_diff_stat(""), None);
-        assert_eq!(parse_diff_stat("alguma outra coisa"), None);
+        assert_eq!(parse_diff_stat("something else"), None);
     }
 
     #[test]
@@ -1442,21 +1450,21 @@ mod tests {
         let lines = parse_stat_lines(stat);
         let shape: Vec<(&str, &str)> = lines.iter().map(|l| (l.path.as_str(), l.changes.as_str())).collect();
         assert_eq!(shape, [("crates/app/src/tasks_ui.rs", "412"), ("a b/c.rs => d.rs", "3"), ("logo.png", "Bin 0 -> 1234 bytes")]);
-        assert!(parse_stat_lines("(nenhuma alteração em relação à base)").is_empty());
+        assert!(parse_stat_lines("(no changes against the base)").is_empty());
         assert!(parse_stat_lines("").is_empty());
     }
 
     #[test]
     fn ages_read_naturally() {
         let now = 10_000_000_000;
-        assert_eq!(age_text(now, now), "agora");
-        assert_eq!(age_text(now, now + 5_000), "agora");
-        assert_eq!(age_text(now, now - 59_000), "agora");
-        assert_eq!(age_text(now, now - 60_000), "há 1 min");
-        assert_eq!(age_text(now, now - 59 * 60_000), "há 59 min");
-        assert_eq!(age_text(now, now - 3_600_000), "há 1 h");
-        assert_eq!(age_text(now, now - 23 * 3_600_000), "há 23 h");
-        assert_eq!(age_text(now, now - 3 * 86_400_000), "há 3 d");
+        assert_eq!(age_text(now, now), "now");
+        assert_eq!(age_text(now, now + 5_000), "now");
+        assert_eq!(age_text(now, now - 59_000), "now");
+        assert_eq!(age_text(now, now - 60_000), "1 min ago");
+        assert_eq!(age_text(now, now - 59 * 60_000), "59 min ago");
+        assert_eq!(age_text(now, now - 3_600_000), "1 h ago");
+        assert_eq!(age_text(now, now - 23 * 3_600_000), "23 h ago");
+        assert_eq!(age_text(now, now - 3 * 86_400_000), "3 d ago");
     }
 
     #[test]
@@ -1464,22 +1472,29 @@ mod tests {
         let now = 1_000_000_000;
         let mut t = task("t1", TaskStatus::Review, now - 1000);
         t.finished_ms = Some(now - 3 * 60_000);
-        assert_eq!(status_age(&t, now), "pronta há 3 min");
+        assert_eq!(status_age(&t, now), "ready 3 min ago");
         t.status = TaskStatus::Running;
         t.started_ms = Some(now - 2 * 3_600_000);
-        assert_eq!(status_age(&t, now), "iniciada há 2 h");
+        assert_eq!(status_age(&t, now), "started 2 h ago");
         t.status = TaskStatus::Draft;
         t.created_ms = now - 10_000;
-        assert_eq!(status_age(&t, now), "criada agora");
+        assert_eq!(status_age(&t, now), "created now");
         t.status = TaskStatus::Failed;
         t.created_ms = now - 3_600_000;
-        t.events = vec![TaskEvent { at_ms: now - 120_000, text: "erro".into() }];
-        assert_eq!(status_age(&t, now), "falhou há 2 min");
+        t.events = vec![TaskEvent { at_ms: now - 120_000, text: "error".into() }];
+        assert_eq!(status_age(&t, now), "failed 2 min ago");
         t.status = TaskStatus::Validating;
         t.finished_ms = Some(now - 5 * 60_000);
-        assert_eq!(status_age(&t, now), "mesclada há 5 min");
+        assert_eq!(status_age(&t, now), "merged 5 min ago");
         t.status = TaskStatus::Merged;
-        assert_eq!(status_age(&t, now), "concluída há 5 min");
+        assert_eq!(status_age(&t, now), "completed 5 min ago");
+        // The same lines in Portuguese.
+        with_lang(Lang::PtBr, || {
+            assert_eq!(status_age(&t, now), "concluída há 5 min");
+            t.status = TaskStatus::Draft;
+            assert_eq!(status_age(&t, now), "criada há 1 h");
+            assert_eq!(age_text(now, now), "agora");
+        });
     }
 
     #[test]
@@ -1490,10 +1505,11 @@ mod tests {
         assert_eq!(model_effort_text(&t).as_deref(), Some("glm-5.3"));
         t.model = Some("sonnet".into());
         t.effort = Some(Effort::High);
-        assert_eq!(model_effort_text(&t).as_deref(), Some("sonnet · alto"));
+        let high = Effort::High.label();
+        assert_eq!(model_effort_text(&t), Some(format!("sonnet · {high}")));
         t.model = None;
-        assert_eq!(model_effort_text(&t).as_deref(), Some("alto"));
-        // Antigravity: o esforço já está no nome do modelo.
+        assert_eq!(model_effort_text(&t).as_deref(), Some(high));
+        // Antigravity: the effort is already in the model name.
         t.model = Some("gemini-4-argon-medium".into());
         t.effort = Some(Effort::Medium);
         assert_eq!((effort_text(&t), model_effort_text(&t).as_deref()), (None, Some("gemini-4-argon-medium")));
@@ -1519,18 +1535,18 @@ mod tests {
             ..Task::default()
         };
         assert_eq!(actions_for(&q, false), [TaskAct::Discard]);
-        assert_eq!((Group::of(TaskStatus::Queued), Group::Queued.title()), (Group::Queued, "Na fila"));
-        // Entre "Em andamento" e "Rascunho": já pediu para começar, mas ainda espera.
+        assert_eq!((Group::of(TaskStatus::Queued), Group::Queued.title()), (Group::Queued, "Queued"));
+        // Between "In progress" and "Draft": it already asked to start, but still waits.
         let order: Vec<Group> = Group::ORDER.to_vec();
-        let at = |g| order.iter().position(|x| *x == g).expect("grupo");
+        let at = |g| order.iter().position(|x| *x == g).expect("group");
         assert!(at(Group::Running) < at(Group::Queued) && at(Group::Queued) < at(Group::Draft));
         assert_eq!(
             (status_name(TaskStatus::Queued), card_state_label(TaskStatus::Queued), task_step(TaskStatus::Queued)),
-            ("Na fila", "na fila", 1)
+            ("Queued", "queued", 1)
         );
         assert!(!is_focused_card(TaskStatus::Queued));
-        // Quanto tempo está na fila conta da entrada nela, não da criação.
-        assert_eq!(status_age(&q, 65_000), "na fila há 1 min");
+        // How long it has been in the queue counts from entering it, not from the creation.
+        assert_eq!(status_age(&q, 65_000), "queued 1 min ago");
     }
 
     #[test]
@@ -1544,7 +1560,7 @@ mod tests {
 
     #[test]
     fn each_status_has_its_buttons() {
-        let t = |status, report: bool| Task { status, base: "dev".into(), report: report.then(|| "feito".to_owned()), ..Task::default() };
+        let t = |status, report: bool| Task { status, base: "dev".into(), report: report.then(|| "done".to_owned()), ..Task::default() };
         assert_eq!(actions_for(&t(TaskStatus::Draft, false), false), [TaskAct::Start, TaskAct::Discard]);
         assert_eq!(actions_for(&t(TaskStatus::Running, false), true), [TaskAct::GoToTab, TaskAct::Discard]);
         assert_eq!(actions_for(&t(TaskStatus::Running, false), false), [TaskAct::ReopenTab, TaskAct::Discard]);
@@ -1558,18 +1574,19 @@ mod tests {
             [TaskAct::Validate, TaskAct::Reject, TaskAct::ReopenTab, TaskAct::Discard]
         );
         assert_eq!(actions_for(&t(TaskStatus::Failed, false), false), [TaskAct::Retry, TaskAct::Discard]);
-        // Mesclagem que falhou antes (Failed com relatório): também se devolve ao agente.
+        // A merge that failed earlier (Failed with a report): it is also sent back to the agent.
         assert_eq!(actions_for(&t(TaskStatus::Failed, true), true), [TaskAct::Retry, TaskAct::Return, TaskAct::GoToTab, TaskAct::Discard]);
         assert!(actions_for(&t(TaskStatus::Merged, true), false).is_empty());
         assert!(actions_for(&t(TaskStatus::Discarded, false), false).is_empty());
-        // Só a ação principal vem cheia; mesclar mostra a base.
+        // Only the main action comes filled; merge shows the base.
         assert!(TaskAct::Merge.is_primary() && !TaskAct::Discard.is_primary() && !TaskAct::Return.is_primary());
         assert!(TaskAct::Validate.is_primary() && !TaskAct::Reject.is_primary());
         assert_eq!(
             (TaskAct::Validate.label(&t(TaskStatus::Validating, true)), TaskAct::Reject.label(&t(TaskStatus::Validating, true))),
-            ("Validar".to_owned(), "Reprovar".to_owned())
+            ("Validate".to_owned(), "Reject".to_owned())
         );
-        assert_eq!(TaskAct::Merge.label(&t(TaskStatus::Review, true)), "Mesclar em dev");
+        assert_eq!(TaskAct::Merge.label(&t(TaskStatus::Review, true)), "Merge into dev");
+        with_lang(Lang::PtBr, || assert_eq!(TaskAct::Merge.label(&t(TaskStatus::Review, true)), "Mesclar em dev"));
     }
 
     #[test]
@@ -1579,7 +1596,7 @@ mod tests {
         assert!(!TaskAct::Return.needs_confirm(&review) && !TaskAct::Start.needs_confirm(&review));
         assert!(!TaskAct::Validate.needs_confirm(&review) && !TaskAct::Reject.needs_confirm(&review));
         assert!(!TaskAct::GoToTab.needs_confirm(&review) && !TaskAct::ReopenTab.needs_confirm(&review));
-        // Tentar de novo: iniciar não pergunta; mesclar (já tem relatório) pergunta.
+        // Try again: starting does not ask; merging (it already has a report) does.
         let failed_start = Task { status: TaskStatus::Failed, ..Task::default() };
         let failed_merge = Task { status: TaskStatus::Failed, report: Some("x".into()), ..Task::default() };
         assert!(!TaskAct::Retry.needs_confirm(&failed_start));
@@ -1596,12 +1613,12 @@ mod tests {
         assert!(!can_show_diff(&t(TaskStatus::Failed, false)));
         assert!(!can_show_diff(&t(TaskStatus::Draft, false)));
         assert!(!can_show_diff(&t(TaskStatus::Discarded, true)));
-        // Sem o commit da mesclagem (tarefa antiga), aguardando validação ou concluída não tem diff: a branch é a própria base.
+        // Without the merge commit (an old task), awaiting validation or completed has no diff: the branch is the base itself.
         assert!(!can_show_diff(&t(TaskStatus::Validating, true)));
         assert!(!can_show_diff(&t(TaskStatus::Merged, true)));
-        // Com o commit, os dois estados mostram o que foi mesclado.
+        // With the commit, both statuses show what was merged.
         assert!(can_show_diff(&merged(TaskStatus::Validating)) && can_show_diff(&merged(TaskStatus::Merged)));
-        // Descartada continua sem diff, mesmo que já tenha sido mesclada antes.
+        // Discarded still has no diff, even if it was merged before.
         assert!(!can_show_diff(&merged(TaskStatus::Discarded)));
     }
 
@@ -1618,16 +1635,16 @@ mod tests {
             ..Task::default()
         };
         for status in [TaskStatus::Running, TaskStatus::Review, TaskStatus::Failed] {
-            assert_eq!(diff_button_label(&t(status, None)), "Ver diff completo");
-            assert_eq!(diff_title(&t(status, None)), "t5 · alterações em relação a dev");
+            assert_eq!(diff_button_label(&t(status, None)), "View full diff");
+            assert_eq!(diff_title(&t(status, None)), "t5 · changes against dev");
         }
-        // Reprovada e de novo em revisão, o commit antigo continua guardado: o diff é o da branch.
-        assert_eq!(diff_button_label(&t(TaskStatus::Review, Some(hash))), "Ver diff completo");
+        // Rejected and back in review, the old commit is still stored: the diff is the branch's.
+        assert_eq!(diff_button_label(&t(TaskStatus::Review, Some(hash))), "View full diff");
         for status in [TaskStatus::Validating, TaskStatus::Merged] {
-            assert_eq!(diff_button_label(&t(status, Some(hash))), "Ver o que foi mesclado");
-            assert_eq!(diff_title(&t(status, Some(hash))), "t5 · o que a mesclagem trouxe para dev");
+            assert_eq!(diff_button_label(&t(status, Some(hash))), "View what was merged");
+            assert_eq!(diff_title(&t(status, Some(hash))), "t5 · what the merge brought into dev");
         }
-        // O detalhe mostra o hash curto ao lado de `branch → base`.
+        // The detail shows the short hash next to `branch → base`.
         assert_eq!(branch_line(&t(TaskStatus::Validating, Some(hash))), "tarefa/t5-x → dev · 0123456");
         assert_eq!(branch_line(&t(TaskStatus::Running, None)), "tarefa/t5-x → dev");
         assert_eq!(merge_short(&t(TaskStatus::Merged, Some(""))), None);
@@ -1644,12 +1661,12 @@ mod tests {
 
     #[test]
     fn long_texts_are_clipped_for_the_screen() {
-        assert_eq!(clip_text("curto", 10), "curto");
-        assert_eq!(clip_text("exato", 5), "exato");
-        let clipped = clip_text("ação longa demais", 4);
-        assert!(clipped.starts_with("ação\n\n[… texto cortado"), "{clipped}");
-        assert!(clipped.contains("4 de 17"), "{clipped}");
-        // O horário local tem a forma dd/mm hh:mm (o fuso depende da máquina).
+        assert_eq!(clip_text("short", 10), "short");
+        assert_eq!(clip_text("exact", 5), "exact");
+        let clipped = clip_text("an action too long", 4);
+        assert!(clipped.starts_with("an a\n\n[… text cut on screen"), "{clipped}");
+        assert!(clipped.contains("4 of 18"), "{clipped}");
+        // The local time has the form dd/mm hh:mm (the time zone depends on the machine).
         let t = event_time(1_760_000_000_000);
         assert_eq!((t.len(), t.as_bytes()[2], t.as_bytes()[8]), (11, b'/', b':'), "{t}");
     }
@@ -1689,21 +1706,21 @@ mod tests {
         let tasks = demo_tasks();
         let active = active_tasks(&tasks);
         let active_ids: Vec<&str> = active.iter().map(|t| t.id.as_str()).collect();
-        // Só as não encerradas (Review, Validating, Running, Queued, Draft, Failed), na ordem de prioridade e recência.
+        // Only the unfinished ones (Review, Validating, Running, Queued, Draft, Failed), in order of priority and recency.
         assert_eq!(active_ids, ["t4", "t5", "t8", "t6", "t9", "t7", "t3"]);
         assert!(active.iter().all(|t| !matches!(t.status, TaskStatus::Merged | TaskStatus::Discarded)));
 
-        // Histórico: todas (Merged + Discarded), da mais recente (t2, há 24h) para a mais antiga (t1, há 48h).
+        // History: all of them (Merged + Discarded), from the most recent (t2, 24h ago) to the oldest (t1, 48h ago).
         let all_hist = history_tasks(&tasks, HistoryFilter::All);
         assert_eq!(all_hist.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t2", "t1"]);
 
-        // Filtro só concluídas / só descartadas.
+        // Filter completed only / discarded only.
         let done_only = history_tasks(&tasks, HistoryFilter::Done);
         assert_eq!(done_only.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t2"]);
         let discarded_only = history_tasks(&tasks, HistoryFilter::Discarded);
         assert_eq!(discarded_only.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t1"]);
 
-        // Etapas de 5 segmentos e destaque dos cartões que pedem ação do humano.
+        // 5-segment steps and the highlight of the cards that ask for the human's action.
         assert_eq!(task_step(TaskStatus::Draft), 1);
         assert_eq!(task_step(TaskStatus::Running), 2);
         assert_eq!(task_step(TaskStatus::Failed), 2);
@@ -1713,12 +1730,16 @@ mod tests {
         assert_eq!(task_step(TaskStatus::Discarded), 0);
         assert!(is_focused_card(TaskStatus::Review) && is_focused_card(TaskStatus::Validating));
         assert!(!is_focused_card(TaskStatus::Running) && !is_focused_card(TaskStatus::Draft));
-        assert_eq!(card_state_label(TaskStatus::Review), "em revisão");
-        assert_eq!(card_state_label(TaskStatus::Validating), "aguarda validação");
-        assert_eq!(card_state_label(TaskStatus::Merged), "concluída");
-        assert_eq!(card_state_label(TaskStatus::Discarded), "descartada");
+        assert_eq!(card_state_label(TaskStatus::Review), "in review");
+        assert_eq!(card_state_label(TaskStatus::Validating), "awaits validation");
+        assert_eq!(card_state_label(TaskStatus::Merged), "completed");
+        assert_eq!(card_state_label(TaskStatus::Discarded), "discarded");
+        with_lang(Lang::PtBr, || {
+            assert_eq!(card_state_label(TaskStatus::Validating), "aguarda validação");
+            assert_eq!(status_name(TaskStatus::Merged), "Concluída");
+        });
 
-        // Data dd/mm tem 5 caracteres com '/' no meio.
+        // The dd/mm date has 5 characters with a '/' in the middle.
         let ddmm = task_date_ddmm(&tasks[0]);
         assert_eq!((ddmm.len(), ddmm.as_bytes()[2]), (5, b'/'), "{ddmm}");
     }
@@ -1734,14 +1755,14 @@ mod tests {
         assert_eq!(message_route(&t.messages[0]), "claude@t1 → …");
         assert_eq!(
             (message_kind_label(FeedKind::Ask), message_kind_label(FeedKind::Answer), message_kind_label(FeedKind::Error)),
-            ("pergunta", "resposta", "erro")
+            ("question", "answer", "error")
         );
     }
 
     #[test]
     fn a_long_message_is_collapsed_by_size_or_by_lines() {
-        assert_eq!(message_preview("  curta \n"), ("curta".into(), false));
-        let (cut, more) = message_preview(&"ação ".repeat(200));
+        assert_eq!(message_preview("  short \n"), ("short".into(), false));
+        let (cut, more) = message_preview(&"word ".repeat(200));
         assert!(more && cut.ends_with('…') && cut.chars().count() <= MESSAGE_PREVIEW_CHARS + 1, "{cut}");
         let (cut, more) = message_preview("1\n2\n3\n4\n5\n6");
         assert_eq!((cut.as_str(), more), ("1\n2\n3\n4…", true));
