@@ -187,7 +187,10 @@ pub struct Config {
     /// In the old format it was the global workspace (read only for the migration).
     #[serde(skip_serializing)]
     pub workspace: PathBuf,
+    /// Spoken language of the dictation: `auto` or a Whisper code (`en`, `pt`...). A fresh config follows the UI language.
     pub whisper_lang: String,
+    /// Dictation: Whisper translates what it hears into English (`-tr`).
+    pub whisper_translate: bool,
     /// Voice dictation: see [`DictationChoice`].
     pub dictation: DictationChoice,
     pub sound_enabled: bool,
@@ -247,7 +250,8 @@ impl Default for Config {
             removed_projects: Vec::new(),
             active_project: String::new(),
             workspace: PathBuf::new(),
-            whisper_lang: "pt".into(),
+            whisper_lang: crate::i18n::Lang::En.whisper_code().into(),
+            whisper_translate: false,
             dictation: DictationChoice::default(),
             sound_enabled: true,
             sidebar_width: 220.0,
@@ -351,6 +355,11 @@ impl Config {
         else {
             return None;
         };
+        // A file without a dictation language follows its UI language (a fresh config is English).
+        if !loaded.contains_key("whisperLang") {
+            let ui = loaded.get("language").and_then(|l| l.as_str()).map(crate::i18n::Lang::from_code).unwrap_or_default();
+            base.insert("whisperLang".into(), ui.whisper_code().into());
+        }
         for (k, v) in loaded {
             // `null` does not override a typed default (serde would reject the whole object).
             if !v.is_null() {
@@ -848,12 +857,24 @@ mod tests {
     }
 
     #[test]
+    fn dictation_language_follows_the_ui_language_unless_saved() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let p = paths(tmp.path());
+        assert_eq!(Config::default().whisper_lang, "en");
+        assert!(!Config::default().whisper_translate);
+        let pt = Config::from_json_over_defaults(r#"{"language": "pt-BR"}"#, &p);
+        assert_eq!(pt.whisper_lang, "pt");
+        let kept = Config::from_json_over_defaults(r#"{"language": "pt-BR", "whisperLang": "es", "whisperTranslate": true}"#, &p);
+        assert_eq!((kept.whisper_lang.as_str(), kept.whisper_translate), ("es", true));
+    }
+
+    #[test]
     fn partial_json_keeps_defaults() {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         let cfg = Config::from_json_over_defaults(r#"{"soundEnabled": false, "extra": 1, "workspace": null}"#, &p);
         assert!(!cfg.sound_enabled);
-        assert_eq!(cfg.whisper_lang, "pt");
+        assert_eq!(cfg.whisper_lang, "en");
         // Invalid JSON → defaults.
         let cfg = Config::from_json_over_defaults("{oops", &p);
         assert!(cfg.project_list.is_empty());
