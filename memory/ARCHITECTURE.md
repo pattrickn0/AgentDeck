@@ -138,6 +138,60 @@ The policy in `delivery.rs` avoids overriding the user or TUI:
 
 ---
 
+## Chat view of an agent tab (`crates/core/src/chat.rs`, `app/src/deck/chat.rs`, `app/src/ui/chat.rs`)
+
+A Claude tab shows a friendly chat (messages, tool calls with diffs, permission cards, a composer) instead of Claude Code's terminal
+UI, with the CLI still running underneath. Holt never reads the terminal screen: the CLI runs in its **structured mode**
+(`claude -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose
+--permission-prompt-tool stdio`, `chat::chat_args`) and the events are rendered. Chat is the default view of Claude
+(`Config.chat_by_default`); the tab menu switches a tab to Terminal and back (`ProjectCfg.tab_views`, `Deck::set_tab_view`): the process is
+replaced, the conversation continues (same session id, `--resume`). Other CLIs keep the terminal (`chat::supports`).
+
+- **Core (`chat.rs`, no interface):** `parse_line` turns one stdout line into `ChatEvent`s (init, text deltas, complete assistant message,
+  tool results, permission request, interrupt, result; sub-agent traffic is dropped; a `control_request` it does not know is answered with
+  an error so the CLI never waits). `Transcript` is the conversation (`Item`: user / assistant text / tool call / permission card / notice):
+  `apply(event)` builds it, `push_user` starts a turn (`busy` = turns sent and not yet ended), `from_history` rebuilds it from the CLI's
+  own transcript file (`<claude>/projects/<folder>/<session>.jsonl`) so a resumed tab shows what was said (`Core::chat_history`).
+  `Core::spawn_chat` starts the child (same `SpawnSpec` env as a PTY tab: `HOLT_*`, `ask-agent` on `PATH`; registered in the process
+  registry and, on Windows, in the app's Job Object) with a reader, a stderr and a writer thread, and wakes the interface; `ChatProcess`
+  kills it on drop. `Core::spawn_spec_chat` is `spawn_spec_for` for the chat: same conversation plan (`--session-id` first, `--resume` after),
+  instructions, model and allowed tools, but no turn hooks (the end of a turn is an event) and the task's first prompt travels as
+  `SpawnSpec::first_message`, sent as the first user message.
+- **What goes in:** `user_message_json`, `permission_response_json` (allow with `updatedInput`, optionally `updatedPermissions` = the request's
+  `permission_suggestions` for "allow for this session"; deny with a message), `interrupt_json` (Esc / Stop).
+- **App (`deck/chat.rs`):** `Tab.chat: Option<Box<ChatTab>>` (`Some` = chat view). `Deck::pump_chat` (in `tick`, so also with the window hidden)
+  drains each process; `on_chat_event` saves a new session id after `/clear`, auto-denies `AskUserQuestion` with "ask in plain text", marks
+  the tab "done" and rings when a permission card needs the user, and at the end of a turn calls `on_agent_signal(false)` and
+  `Core::mail_turn_ended` (the reminder of unread mail, which the terminal gets from the `Stop` hook). `chat_submit` sends the composer
+  (a terminal-only slash command such as `/config`, `/login`, `/theme`, or one the CLI lists in `terminal_slash_commands`, is not sent: a
+  notice points to the Terminal view; every other slash command is sent as text and works in this mode). Dictation, attached files and
+  files clicked in the tree are inserted in the composer instead of being typed into a terminal (`chat_insert`).
+- **Delivery (`ask-agent`, durable mail, GitHub tab messages):** the same queue and rule as a terminal tab (`delivery::gate`), with a chat
+  `TabState`: `hooked`, `busy` = the transcript's, `last_output` = the last event, never `typing`. When ready, `chat_deliver` sends the text
+  as a user message (no paste, no Enter timing) and the conversation shows only the message and who sent it (`agent_message_display` strips
+  the "how to answer" instructions Holt adds for the model). A question for a busy tab, or one waiting for a permission answer, waits.
+- **View (`ui/chat.rs`):** a scroll area of items in a centered column; each item's height is remembered (`ChatTab::heights`), so only the
+  items near the viewport are laid out (markdown is the cost; a resumed conversation can have a thousand items). Assistant text is
+  `egui_commonmark` like Documents; a tool call is a collapsible row (Edit/Write open by default, with the diff of `old_string`/`new_string`);
+  a pending permission is an amber card (Allow / Allow for this session / Deny; Enter and Esc when the composer is empty); the composer
+  grows to 8 lines, Enter sends, Shift+Enter newline, ↑/↓ history, `/` suggestions, Esc interrupts. Keys: with a chat tab active
+  `term_focus` is off, so the terminal key path and IME are not used.
+- **Resume across restarts:** the session id is in `tab_sessions` as for terminal tabs; the chat reloads the transcript file and restarts the CLI
+  with `--resume`. `reopen_without_resume` also applies (a resume that fails within 10 s starts from scratch).
+- **Checks:** `crates/core/tests/data/claude-stream-*.jsonl` are recordings of Claude Code 2.1.312 (tools + slash command, text streaming,
+  interrupt) that `chat.rs` tests parse; `crates/core/tests/chat.rs` (launch, history, a fake CLI speaking the protocol, and an `#[ignore]`d test
+  against the real `claude`); `app/src/chat_flow_tests.rs` (delivery into a chat tab, permission round trip, terminal-only command, switching
+  views). `HOLT_DEBUG_UI=chat-demo` fills the first chat tab with a made-up conversation for screenshots.
+- **Not done / follow-ups for other CLIs** (each needs its own structured transport and a parser like `parse_line` feeding the same
+  `Transcript`): **Codex**: `codex exec --json` (one JSON event per line, but one turn per process: resume with `codex exec resume <id>`) or
+  the `codex app-server` JSON-RPC (long-lived, approvals and streaming deltas; the better base for a chat). **OpenCode**: `opencode serve`
+  (HTTP + SSE events: sessions, messages, permission requests) or `opencode run --format json` per turn. **Antigravity / Gemini and others**: ACP
+  (Agent Client Protocol, JSON-RPC over stdio: `session/prompt`, `session/update` notifications, `session/request_permission`) would cover
+  every CLI that speaks it with one client. Until then they keep the terminal. Also not done: `AskUserQuestion` (denied with a
+  "ask as text" hint), images in the composer, a setting in Settings for the default view (`chat_by_default` is only in `config.json`),
+  context-window percentage (needs the `usage` of the assistant messages), Windows with a `.cmd` shim (the arguments are escaped for the
+  PTY path; the chat path was not run on Windows).
+
 ## Tasks desk (`crates/core/src/tasks/`, `scope.rs`, `crates/app/src/tasks_ui.rs`)
 
 Each task (`t1`, `t2`…, per-project counter never reused) isolates work in an agent (`<model>@tN`), a branch (`task/<id>-<slug>`), and a dedicated worktree.

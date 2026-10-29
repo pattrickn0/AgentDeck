@@ -181,3 +181,58 @@ fn a_process_that_cannot_start_is_an_error_not_a_hang() {
     assert!(env.core.spawn_chat(&spec, Arc::new(|| {})).is_err());
     env.core.shutdown();
 }
+
+/// Against the real Claude Code (costs a few tokens, needs the user's login): `cargo test -p holt-core --test chat -- --ignored`.
+/// Checks that the arguments the core builds are accepted by the installed CLI, that a message gets an answer, and that a
+/// process started again with `--resume` knows the conversation.
+#[cfg(unix)]
+#[test]
+#[ignore = "talks to the real claude CLI"]
+fn the_real_claude_answers_in_the_chat_mode_and_resumes_the_conversation() {
+    isolated_config();
+    let tmp = tempfile::tempdir().expect("tmp");
+    let root = holt_core::util::strip_verbatim(&std::fs::canonicalize(tmp.path()).expect("canonicalize"));
+    let ws = root.join("ws");
+    std::fs::create_dir_all(&ws).expect("ws");
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).expect("HOME");
+    let opts = holt_core::StartOptions {
+        search_path: std::env::var_os("PATH"),
+        home_dir: Some(home),
+        watch_workspace: false,
+        config: Some(holt_core::Config::with_project(ws.clone())),
+        system_dirs: false,
+    };
+    let (core, _rx) = holt_core::Core::start_with(paths_in(&root), opts).expect("start");
+    let project = core.active_project_id();
+    let ident = Ident::parse("claude@dev").expect("ident");
+
+    let run = |text: &str| -> String {
+        let spec = core.spawn_spec_chat(&project, &ident).expect("spec");
+        let proc = core.spawn_chat(&spec, Arc::new(|| {})).expect("spawn");
+        proc.send_user(text);
+        let limit = Instant::now() + Duration::from_secs(120);
+        let mut transcript = chat::Transcript::default();
+        transcript.push_user(text, None);
+        loop {
+            assert!(Instant::now() < limit, "no answer: {:?}", transcript.items);
+            match proc.try_recv() {
+                Some(ChatMsg::Event(ev)) => {
+                    transcript.apply(&ev);
+                    if matches!(ev, ChatEvent::Result(_)) {
+                        break;
+                    }
+                }
+                Some(ChatMsg::Stderr(line)) => eprintln!("stderr: {line}"),
+                Some(ChatMsg::Exited(code)) => panic!("exited {code:?}: {:?}", transcript.items),
+                None => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        transcript.items.iter().filter_map(|i| if let Item::Assistant { text, .. } = i { Some(text.clone()) } else { None }).collect::<Vec<_>>().join("\n")
+    };
+    let first = run("Remember the word BANANA7. Reply with just: ok");
+    assert!(!first.is_empty());
+    // A new process for the same tab resumes the conversation (the second launch uses `--resume`).
+    let second = run("What was the word I told you to remember? Reply with just the word.");
+    assert!(second.contains("BANANA7"), "{second}");
+    core.shutdown();
+}

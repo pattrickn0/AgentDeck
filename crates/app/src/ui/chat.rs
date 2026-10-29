@@ -219,8 +219,7 @@ fn draw(
         .hint_text(egui::RichText::new(hint).font(font).color(p.text_3))
         .desired_width(box_r.width() - 4.0)
         .desired_rows(rows)
-        .interactive(alive)
-        .lock_focus(true);
+        .interactive(alive);
     let resp = te.show(&mut field);
     if chat.focus_composer && alive {
         resp.response.request_focus();
@@ -283,7 +282,8 @@ fn draw(
     if submit {
         acts.push(Act::Submit);
     }
-    ui.interact(body, Id::new(("chat-body", uid)), Sense::click()).clicked() || resp.response.clicked()
+    // A press anywhere in the pane focuses it (a widget over the whole pane would swallow the clicks of the ones below).
+    ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| body.contains(p)))
 }
 
 fn working_text(chat: &ChatTab) -> String {
