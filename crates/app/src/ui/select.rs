@@ -1,30 +1,30 @@
-//! Seleção de texto nas telas pintadas à mão (o diff e o arquivo grande, em leitura). O egui só seleciona o que é
-//! `Label` ou `TextEdit`, e estas telas só pintam as linhas que aparecem (`show_viewport`/`show_rows`): aqui a seleção é
-//! um par de posições (linha, byte dentro do texto da linha) guardado entre quadros, e quem pinta pergunta, linha a
-//! linha, o que dela está selecionado ([`Selected::on_line`]).
+//! Text selection on the hand-painted screens (the diff and the large file, in read-only mode). egui only selects
+//! what is a `Label` or a `TextEdit`, and these screens only paint the lines that show up (`show_viewport`/`show_rows`): here the selection is
+//! a pair of positions (line, byte inside the line's text) kept between frames, and whoever paints asks, line by
+//! line, what part of it is selected ([`Selected::on_line`]).
 //!
-//! Arrastar seleciona (rolando a tela quando o ponteiro passa da borda), clique limpa, Ctrl+A seleciona tudo e Ctrl+C
-//! copia. O arquivo pequeno não passa por aqui: o `TextEdit` do egui já faz tudo isso.
+//! Dragging selects (scrolling the screen when the pointer goes past the edge), a click clears it, Ctrl+A selects all and Ctrl+C
+//! copies. The small file does not go through here: egui's `TextEdit` already does all of that.
 
 use std::ops::Range;
 
 use egui::{Event, Id, Key, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
 
-/// Uma posição no texto: a linha e o byte dentro do texto dela.
+/// A position in the text: the line and the byte inside its text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Pos {
     pub line: usize,
     pub col: usize,
 }
 
-/// A seleção em andamento: onde o arrasto começou e onde está agora (a cabeça pode vir antes da âncora).
+/// The selection in progress: where the drag started and where it is now (the head may come before the anchor).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Drag {
     anchor: Pos,
     head: Pos,
 }
 
-/// Uma seleção não vazia, com o começo antes do fim.
+/// A non-empty selection, with the start before the end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selected {
     pub start: Pos,
@@ -32,7 +32,7 @@ pub struct Selected {
 }
 
 impl Selected {
-    /// O que da linha `line`, de `len` bytes, está selecionado.
+    /// What part of line `line`, of `len` bytes, is selected.
     pub fn on_line(&self, line: usize, len: usize) -> Option<Range<usize>> {
         if line < self.start.line || line > self.end.line {
             return None;
@@ -47,14 +47,14 @@ fn ordered(d: Drag) -> Option<Selected> {
     (d.anchor != d.head).then(|| Selected { start: d.anchor.min(d.head), end: d.anchor.max(d.head) })
 }
 
-/// Em quantos pixels da borda o arrasto começa a rolar a tela, e quanto rola por quadro no máximo.
+/// How many pixels from the edge the drag starts scrolling the screen, and how much it scrolls per frame at most.
 const EDGE: f32 = 24.0;
 const SCROLL_STEP: f32 = 22.0;
 
-/// Trata o mouse e o teclado da área `rect` (a parte visível, em coordenadas da tela) e devolve a seleção do quadro.
-/// `hit` traduz um ponto da tela numa posição do texto (qualquer ponto, mesmo fora da área: o arrasto passa da borda);
-/// `end` é o fim do texto (para Ctrl+A); `text` devolve o texto de uma seleção (para Ctrl+C).
-/// Deve vir antes de qualquer botão que se desenhe por cima da área, para ele ganhar o clique.
+/// Handles the mouse and the keyboard of the `rect` area (the visible part, in screen coordinates) and returns the frame's selection.
+/// `hit` turns a screen point into a text position (any point, even outside the area: the drag goes past the edge);
+/// `end` is the end of the text (for Ctrl+A); `text` returns the text of a selection (for Ctrl+C).
+/// It must come before any button drawn on top of the area, so that the button gets the click.
 pub fn drive(
     ui: &mut Ui,
     id: Id,
@@ -87,7 +87,7 @@ pub fn drive(
                 0.0
             };
             if dy != 0.0 {
-                // `scroll_with_delta` anda no sentido do conteúdo: arrastar para baixo da borda rola para baixo.
+                // `scroll_with_delta` moves in the direction of the content: dragging past the bottom edge scrolls down.
                 ui.scroll_with_delta(Vec2::new(0.0, -dy));
                 ctx.request_repaint();
             }
@@ -118,11 +118,11 @@ mod tests {
 
     #[test]
     fn the_selection_is_ordered_whatever_the_drag_direction() {
-        let forward = ordered(Drag { anchor: p(1, 2), head: p(3, 0) }).expect("seleção");
-        let backward = ordered(Drag { anchor: p(3, 0), head: p(1, 2) }).expect("seleção");
+        let forward = ordered(Drag { anchor: p(1, 2), head: p(3, 0) }).expect("selection");
+        let backward = ordered(Drag { anchor: p(3, 0), head: p(1, 2) }).expect("selection");
         assert_eq!(forward, backward);
         assert_eq!((forward.start, forward.end), (p(1, 2), p(3, 0)));
-        // Um clique sem arrastar não seleciona nada.
+        // A click without dragging selects nothing.
         assert_eq!(ordered(Drag { anchor: p(2, 4), head: p(2, 4) }), None);
     }
 
@@ -135,9 +135,9 @@ mod tests {
         assert_eq!(sel.on_line(2, 0), Some(0..0));
         assert_eq!(sel.on_line(3, 10), Some(0..4));
         assert_eq!(sel.on_line(4, 10), None);
-        // O fim além do tamanho da linha (a linha ficou mais curta) é cortado.
+        // The end past the line length (the line got shorter) is cut.
         assert_eq!(sel.on_line(3, 2), Some(0..2));
-        // Começo e fim na mesma linha.
+        // Start and end on the same line.
         let one = Selected { start: p(5, 1), end: p(5, 3) };
         assert_eq!(one.on_line(5, 10), Some(1..3));
         assert_eq!(one.on_line(5, 2), Some(1..2));

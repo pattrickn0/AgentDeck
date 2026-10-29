@@ -1,5 +1,5 @@
-//! Seção PROJETOS da barra lateral: lista de projetos, agentes de cada um (em árvore: quem abriu
-//! quem) e ações rápidas.
+//! PROJECTS section of the sidebar: the project list, each project's agents (as a tree: who opened
+//! whom) and quick actions.
 
 use std::path::{Path, PathBuf};
 
@@ -11,42 +11,43 @@ use super::{clickable, dot, frame, galley, galley_trunc, menus, place, shadow, t
 use crate::deck::{AgentBadge, Deck, ProjectView};
 use crate::icons::Icon;
 use crate::theme;
+use agentdeck_core::t;
 
-/// Altura da linha de um projeto e da "+ Novo agente".
+/// Height of a project row and of the "+ New agent" row.
 pub const ROW_H: f32 = 22.0;
-/// Altura da linha de um agente.
+/// Height of an agent row.
 const AGENT_ROW_H: f32 = 24.0;
 pub const SECTION_H: f32 = 24.0;
-/// Margem lateral das linhas: a seleção e o hover não encostam na borda da ilha.
+/// Side margin of the rows: the selection and the hover do not touch the island's edge.
 const SIDE_MARGIN: f32 = 4.0;
-/// O logo do modelo (12 px) mora numa caixa de 16 px.
+/// The model logo (12 px) lives in a 16 px box.
 const LOGO_SIZE: f32 = 12.0;
 const MARK_BOX: f32 = 16.0;
-/// Centro do logo de um agente da raiz (a partir da borda esquerda da linha).
+/// Center of a root agent's logo (from the left edge of the row).
 const AGENT_X: f32 = 30.0;
-/// Recuo de cada nível da árvore de agentes.
+/// Indent of each level of the agent tree.
 const INDENT: f32 = 12.0;
-/// Espaço entre o logo e o nome, e entre o nome e o modelo.
+/// Space between the logo and the name, and between the name and the model.
 const GAP: f32 = 7.0;
-/// Largura máxima do modelo à direita do nome (o resto é do nome).
+/// Maximum width of the model to the right of the name (the rest belongs to the name).
 const MODEL_MAX_W: f32 = 64.0;
-/// Espaço mínimo do nome para o modelo aparecer ao lado dele.
+/// Minimum room for the name before the model shows up beside it.
 const NAME_MIN_W: f32 = 56.0;
-/// Níveis além deste não recuam mais (a barra é estreita).
+/// Levels beyond this one stop indenting (the bar is narrow).
 const MAX_DEPTH: usize = 5;
 
-/// Onde a linha "+ Novo agente" foi pintada no último quadro (âncora do menu de agentes; `None` se invisível).
+/// Where the "+ New agent" row was painted in the last frame (anchor of the agent menu; `None` if not visible).
 fn anchor_key() -> Id {
     Id::new("new-agent-anchor")
 }
 
-/// Âncora do menu de novo agente: a linha "+ Novo agente" da barra lateral ou, se ela não está à vista
-/// (barra recolhida, lista rolada), `fallback`.
+/// Anchor of the new-agent menu: the sidebar's "+ New agent" row or, when it is not visible
+/// (collapsed bar, scrolled list), `fallback`.
 pub fn new_agent_anchor(ctx: &egui::Context, fallback: Rect) -> Rect {
     ctx.data(|d| d.get_temp::<Option<Rect>>(anchor_key())).flatten().unwrap_or(fallback)
 }
 
-/// Mapeia o identificador do modelo para o ícone correspondente.
+/// Maps the model identifier to its icon.
 pub(super) fn agent_icon(kind: &str) -> Option<Icon> {
     let model = kind.split(':').next().unwrap_or(kind);
     match model {
@@ -57,8 +58,8 @@ pub(super) fn agent_icon(kind: &str) -> Option<Icon> {
     }
 }
 
-/// O logo do modelo de um tipo de agente (12 px) ou, sem logo (terminal), o ponto: a marca do agente nos
-/// menus e botões de abrir agente.
+/// The logo of an agent type's model (12 px) or, without a logo (terminal), the dot: the agent's mark in the
+/// menus and in the open-agent buttons.
 pub(super) fn paint_kind_mark(icons: &mut crate::icons::IconCache, p: &Painter, center: Pos2, kind: &str, color: Color32) {
     match agent_icon(kind) {
         Some(icon) => icons.paint(p, icon, center, LOGO_SIZE, color, 0.0),
@@ -66,9 +67,9 @@ pub(super) fn paint_kind_mark(icons: &mut crate::icons::IconCache, p: &Painter, 
     }
 }
 
-/// O modelo de LLM como cabe numa linha da barra lateral: a família (`claude-sonnet-5-5` → `sonnet`,
-/// `gemini-4-argon-high` → `argon`, `opencode/deepseek-v4.1-flash-free` → `flash`). Sem família
-/// conhecida, o nome sem o provedor, sem o `claude-` e sem o `-free`.
+/// The LLM model as it fits in one sidebar row: the family (`claude-sonnet-5-5` → `sonnet`,
+/// `gemini-4-argon-high` → `argon`, `opencode/deepseek-v4.1-flash-free` → `flash`). Without a known
+/// family, the name without the provider, without `claude-` and without `-free`.
 pub fn model_tag(model: &str) -> String {
     const FAMILIES: [&str; 7] = ["opus", "sonnet", "haiku", "fable", "argon", "flash", "codex"];
     let short = short_model(model).to_lowercase();
@@ -79,8 +80,8 @@ pub fn model_tag(model: &str) -> String {
     short.strip_suffix("-free").unwrap_or(short).to_owned()
 }
 
-/// Altura do que a lista de projetos desenha: uma linha por projeto e, nos abertos, uma por agente e, no
-/// ativo, a "+ Novo agente".
+/// Height of what the project list draws: one row per project and, in the open ones, one per agent and, in
+/// the active one, the "+ New agent" row.
 fn list_height(projects: &[ProjectView]) -> f32 {
     projects
         .iter()
@@ -91,7 +92,7 @@ fn list_height(projects: &[ProjectView]) -> f32 {
         .sum()
 }
 
-/// Abre uma pasta no explorador de arquivos do sistema operacional.
+/// Opens a folder in the operating system's file explorer.
 fn open_project_folder(deck: &Deck, path: &Path) {
     if deck.workspace == path && deck.core.open_path(".").is_ok() {
         return;
@@ -111,26 +112,26 @@ fn open_project_folder(deck: &Deck, path: &Path) {
 }
 
 // ---------------------------------------------------------------------------
-// Árvore de agentes
+// Agent tree
 // ---------------------------------------------------------------------------
 
-/// Uma linha da árvore de agentes de um projeto.
+/// One row of a project's agent tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TreeRow {
-    /// Índice em `ProjectView::agents`.
+    /// Index in `ProjectView::agents`.
     pub idx: usize,
     pub depth: usize,
-    /// Para cada ancestral de profundidade 1 até `depth - 1`: se ele ainda tem irmãos abaixo (a
-    /// linha-guia daquele nível continua por esta linha).
+    /// For each ancestor from depth 1 up to `depth - 1`: whether it still has siblings below (that
+    /// level's guide line goes on through this row).
     pub rails: Vec<bool>,
-    /// É o último filho do pai (o "cotovelo" para no meio da linha).
+    /// Whether it is the parent's last child (the "elbow" stops in the middle of the line).
     pub last: bool,
-    /// Tem filhos logo abaixo (a linha-guia desce do logo).
+    /// Whether it has children right below (the guide line goes down from the logo).
     pub has_kids: bool,
 }
 
-/// Ordena os agentes em árvore: pai antes dos filhos, irmãos na ordem das abas. Quem não tem pai
-/// ou tem um pai que não está na lista fica na raiz; num ciclo, o primeiro da lista vira raiz.
+/// Orders the agents into a tree: parent before children, siblings in tab order. An agent without a parent
+/// or with a parent that is not in the list stays at the root; in a cycle, the first one in the list becomes the root.
 pub fn agent_tree(agents: &[AgentBadge]) -> Vec<TreeRow> {
     let n = agents.len();
     let parent: Vec<Option<usize>> =
@@ -168,12 +169,12 @@ fn walk(i: usize, depth: usize, rails: Vec<bool>, last: bool, kids: &[Vec<usize>
     }
 }
 
-/// X do logo de um agente na profundidade `depth`.
+/// X of an agent's logo at `depth`.
 fn agent_x(row: Rect, depth: usize) -> f32 {
     row.min.x + AGENT_X + depth.min(MAX_DEPTH) as f32 * INDENT
 }
 
-/// Linhas-guia da árvore (como no explorador de arquivos). `gap` é o espaço entre as linhas.
+/// Guide lines of the tree (like in a file explorer). `gap` is the space between the lines.
 fn paint_guides(p: &Painter, row: Rect, gap: f32, node: &TreeRow) {
     let stroke = Stroke::new(1.0, theme::pal().guide);
     let y = row.center().y;
@@ -194,8 +195,8 @@ fn paint_guides(p: &Painter, row: Rect, gap: f32, node: &TreeRow) {
     p.hline(x..=(agent_x(row, node.depth) - MARK_BOX / 2.0 - 2.0), y, stroke);
 }
 
-/// Logo do modelo do agente (ponto, se não há logo), com o estado: halo pulsando trabalhando,
-/// anel com turno concluído não visto, apagado se o processo encerrou.
+/// Logo of the agent's model (a dot when there is no logo), with the state: a pulsing halo while working,
+/// a ring for a finished turn not seen yet, dimmed if the process ended.
 fn paint_agent_mark(deck: &mut Deck, ctx: &egui::Context, p: &Painter, center: Pos2, ag: &AgentBadge, is_active_tab: bool) {
     if ag.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -203,7 +204,7 @@ fn paint_agent_mark(deck: &mut Deck, ctx: &egui::Context, p: &Painter, center: P
         let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
         p.circle_filled(center, 7.0 + 3.5 * wave, theme::with_opacity(ag.color, 0.30 * (1.0 - wave)));
     } else if ag.done && !is_active_tab {
-        // Anel de 1,5 px logo fora da caixa do logo (16 px).
+        // A 1.5 px ring just outside the logo box (16 px).
         p.circle_stroke(center, MARK_BOX / 2.0 + 0.75, Stroke::new(1.5, ag.color));
     }
     let color = if ag.alive { ag.color } else { theme::with_opacity(ag.color, 0.4) };
@@ -213,7 +214,7 @@ fn paint_agent_mark(deck: &mut Deck, ctx: &egui::Context, p: &Painter, center: P
     }
 }
 
-/// Seta de expandir/recolher (▸ fechada, ▾ aberta).
+/// Expand/collapse arrow (▸ closed, ▾ open).
 fn paint_chevron(p: &Painter, center: Pos2, open: bool, color: Color32) {
     let s = Stroke::new(1.3, color);
     let (a, b, c) = if open {
@@ -225,7 +226,7 @@ fn paint_chevron(p: &Painter, center: Pos2, open: bool, color: Color32) {
     p.line_segment([b, c], s);
 }
 
-/// Duas setas empilhadas: para cima = recolher todos, para baixo = expandir todos.
+/// Two stacked arrows: up = collapse all, down = expand all.
 fn paint_double_chevron(p: &Painter, center: Pos2, up: bool, color: Color32) {
     let s = Stroke::new(1.3, color);
     let dir = if up { -1.0 } else { 1.0 };
@@ -236,7 +237,7 @@ fn paint_double_chevron(p: &Painter, center: Pos2, up: bool, color: Color32) {
     }
 }
 
-/// `target` é `dragged` ou está na equipe dele (soltar ali criaria um ciclo).
+/// `target` is `dragged` or is on its team (dropping there would create a cycle).
 fn in_subtree(agents: &[AgentBadge], target: &str, dragged: &str) -> bool {
     let mut cur = Some(target);
     for _ in 0..agents.len() + 2 {
@@ -249,34 +250,34 @@ fn in_subtree(agents: &[AgentBadge], target: &str, dragged: &str) -> bool {
     true
 }
 
-/// Agente sendo arrastado na lista: (projeto, id, nome).
+/// Agent being dragged in the list: (project, id, name).
 type AgentDrag = Option<(String, String, String)>;
 
 fn drag_key() -> Id {
     Id::new("agent-drag")
 }
 
-/// Onde o agente arrastado cai: sob outro agente (`Some(id)`) ou na raiz (`None`); `ok` = sem ciclo.
+/// Where the dragged agent lands: under another agent (`Some(id)`) or at the root (`None`); `ok` = no cycle.
 struct DropTarget {
     boss: Option<String>,
     ok: bool,
 }
 
-/// Contorno do alvo de soltar (cor do projeto se vale, vermelho se criaria um ciclo).
+/// Outline of the drop target (the project's color when it is allowed, red when it would create a cycle).
 fn paint_drop_target(p: &Painter, r: Rect, ok: bool, color: Color32) {
     let c = if ok { color } else { theme::pal().danger };
     p.rect_filled(r, 5.0, theme::with_opacity(c, 0.12));
     p.rect_stroke(r.shrink(0.5), 5.0, Stroke::new(1.2, c), egui::StrokeKind::Inside);
 }
 
-/// Clique num agente da lista.
+/// Click on an agent in the list.
 struct AgentClick {
     project: String,
     id: String,
     tab: Option<usize>,
 }
 
-/// Desenha a seção PROJETOS e avança `top_y`.
+/// Draws the PROJECTS section and advances `top_y`.
 pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging: bool) {
     let ctx = ui.ctx().clone();
 
@@ -293,12 +294,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     let painter = ui.painter_at(rect);
     let projects = deck.project_views();
 
-    // ---------- Cabeçalho da seção PROJETOS ----------
+    // ---------- Header of the PROJECTS section ----------
     let head_rect = Rect::from_min_size(Pos2::new(rect.min.x, *top_y + 4.0), Vec2::new(rect.width(), SECTION_H));
     *top_y = head_rect.max.y;
-    super::section_label(&painter, head_rect, "PROJETOS");
+    super::section_label(&painter, head_rect, t!("PROJECTS"));
 
-    // Botão "+" para novo projeto
+    // "+" button for a new project
     let plus_r = Rect::from_min_size(Pos2::new(head_rect.max.x - 24.0, head_rect.min.y + 2.0), Vec2::new(20.0, 20.0));
     let plus_resp = clickable(ui, plus_r, Id::new("proj-plus-btn"));
     let plus_hov = plus_resp.hovered() && !dragging;
@@ -308,11 +309,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     }
     let plus_color = if plus_hov { theme::pal().text } else { theme::pal().text_2 };
     text_in(&painter, plus_r, Align2::CENTER_CENTER, "+", theme::ui_semibold(14.0), plus_color);
-    if tip(plus_resp, "Novo projeto…").clicked() {
+    if tip(plus_resp, t!("New project…")).clicked() {
         deck.new_project_dialog();
     }
 
-    // Expandir/recolher a lista de agentes de todos os projetos
+    // Expand/collapse the agent list of every project
     let any_open = projects.iter().any(|p| p.expanded);
     let all_r = plus_r.translate(Vec2::new(-22.0, 0.0));
     let all_resp = clickable(ui, all_r, Id::new("proj-all-btn"));
@@ -322,13 +323,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
     paint_double_chevron(&painter, all_r.center(), any_open, if all_hov { theme::pal().text } else { theme::pal().text_2 });
-    let all_tip = if any_open { "Recolher os agentes de todos os projetos" } else { "Mostrar os agentes de todos os projetos" };
+    let all_tip = if any_open { t!("Collapse the agents of every project") } else { t!("Show the agents of every project") };
     if tip(all_resp, all_tip).clicked() {
         deck.set_all_projects_expanded(!any_open);
     }
 
-    // ---------- Lista de projetos e agentes ----------
-    // Só a altura do conteúdo, até 40 % da barra (aí a lista rola).
+    // ---------- Project and agent list ----------
+    // Only the height of the content, up to 40 % of the bar (then the list scrolls).
     let gap = ui.spacing().item_spacing.y;
     let content_h = list_height(&projects) + gap * projects.len() as f32;
     let max_list_h = content_h.min((rect.height() * 0.40).round());
@@ -359,7 +360,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
             for proj in &projects {
                 let (row_r, resp) = ui.allocate_exact_size(Vec2::new(row_w, ROW_H), Sense::click());
                 let inner = row_r.shrink2(Vec2::new(SIDE_MARGIN, 0.0));
-                // A seta fica por cima da linha (criada depois, ganha o clique).
+                // The arrow sits on top of the row (created later, it gets the click).
                 let can_expand = proj.active || !proj.agents.is_empty();
                 let chev_r = Rect::from_min_size(inner.min, Vec2::new(20.0, ROW_H));
                 let chev_resp = can_expand.then(|| ui.interact(chev_r, Id::new(("proj-chevron", &proj.id)), Sense::click()));
@@ -370,8 +371,8 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     p.rect_filled(inner, 5.0, theme::pal().hover);
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
-                // Soltar sobre o próprio projeto devolve o agente à raiz (responde ao usuário).
-                // Só o que está à vista na lista conta (as linhas roladas para fora ficam por baixo de outras seções).
+                // Dropping onto the project itself sends the agent back to the root (it answers the user).
+                // Only what is visible in the list counts (rows scrolled out sit under other sections).
                 let clip = ui.clip_rect();
                 let visible = |r: Rect| pointer.is_some_and(|ptr| r.contains(ptr) && clip.contains(ptr));
                 if agent_drag.as_ref().is_some_and(|(dp, ..)| *dp == proj.id) && visible(row_r) {
@@ -383,7 +384,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     paint_chevron(&p, Pos2::new(inner.min.x + 10.5, row_r.center().y), proj.expanded, c);
                 }
 
-                // Lado direito: o anel de um agente que terminou sem ser visto (projeto de fora) e a contagem.
+                // Right side: the ring of an agent that finished unseen (a project that is not open) and the count.
                 let mut right = inner.max.x - 6.0;
                 let unseen = proj.agents.iter().find(|a| a.done && a.alive).filter(|_| !proj.active);
                 if let Some(ag) = unseen {
@@ -405,7 +406,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     right -= w + 6.0;
                 }
 
-                // Nome do projeto (com reticências para não encostar no que está à direita)
+                // Project name (with ellipsis so it does not touch what is on the right)
                 let name_x = inner.min.x + 6.0 + 9.0 + 6.0;
                 let name_color = if proj.active || hovered { theme::pal().text } else { theme::pal().text_2 };
                 let name_g = galley_trunc(&p, &proj.name, theme::ui_semibold(12.0), name_color, (right - name_x).max(1.0));
@@ -417,12 +418,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     name_color,
                 );
 
-                // Tooltip com caminho completo
+                // Tooltip with the full path
                 let resp = tip(resp, proj.path.display().to_string());
 
-                // Interações de clique
+                // Click interactions
                 if let Some(chev) = chev_resp {
-                    let label = if proj.expanded { "Recolher agentes" } else { "Mostrar agentes" };
+                    let label = if proj.expanded { t!("Collapse agents") } else { t!("Show agents") };
                     if tip(chev, label).clicked() {
                         toggle_id = Some(proj.id.clone());
                     }
@@ -438,12 +439,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     continue;
                 }
 
-                // Agentes do projeto, em árvore (quem abriu quem)
+                // The project's agents, as a tree (who opened whom)
                 for node in agent_tree(&proj.agents) {
                     let ag = &proj.agents[node.idx];
                     let (tab_r, _) = ui.allocate_exact_size(Vec2::new(row_w, AGENT_ROW_H), Sense::hover());
                     let sel_r = tab_r.shrink2(Vec2::new(SIDE_MARGIN, 0.0));
-                    // Id fixo (projeto + instância): o arrasto continua na mesma linha entre os quadros.
+                    // Fixed id (project + instance): the drag stays on the same row across frames.
                     let tab_resp = ui.interact(tab_r, Id::new(("agent-row", &proj.id, &ag.id)), Sense::click_and_drag());
                     let tab_hov = tab_resp.hovered() && !dragging;
                     let is_active_tab = ag.tab.is_some() && deck_active == ag.tab;
@@ -453,14 +454,14 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let being_dragged = agent_drag.as_ref().is_some_and(|(dp, di, _)| *dp == proj.id && *di == ag.id);
 
                     if is_active_tab {
-                        // Fundo na cor de destaque (18%) e filete de 2 px na borda esquerda.
+                        // Background in the accent color (18%) and a 2 px line on the left edge.
                         p.rect_filled(sel_r, 5.0, theme::accent_soft(active_color));
                         let edge = egui::CornerRadius { nw: 5, sw: 5, ne: 0, se: 0 };
                         p.rect_filled(Rect::from_min_size(sel_r.min, Vec2::new(2.0, sel_r.height())), edge, active_color);
                     } else if tab_hov {
                         p.rect_filled(sel_r, 5.0, theme::pal().hover);
                     }
-                    // Alvo de soltar: vira o chefe do arrastado (no mesmo projeto, sem ciclo).
+                    // Drop target: it becomes the dragged agent's boss (same project, no cycle).
                     if let Some((_, dragged, _)) = agent_drag.as_ref().filter(|(dp, ..)| *dp == proj.id) {
                         if !being_dragged && visible(tab_r) {
                             let ok = !in_subtree(&proj.agents, &ag.id, dragged);
@@ -480,10 +481,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     let logo_x = agent_x(tab_r, node.depth);
                     paint_agent_mark(deck, &ctx, &p, Pos2::new(logo_x, tab_r.center().y), ag, is_active_tab);
 
-                    // O modelo à direita, numa linha só; o nome é quem encolhe (com reticências).
+                    // The model on the right, on a single line; the name is what shrinks (with an ellipsis).
                     let right = sel_r.max.x - 8.0;
                     let name_x = logo_x + MARK_BOX / 2.0 + GAP;
-                    // Na barra estreita o nome vale mais que o modelo: sem espaço para os dois, o modelo sai.
+                    // In the narrow bar the name matters more than the model: with no room for both, the model is dropped.
                     let model = ag.model.as_deref().map(model_tag).filter(|m| !m.is_empty() && right - name_x >= NAME_MIN_W + MODEL_MAX_W);
                     let mcolor = if is_active_tab { theme::pal().text } else { theme::pal().text_3 };
                     let model_w = model.as_deref().map_or(0.0, |m| {
@@ -521,23 +522,24 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     }
 
                     let mut tooltip = if ag.busy {
-                        format!("{} (trabalhando…)", ag.label)
+                        t!("{name} (working…)", name = ag.label)
                     } else if ag.done {
-                        format!("{} (concluído)", ag.label)
+                        t!("{name} (done)", name = ag.label)
                     } else if ag.tab.is_none() {
-                        format!("{} (abre ao selecionar o projeto)", ag.label)
+                        t!("{name} (opens when you select the project)", name = ag.label)
                     } else if !ag.alive {
-                        format!("{} (encerrado)", ag.label)
+                        t!("{name} (ended)", name = ag.label)
                     } else {
                         ag.label.clone()
                     };
                     if let Some(model) = &ag.model {
-                        tooltip.push_str(&format!("\nModelo: {model}"));
+                        tooltip.push_str(&format!("\n{}", t!("Model: {model}", model)));
                     }
                     if let Some(parent) = ag.parent.as_ref().filter(|_| node.depth > 0) {
-                        tooltip.push_str(&format!("\nResponde a {parent}"));
+                        tooltip.push_str(&format!("\n{}", t!("Reports to {agent}", agent = parent)));
                     }
-                    tooltip.push_str("\nArraste sobre outro agente para pô-lo na equipe dele");
+                    tooltip.push('\n');
+                    tooltip.push_str(t!("Drag onto another agent to put it on their team"));
                     if tip(tab_resp, tooltip).clicked() {
                         agent_click = Some(AgentClick { project: proj.id.clone(), id: ag.id.clone(), tab: ag.tab });
                     }
@@ -547,7 +549,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     continue;
                 }
 
-                // "+ Novo agente" fecha a lista do projeto e abre o menu de agentes (o mesmo do Ctrl+T).
+                // "+ New agent" closes the project list and opens the agent menu (the same one as Ctrl+T).
                 let (add_r, add_resp) = ui.allocate_exact_size(Vec2::new(row_w, ROW_H), Sense::click());
                 let add_hov = (add_resp.hovered() || deck.new_tab_menu_open) && !dragging;
                 if add_hov {
@@ -559,11 +561,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
                     Pos2::new(add_r.min.x + AGENT_X - MARK_BOX / 2.0, add_r.min.y),
                     Pos2::new(add_r.max.x - 10.0, add_r.max.y),
                 );
-                text_in(&p, add_text, Align2::LEFT_CENTER, "+ Novo agente", theme::ui(11.5), add_color);
+                text_in(&p, add_text, Align2::LEFT_CENTER, t!("+ New agent"), theme::ui(11.5), add_color);
                 if ui.is_rect_visible(add_r) {
                     new_agent_anchor = Some(add_r);
                 }
-                if tip(add_resp, "Escolher um agente para abrir neste projeto").clicked() {
+                if tip(add_resp, t!("Choose an agent to open in this project")).clicked() {
                     new_agent_click = true;
                 }
             }
@@ -572,21 +574,21 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
 
     *top_y = list_top + scroll_output.inner_rect.height().min(max_list_h);
 
-    // Separador da largura da ilha
+    // Project separator, as wide as the island
     *top_y += 6.0;
     super::separator(&painter, Pos2::new(rect.min.x, *top_y + 0.5), Pos2::new(rect.max.x, *top_y + 0.5));
     *top_y += 1.0;
 
-    // Arrasto de agente: "fantasma" junto ao ponteiro; ao soltar, muda o chefe.
+    // Agent drag: a "ghost" next to the pointer; on release, the boss changes.
     let mut set_boss = None;
     if let Some((project, id, label)) = agent_drag.clone() {
         if let Some(ptr) = pointer {
             ctx.set_cursor_icon(if drop_target.as_ref().is_some_and(|t| !t.ok) { CursorIcon::NoDrop } else { CursorIcon::Grabbing });
             let gp = ctx.layer_painter(egui::LayerId::new(Order::Tooltip, Id::new("agent-drag-ghost")));
             let hint = match &drop_target {
-                Some(DropTarget { boss: Some(b), ok: true }) => format!("{label} → equipe de {b}"),
-                Some(DropTarget { boss: Some(_), ok: false }) => format!("{label}: não pode ficar sob a própria equipe"),
-                Some(DropTarget { boss: None, .. }) => format!("{label} → responde ao usuário"),
+                Some(DropTarget { boss: Some(b), ok: true }) => t!("{name} → {boss}'s team", name = label, boss = b),
+                Some(DropTarget { boss: Some(_), ok: false }) => t!("{name}: cannot go under their own team", name = label),
+                Some(DropTarget { boss: None, .. }) => t!("{name} → reports to you", name = label),
                 None => label.clone(),
             };
             let g = galley(&gp, &hint, theme::ui(12.0), theme::pal().text);
@@ -604,7 +606,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
     }
     ctx.data_mut(|d| d.insert_temp(drag_key(), agent_drag));
 
-    // Ações executadas fora das closures
+    // Actions performed outside the closures
     if let Some((project, id, boss)) = set_boss {
         deck.set_agent_boss(&project, &id, boss.as_deref());
     }
@@ -635,12 +637,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, top_y: &mut f32, rect: Rect, dragging:
         });
     }
 
-    // Menus e Modais
+    // Menus and modals
     show_context_menu(deck, &ctx);
     show_rename_modal(deck, &ctx);
 }
 
-/// Menu de contexto do projeto (clique direito).
+/// Project context menu (right click).
 fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     let ctx_data: Option<(String, PathBuf, String, Pos2)> = ctx.data(|d| d.get_temp(Id::new("proj-ctx-menu")).flatten());
     let Some((id, path, name, pos)) = ctx_data else { return };
@@ -665,31 +667,31 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
 
         let mut item_y = rect.min.y + 4.0;
 
-        // Renomear
+        // Rename
         let r_ren = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, item_y), Vec2::new(w - 8.0, item_h));
         item_y += item_h;
         let resp_ren = clickable(ui, r_ren, Id::new("proj-ctx-ren"));
         if resp_ren.hovered() {
             p.rect_filled(r_ren, 4.0, theme::pal().separator);
         }
-        text_in(p, r_ren.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Renomear", font.clone(), theme::pal().text);
+        text_in(p, r_ren.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Rename"), font.clone(), theme::pal().text);
         if resp_ren.clicked() {
             action_rename = true;
         }
 
-        // Abrir pasta no sistema
+        // Open the folder in the system
         let r_open = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, item_y), Vec2::new(w - 8.0, item_h));
         item_y += item_h;
         let resp_open = clickable(ui, r_open, Id::new("proj-ctx-open"));
         if resp_open.hovered() {
             p.rect_filled(r_open, 4.0, theme::pal().separator);
         }
-        text_in(p, r_open.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Abrir pasta no sistema", font.clone(), theme::pal().text);
+        text_in(p, r_open.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Open in file manager"), font.clone(), theme::pal().text);
         if resp_open.clicked() {
             action_open = true;
         }
 
-        // Remover
+        // Remove
         let r_rem = Rect::from_min_size(Pos2::new(rect.min.x + 4.0, item_y), Vec2::new(w - 8.0, item_h));
         let resp_rem = if can_remove {
             clickable(ui, r_rem, Id::new("proj-ctx-rem"))
@@ -706,7 +708,7 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         } else {
             theme::pal().text
         };
-        text_in(p, r_rem.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, "Remover", font, rem_color);
+        text_in(p, r_rem.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Remove"), font, rem_color);
         if can_remove && resp_rem.clicked() {
             action_remove = true;
         }
@@ -730,7 +732,7 @@ fn show_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     }
 }
 
-/// Modal para renomear projeto (modal de texto simples).
+/// Modal to rename a project (a simple text modal).
 fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
     let modal_data: Option<(String, String)> = ctx.data(|d| d.get_temp(Id::new("proj-rename-modal")).flatten());
     let Some((id, mut buffer)) = modal_data else { return };
@@ -752,8 +754,8 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         frame(&p, r, 10.0, theme::pal().popup, theme::pal().glass_border);
 
         let mut y = r.min.y + 16.0;
-        // Título
-        let title_g = galley(&p, "Renomear Projeto", theme::ui_semibold(15.0), theme::pal().text);
+        // Title
+        let title_g = galley(&p, t!("Rename Project"), theme::ui_semibold(15.0), theme::pal().text);
         place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 20.0)),
@@ -763,8 +765,8 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         );
         y += 24.0;
 
-        // Explicação
-        let hint_g = galley(&p, "Altera o nome do projeto exibido na barra lateral", theme::ui(11.5), theme::pal().text_2);
+        // Explanation
+        let hint_g = galley(&p, t!("Changes the project name shown in the sidebar"), theme::ui(11.5), theme::pal().text_2);
         place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)),
@@ -774,7 +776,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         );
         y += 22.0;
 
-        // Caixa de texto
+        // Text box
         let input_r = Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 28.0));
         p.rect_filled(input_r, 6.0, theme::pal().recess);
         p.rect_stroke(input_r, 6.0, Stroke::new(1.0, theme::pal().separator), egui::StrokeKind::Inside);
@@ -796,7 +798,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         }
         y += 34.0;
 
-        // Botões Cancelar e Salvar
+        // Cancel and Save buttons
         let btn_w = 80.0;
         let btn_h = 26.0;
         let save_r = Rect::from_min_size(Pos2::new(r.max.x - 20.0 - btn_w, y), Vec2::new(btn_w, btn_h));
@@ -808,7 +810,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         } else {
             p.rect_filled(cancel_r, 6.0, theme::pal().chip);
         }
-        text_in(&p, cancel_r, Align2::CENTER_CENTER, "Cancelar", theme::ui(12.5), theme::pal().text_2);
+        text_in(&p, cancel_r, Align2::CENTER_CENTER, t!("Cancel"), theme::ui(12.5), theme::pal().text_2);
         if cr.clicked() {
             close = true;
         }
@@ -819,7 +821,7 @@ fn show_rename_modal(deck: &mut Deck, ctx: &egui::Context) {
         } else {
             p.rect_filled(save_r, 6.0, theme::accent());
         }
-        text_in(&p, save_r, Align2::CENTER_CENTER, "Salvar", theme::ui_semibold(12.5), theme::pal().on_accent);
+        text_in(&p, save_r, Align2::CENTER_CENTER, t!("Save"), theme::ui_semibold(12.5), theme::pal().on_accent);
         if sr.clicked() {
             apply = true;
         }
@@ -857,13 +859,13 @@ mod tests {
         }
     }
 
-    /// (índice, profundidade) de cada linha.
+    /// (index, depth) of each row.
     fn shape(rows: &[TreeRow]) -> Vec<(usize, usize)> {
         rows.iter().map(|r| (r.idx, r.depth)).collect()
     }
 
     #[test]
-    fn o_modelo_vira_a_familia() {
+    fn the_model_becomes_the_family() {
         assert_eq!(model_tag("claude-sonnet-5-5"), "sonnet");
         assert_eq!(model_tag("claude-opus-5-5"), "opus");
         assert_eq!(model_tag("gemini-4-argon-high"), "argon");
@@ -874,12 +876,12 @@ mod tests {
     }
 
     #[test]
-    fn o_modelo_sem_familia_perde_so_o_enfeite() {
+    fn a_model_without_a_family_loses_only_the_decoration() {
         assert_eq!(model_tag("opencode/big-pickle-free"), "big-pickle");
         assert_eq!(model_tag("claude-custom-1"), "custom-1");
         assert_eq!(model_tag("llama3:8b"), "llama3:8b");
         assert_eq!(model_tag(""), "");
-        // Só vale a palavra inteira.
+        // Only the whole word counts.
         assert_eq!(model_tag("flashlight-2"), "flashlight-2");
     }
 
@@ -895,19 +897,19 @@ mod tests {
     }
 
     #[test]
-    fn a_altura_da_lista_conta_agentes_e_o_novo_agente() {
-        // Fechado: só a linha do projeto.
+    fn the_list_height_counts_agents_and_the_new_agent() {
+        // Closed: only the project row.
         assert_eq!(list_height(&[view(3, false, true)]), ROW_H);
-        // Aberto e ativo: projeto + 3 agentes + "+ Novo agente".
+        // Open and active: project + 3 agents + "+ New agent".
         assert_eq!(list_height(&[view(3, true, true)]), ROW_H + 3.0 * AGENT_ROW_H + ROW_H);
-        // Aberto e inativo: sem o "+ Novo agente".
+        // Open and inactive: without the "+ New agent".
         assert_eq!(list_height(&[view(2, true, false), view(0, false, false)]), ROW_H + 2.0 * AGENT_ROW_H + ROW_H);
         assert_eq!(list_height(&[]), 0.0);
     }
 
     #[test]
-    fn filhos_vem_logo_abaixo_do_pai() {
-        // claude, antigravity (aberto pelo claude), claude@dev (aberto pelo claude), codex2 (pelo claude@dev), codex (raiz)
+    fn children_come_right_below_the_parent() {
+        // claude, antigravity (opened by claude), claude@dev (opened by claude), codex2 (by claude@dev), codex (root)
         let agents = [
             ag("claude", None),
             ag("antigravity", Some("claude")),
@@ -919,12 +921,12 @@ mod tests {
         assert_eq!(shape(&rows), [(0, 0), (1, 1), (3, 1), (4, 2), (2, 0)]);
         assert!(rows[0].has_kids && !rows[1].has_kids);
         assert!(!rows[1].last && rows[2].last && rows[3].last);
-        // O codex2 está sob o último filho do claude: a guia do nível 1 não continua.
+        // codex2 sits under claude's last child: the level 1 guide does not go on.
         assert_eq!(rows[3].rails, [false]);
     }
 
     #[test]
-    fn guia_continua_quando_o_ancestral_tem_irmaos_abaixo() {
+    fn the_guide_goes_on_when_the_ancestor_has_siblings_below() {
         let agents = [ag("a", None), ag("b", Some("a")), ag("c", Some("b")), ag("d", Some("a"))];
         let rows = agent_tree(&agents);
         assert_eq!(shape(&rows), [(0, 0), (1, 1), (2, 2), (3, 1)]);
@@ -932,19 +934,19 @@ mod tests {
     }
 
     #[test]
-    fn nao_se_solta_um_agente_dentro_da_propria_equipe() {
+    fn an_agent_cannot_be_dropped_inside_its_own_team() {
         let agents = [ag("claude", None), ag("dev", Some("claude")), ag("codex2", Some("dev")), ag("review", None)];
-        assert!(in_subtree(&agents, "codex2", "claude"), "neto");
-        assert!(in_subtree(&agents, "dev", "dev"), "ele mesmo");
+        assert!(in_subtree(&agents, "codex2", "claude"), "grandchild");
+        assert!(in_subtree(&agents, "dev", "dev"), "itself");
         assert!(!in_subtree(&agents, "review", "claude"));
-        assert!(!in_subtree(&agents, "claude", "codex2"), "subir para o avô pode");
+        assert!(!in_subtree(&agents, "claude", "codex2"), "moving up to the grandparent is allowed");
     }
 
     #[test]
-    fn pai_ausente_ou_ciclo_vira_raiz() {
+    fn a_missing_parent_or_a_cycle_becomes_root() {
         let agents = [ag("a", Some("sumiu")), ag("b", Some("c")), ag("c", Some("b")), ag("d", Some("d"))];
         let rows = agent_tree(&agents);
-        assert_eq!(rows.len(), 4, "ninguém some da lista");
+        assert_eq!(rows.len(), 4, "nobody disappears from the list");
         assert_eq!(shape(&rows), [(0, 0), (3, 0), (1, 0), (2, 1)]);
     }
 }
