@@ -19,7 +19,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("queued", "na fila"),
     ("in progress", "em andamento"),
     ("in review", "em revisão"),
-    ("awaiting validation", "aguarda validação"),
+    ("awaits validation", "aguarda validação"),
     ("completed", "concluída"),
     ("discarded", "descartada"),
     ("failed", "falhou"),

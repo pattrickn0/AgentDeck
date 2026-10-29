@@ -88,7 +88,7 @@ pub fn card_state_label(status: TaskStatus) -> &'static str {
         TaskStatus::Queued => t!("queued"),
         TaskStatus::Running => t!("in progress"),
         TaskStatus::Review => t!("in review"),
-        TaskStatus::Validating => t!("awaiting validation"),
+        TaskStatus::Validating => t!("awaits validation"),
         TaskStatus::Merged => t!("completed"),
         TaskStatus::Discarded => t!("discarded"),
         TaskStatus::Failed => t!("failed"),
@@ -1731,7 +1731,7 @@ mod tests {
         assert!(is_focused_card(TaskStatus::Review) && is_focused_card(TaskStatus::Validating));
         assert!(!is_focused_card(TaskStatus::Running) && !is_focused_card(TaskStatus::Draft));
         assert_eq!(card_state_label(TaskStatus::Review), "in review");
-        assert_eq!(card_state_label(TaskStatus::Validating), "awaiting validation");
+        assert_eq!(card_state_label(TaskStatus::Validating), "awaits validation");
         assert_eq!(card_state_label(TaskStatus::Merged), "completed");
         assert_eq!(card_state_label(TaskStatus::Discarded), "discarded");
         with_lang(Lang::PtBr, || {
