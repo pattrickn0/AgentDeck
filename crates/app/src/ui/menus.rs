@@ -488,7 +488,12 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             } else if r.hovered() {
                 p.rect_filled(cell, 5.0, pal.hover);
             }
-            let label = if matches!(*code, "auto" | "ja" | "zh") { i18n::tr(name) } else { name };
+            let label = match *code {
+                "auto" => t!("Auto-detect"),
+                "ja" => t!("Japanese"),
+                "zh" => t!("Chinese"),
+                _ => name,
+            };
             text_in(p, cell, Align2::CENTER_CENTER, label, theme::ui(11.5), if on { pal.text_strong } else { pal.text });
             if r.clicked() {
                 spoken = Some(*code);
