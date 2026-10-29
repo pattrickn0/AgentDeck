@@ -421,6 +421,20 @@ Windows, with app open and an agent tab:
 - [ ] **Quit** with agent mid-turn: window appears with "Agents are currently working" (Cancel keeps app running).
 - [ ] Linux with tray (KDE, or GNOME with AppIndicator): same test script with `ksni`. Without `StatusNotifierWatcher` (pure GNOME): × **quits** (asking first if an agent is mid-turn or a document is unsaved), and the app is never left invisible without an icon.
 
+## Chat view of a Claude tab ★
+
+With Claude Code installed and signed in (Linux or Windows; the Windows launch through a `.cmd` shim was never run):
+
+- [ ] A new Claude tab opens as a **chat** (empty state "Ask Claude about this project"), no terminal UI. The tab menu (right click) has "Show the terminal view"; choosing it opens the same conversation in the terminal and "Show the chat view" brings it back with the earlier messages.
+- [ ] Type a message, Enter: your message appears on the right, the answer streams with formatting (lists, code), "Working 00:03" and a Stop button show while it runs; Esc (or Stop) interrupts and the next message still works. Shift+Enter makes a new line; ↑ on an empty composer brings back what you sent.
+- [ ] "Create a file a.txt with the word hi, then change it to hello": tool rows appear (Write, Edit with the red/green diff, Bash with its output) and an amber **Permission** card asks first. **Allow for this session** lets the Edit through without asking again; **Deny** makes Claude say it was refused. Enter allows and Esc denies while the composer is empty.
+- [ ] `/context` or `/cost` answer in the chat; typing `/` lists commands (Tab completes); `/config` (or `/theme`, `/login`) shows a short notice pointing to the Terminal view and sends nothing.
+- [ ] Mic: dictated text lands in the composer; the attach button and a file click in the tree put an `@file` mention in the composer.
+- [ ] Close and reopen Holt (or restart the tab): the earlier messages are back and Claude remembers the conversation.
+- [ ] From another tab run `ask-agent claude "what is 2+2?"`: the question shows as a "From claude@…" card in the chat (no typing, no Enter), Claude answers with `ask-agent --reply` and the other tab receives it. A long question arrives as a mail notice; unread mail is reminded when the turn ends.
+- [ ] Open a task for Claude from the tasks desk: its tab is a chat and its first message is the task prompt.
+- [ ] A permission card left unanswered keeps the tab marked as waiting (ring in the sidebar, chime) when another tab is in view.
+
 ## Final checklist
 
 - [ ] Take a screenshot of main screen (with right panel) to replace `docs/screenshots/main.png`.

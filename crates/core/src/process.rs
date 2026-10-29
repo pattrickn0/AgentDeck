@@ -19,13 +19,13 @@ pub(crate) struct ProcessRegistry {
 }
 
 impl ProcessRegistry {
-    fn add(&self, child: Arc<Mutex<Child>>) -> u64 {
+    pub(crate) fn add(&self, child: Arc<Mutex<Child>>) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.children.lock().insert(id, child);
         id
     }
 
-    fn remove(&self, id: u64) {
+    pub(crate) fn remove(&self, id: u64) {
         self.children.lock().remove(&id);
     }
 
@@ -131,6 +131,14 @@ mod job {
             _ => log::warn!("could not assign process {} to the app job", child.id()),
         }
     }
+}
+
+/// Makes the process die with the app, even if the app crashes (Windows Job Object; nothing to do elsewhere).
+pub(crate) fn die_with_app(child: &Child) {
+    #[cfg(windows)]
+    job::adopt(child);
+    #[cfg(not(windows))]
+    let _ = child;
 }
 
 /// Kills the process and its descendants (best effort).

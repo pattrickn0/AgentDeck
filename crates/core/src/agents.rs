@@ -51,6 +51,9 @@ pub struct SpawnSpec {
     pub resumed: bool,
     /// Antigravity's `--log-file` for this process: where its conversation id shows up (see `resume::agy_session_in_log`).
     pub session_log: Option<PathBuf>,
+    /// Chat launch only: the task's initial prompt, which is sent as the first message instead of being a command-line
+    /// argument (see `chat.rs`).
+    pub first_message: Option<String>,
 }
 
 /// Official colors (also used by the UI as a fallback).
@@ -714,6 +717,20 @@ pub(crate) fn spawn_spec(core: &Core, project: &str, kind: &str) -> Result<Spawn
 /// in `HOLT_ROLE` and in the system prompt. The terminal opens in the folder of project `project`
 /// (on the first tab of a project that is not the active one, its AGENTS.md is written).
 pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
+    spawn_spec_with(core, project, ident, false)
+}
+
+/// Like [`spawn_spec_for`] for the chat view of the tab (Claude in its structured mode, see `chat.rs`): the same
+/// conversation, instructions, model and environment, but no terminal-only pieces (the turn hooks: the end of a turn is
+/// an event of the stream) and the task prompt becomes `first_message`.
+pub(crate) fn spawn_spec_chat(core: &Core, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
+    if !crate::chat::supports(&ident.kind) {
+        return Err(t!("{kind} has no chat view.", kind = ident.kind));
+    }
+    spawn_spec_with(core, project, ident, true)
+}
+
+fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Result<SpawnSpec, String> {
     let project_dir = core.project_path(project).ok_or_else(|| t!("Unknown project: {project}", project))?;
     let kind = ident.kind.as_str();
     let id = ident.id();
@@ -742,7 +759,8 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     let mut args = Vec::new();
     // Initial prompt of a newly opened task (see `Core::set_boot_prompt`). In Claude it is positional and goes
     // first: `--add-dir` and `--allowedTools` accept several values and would swallow the text.
-    let boot = models::boot_prompt_flag(kind).and_then(|flag| core.take_boot_prompt(project, &id).map(|p| (flag, p)));
+    let mut boot = models::boot_prompt_flag(kind).and_then(|flag| core.take_boot_prompt(project, &id).map(|p| (flag, p)));
+    let first_message = if chat { boot.take().map(|(_, prompt)| prompt) } else { None };
     if let Some((None, prompt)) = &boot {
         args.push(prompt.clone());
     }
@@ -762,13 +780,15 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         // Answering another agent means running `ask-agent`: allow only that command, without asking.
         args.push("--allowedTools".into());
         args.push("Bash(ask-agent:*)".into());
-        // Hooks tell the start and the end of each turn (see `delivery.rs`).
-        match write_claude_hooks(&core.paths().data_dir, &project_dir) {
-            Ok(path) => {
-                args.push("--settings".into());
-                args.push(path.to_string_lossy().into_owned());
+        // Hooks tell the start and the end of each turn (see `delivery.rs`); the chat reads them from the event stream.
+        if !chat {
+            match write_claude_hooks(&core.paths().data_dir, &project_dir) {
+                Ok(path) => {
+                    args.push("--settings".into());
+                    args.push(path.to_string_lossy().into_owned());
+                }
+                Err(e) => log::warn!("could not write the Claude hooks: {e}"),
             }
-            Err(e) => log::warn!("could not write the Claude hooks: {e}"),
         }
     }
     if kind == "codex" && resolved.shim.is_none() {
@@ -830,6 +850,9 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         args.push(flag.into());
         args.push(prompt);
     }
+    if chat {
+        args.extend(crate::chat::chat_args());
+    }
     if resolved.shim.is_some() {
         args = args.iter().map(|a| cmd_safe_arg(a)).collect();
     }
@@ -852,6 +875,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         model,
         resumed: resumed && (kind != "antigravity" || session_log.is_some()),
         session_log,
+        first_message,
     })
 }
 

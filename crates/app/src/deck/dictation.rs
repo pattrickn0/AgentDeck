@@ -164,6 +164,7 @@ impl Deck {
     pub fn shutdown(&mut self) {
         self.persist_tabs_now();
         self.persist_layout_now();
+        self.kill_chats();
         for t in &mut self.tabs {
             t.session.kill();
         }

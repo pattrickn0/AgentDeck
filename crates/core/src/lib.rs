@@ -14,6 +14,7 @@ pub mod agents;
 pub mod attachments;
 pub mod bridge;
 pub mod capability;
+pub mod chat;
 pub mod config;
 pub mod context;
 pub mod delivery;
@@ -421,6 +422,11 @@ impl Core {
         agents::spawn_spec_for(self, project, ident)
     }
 
+    /// Like [`Core::spawn_spec_for`], for the chat view of a tab (see `chat.rs`).
+    pub fn spawn_spec_chat(&self, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
+        agents::spawn_spec_chat(self, project, ident)
+    }
+
     // ---------- Instances (tabs) and questions between them ----------
 
     /// The UI starts delivering the `ask-agent` questions by typing in the tabs (instead of running
@@ -484,6 +490,7 @@ impl Core {
             p.tab_models.remove(id);
             // Closed for good (the tab's ×, a finished task): reopening it later starts a new conversation.
             p.tab_sessions.remove(id);
+            p.tab_views.remove(id);
         });
         self.mark_team_changed(project, &touched);
     }
@@ -558,6 +565,7 @@ impl Core {
             team::rename(&mut p.tab_parents, old_id, &new_id);
             models::rename(&mut p.tab_models, old_id, &new_id);
             models::rename(&mut p.tab_sessions, old_id, &new_id);
+            models::rename(&mut p.tab_views, old_id, &new_id);
         });
         let mut changed = self.inner.team_changed.lock();
         if changed.remove(&instances::scoped(project, old_id)) {

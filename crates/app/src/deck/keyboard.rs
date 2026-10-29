@@ -99,6 +99,9 @@ impl Deck {
             return false;
         }
         let Some(idx) = self.active else { return false };
+        if self.tabs[idx].chat.is_some() {
+            return false;
+        }
         self.blink_epoch = Instant::now();
 
         // Ctrl+C copies when there is a selection; Ctrl+V pastes.

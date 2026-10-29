@@ -2,6 +2,7 @@
 //! The layout is computed by hand to reproduce the CSS measurements to the pixel.
 
 mod background;
+mod chat;
 mod code;
 mod diff_view;
 mod docs;
