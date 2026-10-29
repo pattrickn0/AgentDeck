@@ -72,7 +72,7 @@ impl Deck {
     /// refuses cycles; the team notice goes with the next message of the affected agents.
     pub fn set_agent_boss(&mut self, project: &str, id: &str, boss: Option<&str>) {
         if let Err(e) = self.core.set_boss(project, id, boss) {
-            self.system(t!("Could not change the team: {error}.", error = e));
+            self.notify(holt_core::Tone::Error, t!("Could not change the team: {error}.", error = e));
         }
     }
 

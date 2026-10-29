@@ -104,13 +104,13 @@ impl Deck {
         }
         let project = self.active_project.clone();
         if project.is_empty() {
-            self.system(t!("Open a folder as a project before opening an agent."));
+            self.notify(holt_core::Tone::Warning, t!("Open a folder as a project before opening an agent."));
             self.new_project_dialog();
             return;
         }
         match self.core.register_instance_with_model(&project, kind, model) {
             Ok(ident) => self.add_tab(project, ident, restoring, false),
-            Err(e) => self.system(t!("Could not open {kind}: {error}.", kind, error = e)),
+            Err(e) => self.notify(holt_core::Tone::Error, t!("Could not open {kind}: {error}.", kind, error = e)),
         }
     }
 
@@ -626,10 +626,10 @@ impl Deck {
         let id = tab.ident.id();
         match tab.session.save_snapshot(&dir, &id) {
             Ok(path) => {
-                self.system(t!("Terminal grid snapshot for {id} saved to {path}.", id, path = path.display()));
+                self.notify(holt_core::Tone::Success, t!("Terminal grid snapshot for {id} saved to {path}.", id, path = path.display()));
                 open_in_file_manager(&dir);
             }
-            Err(e) => self.system(t!("Could not save the terminal grid snapshot for {id}: {error}", id, error = e)),
+            Err(e) => self.notify(holt_core::Tone::Error, t!("Could not save the terminal grid snapshot for {id}: {error}", id, error = e)),
         }
     }
 

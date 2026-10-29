@@ -100,7 +100,7 @@ impl Deck {
         self.persist_tabs_now();
         self.persist_layout_now();
         if let Err(e) = self.core.set_active_project(id) {
-            self.system(t!("Could not open the project: {error}", error = e));
+            self.notify(holt_core::Tone::Error, t!("Could not open the project: {error}", error = e));
             return;
         }
         let old = std::mem::replace(&mut self.active_project, id.to_owned());

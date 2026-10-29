@@ -1130,7 +1130,7 @@ impl Deck {
                 let name = tab.subtitle.clone();
                 self.docs.focus(uid);
                 self.docs.view = CenterView::Docs;
-                self.system(t!("I did not save {name}: {why}.", name, why));
+                self.notify(holt_core::Tone::Warning, t!("I did not save {name}: {why}.", name, why));
             }
             return;
         }
@@ -1176,7 +1176,7 @@ impl Deck {
                 self.docs.focus(uid);
                 self.docs.view = CenterView::Docs;
                 // The document may be from a project that is not on screen: the notice also goes to the Conversation.
-                self.system(t!("Could not save {name}: {error}", name, error = e));
+                self.notify(holt_core::Tone::Error, t!("Could not save {name}: {error}", name, error = e));
                 return;
             }
         }

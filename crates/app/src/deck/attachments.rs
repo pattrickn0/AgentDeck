@@ -74,7 +74,7 @@ impl Deck {
             .or_else(|| self.last_drop_target.take())
             .or_else(|| self.active_tab().map(|t| AttachTarget::Tab(t.uid)));
         let Some(target) = target else {
-            self.system(t!("Open an agent or the new task form to attach files."));
+            self.notify(holt_core::Tone::Warning, t!("Open an agent or the new task form to attach files."));
             return;
         };
         self.spawn_bg("attach-files", move |core| Some(UiMsg::Attached(target, attachment_paths(&core, core.attach_files(&paths)))));
@@ -95,7 +95,7 @@ impl Deck {
             MicPhase::Idle => {
                 if let Some(tab) = self.active_tab() {
                     if !tab.alive {
-                        self.system(t!("The active tab has no running process."));
+                        self.notify(holt_core::Tone::Warning, t!("The active tab has no running process."));
                         return;
                     }
                     let uid = tab.uid;
