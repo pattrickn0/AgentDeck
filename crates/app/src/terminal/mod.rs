@@ -515,10 +515,10 @@ mod tests {
     #[test]
     fn without_a_process_writes_are_dropped() {
         let mut s = Session::new(GridSize { cols: 20, rows: 4 });
-        s.write(b"nada");
+        s.write(b"nothing");
         s.print("\x1b[6n");
         s.kill();
-        s.write(b"nada");
+        s.write(b"nothing");
     }
 
     #[test]

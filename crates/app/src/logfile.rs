@@ -1,5 +1,5 @@
 //! The app's log on disk: a window app on Windows has no stderr, so what `log` writes
-//! (info level by default) also goes to `<dados>/agentdeck.log`.
+//! (info level by default) also goes to `<data>/agentdeck.log`.
 //!
 //! The file moves to `agentdeck.log.1` (replacing the previous one) when it grows past `MAX_LOG`;
 //! the check runs on every write, not only when the app opens.

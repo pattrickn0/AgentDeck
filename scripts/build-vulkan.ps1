@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Compila o whisper.cpp com suporte a aceleração Vulkan para Windows (GPUs AMD Radeon e Intel).
+    Builds whisper.cpp with Vulkan acceleration for Windows (AMD Radeon and Intel GPUs).
 .DESCRIPTION
-    Clona o repositório whisper.cpp (se necessário), compila via CMake + MSVC com a flag
-    -DWHISPER_VULKAN=ON e copia os binários gerados para whisper/bin-vulkan/.
+    Clones the whisper.cpp repository (if needed), builds it with CMake + MSVC with the flag
+    -DWHISPER_VULKAN=ON and copies the built binaries to whisper/bin-vulkan/.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -13,42 +13,42 @@ $whisperDir = Join-Path $projectRoot "whisper"
 $srcDir = Join-Path $whisperDir "src\whisper.cpp"
 $outDir = Join-Path $whisperDir "bin-vulkan"
 
-Write-Host "=== Compilador Vulkan do whisper.cpp para AgentDeck ===" -ForegroundColor Cyan
+Write-Host "=== whisper.cpp Vulkan build for AgentDeck ===" -ForegroundColor Cyan
 
-# Verifica pré-requisitos
+# Checks the prerequisites
 if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
-    Write-Error "CMake não encontrado no PATH. Instale o CMake ou o Visual Studio Build Tools com C++."
+    Write-Error "CMake not found on PATH. Install CMake or the Visual Studio Build Tools with C++."
     exit 1
 }
 
 if (-not $env:VULKAN_SDK -and -not (Test-Path "C:\VulkanSDK")) {
-    Write-Warning "VULKAN_SDK não detectado nas variáveis de ambiente. Certifique-se de ter o LunarG Vulkan SDK instalado."
+    Write-Warning "VULKAN_SDK not found in the environment variables. Make sure the LunarG Vulkan SDK is installed."
 }
 
-# Clona ou atualiza o whisper.cpp
+# Clones or updates whisper.cpp
 if (-not (Test-Path $srcDir)) {
     Write-Host "Clonando whisper.cpp em $srcDir..." -ForegroundColor Yellow
     New-Item -ItemType Directory -Path (Split-Path -Parent $srcDir) -Force | Out-Null
     git clone --depth 1 https://github.com/ggml-org/whisper.cpp $srcDir
 }
 
-# Configura e compila
+# Configures and builds
 $buildDir = Join-Path $srcDir "build"
-Write-Host "Configurando CMake com suporte a Vulkan..." -ForegroundColor Yellow
+Write-Host "Configuring CMake with Vulkan support..." -ForegroundColor Yellow
 cmake -S $srcDir -B $buildDir -DWHISPER_VULKAN=ON
 
 Write-Host "Compilando whisper-cli em Release..." -ForegroundColor Yellow
 cmake --build $buildDir --config Release --target whisper-cli
 
-# Garante pasta de destino
+# Makes sure the destination folder exists
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 }
 
-Write-Host "Copiando binários compilados para $outDir..." -ForegroundColor Yellow
+Write-Host "Copying the built binaries to $outDir..." -ForegroundColor Yellow
 $builtFiles = Get-ChildItem -Recurse -Path $buildDir -Include "*.dll", "*.exe" | Where-Object { $_.FullName -notmatch "CMakeFiles" }
 foreach ($file in $builtFiles) {
     Copy-Item -Path $file.FullName -Destination $outDir -Force
 }
 
-Write-Host "Compilação concluída com sucesso! Binários instalados em $outDir" -ForegroundColor Green
+Write-Host "Build finished! Binaries installed in $outDir" -ForegroundColor Green

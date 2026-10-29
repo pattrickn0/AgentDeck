@@ -1,6 +1,6 @@
 # AgentDeck architecture
 
-Overview and map of documents: [GERAL.md](GERAL.md). Practical guide and file map: [MANUTENCAO.md](MANUTENCAO.md).
+Overview and map of documents: [OVERVIEW.md](OVERVIEW.md). Practical guide and file map: [MAINTENANCE.md](MAINTENANCE.md).
 
 Native desktop application in Rust (rewritten from the old Electron version, no Node at runtime).
 
@@ -42,20 +42,20 @@ Each interactive tab (and headless execution) receives a sanitized environment:
 
 ### AgentDeck instructions and folder trust (`agents.rs`, `trust.rs`, `workspace.rs`)
 
-Bridge instructions (use of `ask-agent`, prohibition of CLI-internal subagents without user request, `--models`/`--team`/`--learn`/`--outline`, and `memory/aprendizados/`) arrive through each CLI's dedicated channel, without depending on a prior `AGENTS.md`:
+Bridge instructions (use of `ask-agent`, prohibition of CLI-internal subagents without user request, `--models`/`--team`/`--learn`/`--outline`, and `memory/learnings/`) arrive through each CLI's dedicated channel, without depending on a prior `AGENTS.md`:
 
 | CLI | Instruction delivery channel |
 | :-- | :-- |
-| Claude | `--append-system-prompt <text>` (includes name and role), `--allowedTools "Bash(ask-agent:*)"`, and `--settings dados/hooks/claude-settings.json` |
+| Claude | `--append-system-prompt <text>` (includes name and role), `--allowedTools "Bash(ask-agent:*)"`, and `--settings data/hooks/claude-settings.json` |
 | Codex | `-c developer_instructions=<TOML>` (or raw text in `.cmd` shim) and, outside shims, `-c notify=["ask-agent","--signal","idle"]` |
-| OpenCode | `--standalone` + `OPENCODE_CONFIG_CONTENT={"model":…,"instructions":["dados/agentdeck-instructions.md"]}` (`models.rs`) |
-| Aider | `--read dados/agentdeck-instructions.md` |
+| OpenCode | `--standalone` + `OPENCODE_CONFIG_CONTENT={"model":…,"instructions":["data/agentdeck-instructions.md"]}` (`models.rs`) |
+| Aider | `--read data/agentdeck-instructions.md` |
 | Open Interpreter | `--custom_instructions <text>` |
-| Antigravity | `--add-dir dados/agy/<instance>` (where the app writes an `AGENTS.md` with instance name and role, combined with project's by `agy`) |
+| Antigravity | `--add-dir data/agy/<instance>` (where the app writes an `AGENTS.md` with instance name and role, combined with project's by `agy`) |
 | Goose, Copilot | read only the folder's `AGENTS.md`: if missing, the app creates one with only the `<!-- agentdeck:start/end -->` block and notifies in Conversation; if already present, updates only the block |
 | Amazon Q, Terminal | no instruction channel |
 
-The text in a shared file (`dados/agentdeck-instructions.md` and `AGENTS.md` block) does not list agents installed on the machine, so as not to dirty `git status` across computers.
+The text in a shared file (`data/agentdeck-instructions.md` and `AGENTS.md` block) does not list agents installed on the machine, so as not to dirty `git status` across computers.
 
 **Folder trust (`crates/core/src/trust.rs`):** before opening a tab, the app registers trust for the working folder and project folder so background tabs do not stall on *"Do you trust this folder?"*: in Claude in `~/.claude.json` (if no parent folder is already accepted), in Codex via `-c projects={…}` on the command line, and in Antigravity in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json` (exact path, removed alongside task worktree). User home and drive root are never added.
 
@@ -72,7 +72,7 @@ Every request requires `x-agentdeck-token` (constant-time comparison) and `Host:
 | :-- | :-- | :-- |
 | `POST /activate` | `{}` (master token only) | **200** `{"ok":true}` and brings window forward; **403** for agent token |
 | `GET /agents` | — | **200** `{"agents":[…],"models":{id:model},"quota":{id:quota}}` for caller's project |
-| `GET /models[?agent=<id>]` | `agent` optional | **200** `{"text"}` with inventory (`ask-agent --models`): the 4 official CLIs from most quota headroom to most spent, `cota:` line per group, and `capacidade` block; **400** if invalid; **404** if not installed |
+| `GET /models[?agent=<id>]` | `agent` optional | **200** `{"text"}` with inventory (`ask-agent --models`): the 4 official CLIs from most quota headroom to most spent, `quota:` line per group, and `capacidade` block; **400** if invalid; **404** if not installed |
 | `GET /team` | — (tab token only) | **200** `{"id","boss","crew","models","quota"}` and consumes team change notification; **400** with master token |
 | `POST /ask` | `{"to","message","depth","new","wait"[,"reply_to"][,"model"][,"ack"]}` (+ `"from"`, `"project"` with master token) | **200** `{"answer","request"}` within deadline; **202** `{"pending":true,"answer","request"}` after `wait` (reply typed later in tab); **400** unknown target, self-question, `depth >= 2`, invalid `model`, or CLI without model choice; **404** missing `reply_to`; **409** wait cycle, instance already open with different model (suggests `--new`), or exhausted quota (≥ 99.5%); **413** > 16 MB; **500** error or timeout (10 min) |
 | `POST /reply` | `{"to","message"[,"reply_to"]}` | **200** `{"answer"}` completing pending question; **400** invalid arguments; **404** no pending question from that sender |
@@ -92,7 +92,7 @@ Every request requires `x-agentdeck-token` (constant-time comparison) and `Host:
 
 ### Single instance and system tray (`activation.rs`, `app/src/tray.rs`)
 
-- **Second launch:** the core holds the `dados/.agentdeck.lock` lock and writes port + master token to `dados/.agentdeck.bridge`. A second launch detects the occupied lock, calls `AllowSetForegroundWindow` (on Windows) + `POST /activate`, and exits; the running instance restores and focuses the window.
+- **Second launch:** the core holds the `data/.agentdeck.lock` lock and writes port + master token to `data/.agentdeck.bridge`. A second launch detects the occupied lock, calls `AllowSetForegroundWindow` (on Windows) + `POST /activate`, and exits; the running instance restores and focuses the window.
 - **System tray:** closing the window (×, `Alt+F4`, or title bar button) hides the window to the tray (`tray-icon` on Windows, `ksni`/StatusNotifierItem on Linux), keeping agents and bridge active in the background; without a tray on Linux, minimizes. Only **Exit** in the tray menu closes the app, prompting for confirmation in the window if there is an unsaved document or an agent in turn.
 
 ---
@@ -101,8 +101,8 @@ Every request requires `x-agentdeck-token` (constant-time comparison) and `Host:
 
 - **Identity and team (`instances.rs`, `team.rs`):** instances use `<model>[@<role>[@<name>]]` (`claude`, `claude@dev`, `claude@dev@ana`, `claude@main@bia`). When an agent creates another instance via `ask-agent`, it becomes its lead; the user reorganizes by dragging in the sidebar (cycles are rejected). Closing a tab reassigns subordinates to its lead; renaming preserves the tree. Position changes generate a notice attached to the next message delivered in the tab (or consumed by `ask-agent --team`). The team guides, but does not block direct calls.
 - **LLM model and effort (`models.rs`):** resolved when opening the tab in order: (1) explicit request (`--model` or menu), (2) model already saved for the instance in the project, (3) role/CLI default in configuration, (4) CLI's own default. Only `claude`, `antigravity`, `codex`, and `opencode` accept models; requesting a different model for an already open tab returns **409**. Passed as `--model <m>` in `claude`, `agy`, and `codex` (and `opencode run -m` in headless); in OpenCode TUI, passed via `--standalone` + `OPENCODE_CONFIG_CONTENT`. Models for `agy` and `opencode` are listed in a thread (15 s timeout, 10 min cache, `-free` first). Effort (`low`, `medium`, `high`) becomes `--effort` in Claude and suffix `-low|medium|high` in Antigravity (rejected with 400 in others).
-- **Plan usage and quota (`usage.rs`, `usage/codex.rs`, `usage/antigravity.rs`):** tracks session (5 h) and week (`0.0..=1.0` + renewal time) and saves in `dados/usage.json`. In Claude, comes from `statusLine` hook (`ask-agent --usage` reads `rate_limits` from stdin, posts `POST /usage`, and passes stdin through to user statusline); in Codex, reads most recent `rollout-*.jsonl` from `~/.codex/sessions` every 60 s; in Antigravity, queries `retrieveUserQuotaSummary` (fallback `fetchAvailableModels`) every 3 min with `agy` OAuth token and version (Windows Credentials, Secret Service D-Bus on Linux, or file), separated by group (`Gemini 4 Argon`, `Gemini Models`, `Claude and GPT models`). On bridge, `/ask` rejects with **409** targets with group ≥ 99.5% (reading < 1 h old) and warns when target exceeds 80% while another official CLI is < 50%.
-- **Capability and task selection (`capability.rs`, `capability.json`):** matches task level (`simples`, `media`, `complexa`) with the *AA Coding Agent Index v2.0* (`≥ 53` complex, `40..53` medium, `< 40` simple; effort `low` drops one level; overridable via `dados/capacidade.json`). With ≥ 3 evaluated tasks of a model at a level (`dados/tarefas/*.json`), actual history prevails (more than half discarded or ≥ 2 returns drops one level; last 3 of next level approved on first try raises one level). Without an explicit agent, task creation picks among capable installed CLIs for the level the one with lowest quota used; explicit selection below level generates warning without blocking.
+- **Plan usage and quota (`usage.rs`, `usage/codex.rs`, `usage/antigravity.rs`):** tracks session (5 h) and week (`0.0..=1.0` + renewal time) and saves in `data/usage.json`. In Claude, comes from `statusLine` hook (`ask-agent --usage` reads `rate_limits` from stdin, posts `POST /usage`, and passes stdin through to user statusline); in Codex, reads most recent `rollout-*.jsonl` from `~/.codex/sessions` every 60 s; in Antigravity, queries `retrieveUserQuotaSummary` (fallback `fetchAvailableModels`) every 3 min with `agy` OAuth token and version (Windows Credentials, Secret Service D-Bus on Linux, or file), separated by group (`Gemini 4 Argon`, `Gemini Models`, `Claude and GPT models`). On bridge, `/ask` rejects with **409** targets with group ≥ 99.5% (reading < 1 h old) and warns when target exceeds 80% while another official CLI is < 50%.
+- **Capability and task selection (`capability.rs`, `capability.json`):** matches task level (`simple`, `medium`, `complex`) with the *AA Coding Agent Index v2.0* (`≥ 53` complex, `40..53` medium, `< 40` simple; effort `low` drops one level; overridable via `data/capability.json`). With ≥ 3 evaluated tasks of a model at a level (`data/tasks/*.json`), actual history prevails (more than half discarded or ≥ 2 returns drops one level; last 3 of next level approved on first try raises one level). Without an explicit agent, task creation picks among capable installed CLIs for the level the one with lowest quota used; explicit selection below level generates warning without blocking.
 
 ---
 
@@ -121,13 +121,13 @@ The policy in `delivery.rs` avoids overriding the user or TUI:
 - **Respect for user:** does not type within 2 s after a user keypress or within 20 s while typed text remains without Enter.
 - **Tab readiness:** waits 5 s when opening tabs without hooks; with hooks (Claude and Codex), waits for `idle` signal + 300 ms without output (10 min fallback); without hooks, 1.5 s without output or 30 s waiting in queue.
 - **Pasting and Enter:** cleans `ESC` and C0/C1 controls (protecting bracketed paste) and sends via PTY write thread. Enter follows 250 ms later (plus a second Enter in 600 ms when `@mention` is present in Claude/Antigravity; in Windows Codex adds 1 ms per pasted character, up to 10 s). User keys pressed during Enter wait are emitted immediately after it.
-- **`.cmd` shims and processes on Windows (`agents.rs`, `headless.rs`, `process.rs`):** interactive tabs open shims via `cmd.exe /d /e:on /v:off /c` with escaped arguments; free prompts never go on a shim's command line (in headless they go via file in `dados/prompts/`). Headless processes and `whisper-cli` join a Job Object with `KILL_ON_JOB_CLOSE`.
+- **`.cmd` shims and processes on Windows (`agents.rs`, `headless.rs`, `process.rs`):** interactive tabs open shims via `cmd.exe /d /e:on /v:off /c` with escaped arguments; free prompts never go on a shim's command line (in headless they go via file in `data/prompts/`). Headless processes and `whisper-cli` join a Job Object with `KILL_ON_JOB_CLOSE`.
 
 ---
 
 ## Tasks desk (`crates/core/src/tasks/`, `scope.rs`, `crates/app/src/tasks_ui.rs`)
 
-Each task (`t1`, `t2`…, per-project counter never reused) isolates work in an agent (`<model>@tN`), a branch (`tarefa/<id>-<slug>`), and a dedicated worktree.
+Each task (`t1`, `t2`…, per-project counter never reused) isolates work in an agent (`<model>@tN`), a branch (`task/<id>-<slug>`), and a dedicated worktree.
 
 ```
 Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged ("completed")
@@ -138,8 +138,8 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
   └─ start error ▶ Failed ──start again──▶ Running
 ```
 
-- **Storage and worktrees (`tasks/store.rs`, `tasks/git_ops.rs`):** saved in `dados/tarefas/<projeto>.json` (outside repo; removing and re-adding folder preserves project id). Worktrees live in `<repo root>/.agentdeck/worktrees/<id>` — inside repository so workspace-confined agents (such as Antigravity) have access — and `/.agentdeck/` is recorded in `<common git>/info/exclude` (never in `.gitignore`).
-- **Start and delivery (`tasks/lifecycle.rs`, `tasks/text.rs`):** creates worktree and branch from base, registers `<model>@<id>` subordinate to creator, and delivers brief with memory and rules. When the tab needs to be opened, writes brief (or feedback) to `dados/tarefas/<projeto>-<id>-brief.md` (or `-feedback.md`) and passes a short ASCII line as initial CLI argument (`claude "<line>"`, `agy -i "<line>"`, `opencode --prompt "<line>"`), avoiding loss of text while TUI initializes.
+- **Storage and worktrees (`tasks/store.rs`, `tasks/git_ops.rs`):** saved in `data/tasks/<project>.json` (outside repo; removing and re-adding folder preserves project id). Worktrees live in `<repo root>/.agentdeck/worktrees/<id>` — inside repository so workspace-confined agents (such as Antigravity) have access — and `/.agentdeck/` is recorded in `<common git>/info/exclude` (never in `.gitignore`).
+- **Start and delivery (`tasks/lifecycle.rs`, `tasks/text.rs`):** creates worktree and branch from base, registers `<model>@<id>` subordinate to creator, and delivers brief with memory and rules. When the tab needs to be opened, writes brief (or feedback) to `data/tasks/<project>-<id>-brief.md` (or `-feedback.md`) and passes a short ASCII line as initial CLI argument (`claude "<line>"`, `agy -i "<line>"`, `opencode --prompt "<line>"`), avoiding loss of text while TUI initializes.
 - **Scope and queue (`scope.rs`, `tasks/lifecycle.rs`):** scope lists relative paths (no globs); two scopes collide when one equals or is a path-component prefix of the other (`memory/` and `Cargo.lock` reserve nothing). If colliding with task in `Running`, `Review`, or ahead in queue, enters `Queued` without creating worktree or tab. When blocking task is merged, discarded, or fails to start, queue advances automatically, creating worktree from current base head (`Validating` does not hold the queue). On `done`, files touched outside scope produce a warning in review.
 - **Merge (`tasks/merge.rs`, `tasks/stash.rs`):** requires main repo on base branch and clean (ignoring and restoring automatic `AGENTS.md` block) and clean worktree. Performs `git merge --no-ff`, aligns task branch (`git merge --ff-only`), and transitions to `Validating` keeping tab, worktree, and branch alive. In UI, blockages offer one-click resolution — including stashing local changes in a `git stash`, merging, and reapplying by SHA hash after pre-verifying with `git merge-tree --write-tree`.
 - **Validation, rejection, discard, and permissions (`tasks/finish.rs`, `file_lock.rs`, `bridge.rs`):** `validate` requires no unmerged commits, closes tab, removes worktree (diagnosing processes locking folder on Windows) and branch, and marks `Merged`. `reject` reopens tab/worktree if needed and returns to `Running` with reason. `discard` cleans tab, worktree, and branch from any non-final state. On bridge, active task agent can only query tasks and call `/done` on its own task (other task routes → **403**).
@@ -148,7 +148,7 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
 
 ## Two-layer memory (`learnings.rs`, `situation.rs`, `outline.rs`)
 
-1. **Long term — Learnings (`learnings.rs`):** files `memory/aprendizados/*.md` with frontmatter `titulo`, `resumo`, and `touches` (globs relative to root; empty = global), read from task worktree or main repo. At task start, agent receives globals and those matching paths cited in brief in full (up to 6,000 characters) plus index of remaining ones (up to 2,500); on returns/rejections, receives those matching newly cited files in feedback (up to 3,000).
+1. **Long term — Learnings (`learnings.rs`):** files `memory/learnings/*.md` with frontmatter `titulo`, `resumo`, and `touches` (globs relative to root; empty = global), read from task worktree or main repo. At task start, agent receives globals and those matching paths cited in brief in full (up to 6,000 characters) plus index of remaining ones (up to 2,500); on returns/rejections, receives those matching newly cited files in feedback (up to 3,000).
 2. **Short term — Current situation and history (`situation.rs`, `tasks/`):** delivers other active tasks with files they touch (branch commits + worktree dirt via `git --no-optional-locks status`) and last 8 commits of base (up to 1,500 characters). Returns and rejections repeat last 5 feedbacks, and task stores up to 300 messages (6,000 characters each) exchanged by agent.
 3. **On-demand query (`--learn` and `--outline`):** `ask-agent --learn [<file>…]` (`POST /learn`, up to 12,000 characters) returns globals + index + current situation (without arguments) or `ATTENTION:` conflict warnings + matching learnings (with files). `ask-agent --outline <file>…` (`POST /outline`, `outline.rs`, up to 6,000 characters/file and 16,000/call) extracts signatures and lines (`impl`/`trait`/`mod` items and members in Rust, headings in Markdown) over `highlight.rs` lexer.
 

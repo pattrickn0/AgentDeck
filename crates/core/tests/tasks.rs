@@ -30,13 +30,13 @@ fn create_validates_and_records_the_task() {
     let t = core
         .task_create(
             &env.project,
-            TaskSpec { model: Some("opus".into()), creator: Some("usuário".into()), ..spec("  Fix the button\n of Action! ") },
+            TaskSpec { model: Some("opus".into()), creator: Some("user".into()), ..spec("  Fix the button\n of Action! ") },
         )
         .expect("create");
     assert_eq!((t.id.as_str(), t.status), ("t1", TaskStatus::Draft));
     assert_eq!(t.title, "Fix the button of Action!");
     assert_eq!((t.base.as_str(), t.kind.as_str(), t.model.as_deref()), ("main", "claude", Some("opus")));
-    assert_eq!(t.branch, "tarefa/t1-fix-the-button-of-action");
+    assert_eq!(t.branch, "task/t1-fix-the-button-of-action");
     assert_eq!(t.instance, "claude@t1");
     assert!(same_path(&t.worktree, &env.ws.join(".agentdeck").join("worktrees").join("t1")), "{}", t.worktree.display());
     assert!(t.created_ms > 0 && t.started_ms.is_none() && t.events.len() == 1);
@@ -305,8 +305,8 @@ fn merge_makes_a_no_ff_commit_and_waits_for_validation() {
     let merged = core.task_merge(&env.project, &t.id).expect("merge");
     assert_eq!(merged.status, TaskStatus::Validating);
     assert!(merged.finished_ms.is_some() && merged.error.is_none());
-    // Merge commit (two parents) with the task's message, on the base. (The subject stays `Merge tarefa`: see merge.rs.)
-    assert_eq!(git(&env.ws, &["log", "-1", "--format=%s"]).trim(), "Merge tarefa t1: Merge this");
+    // Merge commit (two parents) with the task's message, on the base.
+    assert_eq!(git(&env.ws, &["log", "-1", "--format=%s"]).trim(), "Merge task t1: Merge this");
     assert_eq!(git(&env.ws, &["log", "-1", "--format=%P"]).split_whitespace().count(), 2, "--no-ff");
     assert_eq!(git(&env.ws, &["symbolic-ref", "--short", "HEAD"]).trim(), "main");
     assert!(env.ws.join("feature.txt").is_file());
@@ -432,7 +432,7 @@ fn reject_returns_the_task_to_the_same_agent_in_the_same_worktree() {
         "already merged into main",
         "rejected it for the following reason",
         "When saving, the app closes.",
-        "same branch tarefa/t1-reject-this",
+        "same branch task/t1-reject-this",
         "ask-agent --task done t1 --file",
     ] {
         assert!(prompt.contains(needle), "{needle}: {prompt}");
@@ -526,7 +526,7 @@ fn a_task_awaiting_validation_survives_a_restart() {
     let env = start();
     let t = task_in_review(&env, "Restart", "feature.txt");
     env.core.task_merge(&env.project, &t.id).expect("merge");
-    let text = std::fs::read_to_string(env.root.join("dados").join("tarefas").join(format!("{}.json", env.project))).expect("json");
+    let text = std::fs::read_to_string(env.root.join("data").join("tasks").join(format!("{}.json", env.project))).expect("json");
     assert!(text.contains("\"status\": \"validating\""), "{text}");
     let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
     let Env { _tmp, core: first, rx, .. } = env;
@@ -574,7 +574,7 @@ fn a_failed_merge_keeps_the_agent_terminal_in_the_worktree_after_a_restart() {
     let env = start();
     let t = task_in_review(&env, "Merge failed", "feature.txt");
     // Simulates the infrastructure error in the merge: the file records `Failed` with the report already delivered.
-    let file = env.root.join("dados").join("tarefas").join(format!("{}.json", env.project));
+    let file = env.root.join("data").join("tasks").join(format!("{}.json", env.project));
     let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
     let Env { _tmp, core: first, rx, .. } = env;
     first.shutdown();
@@ -1037,10 +1037,10 @@ fn tasks_survive_a_restart_and_numbers_are_never_reused() {
     let (root, project, config, ws) = (env.root.clone(), env.project.clone(), env.config.clone(), env.ws.clone());
 
     // The file stays in the data folder, not in the user's repository.
-    let file = root.join("dados").join("tarefas").join(format!("{project}.json"));
+    let file = root.join("data").join("tasks").join(format!("{project}.json"));
     let text = std::fs::read_to_string(&file).expect("tasks file");
     assert!(text.contains("\"id\": \"t1\"") && text.contains("\"status\": \"discarded\"") && text.contains("\"next\": 3"), "{text}");
-    assert!(!ws.join("tarefas").exists());
+    assert!(!ws.join("tasks").exists());
     let names: Vec<String> = std::fs::read_dir(file.parent().expect("folder"))
         .expect("dir")
         .flatten()
@@ -1071,7 +1071,7 @@ fn removing_a_project_keeps_its_tasks_file() {
     need_git!();
     let env = start();
     let t = env.core.task_create(&env.project, spec("Stays")).expect("create");
-    let file = env.root.join("dados").join("tarefas").join(format!("{}.json", env.project));
+    let file = env.root.join("data").join("tasks").join(format!("{}.json", env.project));
     assert!(file.is_file());
     assert!(env.core.remove_project(&env.project));
     assert!(file.is_file(), "the tasks file does not vanish with the project");
@@ -1115,7 +1115,7 @@ fn the_brief_goes_to_a_file_and_the_boot_line_is_short_ascii() {
     let (to, prompt, boot) = last_task_delivery(&events(&env));
     assert_eq!(to, "claude@t1");
     // The full text (with accents and line breaks) stays in a file in the data folder...
-    let file = env.root.join("dados").join("tarefas").join(format!("{}-t1-brief.md", env.project));
+    let file = env.root.join("data").join("tasks").join(format!("{}-t1-brief.md", env.project));
     assert_eq!(std::fs::read_to_string(&file).expect("brief written"), prompt);
     assert!(prompt.contains("Fix the café button") && prompt.contains('\n'));
     // ...and the command line carries only a short, ASCII, single-line sentence that points to it.
@@ -1127,7 +1127,7 @@ fn the_brief_goes_to_a_file_and_the_boot_line_is_short_ascii() {
     core.task_done(&env.project, &t.id, "Done.").expect("done");
     core.task_return(&env.project, &t.id, "The açaí test is missing.").expect("return");
     let (_, prompt, boot) = last_task_delivery(&events(&env));
-    let feedback = env.root.join("dados").join("tarefas").join(format!("{}-t1-feedback.md", env.project));
+    let feedback = env.root.join("data").join("tasks").join(format!("{}-t1-feedback.md", env.project));
     assert_eq!(std::fs::read_to_string(&feedback).expect("feedback written"), prompt);
     assert!(prompt.contains("The açaí test is missing."));
     let line = boot.expect("boot of the return");
@@ -1154,7 +1154,7 @@ fn a_cli_without_an_initial_prompt_keeps_the_typed_delivery() {
     assert_eq!(to, "aider@t1");
     assert_eq!(boot, None, "aider has no initial prompt: the brief is typed");
     assert!(prompt.contains("Do: With aider"));
-    assert!(!env.root.join("dados").join("tarefas").join(format!("{}-t1-brief.md", env.project)).exists());
+    assert!(!env.root.join("data").join("tasks").join(format!("{}-t1-brief.md", env.project)).exists());
     env.core.shutdown();
 }
 
@@ -1218,7 +1218,7 @@ fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
     install_fake_agent(&env.root, "agy");
     install_fake_agent(&env.root, "opencode");
     install_fake_agent(&env.root, "codex");
-    let line = "Task t7: the full request is in the file C:/Users/Ana Bia/dados/tarefas/p1-t7-brief.md. Read the file and start now.";
+    let line = "Task t7: the full request is in the file C:/Users/Ana Bia/data/tasks/p1-t7-brief.md. Read the file and start now.";
     let spec_of = |id: &str, boot: bool| {
         let ident = Ident::parse(id).expect("id");
         core.register_instance(&env.project, id);
@@ -1260,9 +1260,9 @@ fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
 fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
     use agentdeck_core::tasks::boot_line;
     let t = agentdeck_core::Task { id: "t3".into(), ..agentdeck_core::Task::default() };
-    let ok = boot_line(&t, "the request is in the file", std::path::Path::new("C:/dados/tarefas/p1-t3-brief.md")).expect("ascii");
+    let ok = boot_line(&t, "the request is in the file", std::path::Path::new("C:/data/tasks/p1-t3-brief.md")).expect("ascii");
     assert!(
-        ok.starts_with("Task t3: the request is in the file. Read the file C:/dados") && ok.ends_with("without waiting for confirmation."),
+        ok.starts_with("Task t3: the request is in the file. Read the file C:/data") && ok.ends_with("without waiting for confirmation."),
         "{ok}"
     );
     // A path with an accent (or quotes): the command line of a `.cmd` shim would not carry it whole; falls back to the typed delivery.
@@ -1304,7 +1304,7 @@ fn merge_stores_the_full_merge_commit_and_a_new_merge_overwrites_it() {
 
 #[test]
 fn a_task_saved_before_merge_commit_existed_still_loads() {
-    let old = r#"{"id":"t4","title":"Old","status":"validating","base":"main","branch":"tarefa/t4-old"}"#;
+    let old = r#"{"id":"t4","title":"Old","status":"validating","base":"main","branch":"task/t4-old"}"#;
     let t: agentdeck_core::Task = serde_json::from_str(old).expect("old task");
     assert_eq!((t.id.as_str(), t.status, t.merge_commit.as_deref()), ("t4", TaskStatus::Validating, None));
     // And the field goes back and forth through the JSON.
@@ -1482,7 +1482,7 @@ fn the_models_inventory_lists_the_capacity_of_each_model() {
     let lines = env.core.capability_lines(&env.core.models_inventory(None).expect("inventory"));
     let sonnet = lines.iter().find(|l| l.starts_with("Claude Sonnet 5.5")).expect("sonnet");
     // The capacity wording belongs to `capability.rs` (another area): it stays as that area has it.
-    assert!(sonnet.contains("complexa, Coding Agent Index 59.3 (2026-10)"), "{sonnet}");
+    assert!(sonnet.contains("complex, Coding Agent Index 59.3 (2026-10)"), "{sonnet}");
 }
 
 #[test]

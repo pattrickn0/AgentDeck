@@ -6,7 +6,7 @@
 //! - **Antigravity**: quota queried via the API that the CLI itself uses;
 //!
 //! Codex and Antigravity are queried when an open tab exists for them **or** the CLI is installed, and the latest usage
-//! of each is kept in `dados/usage.json`: the bar shows all agents with quota, even without an open window (Claude's
+//! of each is kept in `data/usage.json`: the bar shows all agents with quota, even without an open window (Claude's
 //! is the latest sent by statusline).
 //!
 //! STABLE CONTRACT: `UsageWindow`, `AgentUsage`, `Core::usage_snapshot` and `Core::set_usage`

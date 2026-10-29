@@ -16,7 +16,7 @@ fn start(root: &Path) -> Core {
     let paths = AppPaths {
         app_dir: root.to_path_buf(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("ws"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),
@@ -108,7 +108,7 @@ fn live_overview_of_this_repository() {
     let paths = AppPaths {
         app_dir: root.to_path_buf(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: repo_dir.clone(),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),

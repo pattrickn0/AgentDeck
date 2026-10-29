@@ -1106,6 +1106,6 @@ mod tests {
     fn paths_split_into_name_and_folder() {
         assert_eq!(split_path("crates/app/src/x.rs"), ("x.rs", "crates/app/src"));
         assert_eq!(split_path("README.md"), ("README.md", ""));
-        assert_eq!(split_path("docs/novo/"), ("novo/", "docs"));
+        assert_eq!(split_path("docs/new/"), ("new/", "docs"));
     }
 }

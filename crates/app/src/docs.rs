@@ -1512,7 +1512,7 @@ index 0000000..333
 --- /dev/null
 +++ b/new file.txt
 @@ -0,0 +1,2 @@
-+um
++one
 +dois
 diff --git a/old.txt b/old.txt
 deleted file mode 100644
@@ -1521,13 +1521,13 @@ index 444..0000000
 +++ /dev/null
 @@ -1 +0,0 @@
 -adeus
-diff --git a/antes.rs b/depois.rs
+diff --git a/before.rs b/after.rs
 similarity index 90%
-rename from antes.rs
-rename to depois.rs
+rename from before.rs
+rename to after.rs
 index 555..666 100644
---- a/antes.rs
-+++ b/depois.rs
+--- a/before.rs
++++ b/after.rs
 @@ -1 +1 @@
 -a
 +b
@@ -1543,13 +1543,7 @@ Binary files a/img.png and b/img.png differ
         let got: Vec<(&str, char, usize, usize)> = files.iter().map(|f| (f.path.as_str(), f.status, f.added, f.removed)).collect();
         assert_eq!(
             got,
-            [
-                ("src/a.rs", 'M', 2, 1),
-                ("new file.txt", 'A', 2, 0),
-                ("old.txt", 'D', 0, 1),
-                ("depois.rs", 'R', 1, 1),
-                ("img.png", 'M', 0, 0),
-            ]
+            [("src/a.rs", 'M', 2, 1), ("new file.txt", 'A', 2, 0), ("old.txt", 'D', 0, 1), ("after.rs", 'R', 1, 1), ("img.png", 'M', 0, 0),]
         );
         // Each file points at its own `diff --git` line.
         for f in &files {
@@ -1598,10 +1592,10 @@ Binary files a/img.png and b/img.png differ
     #[test]
     fn a_loaded_file_becomes_text_or_markdown_by_kind() {
         let mut t = tab(DocKind::File("a.rs".into()));
-        t.apply(Loaded::Text(Ok(TextFile::Text("um\n\tdois\n".into()))));
+        t.apply(Loaded::Text(Ok(TextFile::Text("one\n\ttwo\n".into()))));
         // A file that fits in the editor opens as code (reads, searches and edits)...
         let DocState::Source(src) = &t.state else { panic!("code") };
-        assert_eq!((src.text.as_str(), src.lang, src.editing), ("um\n\tdois\n", Lang::Rust, false));
+        assert_eq!((src.text.as_str(), src.lang, src.editing), ("one\n\ttwo\n", Lang::Rust, false));
         // ...and a file too large, or with a line too long, is only read.
         let big = "x\n".repeat(EDIT_MAX / 2 + 1);
         t.apply(Loaded::Text(Ok(TextFile::Text(big))));
@@ -1609,17 +1603,17 @@ Binary files a/img.png and b/img.png differ
         t.apply(Loaded::Text(Ok(TextFile::Text(format!("curta\n{}\n", "y".repeat(EDIT_LINE_MAX + 1))))));
         let DocState::Text(doc) = &t.state else { panic!("text") };
         assert_eq!(doc.lines[0], "curta");
-        t.apply(Loaded::Text(Ok(TextFile::Text("um\n\tdois\n".into()))));
+        t.apply(Loaded::Text(Ok(TextFile::Text("one\n\ttwo\n".into()))));
         assert!(matches!(&t.state, DocState::Source(_)));
 
         let mut m = tab(DocKind::Markdown(MdSource::File("a.md".into())));
-        m.apply(Loaded::Text(Ok(TextFile::Text("# Oi".into()))));
+        m.apply(Loaded::Text(Ok(TextFile::Text("# Hi".into()))));
         let DocState::Source(md) = &m.state else { panic!("markdown as code") };
-        assert_eq!((md.text.as_str(), md.lang), ("# Oi", Lang::Markdown));
+        assert_eq!((md.text.as_str(), md.lang), ("# Hi", Lang::Markdown));
         // A task's request and report do not come from a file: they stay as formatted markdown.
         let mut brief = tab(DocKind::Markdown(MdSource::TaskBrief("t1".into())));
-        brief.apply(Loaded::Text(Ok(TextFile::Text("# Oi".into()))));
-        assert!(matches!(&brief.state, DocState::Markdown(t) if t == "# Oi"));
+        brief.apply(Loaded::Text(Ok(TextFile::Text("# Hi".into()))));
+        assert!(matches!(&brief.state, DocState::Markdown(t) if t == "# Hi"));
     }
 
     fn source(raw: &str) -> Source {
@@ -1628,9 +1622,9 @@ Binary files a/img.png and b/img.png differ
 
     #[test]
     fn the_line_ending_and_the_bom_come_back_as_they_were() {
-        let s = source("\u{feff}um\r\ndois\r\n");
-        assert_eq!((s.text.as_str(), s.eol, s.bom, s.locked.is_none()), ("um\ndois\n", Eol::Crlf, true, true));
-        let s = source("um\ndois");
+        let s = source("\u{feff}one\r\ntwo\r\n");
+        assert_eq!((s.text.as_str(), s.eol, s.bom, s.locked.is_none()), ("one\ntwo\n", Eol::Crlf, true, true));
+        let s = source("one\ntwo");
         assert_eq!((s.eol, s.bom), (Eol::Lf, false));
         // Mixed line endings, or text that is not UTF-8: read-only, with the reason.
         assert!(source("a\r\nb\n").locked.as_deref().is_some_and(|m| m.contains("mixes")));
@@ -1647,62 +1641,62 @@ Binary files a/img.png and b/img.png differ
 
     #[test]
     fn without_unsaved_edits_the_screen_follows_the_disk() {
-        let mut s = source("um\n");
+        let mut s = source("one\n");
         let v = s.version;
-        s.reload("um\n");
+        s.reload("one\n");
         assert_eq!(s.version, v, "the same text does not count as a change");
-        s.reload("dois\n");
-        assert_eq!((s.text.as_str(), s.disk.as_str(), s.external.is_none()), ("dois\n", "dois\n", true));
+        s.reload("two\n");
+        assert_eq!((s.text.as_str(), s.disk.as_str(), s.external.is_none()), ("two\n", "two\n", true));
         assert!(s.version > v);
         assert!(!s.dirty());
     }
 
     #[test]
     fn reloading_the_agents_text_takes_its_line_ending_bom_and_lock() {
-        let mut s = source("um\n");
+        let mut s = source("one\n");
         s.set_editing(true);
-        s.text = "um\nminha\n".into();
+        s.text = "one\nmine\n".into();
         s.touched();
-        s.reload("\u{feff}um\r\nagente\r\n");
+        s.reload("\u{feff}one\r\nagent\r\n");
         s.take_disk();
-        assert_eq!((s.text.as_str(), s.eol, s.bom), ("um\nagente\n", Eol::Crlf, true));
+        assert_eq!((s.text.as_str(), s.eol, s.bom), ("one\nagent\n", Eol::Crlf, true));
         // Keeping mine keeps the format of the file that was open.
-        let mut s = source("um\n");
+        let mut s = source("one\n");
         s.set_editing(true);
-        s.text = "um\nminha\n".into();
+        s.text = "one\nmine\n".into();
         s.touched();
-        s.reload("um\r\nagente\r\n");
+        s.reload("one\r\nagent\r\n");
         s.keep_mine();
         assert_eq!((s.eol, s.bom), (Eol::Lf, false));
         // The agent's text that is not UTF-8 locks saving, and the edit goes away.
-        let mut s = source("um\n");
+        let mut s = source("one\n");
         s.set_editing(true);
-        s.text = "um\nminha\n".into();
+        s.text = "one\nmine\n".into();
         s.touched();
-        s.reload("um\u{fffd}\n");
+        s.reload("one\u{fffd}\n");
         s.take_disk();
         assert!(s.locked.is_some() && !s.editing);
     }
 
     #[test]
     fn an_agent_changing_the_file_during_an_edit_asks_instead_of_replacing() {
-        let mut s = source("um\n");
+        let mut s = source("one\n");
         s.set_editing(true);
-        s.text = "um\nminha linha\n".into();
+        s.text = "one\nmy line\n".into();
         s.touched();
         assert!(s.dirty());
         // The disk is still the same: nothing to warn about (it is what the watcher's read brings after saving).
-        s.reload("um\n");
+        s.reload("one\n");
         assert!(s.external.is_none());
-        assert!(s.is_disk("um\n"));
+        assert!(s.is_disk("one\n"));
         // The agent changed it: its text waits; mine stays intact.
-        s.reload("um\nlinha do agente\n");
-        assert_eq!(s.external.as_deref(), Some("um\nlinha do agente\n"));
-        assert_eq!(s.text, "um\nminha linha\n");
-        assert!(!s.is_disk("um\nlinha do agente\n"), "the reread repeats the notice instead of being ignored");
+        s.reload("one\nagent line\n");
+        assert_eq!(s.external.as_deref(), Some("one\nagent line\n"));
+        assert_eq!(s.text, "one\nmy line\n");
+        assert!(!s.is_disk("one\nagent line\n"), "the reread repeats the notice instead of being ignored");
         // Keep mine: the new disk becomes the base and the edit goes on, to be saved over it.
         s.keep_mine();
-        assert_eq!((s.disk.as_str(), s.text.as_str(), s.external.is_none()), ("um\nlinha do agente\n", "um\nminha linha\n", true));
+        assert_eq!((s.disk.as_str(), s.text.as_str(), s.external.is_none()), ("one\nagent line\n", "one\nmy line\n", true));
         assert!(s.dirty());
         // Reload from disk: the edit is discarded.
         s.reload("outra\n");
@@ -1712,60 +1706,60 @@ Binary files a/img.png and b/img.png differ
 
     #[test]
     fn an_agent_writing_what_the_user_typed_needs_no_choice() {
-        let mut s = source("um\n");
-        s.text = "dois\n".into();
-        s.reload("dois\n");
+        let mut s = source("one\n");
+        s.text = "two\n".into();
+        s.reload("two\n");
         assert!(s.external.is_none() && !s.dirty());
     }
 
     #[test]
     fn a_save_that_finished_while_typing_leaves_the_rest_unsaved() {
-        let mut s = source("um\n");
-        s.text = "dois\n".into();
+        let mut s = source("one\n");
+        s.text = "two\n".into();
         s.saving = true;
-        // The user typed more while the save of "dois" was going on.
-        s.text = "dois e meio\n".into();
-        s.mark_saved("dois\n");
+        // The user typed more while the save of "two" was going on.
+        s.text = "two and a half\n".into();
+        s.mark_saved("two\n");
         assert!(!s.saving && s.dirty(), "what came after still has to be saved");
-        s.mark_saved("dois e meio\n");
+        s.mark_saved("two and a half\n");
         assert!(!s.dirty());
     }
 
     #[test]
     fn discarding_goes_back_to_the_disk() {
-        let mut s = source("um\n");
+        let mut s = source("one\n");
         s.text = "x\n".into();
         s.save_error = Some("falhou".into());
         s.discard();
-        assert_eq!((s.text.as_str(), s.dirty(), s.save_error.is_none()), ("um\n", false, true));
+        assert_eq!((s.text.as_str(), s.dirty(), s.save_error.is_none()), ("one\n", false, true));
     }
 
     #[test]
     fn a_dirty_file_is_never_replaced_by_a_read() {
         let mut t = tab(DocKind::File("a.rs".into()));
-        t.apply(Loaded::Text(Ok(TextFile::Text("um\n".into()))));
+        t.apply(Loaded::Text(Ok(TextFile::Text("one\n".into()))));
         let DocState::Source(src) = &mut t.state else { panic!("code") };
         src.set_editing(true);
-        src.text = "meu\n".into();
+        src.text = "mine\n".into();
         // The file was deleted, became binary or too large: the edit stays and the notice shows.
         for gone in [Loaded::Text(Err("sumiu".into())), Loaded::Text(Ok(TextFile::Binary)), Loaded::Text(Ok(TextFile::TooLarge(9)))] {
             t.apply(gone);
             let DocState::Source(src) = &t.state else { panic!("the edit stays") };
-            assert!(src.gone && src.text == "meu\n" && src.editing);
+            assert!(src.gone && src.text == "mine\n" && src.editing);
         }
         // It came back: the notice goes away and the new disk becomes the "changed" notice.
-        t.apply(Loaded::Text(Ok(TextFile::Text("novo\n".into()))));
+        t.apply(Loaded::Text(Ok(TextFile::Text("new\n".into()))));
         let DocState::Source(src) = &t.state else { panic!("code") };
-        assert!(!src.gone && src.external.as_deref() == Some("novo\n") && src.text == "meu\n");
+        assert!(!src.gone && src.external.as_deref() == Some("new\n") && src.text == "mine\n");
         // The same read again does not repaint when the screen already shows it (no edit) and repeats the notice with one.
-        assert!(!t.same_text(&Loaded::Text(Ok(TextFile::Text("novo\n".into())))));
+        assert!(!t.same_text(&Loaded::Text(Ok(TextFile::Text("new\n".into())))));
     }
 
     #[test]
     fn a_tab_with_unsaved_edits_says_so() {
         let mut t = tab(DocKind::File("a.rs".into()));
         assert!(!t.dirty());
-        t.apply(Loaded::Text(Ok(TextFile::Text("um\n".into()))));
+        t.apply(Loaded::Text(Ok(TextFile::Text("one\n".into()))));
         assert!(!t.dirty());
         if let DocState::Source(s) = &mut t.state {
             s.text.push('x');
@@ -1809,8 +1803,8 @@ Binary files a/img.png and b/img.png differ
     fn the_search_by_lines_serves_the_diff_and_the_big_file() {
         let mut f = Find::default();
         f.show();
-        f.query = "oi".into();
-        f.refresh(0, |q| (Vec::new(), highlight::find_lines(["oi", "x", "Oi!"], q)));
+        f.query = "hi".into();
+        f.refresh(0, |q| (Vec::new(), highlight::find_lines(["hi", "x", "Hi!"], q)));
         assert_eq!((f.count(), f.current_line()), (2, Some(0)));
         f.step(false);
         assert_eq!(f.current_line(), Some(2));
@@ -1887,9 +1881,9 @@ Binary files a/img.png and b/img.png differ
     #[test]
     fn an_unchanged_file_does_not_need_repainting() {
         let mut t = tab(DocKind::File("a.rs".into()));
-        t.apply(Loaded::Text(Ok(TextFile::Text("um\ndois".into()))));
-        assert!(t.same_text(&Loaded::Text(Ok(TextFile::Text("um\ndois".into())))));
-        assert!(!t.same_text(&Loaded::Text(Ok(TextFile::Text("um\ntres".into())))));
+        t.apply(Loaded::Text(Ok(TextFile::Text("one\ntwo".into()))));
+        assert!(t.same_text(&Loaded::Text(Ok(TextFile::Text("one\ntwo".into())))));
+        assert!(!t.same_text(&Loaded::Text(Ok(TextFile::Text("one\nthree".into())))));
         assert!(!t.same_text(&Loaded::Text(Ok(TextFile::Binary))));
         assert!(!t.same_text(&Loaded::Diff(Ok(GitDiff::default()))));
     }

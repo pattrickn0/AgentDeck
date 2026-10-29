@@ -5,7 +5,7 @@
 //! stays as the model's reasoning) and the **level the model reaches**. This comes from two sources:
 //!
 //! 1. the table of public benchmarks (`capability.json`, embedded; the user overrides it with
-//!    `dados/capacidade.json`), with the score, the source, the date and the level that comes from it;
+//!    `data/capability.json`), with the score, the source, the date and the level that comes from it;
 //! 2. the measure of what the model has already delivered here ([`measure`]): with at least [`MIN_SAMPLE`] tasks in a
 //!    level, the measure wins over the table (whoever fails drops one level, whoever gets it right on the first try
 //!    in a row goes up).
@@ -26,8 +26,11 @@ use crate::Core;
 /// The embedded table (October 2026 benchmarks).
 const BUILTIN: &str = include_str!("capability.json");
 
-/// The file (in `dados/`) that overrides the embedded table: the same format, entries by `name`.
-pub const OVERRIDE_FILE: &str = "capacidade.json";
+/// The file (in `data/`) that overrides the embedded table: the same format, entries by `name`.
+pub const OVERRIDE_FILE: &str = "capability.json";
+
+/// The name the override file had before the English rename; still read when the new one does not exist.
+pub const LEGACY_OVERRIDE_FILE: &str = "capacidade.json";
 
 /// Tasks in a level from which the measure wins over the table.
 pub const MIN_SAMPLE: u32 = 3;
@@ -35,13 +38,13 @@ pub const MIN_SAMPLE: u32 = 3;
 /// The size of a task, or the biggest size a model can handle.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Level {
-    #[serde(rename = "simples")]
+    #[serde(rename = "simple", alias = "simples")]
     Simple,
     /// The value of a task with no level informed.
     #[default]
-    #[serde(rename = "media")]
+    #[serde(rename = "medium", alias = "media")]
     Medium,
-    #[serde(rename = "complexa")]
+    #[serde(rename = "complex", alias = "complexa")]
     Complex,
 }
 
@@ -51,9 +54,9 @@ impl Level {
     /// The value of `--level`, of the JSON and of the table.
     pub fn as_str(self) -> &'static str {
         match self {
-            Level::Simple => "simples",
-            Level::Medium => "media",
-            Level::Complex => "complexa",
+            Level::Simple => "simple",
+            Level::Medium => "medium",
+            Level::Complex => "complex",
         }
     }
 
@@ -129,16 +132,18 @@ pub struct Entry {
     pub url: String,
 }
 
-/// The ruler thresholds: `complexa` from `complexa`, `media` from `media`, `simples` below.
+/// The ruler thresholds: `complex` from `complex`, `medium` from `medium`, `simple` below (older tables use `complexa`/`media`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Thresholds {
-    pub complexa: f32,
-    pub media: f32,
+    #[serde(alias = "complexa")]
+    pub complex: f32,
+    #[serde(alias = "media")]
+    pub medium: f32,
 }
 
 impl Default for Thresholds {
     fn default() -> Self {
-        Self { complexa: 53.0, media: 40.0 }
+        Self { complex: 53.0, medium: 40.0 }
     }
 }
 
@@ -188,11 +193,15 @@ impl Table {
         serde_json::from_str(BUILTIN).expect("the embedded capability.json is valid")
     }
 
-    /// The embedded one with the entries of `<data_dir>/capacidade.json` on top (same `name` = replaces; a new name =
+    /// The embedded one with the entries of `<data_dir>/capability.json` (or the legacy `capacidade.json`) on top (same `name` = replaces; a new name =
     /// adds; `defaults` are merged). Missing or unreadable file: only the embedded one stays (the error goes to the log).
     pub fn load(data_dir: &Path) -> Table {
         let mut table = Table::builtin();
-        let path = data_dir.join(OVERRIDE_FILE);
+        let path = [OVERRIDE_FILE, LEGACY_OVERRIDE_FILE]
+            .iter()
+            .map(|name| data_dir.join(name))
+            .find(|p| p.exists())
+            .unwrap_or_else(|| data_dir.join(OVERRIDE_FILE));
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) => {
@@ -240,8 +249,8 @@ impl Table {
     /// The level the row score gives (a saved `level` wins; with neither score nor level, `simples`).
     pub fn level_of(&self, entry: &Entry) -> Level {
         let by_score = match entry.score {
-            Some(s) if s >= self.thresholds.complexa => Level::Complex,
-            Some(s) if s >= self.thresholds.media => Level::Medium,
+            Some(s) if s >= self.thresholds.complex => Level::Complex,
+            Some(s) if s >= self.thresholds.medium => Level::Medium,
             _ => Level::Simple,
         };
         entry.level.unwrap_or(by_score)
@@ -353,7 +362,7 @@ pub fn measure<'a>(tasks: impl IntoIterator<Item = &'a Task>, table: &Table) -> 
         let stats = &mut out.entry(table.key(&task.kind, task.model.as_deref())).or_default()[task.level.index()];
         let returns = task.feedbacks.len();
         stats.returns += returns as u32;
-        stats.rejected += u32::from(task.feedbacks.iter().any(|f| f.origin == "validação"));
+        stats.rejected += u32::from(task.feedbacks.iter().any(|f| f.origin == "validation"));
         if !done {
             stats.discarded += 1;
             stats.bad += 1;
@@ -529,7 +538,7 @@ pub fn advisory(label: &str, capacity: &Capacity, level: Level) -> Option<String
 // ---------- No Core ----------
 
 impl Core {
-    /// The capacity table (the embedded one with `dados/capacidade.json` on top), read on each call.
+    /// The capacity table (the embedded one with `data/capability.json` on top), read on each call.
     pub fn capability_table(&self) -> Table {
         Table::load(&self.paths().data_dir)
     }
@@ -749,13 +758,13 @@ mod tests {
             dir.path().join(OVERRIDE_FILE),
             r#"{"defaults":{"codex":"gpt-5.6-terra"},"models":[
                 {"name":"gpt-6 luna","aliases":["gpt-6-luna"],"score":50.0,"source":"my test","date":"2026-11"},
-                {"name":"New Model","aliases":["novo"],"level":"complexa","source":"x","date":"2026-11"}]}"#,
+                {"name":"New Model","aliases":["new-model"],"level":"complexa","source":"x","date":"2026-11"}]}"#,
         )
         .expect("write");
         let t = Table::load(dir.path());
         assert_eq!(t.models.len(), 19);
         assert_eq!(t.table_level(Some("gpt-6-luna")), Level::Medium);
-        assert_eq!(t.table_level(Some("novo")), Level::Complex);
+        assert_eq!(t.table_level(Some("new-model")), Level::Complex);
         assert_eq!(t.assumed_model("codex", None).as_deref(), Some("gpt-5.6-terra"));
         assert_eq!(t.assumed_model("claude", None).as_deref(), Some("sonnet"));
         // An unreadable file does not bring the embedded table down.
@@ -769,8 +778,8 @@ mod tests {
         let t = table();
         let tasks = vec![
             task("claude", Some("sonnet"), Level::Medium, TaskStatus::Merged, &[], 1),
-            task("claude", None, Level::Medium, TaskStatus::Validating, &["revisão"], 2),
-            task("claude", Some("sonnet"), Level::Medium, TaskStatus::Merged, &["revisão", "validação"], 3),
+            task("claude", None, Level::Medium, TaskStatus::Validating, &["review"], 2),
+            task("claude", Some("sonnet"), Level::Medium, TaskStatus::Merged, &["review", "validation"], 3),
             task("claude", Some("sonnet"), Level::Medium, TaskStatus::Discarded, &[], 4),
             task("claude", Some("sonnet"), Level::Medium, TaskStatus::Running, &[], 5),
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &[], 6),
@@ -809,7 +818,7 @@ mod tests {
         // More than half discarded or returned twice or more: 2 of 3.
         let tasks = vec![
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Discarded, &[], 1),
-            task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &["revisão", "revisão"], 2),
+            task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &["review", "review"], 2),
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &[], 3),
         ];
         let rec = measure(&tasks, &t);
@@ -819,7 +828,7 @@ mod tests {
         // An exact half does not bring it down; a single return is not a failure.
         let tasks = vec![
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Discarded, &[], 1),
-            task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &["revisão"], 2),
+            task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &["review"], 2),
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &[], 3),
             task("claude", Some("sonnet"), Level::Complex, TaskStatus::Merged, &[], 4),
         ];
@@ -844,7 +853,7 @@ mod tests {
         assert_eq!(c.level, Level::Medium);
         assert_eq!(c.notes.len(), 1);
         // One returned in the middle of the sequence (the last 3) does not promote.
-        let rec = measure(&[win(1), task("codex", Some("gpt-6-luna"), Level::Medium, TaskStatus::Merged, &["revisão"], 2), win(3)], &t);
+        let rec = measure(&[win(1), task("codex", Some("gpt-6-luna"), Level::Medium, TaskStatus::Merged, &["review"], 2), win(3)], &t);
         assert_eq!(capacity(Level::Simple, false, rec.get("GPT-6 Luna")).level, Level::Simple);
         // But an old stumble, outside the last 3, does not prevent it.
         let rec = measure(&[task("codex", Some("gpt-6-luna"), Level::Medium, TaskStatus::Discarded, &[], 0), win(1), win(2), win(3)], &t);

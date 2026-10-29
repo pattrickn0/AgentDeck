@@ -1,9 +1,9 @@
-//! Sonda do defeito t37 (terminal em branco): abre o `claude.exe` num PTY (portable-pty, ConPTY no Windows), alimenta um
-//! `Term` do `alacritty_terminal` como o app faz e relata, por amostragem, qualquer "vão" (5+ linhas vazias seguidas com
-//! texto depois) na grade. Grava `<saida>` (bytes crus) e `<saida>.events.txt` (trocas de tamanho), o mesmo formato da
-//! gravação do app (`terminal/record.rs`). Ver `README.md`.
+//! Probe for the t37 defect (blank terminal): opens `claude.exe` in a PTY (portable-pty, ConPTY on Windows), feeds an
+//! `alacritty_terminal` `Term` the way the app does and reports, by sampling, any "gap" (5+ empty lines in a row with
+//! text after them) in the grid. Writes `<out>` (raw bytes) and `<out>.events.txt` (size changes), the same format as the
+//! app's recording (`terminal/record.rs`). See `README.md`.
 
-// A mesma mudança de tamanho do app (`PROBE_PULL=1` desliga a correção, para comparar).
+// The same size change as the app (`PROBE_PULL=1` turns the fix off, to compare).
 #[path = "../../../crates/app/src/terminal/resize.rs"]
 mod resize;
 
@@ -46,13 +46,13 @@ fn row_text(t: &Term<L>, l: i32) -> String {
 fn pattern(t: &Term<L>) -> String {
     (0..t.screen_lines() as i32).map(|l| if row_text(t, l).is_empty() { '.' } else { '#' }).collect()
 }
-// vão: >=5 linhas vazias seguidas com texto depois
+// gap: >=5 empty lines in a row with text after them
 fn has_gap(p: &str) -> bool {
     let t = p.trim_end_matches('.');
     t.contains(".....")
 }
 
-// uso: probe <rows> <cols> <out.bin> "<prompt1>" ["<prompt2>" ...]   env RESIZE="seg:rows:cols,..." (segundos desde o 1o prompt)
+// usage: probe <rows> <cols> <out.bin> "<prompt1>" ["<prompt2>" ...]   env RESIZE="sec:rows:cols,..." (seconds since the 1st prompt)
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let rows0: usize = args[1].parse().unwrap();
@@ -71,7 +71,7 @@ fn main() {
     let boot: u64 = std::env::var("PROBE_BOOT").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
     let (mut cols, mut rows) = (cols0, rows0);
     let pair = native_pty_system().openpty(PtySize { rows: rows as u16, cols: cols as u16, pixel_width: 0, pixel_height: 0 }).unwrap();
-    let program = std::env::var("PROBE_PROGRAM").expect("PROBE_PROGRAM: caminho do claude.exe");
+    let program = std::env::var("PROBE_PROGRAM").expect("PROBE_PROGRAM: path of claude.exe");
     let mut cmd = CommandBuilder::new(program);
     cmd.args(std::env::var("PROBE_ARGS").unwrap_or_default().split_whitespace());
     if let Ok(s) = std::env::var("PROBE_SETTINGS") {
@@ -142,7 +142,7 @@ fn main() {
             writer.write_all(&r).unwrap();
             writer.flush().unwrap();
         }
-        // próximo prompt: quando está quieto há 4 s
+        // next prompt: when it has been quiet for 4 s
         let ready = if next_prompt == 0 {
             start.elapsed() > Duration::from_secs(boot) && last_out.elapsed() > Duration::from_secs(1)
         } else {
@@ -159,7 +159,7 @@ fn main() {
             if first_prompt.is_none() {
                 first_prompt = Some(Instant::now());
             }
-            println!("[{:.1}s] prompt {} enviado", start.elapsed().as_secs_f32(), next_prompt);
+            println!("[{:.1}s] prompt {} sent", start.elapsed().as_secs_f32(), next_prompt);
         }
         if let Some(fp) = first_prompt {
             while let Some(&(at, r, c)) = resizes.first() {
@@ -172,14 +172,14 @@ fn main() {
                 resize::resize(&mut term, Sz(cols, rows), std::env::var("PROBE_PULL").is_err());
                 pair.master.resize(PtySize { rows: rows as u16, cols: cols as u16, pixel_width: 0, pixel_height: 0 }).unwrap();
                 writeln!(ev, "0 {off} size {cols} {rows}").unwrap();
-                println!("[{:.1}s] REDIMENSIONOU para {cols}x{rows}", start.elapsed().as_secs_f32());
+                println!("[{:.1}s] RESIZED to {cols}x{rows}", start.elapsed().as_secs_f32());
                 report_at = Some(Instant::now() + Duration::from_millis(900));
             }
         }
         if report_at.is_some_and(|t| Instant::now() >= t) {
             report_at = None;
             println!(
-                "    depois: {}x{} {}  hist={}  SEQ {}",
+                "    after: {}x{} {}  hist={}  SEQ {}",
                 cols,
                 rows,
                 pattern(&term),
@@ -200,7 +200,7 @@ fn main() {
             next_snap += Duration::from_millis(200);
             let p = pattern(&term);
             if has_gap(&p) && p != last_pat {
-                println!("[{:.1}s] VAO  {p}  hist={}", start.elapsed().as_secs_f32(), term.grid().history_size());
+                println!("[{:.1}s] GAP  {p}  hist={}", start.elapsed().as_secs_f32(), term.grid().history_size());
             }
             last_pat = p;
         }
@@ -212,7 +212,7 @@ fn main() {
         }
     }
     println!(
-        "padrao final {}  historico {}  corridas de linhas vazias (linha, tamanho): {:?}",
+        "final screen {}  history {}  runs of empty lines (line, size): {:?}",
         pattern(&term),
         term.grid().history_size(),
         blank_runs(&term)
@@ -243,8 +243,8 @@ fn blank_runs(t: &Term<L>) -> Vec<(i32, usize)> {
     runs.into_iter().filter(|r| r.1 >= 6).collect()
 }
 
-/// Linhas numeradas (`L00001 ...`, o que o roteiro do shell imprime): confere, na ordem do histórico + tela, que a
-/// numeração não pula (linha sumida) nem repete (cópia no histórico) e conta as linhas vazias entre duas numeradas.
+/// Numbered lines (`L00001 ...`, what the shell script prints): checks, in history + screen order, that the
+/// numbering does not skip (a lost line) nor repeat (a copy in the history) and counts the empty lines between two numbered ones.
 fn sequence_report(t: &Term<L>) -> String {
     let hist = t.grid().history_size() as i32;
     let (mut prev, mut missing, mut repeated, mut blank_between, mut seen) = (None::<u32>, Vec::new(), Vec::new(), 0usize, 0usize);
@@ -271,5 +271,5 @@ fn sequence_report(t: &Term<L>) -> String {
             None => {}
         }
     }
-    format!("numeradas={seen} puladas={missing:?} repetidas/voltas={repeated:?} vazias_entre_consecutivas={blank_between}")
+    format!("numbered={seen} skipped={missing:?} repeated/back={repeated:?} empty_between_consecutive={blank_between}")
 }

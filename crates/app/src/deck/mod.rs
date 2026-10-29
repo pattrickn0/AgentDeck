@@ -51,7 +51,7 @@ pub struct DropZone {
 /// Task messages from background work to the UI.
 pub enum UiMsg {
     Agents(Vec<AgentInfo>),
-    /// Attachments copied (absolute paths under `dados/anexos`) for a tab or a task form.
+    /// Attachments copied (absolute paths under `data/attachments`) for a tab or a task form.
     Attached(AttachTarget, Vec<PathBuf>),
     Transcribed(Result<String, String>),
     Engine(String),
@@ -109,8 +109,8 @@ struct Queued {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightView {
     /// Tasks desk (see `tasks_ui.rs`).
-    Tarefas,
-    Conversa,
+    Tasks,
+    Chat,
     /// The workspace git repository (see `git_ui.rs`).
     Git,
     /// GitHub PRs, issues and Actions (see `github_ui.rs`).
@@ -430,7 +430,7 @@ pub struct Deck {
     pub terminal_rect: Option<egui::Rect>,
     pub window_focused: bool,
     debug_fake_shell: bool,
-    /// `AGENTDECK_DEBUG_PTY=1`: records each tab's raw output under `dados/pty/` (see `terminal::record`).
+    /// `AGENTDECK_DEBUG_PTY=1`: records each tab's raw output under `data/pty/` (see `terminal::record`).
     debug_pty: bool,
     /// DEBUG ONLY: closes the restored tabs (empty-state screenshot).
     pub debug_close_all: bool,
@@ -480,10 +480,10 @@ fn discard_recorder(rec: audio::Recorder) {
 }
 
 /// Absolute paths of the attachments from the core references (relative to the workspace at copy time,
-/// or absolute). Every attachment lives in `dados/anexos` with a unique name, so the name is enough
+/// or absolute). Every attachment lives in `data/attachments` with a unique name, so the name is enough
 /// and does not depend on which project was active.
 fn attachment_paths(core: &Core, refs: Vec<String>) -> Vec<PathBuf> {
-    let dir = core.paths().data_dir.join("anexos");
+    let dir = core.paths().data_dir.join("attachments");
     refs.iter().filter_map(|r| Path::new(r).file_name()).map(|name| dir.join(name)).collect()
 }
 
@@ -541,7 +541,7 @@ impl Deck {
             },
             right_dragging: None,
             // The tasks desk is the first tab and the one that opens: the app does not save the chosen tab.
-            right_view: RightView::Tarefas,
+            right_view: RightView::Tasks,
             right_panel_rect: None,
             organization: cfg.organization(),
             highlight_ratio: split::highlight_ratio(cfg.highlight_ratio),

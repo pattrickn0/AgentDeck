@@ -518,7 +518,7 @@ mod tests {
         assert_eq!(pieces("", 10.0), vec![""]);
         assert_eq!(pieces("curto", 10.0), vec!["curto"]);
         // A word that does not fit goes whole to the next line.
-        assert_eq!(pieces("uma frase com palavras", 10.0), vec!["uma frase ", "com ", "palavras"]);
+        assert_eq!(pieces("one small cat sleeping", 10.0), vec!["one small ", "cat ", "sleeping"]);
         // Without a space, it cuts at the width.
         assert_eq!(pieces("abcdefghijklmnop", 6.0), vec!["abcdef", "ghijkl", "mnop"]);
         // Accented letters count as one character and are not split in the middle.
@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn the_file_header_names_the_file() {
         assert_eq!(file_title("diff --git a/src/x.rs b/src/x.rs").as_deref(), Some("src/x.rs"));
-        assert_eq!(file_title("diff --git a/velho.md b/novo.md").as_deref(), Some("velho.md → novo.md"));
+        assert_eq!(file_title("diff --git a/old.md b/new.md").as_deref(), Some("old.md → new.md"));
         assert_eq!(file_title("diff --cc conflito.rs").as_deref(), Some("conflito.rs"));
         assert_eq!(file_title("index 123..456 100644"), None);
     }
@@ -566,7 +566,7 @@ mod tests {
     #[test]
     fn heights_add_up_and_the_first_header_has_no_gap() {
         let diff = GitDiff {
-            lines: vec![line(DiffKind::Meta, "diff --git a/a b/a"), line(DiffKind::Meta, "index 1"), line(DiffKind::Add, "+uma linha")],
+            lines: vec![line(DiffKind::Meta, "diff --git a/a b/a"), line(DiffKind::Meta, "index 1"), line(DiffKind::Add, "+one line")],
             ..Default::default()
         };
         let lay = layout(&diff, W, true, true, &mut cells);
@@ -617,8 +617,8 @@ mod tests {
             (DiffKind::Meta, "diff --git a/a.rs b/a.rs"),
             (DiffKind::Hunk, "@@ -1,3 +1,3 @@"),
             (DiffKind::Add, "+/* abre"),
-            (DiffKind::Del, "-let velho = 1;"),
-            (DiffKind::Add, "+ainda comentário */ let x = 1;"),
+            (DiffKind::Del, "-let old = 1;"),
+            (DiffKind::Add, "+still one comment */ let x = 1;"),
         ]);
         let spans = diff_spans(&diff, true, None);
         assert_eq!(spans[2].first().map(|s| s.tok), Some(highlight::Tok::Comment));
@@ -636,7 +636,7 @@ mod tests {
             (DiffKind::Meta, "+++ b/foo.rs"),
             (DiffKind::Hunk, "@@ -1 +1 @@"),
             (DiffKind::Add, "+fn FOO() {}"),
-            (DiffKind::Context, " nada"),
+            (DiffKind::Context, " nothing"),
             (DiffKind::Del, "-foo"),
         ]);
         assert_eq!(search(&diff, "foo"), [5, 7], "the header path does not count");
@@ -648,15 +648,15 @@ mod tests {
         let diff = diff_of(&[
             (DiffKind::Meta, "diff --git a/a.go b/a.go"),
             (DiffKind::Hunk, "@@ -1,2 +1,2 @@"),
-            (DiffKind::Add, "+\tum"),
-            (DiffKind::Context, " \tdois"),
-            (DiffKind::Del, "-tres"),
+            (DiffKind::Add, "+\tone"),
+            (DiffKind::Context, " \ttwo"),
+            (DiffKind::Del, "-three"),
         ]);
-        let all = Selected { start: Pos { line: 0, col: 0 }, end: Pos { line: 4, col: 4 } };
-        assert_eq!(selection_text(&diff, true, all), "@@ -1,2 +1,2 @@\n\tum\n\tdois\ntres");
+        let all = Selected { start: Pos { line: 0, col: 0 }, end: Pos { line: 4, col: 5 } };
+        assert_eq!(selection_text(&diff, true, all), "@@ -1,2 +1,2 @@\n\tone\n\ttwo\nthree");
         // A piece of a single line (the body has the tab as four spaces).
-        let part = Selected { start: Pos { line: 2, col: 4 }, end: Pos { line: 2, col: 6 } };
-        assert_eq!(selection_text(&diff, true, part), "um");
+        let part = Selected { start: Pos { line: 2, col: 4 }, end: Pos { line: 2, col: 7 } };
+        assert_eq!(selection_text(&diff, true, part), "one");
         assert_eq!(unexpanded("\ta\tb", 0), 0);
         assert_eq!(unexpanded("\ta\tb", 4), 1);
         assert_eq!(unexpanded("\ta\tb", 6), 2, "in the middle of the second tab, its start");

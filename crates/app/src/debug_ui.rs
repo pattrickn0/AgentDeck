@@ -82,13 +82,13 @@ fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage
     ])
 }
 
-/// DEBUG ONLY: `AGENTDECK_DEBUG_UI=conversa,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-level,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agent>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agent>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` opens menus/states
+/// DEBUG ONLY: `AGENTDECK_DEBUG_UI=chat,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-level,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agent>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agent>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` opens menus/states
 /// for screenshots in smoke mode.
 pub(crate) fn apply(deck: &mut Deck) {
     let Some(v) = agentdeck_core::env_var("DEBUG_UI") else { return };
     for item in v.split(',').map(str::trim) {
         match item {
-            "conversa" => deck.set_right_view(crate::deck::RightView::Conversa),
+            "chat" => deck.set_right_view(crate::deck::RightView::Chat),
             "settings" => deck.settings_open = true,
             "dictation-ask" => deck.dictation_prompt = true,
             "shortcuts" => deck.toggle_shortcuts = true,
@@ -326,7 +326,7 @@ pub(crate) fn apply(deck: &mut Deck) {
 /// DEBUG ONLY: fake states of the Tasks tab (`AGENTDECK_DEBUG_UI=tasks-*`), without git or the core.
 fn debug_tasks(deck: &mut Deck, item: &str) {
     use crate::tasks_ui::{self as t, Confirm, FormMenu, TasksView};
-    deck.set_right_view(crate::deck::RightView::Tarefas);
+    deck.set_right_view(crate::deck::RightView::Tasks);
     deck.tasks.debug_hold = true;
     deck.tasks.loaded = true;
     deck.tasks.tasks = if item == "tasks-empty" { Vec::new() } else { t::demo_tasks() };
@@ -380,13 +380,13 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                     )
                 }
                 "tasks-refused-main" | "tasks-refused-main-files" => {
-                    let files = ["crates/app/src/deck.rs", "crates/app/src/app.rs", "memory/pendencias.md"].map(String::from).to_vec();
+                    let files = ["crates/app/src/deck.rs", "crates/app/src/app.rs", "memory/backlog.md"].map(String::from).to_vec();
                     deck.tasks.notice = Some("the main repository has uncommitted changes".into());
                     deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::MainDirty(files));
                     deck.tasks.notice_files = item == "tasks-refused-main-files";
                 }
                 "tasks-refused-commit" => {
-                    let files = ["crates/core/src/tasks.rs", "memory/testes.md"].map(String::from).to_vec();
+                    let files = ["crates/core/src/tasks.rs", "memory/manual-tests.md"].map(String::from).to_vec();
                     deck.tasks.notice = Some("the task's worktree has uncommitted work".into());
                     deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::TaskDirty(files));
                 }
@@ -435,8 +435,8 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             f.brief = "Explain each route in memory/ARCHITECTURE.md, with the example body and the error codes.\n\nAlso check the ask-agent --task text.".into();
             if item == "tasks-new-attach" {
                 f.attachments = vec![
-                    r"C:\Users\you\agentdeck-dev\dados\anexos\1a2b3c-screenshot.png".into(),
-                    r"C:\Users\you\agentdeck-dev\dados\anexos\9f8e-report.pdf".into(),
+                    r"C:\Users\you\agentdeck-dev\data\attachments\1a2b3c-screenshot.png".into(),
+                    r"C:\Users\you\agentdeck-dev\data\attachments\9f8e-report.pdf".into(),
                 ];
             }
             f.focus_title = false;

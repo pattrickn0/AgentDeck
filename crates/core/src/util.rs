@@ -178,20 +178,20 @@ mod tests {
 
     #[test]
     fn terminal_text_cannot_escape_the_paste() {
-        let evil = "oi\x1b[201~!rm -rf ~\r\x1b[200~\u{9b}2J\x07\x00fim\r\nlinha\ttab";
-        assert_eq!(terminal_text(evil), "oi[201~!rm -rf ~\n[200~2Jfim\nlinha\ttab");
-        assert_eq!(terminal_text("ação ✓ 🎉"), "ação ✓ 🎉");
+        let evil = "hi\x1b[201~!rm -rf ~\r\x1b[200~\u{9b}2J\x07\x00end\r\nline\ttab";
+        assert_eq!(terminal_text(evil), "hi[201~!rm -rf ~\n[200~2Jend\nline\ttab");
+        assert_eq!(terminal_text("façade ✓ 🎉"), "façade ✓ 🎉");
     }
 
     #[test]
     fn decode_text_reads_utf8_and_utf16_with_acents() {
-        assert_eq!(decode_text("ação — ícone".as_bytes()), "ação — ícone");
+        assert_eq!(decode_text("façade — naïve".as_bytes()), "façade — naïve");
         // UTF-8 BOM and UTF-16 BOM (LE, the PowerShell 5.1 one with `>`/`Out-File`, and BE).
         assert_eq!(decode_text(&[0xEF, 0xBB, 0xBF, b'a', b'\xC3', b'\xA7']), "aç");
-        let utf16le: Vec<u8> = [0xFF, 0xFE].into_iter().chain("ação".encode_utf16().flat_map(u16::to_le_bytes)).collect();
-        assert_eq!(decode_text(&utf16le), "ação");
-        let utf16be: Vec<u8> = [0xFE, 0xFF].into_iter().chain("ação".encode_utf16().flat_map(u16::to_be_bytes)).collect();
-        assert_eq!(decode_text(&utf16be), "ação");
+        let utf16le: Vec<u8> = [0xFF, 0xFE].into_iter().chain("façade".encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        assert_eq!(decode_text(&utf16le), "façade");
+        let utf16be: Vec<u8> = [0xFE, 0xFF].into_iter().chain("façade".encode_utf16().flat_map(u16::to_be_bytes)).collect();
+        assert_eq!(decode_text(&utf16be), "façade");
         // Garbage that is neither UTF-8 nor UTF-16: replacements, no panic.
         assert_eq!(decode_text(b"a\xE7\xE3o"), "a\u{FFFD}\u{FFFD}o");
         assert_eq!(decode_text(&[]), "");
@@ -219,7 +219,7 @@ mod tests {
         let ws = Path::new("/w/proj");
         assert_eq!(ref_path(ws, Path::new("/w/proj/src/a.rs")), "src/a.rs");
         assert_eq!(ref_path(ws, Path::new("/w/proj/x/../b.txt")), "b.txt");
-        assert_eq!(ref_path(ws, Path::new("/w/dados/anexos/f.png")), "/w/dados/anexos/f.png");
+        assert_eq!(ref_path(ws, Path::new("/w/data/attachments/f.png")), "/w/data/attachments/f.png");
         // String prefix is not a path prefix.
         assert_eq!(ref_path(ws, Path::new("/w/project2/f")), "/w/project2/f");
         assert_eq!(ref_path(ws, ws), "/w/proj");
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn truncate_is_char_based() {
-        assert_eq!(truncate_chars("ação", 2), ("aç", true));
+        assert_eq!(truncate_chars("façade", 3), ("faç", true));
         assert_eq!(truncate_chars("ab", 5), ("ab", false));
     }
 }

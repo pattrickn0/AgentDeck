@@ -744,10 +744,10 @@ mod tests {
 
     #[test]
     fn component_strip_rejects_unsafe_paths() {
-        assert_eq!(stripped(Path::new("pasta/whisper-cli"), 1).expect("ok"), Some(PathBuf::from("whisper-cli")));
-        assert_eq!(stripped(Path::new("pasta/"), 1).expect("ok"), None);
-        assert_eq!(stripped(Path::new("pasta/sub/x.so"), 1).expect("ok"), Some(PathBuf::from("sub/x.so")));
-        assert!(stripped(Path::new("pasta/../fora"), 1).is_err());
+        assert_eq!(stripped(Path::new("folder/whisper-cli"), 1).expect("ok"), Some(PathBuf::from("whisper-cli")));
+        assert_eq!(stripped(Path::new("folder/"), 1).expect("ok"), None);
+        assert_eq!(stripped(Path::new("folder/sub/x.so"), 1).expect("ok"), Some(PathBuf::from("sub/x.so")));
+        assert!(stripped(Path::new("folder/../outside"), 1).is_err());
         assert!(stripped(Path::new("/abs/x"), 1).is_err());
     }
 
@@ -758,7 +758,7 @@ mod tests {
         {
             let gz = flate2::write::GzEncoder::new(File::create(&archive).expect("create"), flate2::Compression::fast());
             let mut b = tar::Builder::new(gz);
-            for (name, data) in [("raiz/whisper-cli", &b"#!/bin/sh\n"[..]), ("raiz/lib/libwhisper.so", &b"so"[..])] {
+            for (name, data) in [("root/whisper-cli", &b"#!/bin/sh\n"[..]), ("root/lib/libwhisper.so", &b"so"[..])] {
                 let mut h = tar::Header::new_gnu();
                 h.set_size(data.len() as u64);
                 h.set_mode(0o755);
@@ -771,7 +771,7 @@ mod tests {
         extract_tar_gz(&archive, &out, 1).expect("extract");
         assert_eq!(std::fs::read(out.join("whisper-cli")).expect("cli"), b"#!/bin/sh\n");
         assert_eq!(std::fs::read(out.join("lib").join("libwhisper.so")).expect("so"), b"so");
-        assert!(!out.join("raiz").exists());
+        assert!(!out.join("root").exists());
     }
 
     fn tar_gz(path: &Path, entries: &[(&str, &[u8])]) {
@@ -793,7 +793,7 @@ mod tests {
         let pkg = tmp.path().join("pacote.tar.gz");
         let target = tmp.path().join("bin-x");
         // Package without executable: final folder does not appear and staging is removed.
-        tar_gz(&pkg, &[("raiz/outra.dll", b"dll")]);
+        tar_gz(&pkg, &[("root/other.dll", b"dll")]);
         assert!(install_package(&pkg, &target, true, 1).is_err());
         assert!(!target.exists());
         assert!(!tmp.path().join("bin-x.staging").exists());
@@ -806,7 +806,7 @@ mod tests {
         assert!(target.join("old.txt").is_file());
         assert!(!tmp.path().join("bin-x.staging").exists());
         // Good package: swaps folder (removing old leftovers) and cleans staging.
-        tar_gz(&pkg, &[("raiz/whisper-cli", b"cli"), ("raiz/whisper-cli.exe", b"cli"), ("raiz/ggml.dll", b"dll")]);
+        tar_gz(&pkg, &[("root/whisper-cli", b"cli"), ("root/whisper-cli.exe", b"cli"), ("root/ggml.dll", b"dll")]);
         install_package(&pkg, &target, true, 1).expect("install");
         assert!(cli_in(&target).is_some());
         assert!(target.join("ggml.dll").is_file());

@@ -1,6 +1,6 @@
 # pty-probe
 
-Probe used in terminal investigations (`claude-code-sem-esc3j-no-windows`, `t37`). Runs a real program in a PTY (ConPTY on
+Probe used in terminal investigations (`claude-code-without-esc3j-on-windows`, `t37`). Runs a real program in a PTY (ConPTY on
 Windows), feeds the same emulator as the app (`alacritty_terminal` 0.26 and the same resize logic, `crates/app/src/terminal/resize.rs`,
 included via `#[path]`), and measures the grid, without a window.
 

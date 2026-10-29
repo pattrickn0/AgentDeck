@@ -297,7 +297,7 @@ impl Core {
         cancel.load(Ordering::SeqCst) || self.inner.state.shutdown.load(Ordering::SeqCst)
     }
 
-    /// Writes the prompt to `dados/prompts` when it cannot go on the command line: too long
+    /// Writes the prompt to `data/prompts` when it cannot go on the command line: too long
     /// (the Windows one has ~32 thousand characters) or `force` (it would go through a `.cmd` shim).
     /// Returns the file path; `None` = it goes as an argument anyway.
     fn prompt_file_if(&self, prompt: &str, force: bool) -> Option<String> {

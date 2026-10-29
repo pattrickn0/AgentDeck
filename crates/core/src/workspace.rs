@@ -18,8 +18,15 @@ pub struct DirEntry {
 }
 
 /// Names ignored in the tree (`.gemini` is Antigravity's config folder, `~/.gemini/antigravity`;
-/// `.agentdeck` keeps the task worktrees).
-pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".agentdeck", "dados", "$RECYCLE.BIN", "target"];
+/// `.agentdeck` keeps the task worktrees). AgentDeck's own data folder is recognized by its lock file
+/// ([`is_app_data_dir`]), not by name, so a project's own `data/` folder stays visible.
+pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".agentdeck", "$RECYCLE.BIN", "target"];
+
+/// Is `dir` the data folder of an AgentDeck (it holds the instance lock file)? It is the app's own folder when the
+/// project is the AgentDeck repository (`data/`, or the legacy `dados/`).
+pub fn is_app_data_dir(dir: &Path) -> bool {
+    dir.join(".agentdeck.lock").is_file()
+}
 
 fn is_ignored_entry(name: &str) -> bool {
     if cfg!(windows) {
@@ -45,7 +52,7 @@ pub fn read_dir(workspace: &Path, rel_dir: &str) -> Vec<DirEntry> {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            if is_ignored_entry(&name) {
+            if is_ignored_entry(&name) || is_app_data_dir(&e.path()) {
                 return None;
             }
             let is_dir = e
@@ -339,7 +346,7 @@ fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
 // ---------- Watcher ----------
 
 /// Changes in these folders do not reload the tree (`.gemini`: Antigravity's configuration).
-const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".agentdeck", "dados", "target"];
+const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".agentdeck", "target"];
 
 /// `path` relative to `base`, comparing by components (no case difference and no verbatim prefix
 /// `\\?\` on Windows: `c:\x`, `C:\x` and `\\?\C:\x` are the same folder). `None` if it is outside.
@@ -350,9 +357,13 @@ fn rel_within(base: &Path, path: &Path) -> Option<PathBuf> {
 }
 
 /// `true` if the change in `path` must be ignored. Outside the workspace nothing is ignored: the folders
-/// above it (a project in `C:\dados\app`, for example) do not count.
+/// above it (a project in `C:\data\app`, for example) do not count.
 pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
     let Some(rel) = rel_within(workspace, path) else { return false };
+    // AgentDeck's own data folder (the app writes there all the time) is only checked at the first level.
+    if rel.components().next().is_some_and(|c| is_app_data_dir(&workspace.join(c.as_os_str()))) {
+        return true;
+    }
     rel.components().any(|c| match c {
         Component::Normal(s) => WATCH_IGNORED.iter().any(|i| crate::util::same_component(s, std::ffi::OsStr::new(i))),
         _ => false,
@@ -659,9 +670,11 @@ mod tests {
     fn read_dir_orders_and_filters() {
         let tmp = tempfile::tempdir().expect("tmp");
         let ws = tmp.path();
-        for d in ["zeta", "Alpha", "node_modules", ".git", "dados", "target"] {
+        for d in ["zeta", "Alpha", "node_modules", ".git", "data", "target"] {
             std::fs::create_dir_all(ws.join(d)).expect("mkdir");
         }
+        // AgentDeck's own data folder (it has the lock file) is hidden; a plain `data/` of the project would show.
+        std::fs::write(ws.join("data").join(".agentdeck.lock"), "").expect("lock");
         if cfg!(windows) {
             std::fs::create_dir_all(ws.join("$Recycle.Bin")).expect("mkdir");
         }
@@ -931,9 +944,9 @@ X
         assert!(git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/HEAD")));
         assert!(git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/CHERRY_PICK_HEAD")));
         assert!(!git_state_change_in(ext_git, Path::new("/repo/.git/worktrees/wt/index.lock")));
-        // Outside the workspace nothing is ignored (a parent folder named `dados` does not count).
-        assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/outside/dados/x")));
-        assert!(!watch_ignored(Path::new("/dados/app"), Path::new("/dados/app/src/x")));
+        // Outside the workspace nothing is ignored (a parent folder named `data` does not count).
+        assert!(!watch_ignored(Path::new("/data/app"), Path::new("/outside/data/x")));
+        assert!(!watch_ignored(Path::new("/data/app"), Path::new("/data/app/src/x")));
         if cfg!(windows) {
             // Drive letter with another case and verbatim prefix `\\?\`: it is the same repository.
             assert!(git_state_change(Path::new(r"c:\w"), Path::new(r"C:\W\.git\HEAD")));
@@ -974,7 +987,7 @@ X
         let paths = crate::paths::AppPaths {
             app_dir: root.join("app"),
             bin_dir: root.join("bin"),
-            data_dir: root.join("dados"),
+            data_dir: root.join("data"),
             default_workspace: ws.clone(),
             whisper_dir: root.join("whisper"),
             config_file: root.join("cfg").join("config.json"),

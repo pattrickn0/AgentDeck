@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
     // GitHub token, and `ureq` logs every request at DEBUG (headers, IPs). Both stay at WARN,
     // even with RUST_LOG=trace: `filter_module` pins the level (it is not a ceiling), and at
     // DEBUG they filled the log on every usage query.
-    // The log also goes to `<dados>/agentdeck.log`: a window app has no stderr.
+    // The log also goes to `<data>/agentdeck.log`: a window app has no stderr.
     let data_dir = AppPaths::detect().data_dir;
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .filter_module("ureq_proto", log::LevelFilter::Warn)

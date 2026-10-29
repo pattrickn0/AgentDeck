@@ -70,7 +70,7 @@ pub fn paths_in(root: &Path) -> AppPaths {
     AppPaths {
         app_dir: root.to_path_buf(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("ws"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),

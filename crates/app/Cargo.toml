@@ -1,6 +1,6 @@
 [package]
 name = "agentdeck"
-description = "AgentDeck — interface nativa (winit + egui) que conecta agentes de IA."
+description = "AgentDeck — native interface (winit + egui) that connects AI agents."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ rust-version.workspace = true
 
 [features]
 default = ["audio"]
-# Notificações sonoras e microfone (cpal). Sem ela, o som é mudo e o microfone fica indisponível.
+# Notification sounds and microphone (cpal). Without it, sound is muted and the microphone is unavailable.
 audio = ["dep:cpal"]
 
 [dependencies]
@@ -46,5 +46,5 @@ ksni.workspace = true
 tempfile.workspace = true
 
 [build-dependencies]
-# Ícone e dados de versão do executável no Windows (recurso embutido por `build.rs`).
+# Icon and version data of the Windows executable (resource embedded by `build.rs`).
 winresource.workspace = true

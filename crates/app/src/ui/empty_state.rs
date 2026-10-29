@@ -10,7 +10,7 @@ use crate::theme;
 use agentdeck_core::t;
 
 /// "Open folder…" button of the card shown without a project (an internal marker, not user-facing).
-const NEW_PROJECT: &str = "#novo-projeto";
+const NEW_PROJECT: &str = "#new-project";
 
 /// Marker the empty-state sentence uses to point at the bold piece (a character the text never has).
 const MARKER: &str = "\u{1}";

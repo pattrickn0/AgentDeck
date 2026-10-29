@@ -67,10 +67,10 @@ index 1111111..2222222 100644
  /// A lifecycle operation in progress.
  #[derive(Debug, Clone, PartialEq, Eq)]
  pub struct Busy {
-diff --git a/memory/pendencias.md b/memory/pendencias.md
+diff --git a/memory/backlog.md b/memory/backlog.md
 index 9f8e7d6..5c4b3a2 100644
---- a/memory/pendencias.md
-+++ b/memory/pendencias.md
+--- a/memory/backlog.md
++++ b/memory/backlog.md
 @@ -12,3 +12,4 @@
  - Task desk: review without dead ends.
 -- Brief and report show up as plain text.
@@ -175,7 +175,7 @@ cargo run -p agentdeck
 cargo test --workspace
 ```
 
-See also [GERAL.md](GERAL.md).
+See also [OVERVIEW.md](OVERVIEW.md).
 ";
 
 /// Applies the screenshot state `item` (one of the `docs-demo*`).
@@ -194,9 +194,9 @@ pub fn apply(deck: &mut Deck, item: &str) {
     );
     open(
         deck,
-        DocKind::Markdown(MdSource::File("memory/MANUTENCAO.md".into())),
-        "MANUTENCAO.md",
-        "memory/MANUTENCAO.md",
+        DocKind::Markdown(MdSource::File("memory/MAINTENANCE.md".into())),
+        "MAINTENANCE.md",
+        "memory/MAINTENANCE.md",
         DocState::Source(Source::open(README, Lang::Markdown).expect("fits in the editor")),
     );
     let file_state = if item == "docs-demo-large" {
@@ -232,7 +232,7 @@ pub fn apply(deck: &mut Deck, item: &str) {
     let focus = match item {
         "docs-demo-file" | "docs-demo-many" | "docs-demo-edit" | "docs-demo-find" | "docs-demo-external" | "docs-demo-confirm"
         | "docs-demo-large" => DocKind::File("crates/core/src/workspace.rs".into()),
-        "docs-demo-md" | "docs-demo-md-code" => DocKind::Markdown(MdSource::File("memory/MANUTENCAO.md".into())),
+        "docs-demo-md" | "docs-demo-md-code" => DocKind::Markdown(MdSource::File("memory/MAINTENANCE.md".into())),
         "docs-demo-report" => DocKind::Markdown(MdSource::TaskReport("t19".into())),
         "docs-demo-unreadable" => DocKind::File("whisper/models/ggml-base.bin".into()),
         _ => DocKind::TaskDiff { id: "t19".into(), merged: false },

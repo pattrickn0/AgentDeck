@@ -185,7 +185,7 @@ mod tests {
         let long = "x".repeat(1735);
         assert_eq!(enter_delay("claude", &long, base), base, "only Codex waits longer");
         if cfg!(windows) {
-            assert_eq!(enter_delay("codex", "oi", base), ms(252));
+            assert_eq!(enter_delay("codex", "hi", base), ms(252));
             assert!(enter_delay("codex", &long, base) > ms(1200), "1,735 characters caught it at 1,200 ms");
             assert!(enter_delay("codex", &"x".repeat(3593), base) > ms(2400), "3,593 characters caught it at 2,400 ms");
             assert_eq!(enter_delay("codex", &"x".repeat(200_000), base), MAX_ENTER_DELAY);

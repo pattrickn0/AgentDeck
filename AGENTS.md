@@ -1,27 +1,27 @@
 <!-- agentdeck:start -->
-Você está rodando dentro do AgentDeck, um ambiente que conecta vários agentes de IA. Seu nome e cargo estão nas variáveis AGENTDECK_AGENT e AGENTDECK_ROLE; nunca pergunte a si mesmo.
-Para falar com outro agente, rode no shell: ask-agent <agente> "mensagem". Precisando de outro agente, abra-o no AgentDeck (ask-agent <agente>, ask-agent <agente>@<cargo> ou ask-agent --task new): NÃO use subagentes internos do seu CLI (Task/Agent tool, sub-agents), a menos que o usuário peça.
-A resposta sai no stdout e pode levar minutos (timeout de até 600000 ms). Se o ask-agent avisar que a resposta será digitada depois neste terminal, não repita a pergunta; se ela não aparecer, rode ask-agent --inbox (--all: as 20 últimas).
-ask-agent --models [<agente>] lista os agentes, os modelos desta máquina e a cota de cada um (do mais folgado ao mais gasto): antes de delegar ou de abrir tarefas, veja a cota de todos e distribua o trabalho, preferindo quem tem mais folga em vez de ir sempre no mesmo (a ponte recusa o que está esgotado). O histórico de cada par é mantido e o usuário vê tudo na "Conversa integrada": não relate nem resuma a conversa; dialogue com o outro agente até concluir, sem parar para perguntar ao usuário.
-Cada aba é uma instância <modelo>[@<cargo>[@<nome>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev "tarefa" abre a aba se não existir; --new abre outra do mesmo cargo; --model <modelo> escolhe o LLM ao abrir. Trabalho grande vira tarefa, com worktree, branch e agente próprios: ask-agent --task new "título" --start --file <pedido.md>.
-Texto com acento vai num arquivo (--file <arquivo>): pela entrada padrão o shell do Windows troca os acentos por "?".
-Quando outro agente lhe mandar uma mensagem, responda com o comando indicado nela (ask-agent --reply <número> "resposta" ou --file <arquivo>): só assim a resposta chega a ele.
-Os agentes formam uma equipe (chefe e subordinados; o usuário pode reorganizá-la). Antes de delegar ou reportar, veja a sua posição com ask-agent --team; delegue de preferência à equipe e, ao concluir algo que o chefe pediu, reporte com ask-agent --boss "mensagem".
-Memória do projeto: memory/aprendizados/, um .md por armadilha, decisão ou convenção que custou tempo e o código não mostra. Formato: cabeçalho --- titulo: … / resumo: uma linha / touches: [globs dos arquivos; opcional] --- e o corpo curto, com Por quê e Como aplicar. Antes de mexer em arquivos, rode ask-agent --learn <arquivo>... (sem argumentos: o índice e a situação das tarefas; com arquivos, avisa se outra tarefa mexe neles); ao descobrir algo assim, crie o arquivo. ask-agent --outline <arquivo>... mostra as assinaturas com a linha, para ler só o trecho necessário de um arquivo grande (offset).
+You are running inside AgentDeck, an environment that connects several AI agents. Your name and role are in the AGENTDECK_AGENT and AGENTDECK_ROLE variables; never ask who you are.
+To talk to another agent, run this in the shell: ask-agent <agent> "message". If you need another agent, open it in AgentDeck (ask-agent <agent>, ask-agent <agent>@<role> or ask-agent --task new): do NOT use your CLI's internal subagents (Task/Agent tool, sub-agents) unless the user asks for it.
+The answer comes on stdout and can take minutes (timeout up to 600000 ms). If ask-agent warns that the answer will be typed later in this terminal, do not repeat the question; if it does not show up, run ask-agent --inbox (--all: the last 20).
+ask-agent --models [<agent>] lists the agents, this machine's models and the quota of each one (from the most free to the most spent): before delegating or opening tasks, look at everyone's quota and choose among the models capable of the size of the work, and among them the one with the most free quota, instead of always using the same one (the bridge refuses the exhausted ones). The history of each pair is kept and the user sees everything in the "Integrated chat": do not report or summarize the conversation; talk with the other agent until it is done, without stopping to ask the user.
+Each tab is an instance <model>[@<role>[@<name>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev "task" opens the tab if it does not exist; --new opens another one with the same role; --model <model> picks the LLM when opening. Large work becomes a task, with its own worktree, branch and agent: ask-agent --task new "title" --start --file <request.md>.
+Text with accents goes in a file (--file <file>): through standard input the Windows shell turns accents into "?".
+When another agent sends you a message, answer with the command it shows (ask-agent --reply <number> "answer" or --file <file>): only then does the answer reach it.
+The agents form a team (boss and subordinates; the user can reorganize it). Before delegating or reporting, see your position with ask-agent --team; delegate preferably to the team and, when you finish something the boss asked for, report with ask-agent --boss "message".
+Project memory: memory/learnings/, one .md per trap, decision or convention that cost time and the code does not show. Format: header --- title: … / summary: one line / touches: [globs of the files; optional] --- and a short body, with Why and How to apply. Before touching files, run ask-agent --learn <file>... (without arguments: the index and the state of the tasks; with files, it warns if another task touches them); when you find out something like that, create the file. ask-agent --outline <file>... shows the signatures with the line, so you read only the part of a large file you need (offset).
 <!-- agentdeck:end -->
 
-## Memória do projeto
+## Project memory
 
-A documentação e a memória do projeto ficam em `memory/`, versionadas no git. Leia antes de mexer no que não conhece:
+The project's documentation and memory live in `memory/`, versioned in git. Read them before touching what you do not know:
 
-- `memory/GERAL.md`: ponto de partida, com a visão geral e o mapa dos outros documentos e das regras de cada um.
-- `memory/AGENTDECK.md`: visão e rumo do produto (o AgentDeck) e quem decide.
-- `memory/ARCHITECTURE.md`: como o código está organizado (crates, módulos, fluxos).
-- `memory/MANUTENCAO.md`: como compilar, testar e manter.
-- `memory/pendencias.md`: o trabalho que falta, em ordem de prioridade.
-- `memory/testes.md`: roteiro de testes manuais no Windows.
+- `memory/OVERVIEW.md`: the starting point, with the overview and the map of the other documents and their rules.
+- `memory/AGENTDECK.md`: the product's vision and direction (AgentDeck) and who decides.
+- `memory/ARCHITECTURE.md`: how the code is organized (crates, modules, flows).
+- `memory/MAINTENANCE.md`: how to build, test and maintain.
+- `memory/backlog.md`: the work left, in priority order.
+- `memory/manual-tests.md`: the manual test script on Windows.
 
-A memória funciona em duas camadas:
+The memory works in two layers:
 
-- **Aprendizados** (longo prazo): `memory/aprendizados/`, um arquivo por armadilha, decisão ou convenção que não é óbvia no código. O formato e quando criar estão em `memory/aprendizados/README.md`. Para ver os que valem para os arquivos em que você vai mexer, rode `ask-agent --learn <arquivo> [<arquivo>...]`.
-- **Situação atual** (curto prazo): no início de cada tarefa, o app entrega as outras tarefas em andamento, os arquivos que elas mexem e os últimos commits da base. Fora de tarefa, consulte `ask-agent --task list` e `git log`.
+- **Learnings** (long term): `memory/learnings/`, one file per trap, decision or convention that is not obvious in the code. The format and when to create one are in `memory/learnings/README.md`. To see the ones that apply to the files you are going to touch, run `ask-agent --learn <file> [<file>...]`.
+- **Current situation** (short term): at the start of each task, the app delivers the other tasks in progress, the files they touch and the latest commits of the base. Outside a task, check `ask-agent --task list` and `git log`.

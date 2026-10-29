@@ -274,7 +274,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
             Ok(v) => v,
             Err((status, body)) => return reply(req, status, body),
         };
-        let caller = match caller(&core, &auth, &msg, "usuário") {
+        let caller = match caller(&core, &auth, &msg, crate::instances::USER) {
             Ok(c) => c,
             Err(e) => return reply(req, 400, json!({ "error": e })),
         };
@@ -326,7 +326,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
         Ok(v) => v,
         Err((status, body)) => return reply(req, status, body),
     };
-    let default_from = if route == "/ask" { "usuário" } else { "" };
+    let default_from = if route == "/ask" { crate::instances::USER } else { "" };
     let caller = match caller(&core, &auth, &msg, default_from) {
         Ok(c) => c,
         Err(e) => return reply(req, 400, json!({ "error": e })),
@@ -386,8 +386,11 @@ fn caller(core: &Core, auth: &Auth, msg: &Value, default_from: &str) -> Result<C
     match auth {
         Auth::Agent(c) => Ok(c.clone()),
         Auth::Master => {
-            let from = js_string_or(msg.get("from"), default_from).to_lowercase();
-            if from != "usuário" && Ident::parse(&from).is_none() {
+            let mut from = js_string_or(msg.get("from"), default_from).to_lowercase();
+            if from == crate::instances::LEGACY_USER {
+                from = crate::instances::USER.to_owned();
+            }
+            if from != crate::instances::USER && Ident::parse(&from).is_none() {
                 return Err(format!("invalid sender: \"{}\"", from.escape_debug()));
             }
             let project = match msg.get("project").and_then(Value::as_str).filter(|p| !p.is_empty()) {
@@ -1027,7 +1030,7 @@ fn tasks_route(core: &Core, mut req: Request, auth: &Auth, bodies: &Arc<AtomicU6
     if let Some(p) = query_project.filter(|_| !fields.contains_key("project")) {
         fields.insert("project".into(), Value::String(p));
     }
-    let caller = match caller(core, auth, &msg, "usuário") {
+    let caller = match caller(core, auth, &msg, crate::instances::USER) {
         Ok(c) => c,
         Err(e) => return reply(req, 400, json!({ "error": e })),
     };
@@ -1168,8 +1171,8 @@ mod tests {
 
     #[test]
     fn js_coercions() {
-        assert_eq!(js_string_or(None, "usuário"), "usuário");
-        assert_eq!(js_string_or(Some(&json!("")), "usuário"), "usuário");
+        assert_eq!(js_string_or(None, "user"), "user");
+        assert_eq!(js_string_or(Some(&json!("")), "user"), "user");
         assert_eq!(js_string_or(Some(&json!("claude")), "x"), "claude");
         assert_eq!(js_string_or(Some(&json!(5)), "x"), "5");
         assert_eq!(js_depth(Some(&json!(1))), 1);

@@ -1,7 +1,7 @@
-# Build do Rust
+# Rust build
 target/
 
-# Sistema Operacional & Arquivos Temporários
+# Operating system and temporary files
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -10,47 +10,49 @@ desktop.ini
 $RECYCLE.BIN/
 
 
-# Modelos neurais do Whisper (grandes arquivos binários baixados sob demanda)
-# O modelo ggml-large-v3-turbo.bin possui ~1.6 GB e é baixado na 1ª execução
+# Whisper neural models (large binaries downloaded on demand)
+# The ggml-large-v3-turbo.bin model is ~1.6 GB and is downloaded when dictation is installed
 whisper/models/*.bin
 !whisper/models/README.md
 !whisper/models/.gitkeep
 
-# Arquivos temporários e binários pesados de GPU baixados pelo app
+# Temporary files and heavy GPU binaries downloaded by the app
 whisper/*.zip
 whisper/bin-cuda/
 
-# Dos binários pré-compilados do whisper.cpp o app só usa o whisper-cli e as DLLs dele: os exemplos,
-# testes e ferramentas que vêm no pacote (e as DLLs só deles) ficam fora do repositório.
+# Of the precompiled whisper.cpp binaries the app only uses whisper-cli and its DLLs: the examples,
+# tests and tools that come in the package (and the DLLs only they use) stay out of the repository.
 whisper/bin-*/**/*.exe
 !whisper/bin-*/**/whisper-cli.exe
 whisper/bin-*/**/llama.dll
 whisper/bin-*/**/SDL2.dll
 whisper/bin-*/**/parakeet.dll
 
-# Código-fonte externo do whisper.cpp e pastas de compilação intermediária
+# External whisper.cpp source and intermediate build folders
 whisper/src/
 
-# Dados de execução local e retenção do usuário (anexos efêmeros, prints, sessões)
-# (tudo em dados/ fica de fora, menos o README e a pasta anexos/ vazia)
-dados/*
-!dados/README.md
-!dados/anexos/
-dados/anexos/*
-!dados/anexos/.gitkeep
+# Local runtime data (attachments, screenshots, sessions, tasks)
+# (everything in data/ stays out, except the README and the empty attachments/ folder)
+data/*
+!data/README.md
+!data/attachments/
+data/attachments/*
+!data/attachments/.gitkeep
+# The data folder of older versions (moved to data/ on the next start)
+dados/
 
-# Logs e variáveis de ambiente locais
+# Logs and local environment variables
 *.log
 .env
 .env.local
 
-# Ambientes de desenvolvimento e IDEs
+# Development environments and IDEs
 .vscode/
 .idea/
 .gemini/
 
-# Worktrees temporários de agentes (Claude Code)
+# Temporary agent worktrees (Claude Code)
 .claude/worktrees/
 
-# Worktrees e pastas das tarefas da mesa do AgentDeck
+# Worktrees and folders of the AgentDeck tasks desk
 /.agentdeck/

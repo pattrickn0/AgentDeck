@@ -18,6 +18,12 @@ pub const SEP: char = '@';
 /// Implicit role of an instance without a role.
 pub const MAIN_ROLE: &str = "main";
 
+/// The sender and task creator that stands for the user (a protocol value: bridge requests and saved tasks).
+pub const USER: &str = "user";
+
+/// The value [`USER`] had before the English rename; requests and files that still carry it are read as [`USER`].
+pub const LEGACY_USER: &str = "usuário";
+
 /// Separator between the project and the id in scoped keys (never appears in an id).
 pub const SCOPE_SEP: char = '#';
 
@@ -283,7 +289,7 @@ mod tests {
         }
         assert!(Ident::parse(&format!("claude@{}", "a".repeat(33))).is_none());
         // The model is validated too: the id goes into prompts typed into other tabs.
-        for s in ["cla ude", "claude\"", "claude\x1b[201~", "claude\n", "a&b", "x<y", "usuário"] {
+        for s in ["cla ude", "claude\"", "claude\x1b[201~", "claude\n", "a&b", "x<y", "naïve"] {
             assert!(Ident::parse(s).is_none(), "{s:?}");
         }
         assert!(Ident::parse("outro:user/custom:latest").is_some());

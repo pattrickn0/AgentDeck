@@ -182,14 +182,14 @@ impl Deck {
     /// The clipboard is read here, on the UI thread: two threads on it at the same time corrupted the
     /// Windows heap (`0xC0000374`). Only the conversion to PNG and the attach go to the background.
     fn check_clipboard_image(&self, egui_has_focus: bool) {
-        let target =
-            if egui_has_focus && self.right_view == RightView::Tarefas && matches!(self.tasks.view, crate::tasks_ui::TasksView::New) {
-                AttachTarget::TaskForm(self.active_project.clone())
-            } else if let Some(tab) = self.active_tab().filter(|t| t.alive) {
-                AttachTarget::Tab(tab.uid)
-            } else {
-                return;
-            };
+        let target = if egui_has_focus && self.right_view == RightView::Tasks && matches!(self.tasks.view, crate::tasks_ui::TasksView::New)
+        {
+            AttachTarget::TaskForm(self.active_project.clone())
+        } else if let Some(tab) = self.active_tab().filter(|t| t.alive) {
+            AttachTarget::Tab(tab.uid)
+        } else {
+            return;
+        };
         let Ok(mut cb) = arboard::Clipboard::new() else { return };
         if cb.get_text().is_ok_and(|t| !t.is_empty()) {
             return;

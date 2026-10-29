@@ -320,10 +320,10 @@ mod tests {
     #[test]
     fn captures_and_feeds_stdin() {
         let mut cmd = Command::new("sh");
-        cmd.args(["-c", "cat; echo erro >&2; exit 3"]);
+        cmd.args(["-c", "cat; echo error >&2; exit 3"]);
         let c = run_captured(cmd, Some(b"ola".to_vec()), Duration::from_secs(10), None, None).expect("run");
         assert_eq!(c.stdout, "ola");
-        assert_eq!(c.stderr.trim(), "erro");
+        assert_eq!(c.stderr.trim(), "error");
         assert_eq!(c.exit, Exit::Code(Some(3)));
     }
 

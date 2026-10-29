@@ -35,7 +35,7 @@ pub fn tab_file_refs_text(kind: &str, paths: &[String]) -> String {
     format!("{joined} ")
 }
 
-/// Appends the attachment list (absolute paths under `dados/anexos`) to the end of the task
+/// Appends the attachment list (absolute paths under `data/attachments`) to the end of the task
 /// request when the "New task" form has attachments. The request is read by an agent, so the
 /// heading is English.
 pub fn append_brief_attachments(brief: &str, attachments: &[PathBuf]) -> String {
@@ -78,41 +78,41 @@ mod tests {
 
     #[test]
     fn tab_file_reference_per_cli() {
-        assert_eq!(tab_file_ref("claude", "dados/anexos/a.png"), "@dados/anexos/a.png");
+        assert_eq!(tab_file_ref("claude", "data/attachments/a.png"), "@data/attachments/a.png");
         assert_eq!(tab_file_ref("claude", "my folder/a.png"), "@\"my folder/a.png\"");
-        assert_eq!(tab_file_ref("antigravity", "dados/anexos/a.png"), "dados/anexos/a.png");
+        assert_eq!(tab_file_ref("antigravity", "data/attachments/a.png"), "data/attachments/a.png");
         assert_eq!(tab_file_ref("opencode", "my folder/a.png"), "\"my folder/a.png\"");
         assert_eq!(
-            tab_file_refs_text("claude", &["dados/anexos/1.png".into(), "folder 2/b.txt".into()]),
-            "@dados/anexos/1.png @\"folder 2/b.txt\" "
+            tab_file_refs_text("claude", &["data/attachments/1.png".into(), "folder 2/b.txt".into()]),
+            "@data/attachments/1.png @\"folder 2/b.txt\" "
         );
         assert_eq!(
-            tab_file_refs_text("codex", &["dados/anexos/1.png".into(), "folder 2/b.txt".into()]),
-            "dados/anexos/1.png \"folder 2/b.txt\" "
+            tab_file_refs_text("codex", &["data/attachments/1.png".into(), "folder 2/b.txt".into()]),
+            "data/attachments/1.png \"folder 2/b.txt\" "
         );
         assert_eq!(tab_file_refs_text("claude", &[]), "");
     }
 
     #[test]
     fn brief_attachments_appended_at_end() {
-        let p1 = PathBuf::from(r"C:\proj\dados\anexos\1a-print.png");
-        let p2 = PathBuf::from(r"C:\proj\dados\anexos\2b-log.txt");
+        let p1 = PathBuf::from(r"C:\proj\data\attachments\1a-print.png");
+        let p2 = PathBuf::from(r"C:\proj\data\attachments\2b-log.txt");
         assert_eq!(append_brief_attachments("Fix bug", &[]), "Fix bug");
         assert_eq!(
             append_brief_attachments("Fix bug", &[p1.clone(), p2.clone()]),
-            "Fix bug\n\nAttachments:\n- C:\\proj\\dados\\anexos\\1a-print.png\n- C:\\proj\\dados\\anexos\\2b-log.txt"
+            "Fix bug\n\nAttachments:\n- C:\\proj\\data\\attachments\\1a-print.png\n- C:\\proj\\data\\attachments\\2b-log.txt"
         );
-        assert_eq!(append_brief_attachments("", &[p1]), "Attachments:\n- C:\\proj\\dados\\anexos\\1a-print.png");
+        assert_eq!(append_brief_attachments("", &[p1]), "Attachments:\n- C:\\proj\\data\\attachments\\1a-print.png");
     }
 
     #[test]
     fn chip_labels() {
-        assert_eq!(chip_label("dados/anexos/1a2b3c-photo.png"), "photo.png");
-        assert_eq!(chip_label("dados/anexos/Photo.png"), "Photo.png");
+        assert_eq!(chip_label("data/attachments/1a2b3c-photo.png"), "photo.png");
+        assert_eq!(chip_label("data/attachments/Photo.png"), "Photo.png");
         assert_eq!(chip_label("x/abc-def-ghi.txt"), "def-ghi.txt");
         assert_eq!(chip_label("nohyphen"), "nohyphen");
         assert_eq!(chip_label("C:/Users/x/AB-1.png"), "AB-1.png");
-        assert_eq!(chip_label(r"C:\dados\anexos\1a2b-photo.png"), "photo.png");
+        assert_eq!(chip_label(r"C:\data\attachments\1a2b-photo.png"), "photo.png");
     }
 
     #[test]

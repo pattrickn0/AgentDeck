@@ -21,46 +21,46 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - name: Dependências de sistema (Linux)
+      - name: System dependencies (Linux)
         if: runner.os == 'Linux'
-        # Sem GTK: os diálogos usam o xdg-desktop-portal (rfd com `xdg-portal`), não o GTK3.
+        # No GTK: the dialogs use xdg-desktop-portal (rfd with `xdg-portal`), not GTK3.
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
-      - name: Formatação
+      - name: Formatting
         run: cargo fmt --all -- --check
       - name: Build
         run: cargo build --workspace --locked
-      - name: Build sem áudio
+      - name: Build without audio
         run: cargo build -p agentdeck --no-default-features --locked
-      - name: Testes
+      - name: Tests
         shell: bash
         run: set -o pipefail; cargo test --workspace --locked 2>&1 | tee ci.log
       - name: Clippy
         shell: bash
         run: set -o pipefail; cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee ci.log
-      # O log só baixa com login; as anotações saem na API pública (ver o script).
-      - name: Resumo da falha
+      # The log only downloads when signed in; the annotations come from the public API (see the script).
+      - name: Failure summary
         if: failure()
         shell: bash
-        run: bash scripts/ci-falha.sh ci.log
+        run: bash scripts/ci-failure.sh ci.log
 
   fedora:
     name: fedora (container)
-    # O GitHub não tem runner de Fedora: um contêiner com as dependências do README. Só build e
-    # testes; formatação e clippy ficam no job acima para não duplicar o desvio de rustfmt da base.
+    # GitHub has no Fedora runner: a container with the README dependencies. Only build and
+    # tests; formatting and clippy stay in the job above so the codebase's rustfmt deviation is not duplicated.
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
-      - name: Dependências de sistema (Fedora)
+      - name: System dependencies (Fedora)
         run: dnf install -y gcc gcc-c++ git pkgconf-pkg-config alsa-lib-devel libxkbcommon-devel curl tar gzip
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --workspace --locked
-      - name: Testes
+      - name: Tests
         shell: bash
         run: set -o pipefail; cargo test --workspace --locked 2>&1 | tee ci.log
-      - name: Resumo da falha
+      - name: Failure summary
         if: failure()
         shell: bash
-        run: bash scripts/ci-falha.sh ci.log
+        run: bash scripts/ci-failure.sh ci.log

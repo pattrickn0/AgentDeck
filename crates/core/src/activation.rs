@@ -1,7 +1,7 @@
 //! Second opening of the app: instead of refusing ("another window is already using the data folder"), the new
 //! instance asks the live one to show its window (`POST /activate` on the bridge) and exits silently.
 //!
-//! The live instance writes the bridge port and token to `dados/.agentdeck.bridge` after starting the bridge and
+//! The live instance writes the bridge port and token to `data/.agentdeck.bridge` after starting the bridge and
 //! deletes the file on shutdown. The file alone does not prove that an instance exists (a crash leaves an old one):
 //! the folder lock decides ([`crate::lock_data_dir`]), and whoever takes the lock deletes the stale file.
 

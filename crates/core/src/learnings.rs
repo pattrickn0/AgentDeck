@@ -1,6 +1,6 @@
 //! Long-term memory: the project's "learnings".
 //!
-//! Each learning is a `.md` file in `memory/aprendizados/`, versioned in git, with a frontmatter:
+//! Each learning is a `.md` file in `memory/learnings/`, versioned in git, with a frontmatter:
 //!
 //! ```text
 //! ---
@@ -25,7 +25,19 @@ use std::path::Path;
 use regex::Regex;
 
 /// Folder of the learnings, relative to the repository root.
-pub const DIR: &str = "memory/aprendizados";
+pub const DIR: &str = "memory/learnings";
+
+/// The folder's name before the English rename. A project that still has it (and not [`DIR`]) is read from there.
+pub const LEGACY_DIR: &str = "memory/aprendizados";
+
+/// The learnings folder of `root`, relative to it: [`DIR`], or [`LEGACY_DIR`] when only that one exists.
+pub fn dir_of(root: &Path) -> &'static str {
+    if !root.join(DIR).is_dir() && root.join(LEGACY_DIR).is_dir() {
+        LEGACY_DIR
+    } else {
+        DIR
+    }
+}
 /// Budget (in characters) of the full texts delivered at the start of a task; what goes over becomes only the index line.
 pub const START_BUDGET: usize = 6_000;
 /// Budget of the full texts of `ask-agent --learn`.
@@ -41,7 +53,7 @@ const MAX_PATHS: usize = 60;
 /// A learning read from the folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Learning {
-    /// Path relative to the repository root (`memory/aprendizados/accents.md`), with `/`.
+    /// Path relative to the repository root (`memory/learnings/accents.md`), with `/`.
     pub file: String,
     pub titulo: String,
     pub resumo: String,
@@ -166,10 +178,11 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Reads `memory/aprendizados/*.md` from `root`, in name order. Missing folder = no learning. Invalid, too
+/// Reads `memory/learnings/*.md` (or the legacy `memory/aprendizados/*.md`, see [`dir_of`]) from `root`, in name order. Missing folder = no learning. Invalid, too
 /// large or unreadable file is skipped with a warning in the log (the folder `README.md` never counts).
 pub fn load(root: &Path) -> Vec<Learning> {
-    let dir = root.join(DIR);
+    let base = dir_of(root);
+    let dir = root.join(base);
     let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
     let mut files: Vec<_> = entries
         .filter_map(Result::ok)
@@ -180,7 +193,7 @@ pub fn load(root: &Path) -> Vec<Learning> {
     let mut out = Vec::new();
     for entry in files.into_iter().take(MAX_FILES) {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let rel = format!("{DIR}/{name}");
+        let rel = format!("{base}/{name}");
         if entry.metadata().map_or(true, |m| !m.is_file() || m.len() > MAX_FILE_BYTES) {
             log::warn!("learning ignored ({rel}): it is not a file or it goes over {} KB", MAX_FILE_BYTES / 1024);
             continue;
@@ -359,7 +372,7 @@ pub fn render_with(all: &[Learning], paths: &[String], budget: usize, index_budg
 }
 
 /// How to create a learning, for the project that has neither the folder nor the `README.md` with the format.
-const FORMAT_HELP: &str = "To create one, write memory/aprendizados/<short-name>.md (one per trap, decision or convention that cost time and the code does not show):
+const FORMAT_HELP: &str = "To create one, write memory/learnings/<short-name>.md (one per trap, decision or convention that cost time and the code does not show):
 
 ---
 title: one line
@@ -449,7 +462,7 @@ impl crate::Core {
         let project_root = repo.as_ref().map(|r| r.root.clone());
         let work_root = self.task_cwd(project, instance).or_else(|| project_root.clone());
         let Some(work_root) = work_root else {
-            return Err("could not find the project repository: the learnings live in its memory/aprendizados/".into());
+            return Err("could not find the project repository: the learnings live in its memory/learnings/".into());
         };
         let roots: Vec<std::path::PathBuf> = [Some(work_root.clone()), project_root].into_iter().flatten().collect();
         let paths: Vec<String> = paths.iter().map(|p| relativize(p, &roots)).filter(|p| !p.is_empty()).collect();
@@ -526,7 +539,7 @@ mod tests {
 
     #[test]
     fn a_well_formed_file_is_read() {
-        let l = parse("memory/aprendizados/a.md", GOOD).unwrap();
+        let l = parse("memory/learnings/a.md", GOOD).unwrap();
         assert_eq!((l.titulo.as_str(), l.resumo.as_str()), ("Acentos", "Use --file."));
         assert_eq!(l.touches, ["crates/cli/**", "crates/core/src/bridge.rs"]);
         assert_eq!(l.body, "The fact.\n\n**Why:** x.");
@@ -583,8 +596,8 @@ mod tests {
         assert!(glob_match("crates/**/tasks.rs", "crates/tasks.rs"));
         assert!(!glob_match("crates/cli/**", "crates/core/src/x.rs"));
         assert!(glob_match("crates/core/src/ta?ks.rs", "crates/core/src/tasks.rs"));
-        assert!(glob_match("memory/*.md", "memory/GERAL.md"));
-        assert!(!glob_match("memory/*.md", "memory/aprendizados/a.md"));
+        assert!(glob_match("memory/*.md", "memory/OVERVIEW.md"));
+        assert!(!glob_match("memory/*.md", "memory/learnings/a.md"));
         // Without a slash: the file name in any folder. Backslashes and `./` are normalized.
         assert!(glob_match("*.rs", "crates/core/src/tasks.rs"));
         assert!(glob_match("Cargo.toml", "crates/cli/Cargo.toml"));
@@ -680,8 +693,8 @@ mod tests {
         assert!(miss.contains("No specific learning") && !miss.contains("### T a") && miss.contains("### T g"), "{miss}");
         let empty = learn_report(&[], &strings(&["a.rs"]));
         assert!(empty.contains("has no learnings yet"));
-        // With no learnings (new project), the report teaches the format: there is no `memory/aprendizados/README.md` there.
-        assert!(empty.contains("memory/aprendizados/<short-name>.md") && empty.contains("title:") && empty.contains("summary:"), "{empty}");
+        // With no learnings (new project), the report teaches the format: there is no `memory/learnings/README.md` there.
+        assert!(empty.contains("memory/learnings/<short-name>.md") && empty.contains("title:") && empty.contains("summary:"), "{empty}");
     }
 
     #[test]
@@ -744,7 +757,7 @@ mod tests {
         // The real learnings of the project: a broken frontmatter would be silently ignored in the app.
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let files = std::fs::read_dir(root.join(DIR))
-            .expect("memory/aprendizados exists")
+            .expect("memory/learnings exists")
             .filter_map(Result::ok)
             .filter(|e| e.path().extension().is_some_and(|x| x == "md") && e.file_name() != "README.md")
             .count();

@@ -8,7 +8,7 @@
 //! `tasks/` (`lifecycle.rs`, `finish.rs`).
 
 /// Paths that no task reserves (excluded from overlap checking and the "out of scope" warning):
-/// every task modifies them, and they are already resolved during merge (see `memory/aprendizados/historico-mescla-por-uniao.md`).
+/// every task modifies them, and they are already resolved during merge (see `memory/learnings/history-merges-by-union.md`).
 /// Each item applies to itself and, if a directory, to everything inside it.
 pub const UNRESERVED: &[&str] = &["memory", "Cargo.lock"];
 
@@ -131,12 +131,12 @@ mod tests {
 
     #[test]
     fn memory_and_cargo_lock_reserve_nothing() {
-        assert!(!overlaps(&s(&["memory/pendencias.md"]), &s(&["memory/pendencias.md"])));
-        assert!(!overlaps(&s(&["memory"]), &s(&["memory/GERAL.md"])));
+        assert!(!overlaps(&s(&["memory/backlog.md"]), &s(&["memory/backlog.md"])));
+        assert!(!overlaps(&s(&["memory"]), &s(&["memory/OVERVIEW.md"])));
         assert!(!overlaps(&s(&["Cargo.lock"]), &s(&["cargo.lock"])));
-        assert!(overlaps(&s(&["crates/app", "memory/pendencias.md"]), &s(&["crates/app/src", "memory/pendencias.md"])));
-        assert!(!overlaps(&s(&["crates/app", "memory/pendencias.md"]), &s(&["crates/cli", "memory/pendencias.md"])));
-        assert!(is_unreserved("MEMORY/aprendizados/x.md") && !is_unreserved("memory2/x.md") && !is_unreserved("crates/memory"));
+        assert!(overlaps(&s(&["crates/app", "memory/backlog.md"]), &s(&["crates/app/src", "memory/backlog.md"])));
+        assert!(!overlaps(&s(&["crates/app", "memory/backlog.md"]), &s(&["crates/cli", "memory/backlog.md"])));
+        assert!(is_unreserved("MEMORY/learnings/x.md") && !is_unreserved("memory2/x.md") && !is_unreserved("crates/memory"));
     }
 
     #[test]
@@ -167,8 +167,13 @@ mod tests {
     #[test]
     fn outside_lists_files_the_scope_does_not_cover() {
         let scope = s(&["crates/core/src/tasks.rs", "crates/cli"]);
-        let files =
-            s(&["crates/core/src/tasks.rs", "crates/cli/src/bin/ask-agent.rs", "crates/core/src/git.rs", "memory/GERAL.md", "Cargo.lock"]);
+        let files = s(&[
+            "crates/core/src/tasks.rs",
+            "crates/cli/src/bin/ask-agent.rs",
+            "crates/core/src/git.rs",
+            "memory/OVERVIEW.md",
+            "Cargo.lock",
+        ]);
         assert_eq!(outside(&scope, &files), s(&["crates/core/src/git.rs"]));
         assert!(outside(&[], &files).is_empty(), "without scope there is no deviation");
         assert!(outside(&s(&["memory/x.md"]), &files).is_empty(), "scope with only unreserved paths also has no deviation");

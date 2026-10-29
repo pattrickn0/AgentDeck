@@ -1,6 +1,6 @@
 [package]
 name = "agentdeck-core"
-description = "Backend do AgentDeck: agentes, ponte HTTP, execução headless, mesas, workspace e transcrição."
+description = "AgentDeck backend: agents, HTTP bridge, headless runs, tasks desk, workspace and transcription."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -33,8 +33,8 @@ unicode-normalization = "0.1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Cota do Antigravity: no Linux o `agy` guarda o token no chaveiro do sistema (Secret Service, por D-Bus). A crate é
-# Rust puro (zbus), sem biblioteca C: não muda o que a CI e o README instalam. Ver `memory/LINUX.md`.
+# Antigravity quota: on Linux `agy` keeps the token in the system keyring (Secret Service, over D-Bus). The crate is
+# pure Rust (zbus), no C library: it does not change what CI and the README install. See `memory/LINUX.md`.
 [target.'cfg(target_os = "linux")'.dependencies]
 secret-service = { version = "5", default-features = false, features = ["rt-async-io-crypto-rust"] }
 
@@ -44,9 +44,9 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 [dev-dependencies]
 tempfile.workspace = true
 
-# Agente falso dos testes da ponte: um binário de verdade no lugar dos scripts de shell, para os mesmos
-# testes rodarem no Windows e no Unix. Os testes o copiam para o PATH de busca e escrevem o
-# comportamento ao lado (ver `tests/support/fake_agent.rs`).
+# Fake agent of the bridge tests: a real binary instead of shell scripts, so the same
+# tests run on Windows and Unix. The tests copy it to the search PATH and write the
+# behavior next to it (see `tests/support/fake_agent.rs`).
 [[bin]]
 name = "fake_agent"
 path = "tests/support/fake_agent.rs"
@@ -54,8 +54,8 @@ test = false
 bench = false
 doc = false
 
-# Régua da memória (mede as estratégias de entrega de aprendizados sobre o histórico do git). `test = true` faz o
-# `cargo test` rodar os testes unitários do exemplo.
+# Memory ruler (measures the learning delivery strategies over the git history). `test = true` makes
+# `cargo test` run the example's unit tests.
 [[example]]
 name = "memeval"
 test = true

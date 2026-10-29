@@ -1586,11 +1586,11 @@ mod tests {
 
     #[test]
     fn status_of_a_fresh_repository() {
-        let st = parse_status_v2(&z(&["# branch.oid (initial)", "# branch.head main", "? novo arquivo.txt"]));
+        let st = parse_status_v2(&z(&["# branch.oid (initial)", "# branch.head main", "? new file.txt"]));
         assert_eq!((st.head, st.branch.as_deref(), st.upstream, st.ahead, st.behind), (None, Some("main"), None, 0, 0));
         assert_eq!(
             st.entries,
-            [GitEntry { path: "novo arquivo.txt".into(), orig_path: None, index: '?', worktree: '?', kind: EntryKind::Untracked }]
+            [GitEntry { path: "new file.txt".into(), orig_path: None, index: '?', worktree: '?', kind: EntryKind::Untracked }]
         );
     }
 
@@ -1603,9 +1603,9 @@ mod tests {
             "# branch.ab +2 -3",
             "# stash 4",
             "1 .M N... 100644 100644 100644 aaaa bbbb a b.txt",
-            "1 A. N... 000000 100644 100644 0000 cccc ção/ü.txt",
-            "2 R. N... 100644 100644 100644 dddd eeee R100 novo nome.rs",
-            "velho nome.rs",
+            "1 A. N... 000000 100644 100644 0000 cccc naïve/ü.txt",
+            "2 R. N... 100644 100644 100644 dddd eeee R100 new name.rs",
+            "old name.rs",
             "u UU N... 100644 100644 100644 100644 h1 h2 h3 conflito.md",
             "? dir/",
         ]);
@@ -1619,9 +1619,9 @@ mod tests {
         assert_eq!(e.len(), 5);
         assert_eq!((e[0].path.as_str(), e[0].index, e[0].worktree), ("a b.txt", '.', 'M'));
         assert!(!e[0].staged() && e[0].unstaged());
-        assert_eq!((e[1].path.as_str(), e[1].index), ("ção/ü.txt", 'A'));
+        assert_eq!((e[1].path.as_str(), e[1].index), ("naïve/ü.txt", 'A'));
         assert!(e[1].staged() && !e[1].unstaged());
-        assert_eq!((e[2].path.as_str(), e[2].orig_path.as_deref(), e[2].kind), ("novo nome.rs", Some("velho nome.rs"), EntryKind::Renamed));
+        assert_eq!((e[2].path.as_str(), e[2].orig_path.as_deref(), e[2].kind), ("new name.rs", Some("old name.rs"), EntryKind::Renamed));
         assert_eq!((e[3].path.as_str(), e[3].kind), ("conflito.md", EntryKind::Unmerged));
         assert!(!e[3].staged() && !e[3].unstaged());
         assert_eq!((e[4].path.as_str(), e[4].kind), ("dir/", EntryKind::Untracked));
@@ -1816,13 +1816,13 @@ mod tests {
 
     #[test]
     fn branch_names_and_paths_are_checked() {
-        for ok in ["main", "feat/x", "fix-1.2", "user/ana/teste"] {
+        for ok in ["main", "feat/x", "fix-1.2", "user/ana/test"] {
             assert!(valid_branch_name(ok), "{ok}");
         }
         for bad in ["", "-f", "a b", "a..b", "a~1", "a^", "x:y", "a.lock", "a/", "/a", ".hidden", "a/.b", "@", "a@{1}", "a\\b", "a*"] {
             assert!(!valid_branch_name(bad), "{bad:?}");
         }
-        assert!(safe_rel("src/main.rs") && safe_rel("a b/ção.txt") && safe_rel("./a") && safe_rel("dir/"));
+        assert!(safe_rel("src/main.rs") && safe_rel("a b/naïve.txt") && safe_rel("./a") && safe_rel("dir/"));
         for bad in ["", "/etc/passwd", "/x", "../x", "a/../b", "a/../../x", "a\\..\\b", "\\\\server\\x", "\\x", "a\0b"] {
             assert!(!safe_rel(bad), "{bad:?}");
         }

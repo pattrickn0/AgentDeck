@@ -733,7 +733,7 @@ mod tests {
         let fx = serve(body(), Behavior { statuses: vec![500, 500, 500, 500], ..Default::default() });
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
-        let mut opts = fast("teste", None);
+        let mut opts = fast("test", None);
         opts.retries = 2;
         let err = run(&format!("{}/file", fx.base), &dest, &opts).0.expect_err("500");
         assert!(err.message.contains("HTTP 500"));
@@ -761,7 +761,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tmp");
         let dest = dir.path().join("out.bin");
         let digest = sha(&data);
-        let mut opts = fast("teste", Some(&digest));
+        let mut opts = fast("test", Some(&digest));
         opts.stall_timeout = Duration::from_millis(300);
         let (r, ev) = run(&format!("{}/file", fx.base), &dest, &opts);
         r.expect("download");
@@ -856,8 +856,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tmp");
         let part = dir.path().join("a.bin.part");
         let dest = dir.path().join("a.bin");
-        std::fs::write(&part, b"dados").expect("write");
+        std::fs::write(&part, b"data").expect("write");
         rename_with_retry(&part, &dest).expect("rename");
-        assert_eq!(std::fs::read(&dest).expect("read"), b"dados");
+        assert_eq!(std::fs::read(&dest).expect("read"), b"data");
     }
 }

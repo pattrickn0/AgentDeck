@@ -2,7 +2,7 @@
 
 Verification performed in tasks `t29` (2026-10-22) and `t33` (2026-10-23). This document explains **what was checked, how**,
 what was fixed, the dependencies for each distro, and what remains unverified. The manual Windows test script
-remains in [testes.md](testes.md); the Linux script is at the end here.
+remains in [manual-tests.md](manual-tests.md); the Linux script is at the end here.
 
 > **Summary:** the app compiles and passes tests on Ubuntu (CI) and now also on Fedora (container job). The interface
 > was manually validated only on Ubuntu X11; Wayland and a real Fedora desktop have not yet been tested. There is no
@@ -47,7 +47,7 @@ assert_eq!(sub_bs[0].rel_path, "zeta/in.json");   // panic on Linux
 on Unix the backslash is part of the filename, so `ws.join("zeta\\")` looks for a file named `zeta\` and returns
 empty. Fix in `crates/core/src/workspace.rs`: normalize the separator at the beginning of `read_dir`. The test remains
 valid (and passes) on Windows. See
-[aprendizados/caminho-com-barra-invertida-no-read-dir.md](aprendizados/caminho-com-barra-invertida-no-read-dir.md).
+[learnings/backslash-path-in-read-dir.md](learnings/backslash-path-in-read-dir.md).
 
 ### 2.2 CI stopped validating Linux (from Oct 22 until formatting debt was paid)
 
@@ -57,8 +57,8 @@ across all three jobs (Windows, Ubuntu, Fedora), including formatting.
 
 ### 2.3 Data folder in system-wide installation
 
-`AppPaths::detect()` always used the executable's directory for `dados/`, `workspace/`, and `whisper/`. Copying the binary
-to `/usr/local/bin` (root-owned directory) caused the app to fail when opening the lock (`dados/.agentdeck.lock` →
+`AppPaths::detect()` always used the executable's directory for `data/`, `workspace/`, and `whisper/`. Copying the binary
+to `/usr/local/bin` (root-owned directory) caused the app to fail when opening the lock (`data/.agentdeck.lock` →
 permission denied). Now, on Unix, if the folder is not writable (`access(2)`), data goes to `~/.local/share/AgentDeck`
 (XDG standard). Portable folder and development repository continue as before, and `AGENTDECK_HOME` still takes
 precedence. Fix in `crates/core/src/paths.rs`, with a test under `#[cfg(unix)]`.
@@ -94,7 +94,7 @@ in the background. Without a D-Bus session (SSH, container), the lookup silently
 as before; keyring reading only occurs when the home used is the system home, as was already the case on Windows. Also
 added support for the file `agy` writes when there is no keyring (`GEMINI_FORCE_FILE_STORAGE=true`, the SSH,
 container, and WSL fallback): `~/.gemini/antigravity-cli/antigravity-oauth-token`, after `~/.gemini/oauth_creds.json`
-in source precedence. See [aprendizados/antigravity-token-no-secret-service.md](aprendizados/antigravity-token-no-secret-service.md).
+in source precedence. See [learnings/antigravity-token-in-secret-service.md](learnings/antigravity-token-in-secret-service.md).
 
 To verify: `secret-tool lookup service gemini username antigravity` (`libsecret-tools` package on Ubuntu, `libsecret`
 on Fedora) prints the JSON and prompts to unlock the keyring if locked. With a valid token, quota appears on the next
@@ -120,7 +120,7 @@ What the app does not resolve, and why the README advises using the native app o
 - **Resizing and cursor**: these are precisely the failure points on WSLg Wayland; on X11 they should work, but nobody
   has opened the app there.
 
-See [aprendizados/wslg-forca-x11.md](aprendizados/wslg-forca-x11.md).
+See [learnings/wslg-forces-x11.md](learnings/wslg-forces-x11.md).
 
 ## 3. Dependencies
 
@@ -163,7 +163,7 @@ Agent CLIs: `npm install -g` of the same packages as Windows; Antigravity has it
 | PTY/terminal | `portable-pty` + `alacritty_terminal`; `TERM=xterm-256color`, `COLORTERM=truecolor` |
 | Terminal tab | `$SHELL` or `/bin/bash`; no `.cmd` shims (Windows only) |
 | Tab environment | `PATH` with app binary directory prepended; `AGENTDECK_*` variables; no `PYTHONUTF8`/MSYS |
-| Single instance | file lock at `dados/.agentdeck.lock` |
+| Single instance | file lock at `data/.agentdeck.lock` |
 | Git | `PATH` `git`, without shell, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, SSH in `BatchMode` |
 | GitHub | token via `git credential fill` and, if available, `gh auth token`; no disk persistence |
 | Agents | resolved via `which`/user directories; no `cmd.exe` |
@@ -196,7 +196,7 @@ test was `read_dir` (fixed here); the rest ran green on Ubuntu through `run 46`.
    notice. If a new dependency appears, check the “System dependencies” step log.
 9. **Formatting**: if `cargo fmt --all -- --check` fails again, no job runs tests — including Fedora. The entire codebase
    conforms to rustfmt: run `cargo fmt --all` and commit what it changes (see
-   [aprendizados/base-toda-no-rustfmt.md](aprendizados/base-toda-no-rustfmt.md)).
+   [learnings/whole-codebase-in-rustfmt.md](learnings/whole-codebase-in-rustfmt.md)).
 10. **WSLg**: X11 was forced (section 2.8), but nobody has opened the app inside WSLg. Still to check: maximized window
     (32 px shift), scaling (always 1, small UI on 4K), drag/resize, cursor, and Antigravity quota read from the keyring
     there. `WINIT_UNIX_BACKEND=wayland` reproduces the broken path, for comparison.
@@ -204,7 +204,7 @@ test was `read_dir` (fixed here); the rest ran green on Ubuntu through `run 46`.
 ## 6. Manual test script (Ubuntu and Fedora)
 
 Run in a separate data folder to avoid affecting real configuration:
-`AGENTDECK_HOME=/tmp/agentdeck-teste ./target/release/agentdeck`.
+`AGENTDECK_HOME=/tmp/agentdeck-test ./target/release/agentdeck`.
 
 **Installation and launch**
 
@@ -234,7 +234,7 @@ Run in a separate data folder to avoid affecting real configuration:
 
 **Dictation**
 
-- [ ] With microphone: hold shortcut, speak, and see text appear in tab; temporary `.wav` disappears from `dados/`.
+- [ ] With microphone: hold shortcut, speak, and see text appear in tab; temporary `.wav` disappears from `data/`.
 - [ ] Without microphone or without `libgomp`: app explains what is missing instead of crashing.
 
 **WSLg (from Windows, with app built in WSL)**
@@ -247,7 +247,7 @@ Run in a separate data folder to avoid affecting real configuration:
 
 **Wrap-up**
 
-- [ ] `dados/agentdeck.log` and `dados/crash.log` exist and have no repeated errors.
+- [ ] `data/agentdeck.log` and `data/crash.log` exist and have no repeated errors.
 - [ ] On closing the app, no orphaned `whisper-cli` or agent processes remain (`ps -ef | grep -E "whisper|claude"`).
 
 ## 7. Maintenance

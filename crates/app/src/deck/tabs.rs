@@ -219,7 +219,7 @@ impl Deck {
         }
         self.activate(idx);
         self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), answer: false });
-        self.add_feed(FeedEntry::new(FeedKind::User, Some("você"), Some(&id), prompt));
+        self.add_feed(FeedEntry::new(FeedKind::User, Some("you"), Some(&id), prompt));
         Ok(self.tabs[idx].label.clone())
     }
 
@@ -566,7 +566,7 @@ impl Deck {
         self.persist_tabs_now();
     }
 
-    /// Folder of the terminal's diagnostic recordings (`dados/pty`).
+    /// Folder of the terminal's diagnostic recordings (`data/pty`).
     pub fn pty_dir(&self) -> PathBuf {
         self.core.paths().data_dir.join("pty")
     }

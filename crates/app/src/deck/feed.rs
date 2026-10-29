@@ -41,7 +41,7 @@ impl Deck {
         if self.feed_near_bottom {
             self.feed_scroll_to_bottom = true;
         }
-        if self.right_view != RightView::Conversa && e.kind != FeedKind::Thinking {
+        if self.right_view != RightView::Chat && e.kind != FeedKind::Thinking {
             self.unseen += 1;
         }
     }
@@ -50,9 +50,9 @@ impl Deck {
     pub fn set_right_view(&mut self, view: RightView) {
         let opening_git = view == RightView::Git && self.right_view != RightView::Git;
         let opening_github = view == RightView::GitHub && self.right_view != RightView::GitHub;
-        let opening_tasks = view == RightView::Tarefas && self.right_view != RightView::Tarefas;
+        let opening_tasks = view == RightView::Tasks && self.right_view != RightView::Tasks;
         self.right_view = view;
-        if view == RightView::Conversa {
+        if view == RightView::Chat {
             self.unseen = 0;
         }
         if opening_git {
@@ -84,7 +84,7 @@ impl Deck {
 
     pub(super) fn debug_feed(&mut self) {
         let mk = |kind, from: Option<&str>, to: Option<&str>, text: &str| FeedEntry::new(kind, from, to, text);
-        self.add_feed(mk(FeedKind::User, Some("você"), Some("claude"), "Review @README.md and propose improvements."));
+        self.add_feed(mk(FeedKind::User, Some("you"), Some("claude"), "Review @README.md and propose improvements."));
         self.add_feed(mk(FeedKind::Ask, Some("claude"), Some("antigravity"), "Can you check whether the Windows build still uses ConPTY?"));
         self.add_feed(mk(
             FeedKind::Answer,

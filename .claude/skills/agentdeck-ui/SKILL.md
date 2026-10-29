@@ -35,7 +35,7 @@ Decisions the user already made (do not reopen unless they ask):
 
 - **Every text the user reads goes through `t!`** (`use agentdeck_core::t;`): `t!("Close")` is `&'static str`,
   `t!("Model: {model}", model = m)` is `String`. The English text is the key; add the pair `("English", "Português")`
-  to the area file in `crates/core/src/i18n/pt_br/` (see `memory/aprendizados/i18n-english-key-and-area-files.md`).
+  to the area file in `crates/core/src/i18n/pt_br/` (see `memory/learnings/i18n-english-key-and-area-files.md`).
   The app is English by default; pt-BR is chosen in ☰ > Language and switches at once.
 - Write the English first, short sentences; tooltips say what the click does. The pt-BR entry keeps the same meaning
   and the same `{placeholders}`. `cargo test -p agentdeck-core i18n` fails on a `t!` without a pt-BR entry.
@@ -87,7 +87,7 @@ to the system font.
   of the split view is a `Well` island. Dividers sit in the gap (`paint_splitter` only shows with the mouse).
 - Common components in `ui/mod.rs`: `segmented`, `button` (`ButtonKind::{Primary, Secondary, Ghost}`), `button_danger`,
   `section_label`, `chip`, `separator`, `galley_spaced`.
-- Logo: `Icon::AgentDeck` (`icons.rs`, `LOGO_CARDS`); the `.ico` comes from `scripts/gerar-icone.ps1`.
+- Logo: `Icon::AgentDeck` (`icons.rs`, `LOGO_CARDS`); the `.ico` comes from `scripts/generate-icon.ps1`.
 
 ## Measurements
 

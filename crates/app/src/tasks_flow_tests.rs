@@ -71,7 +71,7 @@ impl Env {
         let paths = AppPaths {
             app_dir: root.clone(),
             bin_dir: root.join("bin"),
-            data_dir: root.join("dados"),
+            data_dir: root.join("data"),
             default_workspace: root.join("ws"),
             whisper_dir: root.join("whisper"),
             config_file: root.join("cfg").join("config.json"),
@@ -174,7 +174,7 @@ fn the_form_creates_and_starts_a_task_then_review_and_merge_run_off_the_ui_threa
     env.deck.tasks_submit_form();
     assert!(!env.deck.tasks.form.busy);
     env.deck.tasks.form.title = "Task with a bad base".into();
-    env.deck.tasks.form.base = "nao-existe".into();
+    env.deck.tasks.form.base = "does-not-exist".into();
     env.deck.tasks_submit_form();
     env.pump("the validation error", |d| !d.tasks.form.busy);
     let err = env.deck.tasks.form.error.clone().expect("inline error");
@@ -299,11 +299,11 @@ fn a_task_whose_scope_overlaps_waits_in_the_queue_and_starts_by_itself_when_the_
 
     // The form's scope (one path per line or separated by commas) goes to the core.
     env.deck.tasks_open_new();
-    env.deck.tasks.form.scope = " crates/core \n\nmemory/GERAL.md, crates\\cli ".into();
+    env.deck.tasks.form.scope = " crates/core \n\nmemory/OVERVIEW.md, crates\\cli ".into();
     env.deck.tasks.form.title = "Touches the core".into();
     env.deck.tasks_submit_form();
     env.pump("the creation", |d| !d.tasks.form.busy);
-    assert_eq!(env.task("t1").scope, ["crates/core", "memory/GERAL.md", "crates/cli"]);
+    assert_eq!(env.task("t1").scope, ["crates/core", "memory/OVERVIEW.md", "crates/cli"]);
     assert_eq!(env.task("t1").status, TaskStatus::Running);
     assert!(env.deck.tasks.form.scope.is_empty(), "the form goes back empty");
     env.pump("the agent's tab", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
@@ -504,7 +504,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     let mut env = Env::start();
     env.pump("os agentes", |d| d.initialized);
     // The project already has learnings in the base: a global one, one for a.txt and one for another area.
-    let dir = env.ws.join("memory").join("aprendizados");
+    let dir = env.ws.join("memory").join("learnings");
     std::fs::create_dir_all(&dir).expect("dir");
     let write = |name: &str, touches: &str, body: &str| {
         let text = format!("---\ntitle: Learning {name}\nsummary: Summary {name}.\ntouches: {touches}\n---\n{body}\n");
@@ -517,7 +517,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     git(&env.ws, &["commit", "-q", "-m", "docs: learnings"]);
 
     let project = env.project();
-    let tasks_dir = env._tmp.path().join("dados").join("tarefas");
+    let tasks_dir = env._tmp.path().join("data").join("tasks");
     fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
         let spec =
             agentdeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("user".into()), ..Default::default() };
@@ -534,7 +534,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     assert!(first.contains("Other tasks in progress: none.") && first.contains("docs: learnings"), "{first}");
     // What does not match becomes only the index line.
     assert!(
-        first.contains("- memory/aprendizados/of-other-area.md — Summary of-other-area.") && !first.contains("Only for the code."),
+        first.contains("- memory/learnings/of-other-area.md — Summary of-other-area.") && !first.contains("Only for the code."),
         "{first}"
     );
 
@@ -571,7 +571,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     }
     let mut env = Env::start();
     env.pump("os agentes", |d| d.initialized);
-    let dir = env.ws.join("memory").join("aprendizados");
+    let dir = env.ws.join("memory").join("learnings");
     std::fs::create_dir_all(&dir).expect("dir");
     for (name, touches, body) in
         [("global", "[]", "Applies to everyone."), ("of-a", "[a.txt]", "Careful with a."), ("of-b", "[b.txt]", "Careful with b.")]
@@ -583,7 +583,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     git(&env.ws, &["commit", "-q", "-m", "docs: learnings"]);
 
     let project = env.project();
-    let tasks_dir = env._tmp.path().join("dados").join("tarefas");
+    let tasks_dir = env._tmp.path().join("data").join("tasks");
     fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
         let spec =
             agentdeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("user".into()), ..Default::default() };
@@ -1119,7 +1119,7 @@ fn editing_a_file_saves_it_as_it_was_and_asks_before_losing_what_was_typed() {
     assert!(env.deck.docs.get(uid).expect("aberto").dirty());
     env.deck.push_action(crate::deck::Action::SaveDoc);
     env.deck.before_frame(&env.ctx);
-    assert!(src(&mut env).saving, "grava numa thread");
+    assert!(src(&mut env).saving, "saves in a thread");
     env.pump("the save", |d| !d.docs.get(uid).is_some_and(|t| t.dirty() || matches!(&t.state, DocState::Source(s) if s.saving)));
     assert_eq!(std::fs::read(&path).expect("r"), b"fn a() {}\r\nfn c() {}\r\n");
     // The watcher's re-read of what was just saved warns of nothing.
@@ -1268,7 +1268,7 @@ fn the_editor_takes_typing_the_search_and_the_diff_selects_and_copies() {
 
     // Diff: selects by dragging and copies with Ctrl+C only the code of the lines (no number, no + or −).
     let id = env.create_from_form("For the diff", true);
-    env.agent_commits(&id, "novo.rs", "// one\nfn two() {}\n");
+    env.agent_commits(&id, "new.rs", "// one\nfn two() {}\n");
     let (diff_uid, _) = env.open_task_diff(&id);
     draw_frame(&mut env, vec![]);
     draw_frame(&mut env, vec![]);
@@ -1383,15 +1383,15 @@ fn a_hidden_window_still_types_the_queued_messages_and_the_late_answers_and_neve
     background_until(&mut env, "the terminal to speak", |d| {
         d.tabs[tab].session.shared.output_seq.load(std::sync::atomic::Ordering::Relaxed) > 0
     });
-    env.deck.on_deliver(delivery("echo mensagem-minimizada-1", false));
-    background_until(&mut env, "the message to be typed", |d| screen_has(d, tab, "mensagem-minimizada-1"));
+    env.deck.on_deliver(delivery("echo minimized-message-1", false));
+    background_until(&mut env, "the message to be typed", |d| screen_has(d, tab, "minimized-message-1"));
 
     // The "typed later" answer goes out the same way. (The tab is a shell's, which the rule refuses for safety: it is made to
     // pass for a CLI just for the rule; the PTY is still a shell's.)
     env.deck.tabs[tab].kind = "claude".into();
     background_until(&mut env, "the tab to become free", |d| !d.tabs[tab].busy);
-    env.deck.on_deliver(delivery("echo resposta-tardia-2", true));
-    background_until(&mut env, "the answer to be typed", |d| screen_has(d, tab, "resposta-tardia-2"));
+    env.deck.on_deliver(delivery("echo late-answer-2", true));
+    background_until(&mut env, "the answer to be typed", |d| screen_has(d, tab, "late-answer-2"));
 
     // With no frame at all, the terminal neither changes size nor asks to.
     assert!(!env.deck.tabs[tab].resize_pending(), "background does not fit terminals to the window size");

@@ -550,7 +550,7 @@ mod tests {
         for ok in ["sonnet", "opencode/glm-5.3-flash-free", "provider/model#high", "qwen3.5:9b", "a@b+c_d.e"] {
             assert!(valid_model(ok), "{ok}");
         }
-        for bad in ["", "two names", "a\"b", "a&b", "a|b", "a%b", "a^b", "a<b", "a\nb", "\x1b[0m", "usuário", "$(x)", "a;b", "a`b"] {
+        for bad in ["", "two names", "a\"b", "a&b", "a|b", "a%b", "a^b", "a<b", "a\nb", "\x1b[0m", "naïve", "$(x)", "a;b", "a`b"] {
             assert!(!valid_model(bad), "{bad:?}");
         }
         assert!(valid_model(&"a".repeat(128)));
@@ -647,16 +647,16 @@ mod tests {
 
     #[test]
     fn opencode_tui_always_gets_the_instructions_file_even_without_a_model() {
-        let file = std::path::Path::new("/dados/agentdeck-instructions.md");
+        let file = std::path::Path::new("/data/agentdeck-instructions.md");
         let (args, (_, value)) = opencode_tui(None, Some(file));
         assert_eq!(args, ["--standalone"]);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&value).expect("json"),
-            serde_json::json!({ "instructions": ["/dados/agentdeck-instructions.md"] })
+            serde_json::json!({ "instructions": ["/data/agentdeck-instructions.md"] })
         );
         let (_, (_, both)) = opencode_tui(Some("p/m#high"), Some(file));
         let both: serde_json::Value = serde_json::from_str(&both).expect("json");
-        assert_eq!((both["model"].as_str(), both["instructions"][0].as_str()), (Some("p/m"), Some("/dados/agentdeck-instructions.md")));
+        assert_eq!((both["model"].as_str(), both["instructions"][0].as_str()), (Some("p/m"), Some("/data/agentdeck-instructions.md")));
     }
 
     #[test]
@@ -664,7 +664,7 @@ mod tests {
         assert_eq!(Effort::parse("low"), Some(Effort::Low));
         assert_eq!(Effort::parse(" Médio "), Some(Effort::Medium));
         assert_eq!(Effort::parse("ALTO"), Some(Effort::High));
-        for bad in ["", "xhigh", "max", "padrão"] {
+        for bad in ["", "xhigh", "max", "standard"] {
             assert_eq!(Effort::parse(bad), None, "{bad}");
         }
         for e in Effort::ALL {

@@ -105,7 +105,7 @@ impl Background {
 }
 
 /// The window gets no frames: minimized (0×0 on Windows), with zero area or hidden. Drawing like that is worse than
-/// useless: the `fit_tab` of a 0×0 terminal ruins the CLI (see `claude-code-sem-esc3j-no-windows.md`).
+/// useless: the `fit_tab` of a 0×0 terminal ruins the CLI (see `claude-code-without-esc3j-on-windows.md`).
 fn hidden_by(minimized: Option<bool>, visible: Option<bool>, size: (u32, u32)) -> bool {
     minimized == Some(true) || visible == Some(false) || size.0 == 0 || size.1 == 0
 }

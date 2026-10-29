@@ -445,7 +445,7 @@ impl Registry {
             "Text with accents goes in a file (--file <file>): through standard input the Windows shell turns accents into \"?\".".to_owned(),
             "When another agent sends you a message, answer with the command it shows (ask-agent --reply <number> \"answer\" or --file <file>): only then does the answer reach it.".to_owned(),
             "The agents form a team (boss and subordinates; the user can reorganize it). Before delegating or reporting, see your position with ask-agent --team; delegate preferably to the team and, when you finish something the boss asked for, report with ask-agent --boss \"message\".".to_owned(),
-            "Project memory: memory/aprendizados/, one .md per trap, decision or convention that cost time and the code does not show. Format: header --- title: … / summary: one line / touches: [globs of the files; optional] --- and a short body, with Why and How to apply. Before touching files, run ask-agent --learn <file>... (without arguments: the index and the state of the tasks; with files, it warns if another task touches them); when you find out something like that, create the file. ask-agent --outline <file>... shows the signatures with the line, so you read only the part of a large file you need (offset).".to_owned(),
+            "Project memory: memory/learnings/, one .md per trap, decision or convention that cost time and the code does not show. Format: header --- title: … / summary: one line / touches: [globs of the files; optional] --- and a short body, with Why and How to apply. Before touching files, run ask-agent --learn <file>... (without arguments: the index and the state of the tasks; with files, it warns if another task touches them); when you find out something like that, create the file. ask-agent --outline <file>... shows the signatures with the line, so you read only the part of a large file you need (offset).".to_owned(),
         ]
         .join("\n")
     }
@@ -556,7 +556,7 @@ pub(crate) fn build_agent_env(
     env
 }
 
-/// Writes `dados/hooks/claude-settings.json`: hooks that tell the bridge when Claude starts
+/// Writes `data/hooks/claude-settings.json`: hooks that tell the bridge when Claude starts
 /// (`UserPromptSubmit`) and ends (`Stop`) a turn, which add to the user's settings, and
 /// the statusline (`ask-agent --usage`), which sends the plan usage to the bridge. Ours replaces the
 /// user's, so `ask-agent --usage` runs theirs and shows its output; its `padding`,
@@ -610,10 +610,10 @@ fn user_statusline_in(file: &Path) -> Option<serde_json::Value> {
     (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| sl.clone())
 }
 
-/// Name of the file (in `dados/`) with the AgentDeck instructions, for the CLIs that read instructions from a file.
+/// Name of the file (in `data/`) with the AgentDeck instructions, for the CLIs that read instructions from a file.
 const INSTRUCTIONS_FILE: &str = "agentdeck-instructions.md";
 
-/// Writes `dados/agentdeck-instructions.md` (only if it changed) and returns the path. It stays outside the user's repository.
+/// Writes `data/agentdeck-instructions.md` (only if it changed) and returns the path. It stays outside the user's repository.
 fn write_instructions_file(data_dir: &Path, text: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(INSTRUCTIONS_FILE);
@@ -653,7 +653,7 @@ fn reads_only_agents_md(kind: &str) -> bool {
     matches!(kind, "goose" | "copilot")
 }
 
-/// Writes `dados/agy/<instance>/AGENTS.md` with the instance instructions (only if it changed) and returns the folder, for
+/// Writes `data/agy/<instance>/AGENTS.md` with the instance instructions (only if it changed) and returns the folder, for
 /// Antigravity's `--add-dir`: `agy` reads the `AGENTS.md` of the added folders together with the project one (checked on
 /// 2026-10-24 with 1.4.7), so nothing is created in the user's repository.
 fn write_agy_instructions(data_dir: &Path, id: &str, text: &str) -> std::io::Result<PathBuf> {
@@ -804,7 +804,7 @@ mod tests {
             "do NOT use your CLI's internal subagents (Task/Agent tool, sub-agents) unless the user asks for it",
             "ask-agent <agent>@<role> or ask-agent --task new",
             "choose among the models capable of the size of the work, and among them the one with the most free quota",
-            "memory/aprendizados/",
+            "memory/learnings/",
             "title:",
             "summary:",
             "touches:",
@@ -828,7 +828,7 @@ mod tests {
 
     #[test]
     fn each_cli_gets_its_own_instruction_channel() {
-        let file = Path::new("/dados/agentdeck-instructions.md");
+        let file = Path::new("/data/agentdeck-instructions.md");
         let text = "Você \"é\"
 ok";
         // Codex: TOML value (basic string) with quotes and line break escaped; in a shim, the raw text.
@@ -841,7 +841,7 @@ ok";
 ok"
             ]
         );
-        assert_eq!(instruction_args("aider", text, Some(file), false), ["--read", "/dados/agentdeck-instructions.md"]);
+        assert_eq!(instruction_args("aider", text, Some(file), false), ["--read", "/data/agentdeck-instructions.md"]);
         assert!(instruction_args("aider", text, None, false).is_empty());
         assert_eq!(instruction_args("interpreter", text, Some(file), false), ["--custom_instructions", text]);
         // Claude and OpenCode are assembled separately; Antigravity reads the AGENTS.md.
@@ -855,18 +855,18 @@ ok"
     #[test]
     fn the_instructions_file_is_rewritten_only_when_it_changes() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let dados = tmp.path().join("dados");
-        let path = write_instructions_file(&dados, "one").expect("write");
-        assert_eq!(path, dados.join(INSTRUCTIONS_FILE));
+        let data_dir = tmp.path().join("data");
+        let path = write_instructions_file(&data_dir, "one").expect("write");
+        assert_eq!(path, data_dir.join(INSTRUCTIONS_FILE));
         assert_eq!(
             std::fs::read_to_string(&path).expect("ler"),
             "one
 "
         );
         let before = std::fs::metadata(&path).and_then(|m| m.modified()).expect("mtime");
-        write_instructions_file(&dados, "one").expect("again");
+        write_instructions_file(&data_dir, "one").expect("again");
         assert_eq!(std::fs::metadata(&path).and_then(|m| m.modified()).expect("mtime"), before);
-        write_instructions_file(&dados, "two").expect("changes");
+        write_instructions_file(&data_dir, "two").expect("changes");
         assert_eq!(
             std::fs::read_to_string(&path).expect("read"),
             "two
@@ -891,7 +891,7 @@ ok"
             // Inherited from an AgentDeck that opened this one (app running inside a tab).
             ("AGENTDECK_ROLE".to_owned(), "dev".to_owned()),
             ("AGENTDECK_HOME".to_owned(), "/outro".to_owned()),
-            ("AGENTDECK_TOKEN".to_owned(), "velho".to_owned()),
+            ("AGENTDECK_TOKEN".to_owned(), "old".to_owned()),
             ("AGENTDECK_DEBUG_UI".to_owned(), "1".to_owned()),
             // User's configuration: still valid.
             ("AGENTDECK_ASK_WAIT".to_owned(), "300".to_owned()),
@@ -921,9 +921,9 @@ ok"
     fn cmd_args_are_escaped_not_mangled() {
         // With a space portable-pty adds quotes: only `%`, quotes and line breaks change.
         assert_eq!(cmd_safe_arg("a \"b\" & calc | x <y> ^z %PATH% !v!\r\nfim\n"), "a b & calc | x <y> ^z %%cd:~,%PATH%%cd:~,% !v! fim ");
-        assert_eq!(cmd_safe_arg(r"C:\Users\ana\dados"), r"C:\Users\ana\dados");
+        assert_eq!(cmd_safe_arg(r"C:\Users\ana\data"), r"C:\Users\ana\data");
         // Without a space, without quotes: carets for the two cmd passes.
-        assert_eq!(cmd_safe_arg(r"C:\Users\Ana&Bia\dados"), r"C:\Users\Ana^^^&Bia\dados");
+        assert_eq!(cmd_safe_arg(r"C:\Users\Ana&Bia\data"), r"C:\Users\Ana^^^&Bia\data");
         assert_eq!(cmd_safe_arg("Bash(ask-agent:*)"), "Bash^^^(ask-agent:*^^^)");
         assert_eq!(cmd_safe_arg("50%!"), "50%%cd:~,%!");
     }
@@ -945,18 +945,18 @@ ok"
     fn escaped_args_reach_the_shim_intact() {
         use std::os::windows::process::CommandExt;
         let tmp = tempfile::tempdir().expect("tmp");
-        std::fs::write(tmp.path().join("linha.cmd"), "@ECHO off\r\nSETLOCAL\r\necho(%*\r\n").expect("shim");
-        std::fs::write(tmp.path().join("bloco.cmd"), "@IF EXIST \"%~dp0\\nada.exe\" (\r\n  echo(%*\r\n) ELSE (\r\n  echo(%*\r\n)\r\n")
+        std::fs::write(tmp.path().join("line.cmd"), "@ECHO off\r\nSETLOCAL\r\necho(%*\r\n").expect("shim");
+        std::fs::write(tmp.path().join("block.cmd"), "@IF EXIST \"%~dp0\\nothing.exe\" (\r\n  echo(%*\r\n) ELSE (\r\n  echo(%*\r\n)\r\n")
             .expect("shim");
         let args = [
-            r"C:\Users\Ana&Bia\dados",
-            r"C:\Users\Ana Bia&X (1)\dados\",
+            r"C:\Users\Ana&Bia\data",
+            r"C:\Users\Ana Bia&X (1)\data\",
             "Bash(ask-agent:*)",
             "50%PATH%!PATH!^x|y<z>w",
-            "texto com %PATH% & aspas \"x\" | fim",
+            "text with %PATH% & quotes \"x\" | end",
         ];
         let expected: Vec<String> = args.iter().map(|a| pty_quoted(&a.replace('"', ""))).collect();
-        for shim in ["linha", "bloco"] {
+        for shim in ["line", "block"] {
             let mut tail: Vec<String> = CMD_FLAGS.map(String::from).to_vec();
             tail.push(format!(r".\{shim}")); // without depending on NoDefaultCurrentDirectoryInExePath
             tail.extend(args.iter().map(|a| pty_quoted(&cmd_safe_arg(a))));
@@ -985,13 +985,13 @@ ok"
     fn claude_hooks_signal_the_bridge() {
         let tmp = tempfile::tempdir().expect("tmp");
         let path =
-            write_claude_hooks_with(&tmp.path().join("dados"), &tmp.path().join("projeto"), &tmp.path().join("claude")).expect("hooks");
+            write_claude_hooks_with(&tmp.path().join("data"), &tmp.path().join("project"), &tmp.path().join("claude")).expect("hooks");
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("ler")).expect("json");
         assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "ask-agent --signal idle");
         assert_eq!(v["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"], "ask-agent --signal busy");
         assert_eq!(v["statusLine"], serde_json::json!({ "type": "command", "command": "ask-agent --usage", "padding": 0 }));
         assert_eq!(
-            write_claude_hooks_with(&tmp.path().join("dados"), &tmp.path().join("projeto"), &tmp.path().join("claude")).expect("de novo"),
+            write_claude_hooks_with(&tmp.path().join("data"), &tmp.path().join("project"), &tmp.path().join("claude")).expect("again"),
             path
         );
     }
@@ -999,8 +999,8 @@ ok"
     #[test]
     fn claude_hooks_keep_the_user_statusline_padding() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let data = tmp.path().join("dados");
-        let project = tmp.path().join("projeto");
+        let data = tmp.path().join("data");
+        let project = tmp.path().join("project");
         let config = tmp.path().join("claude");
         let statusline = |padding: serde_json::Value| serde_json::json!({ "statusLine": { "type": "command", "command": "my-status", "padding": padding } });
         let write = |file: &Path, json: &serde_json::Value| {

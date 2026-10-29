@@ -69,7 +69,7 @@ pub fn format_clock(ms: u64) -> Option<String> {
 pub fn format_weekday_time(ms: u64) -> Option<String> {
     use chrono::{Datelike, Weekday};
     let dt = local_time(ms)?;
-    let dia = match dt.weekday() {
+    let day = match dt.weekday() {
         Weekday::Mon => t!("Mon"),
         Weekday::Tue => t!("Tue"),
         Weekday::Wed => t!("Wed"),
@@ -78,7 +78,7 @@ pub fn format_weekday_time(ms: u64) -> Option<String> {
         Weekday::Sat => t!("Sat"),
         Weekday::Sun => t!("Sun"),
     };
-    Some(format!("{dia} {}", dt.format("%H:%M")))
+    Some(format!("{day} {}", dt.format("%H:%M")))
 }
 
 /// How long ago usage was read (e.g. "read 1 min ago").

@@ -827,7 +827,7 @@ pub fn demo_status() -> GitStatus {
         entries: vec![
             e("crates/app/src/ui/git.rs", 'A', '.', EntryKind::Ordinary),
             e("crates/core/src/git.rs", 'M', 'M', EntryKind::Ordinary),
-            e("memory/GERAL.md", '.', 'M', EntryKind::Ordinary),
+            e("memory/OVERVIEW.md", '.', 'M', EntryKind::Ordinary),
             e("README.md", '.', 'D', EntryKind::Ordinary),
             e("docs/idea draft.md", '?', '?', EntryKind::Untracked),
         ],
@@ -841,9 +841,9 @@ pub fn demo_diff() -> GitDiff {
     let l = |kind, old, new, text: &str| DiffLine { kind, old, new, text: text.into() };
     GitDiff {
         lines: vec![
-            l(DiffKind::Meta, None, None, "diff --git a/memory/GERAL.md b/memory/GERAL.md"),
-            l(DiffKind::Meta, None, None, "--- a/memory/GERAL.md"),
-            l(DiffKind::Meta, None, None, "+++ b/memory/GERAL.md"),
+            l(DiffKind::Meta, None, None, "diff --git a/memory/OVERVIEW.md b/memory/OVERVIEW.md"),
+            l(DiffKind::Meta, None, None, "--- a/memory/OVERVIEW.md"),
+            l(DiffKind::Meta, None, None, "+++ b/memory/OVERVIEW.md"),
             l(DiffKind::Hunk, None, None, "@@ -20,4 +20,6 @@ ## 1. Environment"),
             l(DiffKind::Context, Some(20), Some(20), " Native desktop terminal in Rust (winit + egui)."),
             l(DiffKind::Del, Some(21), None, "-The integrated chat sits below the terminals."),
@@ -911,7 +911,7 @@ pub fn demo_commit_detail() -> GitCommitDetail {
         date: "12 min ago".into(),
         message: "fix(terminal): synchronized update deadline\n\nReleases the held output after 150 ms when the end of the block is lost."
             .into(),
-        files: vec![('M', "crates/app/src/terminal/mod.rs".into()), ('M', "memory/GERAL.md".into())],
+        files: vec![('M', "crates/app/src/terminal/mod.rs".into()), ('M', "memory/OVERVIEW.md".into())],
         diff: demo_diff(),
     }
 }
@@ -933,7 +933,7 @@ pub fn demo_conflicts_status() -> GitStatus {
         GitEntry { path: "crates/core/src/git.rs".into(), orig_path: None, index: 'U', worktree: 'U', kind: EntryKind::Unmerged },
     );
     st.entries
-        .insert(1, GitEntry { path: "memory/GERAL.md".into(), orig_path: None, index: 'U', worktree: 'U', kind: EntryKind::Unmerged });
+        .insert(1, GitEntry { path: "memory/OVERVIEW.md".into(), orig_path: None, index: 'U', worktree: 'U', kind: EntryKind::Unmerged });
     st
 }
 
@@ -978,7 +978,7 @@ mod tests {
                 (Section::Staged, vec![("crates/app/src/ui/git.rs", true, 'A'), ("crates/core/src/git.rs", true, 'M')]),
                 (
                     Section::Changes,
-                    vec![("crates/core/src/git.rs", false, 'M'), ("memory/GERAL.md", false, 'M'), ("README.md", false, 'D')]
+                    vec![("crates/core/src/git.rs", false, 'M'), ("memory/OVERVIEW.md", false, 'M'), ("README.md", false, 'D')]
                 ),
                 (Section::Untracked, vec![("docs/idea draft.md", false, 'U')]),
             ]

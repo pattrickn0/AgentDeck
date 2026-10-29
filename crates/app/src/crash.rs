@@ -1,5 +1,5 @@
 //! Crash reporting: release builds have no console, so panics and fatal crashes vanished
-//! without a trace. Here they become lines in `<dados>/crash.log`.
+//! without a trace. Here they become lines in `<data>/crash.log`.
 //!
 //! - Panics: message + backtrace.
 //! - Windows: only what crashes the app logs code, address and backtrace: heap corruption

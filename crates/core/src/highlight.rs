@@ -846,7 +846,7 @@ mod tests {
             ("x.tsx", Lang::JsTs),
             ("x.mjs", Lang::JsTs),
             ("a.py", Lang::Python),
-            ("scripts\\gerar-icone.ps1", Lang::PowerShell),
+            ("scripts\\generate-icon.ps1", Lang::PowerShell),
             ("run.sh", Lang::Shell),
             ("LICENSE", Lang::Plain),
             ("no-extension", Lang::Plain),

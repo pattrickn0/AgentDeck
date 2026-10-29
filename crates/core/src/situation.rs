@@ -44,7 +44,7 @@ fn clip(text: &str, max: usize) -> String {
 
 /// Files that do not count as a clash: the history merges by union (`.gitattributes`), so two tasks adding to it
 /// do not conflict.
-const MERGE_SAFE: &[&str] = &["memory/historico.md"];
+const MERGE_SAFE: &[&str] = &["memory/history.md"];
 
 /// The latest commits of `base` (`git log --oneline`); empty if git fails.
 pub(crate) fn base_commits(repo: &Repo, base: &str) -> Vec<String> {
@@ -95,7 +95,7 @@ impl Core {
 
 /// One warning per file of `paths` that another task of `others` also touches, saying where it came from
 /// (`already touched`: it is in its branch or worktree; `cited by the request`: it did not touch it yet, but its
-/// request cites the file). `memory/historico.md` does not count. One per line; empty if there is no clash.
+/// request cites the file). `memory/history.md` does not count. One per line; empty if there is no clash.
 pub fn clash_warnings(others: &[OtherTask], paths: &[String]) -> String {
     let mut lines: Vec<String> = Vec::new();
     for path in paths {
@@ -237,9 +237,9 @@ mod tests {
 
     #[test]
     fn clashes_name_the_other_tasks_and_skip_the_history() {
-        let a = other("t37", &["crates/app/src/app.rs", "memory/historico.md"]);
-        let b = OtherTask { cited: vec!["crates/app/src/app.rs".into(), "memory/historico.md".into()], ..other("t40", &["x.rs"]) };
-        let paths = ["crates/app/src/app.rs", "memory/historico.md", "y.rs"].map(String::from);
+        let a = other("t37", &["crates/app/src/app.rs", "memory/history.md"]);
+        let b = OtherTask { cited: vec!["crates/app/src/app.rs".into(), "memory/history.md".into()], ..other("t40", &["x.rs"]) };
+        let paths = ["crates/app/src/app.rs", "memory/history.md", "y.rs"].map(String::from);
         let out = clash_warnings(&[a.clone(), b], &paths);
         let running = TaskStatus::Running.label();
         assert_eq!(

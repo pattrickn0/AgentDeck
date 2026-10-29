@@ -50,7 +50,7 @@ fn load_file(path: &Path) -> ProjectTasks {
     let mut tasks = match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str::<ProjectTasks>(&text).unwrap_or_else(|e| {
             // Unreadable: keep a copy before the next write puts an empty list on top.
-            let backup = path.with_extension(format!("json.ilegivel-{}", now_ms()));
+            let backup = path.with_extension(format!("json.unreadable-{}", now_ms()));
             match std::fs::copy(path, &backup) {
                 Ok(_) => log::error!("unreadable tasks in {} ({e}); copy kept in {}", path.display(), backup.display()),
                 Err(e2) => log::error!("unreadable tasks in {} ({e}; and the copy failed: {e2})", path.display()),
@@ -85,7 +85,7 @@ fn safe_project_id(id: &str) -> bool {
 
 impl Core {
     fn tasks_path(&self, project: &str) -> Option<PathBuf> {
-        safe_project_id(project).then(|| self.paths().data_dir.join("tarefas").join(format!("{project}.json")))
+        safe_project_id(project).then(|| self.paths().data_dir.join("tasks").join(format!("{project}.json")))
     }
 
     /// Applies `f` to the project's tasks (read from disk the first time). With `save`, writes and tells the
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn the_file_round_trips_and_an_unreadable_one_is_kept() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let file = tmp.path().join("tarefas").join("p1.json");
+        let file = tmp.path().join("tasks").join("p1.json");
         assert!(load_file(&file).tasks.is_empty());
         let mut p = ProjectTasks { next: 5, tasks: vec![sample()], ..ProjectTasks::default() };
         p.fix_counter();
@@ -266,7 +266,7 @@ mod tests {
         let kept = std::fs::read_dir(file.parent().expect("folder"))
             .expect("dir")
             .flatten()
-            .any(|e| e.file_name().to_string_lossy().contains("ilegivel"));
+            .any(|e| e.file_name().to_string_lossy().contains("unreadable"));
         assert!(kept, "the copy of the unreadable file should be kept");
     }
 

@@ -34,7 +34,7 @@ fn the_bridge_serves_the_whole_lifecycle_with_the_master_token() {
     assert_eq!((b["task"]["id"].as_str(), b["task"]["status"].as_str()), (Some("t1"), Some("draft")));
     assert_eq!(
         (b["task"]["kind"].as_str(), b["task"]["model"].as_str(), b["task"]["creator"].as_str()),
-        (Some("claude"), Some("sonnet"), Some("usuário"))
+        (Some("claude"), Some("sonnet"), Some("user"))
     );
 
     // Validation and route errors.
@@ -180,8 +180,8 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
     let core = &env.core;
     // A learning versioned in the base, before the task exists (the worktree departs from it).
     let text = "---\ntitle: Careful with src\nsummary: Rule for src.\ntouches: [src/**]\n---\nDo not touch src without reading this.\n";
-    std::fs::create_dir_all(env.ws.join("memory").join("aprendizados")).expect("folder");
-    commit_file(&env.ws, "memory/aprendizados/src.md", text, "docs: learning");
+    std::fs::create_dir_all(env.ws.join("memory").join("learnings")).expect("folder");
+    commit_file(&env.ws, "memory/learnings/src.md", text, "docs: learning");
     core.register_instance(&env.project, "claude");
     let boss = tab_token(&env, "claude");
     let (st, b) = http(core, "POST", "/tasks", &boss, &json!({ "title": "With memory", "brief": "Do it.", "start": true }).to_string());
@@ -202,9 +202,7 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
     let (st, none) = ask(&agent, json!(["docs/x.md"]));
     assert_eq!(st, 200);
     assert!(
-        none["text"]
-            .as_str()
-            .is_some_and(|t| t.contains("No specific learning") && t.contains("memory/aprendizados/src.md — Rule for src.")),
+        none["text"].as_str().is_some_and(|t| t.contains("No specific learning") && t.contains("memory/learnings/src.md — Rule for src.")),
         "{none}"
     );
     // Without paths: the globals and the index of the specific ones. The orchestrator (no task) reads from the project's repository.
@@ -213,7 +211,7 @@ fn learn_answers_from_the_worktree_of_the_asking_agent() {
         st == 200
             && b["text"]
                 .as_str()
-                .is_some_and(|t| t.starts_with("Project learnings:") && t.contains("memory/aprendizados/src.md — Rule for src.")),
+                .is_some_and(|t| t.starts_with("Project learnings:") && t.contains("memory/learnings/src.md — Rule for src.")),
         "{st} {b}"
     );
     let (st, b) = ask(&boss, json!(["src/lib.rs"]));
@@ -258,7 +256,6 @@ impl S {
     let agent = tab_token(&env, "claude@t1");
     let ask = |token: &str, paths: Value| http(core, "POST", "/outline", token, &json!({ "paths": paths }).to_string());
 
-    // The outline wording (`linha`, `não existe`, `recusado`...) belongs to `outline.rs` (another area): it stays as that area has it.
     let (st, rel) = ask(&agent, json!(["src/lib.rs"]));
     assert_eq!(st, 200, "{rel}");
     let rel = rel["text"].as_str().expect("text").to_owned();
@@ -315,11 +312,11 @@ fn the_bridge_reads_the_level_of_a_new_task() {
     let token = tab_token(&env, "claude");
     let post = |body: &str| http(&env.core, "POST", "/tasks", &token, body);
     let (status, body) = post(r#"{"title":"Big","kind":"claude","level":"complexa"}"#);
-    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("complexa")), "{body}");
+    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("complex")), "{body}");
     let (status, body) = post(r#"{"title":"Default","kind":"claude"}"#);
-    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("media")));
+    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("medium")));
     let (status, body) = post(r#"{"title":"Medium","kind":"claude","level":"Média"}"#);
-    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("media")));
+    assert_eq!((status, &body["task"]["level"]), (200, &serde_json::json!("medium")));
     let (status, body) = post(r#"{"title":"Huge","kind":"claude","level":"enorme"}"#);
     assert_eq!(status, 400);
     assert!(body["error"].as_str().is_some_and(|e| e.contains("invalid level")), "{body}");
@@ -336,15 +333,15 @@ fn the_bridge_reads_the_scope_of_a_new_task_and_queues_on_start() {
     let (status, body) = post(r#"{"title":"Core","kind":"claude","scope":["crates/core/","Crates\\Core\\"],"start":true}"#);
     assert_eq!(status, 200, "{body}");
     assert_eq!((body["task"]["status"].as_str(), &body["task"]["scope"]), (Some("running"), &json!(["crates/core"])));
-    let (status, body) = post(r#"{"title":"Git","kind":"claude","scope":"crates/core/src/git.rs\n\nmemory/GERAL.md","start":true}"#);
+    let (status, body) = post(r#"{"title":"Git","kind":"claude","scope":"crates/core/src/git.rs\n\nmemory/OVERVIEW.md","start":true}"#);
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["task"]["status"], "queued");
     assert_eq!(body["task"]["waiting_for"], "t1");
-    assert_eq!(body["task"]["scope"], json!(["crates/core/src/git.rs", "memory/GERAL.md"]));
+    assert_eq!(body["task"]["scope"], json!(["crates/core/src/git.rs", "memory/OVERVIEW.md"]));
     let (status, list) = http(&env.core, "GET", "/tasks", &token, "");
     assert_eq!(status, 200, "{list}");
     assert_eq!((list["tasks"][1]["status"].as_str(), list["tasks"][1]["waiting_for"].as_str()), (Some("queued"), Some("t1")));
-    assert_eq!(list["tasks"][1]["scope"], json!(["crates/core/src/git.rs", "memory/GERAL.md"]));
+    assert_eq!(list["tasks"][1]["scope"], json!(["crates/core/src/git.rs", "memory/OVERVIEW.md"]));
     let (status, shown) = http(&env.core, "GET", "/tasks/t2", &token, "");
     assert_eq!((status, shown["task"]["waiting_for"].as_str()), (200, Some("t1")));
     // Invalid scope or of another type: 400, without creating.

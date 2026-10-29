@@ -1,4 +1,4 @@
-//! Attachments: copy to `dados/anexos` with session prefix (equivalent to `attach:*`).
+//! Attachments: copy to `data/attachments` with session prefix (equivalent to `attach:*`).
 
 use std::path::{Path, PathBuf};
 
@@ -26,7 +26,7 @@ pub fn safe_name(name: &str) -> String {
 
 /// Attachments directory (created if needed).
 pub(crate) fn attachments_dir(data_dir: &Path) -> std::io::Result<PathBuf> {
-    let dir = data_dir.join("anexos");
+    let dir = data_dir.join("attachments");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -123,25 +123,25 @@ mod tests {
 
     #[test]
     fn safe_names() {
-        assert_eq!(safe_name("Relatório Final (v2).pdf"), "Relatorio_Final_v2_.pdf");
-        assert_eq!(safe_name("ação çé ü.txt"), "acao_ce_u.txt");
+        assert_eq!(safe_name("Résumé Final (v2).pdf"), "Resume_Final_v2_.pdf");
+        assert_eq!(safe_name("façade çé ü.txt"), "facade_ce_u.txt");
         assert_eq!(safe_name("a  &&  b"), "a_b");
-        assert_eq!(safe_name("já-ok_1.2"), "ja-ok_1.2");
+        assert_eq!(safe_name("déjà-ok_1.2"), "deja-ok_1.2");
         assert_eq!(safe_name("日本.png"), "_.png");
     }
 
     #[test]
     fn copies_and_refs() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let data = tmp.path().join("dados");
+        let data = tmp.path().join("data");
         let ws = tmp.path().join("ws");
         std::fs::create_dir_all(&ws).expect("mkdir");
-        let src = tmp.path().join("Olá mundo.txt");
+        let src = tmp.path().join("Hëllo wörld.txt");
         std::fs::write(&src, "x").expect("write");
-        let refs = attach_files(&data, &ws, "sess1", &[src, tmp.path().to_path_buf(), tmp.path().join("nao")]);
+        let refs = attach_files(&data, &ws, "sess1", &[src, tmp.path().to_path_buf(), tmp.path().join("missing")]);
         assert_eq!(refs.len(), 1);
-        assert!(refs[0].contains("/dados/anexos/s_sess1_"), "{}", refs[0]);
-        assert!(refs[0].ends_with("-Ola_mundo.txt"));
+        assert!(refs[0].contains("/data/attachments/s_sess1_"), "{}", refs[0]);
+        assert!(refs[0].ends_with("-Hello_world.txt"));
 
         let r = attach_bytes(&data, &ws, "sess1", "Foto é.jpeg", b"img").expect("ok");
         assert!(r.ends_with("-Foto_e.jpeg"), "{r}");
@@ -152,7 +152,7 @@ mod tests {
 
         // Inside the workspace the reference is relative.
         let r = attach_bytes(&ws.join("d"), &ws, "s", "a.txt", b"x").expect("ok");
-        assert!(r.starts_with("d/anexos/s_s_"), "{r}");
+        assert!(r.starts_with("d/attachments/s_s_"), "{r}");
 
         // Two attachments with the same name in succession (same millisecond, in general) do not overwrite each other.
         let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
@@ -163,8 +163,8 @@ mod tests {
         let refs = attach_files(&data, &ws, "dup", &[a.join("foto.txt"), b.join("foto.txt")]);
         assert_eq!(refs.len(), 2);
         assert_ne!(refs[0], refs[1]);
-        let anexos = data.join("anexos");
-        let mut bodies: Vec<String> = std::fs::read_dir(&anexos)
+        let attachments = data.join("attachments");
+        let mut bodies: Vec<String> = std::fs::read_dir(&attachments)
             .expect("ls")
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().starts_with("s_dup_"))

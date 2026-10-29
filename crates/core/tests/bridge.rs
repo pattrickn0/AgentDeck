@@ -31,7 +31,7 @@ fn start_cfg(fake_agents: &[(&str, Value)], tweak: impl FnOnce(&mut Config)) -> 
     let paths = AppPaths {
         app_dir: root.clone(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("workspace"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),
@@ -59,7 +59,7 @@ fn paths_in(root: &Path) -> AppPaths {
     AppPaths {
         app_dir: root.to_path_buf(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("workspace"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),
@@ -231,14 +231,14 @@ fn auth_and_validation() {
     let agents = b["agents"].as_array().expect("list").clone();
     assert_eq!(agents, vec![json!("claude")]);
 
-    let (st, b) = ask(&env, json!({"from": "shell", "to": "bogus", "message": "oi"}));
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "bogus", "message": "hi"}));
     assert_eq!(st, 400);
     let err = b["error"].as_str().expect("error");
     assert!(err.starts_with("unknown or not installed agent \"bogus\". Available: "), "{err}");
 
-    let (st, b) = ask(&env, json!({"from": "claude", "to": "ClaudeCode", "message": "oi"}));
+    let (st, b) = ask(&env, json!({"from": "claude", "to": "ClaudeCode", "message": "hi"}));
     assert_eq!((st, b), (400, json!({"error": "an agent cannot ask itself"})));
-    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi", "depth": 2}));
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "hi", "depth": 2}));
     assert_eq!((st, b), (400, json!({"error": "maximum conversation depth between agents reached"})));
     env.core.shutdown();
 }
@@ -267,7 +267,7 @@ fn workspace_agents_md_and_spawn_specs() {
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
-    assert_eq!(env.core.spawn_spec(&p, "nada").expect_err("unknown"), "Unknown agent: nada");
+    assert_eq!(env.core.spawn_spec(&p, "nothing").expect_err("unknown"), "Unknown agent: nothing");
     let missing = env.core.spawn_spec(&p, "antigravity").expect_err("not installed");
     assert!(missing.starts_with("Antigravity CLI (agy) not found."));
     assert_eq!(env.core.spawn_spec(&p, "ollama").expect_err("the Ollama agent was removed"), "Unknown agent: ollama");
@@ -287,7 +287,7 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(claude.program, env.root.join("fake-bin").join(exe_name("claude")));
     assert_eq!(claude.args[0], "--append-system-prompt");
     assert!(claude.args[1].contains("Your name here is \"claude\"."));
-    let hooks = env.root.join("dados").join("hooks").join("claude-settings.json");
+    let hooks = env.root.join("data").join("hooks").join("claude-settings.json");
     assert_eq!(
         &claude.args[2..],
         [
@@ -296,7 +296,7 @@ fn workspace_agents_md_and_spawn_specs() {
             "--settings".to_owned(),
             hooks.display().to_string(),
             "--add-dir".to_owned(),
-            env.root.join("dados").display().to_string()
+            env.root.join("data").display().to_string()
         ]
     );
     assert!(std::fs::read_to_string(&hooks).expect("hooks written").contains("ask-agent --signal idle"));
@@ -393,13 +393,13 @@ fn same_pair_requests_are_serialized() {
 fn attachments_and_config_persistence() {
     let env = start(&[]);
     let r = env.core.attach_bytes("note é.txt", b"x").expect("attachment");
-    assert!(r.contains(&format!("dados/anexos/s_{}_", env.core.session_id())), "{r}");
+    assert!(r.contains(&format!("data/attachments/s_{}_", env.core.session_id())), "{r}");
     assert!(r.ends_with("-note_e.txt"));
     env.core.update_config(|c| c.whisper_lang = "en".into());
     let saved = std::fs::read_to_string(env.root.join("cfg").join("config.json")).expect("saved config");
     assert!(saved.contains("\"whisperLang\": \"en\""));
     // Session recorded.
-    let sessions = std::fs::read_to_string(env.root.join("dados").join("sessions.json")).expect("sessions.json");
+    let sessions = std::fs::read_to_string(env.root.join("data").join("sessions.json")).expect("sessions.json");
     assert!(sessions.contains(env.core.session_id()));
     assert_eq!(env.core.transcribe_engine(), "unavailable");
     agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || {
@@ -494,7 +494,7 @@ fn a_role_asked_in_one_project_opens_there_and_cycles_do_not_cross_projects() {
     let b = env.core.create_project(&env.root.join("b"), None).id;
     env.core.register_instance(&a, "claude"); // the main Claude tab in A
     let port = env.core.bridge_port();
-    let ask_as = |token: String, to: &'static str| std::thread::spawn(move || ask_raw(port, &token, json!({"to": to, "message": "oi"})));
+    let ask_as = |token: String, to: &'static str| std::thread::spawn(move || ask_raw(port, &token, json!({"to": to, "message": "hi"})));
 
     // A: claude → claude@dev (creates claude@dev in A) → claude@qa.
     let first = ask_as(tab_token_in(&env, &a, "claude"), "claude@dev");
@@ -512,11 +512,11 @@ fn a_role_asked_in_one_project_opens_there_and_cycles_do_not_cross_projects() {
     assert_eq!(http(port, "POST", "/ask", &host, &tab_token_in(&env, &b, "claude@dev"), &forged).0, 404);
 
     // In A, claude@qa asking claude would close the cycle (409)…
-    let (st, body) = ask_raw(port, &tab_token_in(&env, &a, "claude@qa"), json!({"to": "claude", "message": "oi"}));
+    let (st, body) = ask_raw(port, &tab_token_in(&env, &a, "claude@qa"), json!({"to": "claude", "message": "hi"}));
     assert_eq!(st, 409, "{body}");
     assert_eq!(body["error"], "\"claude\" is already waiting for an answer from \"claude@qa\" (wait cycle)");
     // …and asking another already exceeds the maximum depth.
-    let (st, body) = ask_raw(port, &tab_token_in(&env, &a, "claude@qa"), json!({"to": "claude@x", "message": "oi"}));
+    let (st, body) = ask_raw(port, &tab_token_in(&env, &a, "claude@qa"), json!({"to": "claude@x", "message": "hi"}));
     assert_eq!((st, body), (400, json!({"error": "maximum conversation depth between agents reached"})));
     // In B, the same question is neither a cycle nor too deep: it goes to B's claude (created there).
     let third = ask_as(tab_token_in(&env, &b, "claude@qa"), "claude");
@@ -537,11 +537,11 @@ fn the_master_token_picks_the_project_from_the_body() {
     let b = env.core.create_project(&env.root.join("b"), None).id;
     let port = env.core.bridge_port();
     let master = env.core.bridge_token().to_owned();
-    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "oi", "project": "pdeadbeef"}));
+    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "hi", "project": "pdeadbeef"}));
     assert_eq!((st, body), (400, json!({"error": "unknown project: \"pdeadbeef\""})));
     let asking = std::thread::spawn({
         let b = b.clone();
-        move || ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "oi", "project": b}))
+        move || ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "hi", "project": b}))
     });
     let d = next_delivery(&env);
     assert_eq!((d.project.as_str(), d.ident.id().as_str()), (b.as_str(), "claude"));
@@ -667,7 +667,7 @@ fn a_failed_delivery_unblocks_the_asker() {
     let env = start(&[("claude", says("headless"))]);
     env.core.enable_tab_delivery();
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
-    let asker = std::thread::spawn(move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "oi"})));
+    let asker = std::thread::spawn(move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "hi"})));
     let d = next_delivery(&env);
     env.core.fail_delivery(d.request, "the tab did not come up");
     let (st, b) = asker.join().expect("thread");
@@ -684,7 +684,7 @@ fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
     let (port, token) = (env.core.bridge_port(), env.core.bridge_token().to_owned());
     let call = |from: &'static str, to: &'static str| {
         let token = token.clone();
-        std::thread::spawn(move || ask_raw(port, &token, json!({"from": from, "to": to, "message": "oi"})))
+        std::thread::spawn(move || ask_raw(port, &token, json!({"from": from, "to": to, "message": "hi"})))
     };
 
     // claude waits for antigravity; antigravity waits for claude@dev; claude@dev waiting for claude would close the cycle.
@@ -692,15 +692,15 @@ fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
     next_delivery(&env);
     let b = call("antigravity", "claude@dev");
     next_delivery(&env);
-    let (st, body) = ask_raw(port, &token, json!({"from": "claude@dev", "to": "claude", "message": "oi"}));
+    let (st, body) = ask_raw(port, &token, json!({"from": "claude@dev", "to": "claude", "message": "hi"}));
     assert_eq!(st, 409, "{body}");
     assert!(body["error"].as_str().expect("error").contains("cycle"));
 
     // Unknown target and ambiguous instance.
-    assert_eq!(ask_raw(port, &token, json!({"from": "shell", "to": "bogus", "message": "oi"})).0, 400);
+    assert_eq!(ask_raw(port, &token, json!({"from": "shell", "to": "bogus", "message": "hi"})).0, 400);
     env.core.restore_instance(&p, "claude@qa@ana");
     env.core.restore_instance(&p, "claude@qa@bia");
-    let (st, body) = ask_raw(port, &token, json!({"from": "shell", "to": "claude@qa", "message": "oi"}));
+    let (st, body) = ask_raw(port, &token, json!({"from": "shell", "to": "claude@qa", "message": "hi"}));
     assert_eq!(st, 400);
     assert!(body["error"].as_str().expect("error").contains("ambiguous"), "{body}");
 
@@ -714,7 +714,7 @@ fn wait_cycles_and_unknown_or_ambiguous_targets_are_refused() {
 fn without_tab_delivery_the_bridge_still_answers_headless() {
     // The interface did not turn delivery on (CLI/tests) or the user turned the option off: headless mode.
     let env = start(&[("claude", says("headless-answer"))]);
-    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "hi"}));
     assert_eq!((st, b["answer"].as_str()), (200, Some("headless-answer")));
 
     env.core.enable_tab_delivery();
@@ -739,7 +739,7 @@ fn reply_route_only_completes_pending_questions() {
 
     let asker = std::thread::spawn({
         let token = token.clone();
-        move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "oi"}))
+        move || ask_raw(port, &token, json!({"from": "shell", "to": "claude", "message": "hi"}))
     });
     next_delivery(&env);
     let (st, b) = http(port, "POST", "/reply", &host, &token, &body);
@@ -772,7 +772,7 @@ fn the_token_names_the_caller_and_the_body_cannot_forge_it() {
         .collect();
     assert_eq!(who, ["shell@qa"]);
     // With the master token, `from` must be a valid id.
-    let body = json!({"from": "x\u{1b}[201~", "to": "claude", "message": "oi"}).to_string();
+    let body = json!({"from": "x\u{1b}[201~", "to": "claude", "message": "hi"}).to_string();
     let (st, b) = http(port, "POST", "/ask", &host, env.core.bridge_token(), &body);
     assert_eq!(st, 400);
     assert!(b["error"].as_str().expect("error").starts_with("invalid sender"), "{b}");
@@ -873,7 +873,7 @@ fn one_app_per_data_dir() {
 #[test]
 fn headless_runs_get_their_own_short_lived_token() {
     let env = start(&[("claude", json!({ "print_env": "AGENTDECK_TOKEN" }))]);
-    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "oi"}));
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "hi"}));
     assert_eq!(st, 200, "{b}");
     let token = b["answer"].as_str().expect("token").trim().to_owned();
     assert_eq!(token.len(), 32);
@@ -890,7 +890,7 @@ fn only_the_asked_agent_can_answer_a_question() {
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
     let master = env.core.bridge_token().to_owned();
-    let asker = std::thread::spawn(move || ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "oi"})));
+    let asker = std::thread::spawn(move || ask_raw(port, &master, json!({"from": "shell", "to": "claude", "message": "hi"})));
     let d = next_delivery(&env);
     // Another tab trying to answer in place of claude (by the number or by the pair): it does not deliver.
     let agy = tab_token(&env, "antigravity");
@@ -940,7 +940,7 @@ fn a_slow_answer_is_typed_later_into_the_askers_tab() {
     let claude = tab_token(&env, "claude");
     // claude's `ask-agent` accepts waiting 1 s: after that it returns (202) and the answer comes later.
     let t = std::time::Instant::now();
-    let body = json!({"to": "claude@dev", "message": "tarefa longa", "wait": 1}).to_string();
+    let body = json!({"to": "claude@dev", "message": "long task", "wait": 1}).to_string();
     let asking = std::thread::spawn({
         let claude = claude.clone();
         let host = host.clone();
@@ -976,7 +976,7 @@ fn closing_the_askers_tab_drops_its_questions() {
     let port = env.core.bridge_port();
     let host = format!("127.0.0.1:{port}");
     let dev = tab_token(&env, "claude@dev");
-    let asking = std::thread::spawn(move || http(port, "POST", "/ask", &host, &dev, &json!({"to": "claude", "message": "oi"}).to_string()));
+    let asking = std::thread::spawn(move || http(port, "POST", "/ask", &host, &dev, &json!({"to": "claude", "message": "hi"}).to_string()));
     let d = next_delivery(&env);
     env.core.close_instance(&p, "claude@dev");
     let (st, b) = asking.join().expect("thread");
@@ -1011,7 +1011,7 @@ fn a_plain_terminal_waits_until_the_end_instead_of_getting_typed_answers() {
     let host = format!("127.0.0.1:{port}");
     let shell = tab_token(&env, "shell");
     let asking = std::thread::spawn(move || {
-        http(port, "POST", "/ask", &host, &shell, &json!({"to": "claude", "message": "oi", "wait": 1}).to_string())
+        http(port, "POST", "/ask", &host, &shell, &json!({"to": "claude", "message": "hi", "wait": 1}).to_string())
     });
     let d = next_delivery(&env);
     std::thread::sleep(Duration::from_millis(1500));
@@ -1044,7 +1044,7 @@ fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
 
     // Cycles and closed instances are refused.
     assert!(env.core.set_boss(&p, "shell", Some("shell@qa")).is_err(), "the boss cannot end up under its own crew");
-    assert!(env.core.set_boss(&p, "shell@qa", Some("shell@nada")).is_err());
+    assert!(env.core.set_boss(&p, "shell@qa", Some("shell@nothing")).is_err());
 
     // Renaming takes the team along; closing passes the crew to the grandparent; releasing at the root removes the boss.
     let ana = agentdeck_core::Ident::parse("shell@dev@ana").expect("id");
@@ -1292,7 +1292,7 @@ fn removing_a_project_mid_question_leaves_nothing_behind() {
     assert!(env.core.remove_project(&b));
     let (st, body) = asking.join().expect("thread");
     assert_eq!(st, 500, "{body}");
-    assert_eq!(ask_raw(env.core.bridge_port(), &tb, json!({"to": "claude@qa", "message": "oi"})).0, 403);
+    assert_eq!(ask_raw(env.core.bridge_port(), &tb, json!({"to": "claude@qa", "message": "hi"})).0, 403);
     assert!(!env.core.question_pending(q.request), "the question goes away with the project");
     // Nothing recreates the removed project's entry.
     env.core.restore_instance(&b, "claude@qa");
@@ -1341,7 +1341,7 @@ fn a_model_without_quota_is_refused_before_opening_the_tab() {
 
     // Argon without quota: a 409 that explains it and suggests another model; no tab is created.
     let (st, body) =
-        ask_raw(port, &master, json!({"from": "shell", "to": "antigravity@arq", "message": "oi", "model": "gemini-4-argon-high"}));
+        ask_raw(port, &master, json!({"from": "shell", "to": "antigravity@arq", "message": "hi", "model": "gemini-4-argon-high"}));
     assert_eq!(st, 409, "{body}");
     let error = body["error"].as_str().expect("error");
     assert!(error.starts_with("antigravity@arq uses gemini-4-argon-high and its quota for Gemini 4 Argon exhausted, renews in"), "{error}");
@@ -1350,7 +1350,7 @@ fn a_model_without_quota_is_refused_before_opening_the_tab() {
     assert!(env.core.projects()[0].tab_models.is_empty());
 
     // The Flash counts in another group: it delivers normally.
-    let asking = master_ask(&env, json!({"from": "shell", "to": "antigravity@arq", "message": "oi", "model": "gemini-3.8-flash-high"}));
+    let asking = master_ask(&env, json!({"from": "shell", "to": "antigravity@arq", "message": "hi", "model": "gemini-3.8-flash-high"}));
     let d = next_delivery(&env);
     assert_eq!((d.ident.id().as_str(), d.create), ("antigravity@arq", true));
     env.core.fail_delivery(d.request, "test");
@@ -1359,7 +1359,7 @@ fn a_model_without_quota_is_refused_before_opening_the_tab() {
     // A stale reading does not refuse: the quota may have come back.
     let stale = vec![group("Gemini 4 Argon", w(1.0, 9))];
     env.core.set_usage("antigravity", AgentUsage { updated_ms: now - 2 * 3_600_000, groups: stale, ..Default::default() });
-    let asking = master_ask(&env, json!({"from": "shell", "to": "antigravity@b", "message": "oi", "model": "gemini-4-argon-low"}));
+    let asking = master_ask(&env, json!({"from": "shell", "to": "antigravity@b", "message": "hi", "model": "gemini-4-argon-low"}));
     let d = next_delivery(&env);
     assert_eq!(d.ident.id(), "antigravity@b");
     env.core.fail_delivery(d.request, "test");
@@ -1393,14 +1393,14 @@ fn a_model_conflict_on_an_open_instance_is_an_explicit_409() {
     assert_eq!(env.core.instance_models(&p).get("claude@dev").map(String::as_str), Some("sonnet"));
 
     // Another model for the same instance: a 409 with the way out through --new; nothing changes.
-    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@dev", "message": "oi", "model": "opus"}));
+    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@dev", "message": "hi", "model": "opus"}));
     assert_eq!(st, 409, "{body}");
     assert_eq!(body["error"], "claude@dev is already open with sonnet; use --new to open another one with opus");
     assert_eq!(env.core.project_instance_ids(&p), ["claude@dev"]);
     assert_eq!(state(&env).len(), 1);
     // Asking for a model on an instance open with the CLI default is a conflict too.
     env.core.restore_instance(&p, "claude@qa");
-    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@qa", "message": "oi", "model": "opus"}));
+    let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@qa", "message": "hi", "model": "opus"}));
     assert_eq!(
         (st, body["error"].as_str()),
         (409, Some("claude@qa is already open with the default model; use --new to open another one with opus"))
@@ -1428,7 +1428,7 @@ fn a_model_conflict_on_an_open_instance_is_an_explicit_409() {
 
     // Model out of the pattern, or an agent that does not choose a model: 400 before creating anything.
     let ids_before = env.core.project_instance_ids(&p);
-    let bad = |to: &str, model: Value| ask_raw(port, &master, json!({"from": "shell", "to": to, "message": "oi", "model": model}));
+    let bad = |to: &str, model: Value| ask_raw(port, &master, json!({"from": "shell", "to": to, "message": "hi", "model": model}));
     let (st, body) = bad("claude@x", json!("a b"));
     assert_eq!(st, 400);
     assert!(body["error"].as_str().expect("error").starts_with("invalid model: \"a b\""), "{body}");
@@ -1458,7 +1458,7 @@ fn a_failed_request_does_not_keep_the_model_of_an_instance_that_never_opened() {
     let (st, _) = ask_raw(
         env.core.bridge_port(),
         env.core.bridge_token(),
-        json!({"from": "shell", "to": "claude@dev", "message": "oi", "model": "sonnet", "depth": 2}),
+        json!({"from": "shell", "to": "claude@dev", "message": "hi", "model": "sonnet", "depth": 2}),
     );
     assert_eq!(st, 400);
     assert!(env.core.project_instance_ids(&p).is_empty());
@@ -1508,7 +1508,7 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  quota: no reading\n"), "{text}");
     assert!(text.contains("opencode: could not list the models"), "{text}");
     assert!(text.contains("\n  quota: no reading\n\ncapability ("), "the capability comes after the agents: {text}");
-    assert!(text.contains("Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10)"), "{text}");
+    assert!(text.contains("Claude Sonnet 5.5 (claude sonnet): complex, Coding Agent Index 59.3 (2026-10)"), "{text}");
     assert!(!text.contains("antigravity"), "what is not installed does not show up: {text}");
 
     // A single agent (with an alias); the not-installed and the invalid ones are refused.
@@ -1564,7 +1564,7 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
     let ident = |s: &str| agentdeck_core::Ident::parse(s).expect("id");
     let saved = |env: &Env| env.core.projects()[0].tab_models.clone();
     let tail = |args: &[String], n: usize| args[args.len() - n..].to_vec();
-    let data = env.root.join("dados").display().to_string();
+    let data = env.root.join("data").display().to_string();
 
     // c) the role default counts, and is saved when opening.
     let dev = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("claude@dev");
@@ -1590,7 +1590,7 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
     assert_eq!(tail(&codex.args, 2), ["--model", "gpt-5-codex"]);
     assert!(codex.args.iter().any(|a| a.starts_with("notify=")));
     let agy = env.core.spawn_spec_for(&p, &ident("antigravity@x")).expect("agy");
-    // Last, the instance's instructions folder (`dados/agy/<id>`), after the data folder.
+    // Last, the instance's instructions folder (`data/agy/<id>`), after the data folder.
     let own = std::path::Path::new(&data).join("agy").join("antigravity@x").to_string_lossy().into_owned();
     assert_eq!((agy.model, tail(&agy.args, 3)), (None, vec![data, "--add-dir".to_owned(), own]), "no model, no --model");
     env.core.assign_model(&p, &ident("antigravity@x"), Some("claude-sonnet-5-5-medium"));
@@ -1601,7 +1601,7 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
     let oc = env.core.spawn_spec_for(&p, &ident("opencode")).expect("opencode");
     assert_eq!(oc.args, ["--standalone"]);
     let conf: Value = serde_json::from_str(&oc.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
-    let instructions = env.root.join("dados").join("agentdeck-instructions.md");
+    let instructions = env.root.join("data").join("agentdeck-instructions.md");
     assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free", "instructions": [instructions.to_string_lossy()]}));
     // Without a model, OpenCode still gets the AgentDeck instructions (own server + file in the configuration).
     env.core.update_config(|c| {
@@ -1660,7 +1660,7 @@ fn headless_runs_get_the_requested_or_default_model() {
         c.role_models.insert("claude".into(), "opus".into());
     });
     let ask_model = |model: Option<&str>| {
-        let mut body = json!({"from": "shell", "to": "claude", "message": "oi"});
+        let mut body = json!({"from": "shell", "to": "claude", "message": "hi"});
         if let Some(m) = model {
             body["model"] = json!(m);
         }
@@ -1671,7 +1671,7 @@ fn headless_runs_get_the_requested_or_default_model() {
     assert!(b["answer"].as_str().expect("answer").starts_with("ARGS: [-p] [--output-format] [text] [--model] [sonnet] ["), "{b}");
     let (_, b) = ask_model(None);
     assert!(b["answer"].as_str().expect("answer").contains("[--model] [opus]"), "the role default counts without a request: {b}");
-    let (st, b) = ask(&env, json!({"from": "shell", "to": "aider", "message": "oi", "model": "gpt"}));
+    let (st, b) = ask(&env, json!({"from": "shell", "to": "aider", "message": "hi", "model": "gpt"}));
     assert_eq!((st, b), (400, json!({"error": "the agent aider does not accept choosing a model"})));
     env.core.shutdown();
 }

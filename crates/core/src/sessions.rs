@@ -1,7 +1,7 @@
 //! App sessions and data retention (equivalent to `registerSessionAndCleanup`).
 //!
 //! Each run of the app is a "session" identified by its start instant in base36.
-//! We keep the last 5 in `dados/sessions.json`; attachments and prompts (`s_<session>_...`) of
+//! We keep the last 5 in `data/sessions.json`; attachments and prompts (`s_<session>_...`) of
 //! older sessions are deleted, and leftover `.wav` audio too.
 
 use std::collections::HashSet;
@@ -15,8 +15,8 @@ pub fn new_session_id() -> String {
     crate::util::base36(crate::util::now_ms())
 }
 
-/// Registers `current` in `dados/sessions.json` (keeping the last 5) and cleans
-/// `dados/anexos` and `dados/prompts`. I/O errors are ignored (as in the JS).
+/// Registers `current` in `data/sessions.json` (keeping the last 5) and cleans
+/// `data/attachments` and `data/prompts`. I/O errors are ignored (as in the JS).
 pub fn register_and_cleanup(data_dir: &Path, current: &str) {
     let file = data_dir.join("sessions.json");
     let mut history: Vec<String> = std::fs::read_to_string(&file)
@@ -39,7 +39,7 @@ pub fn register_and_cleanup(data_dir: &Path, current: &str) {
     let active: HashSet<&str> = history.iter().map(String::as_str).collect();
 
     // 1. Attachments: delete .wav (there is no use in keeping audio) and files of old sessions.
-    let att_dir = data_dir.join("anexos");
+    let att_dir = data_dir.join("attachments");
     let _ = std::fs::create_dir_all(&att_dir);
     purge(&att_dir, &active, true);
     // 2. Long prompts of old sessions.
@@ -87,11 +87,11 @@ mod tests {
     fn keeps_last_five_and_purges_old_files() {
         let tmp = tempfile::tempdir().expect("tmp");
         let data = tmp.path();
-        std::fs::create_dir_all(data.join("anexos")).expect("mkdir");
+        std::fs::create_dir_all(data.join("attachments")).expect("mkdir");
         std::fs::create_dir_all(data.join("prompts")).expect("mkdir");
         std::fs::write(data.join("sessions.json"), r#"["a1","a2","a3","a4","a5"]"#).expect("write");
         for f in ["s_a1_x.png", "s_a2_y.png", "audio-1.wav", "s_a6_z.txt", "other.txt"] {
-            std::fs::write(data.join("anexos").join(f), "x").expect("write");
+            std::fs::write(data.join("attachments").join(f), "x").expect("write");
         }
         std::fs::write(data.join("prompts").join("s_a1_prompt-1.md"), "x").expect("write");
         std::fs::write(data.join("prompts").join("s_a3_prompt-1.md"), "x").expect("write");
@@ -101,11 +101,11 @@ mod tests {
         let hist: Vec<String> = serde_json::from_str(&std::fs::read_to_string(data.join("sessions.json")).expect("read")).expect("json");
         assert_eq!(hist, ["a2", "a3", "a4", "a5", "a6"]);
         let exists = |p: &str| data.join(p).exists();
-        assert!(!exists("anexos/s_a1_x.png"));
-        assert!(exists("anexos/s_a2_y.png"));
-        assert!(!exists("anexos/audio-1.wav"));
-        assert!(exists("anexos/s_a6_z.txt"));
-        assert!(exists("anexos/other.txt"));
+        assert!(!exists("attachments/s_a1_x.png"));
+        assert!(exists("attachments/s_a2_y.png"));
+        assert!(!exists("attachments/audio-1.wav"));
+        assert!(exists("attachments/s_a6_z.txt"));
+        assert!(exists("attachments/other.txt"));
         assert!(!exists("prompts/s_a1_prompt-1.md"));
         assert!(exists("prompts/s_a3_prompt-1.md"));
     }

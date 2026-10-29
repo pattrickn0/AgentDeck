@@ -29,7 +29,7 @@ env_logger = "0.11"
 tempfile = "3"
 
 # ---------------------------------------------------------------------------
-# UI nativa (crate `agentdeck`, Dev B) — bloco separado para facilitar merge.
+# Native UI (crate `agentdeck`) — a separate block to make merges easier.
 # ---------------------------------------------------------------------------
 winit = "0.30"
 glutin = "0.32"
@@ -47,9 +47,9 @@ arboard = "3"
 png = "0.18"
 winresource = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-# Markdown renderizado no modo Documentos (ui/docs.rs); sem os recursos de realce, imagem e link.
+# Markdown rendered in Documents mode (ui/docs.rs); without the highlighting, image and link features.
 egui_commonmark = { version = "0.25", default-features = false }
-# Ícone na bandeja: Windows (Win32, sem GTK) e Linux (StatusNotifierItem por D-Bus, sem GTK nem tokio).
+# Tray icon: Windows (Win32, no GTK) and Linux (StatusNotifierItem over D-Bus, no GTK nor tokio).
 tray-icon = { version = "0.24", default-features = false }
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 

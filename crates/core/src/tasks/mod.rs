@@ -23,7 +23,7 @@
 //! why merging does **not** end the agent: the task stays in `Validating` (tab, worktree and branch alive, the
 //! branch aligned with the base) until the user validates (cleans everything up) or rejects (back to the same agent).
 //!
-//! - **Storage:** `dados/tarefas/<project>.json`, written through a temporary file + `rename` (one write at a
+//! - **Storage:** `data/tasks/<project>.json`, written through a temporary file + `rename` (one write at a
 //!   time), outside the user's repository. The counter (`t1`, `t2`…) never reuses a number.
 //! - **Worktrees:** `<repository root>/.agentdeck/worktrees/<id>`, inside the repository on purpose (agents confined
 //!   to the workspace, like Antigravity, can reach it). The `/.agentdeck/` folder goes once into
@@ -40,7 +40,7 @@
 //!
 //! **Language:** the texts the desk shows (statuses, history events, refusals, notices) go through `t!`; the texts
 //! only agents read (the brief, the rules, the feedback messages, the boot line) are plain English. The stored
-//! `Feedback::origin` and `Task::creator` values (`revisão`, `validação`, `usuário`) are data and stay as they are.
+//! `Feedback::origin` and `Task::creator` values are English (`review`, `validation`, `user`); older files are read too.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -156,10 +156,27 @@ pub struct TaskEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Feedback {
     pub at_ms: u64,
-    /// `revisão` (review) or `validação` (validation). Saved data that `capability` reads (a `validação` counts as
-    /// a rejection), so the values stay in Portuguese; the messages to the agent show them in English.
+    /// `review` or `validation` (a `validation` counts as a rejection in `capability`). Files saved before the English
+    /// rename have `revisão` / `validação`; they are read as the English values.
+    #[serde(deserialize_with = "legacy_origin")]
     pub origin: String,
     pub text: String,
+}
+
+/// Reads a feedback origin, turning the Portuguese values of older files into the English ones.
+fn legacy_origin<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let origin = String::deserialize(d)?;
+    Ok(match origin.as_str() {
+        "revisão" => "review".to_owned(),
+        "validação" => "validation".to_owned(),
+        _ => origin,
+    })
+}
+
+/// Reads a task creator, turning the Portuguese user value of older files into [`crate::instances::USER`].
+fn legacy_creator<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let creator = Option::<String>::deserialize(d)?;
+    Ok(creator.map(|c| if c == crate::instances::LEGACY_USER { crate::instances::USER.to_owned() } else { c }))
 }
 
 /// A message on the task's timeline: a question, an answer or an error in which its instance speaks or listens.
@@ -185,7 +202,7 @@ pub struct Task {
     pub status: TaskStatus,
     /// Branch the task departs from and is merged into.
     pub base: String,
-    /// `tarefa/<id>-<title slug>`.
+    /// `task/<id>-<title slug>`.
     pub branch: String,
     /// Folder (absolute) of the worktree: `<repository root>/.agentdeck/worktrees/<id>`.
     pub worktree: PathBuf,
@@ -201,8 +218,9 @@ pub struct Task {
     pub effort: Option<models::Effort>,
     /// Id of the instance (`claude@t3`).
     pub instance: String,
-    /// Who created it: the id of an agent (`claude`) or `usuário` (the user; a protocol value). It is the instance's
+    /// Who created it: the id of an agent (`claude`) or `user` ([`crate::instances::USER`]). It is the instance's
     /// boss when it is an open agent.
+    #[serde(default, deserialize_with = "legacy_creator")]
     pub creator: Option<String>,
     pub created_ms: u64,
     pub started_ms: Option<u64>,
@@ -327,7 +345,7 @@ pub struct TaskSpec {
     pub level: Level,
     /// Branch to depart from and merge into; `None` = the current branch of the project's repository.
     pub base: Option<String>,
-    /// Who asked (agent id or `usuário`).
+    /// Who asked (agent id or `user`).
     pub creator: Option<String>,
     /// The paths the task will touch ([`Task::scope`]); empty = no scope. Normalized in `task_create`.
     pub scope: Vec<String>,
@@ -496,7 +514,7 @@ mod tests {
             title: "Fix the login".into(),
             brief: "Do X.\n\nThen Y.".into(),
             base: "main".into(),
-            branch: "tarefa/t3-fix-the-login".into(),
+            branch: "task/t3-fix-the-login".into(),
             worktree: PathBuf::from("/repo/.agentdeck/worktrees/t3"),
             ..Task::default()
         }
@@ -521,7 +539,7 @@ mod tests {
     fn only_the_latest_feedbacks_are_kept() {
         let mut t = sample();
         for n in 0..(MAX_FEEDBACKS + 5) {
-            t.add_feedback("revisão", &n.to_string());
+            t.add_feedback("review", &n.to_string());
         }
         assert_eq!(t.feedbacks.len(), MAX_FEEDBACKS);
         assert_eq!(t.feedbacks.first().map(|f| f.text.as_str()), Some("5"));
@@ -568,7 +586,7 @@ mod tests {
         // Another instance, a transient indicator, a user message and a system notice stay out.
         assert!(!t.record_message(&entry(FeedKind::Ask, Some("claude"), Some("antigravity"), "another")));
         assert!(!t.record_message(&entry(FeedKind::Thinking, Some("claude@t3"), None, "⚙️ [read_file] x")));
-        assert!(!t.record_message(&entry(FeedKind::User, Some("você"), Some("claude@t3"), "hi")));
+        assert!(!t.record_message(&entry(FeedKind::User, Some("you"), Some("claude@t3"), "hi")));
         assert!(!t.record_message(&FeedEntry::system("Task t3 started")));
         // `claude@t30` is not `claude@t3`.
         assert!(!t.record_message(&entry(FeedKind::Ask, Some("claude@t30"), Some("claude"), "x")));

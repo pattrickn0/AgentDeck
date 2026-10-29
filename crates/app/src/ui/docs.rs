@@ -42,13 +42,13 @@ pub const SWITCH_H: f32 = 28.0;
 /// The compact switch of the title bar (sidebar collapsed): 20 px segments.
 pub const SWITCH_COMPACT_H: f32 = 24.0;
 /// The "Agents" badge: a 6 px dot, 6 px after the name.
-const SELO: f32 = 6.0;
-const SELO_GAP: f32 = 6.0;
+const BADGE: f32 = 6.0;
+const BADGE_GAP: f32 = 6.0;
 
 /// Width of the compact switch: two equal segments, the size of the largest label.
 pub fn switch_compact_width(painter: &Painter, deck: &Deck) -> f32 {
     let font = theme::ui_semibold(11.5);
-    let agents = text_w(painter, t!("Agents"), font.clone()) + SELO_GAP + SELO;
+    let agents = text_w(painter, t!("Agents"), font.clone()) + BADGE_GAP + BADGE;
     let docs = text_w(painter, &docs_label(deck.docs.count(&deck.active_project)), font);
     2.0 * (agents.max(docs) + 20.0) + 4.0
 }
@@ -109,9 +109,9 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
             painter.rect_filled(seg, 5.0, fill);
         }
         if which == Switched::Agents {
-            let has_selo = badge.done > 0 || pulse;
+            let has_badge = badge.done > 0 || pulse;
             let g = galley(painter, t!("Agents"), font, fg);
-            let total = g.size().x + if has_selo { SELO_GAP + SELO } else { 0.0 };
+            let total = g.size().x + if has_badge { BADGE_GAP + BADGE } else { 0.0 };
             let x = seg.center().x - total / 2.0;
             let text = place(
                 painter,
@@ -120,15 +120,15 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
                 g,
                 fg,
             );
-            let c = Pos2::new(text.max.x + SELO_GAP + SELO / 2.0, seg.center().y);
-            let selo = if active { p.on_accent } else { accent };
+            let c = Pos2::new(text.max.x + BADGE_GAP + BADGE / 2.0, seg.center().y);
+            let badge_color = if active { p.on_accent } else { accent };
             if badge.done > 0 {
-                painter.circle_filled(c, SELO / 2.0, selo);
+                painter.circle_filled(c, BADGE / 2.0, badge_color);
             } else if pulse {
                 let t = ui.ctx().input(|i| i.time);
                 let wave = (t * 4.8).sin() as f32 * 0.5 + 0.5;
-                painter.circle_filled(c, SELO / 2.0 + 3.0 * wave, theme::with_opacity(selo, 0.35 * (1.0 - wave)));
-                painter.circle_filled(c, SELO / 2.0, selo);
+                painter.circle_filled(c, BADGE / 2.0 + 3.0 * wave, theme::with_opacity(badge_color, 0.35 * (1.0 - wave)));
+                painter.circle_filled(c, BADGE / 2.0, badge_color);
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
             }
         } else {

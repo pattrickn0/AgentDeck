@@ -4,7 +4,7 @@
 //! cargo run -p agentdeck-core --example memeval -- <repository> <tasks file> [options]
 //! ```
 //!
-//! The `<tasks file>` is the `dados/tarefas/<project>.json` of AgentDeck. Read-only: the program calls the installed
+//! The `<tasks file>` is the `data/tasks/<project>.json` of AgentDeck. Read-only: the program calls the installed
 //! `git` and prints tables; nothing is written.
 //!
 //! For each case (a merged task, or a direct commit of `dev` with a big enough diff):
@@ -516,14 +516,14 @@ impl Ctx<'_> {
     }
 }
 
-/// The "Merge tarefa tN: …" merges of the history: task id → (merge, parent 1, parent 2).
+/// The "Merge task tN: …" merges (or "Merge tarefa tN: …", before the English rename) of the history: task id → (merge, parent 1, parent 2).
 fn task_merges(repo: &Repo) -> Result<HashMap<String, (String, String, String)>, String> {
     let log = repo.text(&["log", "--merges", "--format=%H\t%P\t%s", "HEAD"])?;
     let mut out = HashMap::new();
     for line in log.lines() {
         let mut f = line.splitn(3, '\t');
         let (Some(hash), Some(parents), Some(subject)) = (f.next(), f.next(), f.next()) else { continue };
-        let Some(rest) = subject.strip_prefix("Merge tarefa ") else { continue };
+        let Some(rest) = subject.strip_prefix("Merge task ").or_else(|| subject.strip_prefix("Merge tarefa ")) else { continue };
         let Some((id, _)) = rest.split_once(':') else { continue };
         let ps: Vec<&str> = parents.split_whitespace().collect();
         if ps.len() == 2 {
@@ -934,11 +934,11 @@ mod tests {
 
     #[test]
     fn delivery_tells_full_text_from_index_line() {
-        let all = vec![learning("memory/aprendizados/a.md", &["src/a.rs"]), learning("memory/aprendizados/b.md", &["src/b.rs"])];
+        let all = vec![learning("memory/learnings/a.md", &["src/a.rs"]), learning("memory/learnings/b.md", &["src/b.rs"])];
         let rendered = learnings::render_with(&all, &["src/a.rs".to_owned()], BUDGET, usize::MAX);
         let d = read_delivery(&all, &rendered);
-        assert_eq!(d.full, ["memory/aprendizados/a.md".to_owned()].into_iter().collect());
-        assert_eq!(d.index, ["memory/aprendizados/b.md".to_owned()].into_iter().collect());
+        assert_eq!(d.full, ["memory/learnings/a.md".to_owned()].into_iter().collect());
+        assert_eq!(d.index, ["memory/learnings/b.md".to_owned()].into_iter().collect());
         assert_eq!(d.chars, rendered.chars().count());
         let d = read_delivery(&all, &learnings::render_with(&all, &["src/a.rs".to_owned()], BUDGET, 0));
         assert!(d.index.is_empty());
@@ -947,12 +947,12 @@ mod tests {
     #[test]
     fn tally_scores_recall_precision_and_index() {
         let all = vec![
-            learning("memory/aprendizados/a.md", &["src/a.rs"]),
-            learning("memory/aprendizados/b.md", &["src/b.rs"]),
-            learning("memory/aprendizados/c.md", &["src/c.rs"]),
+            learning("memory/learnings/a.md", &["src/a.rs"]),
+            learning("memory/learnings/b.md", &["src/b.rs"]),
+            learning("memory/learnings/c.md", &["src/c.rs"]),
         ];
         // The right ones are a and b; the guess delivers a (right) and c (wrong); b only shows up in the index.
-        let p = prepared(all.clone(), &["memory/aprendizados/a.md", "memory/aprendizados/b.md"]);
+        let p = prepared(all.clone(), &["memory/learnings/a.md", "memory/learnings/b.md"]);
         let rendered = learnings::render_with(&all, &["src/a.rs".to_owned(), "src/c.rs".to_owned()], BUDGET, usize::MAX);
         let mut t = MemTally::default();
         t.add(&p, &read_delivery(&all, &rendered));
@@ -962,7 +962,7 @@ mod tests {
 
     #[test]
     fn tally_ignores_cases_without_truth_in_recall_but_counts_their_delivery() {
-        let all = vec![learning("memory/aprendizados/a.md", &["src/a.rs"])];
+        let all = vec![learning("memory/learnings/a.md", &["src/a.rs"])];
         let p = prepared(all.clone(), &[]);
         let mut t = MemTally::default();
         t.add(&p, &read_delivery(&all, &learnings::render_with(&all, &["src/a.rs".to_owned()], BUDGET, 0)));
@@ -986,8 +986,8 @@ mod tests {
 
     #[test]
     fn layered_matches_render_without_extras_and_puts_seed_learnings_first() {
-        let mut all = vec![learning("memory/aprendizados/a.md", &["src/a.rs"]), learning("memory/aprendizados/b.md", &["src/b.rs"])];
-        all.push(learning("memory/aprendizados/g.md", &[]));
+        let mut all = vec![learning("memory/learnings/a.md", &["src/a.rs"]), learning("memory/learnings/b.md", &["src/b.rs"])];
+        all.push(learning("memory/learnings/g.md", &[]));
         let seeds = vec!["src/b.rs".to_owned()];
         assert_eq!(layered(&all, &seeds, &[], BUDGET), learnings::render_with(&all, &seeds, BUDGET, 0));
         // The cap fits only one text: the one of the cited file (b) is worth more than the one of the neighbour (a),
@@ -1023,7 +1023,7 @@ mod tests {
     }
     #[test]
     fn noise_is_memory_and_cargo_lock() {
-        assert!(is_noise("memory/GERAL.md") && is_noise("Cargo.lock"));
+        assert!(is_noise("memory/OVERVIEW.md") && is_noise("Cargo.lock"));
         assert!(!is_noise("crates/core/Cargo.lock.rs") && !is_noise("src/memory/x.rs"));
     }
 }

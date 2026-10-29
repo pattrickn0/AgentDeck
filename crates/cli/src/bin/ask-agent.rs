@@ -429,7 +429,7 @@ fn team(bridge: &Bridge) -> Result<Team, String> {
 
 const LEARN_USAGE: &str = "Usage: ask-agent --learn [<file>...]   (what the project has already learned, in general or about those files)";
 
-/// `ask-agent --learn [<path>...]`: prints the learnings (`memory/aprendizados/`) that apply to the files;
+/// `ask-agent --learn [<path>...]`: prints the learnings (`memory/learnings/`) that apply to the files;
 /// with no paths, the global ones and the index of the others.
 fn learn_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
     if paths.iter().any(|p| p == "-h" || p == "--help") {
@@ -762,10 +762,10 @@ fn who(task: &Value) -> String {
     }
 }
 
-/// The task's level (`media` when the server does not send it; it is the CLI value).
+/// The task's level (`medium` when the server does not send it; it is the CLI value).
 fn level_text(task: &Value) -> &str {
     match field(task, "level") {
-        "" => "media",
+        "" => "medium",
         level => level,
     }
 }
@@ -1207,7 +1207,7 @@ ready"
             &["new", "T", "--agent"],
             &["new", "T", "--model", "--start"],
             &["new", "T", "--base="],
-            &["new", "T", "--agente", "x"],
+            &["new", "T", "--agentx", "x"],
             &["new", "T", "--file"],
             &["new", "T", "--file="],
         ] {
@@ -1265,7 +1265,7 @@ ready"
     #[test]
     fn task_output_is_readable() {
         let t = json!({
-            "id": "t3", "title": "Fix login", "status": "review", "base": "main", "branch": "tarefa/t3-fix-login",
+            "id": "t3", "title": "Fix login", "status": "review", "base": "main", "branch": "task/t3-fix-login",
             "instance": "claude@t3", "model": "sonnet", "creator": "claude", "worktree": "/r/.agentdeck/worktrees/t3",
             "diff_stat": " a.rs | 2 +-", "report": "Done.", "events": [{ "at_ms": 1, "text": "created" }, { "at_ms": 2, "text": "started" }]
         });
@@ -1277,7 +1277,7 @@ ready"
             "Task t3: Fix login",
             "State: review",
             "Agent: claude@t3 (sonnet)",
-            "Base: main · branch: tarefa/t3-fix-login",
+            "Base: main · branch: task/t3-fix-login",
             "Created by: claude",
             "a.rs | 2 +-",
             "Report:\nDone.",

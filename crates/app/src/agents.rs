@@ -114,7 +114,8 @@ impl Agents {
 
     /// `whoColor(name)`; an instance (`claude@dev`) uses the model's color.
     pub fn who_color(&self, name: Option<&str>) -> Color32 {
-        if name == Some("você") {
+        // "você" is the user's name in chat history saved before the English rename.
+        if name == Some("you") || name == Some("você") {
             return theme::pal().user;
         }
         name.and_then(|n| self.colors.get(n).copied().or_else(|| Ident::parse(n).and_then(|i| self.colors.get(&i.kind).copied())))
@@ -168,7 +169,7 @@ mod tests {
         assert_eq!(a.name("opencode"), "OpenCode");
         assert_eq!(a.name("unknown"), "unknown");
         assert_eq!(a.fallback_kind(), "claude");
-        assert_eq!(a.who_color(Some("você")), theme::pal().user);
+        assert_eq!(a.who_color(Some("you")), theme::pal().user);
         assert_eq!(a.who_color(Some("unknown")), theme::pal().text_2);
     }
 }

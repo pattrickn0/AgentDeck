@@ -11,7 +11,7 @@ fn start_core(root: &std::path::Path) -> Core {
     let paths = AppPaths {
         app_dir: root.to_path_buf(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("workspace"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),

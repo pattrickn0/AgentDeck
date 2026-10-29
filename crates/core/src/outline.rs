@@ -797,7 +797,7 @@ mod tests {
             }
         }
         // Every slice of a multibyte text.
-        let text = "fn ação(é: &str) -> 🙂 {\n    let s = \"ü{\";\n}\nstruct Ç { ã: u8 }\n";
+        let text = "fn façade(é: &str) -> 🙂 {\n    let s = \"ü{\";\n}\nstruct Ç { ã: u8 }\n";
         for end in 0..=text.len() {
             if text.is_char_boundary(end) {
                 for path in ["a.rs", "a.py", "a.ts"] {

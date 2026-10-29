@@ -31,8 +31,8 @@ pub fn draw_panel(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let body = Rect::from_min_max(Pos2::new(rect.min.x, body_top), rect.max);
     if body.height() > 1.0 {
         match deck.right_view {
-            RightView::Tarefas => super::tasks::draw(deck, ui, body),
-            RightView::Conversa => draw_feed(deck, ui, body),
+            RightView::Tasks => super::tasks::draw(deck, ui, body),
+            RightView::Chat => draw_feed(deck, ui, body),
             RightView::Git => super::git::draw(deck, ui, body),
             RightView::GitHub => super::github::draw(deck, ui, body),
         }
@@ -126,8 +126,8 @@ fn draw_head(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         (r, v) => t!("Tasks · {review} in review, {validating} awaiting validation", review = r, validating = v),
     };
     let tabs = [
-        (RightView::Tarefas, HeadTab { id: "tarefas", label: t!("Tasks"), tip: &tasks_tip, badge: review_badge }),
-        (RightView::Conversa, HeadTab { id: "conversa", label: t!("Chat"), tip: t!("Integrated chat"), badge: deck.unseen }),
+        (RightView::Tasks, HeadTab { id: "tasks", label: t!("Tasks"), tip: &tasks_tip, badge: review_badge }),
+        (RightView::Chat, HeadTab { id: "chat", label: t!("Chat"), tip: t!("Integrated chat"), badge: deck.unseen }),
         (RightView::Git, HeadTab { id: "git", label: "Git", tip: &git_tip, badge: git_badge }),
         (RightView::GitHub, HeadTab { id: "github", label: "GitHub", tip: &gh_tip, badge: gh_badge }),
     ];

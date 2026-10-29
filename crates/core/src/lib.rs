@@ -152,9 +152,9 @@ pub(crate) struct CoreInner {
     pub github: github::GithubState,
     /// Usage of the agents' plans (title bar).
     pub usage: usage::UsageStore,
-    /// Tasks (task desk) of each project, in `dados/tarefas/<project>.json`.
+    /// Tasks (task desk) of each project, in `data/tasks/<project>.json`.
     pub tasks: tasks::TaskStore,
-    /// Lock of the data folder (one instance of the app per `dados/`); released on shutdown.
+    /// Lock of the data folder (one instance of the app per `data/`); released on shutdown.
     data_lock: Mutex<Option<std::fs::File>>,
 }
 
@@ -198,7 +198,7 @@ fn same_secret(a: &str, b: &str) -> bool {
 /// Lock file of the data folder: one instance of the app per folder.
 const LOCK_FILE: &str = ".agentdeck.lock";
 
-/// Locks `dados/.agentdeck.lock`. Error if another instance of the app already uses the folder.
+/// Locks `data/.agentdeck.lock`. Error if another instance of the app already uses the folder.
 fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(LOCK_FILE);
@@ -837,7 +837,7 @@ impl Core {
     }
 
     /// Opens a workspace file with the system's default app. Accepts paths relative to the
-    /// workspace or absolute inside the workspace / the `dados` folder (attachments).
+    /// workspace or absolute inside the workspace / the `data` folder (attachments).
     pub fn open_path(&self, rel_path: &str) -> anyhow::Result<()> {
         let ws = self.workspace();
         if ws.as_os_str().is_empty() {
@@ -859,7 +859,7 @@ impl Core {
 
     // ---------- Attachments ----------
 
-    /// Copies files to `dados/anexos` (ignores folders). Returns references to cite (`@ref`).
+    /// Copies files to `data/attachments` (ignores folders). Returns references to cite (`@ref`).
     pub fn attach_files(&self, files: &[PathBuf]) -> Vec<String> {
         attachments::attach_files(&self.paths().data_dir, &self.workspace(), self.session_id(), files)
     }
@@ -1010,7 +1010,7 @@ mod tests {
         let paths = paths::AppPaths {
             app_dir: root.join("app"),
             bin_dir: root.join("bin"),
-            data_dir: root.join("dados"),
+            data_dir: root.join("data"),
             default_workspace: root.join("ws"),
             whisper_dir: root.join("whisper"),
             config_file: root.join("cfg").join("config.json"),
@@ -1025,7 +1025,7 @@ mod tests {
         let (core, _rx) = Core::start_with(paths, opts).expect("start");
         let still_alive = core.clone();
         core.shutdown();
-        lock_data_dir(&root.join("dados")).expect("the folder is free right after the shutdown");
+        lock_data_dir(&root.join("data")).expect("the folder is free right after the shutdown");
         drop(still_alive);
     }
 }

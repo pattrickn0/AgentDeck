@@ -600,7 +600,7 @@ pub enum FormMenu {
 pub struct NewForm {
     pub title: String,
     pub brief: String,
-    /// Files attached to the request (absolute paths in `dados/anexos`).
+    /// Files attached to the request (absolute paths in `data/attachments`).
     pub attachments: Vec<PathBuf>,
     /// Agent (`claude`); empty until the form opens.
     pub kind: String,
@@ -936,7 +936,7 @@ impl Deck {
         self.pick_attachments_for(AttachTarget::TaskForm(self.active_project.clone()));
     }
 
-    /// "×" of the attachment chip in the "New task" form: removes it from the list and deletes the copy in `dados/anexos`.
+    /// "×" of the attachment chip in the "New task" form: removes it from the list and deletes the copy in `data/attachments`.
     pub fn tasks_remove_attachment(&mut self, i: usize) {
         if i >= self.tasks.form.attachments.len() {
             return;
@@ -1200,7 +1200,7 @@ pub fn demo_tasks() -> Vec<Task> {
         title: title.to_owned(),
         status,
         base: "dev".into(),
-        branch: format!("tarefa/{id}-{}", agentdeck_core::tasks::slugify(title, 40)),
+        branch: format!("task/{id}-{}", agentdeck_core::tasks::slugify(title, 40)),
         worktree: format!(r"C:\Users\you\agentdeck-dev\.agentdeck\worktrees\{id}").into(),
         kind: kind.to_owned(),
         model: model.map(str::to_owned),
@@ -1217,7 +1217,7 @@ pub fn demo_tasks() -> Vec<Task> {
         diff_stat: Some(" crates/app/src/tasks_ui.rs       | 412 +++++++++++++++++++++++++++\n crates/app/src/ui/tasks.rs      | 688 ++++++++++++++++++++++++++++++++++++\n crates/app/src/ui/right_panel.rs |  14 +-\n crates/core/src/tasks.rs        |  23 ++\n 4 files changed, 1129 insertions(+), 8 deletions(-)\n".into()),
         events: vec![
             ev(95, "created"),
-            ev(90, "started: worktree C:\\Users\\you\\agentdeck-dev\\.agentdeck\\worktrees\\t4 on branch tarefa/t4-tasks-tab-in-the-right-bar"),
+            ev(90, "started: worktree C:\\Users\\you\\agentdeck-dev\\.agentdeck\\worktrees\\t4 on branch task/t4-tasks-tab-in-the-right-bar"),
             ev(90, "brief delivered to the agent"),
             ev(6, "report received; in review"),
         ],
@@ -1246,7 +1246,7 @@ pub fn demo_tasks() -> Vec<Task> {
     let running = Task {
         created_ms: now - 25 * min,
         started_ms: Some(now - 24 * min),
-        events: vec![ev(25, "created"), ev(24, "started: worktree … on branch tarefa/t6")],
+        events: vec![ev(25, "created"), ev(24, "started: worktree … on branch task/t6")],
         effort: Some(Effort::Medium),
         scope: vec!["crates/core".into(), "memory/ARCHITECTURE.md".into()],
         ..base("t6", "Document the bridge /tasks routes", TaskStatus::Running, "claude", Some("claude-sonnet-5-5"))
@@ -1268,10 +1268,10 @@ pub fn demo_tasks() -> Vec<Task> {
     };
     let failed = Task {
         created_ms: now - 5 * 60 * min,
-        error: Some("could not create the worktree: branch tarefa/t3-new-branch already exists in this repository".into()),
+        error: Some("could not create the worktree: branch task/t3-new-branch already exists in this repository".into()),
         events: vec![
             ev(300, "created"),
-            ev(299, "error: could not create the worktree: branch tarefa/t3-new-branch already exists in this repository"),
+            ev(299, "error: could not create the worktree: branch task/t3-new-branch already exists in this repository"),
         ],
         ..base("t3", "Swap the report's markdown parser", TaskStatus::Failed, "opencode", Some("opencode/deepseek-v4.1-flash-free"))
     };
@@ -1287,7 +1287,7 @@ pub fn demo_tasks() -> Vec<Task> {
         merge_commit: Some("a1b2c3d4e5f60123456789abcdef0123456789ab".into()),
         events: vec![
             ev(180, "created"),
-            ev(170, "started: worktree … on branch tarefa/t8"),
+            ev(170, "started: worktree … on branch task/t8"),
             ev(20, "report received; in review"),
             ev(8, "merged into dev (a1b2c3d); awaiting validation"),
         ],
@@ -1553,8 +1553,8 @@ mod tests {
     fn the_scope_field_takes_one_path_per_line_or_commas() {
         assert!(parse_scope("").is_empty() && parse_scope(" \n , \n").is_empty());
         assert_eq!(
-            parse_scope(" crates/core \n\nmemory/GERAL.md, crates/cli\r\nCargo.lock"),
-            ["crates/core", "memory/GERAL.md", "crates/cli", "Cargo.lock"]
+            parse_scope(" crates/core \n\nmemory/OVERVIEW.md, crates/cli\r\nCargo.lock"),
+            ["crates/core", "memory/OVERVIEW.md", "crates/cli", "Cargo.lock"]
         );
     }
 
@@ -1630,7 +1630,7 @@ mod tests {
             started_ms: Some(1),
             id: "t5".into(),
             base: "dev".into(),
-            branch: "tarefa/t5-x".into(),
+            branch: "task/t5-x".into(),
             merge_commit: commit.map(str::to_owned),
             ..Task::default()
         };
@@ -1645,8 +1645,8 @@ mod tests {
             assert_eq!(diff_title(&t(status, Some(hash))), "t5 · what the merge brought into dev");
         }
         // The detail shows the short hash next to `branch → base`.
-        assert_eq!(branch_line(&t(TaskStatus::Validating, Some(hash))), "tarefa/t5-x → dev · 0123456");
-        assert_eq!(branch_line(&t(TaskStatus::Running, None)), "tarefa/t5-x → dev");
+        assert_eq!(branch_line(&t(TaskStatus::Validating, Some(hash))), "task/t5-x → dev · 0123456");
+        assert_eq!(branch_line(&t(TaskStatus::Running, None)), "task/t5-x → dev");
         assert_eq!(merge_short(&t(TaskStatus::Merged, Some(""))), None);
     }
 

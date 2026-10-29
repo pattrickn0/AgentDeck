@@ -23,7 +23,7 @@ fn start(agents: &[&str]) -> Env {
     let paths = AppPaths {
         app_dir: root.clone(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("workspace"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),
@@ -103,7 +103,7 @@ fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
     let claude = env.spec(&project, "claude");
     let text = arg_after(&claude.args, "--append-system-prompt");
     assert!(text.contains("do NOT use your CLI's internal subagents"), "{text}");
-    assert!(text.contains("memory/aprendizados/") && text.contains("ask-agent --learn"), "{text}");
+    assert!(text.contains("memory/learnings/") && text.contains("ask-agent --learn"), "{text}");
     assert!(text.contains("ask-agent --task new"), "{text}");
 
     // Codex: `-c developer_instructions=<TOML text>`.
@@ -119,7 +119,7 @@ fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
     assert!(opencode.args.contains(&"--standalone".to_owned()), "{:?}", opencode.args);
     let config: serde_json::Value = serde_json::from_str(&opencode.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
     let file = PathBuf::from(config["instructions"][0].as_str().expect("file"));
-    assert!(file.starts_with(env.root.join("dados")), "{}", file.display());
+    assert!(file.starts_with(env.root.join("data")), "{}", file.display());
     let from_file = std::fs::read_to_string(&file).expect("read");
     assert!(from_file.contains("do NOT use your CLI's internal subagents") && from_file.contains("AGENTDECK_AGENT"), "{from_file}");
 
@@ -137,7 +137,7 @@ fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
     let dirs: Vec<PathBuf> =
         agy.args.iter().zip(agy.args.iter().skip(1)).filter(|(a, _)| *a == "--add-dir").map(|(_, d)| PathBuf::from(d)).collect();
     let own = dirs.iter().find(|d| d.join("AGENTS.md").is_file()).unwrap_or_else(|| panic!("no AGENTS.md in {dirs:?}"));
-    assert!(own.starts_with(env.root.join("dados")), "{}", own.display());
+    assert!(own.starts_with(env.root.join("data")), "{}", own.display());
     let agy_text = std::fs::read_to_string(own.join("AGENTS.md")).expect("read");
     assert!(agy_text.contains("do NOT use your CLI's internal subagents") && agy_text.contains("antigravity@arquiteto"), "{agy_text}");
 
@@ -155,7 +155,7 @@ fn a_cli_that_only_reads_agents_md_gets_one_with_just_the_app_block() {
     env.spec(&project, "goose");
     let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md created");
     assert!(text.starts_with("<!-- agentdeck:start -->") && text.trim_end().ends_with("<!-- agentdeck:end -->"), "{text}");
-    assert!(text.contains("do NOT use your CLI's internal subagents") && text.contains("memory/aprendizados/"), "{text}");
+    assert!(text.contains("do NOT use your CLI's internal subagents") && text.contains("memory/learnings/"), "{text}");
     // The user is warned in the Conversation, once.
     let notices = env.feed_texts();
     assert_eq!(notices.len(), 1, "{notices:?}");

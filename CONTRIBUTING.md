@@ -36,13 +36,13 @@ been verified on Linux, what is pending, and how to test manually are in [`memor
 5. **Language:** code comments, docs and commit messages in English. User-facing text goes through `t!("English text")`
    with a pt-BR entry in `crates/core/src/i18n/pt_br/<area>.rs` (the app is English by default, Portuguese is an
    option). Agent-facing text (`ask-agent` output, instructions, briefs, bridge responses) is English only and never goes
-   through `t!`. See [`memory/aprendizados/i18n-english-key-and-area-files.md`](memory/aprendizados/i18n-english-key-and-area-files.md).
+   through `t!`. See [`memory/learnings/i18n-english-key-and-area-files.md`](memory/learnings/i18n-english-key-and-area-files.md).
 
 6. **Documentation alongside code:** changed behavior, protocol, or a pending item? Update the corresponding
-   document in [memory/](memory/GERAL.md) in the same commit. A completed pending item moves from `pendencias.md` to
-   `historico.md`.
+   document in [memory/](memory/OVERVIEW.md) in the same commit. A completed pending item moves from `backlog.md` to
+   `history.md`.
 7. **Project memory:** anything that is not obvious in the code and cost time (a pitfall, a decision, a convention)
-   becomes a file in [memory/aprendizados/](memory/aprendizados/README.md), in the same commit.
+   becomes a file in [memory/learnings/](memory/learnings/README.md), in the same commit.
 
-See [memory/MANUTENCAO.md](memory/MANUTENCAO.md) for the code map and common recipes, and
-[memory/GERAL.md](memory/GERAL.md) for the overview and documentation map.
+See [memory/MAINTENANCE.md](memory/MAINTENANCE.md) for the code map and common recipes, and
+[memory/OVERVIEW.md](memory/OVERVIEW.md) for the overview and documentation map.

@@ -11,7 +11,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("AgentDeck could not start: {error}", "Não foi possível iniciar o AgentDeck: {error}"),
     // Attachments and drag and drop
     ("Drop to attach to the new task", "Solte para anexar à nova tarefa"),
-    ("Copy under dados/anexos cited in the request", "Cópia em dados/anexos citada no pedido"),
+    ("Copy under data/attachments cited in the request", "Cópia em data/attachments citada no pedido"),
     ("Drop to attach to {tab}", "Solte para anexar a {tab}"),
     ("The path will be inserted into this tab's prompt", "O caminho será inserido no prompt desta aba"),
     ("Open an agent or the new task form to attach files.", "Abra um agente ou o formulário de nova tarefa para anexar arquivos."),

@@ -1,7 +1,7 @@
 //! Raw output recording for a tab, debug only (`AGENTDECK_DEBUG_PTY=1`, off by default).
 //!
 //! Useful for bugs that only show up in the user's session (e.g. top half of the terminal blank): with
-//! recording enabled, each tab process creates three files in `dados/pty/` with the same prefix
+//! recording enabled, each tab process creates three files in `data/pty/` with the same prefix
 //! `<tab>-<date>-<time>`:
 //! - `.bin`: bytes delivered by the PTY, exactly as received (what the emulator received);
 //! - `.events.txt`: one line per resize event (`<ms> <position in .bin> size <cols> <rows>`), to
@@ -257,15 +257,15 @@ mod tests {
 
     /// Real ConPTY recordings (Windows, `powershell -NoLogo`, `1..N | % { "L{0:D5} ..." }`) with the window resizing:
     /// height 58→30→58→40→58 (200 lines) and width 120→60→120 (400 lines wrapped in half).
-    const PS_ALTURA: (&[u8], &str) =
+    const PS_HEIGHT: (&[u8], &str) =
         (include_bytes!("testdata/conhost-powershell-altura.bin"), include_str!("testdata/conhost-powershell-altura.events.txt"));
-    const PS_LARGURA: (&[u8], &str) =
+    const PS_WIDTH: (&[u8], &str) =
         (include_bytes!("testdata/conhost-powershell-largura.bin"), include_str!("testdata/conhost-powershell-largura.events.txt"));
 
     #[test]
     fn growing_the_window_does_not_lose_the_lines_the_grid_pulled_from_the_history() {
         // Bug t37: alacritty_terminal pulls history to the top when gaining lines and ConPTY repaints over it.
-        let (bytes, events) = PS_ALTURA;
+        let (bytes, events) = PS_HEIGHT;
         let lost = replay::numbered(&replay::run_with(bytes, events, false));
         assert!(lost.len() < 200 && lost.windows(2).any(|w| w[1] != w[0] + 1), "without the fix lines disappear: {lost:?}");
 
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn widening_a_wrapped_session_does_not_lose_the_lines_the_reflow_pulled_from_the_history() {
-        let (bytes, events) = PS_LARGURA;
+        let (bytes, events) = PS_WIDTH;
         let lost = replay::numbered(&replay::run_with(bytes, events, false));
         assert!(lost.windows(2).any(|w| w[1] != w[0] + 1), "without the fix a line disappears: {lost:?}");
 

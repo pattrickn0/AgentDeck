@@ -135,7 +135,7 @@ impl Core {
             }
             // `before` does not have the new feedback: the message shows only the earlier ones.
             let before = t.clone();
-            t.add_feedback("validação", &feedback);
+            t.add_feedback("validation", &feedback);
             (before, t.clone())
         });
         let (before, task) = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;

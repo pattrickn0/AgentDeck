@@ -3,9 +3,9 @@
 //! anyone seeing it. Opening the folder as a project in AgentDeck is already the user's decision, so the app records trust
 //! before opening the CLI (verified on 2026-10-25 with Claude Code 2.1.310, Codex 0.164.0 and `agy` 1.4.7):
 //!
-//! - **Claude:** `projects["C:/pasta"].hasTrustDialogAccepted` in `~/.claude.json`; applies to subfolders (a task's
+//! - **Claude:** `projects["C:/folder"].hasTrustDialogAccepted` in `~/.claude.json`; applies to subfolders (a task's
 //!   worktree inherits the project's), so it only writes when neither the folder nor a parent folder was accepted;
-//! - **Codex:** `-c projects={'<pasta>'={trust_level='trusted'}}` on the command line, without writing `config.toml`;
+//! - **Codex:** `-c projects={'<folder>'={trust_level='trusted'}}` on the command line, without writing `config.toml`;
 //! - **Antigravity:** `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`, by **exact path** (neither parent
 //!   folder nor different casing works), which is why each worktree asked again; the entry is removed when the worktree is removed.
 //!
@@ -220,16 +220,16 @@ mod tests {
         assert!(!may_trust(home, home));
         assert!(!may_trust(Path::new("/home/voce/"), home));
         assert!(!may_trust(Path::new("/"), home));
-        assert!(may_trust(Path::new("/home/voce/projeto"), home));
+        assert!(may_trust(Path::new("/home/you/project"), home));
         assert!(prepare("codex", home, home, home).is_empty());
     }
 
     #[test]
     fn codex_gets_the_trust_on_the_command_line() {
-        let args = codex_args(&[Path::new("/p/projeto/.agentdeck/worktrees/t1"), Path::new("/p/projeto")]);
+        let args = codex_args(&[Path::new("/p/project/.agentdeck/worktrees/t1"), Path::new("/p/project")]);
         assert_eq!(
             args,
-            ["-c", "projects={'/p/projeto/.agentdeck/worktrees/t1'={trust_level='trusted'},'/p/projeto'={trust_level='trusted'}}"]
+            ["-c", "projects={'/p/project/.agentdeck/worktrees/t1'={trust_level='trusted'},'/p/project'={trust_level='trusted'}}"]
         );
         assert!(codex_args(&[Path::new("/p/o'brien")]).is_empty(), "single quotes do not fit in string literal");
     }
@@ -238,8 +238,8 @@ mod tests {
     #[test]
     fn codex_never_repeats_a_folder() {
         let home = Path::new("/home/voce");
-        let p = Path::new("/p/projeto");
-        assert_eq!(prepare("codex", p, Path::new("/p/projeto/"), home), ["-c", "projects={'/p/projeto'={trust_level='trusted'}}"]);
+        let p = Path::new("/p/project");
+        assert_eq!(prepare("codex", p, Path::new("/p/project/"), home), ["-c", "projects={'/p/project'={trust_level='trusted'}}"]);
     }
 
     #[test]
@@ -247,19 +247,19 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join(".claude.json");
         // Without the file, nothing is created.
-        trust_claude(&file, Path::new("/p/novo")).unwrap();
+        trust_claude(&file, Path::new("/p/new")).unwrap();
         assert!(!file.exists());
 
-        std::fs::write(&file, r#"{"numStartups": 3, "projects": {"/p/projeto": {"hasTrustDialogAccepted": true, "x": 1}}}"#).unwrap();
+        std::fs::write(&file, r#"{"numStartups": 3, "projects": {"/p/project": {"hasTrustDialogAccepted": true, "x": 1}}}"#).unwrap();
         // Worktree inside project inherits: file does not change.
         let before = std::fs::read_to_string(&file).unwrap();
-        trust_claude(&file, Path::new("/p/projeto/.agentdeck/worktrees/t1")).unwrap();
+        trust_claude(&file, Path::new("/p/project/.agentdeck/worktrees/t1")).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
 
-        trust_claude(&file, Path::new("/p/novo")).unwrap();
+        trust_claude(&file, Path::new("/p/new")).unwrap();
         let v = json(&file);
-        assert_eq!(v["projects"]["/p/novo"]["hasTrustDialogAccepted"], true);
-        assert_eq!(v["projects"]["/p/projeto"]["x"], 1, "the rest stays as it was");
+        assert_eq!(v["projects"]["/p/new"]["hasTrustDialogAccepted"], true);
+        assert_eq!(v["projects"]["/p/project"]["x"], 1, "the rest stays as it was");
         assert_eq!(v["numStartups"], 3);
     }
 
@@ -267,11 +267,11 @@ mod tests {
     fn claude_turns_an_existing_refusal_into_trust_and_keeps_the_entry() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join(".claude.json");
-        std::fs::write(&file, r#"{"projects": {"C:/p/novo": {"hasTrustDialogAccepted": false, "allowedTools": ["a"]}}}"#).unwrap();
-        trust_claude(&file, Path::new(r"C:\p\novo")).unwrap();
+        std::fs::write(&file, r#"{"projects": {"C:/p/new": {"hasTrustDialogAccepted": false, "allowedTools": ["a"]}}}"#).unwrap();
+        trust_claude(&file, Path::new(r"C:\p\new")).unwrap();
         let v = json(&file);
-        assert_eq!(v["projects"]["C:/p/novo"]["hasTrustDialogAccepted"], true);
-        assert_eq!(v["projects"]["C:/p/novo"]["allowedTools"][0], "a");
+        assert_eq!(v["projects"]["C:/p/new"]["hasTrustDialogAccepted"], true);
+        assert_eq!(v["projects"]["C:/p/new"]["allowedTools"][0], "a");
     }
 
     #[test]
@@ -279,7 +279,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("antigravity-cli");
         let file = dir.join("settings.json");
-        let wt = tmp.path().join("projeto").join("wt");
+        let wt = tmp.path().join("project").join("wt");
         // Without the agy directory, nothing is created.
         trust_agy(&file, &wt).unwrap();
         assert!(!file.exists());
@@ -309,10 +309,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn on_windows_the_agy_key_uses_backslashes() {
-        assert_eq!(agy_key(Path::new("C:/Users/voce/projeto/")), r"C:\Users\voce\projeto");
+        assert_eq!(agy_key(Path::new("C:/Users/you/project/")), r"C:\Users\you\project");
         assert!(claude_trusted(
-            serde_json::json!({"c:/users/voce/projeto": {"hasTrustDialogAccepted": true}}).as_object().unwrap(),
-            Path::new(r"C:\Users\voce\projeto\.agentdeck\worktrees\t3")
+            serde_json::json!({"c:/users/you/project": {"hasTrustDialogAccepted": true}}).as_object().unwrap(),
+            Path::new(r"C:\Users\you\project\.agentdeck\worktrees\t3")
         ));
     }
 }

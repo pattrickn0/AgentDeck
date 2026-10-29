@@ -75,7 +75,7 @@ impl ProjectCfg {
 }
 
 /// A project that left the list: the id and the folder, so that adding the same folder again reuses the id
-/// (and the tasks in `dados/tarefas/<id>.json` come back to the desk).
+/// (and the tasks in `data/tasks/<id>.json` come back to the desk).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RemovedProject {
@@ -310,7 +310,7 @@ impl Config {
                 text.and_then(|t| Self::try_from_json_over_defaults(&t, paths)).unwrap_or_else(|| {
                     // Unreadable: keeps a copy before the next save puts the defaults on top of it
                     // (otherwise the project list is lost without warning).
-                    let backup = f.with_extension(format!("json.ilegivel-{}", crate::util::now_ms()));
+                    let backup = f.with_extension(format!("json.unreadable-{}", crate::util::now_ms()));
                     match std::fs::copy(f, &backup) {
                         Ok(_) => log::error!("unreadable config at {}; copy kept at {}", f.display(), backup.display()),
                         Err(e) => log::error!("unreadable config at {} (and the copy failed: {e})", f.display()),
@@ -502,7 +502,7 @@ impl Config {
 /// The ONLY reservation of the CommandDeck name that the app still carries (the variables `COMMANDDECK_*`, the bridge
 /// header, the `AGENTS.md` marker and the lock left in t32): whoever never opened AgentDeck would lose the
 /// project list. It goes away (this function, `is_commanddeck_config`, the copy in `load_from` and the tests
-/// `*_commanddeck_*`) in a version after the promotion of `dev` to `main`; see `memory/pendencias.md`.
+/// `*_commanddeck_*`) in a version after the promotion of `dev` to `main`; see `memory/backlog.md`.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
     vec![
@@ -549,7 +549,7 @@ mod tests {
         AppPaths {
             app_dir: root.to_path_buf(),
             bin_dir: root.join("bin"),
-            data_dir: root.join("dados"),
+            data_dir: root.join("data"),
             default_workspace: root.join("workspace"),
             whisper_dir: root.join("whisper"),
             config_file: root.join("cfg").join("config.json"),
@@ -657,7 +657,7 @@ mod tests {
         let kept: Vec<_> = std::fs::read_dir(dir)
             .expect("ls")
             .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
-            .filter(|n| n.contains("ilegivel"))
+            .filter(|n| n.contains("unreadable"))
             .collect();
         assert_eq!(kept.len(), 1, "copy of the unreadable file: {kept:?}");
     }
@@ -668,19 +668,19 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         std::fs::create_dir_all(p.config_file.parent().expect("dir")).expect("mkdir");
-        let json = format!(r#"{{"whisperLang":"en","projectList":[{{"id":"p1","path":{:?}}}]}}"#, tmp.path().join("joão"));
+        let json = format!(r#"{{"whisperLang":"en","projectList":[{{"id":"p1","path":{:?}}}]}}"#, tmp.path().join("zoë"));
         let utf16: Vec<u8> = [0xFF, 0xFE].into_iter().chain(json.encode_utf16().flat_map(u16::to_le_bytes)).collect();
         for bytes in [[&[0xEF, 0xBB, 0xBF][..], json.as_bytes()].concat(), utf16] {
             std::fs::write(&p.config_file, &bytes).expect("write");
             let cfg = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
             assert_eq!(cfg.whisper_lang, "en");
-            assert_eq!(cfg.project_list.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), [tmp.path().join("joão")]);
+            assert_eq!(cfg.project_list.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), [tmp.path().join("zoë")]);
         }
         // Without a BOM and not UTF-8 (cp1252): unreadable, with the copy, instead of "jo�o" saved afterwards.
         std::fs::write(&p.config_file, b"{\"projectList\":[{\"id\":\"p1\",\"path\":\"C:/jo\xE3o\"}]}").expect("write");
         assert!(Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home()).project_list.is_empty());
         let kept = std::fs::read_dir(p.config_file.parent().expect("dir")).expect("ls").flatten();
-        assert_eq!(kept.filter(|e| e.file_name().to_string_lossy().contains("ilegivel")).count(), 1);
+        assert_eq!(kept.filter(|e| e.file_name().to_string_lossy().contains("unreadable")).count(), 1);
     }
 
     #[test]
@@ -717,7 +717,7 @@ mod tests {
     }
 
     /// Removing the project and adding the same folder again gives back the same id (the tasks in
-    /// `dados/tarefas/<id>.json` come back to the desk).
+    /// `data/tasks/<id>.json` come back to the desk).
     #[test]
     fn reading_the_same_folder_after_removing_it_reuses_the_id() {
         let tmp = tempfile::tempdir().expect("tmp");

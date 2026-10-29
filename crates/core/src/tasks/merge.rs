@@ -229,9 +229,8 @@ impl Core {
                 });
             }
         };
-
-        // The merge. (The commit subject stays in Portuguese: `examples/memeval.rs` parses `Merge tarefa tN` in the history.)
-        let message = format!("Merge tarefa {}: {}", task.id, task.title);
+        // The merge (`examples/memeval.rs` finds the merged tasks in the history by the `Merge task tN` subject).
+        let message = format!("Merge task {}: {}", task.id, task.title);
         if let Err(e) = run(repo.cmd(&["merge", "--no-ff", "-m", &message, &task.branch]), None, COMMIT_TIMEOUT) {
             if repo.state() == RepoState::Merging {
                 let files = git_out(&repo, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();

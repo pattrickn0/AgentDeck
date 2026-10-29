@@ -21,11 +21,11 @@ pub fn slugify(title: &str, max: usize) -> String {
     cut.trim_end_matches('-').to_owned()
 }
 
-/// `tarefa/<id>-<slug>` (without a slug, `tarefa/<id>`).
+/// `task/<id>-<slug>` (without a slug, `task/<id>`).
 pub fn branch_name(id: &str, title: &str) -> String {
     match slugify(title, MAX_SLUG) {
-        s if s.is_empty() => format!("tarefa/{id}"),
-        s => format!("tarefa/{id}-{s}"),
+        s if s.is_empty() => format!("task/{id}"),
+        s => format!("task/{id}-{s}"),
     }
 }
 
@@ -73,15 +73,6 @@ pub fn memory_block(learnings: &str, situation: &str) -> String {
     parts.join("\n\n")
 }
 
-/// How a stored feedback origin (`revisão` / `validação`, saved data) reads in a message to the agent.
-fn origin_label(origin: &str) -> &str {
-    match origin {
-        "revisão" => "review",
-        "validação" => "validation",
-        other => other,
-    }
-}
-
 /// The feedbacks the task has already received, to repeat to the agent on a return or rejection (the latest
 /// [`HISTORY_SHOWN`], each one cut) followed by a blank line. Empty when there are none.
 /// `task.feedbacks` must not already contain the feedback being delivered now.
@@ -96,7 +87,7 @@ fn history_section(task: &Task) -> String {
     }
     for (n, f) in task.feedbacks.iter().enumerate().skip(skipped) {
         let (head, cut) = util::truncate_chars(f.text.trim(), HISTORY_ITEM_CHARS);
-        out.push_str(&format!("\n{}. [{}] {}{}", n + 1, origin_label(&f.origin), head, if cut { "…" } else { "" }));
+        out.push_str(&format!("\n{}. [{}] {}{}", n + 1, f.origin, head, if cut { "…" } else { "" }));
     }
     out.push_str("\n\n");
     out
@@ -131,7 +122,7 @@ Rules for task {id}:\n\
 - Make small commits on that branch. Do not merge or push: AgentDeck does the merge, after the review.\n\
 - Do not ask anyone (another agent or the user) to merge or to run ask-agent --task merge: that decision belongs to whoever reviews. Your work ends at --task done.\n\
 - Before touching a file for the first time, run ask-agent --learn <file> (shows what the project has already learned about it).\n\
-- If you find something non-obvious that the next agent would need to know (a trap, a decision, a convention), create a file in memory/aprendizados/ on this branch (format in memory/aprendizados/README.md) and cite it in the report: it goes through the same review and merge as the code.\n\
+- If you find something non-obvious that the next agent would need to know (a trap, a decision, a convention), create a file in memory/learnings/ on this branch (format in memory/learnings/README.md) and cite it in the report: it goes through the same review and merge as the code.\n\
 - When you finish, write the report (what was done, files changed, tests run and what is missing) to a file and run: ask-agent --task done {id} --file <file>.\n\
   (Delivering by file preserves accents; piping through standard input (-) makes the Windows shell replace them with \"?\".)\n\
 - To learn which agents and models this computer has, and the quota of each, run `ask-agent --models` before choosing `--agent`/`--model`.\n\
@@ -226,8 +217,8 @@ mod tests {
         assert_eq!(slugify("a/b\\c:d", 40), "a-b-c-d");
         let long = slugify(&"word ".repeat(20), 40);
         assert!(long.len() <= 40 && !long.ends_with('-'), "{long}");
-        assert_eq!(branch_name("t3", "Fix the button"), "tarefa/t3-fix-the-button");
-        assert_eq!(branch_name("t3", "???"), "tarefa/t3");
+        assert_eq!(branch_name("t3", "Fix the button"), "task/t3-fix-the-button");
+        assert_eq!(branch_name("t3", "???"), "task/t3");
         assert!(crate::git::valid_branch_name(&branch_name("t12", "Title with / slash and \"quotes\" ~ ^ :")));
     }
 
@@ -252,7 +243,7 @@ mod tests {
     fn the_start_message_carries_the_brief_and_the_rules() {
         let m = start_message(&sample(), Some("claude"), "");
         assert!(m.starts_with("[AgentDeck · Task t3: Fix the login]\n\nDo X.\n\nThen Y."), "{m}");
-        assert!(m.contains("ONLY in the folder") && m.contains("tarefa/t3-fix-the-login") && m.contains("created from main"), "{m}");
+        assert!(m.contains("ONLY in the folder") && m.contains("task/t3-fix-the-login") && m.contains("created from main"), "{m}");
         assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(m.contains("Do not merge or push"), "{m}");
         assert!(m.contains("Do not ask anyone") && m.contains("ends at --task done"), "{m}");
@@ -274,7 +265,7 @@ mod tests {
         let plain = start_message(&sample(), None, &memory_block("", " "));
         assert!(!plain.contains("What the project has already learned") && !plain.contains("Current situation"), "{plain}");
         // With memory: between the request and the rules, each part with its own title.
-        let memory = memory_block("### T (memory/aprendizados/a.md)\nbody", "Other tasks in progress: none.");
+        let memory = memory_block("### T (memory/learnings/a.md)\nbody", "Other tasks in progress: none.");
         let m = start_message(&sample(), None, &memory);
         let (brief, learned, situation, rules) = (
             m.find("Then Y."),
@@ -284,7 +275,7 @@ mod tests {
         );
         assert!(brief < learned && learned < situation && situation < rules && rules.is_some(), "{m}");
         // The rules tell the agent to consult and record learnings.
-        assert!(m.contains("ask-agent --learn <file>") && m.contains("memory/aprendizados/"), "{m}");
+        assert!(m.contains("ask-agent --learn <file>") && m.contains("memory/learnings/"), "{m}");
         assert_eq!(memory_block("only long term", ""), "What the project has already learned:\nonly long term");
     }
 
@@ -293,8 +284,8 @@ mod tests {
         let mut t = sample();
         // First return: nothing earlier.
         assert!(!return_message(&t, "The test is missing.", "").contains("Earlier feedback"));
-        t.add_feedback("revisão", "The test is missing.");
-        t.add_feedback("validação", "It closes on save.");
+        t.add_feedback("review", "The test is missing.");
+        t.add_feedback("validation", "It closes on save.");
         let m = return_message(&t, "Now the log.", "");
         assert!(m.contains("\n\nNow the log.\n\nEarlier feedback on this task"), "{m}");
         assert!(m.contains("1. [review] The test is missing.\n2. [validation] It closes on save.\n\n---"), "{m}");
@@ -302,7 +293,7 @@ mod tests {
         assert!(m.contains("It still closes.\n\nEarlier feedback") && m.contains("2. [validation] It closes on save."), "{m}");
         // Many: only the latest, and each one cut.
         for n in 0..10 {
-            t.add_feedback("revisão", &format!("request {n} {}", "x".repeat(2 * HISTORY_ITEM_CHARS)));
+            t.add_feedback("review", &format!("request {n} {}", "x".repeat(2 * HISTORY_ITEM_CHARS)));
         }
         let m = return_message(&t, "one more", "");
         assert!(m.contains("(7 earlier item(s) omitted)") && m.contains("request 9") && !m.contains("request 4"), "{m}");
@@ -311,9 +302,9 @@ mod tests {
 
     #[test]
     fn the_learnings_of_the_cited_files_come_before_the_closing_rule() {
-        let learned = "### T (memory/aprendizados/a.md)\nbody";
+        let learned = "### T (memory/learnings/a.md)\nbody";
         let mut t = sample();
-        t.add_feedback("revisão", "First.");
+        t.add_feedback("review", "First.");
         for m in [return_message(&t, "Touch x.rs.", learned), reject_message(&t, "Touch x.rs.", true, learned)] {
             let (feedback, history, section, rule) = (
                 m.find("Touch x.rs."),
@@ -351,7 +342,7 @@ It closes on save.
             ),
             "{m}"
         );
-        assert!(m.contains("same branch tarefa/t3-fix-the-login") && m.contains("ask-agent --task done t3 --file"), "{m}");
+        assert!(m.contains("same branch task/t3-fix-the-login") && m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(!m.contains("could not align") && !m.contains(''), "{m:?}");
         // Branch that could not be aligned: the agent gets the command to do it.
         assert!(reject_message(&sample(), "x", false, "").contains("run in your folder: git merge main"));

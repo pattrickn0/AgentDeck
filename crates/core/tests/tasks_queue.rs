@@ -131,9 +131,9 @@ fn disjoint_scopes_start_together() {
 fn memory_and_cargo_lock_do_not_reserve_anything() {
     need_git!();
     let env = start();
-    let a = start_scoped(&env, "A", &["crates/app", "memory/pendencias.md", "Cargo.lock"]);
-    let b = start_scoped(&env, "B", &["crates/cli", "memory/pendencias.md", "Cargo.lock"]);
-    let c = start_scoped(&env, "C", &["memory/pendencias.md"]);
+    let a = start_scoped(&env, "A", &["crates/app", "memory/backlog.md", "Cargo.lock"]);
+    let b = start_scoped(&env, "B", &["crates/cli", "memory/backlog.md", "Cargo.lock"]);
+    let c = start_scoped(&env, "C", &["memory/backlog.md"]);
     assert_eq!((a.status, b.status, c.status), (TaskStatus::Running, TaskStatus::Running, TaskStatus::Running));
     env.core.shutdown();
 }
@@ -235,7 +235,7 @@ fn advancing_the_queue_catches_up_after_a_restart() {
     first.shutdown();
     drop((first, rx));
     // With the app closed the first one leaves the way (here, its record is turned into discarded by hand).
-    let file = root.join("dados").join("tarefas").join(format!("{project}.json"));
+    let file = root.join("data").join("tasks").join(format!("{project}.json"));
     let text = std::fs::read_to_string(&file).expect("json");
     let mut json: serde_json::Value = serde_json::from_str(&text).expect("parse");
     json["tasks"][0]["status"] = serde_json::json!("discarded");
@@ -255,13 +255,13 @@ fn done_warns_about_files_outside_the_scope_without_blocking() {
     need_git!();
     let env = start();
     let core = &env.core;
-    let t = start_scoped(&env, "Leaves the scope", &["crates/cli", "memory/pendencias.md"]);
+    let t = start_scoped(&env, "Leaves the scope", &["crates/cli", "memory/backlog.md"]);
     std::fs::create_dir_all(t.worktree.join("crates/cli")).expect("mkdir");
     std::fs::create_dir_all(t.worktree.join("crates/core")).expect("mkdir");
     std::fs::create_dir_all(t.worktree.join("memory")).expect("mkdir");
     std::fs::write(t.worktree.join("crates/cli/inside.rs"), "x").expect("w");
     std::fs::write(t.worktree.join("crates/core/outside.rs"), "x").expect("w");
-    std::fs::write(t.worktree.join("memory/GERAL.md"), "x").expect("w");
+    std::fs::write(t.worktree.join("memory/OVERVIEW.md"), "x").expect("w");
     std::fs::write(t.worktree.join("Cargo.lock"), "x").expect("w");
     git(&t.worktree, &["add", "-A"]);
     git(&t.worktree, &["commit", "-q", "-m", "feat: everything"]);

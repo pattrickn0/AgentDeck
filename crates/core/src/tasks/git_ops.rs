@@ -25,9 +25,9 @@ pub(super) fn safe_worktree(worktree: &Path, allowed: &Path) -> bool {
     util::path_within(&wt, allowed) && !util::same_path(&wt, allowed)
 }
 
-/// Task branch (`tarefa/…`) with an acceptable name.
+/// Task branch (`task/…`, or the `tarefa/…` of tasks created before the English rename) with an acceptable name.
 pub(super) fn valid_task_branch(branch: &str) -> bool {
-    branch.starts_with("tarefa/") && crate::git::valid_branch_name(branch)
+    (branch.starts_with("task/") || branch.starts_with("tarefa/")) && crate::git::valid_branch_name(branch)
 }
 
 /// Standard output of a git command in the main repository (limit of the local operations).
@@ -162,6 +162,11 @@ mod tests {
         assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees"), allowed));
         assert!(!safe_worktree(Path::new("/repo/src"), allowed));
         assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees/../../src"), allowed));
-        assert!(valid_task_branch("tarefa/t1-x") && !valid_task_branch("main") && !valid_task_branch("tarefa/../x"));
+        assert!(
+            valid_task_branch("task/t1-x")
+                && valid_task_branch("tarefa/t1-x")
+                && !valid_task_branch("main")
+                && !valid_task_branch("task/../x")
+        );
     }
 }

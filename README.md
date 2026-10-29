@@ -53,7 +53,7 @@ draft ─→ in progress ─→ in review ─→ awaiting validation ─→ comp
 
 At any stage before completion, the task can be discarded, and the branch and folder are removed along with it.
 
-- **Agent selection by capability and quota.** State the size of the work (`simples`, `media`, or `complexa`). The
+- **Agent selection by capability and quota.** State the size of the work (`simple`, `medium`, or `complex`). The
   desk filters models capable of handling it, based on public benchmarks and historical task outcomes, and among them
   chooses the one with the most remaining quota headroom.
 - **Scoped queuing.** A task can declare the paths it will touch. Another task needing the same paths waits
@@ -162,7 +162,7 @@ ask-agent --team                                            # your boss and team
 ask-agent --models                                          # models for each agent, quota, and capability
 
 # Tasks
-ask-agent --task new "Login screen" --level complexa --scope src/ui --start --file brief.md
+ask-agent --task new "Login screen" --level complex --scope src/ui --start --file brief.md
 ask-agent --task list
 ask-agent --task merge t3                                   # merges and leaves awaiting validation
 ask-agent --task validate t3                                # completes and cleans up the worktree
@@ -173,7 +173,7 @@ ask-agent --outline src/config.rs                           # signatures with li
 ```
 
 Accented text works better via file (`--file`): on Windows, PowerShell standard input replaces accents with `?`.
-The complete reference is in [memory/GERAL.md](memory/GERAL.md#2-what-you-can-do).
+The complete reference is in [memory/OVERVIEW.md](memory/OVERVIEW.md#2-what-you-can-do).
 
 ## Shortcuts
 
@@ -202,19 +202,19 @@ in the ☰ menu reverses this.
 - Opening a folder as a project counts as trusting it: the app registers it as trusted in Claude Code
   (`~/.claude.json`) and in Antigravity (`~/.gemini/antigravity-cli/settings.json`). Your home folder and drive roots
   are never registered.
-- Runtime data lives in `dados/`, next to the executable (or in `AGENTDECK_HOME`). Configuration is stored in
+- Runtime data lives in `data/`, next to the executable (or in `AGENTDECK_HOME`). Configuration is stored in
   `%APPDATA%\AgentDeck\config.json` on Windows and in `~/.config/AgentDeck/config.json` on Linux.
 
 ## Documentation
 
-Project documentation lives in [`memory/`](memory/GERAL.md), versioned alongside the code:
+Project documentation lives in [`memory/`](memory/OVERVIEW.md), versioned alongside the code:
 
-- [GERAL.md](memory/GERAL.md): the starting point, covering how the app works, what you can do, and the documentation map.
+- [OVERVIEW.md](memory/OVERVIEW.md): the starting point, covering how the app works, what you can do, and the documentation map.
 - [ARCHITECTURE.md](memory/ARCHITECTURE.md): crates, workflows, and the inter-agent bridge contract.
-- [MANUTENCAO.md](memory/MANUTENCAO.md): how to build, test, and maintain, with a hands-on introduction to Rust.
+- [MAINTENANCE.md](memory/MAINTENANCE.md): how to build, test, and maintain, with a hands-on introduction to Rust.
 - [AGENTDECK.md](memory/AGENTDECK.md): product vision and direction.
-- [pendencias.md](memory/pendencias.md) and [historico.md](memory/historico.md): what comes next and what has already been done.
-- [aprendizados/](memory/aprendizados/README.md): pitfalls and decisions that the code does not show.
+- [backlog.md](memory/backlog.md) and [history.md](memory/history.md): what comes next and what has already been done.
+- [learnings/](memory/learnings/README.md): pitfalls and decisions that the code does not show.
 
 ## Contributing
 

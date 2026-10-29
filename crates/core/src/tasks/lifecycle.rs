@@ -384,13 +384,13 @@ impl Core {
         (creator != task.instance && self.project_instance_ids(project).iter().any(|o| o == creator)).then(|| creator.to_owned())
     }
 
-    /// Initial prompt for opening the task's process: writes `prompt` to `dados/tarefas/<project>-<id>-<stem>.md`
+    /// Initial prompt for opening the task's process: writes `prompt` to `data/tasks/<project>-<id>-<stem>.md`
     /// and returns the short line that tells the agent to read it. `None` if the CLI does not accept an initial
     /// prompt, if the file could not be written or if the line does not fit in ASCII: the delivery stays typed, as
     /// always.
     pub(super) fn task_boot_prompt(&self, project: &str, task: &Task, stem: &str, intro: &str, prompt: &str) -> Option<String> {
         models::boot_prompt_flag(Ident::parse(&task.instance)?.kind.as_str())?;
-        let dir = self.paths().data_dir.join("tarefas");
+        let dir = self.paths().data_dir.join("tasks");
         let file = util::absolutize(&dir.join(format!("{project}-{}-{stem}.md", task.id)));
         let file = util::strip_verbatim(&file);
         match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, prompt)) {
@@ -417,7 +417,7 @@ impl Core {
     /// the tab has to be opened and the CLI accepts an initial prompt, the interface uses `boot` on the command line
     /// instead of typing `prompt` (see [`Delivery::boot`]).
     pub(super) fn deliver_to_task(&self, project: &str, task: &Task, ident: Ident, prompt: String, boot: Option<String>, log: &str) {
-        let from = task.creator.clone().unwrap_or_else(|| "usuário".to_owned());
+        let from = task.creator.clone().unwrap_or_else(|| crate::instances::USER.to_owned());
         self.emit(CoreEvent::Deliver(Delivery {
             request: 0,
             project: project.to_owned(),
@@ -587,7 +587,7 @@ impl Core {
             t.log(t!("returned to the agent with feedback"));
             // `before` does not have the new feedback: the message shows only the earlier ones.
             let before = t.clone();
-            t.add_feedback("revisão", &feedback);
+            t.add_feedback("review", &feedback);
             (before, t.clone())
         });
         let (before, task) = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;

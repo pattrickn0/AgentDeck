@@ -47,7 +47,7 @@ fn start(with_git: bool) -> Env {
     let paths = AppPaths {
         app_dir: root.clone(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("ws"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),
@@ -105,12 +105,12 @@ fn stage_commit_discard_branches_renames_and_conflicts() {
     // With no HEAD and an empty index, unstaging everything is not an error.
     core.git_unstage_all().expect("unstage all with an empty index");
     std::fs::write(ws.join("a b.txt"), "one\ntwo\n").expect("w");
-    std::fs::create_dir_all(ws.join("ção")).expect("mkdir");
-    std::fs::write(ws.join("ção").join("ü.txt"), "x\n").expect("w");
+    std::fs::create_dir_all(ws.join("naïve")).expect("mkdir");
+    std::fs::write(ws.join("naïve").join("ü.txt"), "x\n").expect("w");
 
     let st = core.git_status().expect("status");
     assert_eq!((st.branch.as_deref(), st.head.as_deref(), st.prefix.as_str()), (Some("main"), None, ""));
-    assert_eq!(paths(&st), [("a b.txt".into(), '?', '?', EntryKind::Untracked), ("ção/".into(), '?', '?', EntryKind::Untracked)]);
+    assert_eq!(paths(&st), [("a b.txt".into(), '?', '?', EntryKind::Untracked), ("naïve/".into(), '?', '?', EntryKind::Untracked)]);
 
     // Diff of an untracked file: the whole content.
     let d = core.git_diff(&st.entries[0], false).expect("diff");

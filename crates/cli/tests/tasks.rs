@@ -40,7 +40,7 @@ fn start_core(root: &Path) -> Core {
     let paths = AppPaths {
         app_dir: root.to_path_buf(),
         bin_dir: root.join("bin"),
-        data_dir: root.join("dados"),
+        data_dir: root.join("data"),
         default_workspace: root.join("workspace"),
         whisper_dir: root.join("whisper"),
         config_file: root.join("cfg").join("config.json"),
@@ -240,10 +240,11 @@ fn the_scope_flag_queues_an_overlapping_task_and_shows_it() {
     let project = core.active_project_id();
 
     // The scope goes up to the next option; the request comes before it (or from the file).
-    let out = run(&core, None, &["--task", "new", "Touches core", "request", "--scope", "crates/core", "memory/GERAL.md", "--start"], "");
+    let out =
+        run(&core, None, &["--task", "new", "Touches core", "request", "--scope", "crates/core", "memory/OVERVIEW.md", "--start"], "");
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let shown = text(&out.stdout);
-    assert!(shown.contains("scope: crates/core, memory/GERAL.md") && shown.contains("started in the worktree"), "{shown}");
+    assert!(shown.contains("scope: crates/core, memory/OVERVIEW.md") && shown.contains("started in the worktree"), "{shown}");
     assert_eq!(core.task(&project, "t1").expect("t1").brief, "request");
 
     let out = run(&core, None, &["--task", "new", "Touches git.rs", "request", "--start", "--scope", r"crates\core\src\git.rs"], "");
