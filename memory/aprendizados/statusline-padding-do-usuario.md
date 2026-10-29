@@ -1,17 +1,17 @@
 ---
-titulo: A statusline do app precisa do padding da statusline do usuário
-resumo: O Claude Code aplica o padding do statusLine; o nosso --usage só repassa a linha, então write_claude_hooks copia o padding do usuário.
+title: App statusline requires user statusline padding
+summary: Claude Code applies statusLine padding; our --usage only forwards output, so write_claude_hooks copies the user's padding.
 touches: [crates/core/src/agents.rs, crates/cli/src/bin/ask-agent.rs]
 ---
-O app grava `dados/hooks/claude-settings.json` (passado em `--settings`) com a própria statusline
-(`ask-agent --usage`), que substitui a do usuário. O `--usage` roda o comando do usuário e imprime a saída
-dele, mas o `padding` é aplicado pelo Claude Code, não pela linha: com `"padding": 0` fixo, a statusline do
-usuário que tinha margem encosta na borda. `write_claude_hooks` lê o `padding` da statusline do usuário na
-mesma precedência do Claude Code (`.claude/settings.local.json` do projeto, `.claude/settings.json` do
-projeto, `$CLAUDE_CONFIG_DIR/settings.json` ou `~/.claude/settings.json`), ignorando a nossa própria, e grava
-esse valor no nosso `statusLine`.
+The app writes `dados/hooks/claude-settings.json` (passed via `--settings`) with its own statusline
+(`ask-agent --usage`), replacing the user's statusline. `--usage` runs the user's command and prints its
+output, but `padding` is applied by Claude Code, not by the command line: with a hardcoded `"padding": 0`, a user
+statusline that had margins ends up touching the border. `write_claude_hooks` reads `padding` from the user's statusline
+following the same precedence as Claude Code (project `.claude/settings.local.json`, project `.claude/settings.json`,
+`$CLAUDE_CONFIG_DIR/settings.json`, or `~/.claude/settings.json`), ignoring our own file, and writes that value
+into our `statusLine`.
 
-**Por quê:** o `padding` não aparece na saída do comando, então repassar a linha do usuário não basta.
-**Como aplicar:** ao mexer em `write_claude_hooks`, mantenha a leitura do padding. O arquivo de hooks é um só
-por pasta de dados, então projetos com paddings diferentes alternam qual valor fica gravado (o padding do
-usuário, igual para todos, é o caso comum).
+**Why:** `padding` does not appear in the command's stdout, so simply proxying the user's command is insufficient.
+**How to apply:** when touching `write_claude_hooks`, preserve padding retrieval. The hooks file is shared per
+data directory, so projects with different padding configurations alternate which value is stored (matching the user's
+global padding for all projects is the common case).

@@ -1,8 +1,8 @@
-//! Funções puras compartilhadas pela UI (fáceis de testar).
+//! Pure functions shared by the UI (easy to test).
 
 use std::path::PathBuf;
 
-/// Referência de arquivo estilo `@caminho` (ou `@"caminho"` quando há espaços).
+/// File reference in the `@path` style (or `@"path"` when it has spaces).
 pub fn file_ref(rel_path: &str) -> String {
     if rel_path.contains(' ') {
         format!("@\"{rel_path}\"")
@@ -11,10 +11,10 @@ pub fn file_ref(rel_path: &str) -> String {
     }
 }
 
-/// Formata um caminho de arquivo para o prompt da CLI da aba (`kind`).
+/// Formats a file path for the tab's CLI prompt (`kind`).
 ///
-/// - No Claude (`kind == "claude"`): `@caminho` (ou `@"caminho"` se houver espaço).
-/// - Nos demais terminais/agentes: `"caminho"` se houver espaço, ou `caminho` direto.
+/// - Claude (`kind == "claude"`): `@path` (or `@"path"` if there is a space).
+/// - The other terminals/agents: `"path"` if there is a space, or the bare path.
 pub fn tab_file_ref(kind: &str, path: &str) -> String {
     if kind == "claude" {
         file_ref(path)
@@ -25,8 +25,8 @@ pub fn tab_file_ref(kind: &str, path: &str) -> String {
     }
 }
 
-/// Junta múltiplos caminhos para digitar no prompt da aba (`kind`), separados por espaço e com
-/// espaço final para que o usuário continue digitando sem colar no caminho.
+/// Joins several paths to type into the tab's prompt (`kind`), separated by a space and with a
+/// trailing space so the user keeps typing without gluing text to the path.
 pub fn tab_file_refs_text(kind: &str, paths: &[String]) -> String {
     if paths.is_empty() {
         return String::new();
@@ -35,8 +35,9 @@ pub fn tab_file_refs_text(kind: &str, paths: &[String]) -> String {
     format!("{joined} ")
 }
 
-/// Acrescenta a lista de anexos (caminhos absolutos em `dados/anexos`) ao final do pedido da
-/// tarefa quando houver anexos no formulário "Nova tarefa".
+/// Appends the attachment list (absolute paths under `dados/anexos`) to the end of the task
+/// request when the "New task" form has attachments. The request is read by an agent, so the
+/// heading is English.
 pub fn append_brief_attachments(brief: &str, attachments: &[PathBuf]) -> String {
     let base = brief.trim();
     if attachments.is_empty() {
@@ -44,13 +45,13 @@ pub fn append_brief_attachments(brief: &str, attachments: &[PathBuf]) -> String 
     }
     let list = attachments.iter().map(|p| format!("- {}", p.display())).collect::<Vec<_>>().join("\n");
     if base.is_empty() {
-        format!("Anexos:\n{list}")
+        format!("Attachments:\n{list}")
     } else {
-        format!("{base}\n\nAnexos:\n{list}")
+        format!("{base}\n\nAttachments:\n{list}")
     }
 }
 
-/// Rótulo do chip de anexo: último segmento sem o prefixo `hash-` (`/^[a-z0-9]+-/`).
+/// Attachment chip label: the last segment without the `hash-` prefix (`/^[a-z0-9]+-/`).
 pub fn chip_label(reference: &str) -> String {
     let last = reference.rsplit(['/', '\\']).next().unwrap_or(reference);
     let prefix_len = last.bytes().take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit()).count();
@@ -61,7 +62,7 @@ pub fn chip_label(reference: &str) -> String {
     }
 }
 
-/// Hora local como `toLocaleTimeString('pt-BR')` (HH:MM:SS).
+/// Local time as `toLocaleTimeString('pt-BR')` (HH:MM:SS).
 pub fn time_pt_br(epoch_ms: u64) -> String {
     use chrono::TimeZone;
     let ms = if epoch_ms == 0 { chrono::Utc::now().timestamp_millis() } else { epoch_ms as i64 };
@@ -78,16 +79,16 @@ mod tests {
     #[test]
     fn tab_file_reference_per_cli() {
         assert_eq!(tab_file_ref("claude", "dados/anexos/a.png"), "@dados/anexos/a.png");
-        assert_eq!(tab_file_ref("claude", "minha pasta/a.png"), "@\"minha pasta/a.png\"");
+        assert_eq!(tab_file_ref("claude", "my folder/a.png"), "@\"my folder/a.png\"");
         assert_eq!(tab_file_ref("antigravity", "dados/anexos/a.png"), "dados/anexos/a.png");
-        assert_eq!(tab_file_ref("opencode", "minha pasta/a.png"), "\"minha pasta/a.png\"");
+        assert_eq!(tab_file_ref("opencode", "my folder/a.png"), "\"my folder/a.png\"");
         assert_eq!(
-            tab_file_refs_text("claude", &["dados/anexos/1.png".into(), "pasta 2/b.txt".into()]),
-            "@dados/anexos/1.png @\"pasta 2/b.txt\" "
+            tab_file_refs_text("claude", &["dados/anexos/1.png".into(), "folder 2/b.txt".into()]),
+            "@dados/anexos/1.png @\"folder 2/b.txt\" "
         );
         assert_eq!(
-            tab_file_refs_text("codex", &["dados/anexos/1.png".into(), "pasta 2/b.txt".into()]),
-            "dados/anexos/1.png \"pasta 2/b.txt\" "
+            tab_file_refs_text("codex", &["dados/anexos/1.png".into(), "folder 2/b.txt".into()]),
+            "dados/anexos/1.png \"folder 2/b.txt\" "
         );
         assert_eq!(tab_file_refs_text("claude", &[]), "");
     }
@@ -96,22 +97,22 @@ mod tests {
     fn brief_attachments_appended_at_end() {
         let p1 = PathBuf::from(r"C:\proj\dados\anexos\1a-print.png");
         let p2 = PathBuf::from(r"C:\proj\dados\anexos\2b-log.txt");
-        assert_eq!(append_brief_attachments("Corrigir bug", &[]), "Corrigir bug");
+        assert_eq!(append_brief_attachments("Fix bug", &[]), "Fix bug");
         assert_eq!(
-            append_brief_attachments("Corrigir bug", &[p1.clone(), p2.clone()]),
-            "Corrigir bug\n\nAnexos:\n- C:\\proj\\dados\\anexos\\1a-print.png\n- C:\\proj\\dados\\anexos\\2b-log.txt"
+            append_brief_attachments("Fix bug", &[p1.clone(), p2.clone()]),
+            "Fix bug\n\nAttachments:\n- C:\\proj\\dados\\anexos\\1a-print.png\n- C:\\proj\\dados\\anexos\\2b-log.txt"
         );
-        assert_eq!(append_brief_attachments("", &[p1]), "Anexos:\n- C:\\proj\\dados\\anexos\\1a-print.png");
+        assert_eq!(append_brief_attachments("", &[p1]), "Attachments:\n- C:\\proj\\dados\\anexos\\1a-print.png");
     }
 
     #[test]
     fn chip_labels() {
-        assert_eq!(chip_label("dados/anexos/1a2b3c-foto.png"), "foto.png");
-        assert_eq!(chip_label("dados/anexos/Foto.png"), "Foto.png");
+        assert_eq!(chip_label("dados/anexos/1a2b3c-photo.png"), "photo.png");
+        assert_eq!(chip_label("dados/anexos/Photo.png"), "Photo.png");
         assert_eq!(chip_label("x/abc-def-ghi.txt"), "def-ghi.txt");
-        assert_eq!(chip_label("semhifen"), "semhifen");
+        assert_eq!(chip_label("nohyphen"), "nohyphen");
         assert_eq!(chip_label("C:/Users/x/AB-1.png"), "AB-1.png");
-        assert_eq!(chip_label(r"C:\dados\anexos\1a2b-foto.png"), "foto.png");
+        assert_eq!(chip_label(r"C:\dados\anexos\1a2b-photo.png"), "photo.png");
     }
 
     #[test]

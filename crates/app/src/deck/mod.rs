@@ -1,11 +1,12 @@
-//! Estado e lógica da interface (porta do `renderer.js`), independente da pintura.
-//! A pintura fica em [`crate::ui`]; a janela/loop em [`crate::app`].
+//! Interface state and logic (port of `renderer.js`), independent of painting.
+//! Painting lives in [`crate::ui`]; the window/loop in [`crate::app`].
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use agentdeck_core::delivery::{self, Gate, Mailbox, TabState};
+use agentdeck_core::t;
 use agentdeck_core::{
     AgentInfo, Core, CoreEvent, Delivery, DictationChoice, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident,
     Organization, SpawnSpec,
@@ -29,16 +30,16 @@ use crate::terminal::{GridSize, Session, Wake};
 use crate::theme;
 use crate::util;
 
-/// Destino de arquivos anexados pelo botão de anexo, arrastar e soltar ou Ctrl+V de imagem.
+/// Destination of files attached by the attach button, drag and drop or Ctrl+V of an image.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachTarget {
-    /// Digita os caminhos anexados no PTY da aba `uid` (sem Enter).
+    /// Types the attached paths into the tab's PTY (`uid`) (no Enter).
     Tab(u64),
-    /// Adiciona os anexos ao formulário "Nova tarefa" do projeto `project_id`.
+    /// Adds the attachments to the "New task" form of project `project_id`.
     TaskForm(String),
 }
 
-/// Área destacada enquanto arquivos são arrastados sobre a janela (`ui/overlay.rs`).
+/// Area highlighted while files are dragged over the window (`ui/overlay.rs`).
 #[derive(Debug, Clone)]
 pub struct DropZone {
     pub rect: egui::Rect,
@@ -47,31 +48,31 @@ pub struct DropZone {
     pub subtitle: String,
 }
 
-/// Mensagens de tarefas em segundo plano para a UI.
+/// Task messages from background work to the UI.
 pub enum UiMsg {
     Agents(Vec<AgentInfo>),
-    /// Anexos copiados (caminhos absolutos em `dados/anexos`) para uma aba ou formulário de tarefa.
+    /// Attachments copied (absolute paths under `dados/anexos`) for a tab or a task form.
     Attached(AttachTarget, Vec<PathBuf>),
     Transcribed(Result<String, String>),
     Engine(String),
     WorkspacePicked(PathBuf),
-    /// Resultado da abertura do microfone (feita fora da thread da interface).
+    /// Result of opening the microphone (done outside the interface thread).
     MicOpened(Result<audio::Recorder, String>),
-    /// O usuário confirmou remover o projeto (id) da lista.
+    /// The user confirmed removing the project (id) from the list.
     RemoveProject(String),
-    /// Resposta do Git, com a geração do projeto em que foi pedida (ver `GitUi::generation`).
+    /// Git reply, with the generation of the project it was asked for (see `GitUi::generation`).
     Git(u64, crate::git_ui::GitReply),
-    /// Modelos conhecidos de um agente (menu de novo agente); vazio = só o padrão.
+    /// Known models of an agent (new-agent menu); empty = default only.
     Models(String, Vec<String>),
-    /// Resposta da mesa de tarefas, com a geração do projeto em que foi pedida (ver `TasksUi::generation`).
+    /// Tasks desk reply, with the generation of the project it was asked for (see `TasksUi::generation`).
     Tasks(u64, crate::tasks_ui::TaskReply),
-    /// Um documento do modo Documentos terminou de carregar (uid do documento).
+    /// A document of the Documents mode finished loading (document uid).
     Doc(u64, crate::docs::Loaded),
-    /// A gravação de um arquivo editado terminou: o documento, o texto gravado e o resultado.
+    /// The save of an edited file finished: the document, the saved text and the result.
     DocSaved(u64, String, Result<(), String>),
 }
 
-/// Ações vindas da janela (atalhos globais) aplicadas no próximo quadro.
+/// Actions from the window (global shortcuts) applied on the next frame.
 #[derive(Debug, Clone)]
 pub enum Action {
     NewTabShortcut,
@@ -79,103 +80,103 @@ pub enum Action {
     CycleTab {
         back: bool,
     },
-    /// Ctrl+Alt+setas: foco para a janela vizinha da tela dividida.
+    /// Ctrl+Alt+arrows: focus to the neighboring window of the split view.
     FocusPane {
         dx: i32,
         dy: i32,
     },
-    /// Ctrl+Shift+M: inicia/para o ditado na aba de CLI focada (ou na que já está gravando).
+    /// Ctrl+Shift+M: starts/stops dictation on the focused CLI tab (or on the one already recording).
     ToggleTabMic,
     CopyText(String),
-    /// Ctrl+Shift+D: alterna o centro entre Agentes e Documentos.
+    /// Ctrl+Shift+D: switches the center between Agents and Documents.
     ToggleCenter,
-    /// Ctrl+S no modo Documentos: grava o arquivo em edição.
+    /// Ctrl+S in Documents mode: saves the file being edited.
     SaveDoc,
-    /// Ctrl+F no modo Documentos: abre a busca do documento.
+    /// Ctrl+F in Documents mode: opens the document search.
     FindInDoc,
 }
 
-/// Mensagem de outro agente (ou da UI) esperando para ser digitada no terminal da aba.
+/// Message from another agent (or from the UI) waiting to be typed into the tab's terminal.
 struct Queued {
-    /// Número da pergunta no core; 0 = mensagem da própria interface (ex.: aba GitHub), sem resposta a devolver.
+    /// Question number in the core; 0 = message from the interface itself (e.g. GitHub tab), with no answer to return.
     request: u64,
     prompt: String,
-    /// É uma resposta atrasada a uma pergunta desta aba, não uma pergunta nova.
+    /// It is a late answer to a question of this tab, not a new question.
     answer: bool,
 }
 
-/// O que a barra lateral direita mostra.
+/// What the right bar shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightView {
-    /// Mesa de tarefas (ver `tasks_ui.rs`).
+    /// Tasks desk (see `tasks_ui.rs`).
     Tarefas,
     Conversa,
-    /// Repositório git do workspace (ver `git_ui.rs`).
+    /// The workspace git repository (see `git_ui.rs`).
     Git,
-    /// PRs, issues e Actions do GitHub (ver `github_ui.rs`).
+    /// GitHub PRs, issues and Actions (see `github_ui.rs`).
     GitHub,
 }
 
 pub struct Tab {
     pub uid: u64,
     pub kind: String,
-    /// Identidade da instância (`claude`, `claude@dev`, `claude@dev@ana`).
+    /// Instance identity (`claude`, `claude@dev`, `claude@dev@ana`).
     pub ident: Ident,
-    /// Id do projeto da instância (as instâncias do core são por projeto).
+    /// Project id of the instance (the core instances are per project).
     pub project: String,
     pub label: String,
-    /// Modelo de LLM da instância (`sonnet`); `None` = o padrão do CLI ou um agente que não escolhe.
+    /// Instance LLM model (`sonnet`); `None` = the CLI default or an agent that does not choose.
     pub model: Option<String>,
     pub color: Color32,
     pub session: Session,
     pub view: ViewState,
     pub alive: bool,
     pub busy: bool,
-    /// Teve turno concluído enquanto não estava ativa (limpa ao focar a aba).
+    /// A turn finished while it was not active (cleared when the tab is focused).
     pub done: bool,
-    /// Quando a aba foi ativada pela última vez (contador): em cada janela da tela dividida
-    /// aparece a mais recente.
+    /// When the tab was last activated (counter): each window of the split view
+    /// shows the most recent one.
     pub shown: u64,
-    /// Aberta pelo app a pedido de `ask-agent` (e não pelo usuário).
+    /// Opened by the app at the request of `ask-agent` (and not by the user).
     pub auto: bool,
-    /// Perguntas de outros agentes aguardando a aba ficar pronta (uma por vez).
+    /// Questions from other agents waiting for the tab to be ready (one at a time).
     queue: Mailbox<Queued>,
-    /// Última tecla do usuário nesta aba e se ela deixou texto começado na linha.
+    /// Last user key in this tab and whether it left text started on the line.
     last_key: Option<Instant>,
     typing: bool,
-    /// O agente avisa início/fim de turno por hook (`ask-agent --signal`): `busy` vem dele.
+    /// The agent reports the start/end of a turn through a hook (`ask-agent --signal`): `busy` comes from it.
     hooked: bool,
-    /// O hook confirmou que o turno atual começou: só o aviso de fim de turno libera a aba. Sem
-    /// confirmação (ex.: Enter num menu, que não abre turno), vale a heurística da saída.
+    /// The hook confirmed that the current turn started: only the end-of-turn notice frees the tab. Without
+    /// confirmation (e.g. Enter on a menu, which does not open a turn), the output heuristic applies.
     turn_confirmed: bool,
-    /// Enters agendados de um envio (`submit`), em ordem.
+    /// Scheduled Enters of a submit (`submit`), in order.
     pending_enter: VecDeque<Instant>,
-    /// Teclas do usuário que chegaram enquanto um envio esperava o Enter: vão depois dele, para
-    /// não entrar no meio da mensagem.
+    /// User keys that arrived while a submit was waiting for the Enter: they go after it, so they do
+    /// not land in the middle of the message.
     held_keys: Vec<u8>,
     seen_output: u64,
     idle_deadline: Option<Instant>,
-    /// Houve saída desde que a aba ficou ocupada (só então o fim do turno toca e marca "concluído").
+    /// There has been output since the tab became busy (only then the end of the turn rings and marks "done").
     busy_output: bool,
     spec: Option<SpawnSpec>,
     pending_resize: Option<(GridSize, Instant)>,
-    /// Quando o PTY desta aba foi redimensionado por último: o próximo só sai depois que o CLI
-    /// terminar de reimprimir a conversa (ver [`Tab::resize_blocked_until`]).
+    /// When this tab's PTY was last resized: the next one only goes out after the CLI
+    /// finishes reprinting the conversation (see [`Tab::resize_blocked_until`]).
     last_resize: Option<Instant>,
-    /// Quando o processo atual foi iniciado (a regra de entrega dá tempo de a TUI subir).
+    /// When the current process was started (the delivery rule gives the TUI time to come up).
     spawned_at: Option<Instant>,
 }
 
 impl Tab {
-    /// Um redimensionamento do PTY espera o tamanho parar (ver `Deck::fit_tab`).
+    /// A PTY resize waits for the size to stop (see `Deck::fit_tab`).
     #[cfg(test)]
     pub(crate) fn resize_pending(&self) -> bool {
         self.pending_resize.is_some()
     }
 
-    /// O redimensionamento pendente ainda não pode sair porque o CLI está reimprimindo a conversa do
-    /// anterior: só depois da saída parada por [`RESIZE_SETTLE`], com teto de [`RESIZE_SETTLE_MAX`]
-    /// para um agente que não para de escrever. `None` = pode sair agora.
+    /// The pending resize cannot go out yet because the CLI is reprinting the previous conversation:
+    /// only after the output has been quiet for [`RESIZE_SETTLE`], with a ceiling of [`RESIZE_SETTLE_MAX`]
+    /// for an agent that never stops writing. `None` = it can go out now.
     fn resize_blocked_until(&self, now: Instant) -> Option<Instant> {
         let last = self.last_resize?;
         let quiet = (*self.session.shared.last_output.lock()).map_or(last, |at| at.max(last));
@@ -184,74 +185,74 @@ impl Tab {
     }
 }
 
-/// Uma janela da tela dividida, como ficou no último quadro.
+/// One window of the split view, as it was on the last frame.
 pub struct PaneSlot {
-    /// Janela inteira (cabeçalho de abas + terminal).
+    /// Whole window (tab header + terminal).
     pub rect: egui::Rect,
-    /// Área do terminal.
+    /// Terminal area.
     pub body: egui::Rect,
     pub uids: Vec<u64>,
-    /// `uid` da aba visível (`plan.shown`) desta janela.
+    /// `uid` of the visible tab (`plan.shown`) of this window.
     pub shown_uid: u64,
-    /// Grupos da janela (mais de um quando não cabem todos e os que sobram dividem a última).
+    /// Window groups (more than one when they all do not fit and the remaining ones share the last).
     pub groups: Vec<String>,
 }
 
-/// Um agente (aba) de um projeto, para a lista de projetos da barra lateral.
+/// An agent (tab) of a project, for the sidebar project list.
 #[derive(Debug, Clone)]
 pub struct AgentBadge {
-    /// Id da instância (`claude@dev`).
+    /// Instance id (`claude@dev`).
     pub id: String,
-    /// Chefe da instância (`None` = responde ao usuário). Vem do core (`Core::set_boss`).
+    /// Instance boss (`None` = answers the user). Comes from the core (`Core::set_boss`).
     pub parent: Option<String>,
-    /// Modelo (`claude`, `antigravity`…): escolhe o logo.
+    /// Model (`claude`, `antigravity`…): chooses the logo.
     pub kind: String,
-    /// Nome mostrado (`Claude · Dev`).
+    /// Label shown (`Claude · Dev`).
     pub label: String,
-    /// Modelo de LLM da instância, quando tem um.
+    /// Instance LLM model, when it has one.
     pub model: Option<String>,
     pub color: Color32,
-    /// Trabalhando agora.
+    /// Working right now.
     pub busy: bool,
-    /// Terminou um turno sem ser vista.
+    /// Finished a turn without being seen.
     pub done: bool,
-    /// O processo continua rodando.
+    /// The process is still running.
     pub alive: bool,
-    /// Índice em `Deck::tabs` (clicar ativa a aba); `None` se o projeto ainda não foi carregado.
+    /// Index in `Deck::tabs` (clicking activates the tab); `None` if the project has not been loaded yet.
     pub tab: Option<usize>,
 }
 
-/// Um projeto na barra lateral.
+/// A project in the sidebar.
 #[derive(Debug, Clone)]
 pub struct ProjectView {
     pub id: String,
     pub name: String,
     pub path: PathBuf,
     pub active: bool,
-    /// A lista de agentes aparece embaixo do projeto.
+    /// The agent list shows under the project.
     pub expanded: bool,
     pub agents: Vec<AgentBadge>,
 }
 
-/// O que a Deck lembra de um projeto enquanto ele não está na tela.
+/// What the Deck remembers about a project while it is not on screen.
 #[derive(Default)]
 struct ProjectState {
-    /// As abas salvas já foram abertas nesta sessão (até lá, só estão registradas no core).
+    /// The saved tabs were already opened in this session (until then, they are only registered in the core).
     loaded: bool,
-    /// A aba ativa quando o projeto saiu da tela.
+    /// The active tab when the project left the screen.
     active_uid: Option<u64>,
     group_order: Vec<String>,
     split_ratios: split::Ratios,
-    /// Conversa integrada (a do projeto ativo fica em `Deck`).
+    /// Integrated conversation (the active project's lives in `Deck`).
     feed: Vec<FeedItem>,
 }
 
-/// O que a tela dividida mostra neste quadro.
+/// What the split view shows on this frame.
 pub struct PanePlan {
     pub rect: egui::Rect,
-    /// Índices das abas da janela, na ordem do cabeçalho.
+    /// Indices of the window's tabs, in header order.
     pub tabs: Vec<usize>,
-    /// A aba visível (a ativada mais recentemente).
+    /// The visible tab (the most recently activated one).
     pub shown: usize,
     pub groups: Vec<String>,
 }
@@ -266,7 +267,7 @@ pub struct FeedItem {
     pub color: Color32,
 }
 
-/// Linha achatada da árvore de arquivos.
+/// Flattened row of the file tree.
 pub struct TreeRow {
     pub entry: DirEntry,
     pub depth: usize,
@@ -278,7 +279,7 @@ pub struct TreeState {
     pub expanded: HashSet<String>,
     cache: HashMap<String, Vec<DirEntry>>,
     pub active_file: Option<String>,
-    /// Clique simples pendente (debounce de 220 ms para distinguir do duplo clique).
+    /// Pending single click (220 ms debounce to tell it apart from a double click).
     pending_click: Option<(String, Instant)>,
 }
 
@@ -302,126 +303,126 @@ pub struct Deck {
     pub sidebar_w: f32,
     pub sidebar_collapsed: bool,
     pub sidebar_dragging: Option<(f32, f32)>,
-    /// Largura pedida da barra direita (a efetiva depende da janela; ver `ui::right_width`).
+    /// Requested right bar width (the effective one depends on the window; see `ui::right_width`).
     pub right_w: f32,
     pub right_dragging: Option<(f32, f32)>,
     pub right_view: RightView,
     pub right_panel_rect: Option<egui::Rect>,
 
-    // Tela dividida (ver `split.rs`)
+    // Split view (see `split.rs`)
     pub organization: Organization,
-    /// Destaque: fração da largura do centro que a janela grande ocupa (ver `split::highlight_ratio`).
+    /// Highlight: fraction of the center width the large window takes (see `split::highlight_ratio`).
     pub highlight_ratio: f32,
-    /// O grupo de modelos fixado na barra de título, por agente (cópia de `Config::usage_pins`).
+    /// The model group pinned in the title bar, per agent (a copy of `Config::usage_pins`).
     pub usage_pins: std::collections::BTreeMap<String, String>,
-    /// Ordem das janelas (grupos de `split::group_key`).
+    /// Order of the windows (`split::group_key` groups).
     pub group_order: Vec<String>,
     pub split_ratios: split::Ratios,
-    /// Janelas do último quadro (atalhos de teclado e tamanho das abas novas).
+    /// Windows of the last frame (keyboard shortcuts and size of new tabs).
     pub panes: Vec<PaneSlot>,
-    /// Janela sendo arrastada pela alça para trocar de lugar com outra.
+    /// Window being dragged by the handle to swap places with another.
     pub pane_drag: Option<usize>,
-    /// Até quando o tamanho das janelas mudou por uma troca de aba no Destaque (ver `Deck::activate`):
-    /// nesse prazo o PTY espera `HIGHLIGHT_RESIZE_DEBOUNCE` em vez de `RESIZE_DEBOUNCE`.
+    /// Until when the window size changed due to a tab switch in the Highlight (see `Deck::activate`):
+    /// within that period the PTY waits `HIGHLIGHT_RESIZE_DEBOUNCE` instead of `RESIZE_DEBOUNCE`.
     highlight_switch_until: Option<Instant>,
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=split-drag`): janela-alvo fictícia do arrasto.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=split-drag`): fake target window of the drag.
     pub debug_pane_drop: Option<usize>,
     show_seq: u64,
 
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=usage-demo`): uso fictício na barra de título.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=usage-demo`): fake usage in the title bar.
     pub debug_usage: Option<HashMap<String, agentdeck_core::AgentUsage>>,
-    /// SOMENTE DEPURAÇÃO: o painel de uso aberto sem o mouse, do agente dado ou, vazio, do primeiro
-    /// (`AGENTDECK_DEBUG_UI=usage-panel` ou `usage-panel:<agente>`).
+    /// DEBUG ONLY: the usage panel opened without the mouse, for the given agent or, empty, the first
+    /// (`AGENTDECK_DEBUG_UI=usage-panel` or `usage-panel:<agent>`).
     pub debug_usage_panel: Option<String>,
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=projects-demo`): projetos fictícios na barra lateral.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=projects-demo`): fake projects in the sidebar.
     pub debug_projects: Option<Vec<ProjectView>>,
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=project:<id>`): troca para este projeto logo depois de restaurar as abas.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=project:<id>`): switches to this project right after restoring the tabs.
     pub debug_switch_project: Option<String>,
-    /// O app deve encerrar (o `App` encerra depois do quadro, ou do trabalho sem quadro com a janela escondida).
+    /// The app must quit (the `App` quits after the frame, or after the frame-less work with the window hidden).
     pub quit_requested: bool,
-    /// O botão de fechar da barra de título foi clicado: o mesmo que o fechar do sistema (o `App` esconde na bandeja
-    /// ou minimiza, depois do quadro).
+    /// The title bar's close button was clicked: the same as the system close (the `App` hides in the tray
+    /// or minimizes, after the frame).
     pub close_requested: bool,
-    /// Uma segunda abertura do app pediu a janela (`CoreEvent::Activate`): o `App` a mostra e foca.
+    /// A second launch of the app asked for the window (`CoreEvent::Activate`): the `App` shows and focuses it.
     pub activate_requested: bool,
 
-    /// Aba Git (ver `git_ui.rs`).
+    /// Git tab (see `git_ui.rs`).
     pub git: crate::git_ui::GitUi,
-    /// Aba GitHub (ver `github_ui.rs`).
+    /// GitHub tab (see `github_ui.rs`).
     pub github: crate::github_ui::GithubUi,
-    /// Aba Tarefas (ver `tasks_ui.rs`).
+    /// Tasks tab (see `tasks_ui.rs`).
     pub tasks: crate::tasks_ui::TasksUi,
-    /// Modo Documentos do centro (ver `docs.rs`).
+    /// Center Documents mode (see `docs.rs`).
     pub docs: crate::docs::Docs,
-    /// O que o centro mostrava no quadro anterior (para perceber a troca; ver `Deck::center_changed`).
+    /// What the center showed on the previous frame (to notice the switch; see `Deck::center_changed`).
     pub(crate) center_seen: crate::docs::CenterView,
 
-    // Árvore e Projetos
-    /// Pasta do projeto ativo (vazia sem projeto).
+    // Tree and Projects
+    /// Folder of the active project (empty with no project).
     pub workspace: PathBuf,
-    /// Id do projeto ativo (vazio = nenhum). Só as abas dele aparecem.
+    /// Id of the active project (empty = none). Only its tabs appear.
     pub active_project: String,
     projects: HashMap<String, ProjectState>,
     pub tree: TreeState,
 
-    // Conversa integrada (somente leitura)
+    // Integrated conversation (read only)
     pub feed: Vec<FeedItem>,
     thinking: HashMap<String, u64>,
     next_feed_id: u64,
     pub unseen: u32,
-    /// Download em andamento (barra no cabeçalho) e, se for um erro, quando some.
+    /// Download in progress (bar in the header) and, for an error, when it disappears.
     pub download: Option<(DownloadProgress, Option<Instant>)>,
-    /// SOMENTE DEPURAÇÃO: mantém o estado fictício de `AGENTDECK_DEBUG_UI=download*`, ignorando o download real.
+    /// DEBUG ONLY: keeps the fake state of `AGENTDECK_DEBUG_UI=download*`, ignoring the real download.
     pub debug_hold_download: bool,
     pub feed_scroll_to_bottom: bool,
     pub feed_near_bottom: bool,
 
-    // Ditado por voz (preso ao `uid` da aba onde começou)
+    // Voice dictation (pinned to the `uid` of the tab where it started)
     recorder: Option<audio::Recorder>,
     pub recording_since: Option<Instant>,
-    /// Estado global do microfone e seu destino (`Tab(uid)`).
+    /// Global microphone state and its destination (`Tab(uid)`).
     pub mic_phase: MicPhase,
     pub engine_label: String,
 
-    // Menus e diversos
+    // Menus and misc
     pub new_tab_menu_open: bool,
-    /// Agente cujo segundo passo do menu (escolher o modelo) está aberto.
+    /// Agent whose second menu step (choose the model) is open.
     pub new_tab_models_for: Option<String>,
-    /// Provedor escolhido no menu do modelo (`opencode`, `opencode-go`…): a lista mostra só os
-    /// modelos dele. `None` = o passo dos provedores.
+    /// Provider chosen in the model menu (`opencode`, `opencode-go`…): the list shows only its
+    /// models. `None` = the providers step.
     pub new_tab_provider: Option<String>,
-    /// Modelos conhecidos de cada agente e quando chegaram (buscados fora da thread da interface).
+    /// Known models of each agent and when they arrived (fetched outside the interface thread).
     model_lists: HashMap<String, (Vec<String>, Instant)>,
-    /// Agentes cuja lista de modelos está sendo buscada agora.
+    /// Agents whose model list is being fetched right now.
     models_loading: HashSet<String>,
     pub settings_open: bool,
-    /// A pergunta do ditado por voz (baixar o Whisper?) está aberta.
+    /// The voice dictation question (download Whisper?) is open.
     pub dictation_prompt: bool,
-    /// O modelo e um motor do whisper estão no disco (lido do disco na abertura e quando o core avisa).
+    /// The whisper model and an engine are on disk (read from disk at startup and when the core notifies).
     dictation_installed: bool,
-    /// Configurações: o botão "Remover" já foi clicado uma vez e pede confirmação.
+    /// Settings: the "Remove" button was already clicked once and asks for confirmation.
     pub dictation_confirm_remove: bool,
-    /// Aba sendo renomeada pelo usuário (índice, buffer de edição, erro opcional).
+    /// Tab being renamed by the user (index, edit buffer, optional error).
     pub rename_tab: Option<(usize, String, Option<String>)>,
-    /// Menu de contexto aberto em uma aba (índice da aba, posição do clique).
+    /// Context menu open on a tab (tab index, click position).
     pub tab_context_menu: Option<(usize, egui::Pos2)>,
     pub sound_enabled: bool,
-    /// Espelho de `Config.auto_open_agent_tabs` (item do menu de configurações).
+    /// Mirror of `Config.auto_open_agent_tabs` (settings menu item).
     pub auto_open_agent_tabs: bool,
-    /// Espelho de `Config.app_shortcuts_first` (item do menu de configurações).
+    /// Mirror of `Config.app_shortcuts_first` (settings menu item).
     pub app_shortcuts_first: bool,
-    /// Há um modal aberto (do último quadro): o teclado não vai ao terminal nem aos atalhos.
+    /// A modal is open (from the last frame): the keyboard goes neither to the terminal nor to the shortcuts.
     pub modal_open: bool,
-    /// Ctrl+/ pedido pelo teclado (abre/fecha o modal de atalhos no próximo quadro).
+    /// Ctrl+/ requested by the keyboard (opens/closes the shortcuts modal on the next frame).
     pub toggle_shortcuts: bool,
     pub drop_hover: bool,
     pub last_drop_target: Option<AttachTarget>,
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=drop-pane:<n>`): destaca este painel no arrastar e soltar.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=drop-pane:<n>`): highlights this panel on drag and drop.
     pub debug_drop_slot: Option<usize>,
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=drop-task`): destaca o formulário "Nova tarefa" no arrastar e soltar.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=drop-task`): highlights the "New task" form on drag and drop.
     pub debug_drop_task_form: bool,
     pub term_focus: bool,
-    /// Texto em composição do IME (pré-edição), mostrado sobre o cursor do terminal.
+    /// IME composition text (pre-edit), shown over the terminal cursor.
     pub ime_preedit: String,
     pub metrics: Option<Metrics>,
     pub blink_epoch: Instant,
@@ -429,42 +430,42 @@ pub struct Deck {
     pub terminal_rect: Option<egui::Rect>,
     pub window_focused: bool,
     debug_fake_shell: bool,
-    /// `AGENTDECK_DEBUG_PTY=1`: grava a saída crua de cada aba em `dados/pty/` (ver `terminal::record`).
+    /// `AGENTDECK_DEBUG_PTY=1`: records each tab's raw output under `dados/pty/` (see `terminal::record`).
     debug_pty: bool,
-    /// SOMENTE DEPURAÇÃO: fecha as abas restauradas (captura do estado vazio).
+    /// DEBUG ONLY: closes the restored tabs (empty-state screenshot).
     pub debug_close_all: bool,
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(120);
-/// Quantas abas o app abre sozinho (a pedido de `ask-agent`) ao mesmo tempo.
+/// How many tabs the app opens by itself (at the request of `ask-agent`) at the same time.
 const MAX_AUTO_TABS: usize = 8;
-/// Quanto tempo a lista de modelos recebida de um agente vale antes de pedir de novo.
+/// How long a model list received from an agent is valid before asking again.
 const MODEL_LIST_TTL: Duration = Duration::from_secs(300);
-/// Depois de colar um envio, o Enter vai após este tempo (e de novo após `SECOND_ENTER` quando há
-/// menção `@` em CLIs com autocomplete de arquivo).
+/// After pasting a submit, the Enter goes out after this time (and again after `SECOND_ENTER` when there is
+/// an `@` mention in CLIs with file autocomplete).
 const FIRST_ENTER: Duration = Duration::from_millis(250);
 const SECOND_ENTER: Duration = Duration::from_millis(600);
-/// Com hooks, a aba só deixa de estar ocupada pelo aviso de fim de turno. Se o aviso se perder,
-/// ela é liberada depois deste tempo sem nenhuma saída.
+/// With hooks, the tab only stops being busy through the end-of-turn notice. If the notice is lost,
+/// it is freed after this time with no output.
 const HOOK_STALE: Duration = Duration::from_secs(600);
-/// Cada largura nova faz o Claude Code reimprimir a conversa, e no Windows sem `ESC[3J`: a cópia
-/// anterior fica no histórico. Por isso o PTY só muda com o tamanho parado e o mouse solto
-/// (ver [`resize_due`]): um arrasto do divisor ou da borda vira um redimensionamento só.
+/// Every new width makes Claude Code reprint the conversation, and on Windows without `ESC[3J`: the previous
+/// copy stays in the history. That is why the PTY only changes with the size stopped and the mouse released
+/// (see [`resize_due`]): a drag of the divider or the edge becomes a single resize.
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(150);
-/// Trocar de aba no Destaque muda a largura das janelas sem o usuário arrastar nada; o CLI pode
-/// ainda estar reimprimindo a conversa da troca anterior, então o PTY espera mais.
+/// Switching tabs in the Highlight changes the window widths without the user dragging anything; the CLI may
+/// still be reprinting the previous switch's conversation, so the PTY waits longer.
 const HIGHLIGHT_RESIZE_DEBOUNCE: Duration = Duration::from_millis(600);
-/// Depois de um redimensionamento aplicado, o próximo da mesma aba espera a saída dela ficar parada
-/// por este tempo (o CLI acabou de reimprimir a conversa)…
+/// After an applied resize, the next one of the same tab waits for its output to stay quiet
+/// for this time (the CLI just reprinted the conversation)…
 const RESIZE_SETTLE: Duration = Duration::from_millis(300);
-/// …mas um agente que não para de escrever não pode segurar o redimensionamento para sempre.
+/// …but an agent that never stops writing cannot hold the resize forever.
 const RESIZE_SETTLE_MAX: Duration = Duration::from_secs(3);
 const IDLE_CHIME: Duration = Duration::from_millis(1200);
-/// Enter (ou envio) que não produziu saída nenhuma (prompt vazio, menu): a aba é liberada depois
-/// deste tempo, em silêncio. Sem isso ela ficava "trabalhando" para sempre e prendia a fila da ponte.
+/// An Enter (or submit) that produced no output at all (empty prompt, menu): the tab is freed after
+/// this time, silently. Without it the tab stayed "working" forever and held the bridge queue.
 const NO_OUTPUT_IDLE: Duration = Duration::from_secs(8);
-/// Mensagens guardadas na Conversa integrada de cada projeto (as mais antigas saem): a lista é
-/// redesenhada a cada quadro e, sem limite, uma sessão longa deixava a interface lenta.
+/// Messages kept in each project's Integrated conversation (the oldest leave): the list is
+/// redrawn every frame and, with no limit, a long session made the interface slow.
 const FEED_MAX: usize = 1000;
 
 fn cap_feed(feed: &mut Vec<FeedItem>) {
@@ -473,20 +474,20 @@ fn cap_feed(feed: &mut Vec<FeedItem>) {
     }
 }
 
-/// Fecha o microfone numa thread (esperar a captura terminar não é coisa da thread da interface).
+/// Closes the microphone on a thread (waiting for the capture to finish is not the interface thread's job).
 fn discard_recorder(rec: audio::Recorder) {
     let _ = std::thread::Builder::new().name("mic-close".into()).spawn(move || rec.cancel());
 }
 
-/// Caminhos absolutos dos anexos a partir das referências do core (relativas ao workspace da hora
-/// da cópia, ou absolutas). Todo anexo fica em `dados/anexos` com nome único, então o nome basta
-/// e não depende de qual projeto estava ativo.
+/// Absolute paths of the attachments from the core references (relative to the workspace at copy time,
+/// or absolute). Every attachment lives in `dados/anexos` with a unique name, so the name is enough
+/// and does not depend on which project was active.
 fn attachment_paths(core: &Core, refs: Vec<String>) -> Vec<PathBuf> {
     let dir = core.paths().data_dir.join("anexos");
     refs.iter().filter_map(|r| Path::new(r).file_name()).map(|name| dir.join(name)).collect()
 }
 
-/// Abre uma pasta no explorador de arquivos do sistema.
+/// Opens a folder in the system file manager.
 fn open_in_file_manager(path: &Path) {
     #[cfg(windows)]
     let _ = std::process::Command::new("explorer").arg(path).spawn();
@@ -496,7 +497,7 @@ fn open_in_file_manager(path: &Path) {
     let _ = std::process::Command::new("xdg-open").arg(path).spawn();
 }
 
-/// O redimensionamento pendente do PTY já pode ser aplicado: tamanho parado e mouse solto.
+/// The pending PTY resize can be applied: size stopped and mouse released.
 fn resize_due(now: Instant, at: Instant, dragging: bool) -> bool {
     now >= at && !dragging
 }
@@ -539,7 +540,7 @@ impl Deck {
                 theme::RIGHT_DEFAULT_W
             },
             right_dragging: None,
-            // A mesa de tarefas é a primeira aba e a que abre: o app não grava a aba escolhida.
+            // The tasks desk is the first tab and the one that opens: the app does not save the chosen tab.
             right_view: RightView::Tarefas,
             right_panel_rect: None,
             organization: cfg.organization(),
@@ -613,12 +614,12 @@ impl Deck {
         };
         deck.refresh_agents();
         deck.refresh_engine();
-        // A ponte passa a digitar as perguntas dos agentes nas abas (em vez de rodar o agente à parte).
+        // The bridge now types the agents' questions into the tabs (instead of running the agent separately).
         deck.core.enable_tab_delivery();
         if agentdeck_core::env_var("DEBUG_FEED").is_some_and(|v| v == "1") {
             deck.debug_feed();
         }
-        // O chip da branch na topbar aparece já ao abrir, e o número de tarefas em revisão no ícone da aba.
+        // The branch chip in the top bar shows right away, and so does the number of tasks under review on the tab icon.
         deck.git_refresh();
         deck.tasks_refresh();
         deck
@@ -636,13 +637,13 @@ impl Deck {
         });
     }
 
-    /// `api.listAgents()` numa thread (procura os CLIs no disco).
+    /// `api.listAgents()` on a thread (looks for the CLIs on disk).
     pub fn refresh_agents(&self) {
         self.spawn_bg("list-agents", |core| Some(UiMsg::Agents(core.list_agents())));
     }
 
-    /// Pede os modelos conhecidos de `kind` (numa thread; o core guarda em cache). Não repete enquanto
-    /// há um pedido em andamento nem enquanto a lista recebida é recente.
+    /// Asks for the known models of `kind` (on a thread; the core caches them). Does not repeat while
+    /// a request is in flight nor while the received list is recent.
     pub fn request_models(&mut self, kind: &str) {
         let fresh = self.model_lists.get(kind).is_some_and(|(_, at)| at.elapsed() < MODEL_LIST_TTL);
         if fresh || !self.models_loading.insert(kind.to_owned()) {
@@ -655,7 +656,7 @@ impl Deck {
         });
     }
 
-    /// Lista de modelos de `kind` para o menu e se ainda está sendo buscada.
+    /// Model list of `kind` for the menu and whether it is still being fetched.
     pub fn models_of(&self, kind: &str) -> (&[String], bool) {
         (self.model_lists.get(kind).map_or(&[][..], |(l, _)| l.as_slice()), self.models_loading.contains(kind))
     }
@@ -669,7 +670,7 @@ impl Deck {
     }
 }
 
-// Cada seção em um arquivo (filhos deste módulo: enxergam os campos privados de `Deck`).
+// Each section in a file (children of this module: they see `Deck`'s private fields).
 mod attachments;
 mod dictation;
 mod feed;
@@ -679,12 +680,12 @@ mod projects;
 mod sidebar;
 mod tabs;
 
-/// Lê texto da área de transferência do sistema. Só da thread da UI (ver `check_clipboard_image`).
+/// Reads text from the system clipboard. Only from the UI thread (see `check_clipboard_image`).
 fn clipboard_text() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
 }
 
-/// Pasta pessoal (início do seletor de pasta quando não há projeto).
+/// Home folder (start of the folder picker when there is no project).
 fn dirs_home() -> PathBuf {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
 }
@@ -716,8 +717,8 @@ mod tests {
     fn a_drag_resizes_the_pty_once_when_the_mouse_is_released() {
         let at = Instant::now();
         let later = at + RESIZE_DEBOUNCE;
-        assert!(!resize_due(at - Duration::from_millis(1), at, false), "tamanho ainda mudando");
-        assert!(!resize_due(later, at, true), "arrastando: espera soltar o mouse");
-        assert!(resize_due(later, at, false), "parado e solto: aplica");
+        assert!(!resize_due(at - Duration::from_millis(1), at, false), "size still changing");
+        assert!(!resize_due(later, at, true), "dragging: waits for the mouse to be released");
+        assert!(resize_due(later, at, false), "stopped and released: applies");
     }
 }

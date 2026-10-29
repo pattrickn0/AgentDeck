@@ -1,11 +1,11 @@
-//! Transcrição local com whisper.cpp (equivalente ao bloco "Transcrição local" do main.js).
+//! Local transcription with whisper.cpp (equivalent to "Local transcription" block in main.js).
 //!
-//! Motores em ordem de preferência: CUDA (GPU NVIDIA), Vulkan (qualquer GPU) e CPU. No
-//! Windows os binários ficam em `whisper/bin-*/[Release/]whisper-cli.exe`; no Linux, em
-//! `whisper/bin-*-linux/whisper-cli` (ou o `whisper-cli` do PATH). O modelo e o motor de CPU
-//! (Windows e Linux) e o CUDA (Windows) são baixados sob demanda, com SHA-256 fixado neste
-//! arquivo; para CUDA/Vulkan no Linux, um `whisper-cli` compilado com eles no PATH.
-//! O WAV temporário é SEMPRE apagado após a transcrição.
+//! Engines in order of preference: CUDA (NVIDIA GPU), Vulkan (any GPU) and CPU. On
+//! Windows binaries are in `whisper/bin-*/[Release/]whisper-cli.exe`; on Linux, in
+//! `whisper/bin-*-linux/whisper-cli` (or `whisper-cli` on PATH). The model and CPU engine
+//! (Windows and Linux) and CUDA (Windows) are downloaded on demand, with SHA-256 pinned in this
+//! file; for CUDA/Vulkan on Linux, a `whisper-cli` compiled with them on PATH.
+//! The temporary WAV is ALWAYS deleted after transcription.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -17,19 +17,17 @@ use crate::config::DictationChoice;
 use crate::download::{download_file, DownloadOpts};
 use crate::events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry};
 use crate::process::{run_captured, Exit};
+use crate::t;
 use crate::{Core, Transcription};
 
 pub const MODEL_FILE: &str = "ggml-large-v3-turbo.bin";
 const RELEASE: &str = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454";
 const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
-/// SHA-256 do modelo: bate com o ETag LFS do Hugging Face.
+/// Model SHA-256: matches Hugging Face LFS ETag.
 const MODEL_SHA256: &str = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69";
-/// Vocabulário que orienta o reconhecimento de nomes próprios.
+/// Vocabulary that guides proper noun recognition.
 pub const WHISPER_PROMPT: &str = "AgentDeck, Claude, Antigravity, agy, Claude Code, Ollama, Codex, OpenCode, Aider, Goose, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.";
-pub const UNAVAILABLE: &str = "indisponível";
-const NOT_READY: &str = "a transcrição local ainda não está pronta (veja a Conversa integrada)";
-const NO_SPEECH: &str = "nenhuma fala detectada";
-const CANCELLED: &str = "transcrição interrompida: o app está fechando";
+pub const UNAVAILABLE: &str = "unavailable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
@@ -38,18 +36,18 @@ pub enum Engine {
     Cpu,
 }
 
-/// Pacote pré-compilado de um motor (release b5454 do whisper.cpp), com o SHA-256 fixado.
+/// Precompiled package of an engine (whisper.cpp release b5454), with pinned SHA-256.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Archive {
     file: &'static str,
     tar_gz: bool,
-    /// Componentes iniciais removidos ao extrair (os .tar.gz de Linux trazem uma pasta raiz).
+    /// Leading path components removed during extraction (Linux .tar.gz packages include a root directory).
     strip: usize,
     sha256: &'static str,
 }
 
-/// Hashes do campo "digest" do release no GitHub; os de CPU (Windows e Linux) foram conferidos
-/// baixando os arquivos, o do pacote CUDA (685 MB) vem só do digest.
+/// Hashes from the GitHub release "digest" field; CPU ones (Windows and Linux) were verified
+/// by downloading files, CUDA package (685 MB) comes from digest only.
 fn engine_archive(engine: Engine, os: &str, arch: &str) -> Option<Archive> {
     let zip = |file, sha256| Some(Archive { file, tar_gz: false, strip: 0, sha256 });
     let tgz = |file, sha256| Some(Archive { file, tar_gz: true, strip: 1, sha256 });
@@ -71,8 +69,8 @@ fn engine_archive(engine: Engine, os: &str, arch: &str) -> Option<Archive> {
 }
 
 impl Engine {
-    /// Pasta do motor em `whisper/`. No Linux usa o sufixo `-linux`, para não se misturar aos
-    /// binários de Windows versionados em `bin-cpu/` e `bin-vulkan/`.
+    /// Engine directory in `whisper/`. On Linux uses `-linux` suffix to avoid mixing with
+    /// Windows binaries versioned in `bin-cpu/` and `bin-vulkan/`.
     pub fn dir(self) -> String {
         if cfg!(windows) {
             format!("bin-{}", self.id())
@@ -89,7 +87,7 @@ impl Engine {
         }
     }
 
-    /// Pacote pré-compilado para este sistema e arquitetura, se existir.
+    /// Precompiled package for this system and architecture, if available.
     fn archive(self) -> Option<Archive> {
         engine_archive(self, std::env::consts::OS, std::env::consts::ARCH)
     }
@@ -103,7 +101,7 @@ impl Engine {
     }
 }
 
-/// Estado do subsistema (GPUs detectadas e download em andamento).
+/// Subsystem state (detected GPUs and download in progress).
 #[derive(Default)]
 pub(crate) struct WhisperState {
     gpus: OnceLock<Vec<String>>,
@@ -111,8 +109,8 @@ pub(crate) struct WhisperState {
 }
 
 impl WhisperState {
-    /// Nomes das GPUs (cache). Windows: `Get-CimInstance Win32_VideoController`;
-    /// Linux: `lspci -mm` e, sem NVIDIA nele, `nvidia-smi -L`.
+    /// GPU names (cached). Windows: `Get-CimInstance Win32_VideoController`;
+    /// Linux: `lspci -mm` and, if no NVIDIA in it, `nvidia-smi -L`.
     fn gpus(&self) -> &[String] {
         self.gpus.get_or_init(detect_gpus)
     }
@@ -189,18 +187,18 @@ fn exe_name() -> &'static str {
     }
 }
 
-/// Executável dentro de `whisper/bin-<motor>/` (raiz, `Release/` ou `bin/`).
+/// Executable inside `whisper/bin-<engine>/` (root, `Release/` or `bin/`).
 fn local_cli(whisper_dir: &Path, engine: Engine) -> Option<PathBuf> {
     cli_in(&whisper_dir.join(engine.dir()))
 }
 
-/// Executável dentro de uma pasta de motor (raiz, `Release/` ou `bin/`).
+/// Executable inside an engine directory (root, `Release/` or `bin/`).
 fn cli_in(engine_dir: &Path) -> Option<PathBuf> {
     let subs: &[&str] = if cfg!(windows) { &["", "Release"] } else { &["", "Release", "bin"] };
     subs.iter().map(|s| engine_dir.join(s).join(exe_name())).find(|p| p.is_file())
 }
 
-/// Executável do motor, se presente. Fora do Windows um `whisper-cli` do PATH vale como CPU.
+/// Engine executable, if present. Outside Windows a `whisper-cli` on PATH counts as CPU.
 pub fn whisper_cli(whisper_dir: &Path, engine: Engine) -> Option<PathBuf> {
     let found = local_cli(whisper_dir, engine);
     if found.is_none() && !cfg!(windows) && engine == Engine::Cpu {
@@ -213,24 +211,24 @@ fn model_path(whisper_dir: &Path) -> PathBuf {
     whisper_dir.join("models").join(MODEL_FILE)
 }
 
-/// O modelo e algum motor estão no disco: o ditado funciona (o `whisper-cli` do PATH vale como CPU fora do Windows).
+/// Model and an engine are on disk: dictation works (`whisper-cli` on PATH counts as CPU outside Windows).
 pub fn is_installed(whisper_dir: &Path) -> bool {
     model_path(whisper_dir).is_file() && [Engine::Cuda, Engine::Vulkan, Engine::Cpu].iter().any(|e| whisper_cli(whisper_dir, *e).is_some())
 }
 
-/// O que o app faz com o ditado ao abrir.
+/// What the app does with dictation upon opening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Startup {
-    /// Garante o que faltar (modelo e motores) em segundo plano, como sempre foi.
+    /// Ensures missing components (model and engines) in the background, as always.
     Ensure,
-    /// Nunca foi perguntado e não há nada baixado: a interface pergunta antes de baixar.
+    /// Never asked and nothing downloaded: UI asks before downloading.
     Ask,
-    /// A pessoa não quer o ditado: não baixa nada.
+    /// User does not want dictation: downloads nothing.
     Skip,
 }
 
-/// Decide o que fazer na abertura e qual escolha gravar. Quem já tem o Whisper baixado (os usuários
-/// de antes da pergunta) nunca é perguntado: conta como "sim".
+/// Decides what to do on startup and which choice to save. Anyone who already downloaded Whisper (users
+/// before the prompt) is never asked: counts as "yes".
 pub fn startup(choice: DictationChoice, installed: bool) -> (Startup, DictationChoice) {
     match choice {
         DictationChoice::Yes => (Startup::Ensure, choice),
@@ -244,9 +242,9 @@ pub(crate) fn is_downloading(core: &Core) -> bool {
     core.inner.whisper.ensuring.load(Ordering::SeqCst)
 }
 
-/// O que `remove_downloaded` apaga dentro de `whisper_dir`: o modelo, o motor CUDA, os pacotes e
-/// downloads pela metade e, fora do Windows, os motores baixados. No Windows `bin-cpu/` e `bin-vulkan/` ficam:
-/// vêm versionados no repositório e são pequenos perto do modelo.
+/// What `remove_downloaded` deletes inside `whisper_dir`: the model, CUDA engine, packages and
+/// partial downloads and, outside Windows, downloaded engines. On Windows `bin-cpu/` and `bin-vulkan/` remain:
+/// they are versioned in the repository and are small compared to the model.
 fn removable(whisper_dir: &Path) -> Vec<PathBuf> {
     let mut paths = vec![model_path(whisper_dir), crate::download::part_path(&model_path(whisper_dir))];
     for engine in [Engine::Cuda, Engine::Vulkan, Engine::Cpu] {
@@ -274,22 +272,22 @@ fn size_of(path: &Path) -> u64 {
     }
 }
 
-/// Apaga o que o ditado baixou e devolve os bytes liberados. Recusa enquanto um download está em andamento.
+/// Deletes what dictation downloaded and returns freed bytes. Refuses while a download is in progress.
 pub(crate) fn remove_downloaded(core: &Core) -> Result<u64, String> {
     if is_downloading(core) {
-        return Err("espere o download do ditado terminar".to_owned());
+        return Err(t!("wait for dictation download to finish").to_owned());
     }
     let mut freed = 0;
     for path in removable(&core.paths().whisper_dir) {
         let size = size_of(&path);
         let res = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
-        res.map_err(|e| format!("não foi possível apagar {}: {e}", path.display()))?;
+        res.map_err(|e| t!("could not delete {path}: {error}", path = path.display(), error = e))?;
         freed += size;
     }
     Ok(freed)
 }
 
-/// Ordem de preferência dos motores disponíveis (vazio sem o modelo).
+/// Order of preference for available engines (empty without model).
 fn engines(core: &Core) -> Vec<Engine> {
     let dir = &core.paths().whisper_dir;
     if !model_path(dir).is_file() {
@@ -300,7 +298,7 @@ fn engines(core: &Core) -> Vec<Engine> {
     if st.has_nvidia() {
         order.push(Engine::Cuda);
     }
-    // Fora do Windows não detectamos GPUs Vulkan: tentamos se o binário existir.
+    // Outside Windows we do not detect Vulkan GPUs: we try if binary exists.
     if !st.gpus().is_empty() || !cfg!(windows) {
         order.push(Engine::Vulkan);
     }
@@ -309,12 +307,12 @@ fn engines(core: &Core) -> Vec<Engine> {
     order
 }
 
-/// Corrige variações fonéticas comuns de nomes de agentes.
+/// Corrects common phonetic variations of agent names.
 pub fn normalize_transcription(text: &str) -> String {
     static RULES: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
     let rules = RULES.get_or_init(|| {
         [
-            // Claude com contexto de comando ("Cláudio Code" → "Claude Code").
+            // Claude with command context ("Cláudio Code" → "Claude Code").
             (r"(?i)\b(?:Cl[áa]udio|Cl[áa]ud[eê]|Cl[áa]udi[ao])\b(\s+(?:Code|CLI|agente|assistente))", "Claude${1}"),
             (r"(?i)\bCloud\s+(Code|CLI|agente|assistente)\b", "Claude ${1}"),
             (r"(?i)\b(com o|para o|pro|ao|chama o|pergunta pro|pergunta ao)\s+Cloud\b", "${1} Claude"),
@@ -336,7 +334,7 @@ pub fn normalize_transcription(text: &str) -> String {
     out
 }
 
-/// WAV PCM 16 bits, mono, 16 kHz (amostras f32 em -1..1).
+/// 16-bit PCM WAV, mono, 16 kHz (f32 samples in -1..1).
 pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     const RATE: u32 = 16_000;
     let data_len = (samples.len() * 2) as u32;
@@ -344,13 +342,13 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     b.extend_from_slice(b"RIFF");
     b.extend_from_slice(&(36 + data_len).to_le_bytes());
     b.extend_from_slice(b"WAVEfmt ");
-    b.extend_from_slice(&16u32.to_le_bytes()); // tamanho do bloco fmt
+    b.extend_from_slice(&16u32.to_le_bytes()); // fmt block size
     b.extend_from_slice(&1u16.to_le_bytes()); // PCM
     b.extend_from_slice(&1u16.to_le_bytes()); // mono
     b.extend_from_slice(&RATE.to_le_bytes());
-    b.extend_from_slice(&(RATE * 2).to_le_bytes()); // bytes por segundo
-    b.extend_from_slice(&2u16.to_le_bytes()); // alinhamento do bloco
-    b.extend_from_slice(&16u16.to_le_bytes()); // bits por amostra
+    b.extend_from_slice(&(RATE * 2).to_le_bytes()); // bytes per second
+    b.extend_from_slice(&2u16.to_le_bytes()); // block alignment
+    b.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
     b.extend_from_slice(b"data");
     b.extend_from_slice(&data_len.to_le_bytes());
     for s in samples {
@@ -362,10 +360,10 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
 
 fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String> {
     let dir = &core.paths().whisper_dir;
-    let exe = whisper_cli(dir, engine).ok_or_else(|| format!("whisper-cli ({}) não encontrado", engine.label()))?;
+    let exe = whisper_cli(dir, engine).ok_or_else(|| t!("whisper-cli ({engine}) not found", engine = engine.label()))?;
     let lang = Some(core.config().whisper_lang).filter(|l| !l.is_empty()).unwrap_or_else(|| "auto".into());
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(2).max(1);
-    // O processo roda na pasta do executável: caminhos relativos deixariam de valer.
+    // Process runs in executable's directory: relative paths would become invalid.
     let (exe, model, wav) = (crate::util::absolutize(&exe), crate::util::absolutize(&model_path(dir)), crate::util::absolutize(wav));
     let mut cmd = std::process::Command::new(&exe);
     cmd.arg("-m").arg(&model).arg("-f").arg(&wav).args([
@@ -386,7 +384,7 @@ fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String
     }
     if let Some(parent) = exe.parent() {
         cmd.current_dir(parent);
-        // Os binários de Linux trazem as .so ao lado do executável.
+        // Linux binaries include .so libraries next to executable.
         if !cfg!(windows) && crate::util::path_within(&exe, &crate::util::absolutize(dir)) {
             let mut paths = vec![parent.to_path_buf()];
             paths.extend(std::env::var_os("LD_LIBRARY_PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
@@ -395,33 +393,33 @@ fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String
             }
         }
     }
-    // Fechar o app (`Core::shutdown`) interrompe a transcrição: o processo fica no registro e
-    // o sinal de encerramento o mata, em vez de seguir órfão até o timeout.
+    // Closing the app (`Core::shutdown`) interrupts transcription: process is in registry and
+    // termination signal kills it, instead of running orphaned until timeout.
     let shutdown = &core.inner.state.shutdown;
     if shutdown.load(Ordering::SeqCst) {
-        return Err(CANCELLED.into());
+        return Err(t!("transcription interrupted: the app is closing").into());
     }
     let out = run_captured(cmd, None, Duration::from_secs(600), Some(shutdown), Some(&core.inner.processes)).map_err(|e| e.to_string())?;
     let text = out.stdout.replace("[BLANK_AUDIO]", " ").split_whitespace().collect::<Vec<_>>().join(" ");
     match out.exit {
         Exit::Code(Some(0)) => Ok(normalize_transcription(&text)),
-        Exit::Cancelled => Err(CANCELLED.into()),
+        Exit::Cancelled => Err(t!("transcription interrupted: the app is closing").into()),
         exit => {
             let last = out.stderr.trim().lines().last().map(str::to_owned).filter(|l| !l.is_empty());
             Err(last.unwrap_or_else(|| match exit {
-                Exit::Code(Some(c)) => format!("whisper saiu com código {c}"),
-                _ => "whisper saiu com código null".into(),
+                Exit::Code(Some(c)) => t!("whisper exited with code {code}", code = c),
+                _ => t!("whisper exited with code null").to_owned(),
             }))
         }
     }
 }
 
 pub(crate) fn transcribe_engine(core: &Core) -> String {
-    engines(core).first().map(|e| e.label().to_owned()).unwrap_or_else(|| UNAVAILABLE.into())
+    engines(core).first().map(|e| e.label().to_owned()).unwrap_or_else(|| t!("unavailable").to_owned())
 }
 
-/// Nome único do WAV temporário: milissegundos + processo + contador (duas chamadas no mesmo
-/// milissegundo não podem sobrescrever nem apagar o arquivo uma da outra).
+/// Unique temporary WAV filename: milliseconds + process + counter (two calls in the same
+/// millisecond cannot overwrite or delete each other's file).
 fn unique_wav_name() -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     format!("audio-{}-{}-{}.wav", crate::util::now_ms(), std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed))
@@ -430,38 +428,47 @@ fn unique_wav_name() -> String {
 pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<Transcription> {
     let list = engines(core);
     if list.is_empty() {
-        anyhow::bail!(NOT_READY);
+        anyhow::bail!(t!("local transcription is not ready yet (see the integrated chat)"));
     }
     let dir = crate::attachments::attachments_dir(&core.paths().data_dir)?;
     let wav = dir.join(unique_wav_name());
     std::fs::write(&wav, wav_bytes(samples))?;
     let result = (|| {
         for (i, engine) in list.iter().enumerate() {
-            let res = run_whisper(core, *engine, &wav).and_then(|t| if t.is_empty() { Err(NO_SPEECH.to_owned()) } else { Ok(t) });
+            let res =
+                run_whisper(core, *engine, &wav).and_then(|t| if t.is_empty() { Err(t!("no speech detected").to_owned()) } else { Ok(t) });
             match res {
                 Ok(text) => return Ok(Transcription { text, engine: engine.label().to_owned() }),
-                Err(e) if e == NO_SPEECH || e == CANCELLED || i + 1 == list.len() => anyhow::bail!(e),
-                Err(e) => core.feed(FeedEntry::system(format!("Whisper em {} falhou ({e}); tentando a próxima opção.", engine.label()))),
+                Err(e)
+                    if e == t!("no speech detected") || e == t!("transcription interrupted: the app is closing") || i + 1 == list.len() =>
+                {
+                    anyhow::bail!(e)
+                }
+                Err(e) => core.feed(FeedEntry::system(t!(
+                    "Whisper on {engine} failed ({error}); trying the next option.",
+                    engine = engine.label(),
+                    error = e,
+                ))),
             }
         }
-        anyhow::bail!(NOT_READY)
+        anyhow::bail!(t!("local transcription is not ready yet (see the integrated chat)"))
     })();
-    // Não há serventia em manter o áudio.
+    // No use keeping the audio.
     let _ = std::fs::remove_file(&wav);
     result
 }
 
-// ---------- Download sob demanda ----------
+// ---------- On-demand download ----------
 
-/// Extrai um .zip em `target` (a biblioteca `zip` recusa caminhos que escapam da pasta).
+/// Extracts a .zip into `target` (the `zip` library rejects paths that escape the folder).
 fn extract_zip(file: &Path, target: &Path) -> Result<(), String> {
     let f = File::open(file).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(f).map_err(|e| e.to_string())?;
     zip.extract(target).map_err(|e| e.to_string())
 }
 
-/// Remove `strip` componentes iniciais do caminho de uma entrada. `Ok(None)` = entrada
-/// inteira descartada (a própria pasta raiz); caminhos com `..` ou absolutos são recusados.
+/// Removes `strip` leading path components from an entry. `Ok(None)` = entry
+/// entirely discarded (the root directory itself); paths with `..` or absolute are rejected.
 fn stripped(path: &Path, strip: usize) -> Result<Option<PathBuf>, String> {
     use std::path::Component;
     let mut rel = PathBuf::new();
@@ -469,13 +476,13 @@ fn stripped(path: &Path, strip: usize) -> Result<Option<PathBuf>, String> {
         match c {
             Component::Normal(p) if i >= strip => rel.push(p),
             Component::Normal(_) | Component::CurDir => {}
-            _ => return Err(format!("caminho inseguro no pacote: {}", path.display())),
+            _ => return Err(t!("unsafe path in package: {path}", path = path.display())),
         }
     }
     Ok(Some(rel).filter(|r| !r.as_os_str().is_empty()))
 }
 
-/// Extrai um .tar.gz em `target`, removendo `strip` componentes iniciais.
+/// Extracts a .tar.gz into `target`, removing `strip` leading components.
 fn extract_tar_gz(file: &Path, target: &Path, strip: usize) -> Result<(), String> {
     let gz = flate2::read::GzDecoder::new(File::open(file).map_err(|e| e.to_string())?);
     let mut archive = tar::Archive::new(gz);
@@ -492,29 +499,29 @@ fn extract_tar_gz(file: &Path, target: &Path, strip: usize) -> Result<(), String
     Ok(())
 }
 
-/// Baixa (com retomada e SHA-256), extrai e confere que o whisper-cli ficou no lugar.
+/// Downloads (with resume and SHA-256), extracts and verifies whisper-cli is in place.
 fn download_engine(core: &Core, engine: Engine, label: &str) -> Result<(), String> {
-    let archive = engine.archive().ok_or_else(|| "sem pacote pré-compilado para este sistema".to_owned())?;
+    let archive = engine.archive().ok_or_else(|| t!("no precompiled package for this system").to_owned())?;
     let dir = core.paths().whisper_dir.clone();
     let file = dir.join(archive.file);
     let url = format!("{RELEASE}/{}", archive.file);
     fetch(core, &url, &file, label, archive.sha256)?;
     let target = dir.join(engine.dir());
     core.emit(CoreEvent::Download(progress(label, DownloadState::Extracting)));
-    // O pacote só é apagado depois do sucesso: numa falha, a próxima tentativa o reaproveita.
+    // Package is only deleted after success: on failure, the next attempt reuses it.
     install_package(&file, &target, archive.tar_gz, archive.strip)?;
     let _ = std::fs::remove_file(&file);
     Ok(())
 }
 
-/// Extrai o pacote numa pasta de preparo ao lado de `target`, confere que o `whisper-cli` está
-/// lá e só então a troca por `target`. Uma falha no meio (app fechado, disco cheio) nunca deixa
-/// um motor pela metade no lugar do definitivo.
+/// Extracts package into a staging directory next to `target`, verifies `whisper-cli` is
+/// there and only then swaps it for `target`. A failure midway (app closed, disk full) never leaves
+/// a half-installed engine in place of the final one.
 fn install_package(file: &Path, target: &Path, tar_gz: bool, strip: usize) -> Result<(), String> {
     let mut name = target.as_os_str().to_os_string();
     name.push(".staging");
     let staging = PathBuf::from(name);
-    let _ = std::fs::remove_dir_all(&staging); // sobra de uma execução interrompida
+    let _ = std::fs::remove_dir_all(&staging); // leftover from interrupted run
     let res = (|| {
         std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
         if tar_gz {
@@ -522,7 +529,7 @@ fn install_package(file: &Path, target: &Path, tar_gz: bool, strip: usize) -> Re
         } else {
             extract_zip(file, &staging)?;
         }
-        let exe = cli_in(&staging).ok_or_else(|| format!("{} não encontrado no pacote extraído", exe_name()))?;
+        let exe = cli_in(&staging).ok_or_else(|| t!("{exe} not found in extracted package", exe = exe_name()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -530,10 +537,11 @@ fn install_package(file: &Path, target: &Path, tar_gz: bool, strip: usize) -> Re
         }
         let _ = exe;
         if target.exists() {
-            // Resto de uma instalação antiga/incompleta (sem executável): sai para dar lugar ao novo.
-            std::fs::remove_dir_all(target).map_err(|e| format!("não foi possível substituir {}: {e}", target.display()))?;
+            // Leftover from an old/incomplete installation (no executable): removed to make room for new one.
+            std::fs::remove_dir_all(target).map_err(|e| t!("could not replace {path}: {error}", path = target.display(), error = e))?;
         }
-        crate::download::rename_with_retry(&staging, target).map_err(|e| format!("não foi possível instalar em {}: {e}", target.display()))
+        crate::download::rename_with_retry(&staging, target)
+            .map_err(|e| t!("could not install in {path}: {error}", path = target.display(), error = e))
     })();
     if res.is_err() {
         let _ = std::fs::remove_dir_all(&staging);
@@ -555,8 +563,8 @@ fn progress(label: &str, state: DownloadState) -> DownloadProgress {
     }
 }
 
-/// Download com progresso para a interface. O `Done` do downloader ainda é seguido por
-/// extração, então vira `Finalizing`; só o fim do passo (em `ensure_whisper_async`) emite `Done`.
+/// Download with UI progress. Downloader's `Done` is followed by
+/// extraction, so it becomes `Finalizing`; only step completion (in `ensure_whisper_async`) emits `Done`.
 fn fetch(core: &Core, url: &str, dest: &Path, label: &str, sha256: &str) -> Result<(), String> {
     let opts = DownloadOpts::new(label, Some(sha256));
     download_file(url, dest, &opts, &mut |mut p| {
@@ -568,7 +576,7 @@ fn fetch(core: &Core, url: &str, dest: &Path, label: &str, sha256: &str) -> Resu
     .map_err(|e| e.message)
 }
 
-/// Baixa o que faltar (modelo e motores) numa thread, com progresso na Conversa integrada.
+/// Downloads what is missing (model and engines) on a thread, with progress in integrated chat.
 pub(crate) fn ensure_whisper_async(core: &Core) {
     if core.inner.whisper.ensuring.swap(true, Ordering::SeqCst) {
         return;
@@ -577,16 +585,16 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
     let core = core.clone();
     let spawned = std::thread::Builder::new().name("cd-whisper-setup".into()).spawn(move || {
         let dir = core.paths().whisper_dir.clone();
-        // (descrição, rótulo da barra, arquivo cujo .part sobrevive a uma falha, ação)
+        // (description, bar label, file whose .part survives a failure, action)
         type Step<'a> = (&'static str, &'static str, PathBuf, Box<dyn FnOnce() -> Result<(), String> + 'a>);
         let mut steps: Vec<Step> = Vec::new();
         if !model_path(&dir).is_file() {
             let (d, c) = (model_path(&dir), core.clone());
             steps.push((
-                "modelo large-v3-turbo (1,6 GB)",
-                "Modelo large-v3-turbo",
+                t!("large-v3-turbo model (1.6 GB)"),
+                t!("large-v3-turbo model"),
                 d.clone(),
-                Box::new(move || fetch(&c, MODEL_URL, &d, "Modelo large-v3-turbo", MODEL_SHA256)),
+                Box::new(move || fetch(&c, MODEL_URL, &d, t!("large-v3-turbo model"), MODEL_SHA256)),
             ));
         }
         if whisper_cli(&dir, Engine::Cpu).is_none() {
@@ -594,16 +602,16 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
                 Some(a) => {
                     let c = core.clone();
                     steps.push((
-                        "whisper.cpp para CPU",
-                        "whisper.cpp (CPU)",
+                        t!("whisper.cpp for CPU"),
+                        t!("whisper.cpp (CPU)"),
                         dir.join(a.file),
-                        Box::new(move || download_engine(&c, Engine::Cpu, "whisper.cpp (CPU)")),
+                        Box::new(move || download_engine(&c, Engine::Cpu, t!("whisper.cpp (CPU)"))),
                     ));
                 }
-                None => core.feed(FeedEntry::system(format!(
-                    "Transcrição local: não há binário pré-compilado do whisper.cpp para {}/{}. Compile o whisper.cpp com Vulkan/CUDA e ponha o whisper-cli no PATH, ou use o motor de CPU.",
-                    std::env::consts::OS,
-                    std::env::consts::ARCH
+                None => core.feed(FeedEntry::system(t!(
+                    "Local transcription: no precompiled whisper.cpp binary for {os}/{arch}. Compile whisper.cpp with Vulkan/CUDA and put whisper-cli on PATH, or use the CPU engine.",
+                    os = std::env::consts::OS,
+                    arch = std::env::consts::ARCH,
                 ))),
             }
         }
@@ -611,30 +619,35 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
             if let Some(a) = Engine::Cuda.archive() {
                 let c = core.clone();
                 steps.push((
-                    "whisper.cpp com CUDA (~700 MB)",
-                    "whisper.cpp (CUDA)",
+                    t!("whisper.cpp with CUDA (~700 MB)"),
+                    t!("whisper.cpp (CUDA)"),
                     dir.join(a.file),
-                    Box::new(move || download_engine(&c, Engine::Cuda, "whisper.cpp (CUDA)")),
+                    Box::new(move || download_engine(&c, Engine::Cuda, t!("whisper.cpp (CUDA)"))),
                 ));
             }
         }
         for (what, label, keep, run) in steps {
-            core.feed(FeedEntry::system(format!("Transcrição local: baixando {what}…")));
+            core.feed(FeedEntry::system(t!("Local transcription: downloading {what}…", what)));
             match run() {
                 Ok(()) => {
                     core.emit(CoreEvent::Download(progress(label, DownloadState::Done)));
-                    core.feed(FeedEntry::system(format!("Transcrição local: {what} pronto.")));
+                    core.feed(FeedEntry::system(t!("Local transcription: {what} ready.", what)));
                 }
                 Err(e) => {
                     let mut p = progress(label, DownloadState::Error);
                     p.message = Some(e.clone());
                     core.emit(CoreEvent::Download(p));
                     let resumable = if crate::download::part_path(&keep).exists() {
-                        " O que já foi baixado foi mantido e continua na próxima abertura do app."
+                        t!(" What was already downloaded has been kept and will resume next time the app opens.")
                     } else {
                         ""
                     };
-                    core.feed(FeedEntry::system(format!("Transcrição local: falha ao baixar {what} ({e}).{resumable}")));
+                    core.feed(FeedEntry::system(t!(
+                        "Local transcription: failed to download {what} ({error}).{resumable}",
+                        what,
+                        error = e,
+                        resumable,
+                    )));
                 }
             }
         }
@@ -642,7 +655,7 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
         core.emit(CoreEvent::DictationChanged);
     });
     if spawned.is_err() {
-        // Falha (raríssima) ao criar a thread: permite tentar de novo depois.
+        // (Very rare) thread spawn failure: allows retrying later.
         flag_owner.inner.whisper.ensuring.store(false, Ordering::SeqCst);
     }
 }
@@ -658,7 +671,7 @@ mod tests {
         assert_eq!(normalize_transcription("pergunta pro Cloud sobre isso"), "pergunta pro Claude sobre isso");
         assert_eq!(normalize_transcription("chama o Claudio"), "chama o Claude");
         assert_eq!(normalize_transcription("pede ao Anti-crafty e ao Anti gravity"), "pede ao Antigravity e ao Antigravity");
-        // Sem contexto, "Cláudio" (nome próprio) e "cloud" ficam como estão.
+        // Without context, "Cláudio" (proper noun) and "cloud" stay as they are.
         assert_eq!(normalize_transcription("o Cláudio foi à cloud"), "o Cláudio foi à cloud");
     }
 
@@ -681,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn pacotes_por_plataforma_e_hashes_validos() {
+    fn platform_packages_and_valid_hashes() {
         let a = engine_archive(Engine::Cpu, "windows", "x86_64").expect("win cpu");
         assert!(!a.tar_gz && a.strip == 0 && a.file == "whisper-bin-x64.zip");
         assert!(engine_archive(Engine::Cuda, "windows", "x86_64").is_some());
@@ -703,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn pasta_do_motor_por_sistema() {
+    fn engine_directory_by_system() {
         if cfg!(windows) {
             assert_eq!(Engine::Cpu.dir(), "bin-cpu");
             assert_eq!(Engine::Cuda.dir(), "bin-cuda");
@@ -713,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn lspci_e_nvidia_smi() {
+    fn lspci_and_nvidia_smi() {
         let out = [
             "00:02.0 \"VGA compatible controller\" \"Intel Corporation\" \"UHD Graphics 620\" -r07 \"Dell\" \"Device 08af\"",
             "01:00.0 \"3D controller\" \"NVIDIA Corporation\" \"GP108M [GeForce MX150]\" -ra1 \"Dell\" \"Device 08af\"",
@@ -730,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn strip_de_componentes_recusa_caminhos_inseguros() {
+    fn component_strip_rejects_unsafe_paths() {
         assert_eq!(stripped(Path::new("pasta/whisper-cli"), 1).expect("ok"), Some(PathBuf::from("whisper-cli")));
         assert_eq!(stripped(Path::new("pasta/"), 1).expect("ok"), None);
         assert_eq!(stripped(Path::new("pasta/sub/x.so"), 1).expect("ok"), Some(PathBuf::from("sub/x.so")));
@@ -739,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn extrai_tar_gz_sem_a_pasta_raiz() {
+    fn extracts_tar_gz_without_root_folder() {
         let tmp = tempfile::tempdir().expect("tmp");
         let archive = tmp.path().join("pacote.tar.gz");
         {
@@ -775,35 +788,35 @@ mod tests {
     }
 
     #[test]
-    fn instalacao_so_troca_a_pasta_depois_de_extrair_tudo() {
+    fn installation_only_swaps_folder_after_extracting_everything() {
         let tmp = tempfile::tempdir().expect("tmp");
         let pkg = tmp.path().join("pacote.tar.gz");
         let target = tmp.path().join("bin-x");
-        // Pacote sem o executável: a pasta final não aparece e a de preparo some.
+        // Package without executable: final folder does not appear and staging is removed.
         tar_gz(&pkg, &[("raiz/outra.dll", b"dll")]);
         assert!(install_package(&pkg, &target, true, 1).is_err());
         assert!(!target.exists());
         assert!(!tmp.path().join("bin-x.staging").exists());
-        // Pacote truncado no meio: idem, e uma instalação anterior não é tocada.
+        // Truncated package in the middle: same, and previous installation is untouched.
         std::fs::create_dir_all(&target).expect("mkdir");
-        std::fs::write(target.join("velho.txt"), "v").expect("write");
+        std::fs::write(target.join("old.txt"), "v").expect("write");
         let bytes = std::fs::read(&pkg).expect("read");
         std::fs::write(&pkg, &bytes[..bytes.len() / 2]).expect("trunc");
         assert!(install_package(&pkg, &target, true, 1).is_err());
-        assert!(target.join("velho.txt").is_file());
+        assert!(target.join("old.txt").is_file());
         assert!(!tmp.path().join("bin-x.staging").exists());
-        // Pacote bom: troca a pasta (e leva embora o resto antigo) e limpa a preparação.
+        // Good package: swaps folder (removing old leftovers) and cleans staging.
         tar_gz(&pkg, &[("raiz/whisper-cli", b"cli"), ("raiz/whisper-cli.exe", b"cli"), ("raiz/ggml.dll", b"dll")]);
-        install_package(&pkg, &target, true, 1).expect("instala");
+        install_package(&pkg, &target, true, 1).expect("install");
         assert!(cli_in(&target).is_some());
         assert!(target.join("ggml.dll").is_file());
-        assert!(!target.join("velho.txt").exists());
+        assert!(!target.join("old.txt").exists());
         assert!(!tmp.path().join("bin-x.staging").exists());
-        assert!(pkg.is_file(), "o pacote não é apagado por install_package");
+        assert!(pkg.is_file(), "package is not deleted by install_package");
     }
 
     #[test]
-    fn nomes_do_wav_temporario_sao_unicos() {
+    fn temp_wav_names_are_unique() {
         let names: std::collections::HashSet<String> = (0..1000).map(|_| unique_wav_name()).collect();
         assert_eq!(names.len(), 1000);
     }
@@ -811,14 +824,14 @@ mod tests {
     #[test]
     fn startup_asks_only_who_was_never_asked_and_has_nothing_downloaded() {
         use DictationChoice::{No, Unasked, Yes};
-        // Primeira abertura limpa: pergunta, sem baixar nem gravar nada.
+        // Clean first run: asks, without downloading or saving anything.
         assert_eq!(startup(Unasked, false), (Startup::Ask, Unasked));
-        // Usuário de antes da pergunta (já tem o Whisper): nada muda, conta como "sim".
+        // User from before the prompt (already has Whisper): nothing changes, counts as "yes".
         assert_eq!(startup(Unasked, true), (Startup::Ensure, Yes));
-        // Respondeu "sim": segue baixando o que faltar (um download interrompido continua).
+        // Answered "yes": proceeds to download what is missing (an interrupted download continues).
         assert_eq!(startup(Yes, false), (Startup::Ensure, Yes));
         assert_eq!(startup(Yes, true), (Startup::Ensure, Yes));
-        // Respondeu "agora não": nunca baixa nem pergunta de novo, mesmo que o modelo tenha aparecido.
+        // Answered "not now": never downloads or asks again, even if model appeared.
         assert_eq!(startup(No, false), (Startup::Skip, No));
         assert_eq!(startup(No, true), (Startup::Skip, No));
     }
@@ -831,12 +844,12 @@ mod tests {
         let engine = dir.join(Engine::Vulkan.dir());
         std::fs::create_dir_all(&engine).expect("mkdir");
         std::fs::write(engine.join(exe_name()), "x").expect("write");
-        assert!(!is_installed(dir), "motor sem modelo");
+        assert!(!is_installed(dir), "engine without model");
         std::fs::create_dir_all(dir.join("models")).expect("mkdir");
         std::fs::write(model_path(dir), "m").expect("write");
         assert!(is_installed(dir));
         std::fs::remove_dir_all(&engine).expect("rm");
-        // Fora do Windows um whisper-cli do PATH também vale como motor de CPU.
+        // Outside Windows a whisper-cli on PATH also counts as CPU engine.
         assert_eq!(is_installed(dir), !cfg!(windows) && which::which("whisper-cli").is_ok());
     }
 
@@ -847,7 +860,7 @@ mod tests {
         assert!(removable(dir).is_empty());
         std::fs::create_dir_all(dir.join("models")).expect("mkdir");
         std::fs::write(model_path(dir), "modelo").expect("write");
-        std::fs::write(dir.join("models").join("README.md"), "leia").expect("write");
+        std::fs::write(dir.join("models").join("README.md"), "read").expect("write");
         let cuda = dir.join(Engine::Cuda.dir());
         std::fs::create_dir_all(&cuda).expect("mkdir");
         std::fs::write(cuda.join("a.dll"), "dll").expect("write");

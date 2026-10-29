@@ -1,9 +1,10 @@
-//! Visões da aba Git além da lista de alterações: Histórico, Stash e Conflitos. Como em `git.rs`,
-//! o desenho só *coleta* o que foi clicado ([`Act`]); quem aplica é `git::apply`.
+//! Views of the Git tab beyond the list of changes: History, Stash and Conflicts. As in `git.rs`,
+//! drawing only *collects* what was clicked ([`Act`]); `git::apply` is what applies it.
 
 use egui::{Align2, Color32, Id, Key, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use agentdeck_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
+use agentdeck_core::t;
 
 use super::git::{diff_lines, Act, BTN_H};
 use super::{clickable, frame, galley, galley_spaced, galley_trunc, place, text_in, text_w, tip};
@@ -16,10 +17,10 @@ const COMMIT_ROW_H: f32 = 42.0;
 const STASH_ROW_H: f32 = 46.0;
 const FILE_ROW_H: f32 = 18.0;
 const CODE_ROW_H: f32 = 16.0;
-/// Linhas de cada lado mostradas num bloco de conflito (o resto vira "+N linhas").
+/// Lines of each side shown in a conflict block (the rest becomes "+N lines").
 const BLOCK_LINES: usize = 10;
 
-/// Aparência de um botão de texto.
+/// Look of a text button.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Look {
     Normal,
@@ -27,7 +28,7 @@ pub(super) enum Look {
     Danger,
 }
 
-/// Botão de texto (pílula) encostado em `right`; devolve o clique e recua `right`.
+/// Text button (pill) against `right`; returns the click and moves `right` back.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn pill(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, tooltip: &str, look: Look, enabled: bool, id: Id) -> bool {
     let painter = ui.painter();
@@ -64,38 +65,40 @@ pub(super) fn pill(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, toolti
     tip(resp, tooltip.to_owned()).clicked() && enabled
 }
 
-/// Largura de uma pílula (para alinhar à esquerda ou calcular o espaço).
+/// Width of a pill (to align left or compute the space).
 pub(super) fn pill_w(ui: &Ui, label: &str) -> f32 {
     galley(ui.painter(), label, theme::ui_semibold(11.5), theme::pal().text).size().x + 18.0
 }
 
-/// Cabeçalho com "←", o título e o espaço livre à direita (`right`) para botões. Devolve (cabeçalho, voltar clicado, `right`).
-/// O botão que leva um diff ao modo Documentos.
-pub(super) const OPEN_DOCS: &str = "Abrir em Documentos";
-/// Espaço mínimo do título ao lado do botão com texto; com menos, o botão vira só o ícone.
+/// Header with "←", the title and the free space on the right (`right`) for buttons. Returns (header, back clicked, `right`).
+/// The label of the button that takes a diff to Documents mode.
+pub(super) fn open_docs_label() -> &'static str {
+    t!("Open in Documents")
+}
+/// Minimum title space beside the button with text; with less, the button becomes only the icon.
 const OPEN_DOCS_MIN_TITLE: f32 = 150.0;
-/// O botão de ícone (24 px) e o espaço antes dele.
+/// The icon button (24 px) and the space before it.
 const OPEN_DOCS_ICON_W: f32 = 26.0;
 
-/// Com `room` px para o título e o botão, o botão vai só como ícone?
+/// With `room` px for the title and the button, does the button go as an icon only?
 pub(super) fn open_docs_compact(ui: &Ui, room: f32) -> bool {
-    room - (pill_w(ui, OPEN_DOCS) + 6.0) < OPEN_DOCS_MIN_TITLE
+    room - (pill_w(ui, open_docs_label()) + 6.0) < OPEN_DOCS_MIN_TITLE
 }
 
-/// Largura que o botão "Abrir em Documentos" ocupa à direita (com o espaço antes dele).
+/// Width the "Open in Documents" button takes on the right (with the space before it).
 pub(super) fn open_docs_w(ui: &Ui, compact: bool) -> f32 {
     if compact {
         OPEN_DOCS_ICON_W
     } else {
-        pill_w(ui, OPEN_DOCS) + 6.0
+        pill_w(ui, open_docs_label()) + 6.0
     }
 }
 
-/// "Abrir em Documentos" no cabeçalho de um diff, encostado em `right` (que anda para a esquerda): com texto, ou
-/// só o ícone com a dica (`compact`, barra estreita). Devolve se foi clicado.
+/// "Open in Documents" in a diff header, against `right` (which moves left): with text, or
+/// only the icon with the tooltip (`compact`, narrow bar). Returns whether it was clicked.
 pub(super) fn open_docs(ui: &Ui, right: &mut f32, y: f32, compact: bool, tooltip: &str, id: Id) -> bool {
     if !compact {
-        return pill(ui, right, y, 22.0, OPEN_DOCS, tooltip, Look::Normal, true, id);
+        return pill(ui, right, y, 22.0, open_docs_label(), tooltip, Look::Normal, true, id);
     }
     let b = Rect::from_min_size(Pos2::new(*right - 24.0, y), Vec2::new(24.0, 22.0));
     *right = b.min.x - 2.0;
@@ -105,10 +108,10 @@ pub(super) fn open_docs(ui: &Ui, right: &mut f32, y: f32, compact: bool, tooltip
         ui.painter().rect_filled(b, 5.0, p.separator);
     }
     paint_open_docs(ui.painter(), b.center(), if r.hovered() { p.text_strong } else { p.text });
-    tip(r, format!("{OPEN_DOCS}\n{tooltip}")).clicked()
+    tip(r, format!("{}\n{tooltip}", open_docs_label())).clicked()
 }
 
-/// O ícone de "Abrir em Documentos": uma caixa aberta no canto e uma seta saindo dela.
+/// The "Open in Documents" icon: an open box in the corner and an arrow coming out of it.
 fn paint_open_docs(p: &Painter, c: Pos2, color: Color32) {
     let s = Stroke::new(1.2, color);
     let (x0, y0, x1, y1) = (c.x - 5.5, c.y - 4.5, c.x + 4.5, c.y + 5.5);
@@ -132,7 +135,7 @@ fn header(ui: &Ui, body: Rect, id: &str, title: &str, hint: &str, reserved_right
         painter.rect_filled(back, 5.0, theme::pal().separator);
     }
     text_in(&painter, back, Align2::CENTER_CENTER, "←", theme::ui(15.0), theme::pal().text);
-    let back_clicked = tip(br, "Voltar").clicked();
+    let back_clicked = tip(br, t!("Back")).clicked();
     let right = head.max.x - 6.0 - reserved_right;
     let tr = Rect::from_min_max(Pos2::new(back.max.x + 8.0, head.min.y), Pos2::new(right, head.max.y));
     let g = galley_trunc(&painter, title, theme::ui(12.0), theme::pal().text, tr.width());
@@ -153,7 +156,7 @@ fn scroll_child(ui: &mut Ui, area: Rect) -> Ui {
     child
 }
 
-// ---------- Histórico ----------
+// ---------- History ----------
 
 pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<Act>) {
     if let Some(open) = deck.git.commit_detail.take() {
@@ -162,7 +165,7 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
         return;
     }
     if deck.git.log.is_empty() {
-        let text = if deck.git.log_loading { "Lendo o histórico…" } else { "Nenhum commit ainda nesta branch." };
+        let text = if deck.git.log_loading { t!("Reading the history…") } else { t!("No commits yet on this branch.") };
         note(ui, body, text, theme::pal().text_2);
         return;
     }
@@ -175,8 +178,8 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
             let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), COMMIT_ROW_H), Sense::click());
             let p = ui.painter();
             let Some(c) = log.get(i) else {
-                // "Carregar mais" no fim da lista.
-                let label = if loading { "Carregando…" } else { "Carregar mais commits" };
+                // "Load more" at the end of the list.
+                let label = if loading { t!("Loading…") } else { t!("Load more commits") };
                 let hot = resp.hovered() && !loading;
                 if hot {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -207,7 +210,7 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
                 g,
                 theme::pal().text,
             );
-            // Segunda linha: hash (mono) · autor · data.
+            // Second line: hash (mono) · author · date.
             let hg = galley(p, &c.short_hash, theme::mono(11.0), theme::pal().info);
             let hw = hg.size().x;
             let y2 = r.min.y + 24.0;
@@ -230,19 +233,19 @@ pub(super) fn history(deck: &mut Deck, ui: &mut Ui, body: Rect, acts: &mut Vec<A
 
 fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>) {
     let title = format!("{}  {}", open.short_hash, open.subject);
-    // O título fica entre o "←" (6 + 26 + 8 px) e o botão.
+    // The title sits between the "←" (6 + 26 + 8 px) and the button.
     let compact = open_docs_compact(ui, body.width() - 6.0 - 40.0);
     let (head, back, mut right) = header(ui, body, "commit", &title, &open.subject, open_docs_w(ui, compact));
     if back {
         acts.push(Act::CloseCommit);
     }
-    let tip_text = "Abre o diff deste commit, só para ler, com a largura toda do centro";
+    let tip_text = t!("Opens the diff of this commit, read-only, with the full width of the center");
     if open_docs(ui, &mut right, head.min.y + 3.0, compact, tip_text, Id::new("git-commit-center")) {
         acts.push(Act::OpenCommitCenter(open.hash.clone(), open.short_hash.clone(), open.subject.clone()));
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
     let d = match &open.detail {
-        None => return note(ui, area, "Carregando o commit…", theme::pal().text_2),
+        None => return note(ui, area, t!("Loading the commit…"), theme::pal().text_2),
         Some(Err(e)) => return note(ui, area, e, theme::pal().danger_text),
         Some(Ok(d)) => d,
     };
@@ -253,7 +256,7 @@ fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>
     let g = galley_trunc(&p, &meta, theme::ui(11.5), theme::pal().text_2, w);
     place(&p, Rect::from_min_size(Pos2::new(area.min.x + 14.0, y), Vec2::new(w, 16.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
     y += 20.0;
-    // A mensagem inteira, no máximo 5 linhas de altura.
+    // The whole message, at most 5 lines high.
     let mut job = egui::text::LayoutJob::simple(d.message.clone(), theme::ui(12.5), theme::pal().text, w);
     job.wrap.max_rows = 5;
     job.wrap.overflow_character = Some('…');
@@ -261,8 +264,8 @@ fn commit_detail(ui: &mut Ui, body: Rect, open: &OpenCommit, acts: &mut Vec<Act>
     let mh = mg.size().y;
     p.galley(Pos2::new(area.min.x + 14.0, y), mg, theme::pal().text);
     y += mh + 8.0;
-    // Arquivos alterados (até 5 linhas).
-    let title = format!("{} ARQUIVO(S) ALTERADO(S)", d.files.len());
+    // Changed files (up to 5 lines).
+    let title = t!("{count} FILE(S) CHANGED", count = d.files.len());
     let g = galley_spaced(&p, &title, theme::label(10.0), theme::pal().text_2, 0.8);
     place(&p, Rect::from_min_size(Pos2::new(area.min.x + 14.0, y), Vec2::new(w, 16.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
     y += 18.0;
@@ -319,7 +322,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
         return;
     }
     let p = ui.painter_at(body);
-    // Formulário: mensagem, "incluir não rastreados" e Guardar.
+    // Form: message, "include untracked" and Stash.
     let x0 = body.min.x + 10.0;
     let x1 = body.max.x - 10.0;
     let input = Rect::from_min_size(Pos2::new(x0, body.min.y + 8.0), Vec2::new(x1 - x0, 28.0));
@@ -332,7 +335,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
         .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: 9, right: 9, top: 5, bottom: 5 }))
         .font(theme::ui(12.5))
         .text_color(theme::pal().text)
-        .hint_text(egui::RichText::new("Mensagem do stash (opcional)").font(theme::ui(12.5)).color(theme::pal().text_3))
+        .hint_text(egui::RichText::new(t!("Stash message (optional)")).font(theme::ui(12.5)).color(theme::pal().text_3))
         .desired_width(input.width() - 2.0)
         .show(&mut child);
     let has_changes = !st.entries.is_empty();
@@ -340,13 +343,16 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     let by = input.max.y + 8.0;
     let mut right = x1;
     let can = has_changes && !busy;
-    let why =
-        if has_changes { "Guarda as alterações e deixa a pasta limpa (git stash push)" } else { "Não há alterações para guardar" };
-    if pill(ui, &mut right, by, BTN_H, "Guardar", why, Look::Primary, can, Id::new("git-stash-push")) || (enter && can) {
+    let why = if has_changes {
+        t!("Stashes the changes and leaves the folder clean (git stash push)")
+    } else {
+        t!("There are no changes to stash")
+    };
+    if pill(ui, &mut right, by, BTN_H, t!("Stash"), why, Look::Primary, can, Id::new("git-stash-push")) || (enter && can) {
         acts.push(Act::StashPush);
     }
     let box_r = Rect::from_min_size(Pos2::new(x0 + 2.0, by + (BTN_H - 14.0) / 2.0), Vec2::splat(14.0));
-    let label = "Incluir não rastreados";
+    let label = t!("Include untracked");
     let lw = galley(&p, label, theme::ui(12.0), theme::pal().text_2).size().x;
     let hit = Rect::from_min_max(Pos2::new(x0, by), Pos2::new(box_r.max.x + 8.0 + lw, by + BTN_H));
     let ar = clickable(ui, hit, Id::new("git-stash-untracked"));
@@ -369,7 +375,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
         theme::ui(12.0),
         if ar.hovered() { theme::pal().text } else { theme::pal().text_2 },
     );
-    if tip(ar, "Também guarda (e tira da pasta) os arquivos ainda não rastreados").clicked() {
+    if tip(ar, t!("Also stashes (and removes from the folder) the files not tracked yet")).clicked() {
         acts.push(Act::StashToggleUntracked);
     }
     let top = by + BTN_H + 8.0;
@@ -377,9 +383,9 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
     let list = Rect::from_min_max(Pos2::new(body.min.x, top + 1.0), body.max);
     if deck.git.stashes.is_empty() {
         let text = if deck.git.stash_loading {
-            "Lendo os stashes…"
+            t!("Reading the stashes…")
         } else {
-            "Nenhum stash. Guarde o trabalho em andamento para voltar a ele depois."
+            t!("No stash. Stash the work in progress to come back to it later.")
         };
         return note(ui, list, text, theme::pal().text_2);
     }
@@ -407,15 +413,20 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
                     g,
                     theme::pal().text,
                 );
-                // Segunda linha: índice/data à esquerda; ações à direita.
+                // Second line: index/date on the left; actions on the right.
                 let y2 = r.min.y + 24.0;
                 let mut right = r.max.x - 12.0;
                 let mut clicked_button = false;
                 let h = 18.0;
                 for (label, tooltip, look, act) in [
-                    ("Apagar", "Apaga este stash (não dá para desfazer)", Look::Danger, Act::AskDropStash(s.clone())),
-                    ("Aplicar e apagar", "Aplica as alterações e remove o stash (git stash pop)", Look::Normal, Act::StashPop(s.index)),
-                    ("Aplicar", "Aplica as alterações e mantém o stash (git stash apply)", Look::Normal, Act::StashApply(s.index)),
+                    (t!("Delete"), t!("Deletes this stash (cannot be undone)"), Look::Danger, Act::AskDropStash(s.clone())),
+                    (
+                        t!("Apply and delete"),
+                        t!("Applies the changes and removes the stash (git stash pop)"),
+                        Look::Normal,
+                        Act::StashPop(s.index),
+                    ),
+                    (t!("Apply"), t!("Applies the changes and keeps the stash (git stash apply)"), Look::Normal, Act::StashApply(s.index)),
                 ] {
                     if pill_small(ui, &mut right, y2, h, label, tooltip, look, !busy, Id::new(("git-stash-btn", i, label))) {
                         acts.push(act);
@@ -431,17 +442,7 @@ pub(super) fn stash(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, bu
                     mg,
                     theme::pal().text_2,
                 );
-                if tip(
-                    resp,
-                    format!(
-                        "stash@{{{}}}
-Clique para ver as alterações guardadas",
-                        s.index
-                    ),
-                )
-                .clicked()
-                    && !clicked_button
-                {
+                if tip(resp, t!("stash@{{index}}\nClick to see the stashed changes", index = s.index)).clicked() && !clicked_button {
                     acts.push(Act::OpenStash(s.clone()));
                 }
             }
@@ -449,7 +450,7 @@ Clique para ver as alterações guardadas",
     );
 }
 
-/// Pílula menor (11 px) para as linhas de lista.
+/// Smaller pill (11 px) for list rows.
 #[allow(clippy::too_many_arguments)]
 fn pill_small(ui: &Ui, right: &mut f32, y: f32, h: f32, label: &str, tooltip: &str, look: Look, enabled: bool, id: Id) -> bool {
     let painter = ui.painter();
@@ -483,41 +484,60 @@ fn stash_diff(ui: &mut Ui, body: Rect, open: &OpenStashDiff, busy: bool, acts: &
     if back {
         acts.push(Act::CloseStash);
     }
-    // Segunda linha: as ações (não cabem junto do título).
+    // Second line: the actions (they do not fit next to the title).
     let bar = Rect::from_min_size(Pos2::new(body.min.x, head.max.y), Vec2::new(body.width(), 30.0));
     ui.painter().rect_filled(bar, 0.0, theme::pal().chip);
     let mut right = bar.max.x - 8.0;
     let (y, h) = (bar.min.y + 3.0, 24.0);
-    if pill(ui, &mut right, y, h, "Apagar", "Apaga este stash (não dá para desfazer)", Look::Danger, !busy, Id::new("git-sd-drop")) {
+    if pill(ui, &mut right, y, h, t!("Delete"), t!("Deletes this stash (cannot be undone)"), Look::Danger, !busy, Id::new("git-sd-drop")) {
         acts.push(Act::AskDropStash(s.clone()));
     }
-    if pill(ui, &mut right, y, h, "Aplicar e apagar", "Aplica e remove o stash (git stash pop)", Look::Normal, !busy, Id::new("git-sd-pop"))
-    {
+    if pill(
+        ui,
+        &mut right,
+        y,
+        h,
+        t!("Apply and delete"),
+        t!("Applies and removes the stash (git stash pop)"),
+        Look::Normal,
+        !busy,
+        Id::new("git-sd-pop"),
+    ) {
         acts.push(Act::StashPop(s.index));
     }
-    if pill(ui, &mut right, y, h, "Aplicar", "Aplica e mantém o stash (git stash apply)", Look::Primary, !busy, Id::new("git-sd-apply")) {
+    if pill(
+        ui,
+        &mut right,
+        y,
+        h,
+        t!("Apply"),
+        t!("Applies and keeps the stash (git stash apply)"),
+        Look::Primary,
+        !busy,
+        Id::new("git-sd-apply"),
+    ) {
         acts.push(Act::StashApply(s.index));
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, bar.max.y), body.max);
     match &open.diff {
-        None => note(ui, area, "Carregando o stash…", theme::pal().text_2),
+        None => note(ui, area, t!("Loading the stash…"), theme::pal().text_2),
         Some(Err(e)) => note(ui, area, e, theme::pal().danger_text),
         Some(Ok(diff)) => diff_lines(ui, area, diff, None, acts),
     }
 }
 
-// ---------- Conflitos ----------
+// ---------- Conflicts ----------
 
-/// O que a dupla de letras do status quer dizer, em português.
+/// What the pair of status letters means, in words.
 fn conflict_kind(index: char, worktree: char) -> &'static str {
     match (index, worktree) {
-        ('U', 'U') => "os dois lados alteraram",
-        ('A', 'A') => "os dois lados adicionaram",
-        ('D', 'D') => "os dois lados apagaram",
-        ('A', 'U') | ('U', 'A') => "adicionado só por um dos lados",
-        ('D', 'U') => "nós apagamos, eles alteraram",
-        ('U', 'D') => "nós alteramos, eles apagaram",
-        _ => "em conflito",
+        ('U', 'U') => t!("both sides changed it"),
+        ('A', 'A') => t!("both sides added it"),
+        ('D', 'D') => t!("both sides deleted it"),
+        ('A', 'U') | ('U', 'A') => t!("added by only one side"),
+        ('D', 'U') => t!("we deleted it, they changed it"),
+        ('U', 'D') => t!("we changed it, they deleted it"),
+        _ => t!("in conflict"),
     }
 }
 
@@ -530,9 +550,9 @@ pub(super) fn conflicts(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus
     let files: Vec<_> = st.entries.iter().filter(|e| e.kind == EntryKind::Unmerged).collect();
     if files.is_empty() {
         let text = if st.state == RepoState::Normal {
-            "Nenhum arquivo em conflito."
+            t!("No file in conflict.")
         } else {
-            "Todos os conflitos foram resolvidos. Clique em Continuar na faixa acima para concluir."
+            t!("All conflicts are resolved. Click Continue on the strip above to finish.")
         };
         return note(ui, body, text, theme::pal().text_2);
     }
@@ -540,7 +560,7 @@ pub(super) fn conflicts(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus
     egui::ScrollArea::vertical().id_salt("git-conflicts").auto_shrink([false, false]).show(&mut child, |ui| {
         ui.add_space(6.0);
         let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
-        let hint = "Abra cada arquivo e escolha, bloco a bloco, ficar com o nosso lado, o deles ou os dois.";
+        let hint = t!("Open each file and choose, block by block, to keep our side, theirs or both.");
         let g = ui.painter().layout(hint.to_owned(), theme::ui(11.5), theme::pal().text_2, r.width() - 28.0);
         ui.painter().galley(r.min + Vec2::new(14.0, 0.0), g, theme::pal().text_2);
         for (i, e) in files.iter().enumerate() {
@@ -576,7 +596,7 @@ pub(super) fn conflicts(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus
                 g,
                 theme::pal().text_2,
             );
-            if tip(resp, format!("{}\nClique para resolver", e.path)).clicked() {
+            if tip(resp, t!("{path}\nClick to resolve", path = e.path)).clicked() {
                 acts.push(Act::OpenConflict(e.path.clone()));
             }
             let _ = i;
@@ -585,9 +605,9 @@ pub(super) fn conflicts(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus
 }
 
 fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, busy: bool, acts: &mut Vec<Act>) {
-    let reserved = pill_w(ui, "Abrir") + 6.0;
+    let reserved = pill_w(ui, t!("Open")) + 6.0;
     let (head, back, mut right) =
-        header(ui, body, "conflict", &open.path, &format!("{}\n(Abrir: no programa do sistema)", open.path), reserved);
+        header(ui, body, "conflict", &open.path, &t!("{path}\n(Open: in the system program)", path = open.path), reserved);
     if back {
         acts.push(Act::CloseConflict);
     }
@@ -596,8 +616,8 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
         &mut right,
         head.min.y + 3.0,
         HEADER_H - 6.0,
-        "Abrir",
-        "Abre o arquivo no programa do sistema",
+        t!("Open"),
+        t!("Opens the file in the system program"),
         Look::Normal,
         true,
         Id::new("git-cf-open"),
@@ -606,25 +626,25 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
     }
     let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
     let file = match &open.file {
-        None => return note(ui, area, "Lendo o arquivo…", theme::pal().text_2),
+        None => return note(ui, area, t!("Reading the file…"), theme::pal().text_2),
         Some(Err(e)) => return note(ui, area, e, theme::pal().danger_text),
         Some(Ok(f)) => f,
     };
     let still = st.entries.iter().find(|e| e.path == open.path && e.kind == EntryKind::Unmerged);
     let p = ui.painter_at(area);
     let (x0, x1) = (area.min.x + 12.0, area.max.x - 12.0);
-    // Linha do arquivo inteiro: rótulo + Nosso / Deles / Ambos.
+    // Whole-file row: label + Ours / Theirs / Both.
     let mut y = area.min.y + 8.0;
     let remaining = file.blocks.len();
     let status_line = if file.binary {
-        "Arquivo binário: escolha um dos lados.".to_owned()
+        t!("Binary file: choose one of the sides.").to_owned()
     } else if remaining == 0 {
         match still {
-            Some(e) => format!("Sem marcadores no arquivo ({}).", conflict_kind(e.index, e.worktree)),
-            None => "Resolvido.".to_owned(),
+            Some(e) => t!("No markers in the file ({kind}).", kind = conflict_kind(e.index, e.worktree)),
+            None => t!("Resolved.").to_owned(),
         }
     } else {
-        format!("{remaining} bloco(s) em conflito")
+        t!("{remaining} block(s) in conflict", remaining)
     };
     text_in(
         &p,
@@ -635,13 +655,13 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
         theme::pal().text,
     );
     y += 22.0;
-    let g = galley_spaced(&p, "ARQUIVO INTEIRO", theme::label(10.0), theme::pal().text_2, 0.8);
+    let g = galley_spaced(&p, t!("WHOLE FILE"), theme::label(10.0), theme::pal().text_2, 0.8);
     place(&p, Rect::from_min_size(Pos2::new(x0, y), Vec2::new(110.0, 24.0)), Align2::LEFT_CENTER, g, theme::pal().text_2);
     let mut right = x1;
     for (label, choice, tooltip) in [
-        ("Ambos", ConflictChoice::Both, "Junta os dois lados, o nosso primeiro"),
-        ("Deles", ConflictChoice::Theirs, "Fica com a versão do outro lado (git checkout --theirs) e já prepara"),
-        ("Nosso", ConflictChoice::Ours, "Fica com a nossa versão (git checkout --ours) e já prepara"),
+        (t!("Both"), ConflictChoice::Both, t!("Joins both sides, ours first")),
+        (t!("Theirs"), ConflictChoice::Theirs, t!("Keeps the other side's version (git checkout --theirs) and stages it")),
+        (t!("Ours"), ConflictChoice::Ours, t!("Keeps our version (git checkout --ours) and stages it")),
     ] {
         let enabled = !busy && !(choice == ConflictChoice::Both && (file.binary || remaining == 0));
         if pill(ui, &mut right, y, 24.0, label, tooltip, Look::Normal, enabled, Id::new(("git-cf-all", label))) {
@@ -649,11 +669,11 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
         }
     }
     y += 32.0;
-    // Marcar como resolvido (só quando não sobrou marcador).
+    // Mark as resolved (only when no marker is left).
     let mut right = x1;
     let ready = remaining == 0 && !file.binary && still.is_some();
-    let why = if ready { "Prepara o arquivo como está (git add)" } else { "Resolva todos os blocos antes de marcar" };
-    if pill(ui, &mut right, y, BTN_H, "Marcar como resolvido", why, Look::Primary, ready && !busy, Id::new("git-cf-mark")) {
+    let why = if ready { t!("Stages the file as it is (git add)") } else { t!("Resolve every block before marking it") };
+    if pill(ui, &mut right, y, BTN_H, t!("Mark as resolved"), why, Look::Primary, ready && !busy, Id::new("git-cf-mark")) {
         acts.push(Act::Stage(vec![open.path.clone()]));
     }
     y += BTN_H + 8.0;
@@ -672,7 +692,7 @@ fn conflict_file(ui: &mut Ui, body: Rect, open: &OpenConflict, st: &GitStatus, b
     });
 }
 
-/// Um bloco de conflito: os dois lados lado a lado na ordem do arquivo e as três escolhas.
+/// A conflict block: both sides side by side in file order and the three choices.
 fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bool, acts: &mut Vec<Act>) {
     let side_h = |lines: &[String]| (lines.len().clamp(1, BLOCK_LINES + 1) as f32) * CODE_ROW_H + 6.0;
     let h = 24.0 + 18.0 + side_h(&b.ours) + 18.0 + side_h(&b.theirs) + 10.0 + 24.0 + 10.0;
@@ -685,15 +705,15 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
         &p,
         Rect::from_min_size(r.min + Vec2::new(10.0, 0.0), Vec2::new(w - 20.0, 24.0)),
         Align2::LEFT_CENTER,
-        &format!("Bloco {} · linha {}", index + 1, b.start_line),
+        &t!("Block {number} · line {line}", number = index + 1, line = b.start_line),
         theme::ui_semibold(11.5),
         theme::pal().text,
     );
     let mut y = r.min.y + 24.0;
     let font = theme::mono(11.5);
     for (title, label, lines, tint) in [
-        ("NOSSO", &b.ours_label, &b.ours, theme::with_alpha(theme::pal().success, 0.12)),
-        ("DELES", &b.theirs_label, &b.theirs, theme::with_alpha(theme::pal().info, 0.14)),
+        (t!("OURS"), &b.ours_label, &b.ours, theme::with_alpha(theme::pal().success, 0.12)),
+        (t!("THEIRS"), &b.theirs_label, &b.theirs, theme::with_alpha(theme::pal().info, 0.14)),
     ] {
         let t = if label.is_empty() { title.to_owned() } else { format!("{title} · {label}") };
         let g = galley_spaced(&p, &t, theme::label(10.0), theme::pal().text_2, 0.8);
@@ -713,7 +733,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
             clip.text(
                 Pos2::new(box_r.min.x + 8.0, box_r.min.y + 3.0 + CODE_ROW_H / 2.0),
                 Align2::LEFT_CENTER,
-                "(vazio)",
+                t!("(empty)"),
                 font.clone(),
                 theme::pal().text_2,
             );
@@ -733,7 +753,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
             clip.text(
                 Pos2::new(box_r.min.x + 8.0, box_r.min.y + 3.0 + CODE_ROW_H * (k as f32 + 0.5)),
                 Align2::LEFT_CENTER,
-                format!("… +{} linha(s)", lines.len() - BLOCK_LINES),
+                t!("… +{count} line(s)", count = lines.len() - BLOCK_LINES),
                 font.clone(),
                 theme::pal().text_2,
             );
@@ -743,9 +763,9 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
     y += 10.0;
     let mut right = r.max.x - 10.0;
     for (label, choice, tooltip) in [
-        ("Ambos", ConflictChoice::Both, "Fica com os dois, o nosso primeiro"),
-        ("O deles", ConflictChoice::Theirs, "Fica só com o deles neste bloco"),
-        ("O nosso", ConflictChoice::Ours, "Fica só com o nosso neste bloco"),
+        (t!("Both"), ConflictChoice::Both, t!("Keeps both, ours first")),
+        (t!("Their side"), ConflictChoice::Theirs, t!("Keeps only theirs in this block")),
+        (t!("Our side"), ConflictChoice::Ours, t!("Keeps only ours in this block")),
     ] {
         if pill(ui, &mut right, y, 24.0, label, tooltip, Look::Normal, !busy, Id::new(("git-cf-block", path, index, label))) {
             acts.push(Act::ResolveBlock(path.to_owned(), index, choice));
@@ -753,7 +773,7 @@ fn block_card(ui: &mut Ui, path: &str, index: usize, b: &ConflictBlock, busy: bo
     }
 }
 
-/// Aba de subvisões (Alterações / Histórico / Stash / Conflitos). Devolve a altura usada.
+/// Tab of sub-views (Changes / History / Stash / Conflicts). Returns the height used.
 pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &GitStatus, acts: &mut Vec<Act>) -> f32 {
     let h = 30.0;
     let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), h));
@@ -763,15 +783,15 @@ pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &G
     let conflicts = crate::git_ui::conflict_count(st);
     let changes = st.entries.len();
     let mut tabs: Vec<(GitSubView, String)> = vec![
-        (GitSubView::Changes, if changes > 0 { format!("Alterações {changes}") } else { "Alterações".into() }),
-        (GitSubView::History, "Histórico".into()),
+        (GitSubView::Changes, if changes > 0 { t!("Changes {changes}", changes) } else { t!("Changes").into() }),
+        (GitSubView::History, t!("History").into()),
         (GitSubView::Stash, if st.stash_count > 0 { format!("Stash {}", st.stash_count) } else { "Stash".into() }),
     ];
-    // Conflitos é a aba urgente: vem primeiro, para nunca ser a cortada na barra estreita.
+    // Conflicts is the urgent tab: it comes first, so it is never the one cut off in a narrow bar.
     if conflicts > 0 {
-        tabs.insert(0, (GitSubView::Conflicts, format!("Conflitos {conflicts}")));
+        tabs.insert(0, (GitSubView::Conflicts, t!("Conflicts {conflicts}", conflicts)));
     }
-    // Conflitos some quando não há mais nenhum; a visão volta para Alterações.
+    // Conflicts disappears when there is none left; the view goes back to Changes.
     if deck.git.subview == GitSubView::Conflicts && conflicts == 0 && st.state == RepoState::Normal {
         deck.git.subview = GitSubView::Changes;
     }
@@ -815,14 +835,14 @@ pub(super) fn tab_strip(deck: &mut Deck, ui: &mut Ui, rect: Rect, y: f32, st: &G
     h
 }
 
-/// Faixa do merge/rebase em andamento, com Continuar e Abortar. Devolve a altura usada.
+/// Strip of the merge/rebase in progress, with Continue and Abort. Returns the height used.
 pub(super) fn op_banner(ui: &mut Ui, rect: Rect, y: f32, st: &GitStatus, busy: bool, acts: &mut Vec<Act>) -> f32 {
     let (name, noun) = match st.state {
         RepoState::Normal => return 0.0,
-        RepoState::Merging => ("Mesclagem", "a mesclagem"),
-        RepoState::Rebasing => ("Rebase", "o rebase"),
-        RepoState::CherryPicking => ("Cherry-pick", "o cherry-pick"),
-        RepoState::Reverting => ("Revert", "o revert"),
+        RepoState::Merging => (t!("Merging"), t!("the merge")),
+        RepoState::Rebasing => ("Rebase", t!("the rebase")),
+        RepoState::CherryPicking => ("Cherry-pick", t!("the cherry-pick")),
+        RepoState::Reverting => ("Revert", t!("the revert")),
     };
     let h = 32.0;
     let r = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), h));
@@ -838,8 +858,8 @@ pub(super) fn op_banner(ui: &mut Ui, rect: Rect, y: f32, st: &GitStatus, busy: b
         &mut right,
         top,
         h - 8.0,
-        "Abortar",
-        &format!("Cancela {noun} e volta ao estado de antes"),
+        t!("Abort"),
+        &t!("Cancels {noun} and goes back to the previous state", noun),
         Look::Danger,
         !busy,
         Id::new("git-op-abort"),
@@ -847,11 +867,11 @@ pub(super) fn op_banner(ui: &mut Ui, rect: Rect, y: f32, st: &GitStatus, busy: b
         acts.push(Act::AskAbort(st.state));
     }
     let can = !busy && conflicts == 0;
-    let why = if conflicts > 0 { "Resolva os conflitos antes de continuar".to_owned() } else { format!("Conclui {noun}") };
-    if pill(ui, &mut right, top, h - 8.0, "Continuar", &why, Look::Primary, can, Id::new("git-op-continue")) {
+    let why = if conflicts > 0 { t!("Resolve the conflicts before continuing").to_owned() } else { t!("Finishes {noun}", noun) };
+    if pill(ui, &mut right, top, h - 8.0, t!("Continue"), &why, Look::Primary, can, Id::new("git-op-continue")) {
         acts.push(Act::Continue);
     }
-    let text = if conflicts > 0 { format!("{name} · {conflicts} conflito(s)") } else { format!("{name} em andamento") };
+    let text = if conflicts > 0 { t!("{name} · {conflicts} conflict(s)", name, conflicts) } else { t!("{name} in progress", name) };
     let tr = Rect::from_min_max(Pos2::new(r.min.x + 12.0, r.min.y), Pos2::new(right, r.max.y));
     let g = galley_trunc(&p, &text, theme::ui_semibold(12.0), warn, tr.width());
     place(&p, tr, Align2::LEFT_CENTER, g, warn);
@@ -865,9 +885,9 @@ mod tests {
 
     #[test]
     fn conflict_letters_are_explained() {
-        assert_eq!(conflict_kind('U', 'U'), "os dois lados alteraram");
-        assert_eq!(conflict_kind('D', 'U'), "nós apagamos, eles alteraram");
-        assert_eq!(conflict_kind('U', 'D'), "nós alteramos, eles apagaram");
-        assert_eq!(conflict_kind('?', '?'), "em conflito");
+        assert_eq!(conflict_kind('U', 'U'), "both sides changed it");
+        assert_eq!(conflict_kind('D', 'U'), "we deleted it, they changed it");
+        assert_eq!(conflict_kind('U', 'D'), "we changed it, they deleted it");
+        assert_eq!(conflict_kind('?', '?'), "in conflict");
     }
 }

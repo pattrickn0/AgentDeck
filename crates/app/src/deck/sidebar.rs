@@ -1,4 +1,4 @@
-//! Barra lateral e árvore de arquivos.
+//! Sidebar and file tree.
 
 use super::*;
 
@@ -13,7 +13,7 @@ impl Deck {
         self.tree.cache.clear();
     }
 
-    /// Linhas visíveis da árvore (carrega pastas expandidas sob demanda).
+    /// Visible rows of the tree (loads expanded folders on demand).
     pub fn tree_rows(&mut self) -> Vec<TreeRow> {
         let mut rows = Vec::new();
         if self.tree.expanded.contains("") {
@@ -41,7 +41,7 @@ impl Deck {
     pub fn toggle_dir(&mut self, rel: &str) {
         if !self.tree.expanded.remove(rel) {
             self.tree.expanded.insert(rel.to_owned());
-            // Recarrega ao expandir (como `loadDirItems` a cada clique).
+            // Reloads when expanding (like `loadDirItems` on every click).
             self.tree.cache.remove(rel);
         }
     }
@@ -50,7 +50,7 @@ impl Deck {
         self.tree.pending_click = Some((rel.to_owned(), Instant::now()));
     }
 
-    /// Duplo clique no explorador: abre o arquivo no modo Documentos (texto ou markdown, só leitura).
+    /// Double click in the explorer: opens the file in Documents mode (text or markdown, read only).
     pub fn tree_file_double_click(&mut self, rel: &str) {
         self.tree.pending_click = None;
         self.docs_open_file(rel);
@@ -64,19 +64,19 @@ impl Deck {
         });
     }
 
-    /// Pergunta (numa thread, sem congelar o quadro) se o projeto sai da lista. Remover fecha os documentos dele sem
-    /// gravar, então a pergunta conta os que têm edição não salva.
+    /// Asks (on a thread, without freezing the frame) whether the project leaves the list. Removing closes its documents
+    /// without saving, so the question counts the ones with unsaved edits.
     pub fn confirm_remove_project(&self, id: String, name: String) {
         let unsaved = self.docs.unsaved().iter().filter(|t| t.project == id).count();
         let lost = match unsaved {
             0 => String::new(),
-            1 => "\n\nUm documento dele tem edição não salva, que será perdida.".to_owned(),
-            n => format!("\n\n{n} documentos dele têm edição não salva, que será perdida."),
+            1 => t!("\n\nOne of its documents has unsaved edits, which will be lost.").to_owned(),
+            n => t!("\n\n{count} of its documents have unsaved edits, which will be lost.", count = n),
         };
         self.spawn_bg("confirm-remove-project", move |_| {
             let ok = rfd::MessageDialog::new()
-                .set_title("Remover projeto")
-                .set_description(format!("Deseja remover \"{name}\" da lista de projetos?{lost}"))
+                .set_title(t!("Remove project"))
+                .set_description(t!("Do you want to remove \"{name}\" from the project list?{lost}", name = name, lost = lost))
                 .set_buttons(rfd::MessageButtons::YesNo)
                 .show()
                 == rfd::MessageDialogResult::Yes;
@@ -84,27 +84,27 @@ impl Deck {
         });
     }
 
-    /// Uma pasta escolhida no "+" da seção PROJETOS: vira projeto (ou volta ao que já é dela).
+    /// A folder chosen in the "+" of the PROJECTS section: becomes a project (or goes back to the one it already is).
     pub fn add_project(&mut self, path: PathBuf) {
         let project = self.core.create_project(&path, None);
         self.switch_project(&project.id);
     }
 
-    /// Troca o projeto da tela. As abas do que sai continuam rodando, escondidas; as do que entra
-    /// aparecem (na primeira vez, as salvas são abertas).
+    /// Switches the project on screen. The tabs of the one leaving keep running, hidden; the ones of the one
+    /// entering appear (the first time, the saved ones are opened).
     pub fn switch_project(&mut self, id: &str) {
         if id == self.active_project {
             return;
         }
-        // Grava as abas e o layout do projeto que está saindo.
+        // Saves the tabs and the layout of the project that is leaving.
         self.persist_tabs_now();
         self.persist_layout_now();
         if let Err(e) = self.core.set_active_project(id) {
-            self.system(format!("Não foi possível abrir o projeto: {e}"));
+            self.system(t!("Could not open the project: {error}", error = e));
             return;
         }
         let old = std::mem::replace(&mut self.active_project, id.to_owned());
-        // Menus e modais apontam para abas do projeto que saiu.
+        // Menus and modals point to tabs of the project that left.
         self.rename_tab = None;
         self.tab_context_menu = None;
         self.new_tab_menu_open = false;
@@ -140,7 +140,7 @@ impl Deck {
         self.after_project_change();
     }
 
-    /// O projeto da tela mudou: pasta, árvore (do zero), git e github.
+    /// The project on screen changed: folder, tree (from scratch), git and github.
     pub(super) fn after_project_change(&mut self) {
         self.workspace = self.core.workspace();
         self.tree = TreeState { expanded: HashSet::from([String::new()]), ..Default::default() };
@@ -150,7 +150,7 @@ impl Deck {
         self.tasks_reset_for_project();
         self.tasks_refresh();
         self.github_reset_for_project();
-        // Os documentos são do projeto: o centro só fica em Documentos se o projeto novo tem algum.
+        // Documents belong to the project: the center only stays in Documents if the new project has any.
         self.docs.sync(&self.active_project);
         self.docs_reload_files();
         self.persist_tabs();

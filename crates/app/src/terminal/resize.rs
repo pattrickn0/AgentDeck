@@ -1,23 +1,23 @@
-//! Mudança de tamanho da grade como o ConPTY espera (Windows).
+//! Grid resizing as expected by ConPTY (Windows).
 //!
-//! O `alacritty_terminal` mantém o cursor na mesma linha da tela e, para isso, **puxa linhas do histórico para o topo**
-//! quando a tela cresce em linhas ou quando o reflow de uma largura maior junta linhas. O ConPTY não faz isso: o topo da
-//! janela dele fica no mesmo conteúdo, as linhas que sobram ficam em branco embaixo, e logo depois da mudança ele repinta
-//! a janela inteira a partir de `ESC[H` (medido com o PowerShell e com o Claude Code). A repintura cai por cima das linhas
-//! que a grade puxou, e elas somem: linhas numeradas de 144 a 171 sumiam da conversa (e 28 linhas ficavam em branco
-//! embaixo) numa janela que ia de 58 a 30 e de volta a 58 linhas; o mesmo acontecia ao alargar com texto quebrado.
-//! Por isso depois de cada mudança o conteúdo que estava no topo da tela volta para o topo, e o que foi puxado volta para
-//! o histórico. Este arquivo não depende do resto do app: `tools/pty-probe` o inclui por `#[path]` para medir.
+//! `alacritty_terminal` keeps the cursor on the same screen line and, to do that, **pulls lines from history to the top**
+//! when the screen grows in rows or when the reflow of a larger width joins lines. ConPTY does not do this: the top of
+//! its window stays at the same content, leftover lines remain blank at the bottom, and right after the resize it repaints
+//! the entire window starting from `ESC[H` (measured with PowerShell and Claude Code). The repaint overwrites the lines
+//! that the grid pulled, causing them to disappear: lines numbered 144 to 171 disappeared from the conversation (and 28 lines remained blank
+//! at the bottom) in a window that went from 58 to 30 and back to 58 rows; the same happened when widening wrapped text.
+//! Therefore, after each resize, the content that was at the top of the screen is moved back to the top, and what was pulled moves back to
+//! history. This file does not depend on the rest of the app: `tools/pty-probe` includes it via `#[path]` for measurements.
 
 use alacritty_terminal::event::EventListener;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::{Term, TermMode};
 
-/// Caractere sem largura (área de uso privado) que marca a primeira célula da tela durante a mudança.
+/// Zero-width character (private use area) marking the first cell on screen during resizing.
 const MARK: char = '\u{E000}';
 
-/// `term.resize(size)`; com `keep_top` o conteúdo que estava na primeira linha da tela continua nela (ver o módulo).
+/// `term.resize(size)`; with `keep_top` the content that was on the first screen line remains there (see module doc).
 pub fn resize<T: EventListener>(term: &mut Term<T>, size: impl Dimensions, keep_top: bool) {
     if !keep_top || term.grid().history_size() == 0 || term.mode().contains(TermMode::ALT_SCREEN) {
         term.resize(size);
@@ -30,18 +30,18 @@ pub fn resize<T: EventListener>(term: &mut Term<T>, size: impl Dimensions, keep_
     let grid = term.grid_mut();
     let marked = |l: i32, c: usize| grid[Line(l)][Column(c)].zerowidth().is_some_and(|z| z.contains(&MARK));
     let rows = grid.screen_lines() as i32;
-    // A marca está na tela (puxada para baixo) ou logo acima dela (empurrada para o histórico).
+    // The mark is either on screen (pulled down) or just above it (pushed to history).
     let top = -(grid.history_size() as i32);
     let Some((line, col)) = (top..rows).rev().find_map(|l| (0..grid.columns()).find(|&c| marked(l, c)).map(|c| (l, c))) else { return };
 
-    // Tira a marca: a célula volta ao que era (só o `extra`, privado, é o do clone salvo).
+    // Remove the mark: the cell reverts to what it was (only `extra`, private, comes from the saved clone).
     let cell = &mut grid[Line(line)][Column(col)];
     let mut restored = saved;
     (restored.c, restored.fg, restored.bg, restored.flags) = (cell.c, cell.fg, cell.bg, cell.flags);
     *cell = restored;
 
-    // Marca no meio de uma linha (a continuação de uma linha quebrada foi juntada à anterior no reflow): o ConPTY começa a
-    // janela na linha seguinte, então essa linha inteira vai para o histórico.
+    // Mark in the middle of a line (the continuation of a wrapped line was joined to the previous one during reflow): ConPTY starts the
+    // window on the next line, so this entire line goes to history.
     let line = if col > 0 { line + 1 } else { line };
     if line > 0 {
         grid.scroll_up(&(Line(0)..Line(rows)), line as usize);

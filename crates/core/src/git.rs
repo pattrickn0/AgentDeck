@@ -1,13 +1,13 @@
-//! Integração com o git do workspace (aba "Git" da interface).
+//! Integration with the workspace's git (the "Git" tab of the interface).
 //!
-//! Tudo passa pelo executável `git` instalado, sempre com `Command::new(git).args([...])` (nunca
-//! por um shell) e um ambiente que não trava: sem prompt de senha no terminal (`GIT_TERMINAL_PROMPT=0`,
-//! ssh em `BatchMode`, Git Credential Manager sem janela: `GCM_INTERACTIVE=never`), sem pager, mensagens em inglês (`LC_ALL=C`, para reconhecer os erros) e
-//! caminhos literais (`GIT_LITERAL_PATHSPECS=1`). Listas de caminhos e a mensagem de commit vão pela
-//! entrada padrão (sem limite de linha de comando no Windows, sem interpretação de nada).
+//! Everything goes through the installed `git` executable, always with `Command::new(git).args([...])` (never
+//! through a shell) and an environment that does not hang: no password prompt in the terminal (`GIT_TERMINAL_PROMPT=0`,
+//! ssh in `BatchMode`, Git Credential Manager with no window: `GCM_INTERACTIVE=never`), no pager, messages in English (`LC_ALL=C`, to recognize the errors) and
+//! literal paths (`GIT_LITERAL_PATHSPECS=1`). Path lists and the commit message go through
+//! standard input (no command-line limit on Windows, no interpretation of anything).
 //!
-//! A saída é lida pelas funções puras deste módulo (`parse_*`), testadas sem git; as operações
-//! (`impl Core`) são bloqueantes: a interface as chama numa thread.
+//! The output is read by the pure functions of this module (`parse_*`), tested without git; the operations
+//! (`impl Core`) are blocking: the interface calls them on a thread.
 
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -16,48 +16,48 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 
 use crate::process::{run_captured_raw, CapturedRaw, Exit};
-use crate::Core;
+use crate::{t, Core};
 
-/// Leituras rápidas (status, diff, branches).
+/// Fast reads (status, diff, branches).
 pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(5);
-/// Operações locais que escrevem (stage, checkout…).
+/// Local operations that write (stage, checkout…).
 pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
-/// Commit (hooks e assinatura GPG podem demorar).
+/// Commit (hooks and GPG signing can take a while).
 pub(crate) const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
-/// Rede (fetch, pull, push).
+/// Network (fetch, pull, push).
 const NET_TIMEOUT: Duration = Duration::from_secs(60);
-/// Saída máxima guardada de um comando (o diff de um arquivo enorme é cortado).
+/// Maximum output kept from a command (the diff of a huge file is cut).
 pub(crate) const MAX_OUT: usize = 4 << 20;
-/// Diff mostrado: no máximo isto de bytes e de linhas.
+/// Diff shown: at most this many bytes and lines.
 pub const DIFF_MAX_BYTES: usize = 1 << 20;
 pub const DIFF_MAX_LINES: usize = 10_000;
-/// Entradas de status mostradas.
+/// Status entries shown.
 pub const STATUS_MAX_ENTRIES: usize = 5000;
-/// Tamanho máximo de um arquivo lido para resolução de conflitos.
+/// Maximum size of a file read for conflict resolution.
 pub const CONFLICT_MAX_BYTES: usize = 2 << 20;
 
-// ---------- Tipos ----------
+// ---------- Types ----------
 
-/// O que o git devolveu sobre o repositório.
+/// What git returned about the repository.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitStatus {
-    /// Raiz do repositório.
+    /// Repository root.
     pub root: PathBuf,
-    /// O workspace relativo à raiz (`""` = o workspace é a raiz; `"workspace/"` = subpasta).
+    /// The workspace relative to the root (`""` = the workspace is the root; `"workspace/"` = subfolder).
     pub prefix: String,
-    /// Branch atual (`None` = HEAD destacado).
+    /// Current branch (`None` = detached HEAD).
     pub branch: Option<String>,
-    /// Commit atual (`None` = repositório sem commits).
+    /// Current commit (`None` = repository with no commits).
     pub head: Option<String>,
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
     pub state: RepoState,
-    /// Caminhos relativos à raiz.
+    /// Paths relative to the root.
     pub entries: Vec<GitEntry>,
-    /// Quantidade de stashes salvos no repositório.
+    /// How many stashes are saved in the repository.
     pub stash_count: u32,
-    /// Havia mais de [`STATUS_MAX_ENTRIES`] alterações.
+    /// There were more than [`STATUS_MAX_ENTRIES`] changes.
     pub truncated: bool,
 }
 
@@ -76,17 +76,17 @@ pub enum EntryKind {
     Ordinary,
     Renamed,
     Copied,
-    /// Conflito de mesclagem.
+    /// Merge conflict.
     Unmerged,
     Untracked,
 }
 
-/// Um arquivo alterado. `index`/`worktree` são as letras do git (`M`, `A`, `D`, `R`, `C`, `U`,
-/// `?`, `.` = sem alteração naquele lado).
+/// A changed file. `index`/`worktree` are git's letters (`M`, `A`, `D`, `R`, `C`, `U`,
+/// `?`, `.` = no change on that side).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitEntry {
     pub path: String,
-    /// Nome anterior (renomeado/copiado).
+    /// Previous name (renamed/copied).
     pub orig_path: Option<String>,
     pub index: char,
     pub worktree: char,
@@ -94,12 +94,12 @@ pub struct GitEntry {
 }
 
 impl GitEntry {
-    /// Tem alteração preparada (staged).
+    /// Has a staged change.
     pub fn staged(&self) -> bool {
         !matches!(self.kind, EntryKind::Untracked | EntryKind::Unmerged) && self.index != '.'
     }
 
-    /// Tem alteração não preparada na cópia de trabalho.
+    /// Has an unstaged change in the working copy.
     pub fn unstaged(&self) -> bool {
         !matches!(self.kind, EntryKind::Untracked | EntryKind::Unmerged) && self.worktree != '.'
     }
@@ -121,14 +121,14 @@ pub enum DiffKind {
     Context,
     /// `@@ -1,3 +1,4 @@`
     Hunk,
-    /// Cabeçalhos (`diff --git`, `index`, `---`, `+++`, `\ No newline…`).
+    /// Headers (`diff --git`, `index`, `---`, `+++`, `\ No newline…`).
     Meta,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffLine {
     pub kind: DiffKind,
-    /// Número da linha no arquivo antigo / novo.
+    /// Line number in the old / new file.
     pub old: Option<u32>,
     pub new: Option<u32>,
     pub text: String,
@@ -137,12 +137,12 @@ pub struct DiffLine {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitDiff {
     pub lines: Vec<DiffLine>,
-    /// Cortado em [`DIFF_MAX_LINES`]/[`DIFF_MAX_BYTES`].
+    /// Cut at [`DIFF_MAX_LINES`]/[`DIFF_MAX_BYTES`].
     pub truncated: bool,
     pub binary: bool,
 }
 
-/// Uma entrada da pilha de stash (`stash@{index}`).
+/// An entry of the stash stack (`stash@{index}`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStash {
     pub index: usize,
@@ -150,7 +150,7 @@ pub struct GitStash {
     pub message: String,
 }
 
-/// Um commit do histórico (log).
+/// A commit of the history (log).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitCommit {
     pub hash: String,
@@ -160,7 +160,7 @@ pub struct GitCommit {
     pub subject: String,
 }
 
-/// Detalhe de um commit (metadados, arquivos alterados e diff).
+/// Detail of a commit (metadata, changed files and diff).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitCommitDetail {
     pub hash: String,
@@ -169,15 +169,15 @@ pub struct GitCommitDetail {
     pub email: String,
     pub date: String,
     pub message: String,
-    /// `(letra, caminho)` dos arquivos alterados no commit.
+    /// `(letter, path)` of the files changed in the commit.
     pub files: Vec<(char, String)>,
     pub diff: GitDiff,
 }
 
-/// Um bloco de conflito (`<<<<<<<` … `=======` … `>>>>>>>`) dentro de um arquivo.
+/// A conflict block (`<<<<<<<` … `=======` … `>>>>>>>`) inside a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictBlock {
-    /// Linha inicial do marcador `<<<<<<<` (1-indexed).
+    /// Starting line of the `<<<<<<<` marker (1-indexed).
     pub start_line: u32,
     pub ours_label: String,
     pub ours: Vec<String>,
@@ -185,7 +185,7 @@ pub struct ConflictBlock {
     pub theirs: Vec<String>,
 }
 
-/// Arquivo em conflito com os seus blocos (ou lados inteiros quando não há marcadores de texto).
+/// File in conflict with its blocks (or whole sides when there are no text markers).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitConflictFile {
     pub path: String,
@@ -193,7 +193,7 @@ pub struct GitConflictFile {
     pub binary: bool,
 }
 
-/// Escolha para resolver um bloco ou arquivo em conflito.
+/// Choice to resolve a block or a whole file in conflict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
     Ours,
@@ -205,16 +205,16 @@ pub enum ConflictChoice {
 pub enum GitError {
     NotInstalled,
     NotARepo,
-    /// O git recusa a pasta por ser de outro usuário (`safe.directory`).
+    /// Git refuses the folder because it belongs to another user (`safe.directory`).
     Unsafe {
         path: String,
     },
-    /// Falta `user.name`/`user.email` para o commit.
+    /// Missing `user.name`/`user.email` for the commit.
     NoIdentity,
     Timeout,
-    /// O remoto recusou (precisa de pull antes, por exemplo).
+    /// The remote refused (it needs a pull first, for example).
     Rejected(String),
-    /// Credencial ausente ou recusada.
+    /// Credential missing or refused.
     Auth(String),
     Failed(String),
 }
@@ -222,19 +222,26 @@ pub enum GitError {
 impl std::fmt::Display for GitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GitError::NotInstalled => write!(f, "O git não foi encontrado. Instale em https://git-scm.com e tente de novo."),
-            GitError::NotARepo => write!(f, "A pasta de trabalho não é um repositório git."),
+            GitError::NotInstalled => write!(f, "{}", t!("Git was not found. Install it from https://git-scm.com and try again.")),
+            GitError::NotARepo => write!(f, "{}", t!("The working folder is not a git repository.")),
             GitError::Unsafe { path } => write!(
                 f,
-                "O git não confia nesta pasta (ela pertence a outro usuário). Para liberar, rode: git config --global --add safe.directory \"{path}\""
+                "{}",
+                t!(
+                    "Git does not trust this folder (it belongs to another user). To allow it, run: git config --global --add safe.directory \"{path}\"",
+                    path
+                )
             ),
             GitError::NoIdentity => write!(
                 f,
-                "Defina seu nome e e-mail para o commit: git config --global user.name \"Seu Nome\" e git config --global user.email voce@exemplo.com"
+                "{}",
+                t!(
+                    "Set your name and e-mail for the commit: git config --global user.name \"Your Name\" and git config --global user.email you@example.com"
+                )
             ),
-            GitError::Timeout => write!(f, "O git demorou demais e foi interrompido."),
-            GitError::Rejected(m) => write!(f, "O remoto recusou: {m}"),
-            GitError::Auth(m) => write!(f, "Falha de autenticação: {m}"),
+            GitError::Timeout => write!(f, "{}", t!("Git took too long and was interrupted.")),
+            GitError::Rejected(m) => write!(f, "{}", t!("The remote refused: {message}", message = m)),
+            GitError::Auth(m) => write!(f, "{}", t!("Authentication failed: {message}", message = m)),
             GitError::Failed(m) => write!(f, "{m}"),
         }
     }
@@ -242,9 +249,9 @@ impl std::fmt::Display for GitError {
 
 impl std::error::Error for GitError {}
 
-// ---------- Interpretação da saída (funções puras) ----------
+// ---------- Output parsing (pure functions) ----------
 
-/// Lê `git status --porcelain=v2 -z --branch --show-stash`. `root`/`prefix`/`state` ficam por conta de quem chama.
+/// Reads `git status --porcelain=v2 -z --branch --show-stash`. `root`/`prefix`/`state` are up to the caller.
 pub fn parse_status_v2(out: &[u8]) -> GitStatus {
     let mut st = GitStatus::default();
     let mut records = out.split(|b| *b == 0).filter(|r| !r.is_empty());
@@ -277,7 +284,7 @@ pub fn parse_status_v2(out: &[u8]) -> GitStatus {
             }
             Some(b'2') => {
                 let f: Vec<&str> = line.splitn(10, ' ').collect();
-                // O nome antigo é o registro seguinte.
+                // The previous name is the next record.
                 let orig = records.next().map(|r| String::from_utf8_lossy(r).into_owned());
                 let kind = if f.get(8).is_some_and(|s| s.starts_with('C')) { EntryKind::Copied } else { EntryKind::Renamed };
                 (f.len() == 10).then(|| xy_entry(f[1], f[9], orig, kind))
@@ -313,10 +320,10 @@ fn xy_entry(xy: &str, path: &str, orig_path: Option<String>, kind: EntryKind) ->
     GitEntry { path: path.to_owned(), orig_path, index, worktree, kind }
 }
 
-/// Formato pedido a `git for-each-ref` (campos separados por NUL, um ref por linha).
+/// Format asked of `git for-each-ref` (NUL-separated fields, one ref per line).
 pub const BRANCH_FORMAT: &str = "%(refname)%00%(refname:short)%00%(upstream:short)%00%(HEAD)";
 
-/// Lê a saída de `git for-each-ref --format=BRANCH_FORMAT refs/heads refs/remotes`.
+/// Reads the output of `git for-each-ref --format=BRANCH_FORMAT refs/heads refs/remotes`.
 pub fn parse_branches(out: &[u8]) -> Vec<GitBranch> {
     let text = String::from_utf8_lossy(out);
     let mut list = Vec::new();
@@ -327,7 +334,7 @@ pub fn parse_branches(out: &[u8]) -> Vec<GitBranch> {
         }
         let (full, short, upstream, head) = (f[0], f[1], f[2], f[3]);
         let remote = full.starts_with("refs/remotes/");
-        // `origin/HEAD` aponta para outra branch: não é uma escolha útil.
+        // `origin/HEAD` points to another branch: it is not a useful choice.
         if remote && full.ends_with("/HEAD") {
             continue;
         }
@@ -341,16 +348,16 @@ pub fn parse_branches(out: &[u8]) -> Vec<GitBranch> {
     list
 }
 
-/// Lê um diff unificado (ou combinado, `diff --cc` / `@@@`). Corta em `max_lines` linhas (e cada
-/// linha em 1000 caracteres). O `\r` final de uma linha CRLF é mantido em `text`.
+/// Reads a unified diff (or a combined one, `diff --cc` / `@@@`). Cuts at `max_lines` lines (and each
+/// line at 1000 characters). The trailing `\r` of a CRLF line is kept in `text`.
 pub fn parse_diff(text: &str, max_lines: usize) -> GitDiff {
     let mut diff = GitDiff::default();
     let (mut old, mut new) = (0u32, 0u32);
     let mut in_hunk = false;
-    // Número de prefixos de coluna (1 para diff normal `@@`, >= 2 para diff combinado `@@@`).
+    // Number of column prefixes (1 for a normal `@@` diff, >= 2 for a combined `@@@` diff).
     let mut cols = 1usize;
-    // Divide só em `\n`: o `\r` de arquivos CRLF fica no texto (o patch de um trecho precisa dele para
-    // aplicar; quem desenha tira o `\r`).
+    // Split only on `\n`: the `\r` of CRLF files stays in the text (the patch of a hunk needs it to
+    // apply; whoever draws it removes the `\r`).
     let mut raws: Vec<&str> = text.split('\n').collect();
     if raws.last() == Some(&"") {
         raws.pop();
@@ -372,7 +379,7 @@ pub fn parse_diff(text: &str, max_lines: usize) -> GitDiff {
             let rest = &raw[ats..];
             in_hunk = true;
             cols = ats.saturating_sub(1).max(1);
-            // `@@ -a[,b] +c[,d] @@` ou `@@@ -a[,b] -c[,d] +e[,f] @@@`
+            // `@@ -a[,b] +c[,d] @@` or `@@@ -a[,b] -c[,d] +e[,f] @@@`
             let start = |p: &str, sign: char| -> Option<u32> {
                 p.strip_prefix(sign).and_then(|s| s.split(',').next()).and_then(|s| s.parse().ok())
             };
@@ -407,7 +414,7 @@ pub fn parse_diff(text: &str, max_lines: usize) -> GitDiff {
                 (DiffKind::Context, Some(old - 1), Some(new - 1))
             }
         } else {
-            // Diff combinado (`diff --cc`): os primeiros `cols` caracteres indicam `+`, `-` ou ` ` em cada pai.
+            // Combined diff (`diff --cc`): the first `cols` characters mark `+`, `-` or ` ` in each parent.
             let prefix: String = raw.chars().take(cols).collect();
             if prefix.contains('+') {
                 new += 1;
@@ -431,9 +438,9 @@ pub fn parse_diff(text: &str, max_lines: usize) -> GitDiff {
     diff
 }
 
-/// Constrói um patch unificado contendo apenas o trecho (`hunk_index`, 0-indexed) de `diff`,
-/// pronto para `git apply`. Devolve `None` se o diff for combinado (`@@@`), truncado, binário ou
-/// não tiver o cabeçalho `---`/`+++`.
+/// Builds a unified patch containing only the hunk (`hunk_index`, 0-indexed) of `diff`, ready for
+/// `git apply`. Returns `None` if the diff is combined (`@@@`), truncated, binary or has no
+/// `---`/`+++` header.
 pub fn extract_hunk_patch(diff: &GitDiff, hunk_index: usize) -> Option<String> {
     if diff.binary || diff.truncated {
         return None;
@@ -444,7 +451,7 @@ pub fn extract_hunk_patch(diff: &GitDiff, hunk_index: usize) -> Option<String> {
         match line.kind {
             DiffKind::Meta if hunks.is_empty() => header.push(line.text.as_str()),
             DiffKind::Hunk => {
-                // Diff combinado (`@@@`) não pode ser aplicado com `git apply`.
+                // A combined diff (`@@@`) cannot be applied with `git apply`.
                 if line.text.starts_with("@@@") {
                     return None;
                 }
@@ -461,7 +468,7 @@ pub fn extract_hunk_patch(diff: &GitDiff, hunk_index: usize) -> Option<String> {
     if !header.iter().any(|l| l.starts_with("--- ")) || !header.iter().any(|l| l.starts_with("+++ ")) {
         return None;
     }
-    // Linha truncada (> 1000 chars) não produziria um patch fiel.
+    // A truncated line (> 1000 chars) would not produce a faithful patch.
     if hunk.iter().any(|l| l.text.ends_with('…') && l.text.chars().count() > 1000) {
         return None;
     }
@@ -477,10 +484,10 @@ pub fn extract_hunk_patch(diff: &GitDiff, hunk_index: usize) -> Option<String> {
     Some(out)
 }
 
-/// Formato pedido a `git stash list`.
+/// Format asked of `git stash list`.
 pub const STASH_FORMAT: &str = "%gd%x00%cr%x00%gs";
 
-/// Lê a saída de `git stash list --format=STASH_FORMAT`.
+/// Reads the output of `git stash list --format=STASH_FORMAT`.
 pub fn parse_stashes(out: &[u8]) -> Vec<GitStash> {
     let text = String::from_utf8_lossy(out);
     let mut list = Vec::new();
@@ -495,13 +502,13 @@ pub fn parse_stashes(out: &[u8]) -> Vec<GitStash> {
     list
 }
 
-/// Formato pedido a `git log -z`.
+/// Format asked of `git log -z`.
 pub const LOG_FORMAT: &str = "%H%x00%h%x00%an%x00%cr%x00%s";
 
-/// Lê a saída de `git log -z --format=LOG_FORMAT`.
+/// Reads the output of `git log -z --format=LOG_FORMAT`.
 pub fn parse_log(out: &[u8]) -> Vec<GitCommit> {
     let mut list = Vec::new();
-    // Com `-z` e `%x00`, todos os campos ficam separados por NUL em sequência de 5 em 5.
+    // With `-z` and `%x00`, all fields stay separated by NUL, five at a time.
     let fields: Vec<&[u8]> = out.split(|b| *b == 0).collect();
     for chunk in fields.chunks(5) {
         if chunk.len() < 5 {
@@ -522,7 +529,7 @@ pub fn parse_log(out: &[u8]) -> Vec<GitCommit> {
     list
 }
 
-/// Encontra os blocos de conflito (`<<<<<<<` … `=======` … `>>>>>>>`) num texto.
+/// Finds the conflict blocks (`<<<<<<<` … `=======` … `>>>>>>>`) in a text.
 pub fn parse_conflict_blocks(text: &str) -> Vec<ConflictBlock> {
     let lines: Vec<&str> = text.lines().collect();
     let mut blocks = Vec::new();
@@ -536,7 +543,7 @@ pub fn parse_conflict_blocks(text: &str) -> Vec<ConflictBlock> {
         let ours_label = ours_label.trim().to_owned();
         i += 1;
         let mut ours = Vec::new();
-        // Aceita também conflitos diff3 (`|||||||`), ignorando a seção base entre `|||||||` e `=======`.
+        // Also accepts diff3 conflicts (`|||||||`), ignoring the base section between `|||||||` and `=======`.
         let mut in_base = false;
         while i < lines.len() && !lines[i].starts_with("=======") {
             if lines[i].starts_with("|||||||") {
@@ -549,7 +556,7 @@ pub fn parse_conflict_blocks(text: &str) -> Vec<ConflictBlock> {
         if i >= lines.len() {
             break;
         }
-        i += 1; // pula `=======`
+        i += 1; // skip `=======`
         let mut theirs = Vec::new();
         while i < lines.len() && !lines[i].starts_with(">>>>>>>") {
             theirs.push(lines[i].to_owned());
@@ -565,8 +572,8 @@ pub fn parse_conflict_blocks(text: &str) -> Vec<ConflictBlock> {
     blocks
 }
 
-/// Resolve um único bloco de conflito (`block_index`, 0-indexed) substituindo os marcadores pela
-/// escolha (`Ours`, `Theirs` ou `Both`), preservando o estilo de quebra de linha (`\r\n` ou `\n`).
+/// Resolves a single conflict block (`block_index`, 0-indexed) by replacing the markers with the
+/// choice (`Ours`, `Theirs` or `Both`), preserving the line-break style (`\r\n` or `\n`).
 pub fn resolve_conflict_block_in_text(text: &str, block_index: usize, choice: ConflictChoice) -> Option<String> {
     let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let trailing_nl = text.ends_with('\n');
@@ -630,7 +637,7 @@ pub fn resolve_conflict_block_in_text(text: &str, block_index: usize, choice: Co
     Some(res)
 }
 
-/// Diff de um arquivo ainda não rastreado: todas as linhas como adicionadas.
+/// Diff of a not yet tracked file: every line as added.
 pub fn untracked_diff(bytes: &[u8], max_lines: usize) -> GitDiff {
     if bytes.iter().take(8000).any(|b| *b == 0) {
         return GitDiff { lines: Vec::new(), truncated: false, binary: true };
@@ -648,8 +655,8 @@ pub fn untracked_diff(bytes: &[u8], max_lines: usize) -> GitDiff {
     diff
 }
 
-/// Transforma o stderr de um comando que falhou num erro com sentido (as mensagens vêm em
-/// inglês por causa do `LC_ALL=C`).
+/// Turns the stderr of a command that failed into a meaningful error (the messages come in
+/// English because of `LC_ALL=C`).
 pub fn classify_error(stderr: &str) -> GitError {
     let s = stderr.trim();
     let low = s.to_lowercase();
@@ -666,8 +673,9 @@ pub fn classify_error(stderr: &str) -> GitError {
     let short = crate::util::last_meaningful_lines(s, 4);
     if low.contains("permission denied (publickey") || low.contains("sign_and_send_pubkey") || low.contains("no mutual signature algorithm")
     {
-        return GitError::Auth(format!(
-            "{short}\nSe a sua chave SSH tem senha, o AgentDeck não consegue perguntá-la: carregue a chave no ssh-agent e tente de novo.\n• Windows (PowerShell; na primeira vez como administrador): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add"
+        return GitError::Auth(t!(
+            "{output}\nIf your SSH key has a passphrase, AgentDeck cannot ask for it: load the key into ssh-agent and try again.\n• Windows (PowerShell; the first time as administrator): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
+            output = short
         ));
     }
     if low.contains("authentication failed")
@@ -679,11 +687,11 @@ pub fn classify_error(stderr: &str) -> GitError {
     {
         return GitError::Auth(short);
     }
-    // `commit.gpgsign` com a chave travada ou sem agente/pinentry que consiga perguntar a senha.
+    // `commit.gpgsign` with a locked key or with no agent/pinentry that can ask for the passphrase.
     if low.contains("gpg failed to sign") || low.contains("no pinentry") || low.contains("inappropriate ioctl for device") {
-        return GitError::Failed(format!(
-            "O commit não foi feito: a assinatura GPG (commit.gpgsign) precisa da chave destravada, e o AgentDeck não consegue abrir o pedido de senha. Destrave a chave numa aba de terminal (echo teste | gpg --clearsign) e tente de novo em seguida; a senha fica no gpg-agent por alguns minutos. Se não quiser assinar neste repositório: git config commit.gpgsign false
-{short}"
+        return GitError::Failed(t!(
+            "The commit was not made: the GPG signature (commit.gpgsign) needs the key unlocked, and AgentDeck cannot open the passphrase prompt. Unlock the key in a terminal tab (echo test | gpg --clearsign) and try again right after; the passphrase stays in gpg-agent for a few minutes. If you do not want to sign in this repository: git config commit.gpgsign false\n{output}",
+            output = short
         ));
     }
     if low.contains("[rejected]")
@@ -694,10 +702,10 @@ pub fn classify_error(stderr: &str) -> GitError {
     {
         return GitError::Rejected(short);
     }
-    GitError::Failed(if short.is_empty() { "o git falhou sem mensagem".into() } else { short })
+    GitError::Failed(if short.is_empty() { t!("git failed with no message").to_owned() } else { short })
 }
 
-/// Nome de branch aceitável (subconjunto seguro das regras de `git check-ref-format`).
+/// Acceptable branch name (a safe subset of the rules of `git check-ref-format`).
 pub fn valid_branch_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 200
@@ -714,8 +722,8 @@ pub fn valid_branch_name(name: &str) -> bool {
         && !name.split('/').any(|part| part.starts_with('.'))
 }
 
-/// Caminho relativo seguro para passar ao git (sem `..`, sem ser absoluto, sem NUL). Só aceita
-/// componentes comuns (e `.`); no Windows, nenhum `:` (`C:..\x` é relativo à unidade e sai da raiz).
+/// Safe relative path to pass to git (no `..`, not absolute, no NUL). Accepts only ordinary
+/// components (and `.`); on Windows, no `:` (`C:..\x` is relative to the drive and leaves the root).
 pub fn safe_rel(path: &str) -> bool {
     !path.is_empty()
         && !path.contains('\0')
@@ -725,19 +733,19 @@ pub fn safe_rel(path: &str) -> bool {
         && Path::new(path).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
-// ---------- Execução ----------
+// ---------- Execution ----------
 
-/// Estado do git guardado no core.
+/// Git state kept in the core.
 #[derive(Default)]
 pub(crate) struct GitState {
-    /// Executável encontrado (e quando foi procurado: refaz a busca depois de 30 s, para perceber
-    /// uma instalação feita com o app aberto).
+    /// Executable found (and when it was looked up: the search is redone after 30 s, to notice
+    /// an installation made with the app open).
     exe: Mutex<Option<(Instant, Option<PathBuf>)>>,
-    /// Uma operação que escreve no repositório por vez (o git usa `index.lock`).
+    /// One operation that writes to the repository at a time (git uses `index.lock`).
     pub(crate) op: Mutex<()>,
 }
 
-/// Repositório encontrado a partir do workspace.
+/// Repository found from the workspace.
 pub(crate) struct Repo {
     pub(crate) git: PathBuf,
     pub(crate) root: PathBuf,
@@ -752,8 +760,8 @@ pub(crate) fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
         ("LC_ALL", "C"),
         ("LANGUAGE", "C"),
         ("GIT_TERMINAL_PROMPT", "0"),
-        // O Git Credential Manager abriria uma janela de login e o comando ficaria parado até o
-        // timeout; sem credencial salva, falha logo (vira `GitError::Auth`).
+        // Git Credential Manager would open a login window and the command would stay stuck until
+        // the timeout; with no saved credential, it fails right away (becomes `GitError::Auth`).
         ("GCM_INTERACTIVE", "never"),
         ("SSH_ASKPASS_REQUIRE", "never"),
         ("GIT_OPTIONAL_LOCKS", "0"),
@@ -762,8 +770,8 @@ pub(crate) fn base_command(git: &Path, cwd: &Path, args: &[&str]) -> Command {
         ("GIT_EDITOR", "true"),
         ("GIT_SEQUENCE_EDITOR", "true"),
         ("GIT_LITERAL_PATHSPECS", "1"),
-        // Sem TTY para o pinentry curses; se houver pinentry gráfico, ele usa DISPLAY/sessão do SO;
-        // se for terminal, falha imediatamente em vez de esperar os 120 s de timeout.
+        // No TTY for the curses pinentry; with a graphical pinentry it uses DISPLAY/the OS session;
+        // if it is a terminal, it fails immediately instead of waiting for the 120 s timeout.
         ("GPG_TTY", "not a tty"),
         ("PINENTRY_USER_DATA", "USE_CURSES=0"),
     ] {
@@ -780,14 +788,14 @@ pub(crate) fn run(cmd: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Re
         if e.kind() == std::io::ErrorKind::NotFound {
             GitError::NotInstalled
         } else {
-            GitError::Failed(format!("falha ao rodar o git: {e}"))
+            GitError::Failed(t!("Failed to run git: {error}", error = e))
         }
     })?;
     match out.exit {
         Exit::Code(Some(0)) => Ok(out),
         Exit::TimedOut => Err(GitError::Timeout),
         _ => {
-            // Alguns erros (ex.: "nothing to commit") saem pela saída padrão.
+            // Some errors (e.g. "nothing to commit") come out on standard output.
             let err = String::from_utf8_lossy(&out.stderr);
             let err = if err.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { err };
             Err(classify_error(&err))
@@ -795,12 +803,12 @@ pub(crate) fn run(cmd: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Re
     }
 }
 
-/// Caminhos separados por NUL (para `--pathspec-from-file=- --pathspec-file-nul`).
+/// Paths separated by NUL (for `--pathspec-from-file=- --pathspec-file-nul`).
 fn nul_paths(paths: &[String]) -> Result<Vec<u8>, GitError> {
     let mut buf = Vec::new();
     for p in paths {
         if !safe_rel(p) {
-            return Err(GitError::Failed(format!("caminho inválido: {p}")));
+            return Err(GitError::Failed(t!("Invalid path: {path}", path = p)));
         }
         buf.extend_from_slice(p.as_bytes());
         buf.push(0);
@@ -840,16 +848,16 @@ impl Repo {
         run(self.cmd(&["rev-parse", "--verify", "-q", "HEAD"]), None, READ_TIMEOUT).is_ok()
     }
 
-    /// Verifica se o commit atual usaria assinatura GPG (`commit.gpgsign = true`).
+    /// Checks whether the current commit would use GPG signing (`commit.gpgsign = true`).
     fn is_gpgsign_enabled(&self) -> bool {
         self.read(&["config", "--bool", "--get", "commit.gpgsign"]).is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
     }
 
-    /// Quando `commit.gpgsign` está ligado, confere em instantes se o GPG consegue assinar SEM
-    /// perguntar nada (`--pinentry-mode error`): com a chave destravada no `gpg-agent` passa; com a
-    /// chave travada (ou sem agente/pinentry utilizável) o gpg falha na hora, em vez de deixar o
-    /// commit esperar o `COMMIT_TIMEOUT` por um pedido de senha que ninguém vê. Devolve a explicação
-    /// e NÃO mexe na configuração do usuário. Só vale para assinatura OpenPGP.
+    /// When `commit.gpgsign` is on, checks in an instant whether GPG can sign WITHOUT asking
+    /// anything (`--pinentry-mode error`): with the key unlocked in `gpg-agent` it passes; with the
+    /// key locked (or with no usable agent/pinentry) gpg fails right away, instead of letting the
+    /// commit wait for the `COMMIT_TIMEOUT` for a passphrase prompt that nobody sees. Returns the
+    /// explanation and does NOT touch the user's configuration. Only valid for OpenPGP signing.
     pub(crate) fn check_gpg_ready(&self) -> Result<(), GitError> {
         if !self.is_gpgsign_enabled() {
             return Ok(());
@@ -884,8 +892,8 @@ impl Repo {
         }
     }
 
-    /// Ambiente das operações de rede: ssh sem prompt (senão ele abre o terminal e trava), a menos
-    /// que o usuário tenha configurado o próprio ssh.
+    /// Environment of the network operations: ssh with no prompt (otherwise it opens the terminal and hangs), unless
+    /// the user has configured their own ssh.
     fn net(&self, args: &[&str]) -> Command {
         let mut c = self.cmd(args);
         let user_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
@@ -903,14 +911,14 @@ impl Repo {
     }
 }
 
-/// Texto curto do que o comando disse (para mostrar depois de pull/push).
+/// Short text of what the command said (to show after pull/push).
 fn summary(out: &CapturedRaw) -> String {
     let all = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     crate::util::last_meaningful_lines(&all, 3)
 }
 
 impl Core {
-    /// Caminho do executável do git (ou `None`).
+    /// Path of the git executable (or `None`).
     pub(crate) fn git_exe(&self) -> Option<PathBuf> {
         let state = &self.inner.git;
         let mut cache = state.exe.lock();
@@ -927,13 +935,13 @@ impl Core {
         exe
     }
 
-    /// Acha o repositório do workspace.
+    /// Finds the repository of the workspace.
     fn git_repo(&self) -> Result<Repo, GitError> {
         self.git_repo_at(&self.workspace())
     }
 
-    /// Acha o repositório que contém a pasta `dir` (o das tarefas, que são por projeto e não só
-    /// do projeto ativo).
+    /// Finds the repository that contains the folder `dir` (the one of the tasks, which are per project and not only
+    /// of the active project).
     pub(crate) fn git_repo_at(&self, dir: &Path) -> Result<Repo, GitError> {
         let git = self.git_exe().ok_or(GitError::NotInstalled)?;
         let ws = dir;
@@ -950,7 +958,7 @@ impl Core {
         Ok(Repo { git, root, git_dir, prefix })
     }
 
-    /// Status do repositório do workspace.
+    /// Status of the workspace's repository.
     pub fn git_status(&self) -> Result<GitStatus, GitError> {
         let repo = self.git_repo()?;
         let out = repo.read(&["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=normal"])?;
@@ -961,19 +969,20 @@ impl Core {
         Ok(st)
     }
 
-    /// Diff de um arquivo (`path` relativo à raiz do repositório). `staged`: o que está preparado
-    /// (índice × HEAD); senão, a cópia de trabalho × índice. Arquivo não rastreado: o conteúdo todo.
+    /// Diff of a file (`path` relative to the repository root). `staged`: what is staged
+    /// (index × HEAD); otherwise, the working copy × index. Untracked file: the whole content.
     pub fn git_diff(&self, entry: &GitEntry, staged: bool) -> Result<GitDiff, GitError> {
         let repo = self.git_repo()?;
         if !safe_rel(&entry.path) {
-            return Err(GitError::Failed(format!("caminho inválido: {}", entry.path)));
+            return Err(GitError::Failed(t!("Invalid path: {path}", path = entry.path)));
         }
         if entry.kind == EntryKind::Untracked {
             let full = repo.root.join(&entry.path);
             if full.is_dir() {
                 return Ok(GitDiff::default());
             }
-            let bytes = read_capped(&full, DIFF_MAX_BYTES).map_err(|e| GitError::Failed(format!("falha ao ler {}: {e}", entry.path)))?;
+            let bytes = read_capped(&full, DIFF_MAX_BYTES)
+                .map_err(|e| GitError::Failed(t!("Failed to read {path}: {error}", path = entry.path, error = e)))?;
             let mut d = untracked_diff(&bytes.0, DIFF_MAX_LINES);
             d.truncated |= bytes.1;
             return Ok(d);
@@ -995,7 +1004,7 @@ impl Core {
         Ok(d)
     }
 
-    /// Prepara (stage) os caminhos (relativos à raiz).
+    /// Stages the paths (relative to the root).
     pub fn git_stage(&self, paths: &[String]) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1003,7 +1012,7 @@ impl Core {
         Ok(())
     }
 
-    /// Prepara todas as alterações do repositório.
+    /// Stages every change in the repository.
     pub fn git_stage_all(&self) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1011,8 +1020,8 @@ impl Core {
         Ok(())
     }
 
-    /// Tira do stage. Um arquivo renomeado leva junto o nome antigo (senão este continuaria
-    /// preparado como apagado).
+    /// Unstages. A renamed file takes the old name with it (otherwise the old name would stay
+    /// staged as deleted).
     pub fn git_unstage(&self, paths: &[String]) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1027,33 +1036,33 @@ impl Core {
             }
             repo.write(&["restore", "--staged", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(nul_paths(&all)?))?;
         } else {
-            // Sem nenhum commit não há HEAD para restaurar: só sai do índice.
+            // With no commit at all there is no HEAD to restore from: it only leaves the index.
             repo.write(&["rm", "--cached", "-r", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(stdin))?;
         }
         Ok(())
     }
 
-    /// Tira tudo do stage.
+    /// Unstages everything.
     pub fn git_unstage_all(&self) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
         if repo.has_head() {
             repo.write(&["reset", "-q"], None)?;
         } else {
-            // Índice vazio: nada a tirar (sem `--ignore-unmatch` o git falharia com "did not match").
+            // Empty index: nothing to unstage (without `--ignore-unmatch` git would fail with "did not match").
             repo.write(&["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", "."], None)?;
         }
         Ok(())
     }
 
-    /// Descarta as alterações de um arquivo:
-    /// - não rastreado: APAGA o arquivo ou pasta (usa `-ffdq` em pastas para remover também sub-repositórios com `.git` interno);
-    /// - em conflito (`Unmerged`): restaura à versão do `HEAD` (ou remove se foi adicionado apenas pelo outro lado, ex.: `AU`/`DU`/`UU`);
-    /// - rastreado comum: restaura a cópia de trabalho ao que está no índice.
+    /// Discards the changes of a file:
+    /// - untracked: DELETES the file or folder (uses `-ffdq` on folders to also remove sub-repositories with an inner `.git`);
+    /// - in conflict (`Unmerged`): restores to the `HEAD` version (or removes it if it was only added by the other side, e.g. `AU`/`DU`/`UU`);
+    /// - ordinary tracked file: restores the working copy to what is in the index.
     pub fn git_discard(&self, entry: &GitEntry) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         if !safe_rel(&entry.path) {
-            return Err(GitError::Failed(format!("caminho inválido: {}", entry.path)));
+            return Err(GitError::Failed(t!("Invalid path: {path}", path = entry.path)));
         }
         let _op = self.inner.git.op.lock();
         match entry.kind {
@@ -1063,9 +1072,9 @@ impl Core {
                 repo.write(&["clean", flags, "--", &entry.path], None)?;
             }
             EntryKind::Unmerged => {
-                // Num arquivo em conflito, `restore --worktree` falha porque há múltiplos estágios no índice.
-                // Se o arquivo existe no HEAD, `restore --source=HEAD --staged --worktree` restaura o nosso lado limpo;
-                // se não existe no HEAD (ex.: adicionado por eles `UA` ou ambos `AA`), removemos do índice e do disco.
+                // In a conflicted file, `restore --worktree` fails because there are multiple stages in the index.
+                // If the file exists in HEAD, `restore --source=HEAD --staged --worktree` restores our clean side;
+                // if it does not exist in HEAD (e.g. added by them `UA` or by both `AA`), we remove it from the index and from disk.
                 let in_head = run(repo.cmd(&["cat-file", "-e", &format!("HEAD:{}", entry.path)]), None, READ_TIMEOUT).is_ok();
                 if in_head {
                     repo.write(&["restore", "--source=HEAD", "--staged", "--worktree", "--", &entry.path], None)?;
@@ -1080,30 +1089,30 @@ impl Core {
         Ok(())
     }
 
-    /// Aplica o patch de um trecho (hunk) para preparar (`stage`), tirar da preparação (`unstage`)
-    /// ou descartar da cópia de trabalho (`discard`).
+    /// Applies the patch of a hunk to stage it, unstage it
+    /// or discard it from the working copy.
     pub fn git_apply_hunk(&self, patch: &str, staged: bool, discard: bool) -> Result<(), GitError> {
         if patch.trim().is_empty() {
-            return Err(GitError::Failed("trecho vazio".into()));
+            return Err(GitError::Failed(t!("Empty hunk").to_owned()));
         }
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
         let args: &[&str] = match (discard, staged) {
-            // Descartar um trecho não preparado na cópia de trabalho.
+            // Discard an unstaged hunk from the working copy.
             (true, _) => &["apply", "--reverse", "--recount", "-"],
-            // Tirar do stage um trecho que estava preparado.
+            // Unstage a hunk that was staged.
             (false, true) => &["apply", "--cached", "--reverse", "--recount", "-"],
-            // Preparar um trecho da cópia de trabalho.
+            // Stage a hunk from the working copy.
             (false, false) => &["apply", "--cached", "--recount", "-"],
         };
         repo.write(args, Some(patch.as_bytes().to_vec()))?;
         Ok(())
     }
 
-    /// Faz o commit do que está preparado. Devolve `"<hash> <assunto>"`.
+    /// Commits what is staged. Returns `"<hash> <subject>"`.
     pub fn git_commit(&self, message: &str, amend: bool) -> Result<String, GitError> {
         if message.trim().is_empty() {
-            return Err(GitError::Failed("escreva a mensagem do commit".into()));
+            return Err(GitError::Failed(t!("Write the commit message").to_owned()));
         }
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1117,7 +1126,7 @@ impl Core {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
-    /// Mensagem do último commit (para "corrigir último commit" ou mensagem de merge).
+    /// Message of the last commit (for "amend last commit" or a merge message).
     pub fn git_last_message(&self) -> Option<String> {
         let repo = self.git_repo().ok()?;
         let out = repo.read(&["log", "-1", "--format=%B"]).ok()?;
@@ -1131,7 +1140,7 @@ impl Core {
         Ok(summary(&out))
     }
 
-    /// Pull só por avanço direto (sem criar merge sozinho).
+    /// Pull only by fast-forward (without creating a merge by itself).
     pub fn git_pull(&self) -> Result<String, GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1139,7 +1148,7 @@ impl Core {
         Ok(summary(&out))
     }
 
-    /// Push. Sem upstream, publica a branch no único remoto (`push -u <remoto> <branch>`).
+    /// Push. With no upstream, publishes the branch to the only remote (`push -u <remote> <branch>`).
     pub fn git_push(&self) -> Result<String, GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1147,15 +1156,15 @@ impl Core {
         let out = if st.upstream.is_some() {
             run(repo.net(&["push"]), None, NET_TIMEOUT)?
         } else {
-            let branch = st.branch.ok_or_else(|| GitError::Failed("HEAD destacado: troque para uma branch antes de enviar".into()))?;
+            let branch = st.branch.ok_or_else(|| GitError::Failed(t!("Detached HEAD: switch to a branch before pushing").to_owned()))?;
             let remotes = repo.remotes()?;
             let remote = match remotes.as_slice() {
-                [] => return Err(GitError::Failed("nenhum remoto configurado (git remote add origin <url>)".into())),
+                [] => return Err(GitError::Failed(t!("No remote configured (git remote add origin <url>)").to_owned())),
                 [one] => one.clone(),
                 many if many.iter().any(|r| r == "origin") => "origin".into(),
                 _ => {
                     return Err(GitError::Failed(
-                        "vários remotos e nenhum upstream: publique pelo terminal (git push -u <remoto> <branch>)".into(),
+                        t!("Several remotes and no upstream: publish from the terminal (git push -u <remote> <branch>)").to_owned(),
                     ))
                 }
             };
@@ -1164,7 +1173,7 @@ impl Core {
         Ok(summary(&out))
     }
 
-    /// Branches locais e remotas.
+    /// Local and remote branches.
     pub fn git_branches(&self) -> Result<Vec<GitBranch>, GitError> {
         let repo = self.git_repo()?;
         let fmt = format!("--format={BRANCH_FORMAT}");
@@ -1172,16 +1181,16 @@ impl Core {
         Ok(parse_branches(&out.stdout))
     }
 
-    /// Troca de branch. Uma remota (`origin/x`) vira uma branch local que a acompanha; se a local
-    /// (`x`) já existe, só troca para ela.
+    /// Switches branch. A remote one (`origin/x`) becomes a local branch that tracks it; if the local one
+    /// (`x`) already exists, it only switches to it.
     pub fn git_checkout(&self, branch: &GitBranch) -> Result<(), GitError> {
         if !valid_branch_name(&branch.name) {
-            return Err(GitError::Failed(format!("nome de branch inválido: {}", branch.name)));
+            return Err(GitError::Failed(t!("Invalid branch name: {name}", name = branch.name)));
         }
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
         if branch.remote {
-            // Nome local: o que vem depois do remoto (o mais longo que casa; remotos podem ter `/`).
+            // Local name: what comes after the remote (the longest one that matches; remotes may have `/`).
             let remotes = repo.remotes()?;
             let local = remotes
                 .iter()
@@ -1201,10 +1210,10 @@ impl Core {
         Ok(())
     }
 
-    /// Cria uma branch a partir do HEAD (e troca para ela, se `switch`).
+    /// Creates a branch from HEAD (and switches to it, if `switch`).
     pub fn git_create_branch(&self, name: &str, switch: bool) -> Result<(), GitError> {
         if !valid_branch_name(name) {
-            return Err(GitError::Failed(format!("nome de branch inválido: {name}")));
+            return Err(GitError::Failed(t!("Invalid branch name: {name}", name)));
         }
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1218,7 +1227,7 @@ impl Core {
 
     // ---------- Stash ----------
 
-    /// Lista os stashes do repositório.
+    /// Lists the repository's stashes.
     pub fn git_stash_list(&self) -> Result<Vec<GitStash>, GitError> {
         let repo = self.git_repo()?;
         let fmt = format!("--format={STASH_FORMAT}");
@@ -1226,7 +1235,7 @@ impl Core {
         Ok(parse_stashes(&out.stdout))
     }
 
-    /// Guarda as alterações atuais no stash (`include_untracked`: inclui arquivos não rastreados `-u`).
+    /// Saves the current changes to the stash (`include_untracked`: includes untracked files `-u`).
     pub fn git_stash_push(&self, message: &str, include_untracked: bool) -> Result<String, GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1239,26 +1248,26 @@ impl Core {
             args.push("-m");
             args.push(msg);
         }
-        // Sem caminhos nossos: o `stash -u` chama o `git clean` por dentro e, com pathspecs literais,
-        // ele deixaria os não rastreados no lugar depois de guardá-los.
+        // With no paths of our own: `stash -u` calls `git clean` inside, and with literal pathspecs
+        // it would leave the untracked files in place after saving them.
         let mut cmd = repo.cmd(&args);
         cmd.env_remove("GIT_LITERAL_PATHSPECS");
         let out = run(cmd, None, WRITE_TIMEOUT)?;
         let text = summary(&out);
         if text.to_lowercase().contains("no local changes to save") {
-            return Err(GitError::Failed("nenhuma alteração local para guardar no stash".into()));
+            return Err(GitError::Failed(t!("No local change to save in the stash").to_owned()));
         }
         Ok(text)
     }
 
-    /// Diff completo de um stash (`stash@{index}`), incluindo arquivos não rastreados guardados nele.
+    /// Full diff of a stash (`stash@{index}`), including untracked files saved in it.
     pub fn git_stash_diff(&self, index: usize) -> Result<GitDiff, GitError> {
         let repo = self.git_repo()?;
         let spec = format!("stash@{{{index}}}");
         let out = repo.read(&["stash", "show", "-p", "--no-color", "--no-ext-diff", &spec])?;
         let mut raw = out.stdout;
-        // Quando o stash foi salvo com `--include-untracked`, os arquivos não rastreados ficam no
-        // terceiro pai (`stash@{n}^3`).
+        // When the stash was saved with `--include-untracked`, the untracked files stay in the
+        // third parent (`stash@{n}^3`).
         let untracked_spec = format!("{spec}^3");
         if let Ok(u) = repo.read(&["show", "--format=", "--patch", "--no-color", "--no-ext-diff", &untracked_spec]) {
             if !u.stdout.is_empty() {
@@ -1275,7 +1284,7 @@ impl Core {
         Ok(d)
     }
 
-    /// Aplica um stash sem apagá-lo (`git stash apply stash@{index}`).
+    /// Applies a stash without deleting it (`git stash apply stash@{index}`).
     pub fn git_stash_apply(&self, index: usize) -> Result<String, GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1284,7 +1293,7 @@ impl Core {
         Ok(summary(&out))
     }
 
-    /// Aplica um stash e o remove da lista (`git stash pop stash@{index}`).
+    /// Applies a stash and removes it from the list (`git stash pop stash@{index}`).
     pub fn git_stash_pop(&self, index: usize) -> Result<String, GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1293,7 +1302,7 @@ impl Core {
         Ok(summary(&out))
     }
 
-    /// Apaga um stash (`git stash drop stash@{index}`).
+    /// Deletes a stash (`git stash drop stash@{index}`).
     pub fn git_stash_drop(&self, index: usize) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1302,9 +1311,9 @@ impl Core {
         Ok(())
     }
 
-    // ---------- Histórico (log) ----------
+    // ---------- History (log) ----------
 
-    /// Lista commits da branch atual (paginada por `skip` e `limit`). Devolve `(commits, há_mais)`.
+    /// Lists commits of the current branch (paged by `skip` and `limit`). Returns `(commits, has_more)`.
     pub fn git_log(&self, skip: usize, limit: usize) -> Result<(Vec<GitCommit>, bool), GitError> {
         let repo = self.git_repo()?;
         if !repo.has_head() {
@@ -1323,17 +1332,17 @@ impl Core {
         Ok((list, has_more))
     }
 
-    /// Detalhe de um commit: metadados, arquivos alterados e diff completo.
+    /// Detail of a commit: metadata, changed files and the whole diff.
     pub fn git_commit_detail(&self, hash: &str) -> Result<GitCommitDetail, GitError> {
         if hash.is_empty() || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(GitError::Failed("hash de commit inválido".into()));
+            return Err(GitError::Failed(t!("Invalid commit hash").to_owned()));
         }
         let repo = self.git_repo()?;
         let meta_out = repo.read(&["show", "-s", "--format=%H%x00%h%x00%an%x00%ae%x00%cr%x00%B", hash])?;
         let meta_str = String::from_utf8_lossy(&meta_out.stdout);
         let fields: Vec<&str> = meta_str.splitn(6, '\0').collect();
         if fields.len() < 6 {
-            return Err(GitError::Failed("não foi possível ler os dados do commit".into()));
+            return Err(GitError::Failed(t!("Could not read the commit data").to_owned()));
         }
         let files_out = repo.read(&["diff-tree", "--root", "-r", "--no-commit-id", "--name-status", "-z", hash])?;
         let mut files = Vec::new();
@@ -1365,52 +1374,52 @@ impl Core {
         })
     }
 
-    // ---------- Merge e Rebase ----------
+    // ---------- Merge and Rebase ----------
 
-    /// Mescla a branch `branch` na branch atual (`git merge --no-edit <branch>`).
-    /// Quando entra em conflito, devolve `Ok` com aviso (o estado `Merging` e a seção de conflitos
-    /// aparecem no status).
+    /// Merges the branch `branch` into the current branch (`git merge --no-edit <branch>`).
+    /// When it goes into conflict, returns `Ok` with a warning (the `Merging` state and the conflicts section
+    /// appear in the status).
     pub fn git_merge(&self, branch: &str) -> Result<String, GitError> {
         if !valid_branch_name(branch) {
-            return Err(GitError::Failed(format!("nome de branch inválido: {branch}")));
+            return Err(GitError::Failed(t!("Invalid branch name: {name}", name = branch)));
         }
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
         repo.check_gpg_ready()?;
         let out = run_captured_raw(repo.cmd(&["merge", "--no-edit", branch]), None, WRITE_TIMEOUT, None, None, MAX_OUT)
-            .map_err(|e| GitError::Failed(format!("falha ao rodar o git: {e}")))?;
+            .map_err(|e| GitError::Failed(t!("Failed to run git: {error}", error = e)))?;
         match out.exit {
             Exit::Code(Some(0)) => Ok(summary(&out)),
             Exit::TimedOut => Err(GitError::Timeout),
             _ if repo.state() == RepoState::Merging => {
-                Ok("Mesclagem com conflitos: resolva os arquivos em conflito e clique em Continuar.".into())
+                Ok(t!("Merge with conflicts: resolve the files in conflict and click Continue.").to_owned())
             }
             _ => Err(classify_error(&String::from_utf8_lossy(&out.stderr))),
         }
     }
 
-    /// Rebase da branch atual sobre `branch` (`git rebase <branch>`).
-    /// Quando para em conflito, devolve `Ok` com aviso (o estado `Rebasing` aparece no topo).
+    /// Rebase of the current branch onto `branch` (`git rebase <branch>`).
+    /// When it stops on a conflict, returns `Ok` with a warning (the `Rebasing` state appears at the top).
     pub fn git_rebase(&self, branch: &str) -> Result<String, GitError> {
         if !valid_branch_name(branch) {
-            return Err(GitError::Failed(format!("nome de branch inválido: {branch}")));
+            return Err(GitError::Failed(t!("Invalid branch name: {name}", name = branch)));
         }
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
         repo.check_gpg_ready()?;
         let out = run_captured_raw(repo.cmd(&["rebase", branch]), None, WRITE_TIMEOUT, None, None, MAX_OUT)
-            .map_err(|e| GitError::Failed(format!("falha ao rodar o git: {e}")))?;
+            .map_err(|e| GitError::Failed(t!("Failed to run git: {error}", error = e)))?;
         match out.exit {
             Exit::Code(Some(0)) => Ok(summary(&out)),
             Exit::TimedOut => Err(GitError::Timeout),
             _ if repo.state() == RepoState::Rebasing => {
-                Ok("Rebase pausado em conflito: resolva os conflitos e clique em Continuar.".into())
+                Ok(t!("Rebase paused on a conflict: resolve the conflicts and click Continue.").to_owned())
             }
             _ => Err(classify_error(&String::from_utf8_lossy(&out.stderr))),
         }
     }
 
-    /// Continua a operação em andamento (`merge --continue`, `rebase --continue`, `cherry-pick --continue`, `revert --continue`).
+    /// Continues the operation in progress (`merge --continue`, `rebase --continue`, `cherry-pick --continue`, `revert --continue`).
     pub fn git_continue_op(&self) -> Result<String, GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1420,13 +1429,13 @@ impl Core {
             RepoState::Rebasing => "rebase",
             RepoState::CherryPicking => "cherry-pick",
             RepoState::Reverting => "revert",
-            RepoState::Normal => return Err(GitError::Failed("nenhuma operação em andamento".into())),
+            RepoState::Normal => return Err(GitError::Failed(t!("No operation in progress").to_owned())),
         };
         let out = run(repo.cmd(&[sub, "--continue"]), None, COMMIT_TIMEOUT)?;
         Ok(summary(&out))
     }
 
-    /// Aborta a operação em andamento (`merge --abort`, `rebase --abort`, `cherry-pick --abort`, `revert --abort`).
+    /// Aborts the operation in progress (`merge --abort`, `rebase --abort`, `cherry-pick --abort`, `revert --abort`).
     pub fn git_abort_op(&self) -> Result<String, GitError> {
         let repo = self.git_repo()?;
         let _op = self.inner.git.op.lock();
@@ -1435,25 +1444,26 @@ impl Core {
             RepoState::Rebasing => "rebase",
             RepoState::CherryPicking => "cherry-pick",
             RepoState::Reverting => "revert",
-            RepoState::Normal => return Err(GitError::Failed("nenhuma operação em andamento".into())),
+            RepoState::Normal => return Err(GitError::Failed(t!("No operation in progress").to_owned())),
         };
         let out = repo.write(&[sub, "--abort"], None)?;
         Ok(summary(&out))
     }
 
-    // ---------- Conflitos ----------
+    // ---------- Conflicts ----------
 
-    /// Lê os blocos de conflito (`<<<<<<<` … `>>>>>>>`) de um arquivo em conflito.
+    /// Reads the conflict blocks (`<<<<<<<` … `>>>>>>>`) of a file in conflict.
     pub fn git_conflict_file(&self, path: &str) -> Result<GitConflictFile, GitError> {
         let repo = self.git_repo()?;
         if !safe_rel(path) {
-            return Err(GitError::Failed(format!("caminho inválido: {path}")));
+            return Err(GitError::Failed(t!("Invalid path: {path}", path)));
         }
         let full = repo.root.join(path);
         if !full.is_file() {
             return Ok(GitConflictFile { path: path.to_owned(), blocks: Vec::new(), binary: false });
         }
-        let (bytes, _cut) = read_capped(&full, CONFLICT_MAX_BYTES).map_err(|e| GitError::Failed(format!("falha ao ler {path}: {e}")))?;
+        let (bytes, _cut) =
+            read_capped(&full, CONFLICT_MAX_BYTES).map_err(|e| GitError::Failed(t!("Failed to read {path}: {error}", path, error = e)))?;
         if bytes.iter().take(8000).any(|b| *b == 0) {
             return Ok(GitConflictFile { path: path.to_owned(), blocks: Vec::new(), binary: true });
         }
@@ -1461,21 +1471,21 @@ impl Core {
         Ok(GitConflictFile { path: path.to_owned(), blocks: parse_conflict_blocks(&text), binary: false })
     }
 
-    /// Resolve o arquivo inteiro em conflito escolhendo o nosso lado (`Ours` → `--ours`), o deles
-    /// (`Theirs` → `--theirs`) ou ambos (`Both`, resolvendo todos os blocos do arquivo), e já o
-    /// prepara (`git add`) como resolvido.
+    /// Resolves the whole file in conflict by choosing our side (`Ours` → `--ours`), theirs
+    /// (`Theirs` → `--theirs`) or both (`Both`, resolving every block of the file), and already
+    /// stages it (`git add`) as resolved.
     pub fn git_resolve_conflict_file(&self, path: &str, choice: ConflictChoice) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         if !safe_rel(path) {
-            return Err(GitError::Failed(format!("caminho inválido: {path}")));
+            return Err(GitError::Failed(t!("Invalid path: {path}", path)));
         }
         let _op = self.inner.git.op.lock();
         match choice {
             ConflictChoice::Ours | ConflictChoice::Theirs => {
                 let side = if choice == ConflictChoice::Ours { "--ours" } else { "--theirs" };
-                // Se o lado escolhido existe no índice (estágio 2 = ours, 3 = theirs), `checkout <side>`
-                // restaura-o; se o arquivo foi deletado naquele lado (ex.: conflito modify/delete),
-                // `git rm` aplica a remoção.
+                // If the chosen side exists in the index (stage 2 = ours, 3 = theirs), `checkout <side>`
+                // restores it; if the file was deleted on that side (e.g. a modify/delete conflict),
+                // `git rm` applies the removal.
                 let stage = if choice == ConflictChoice::Ours { "2" } else { "3" };
                 let has_stage = repo
                     .read(&["ls-files", "-u", "--", path])
@@ -1489,56 +1499,58 @@ impl Core {
             }
             ConflictChoice::Both => {
                 let full = repo.root.join(path);
-                let text = std::fs::read_to_string(&full).map_err(|e| GitError::Failed(format!("falha ao ler {path}: {e}")))?;
+                let text =
+                    std::fs::read_to_string(&full).map_err(|e| GitError::Failed(t!("Failed to read {path}: {error}", path, error = e)))?;
                 let mut cur = text;
                 while let Some(next) = resolve_conflict_block_in_text(&cur, 0, ConflictChoice::Both) {
                     cur = next;
                 }
-                write_atomic(&full, cur.as_bytes()).map_err(|e| GitError::Failed(format!("falha ao gravar {path}: {e}")))?;
+                write_atomic(&full, cur.as_bytes())
+                    .map_err(|e| GitError::Failed(t!("Failed to write {path}: {error}", path, error = e)))?;
                 repo.write(&["add", "--", path], None)?;
             }
         }
         Ok(())
     }
 
-    /// Resolve um único bloco (`block_index`, 0-indexed) de um arquivo em conflito.
+    /// Resolves a single block (`block_index`, 0-indexed) of a file in conflict.
     pub fn git_resolve_conflict_block(&self, path: &str, block_index: usize, choice: ConflictChoice) -> Result<(), GitError> {
         let repo = self.git_repo()?;
         if !safe_rel(path) {
-            return Err(GitError::Failed(format!("caminho inválido: {path}")));
+            return Err(GitError::Failed(t!("Invalid path: {path}", path)));
         }
         let _op = self.inner.git.op.lock();
         let full = repo.root.join(path);
-        let text = std::fs::read_to_string(&full).map_err(|e| GitError::Failed(format!("falha ao ler {path}: {e}")))?;
+        let text = std::fs::read_to_string(&full).map_err(|e| GitError::Failed(t!("Failed to read {path}: {error}", path, error = e)))?;
         let new_text = resolve_conflict_block_in_text(&text, block_index, choice)
-            .ok_or_else(|| GitError::Failed("bloco de conflito não encontrado (o arquivo mudou)".into()))?;
-        write_atomic(&full, new_text.as_bytes()).map_err(|e| GitError::Failed(format!("falha ao gravar {path}: {e}")))?;
+            .ok_or_else(|| GitError::Failed(t!("Conflict block not found (the file changed)").to_owned()))?;
+        write_atomic(&full, new_text.as_bytes()).map_err(|e| GitError::Failed(t!("Failed to write {path}: {error}", path, error = e)))?;
         Ok(())
     }
 
-    /// `git init` no workspace (nunca na pasta pessoal do usuário).
+    /// `git init` in the workspace (never in the user's home folder).
     pub fn git_init(&self) -> Result<(), GitError> {
         let git = self.git_exe().ok_or(GitError::NotInstalled)?;
         let ws = self.workspace();
         if ws.as_os_str().is_empty() {
-            return Err(GitError::Failed("nenhum projeto aberto".into()));
+            return Err(GitError::Failed(t!("No project open").to_owned()));
         }
         if crate::util::same_path(&crate::util::absolutize(&ws), &crate::util::absolutize(&self.inner.home)) {
-            return Err(GitError::Failed("não crio um repositório na sua pasta pessoal; escolha uma pasta de projeto".into()));
+            return Err(GitError::Failed(t!("I do not create a repository in your home folder; choose a project folder").to_owned()));
         }
         run(base_command(&git, &ws, &["init", "-q"]), None, WRITE_TIMEOUT)?;
         Ok(())
     }
 }
 
-/// Grava `bytes` em `path` atomicamente via arquivo temporário na mesma pasta.
+/// Writes `bytes` to `path` atomically through a temporary file in the same folder.
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("tmp");
     let tmp = parent.join(format!(".{name}.agentdeck-tmp"));
     std::fs::write(&tmp, bytes)?;
     if let Err(e) = std::fs::rename(&tmp, path) {
-        // No Windows, `rename` por cima de arquivo existente às vezes exige remover ou tentar de novo.
+        // On Windows, `rename` over an existing file sometimes requires removing it or trying again.
         let _ = std::fs::write(path, bytes);
         let _ = std::fs::remove_file(&tmp);
         if !path.exists() {
@@ -1548,7 +1560,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Lê no máximo `max` bytes do arquivo. Devolve (bytes, cortado).
+/// Reads at most `max` bytes of the file. Returns (bytes, cut).
 fn read_capped(path: &Path, max: usize) -> std::io::Result<(Vec<u8>, bool)> {
     use std::io::Read;
     let mut f = std::fs::File::open(path)?;
@@ -1694,7 +1706,7 @@ mod tests {
                 (DiffKind::Add, None, Some(6)),
             ]
         );
-        // Diff combinado não gera patch de hunk individual.
+        // A combined diff does not produce an individual hunk patch.
         assert!(extract_hunk_patch(&d, 0).is_none());
     }
 
@@ -1814,7 +1826,7 @@ mod tests {
         for bad in ["", "/etc/passwd", "/x", "../x", "a/../b", "a/../../x", "a\\..\\b", "\\\\server\\x", "\\x", "a\0b"] {
             assert!(!safe_rel(bad), "{bad:?}");
         }
-        // Relativo à unidade: `C:..\x` sairia da raiz do repositório.
+        // Relative to the drive: `C:..\x` would leave the repository root.
         if cfg!(windows) {
             for bad in ["C:..\\x", "C:x", "C:\\x", "a:b"] {
                 assert!(!safe_rel(bad), "{bad:?}");
@@ -1823,8 +1835,10 @@ mod tests {
     }
 
     #[test]
-    fn errors_read_in_portuguese() {
+    fn errors_are_explained_in_the_current_language() {
         assert!(GitError::NotInstalled.to_string().contains("git-scm.com"));
         assert!(GitError::Unsafe { path: "/x".into() }.to_string().contains("safe.directory \"/x\""));
+        let pt = crate::i18n::with_lang(crate::i18n::Lang::PtBr, || GitError::NotARepo.to_string());
+        assert_eq!(pt, "A pasta de trabalho não é um repositório git.");
     }
 }

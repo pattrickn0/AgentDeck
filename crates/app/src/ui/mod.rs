@@ -1,5 +1,5 @@
-//! Pintura da interface (equivalente ao `index.html` + `styles.css`).
-//! O layout é calculado à mão para reproduzir as medidas do CSS ao pixel.
+//! Interface painting (the equivalent of `index.html` + `styles.css`).
+//! The layout is computed by hand to reproduce the CSS measurements to the pixel.
 
 mod background;
 mod code;
@@ -31,28 +31,28 @@ use crate::theme;
 
 pub use panes::pane_body;
 
-/// Largura mínima que sobra para o terminal ao lado da barra direita.
+/// Minimum width left for the terminal next to the right bar.
 const TERM_MIN_W: f32 = 360.0;
 
-/// Largura efetiva da barra direita e o máximo que a janela permite agora. O valor salvo não é
-/// alterado: se a janela crescer de novo, a barra volta à largura escolhida.
+/// Effective width of the right bar and the maximum the window allows now. The saved value is
+/// not changed: if the window grows again, the bar returns to the chosen width.
 pub fn right_width(saved: f32, win_w: f32, left: f32) -> (f32, f32) {
     let max = theme::RIGHT_MAX_W.min(win_w * 0.5).min(win_w - left - TERM_MIN_W).max(260.0);
     (saved.max(theme::RIGHT_MIN_W).min(max), max)
 }
 
-/// Desenha a janela inteira.
+/// Draws the whole window.
 pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let window = ui.max_rect();
-    // A cor de destaque do quadro (a do agente em foco) vale para tudo que for desenhado abaixo.
+    // The accent color of the frame (the one of the focused agent) applies to everything drawn below.
     theme::set_accent(deck.accent_opt());
     background::draw(ui.painter(), window, deck.accent());
     theme::sync_selection(ui.ctx(), deck.accent());
     let ctx = ui.ctx().clone();
-    // Cada modal desenhado neste quadro volta a marcar (ver `modal_backdrop`).
+    // Each modal drawn in this frame sets it again (see `modal_backdrop`).
     deck.modal_open = false;
 
-    // ---------- Layout: barra de título em cima; embaixo, as ilhas (barra esquerda | centro | barra direita) ----------
+    // ---------- Layout: title bar on top; below, the islands (left bar | center | right bar) ----------
     let gap = theme::ISLAND_GAP;
     let titlebar = Rect::from_min_size(window.min, Vec2::new(window.width(), theme::TITLEBAR_H));
     let body = Rect::from_min_max(Pos2::new(window.min.x + gap, titlebar.max.y), Pos2::new(window.max.x - gap, window.max.y - gap));
@@ -62,11 +62,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     let (right_w, right_max) = right_width(deck.right_w, body.width(), left + gap);
     let center = Rect::from_min_max(Pos2::new(body.min.x + left, body.min.y), Pos2::new(body.max.x - right_w - gap, body.max.y));
     let side = Rect::from_min_size(body.min, Vec2::new(sw, body.height()));
-    // A barra tem sempre a mesma largura: as listas e o diff do Git rolam dentro dela.
+    // The bar always has the same width: the lists and the Git diff scroll inside it.
     let panel = Rect::from_min_max(Pos2::new(body.max.x - right_w, body.min.y), body.max);
     deck.right_panel_rect = Some(panel);
 
-    // ---------- Sombras das ilhas (todas antes de qualquer fundo, só fora das ilhas) ----------
+    // ---------- Island shadows (all before any background, only outside the islands) ----------
     deck.docs.sync(&deck.active_project);
     let docs_mode = deck.docs.view == crate::docs::CenterView::Docs;
     let mut islands = if docs_mode { vec![center] } else { panes::island_rects(deck, center) };
@@ -76,9 +76,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     }
     island_shadows(ui.painter(), Rect::from_min_max(Pos2::new(window.min.x, titlebar.max.y), window.max), &islands);
 
-    // ---------- Centro: os terminais (tela dividida por tipo de agente) ou os documentos ----------
+    // ---------- Center: the terminals (split by agent type) or the documents ----------
     if docs_mode {
-        // Os terminais continuam rodando escondidos, e o PTY não é redimensionado: sem `fit_tab` aqui.
+        // The terminals keep running hidden, and the PTY is not resized: no `fit_tab` here.
         deck.terminal_rect = Some(panes::pane_body(center));
         deck.panes.clear();
         deck.pane_drag = None;
@@ -89,24 +89,24 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
         panes::draw(deck, ui, center);
     }
 
-    // ---------- Barra lateral ----------
+    // ---------- Sidebar ----------
     if !collapsed {
         island(ui, side, IslandKind::Glass);
         sidebar::draw(deck, ui, side);
         island_edge(ui, side, IslandKind::Glass);
     }
 
-    // ---------- Barra de título ----------
+    // ---------- Title bar ----------
     let menus = titlebar::draw(deck, ui, titlebar);
 
-    // ---------- Divisores (por último no fundo: ganham o clique na fresta entre as ilhas) ----------
+    // ---------- Splitters (last in the background: they get the click in the gap between the islands) ----------
     if !collapsed {
         sidebar::splitter(deck, ui, Rect::from_min_size(Pos2::new(side.max.x, body.min.y), Vec2::new(gap, body.height())), body);
     }
     let line = Rect::from_min_size(Pos2::new(center.max.x, body.min.y), Vec2::new(gap, body.height()));
     right_panel::splitter(deck, ui, line, body, right_w, right_max);
 
-    // ---------- Barra direita (numa camada acima dos terminais) ----------
+    // ---------- Right bar (on a layer above the terminals) ----------
     egui::Area::new(Id::new("right-panel")).order(Order::Middle).fixed_pos(panel.min).show(&ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(panel.size(), Sense::hover());
         island(ui, rect, IslandKind::Glass);
@@ -114,7 +114,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
         island_edge(ui, rect, IslandKind::Glass);
     });
 
-    // ---------- Menus suspensos e overlay ----------
+    // ---------- Popup menus and overlay ----------
     menus::new_tab_menu(deck, &ctx, projects::new_agent_anchor(&ctx, menus.fallback_anchor));
     menus::settings_menu(deck, &ctx, menus.settings_anchor);
     menus::tab_context_menu(deck, &ctx);
@@ -124,7 +124,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     shortcuts::shortcuts_modal(deck, &ctx);
     overlay::drop_overlay(deck, &ctx, window);
 
-    // Um campo de texto do egui (ex.: formulário de tarefa ou commit) tem foco de teclado → o terminal não.
+    // An egui text field (e.g. the task form or the commit) has keyboard focus → the terminal does not.
     let egui_focus = ctx.memory(|m| m.focused());
     if egui_focus.is_some() {
         deck.term_focus = false;
@@ -133,10 +133,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
 }
 
 // ---------------------------------------------------------------------------
-// Ilhas
+// Islands
 // ---------------------------------------------------------------------------
 
-/// O jeito de uma ilha: vidro translúcido (barras) ou o poço quase sólido do terminal.
+/// The look of an island: translucent glass (bars) or the almost solid well of the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IslandKind {
     Glass,
@@ -156,7 +156,7 @@ fn island_radius() -> f32 {
     theme::ISLAND_RADIUS as f32
 }
 
-/// `area` menos cada retângulo de `holes`: sobram só as frestas e margens, onde a sombra pode aparecer.
+/// `area` minus each rectangle of `holes`: only the gaps and margins are left, where the shadow can show.
 pub fn free_rects(area: Rect, holes: &[Rect]) -> Vec<Rect> {
     let mut free = vec![area];
     for hole in holes {
@@ -187,33 +187,33 @@ pub fn free_rects(area: Rect, holes: &[Rect]) -> Vec<Rect> {
     free
 }
 
-/// Sombra suave (y 8, desfoque 24) de cada ilha, só nas frestas e margens de `area`: o vidro é
-/// translúcido, então uma sombra por baixo dele o escureceria (no CSS ela é recortada por dentro).
+/// Soft shadow (y 8, blur 24) of each island, only in the gaps and margins of `area`: the glass is
+/// translucent, so a shadow under it would darken it (in the CSS it is clipped inside).
 pub fn island_shadows(painter: &Painter, area: Rect, islands: &[Rect]) {
     let shape =
         |r: Rect| egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: theme::pal().shadow }.as_shape(r, theme::ISLAND_RADIUS);
     for free in free_rects(area, islands) {
         let clipped = painter.with_clip_rect(free.intersect(painter.clip_rect()));
-        // Só as ilhas cuja sombra (até 32 px) alcança esta sobra.
+        // Only the islands whose shadow (up to 32 px) reaches this leftover.
         for r in islands.iter().filter(|r| r.expand(32.0).intersects(free)) {
             clipped.add(shape(*r));
         }
     }
 }
 
-/// Fundo de uma ilha: cantos de 10 px. Desenhe o conteúdo depois e chame [`island_edge`] por último.
+/// Background of an island: 10 px corners. Draw the content afterwards and call [`island_edge`] last.
 pub fn island(ui: &Ui, rect: Rect, kind: IslandKind) {
     ui.painter().rect_filled(rect, island_radius(), kind.fill());
 }
 
-/// Acabamento de uma ilha, depois do conteúdo: repinta o fundo nos quatro cantos (o conteúdo é
-/// retangular e vazaria pelo arredondado), a borda de 1 px e, no vidro, o filete de luz no topo interno.
+/// Finish of an island, after the content: repaints the background at the four corners (the content is
+/// rectangular and would leak through the rounded corner), the 1 px border and, on glass, the light line at the inner top.
 pub fn island_edge(ui: &Ui, rect: Rect, kind: IslandKind) {
     let painter = ui.painter();
     let window = ui.ctx().content_rect();
     let accent = theme::accent();
     let r = island_radius();
-    // Cada canto: o leque entre o vértice do quadrado e o arco do círculo de canto.
+    // Each corner: the fan between the square's vertex and the arc of the corner circle.
     let mut mesh = egui::epaint::Mesh::default();
     for (corner, dx, dy) in
         [(rect.left_top(), 1.0, 1.0), (rect.right_top(), -1.0, 1.0), (rect.left_bottom(), 1.0, -1.0), (rect.right_bottom(), -1.0, -1.0)]
@@ -225,7 +225,7 @@ pub fn island_edge(ui: &Ui, rect: Rect, kind: IslandKind) {
         };
         let apex = vertex(corner);
         const STEPS: usize = 8;
-        // Do ponto sobre a borda vertical até o ponto sobre a borda horizontal.
+        // From the point on the vertical edge to the point on the horizontal edge.
         let arc: Vec<u32> = (0..=STEPS)
             .map(|i| {
                 let th = i as f32 / STEPS as f32 * std::f32::consts::FRAC_PI_2;
@@ -237,7 +237,7 @@ pub fn island_edge(ui: &Ui, rect: Rect, kind: IslandKind) {
         }
     }
     painter.add(egui::Shape::mesh(mesh));
-    // Filete no topo interno, entre os cantos (só o vidro tem; o poço não).
+    // Inner line at the top, between the corners (only glass has it; the well does not).
     if kind == IslandKind::Glass {
         painter.line_segment(
             [Pos2::new(rect.min.x + r, rect.min.y + 1.0), Pos2::new(rect.max.x - r, rect.min.y + 1.0)],
@@ -248,12 +248,12 @@ pub fn island_edge(ui: &Ui, rect: Rect, kind: IslandKind) {
 }
 
 // ---------------------------------------------------------------------------
-// Utilitários de pintura
+// Painting utilities
 // ---------------------------------------------------------------------------
 
-/// Fundo escurecido de um modal. Fica numa camada acima de tudo menos do próprio modal e segura o
-/// clique, o arrasto e o hover do que está atrás; marca `modal_open`, que tira o teclado do
-/// terminal e dos atalhos do app enquanto o modal está aberto.
+/// Darkened background of a modal. It sits on a layer above everything except the modal itself and holds
+/// the click, the drag and the hover of what is behind; it sets `modal_open`, which takes the keyboard away from
+/// the terminal and from the app shortcuts while the modal is open.
 pub fn modal_backdrop(deck: &mut Deck, ctx: &egui::Context, id: &str) {
     deck.modal_open = true;
     let screen = ctx.content_rect();
@@ -263,44 +263,44 @@ pub fn modal_backdrop(deck: &mut Deck, ctx: &egui::Context, id: &str) {
     });
 }
 
-/// Texto numa linha (sem quebra).
+/// Text on a single line (no wrapping).
 pub fn galley(painter: &Painter, text: &str, font: FontId, color: Color32) -> Arc<Galley> {
     painter.layout_no_wrap(text.to_owned(), font, color)
 }
 
-/// Texto numa linha com reticências (`text-overflow: ellipsis`).
+/// Text on a single line with an ellipsis (`text-overflow: ellipsis`).
 pub fn galley_trunc(painter: &Painter, text: &str, font: FontId, color: Color32, max_w: f32) -> Arc<Galley> {
     let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
     job.wrap = egui::text::TextWrapping { max_width: max_w.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     painter.layout_job(job)
 }
 
-/// Texto numa linha com espaçamento extra entre as letras (`letter-spacing`, em px).
+/// Text on a single line with extra spacing between the letters (`letter-spacing`, in px).
 pub fn galley_spaced(painter: &Painter, text: &str, font: FontId, color: Color32, spacing: f32) -> Arc<Galley> {
     let mut job = egui::text::LayoutJob::default();
     job.append(text, 0.0, egui::TextFormat { font_id: font, color, extra_letter_spacing: spacing, ..Default::default() });
     painter.layout_job(job)
 }
 
-/// Largura do texto numa linha.
+/// Width of the text on a single line.
 pub fn text_w(painter: &Painter, text: &str, font: FontId) -> f32 {
     galley(painter, text, font, Color32::WHITE).size().x
 }
 
-/// Pinta a galley alinhada dentro de `rect` (centralizada verticalmente) e devolve o retângulo ocupado.
+/// Paints the galley aligned inside `rect` (vertically centered) and returns the rectangle it occupies.
 pub fn place(painter: &Painter, rect: Rect, align: Align2, g: Arc<Galley>, color: Color32) -> Rect {
     let r = align.align_size_within_rect(g.size(), rect);
     painter.galley(r.min, g, color);
     r
 }
 
-/// Texto alinhado dentro de um retângulo.
+/// Text aligned inside a rectangle.
 pub fn text_in(painter: &Painter, rect: Rect, align: Align2, text: &str, font: FontId, color: Color32) -> Rect {
     let g = galley(painter, text, font, color);
     place(painter, rect, align, g, color)
 }
 
-/// `.dot` (8×8, círculo).
+/// `.dot` (8×8, circle).
 pub fn dot(painter: &Painter, center: Pos2, color: Color32) {
     painter.circle_filled(center, 4.0, color);
 }
@@ -311,7 +311,7 @@ pub fn shadow(painter: &Painter, rect: Rect, radius: u8, offset_y: i8, blur: u8,
     painter.add(s.as_shape(rect, radius));
 }
 
-/// Área clicável com cursor de mão (como `cursor: pointer`).
+/// Clickable area with a hand cursor (like `cursor: pointer`).
 pub fn clickable(ui: &Ui, rect: Rect, id: Id) -> Response {
     let r = ui.interact(rect, id, Sense::click());
     if r.hovered() {
@@ -320,7 +320,7 @@ pub fn clickable(ui: &Ui, rect: Rect, id: Id) -> Response {
     r
 }
 
-/// Tooltip no estilo do atributo `title`.
+/// Tooltip in the style of the `title` attribute.
 pub fn tip(resp: Response, text: impl Into<String>) -> Response {
     let text = text.into();
     resp.on_hover_ui(|ui| {
@@ -328,7 +328,7 @@ pub fn tip(resp: Response, text: impl Into<String>) -> Response {
     })
 }
 
-/// O fio de 2 px no meio de uma fresta entre ilhas (vertical ou horizontal, conforme a fresta).
+/// The 2 px wire in the middle of a gap between islands (vertical or horizontal, according to the gap).
 fn splitter_wire(line: Rect) -> Rect {
     if line.width() < line.height() {
         Rect::from_center_size(line.center(), Vec2::new(2.0, line.height()))
@@ -337,8 +337,8 @@ fn splitter_wire(line: Rect) -> Rect {
     }
 }
 
-/// Divisor arrastável entre as ilhas (`line` é a fresta inteira): só aparece ao passar o mouse ou
-/// arrastar, como um fio que brilha na cor do agente ativo.
+/// Draggable splitter between the islands (`line` is the whole gap): it only shows on hover or
+/// drag, like a wire that glows in the active agent's color.
 pub fn paint_splitter(painter: &Painter, line: Rect, hot: bool, color: Color32) {
     if !hot {
         return;
@@ -351,22 +351,22 @@ pub fn paint_splitter(painter: &Painter, line: Rect, hot: bool, color: Color32) 
     painter.rect_filled(wire, 1.0, color);
 }
 
-/// Moldura arredondada com borda de 1px.
+/// Rounded frame with a 1 px border.
 pub fn frame(painter: &Painter, rect: Rect, radius: f32, fill: Color32, border: Color32) {
     painter.rect(rect, radius, fill, Stroke::new(1.0, border), egui::StrokeKind::Inside);
 }
 
 // ---------------------------------------------------------------------------
-// Componentes comuns (para as partes 2 e 3 do visual)
+// Common components (for parts 2 and 3 of the visual)
 // ---------------------------------------------------------------------------
 
-/// Linha divisória de 1 px dentro de uma ilha, de `a` até `b` (horizontal ou vertical).
+/// 1 px divider line inside an island, from `a` to `b` (horizontal or vertical).
 pub fn separator(painter: &Painter, a: Pos2, b: Pos2) {
     painter.line_segment([a, b], Stroke::new(1.0, theme::pal().separator));
 }
 
-/// Etiqueta (branch, contador): fundo `chip`, cantos de 4 px, texto em IBM Plex Mono. `at` é a
-/// ponta esquerda, centrada na vertical em `at.y`; devolve o retângulo ocupado.
+/// Label (branch, counter): `chip` background, 4 px corners, IBM Plex Mono text. `at` is the
+/// left tip, vertically centered on `at.y`; returns the rectangle it occupies.
 pub fn chip(painter: &Painter, at: Pos2, text: &str, size: f32, color: Color32) -> Rect {
     let g = galley(painter, text, theme::meta(size), color);
     let rect = Rect::from_min_size(Pos2::new(at.x, at.y - 7.0), Vec2::new(g.size().x + 12.0, 14.0));
@@ -375,12 +375,12 @@ pub fn chip(painter: &Painter, at: Pos2, text: &str, size: f32, color: Color32) 
     rect
 }
 
-/// Altura de uma linha de [`section_label`].
+/// Height of a [`section_label`] row.
 pub const SECTION_LABEL_H: f32 = 22.0;
 
-/// Rótulo de seção ("PROJETOS"): IBM Plex Mono Medium 10 px, MAIÚSCULAS, `text_3`, com 0,1 em de
-/// espaçamento, 22 px de altura e 10 px de margem. `rect` é a linha (só `min` e a largura contam);
-/// devolve o retângulo da linha.
+/// Section label ("PROJECTS"): IBM Plex Mono Medium 10 px, UPPERCASE, `text_3`, with 0.1 em of
+/// spacing, 22 px of height and 10 px of margin. `rect` is the row (only `min` and the width count);
+/// returns the row's rectangle.
 pub fn section_label(painter: &Painter, rect: Rect, text: &str) -> Rect {
     let row = Rect::from_min_size(rect.min, Vec2::new(rect.width(), SECTION_LABEL_H));
     let color = theme::pal().text_3;
@@ -389,9 +389,9 @@ pub fn section_label(painter: &Painter, rect: Rect, text: &str) -> Rect {
     row
 }
 
-/// Controle segmentado ("Abas | Dividida | Destaque"): trilho `recess` (cantos 7), segmentos de
-/// cantos 5. O ativo leva a cor de destaque com texto `on_accent` (`accent = true`) ou o fundo
-/// `selected` com texto `text_strong` (`accent = false`). Devolve o índice clicado, se houve.
+/// Segmented control ("Tabs | Split | Highlight"): `recess` track (7 px corners), segments with
+/// 5 px corners. The active one takes the accent color with `on_accent` text (`accent = true`) or the
+/// `selected` background with `text_strong` text (`accent = false`). Returns the clicked index, if any.
 pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, accent: bool) -> Option<usize> {
     let painter = ui.painter();
     let p = theme::pal();
@@ -421,18 +421,18 @@ pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, a
     clicked
 }
 
-/// O jeito de um botão de texto.
+/// The look of a text button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
-    /// Cor de destaque, texto `on_accent`, 600.
+    /// Accent color, `on_accent` text, 600.
     Primary,
-    /// Borda branca 14%, fundo branco 4%.
+    /// White border 14%, white background 4%.
     Secondary,
-    /// Só o texto (`text_2`); o fundo `hover` aparece ao passar o mouse.
+    /// Only the text (`text_2`); the `hover` background shows up on hover.
     Ghost,
 }
 
-/// Botão de texto (cantos 5). Devolve a resposta; quem chama trata o clique.
+/// Text button (5 px corners). Returns the response; the caller handles the click.
 pub fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: ButtonKind) -> Response {
     let r = clickable(ui, rect, id);
     let painter = ui.painter();
@@ -459,7 +459,7 @@ pub fn button(ui: &Ui, rect: Rect, id: Id, label: &str, kind: ButtonKind) -> Res
     r
 }
 
-/// Botão destrutivo (fundo `danger`, texto `on_accent`, cantos 5).
+/// Destructive button (`danger` background, `on_accent` text, 5 px corners).
 pub fn button_danger(ui: &Ui, rect: Rect, id: Id, label: &str) -> Response {
     let r = clickable(ui, rect, id);
     let painter = ui.painter();
@@ -470,16 +470,16 @@ pub fn button_danger(ui: &Ui, rect: Rect, id: Id, label: &str) -> Response {
     r
 }
 
-/// Largura de um botão de texto com `label` (10 px de cada lado).
+/// Width of a text button with `label` (10 px on each side).
 pub fn button_width(painter: &Painter, label: &str, kind: ButtonKind) -> f32 {
     let font = if kind == ButtonKind::Primary { theme::ui_semibold(11.5) } else { theme::ui(11.5) };
     text_w(painter, label, font) + 20.0
 }
 
-/// Como uma fileira de abas em pílula cabe em `avail` px: o espaço interno de cada aba (somado dos dois lados) e a
-/// largura máxima de cada rótulo. `texts` são as larguras dos rótulos; `fixed`, o que cada aba tem além do rótulo e do
-/// espaço interno (o selo); `gap`, o espaço entre as abas. Primeiro o espaço interno encolhe de `pad_max` até `pad_min`;
-/// se ainda não couber, os rótulos mais longos são encurtados (com reticências) por igual, menos o da aba `keep`.
+/// How a row of pill tabs fits in `avail` px: the inner space of each tab (summed on both sides) and the
+/// maximum width of each label. `texts` are the label widths; `fixed`, what each tab has besides the label and the
+/// inner space (the badge); `gap`, the space between the tabs. First the inner space shrinks from `pad_max` down to `pad_min`;
+/// if it still does not fit, the longest labels are shortened (with an ellipsis) by the same amount, except the one of the `keep` tab.
 pub fn fit_pills(texts: &[f32], fixed: &[f32], avail: f32, pad: (f32, f32), gap: f32, keep: Option<usize>) -> (f32, Vec<f32>) {
     let n = texts.len() as f32;
     let (pad_min, pad_max) = pad;
@@ -493,7 +493,7 @@ pub fn fit_pills(texts: &[f32], fixed: &[f32], avail: f32, pad: (f32, f32), gap:
     if text_sum <= room {
         return (pad, texts.to_vec());
     }
-    // Teto comum dos rótulos encurtáveis: o maior `c` com soma(min(t, c)) <= o que sobra para eles.
+    // Common cap of the shortenable labels: the largest `c` with sum(min(t, c)) <= what is left for them.
     let kept = keep.map_or(0.0, |k| texts[k]);
     let mut others: Vec<f32> = texts.iter().enumerate().filter(|(i, _)| Some(*i) != keep).map(|(_, &t)| t).collect();
     others.sort_by(f32::total_cmp);
@@ -519,12 +519,12 @@ mod tests {
 
     #[test]
     fn the_pills_shrink_the_padding_and_then_the_longest_labels() {
-        // Cabe com folga: espaço interno máximo e rótulos inteiros.
+        // It fits with room to spare: maximum inner space and whole labels.
         assert_eq!(fit_pills(&[40.0, 50.0], &[0.0, 0.0], 300.0, (6.0, 16.0), 2.0, None), (16.0, vec![40.0, 50.0]));
-        // Aperta: o espaço interno encolhe primeiro.
+        // Tight: the inner space shrinks first.
         let (pad, w) = fit_pills(&[40.0, 50.0], &[0.0, 0.0], 112.0, (6.0, 16.0), 2.0, None);
         assert_eq!((pad, w), (10.0, vec![40.0, 50.0]));
-        // Não cabe nem com o mínimo: encurta o mais longo, nunca o da aba ativa.
+        // It does not fit even at the minimum: shortens the longest one, never the active tab's.
         let (pad, w) = fit_pills(&[40.0, 50.0, 60.0], &[10.0, 0.0, 0.0], 150.0, (6.0, 16.0), 2.0, Some(2));
         assert_eq!(pad, 6.0);
         assert_eq!(w[2], 60.0);
@@ -536,11 +536,11 @@ mod tests {
 
     #[test]
     fn the_right_panel_keeps_room_for_the_terminal() {
-        // Janela larga: a largura salva vale (respeitando o mínimo e o máximo).
+        // Wide window: the saved width counts (respecting the minimum and the maximum).
         assert_eq!(right_width(380.0, 1280.0, 221.0), (380.0, 640.0));
         assert_eq!(right_width(100.0, 1280.0, 221.0).0, theme::RIGHT_MIN_W);
         assert_eq!(right_width(900.0, 1280.0, 221.0).0, 640.0);
-        // Janela estreita: o terminal fica com pelo menos TERM_MIN_W, e a barra com pelo menos 260.
+        // Narrow window: the terminal keeps at least TERM_MIN_W, and the bar at least 260.
         let (w, max) = right_width(380.0, 820.0, 221.0);
         assert_eq!((w, max), (260.0, 260.0));
         assert!(820.0 - 221.0 - w >= 300.0);
@@ -562,7 +562,7 @@ mod tests {
         let islands = [rect(6.0, 0.0, 40.0, 44.0), rect(46.0, 0.0, 94.0, 44.0)];
         let free = free_rects(area, &islands);
         assert_eq!(area_of(&free), 100.0 * 50.0 - 34.0 * 44.0 - 48.0 * 44.0);
-        // Nada sobra dentro de uma ilha.
+        // Nothing is left inside an island.
         for f in &free {
             assert!(islands.iter().all(|i| i.intersect(*f).width() <= 0.0 || i.intersect(*f).height() <= 0.0));
         }

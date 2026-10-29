@@ -1,7 +1,7 @@
-//! Tokens visuais (paleta semântica), fontes e estilo do egui.
+//! Visual tokens (semantic palette), fonts and egui styling.
 //!
-//! As cores vêm de [`Palette`]: o app lê sempre `theme::pal()`, e um tema novo só troca a paleta
-//! devolvida ali. A cor de destaque não é da paleta: é a do agente ativo (ver [`accent`]).
+//! Colors come from [`Palette`]: the app always reads `theme::pal()`, and a new theme only swaps the palette
+//! returned there. The accent color is not in the palette: it belongs to the active agent (see [`accent`]).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -9,67 +9,67 @@ use std::sync::Arc;
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId};
 
-// ---------- Paleta ----------
+// ---------- Palette ----------
 
-/// Cores semânticas da interface. Os nomes dizem o papel, não o valor.
+/// Semantic colors of the interface. Names describe role, not value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
-    /// Fundo da janela, por trás das ilhas.
+    /// Window background behind islands.
     pub bg: Color32,
-    /// Fundo das ilhas de vidro (barras esquerda e direita).
+    /// Background of glass islands (left and right sidebars).
     pub glass: Color32,
-    /// Borda de 1 px das ilhas.
+    /// 1 px island border.
     pub glass_border: Color32,
-    /// Filete de 1 px no topo interno das ilhas.
+    /// 1 px highlight at internal top of islands.
     pub glass_highlight: Color32,
-    /// Ilha central (o terminal, quase sólido).
+    /// Center island (the terminal, nearly opaque).
     pub well: Color32,
-    /// Faixa de abas do centro.
+    /// Center tab strip.
     pub strip: Color32,
-    /// Linhas divisórias dentro das ilhas.
+    /// Divider lines inside islands.
     pub separator: Color32,
-    /// Linhas-guia da árvore.
+    /// Tree guide lines.
     pub guide: Color32,
     pub hover: Color32,
-    /// Seleção neutra (segmento ativo sem destaque, aba "Tarefas").
+    /// Neutral selection (active segment without accent, "Tasks" tab).
     pub selected: Color32,
-    /// Arquivo selecionado.
+    /// Selected file.
     pub selected_soft: Color32,
-    /// Trilho dos controles segmentados e fundo de campos de texto.
+    /// Track for segmented controls and text field background.
     pub recess: Color32,
-    /// Etiquetas (branch, contadores) e fundo de botões discretos.
+    /// Badges (branch, counters) and subtle button background.
     pub chip: Color32,
-    /// Menus, modais e dicas: precisam ser opacos.
+    /// Menus, modals and tooltips: must be opaque.
     pub popup: Color32,
     pub text: Color32,
-    /// Texto selecionado.
+    /// Selected text.
     pub text_strong: Color32,
     pub text_2: Color32,
-    /// Rótulos de seção e metadados.
+    /// Section labels and metadata.
     pub text_3: Color32,
-    /// Entre `text` e `text_2`: valores e etiquetas (percentual de uso, nome da branch).
+    /// Between `text` and `text_2`: values and badges (usage percentage, branch name).
     pub text_soft: Color32,
-    /// Separadores de texto ("/").
+    /// Text separators ("/").
     pub text_faint: Color32,
-    /// Texto sobre a cor de destaque.
+    /// Text over accent color.
     pub on_accent: Color32,
-    /// Destaque quando não há aba em foco (cinza claro).
+    /// Accent when no tab is focused (light gray).
     pub accent_neutral: Color32,
     pub danger: Color32,
     pub danger_text: Color32,
     pub success: Color32,
     pub warning: Color32,
-    /// Azul de informação (arquivo renomeado, hash de commit, link).
+    /// Information blue (renamed file, commit hash, link).
     pub info: Color32,
-    /// Película escura atrás de um modal.
+    /// Dark backdrop behind a modal.
     pub scrim: Color32,
-    /// Brilho de baixo à direita do fundo (branco, 3,5%).
+    /// Bottom-right background glow (white, 3.5%).
     pub glow: Color32,
-    /// Cor de quem escreve na Conversa ("você"): identidade, não estado.
+    /// Color of user messages in Chat ("you"): identity, not state.
     pub user: Color32,
-    /// Sombra das ilhas.
+    /// Island shadows.
     pub shadow: Color32,
-    /// Realce de sintaxe (arquivos e diff do modo Documentos; ver `highlight.rs`).
+    /// Syntax highlighting (Documents mode files and diff; see `highlight.rs`).
     pub syn_keyword: Color32,
     pub syn_type: Color32,
     pub syn_function: Color32,
@@ -84,7 +84,7 @@ const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
-/// `rgba(r, g, b, a)` do CSS, com o alfa em 0..=255.
+/// CSS `rgba(r, g, b, a)`, with alpha in 0..=255.
 const fn rgba8(r: u8, g: u8, b: u8, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied_const(r, g, b, a)
 }
@@ -93,7 +93,7 @@ const fn white(a: u8) -> Color32 {
     rgba8(255, 255, 255, a)
 }
 
-/// O tema escuro (a direção "C": cinza no estilo GitHub com vidro leve).
+/// Dark theme (direction "C": GitHub-style gray with subtle glass).
 pub const DARK: Palette = Palette {
     bg: rgb(0x16181c),
     glass: rgba8(44, 47, 54, 128),
@@ -136,13 +136,13 @@ pub const DARK: Palette = Palette {
     syn_meta: rgb(0xe3b341),
 };
 
-/// A paleta em uso. Um tema novo troca só o que esta função devolve.
+/// Active palette. A new theme changes only what this function returns.
 pub fn pal() -> &'static Palette {
     &DARK
 }
 
 impl Palette {
-    /// A cor de um pedaço de código; o que não tem categoria fica com `plain`.
+    /// Color of a code token; tokens without a category use `plain`.
     pub fn syn(&self, tok: crate::highlight::Tok, plain: Color32) -> Color32 {
         use crate::highlight::Tok;
         match tok {
@@ -158,8 +158,8 @@ impl Palette {
         }
     }
 
-    /// A cor do texto e a do fundo de um pedaço de código com a marca da busca: o achado leva um fundo âmbar, e o atual
-    /// um mais forte com o texto escuro (o comentário cinza não se lê sobre âmbar).
+    /// Text and background color for a code token with search highlighting: found matches get amber background,
+    /// current match gets a stronger background with dark text (gray comments are unreadable on amber).
     pub fn syn_mark(&self, tok: crate::highlight::Tok, mark: crate::highlight::Mark, plain: Color32) -> (Color32, Color32) {
         use crate::highlight::Mark;
         match mark {
@@ -170,26 +170,26 @@ impl Palette {
     }
 }
 
-// ---------- Cores dos agentes (não são da paleta: identificam o agente) ----------
+// ---------- Agent colors (not in palette: identify each agent) ----------
 
 pub const CLAUDE: Color32 = rgb(0xd97757);
 pub const ANTIGRAVITY: Color32 = rgb(0x4f8cf7);
 pub const SHELL: Color32 = rgb(0x9aa0a6);
 
-// ---------- Cor de destaque = cor do agente ativo ----------
+// ---------- Accent color = active agent color ----------
 
-/// Bit que diz que há uma cor guardada (sem ele, vale o cinza neutro).
+/// Bit indicating a color is set (without it, neutral gray applies).
 const ACCENT_SET: u32 = 1 << 24;
 static ACCENT: AtomicU32 = AtomicU32::new(0);
 
-/// Cor de destaque do quadro: a do agente em foco, ou o cinza neutro sem aba. Quem desenha a janela
-/// (`ui::draw`) a atualiza no começo de cada quadro com [`set_accent`]. Nunca use uma cor fixa de
-/// marca para seleção ou ação primária.
+/// Frame accent color: focused agent's color, or neutral gray when no tab is open. Window rendering
+/// (`ui::draw`) updates this at the start of each frame via [`set_accent`]. Never use a fixed brand
+/// color for selection or primary action.
 pub fn accent() -> Color32 {
     unpack_accent(ACCENT.load(Ordering::Relaxed))
 }
 
-/// A cor guardada (ou o neutro, sem o bit de "há cor").
+/// The stored color (or neutral, without the "color set" bit).
 fn unpack_accent(v: u32) -> Color32 {
     if v & ACCENT_SET == 0 {
         return pal().accent_neutral;
@@ -201,28 +201,28 @@ fn pack_accent(c: Option<Color32>) -> u32 {
     c.map_or(0, |c| ACCENT_SET | (c.r() as u32) << 16 | (c.g() as u32) << 8 | c.b() as u32)
 }
 
-/// Guarda a cor de destaque do quadro (`None`: sem aba em foco).
+/// Stores the frame accent color (`None`: no focused tab).
 pub fn set_accent(c: Option<Color32>) {
     ACCENT.store(pack_accent(c), Ordering::Relaxed);
 }
 
-/// Destaque a 18% de alfa: fundo da linha selecionada.
-#[allow(dead_code)] // Para a parte 2 (linha selecionada).
+/// Accent at 18% alpha: selected row background.
+#[allow(dead_code)] // For part 2 (selected row).
 pub fn accent_soft(a: Color32) -> Color32 {
     with_alpha(a, 0.18)
 }
 
-/// Destaque a 10% de alfa: fundo de um cartão em foco.
+/// Accent at 10% alpha: focused card background.
 pub fn accent_wash(a: Color32) -> Color32 {
     with_alpha(a, 0.10)
 }
 
-/// Destaque a 50% de alfa: borda de um cartão em foco.
+/// Accent at 50% alpha: focused card border.
 pub fn accent_edge(a: Color32) -> Color32 {
     with_alpha(a, 0.50)
 }
 
-// ---------- Terminal (tema do xterm) ----------
+// ---------- Terminal (xterm theme) ----------
 
 pub const TERM_BG: Color32 = rgb(0x16181c);
 pub const TERM_FG: Color32 = rgb(0xe6e8eb);
@@ -230,45 +230,45 @@ pub const TERM_CURSOR: Color32 = rgb(0xe6e8eb);
 pub const TERM_SELECTION: Color32 = rgb(0x2f3542);
 pub const TERM_FONT_SIZE: f32 = 14.0;
 
-// ---------- Métricas ----------
+// ---------- Metrics ----------
 
-/// Tamanho base do texto da interface.
+/// Base font size for UI text.
 pub const UI_FONT_SIZE: f32 = 12.0;
 pub const LINE_HEIGHT: f32 = 1.45;
-/// Barra de título própria (a janela não tem decoração do sistema), sem fundo.
+/// Custom titlebar (window has no system decoration), without background.
 pub const TITLEBAR_H: f32 = 32.0;
-/// Margem da janela e espaço entre as ilhas.
+/// Window margin and island gap.
 pub const ISLAND_GAP: f32 = 6.0;
-/// Cantos arredondados das ilhas.
+/// Island corner radius.
 pub const ISLAND_RADIUS: u8 = 10;
-/// Janela do agente selecionado (Dividida e Destaque): halo de 3 px na cor do agente (a 18%)...
+/// Selected agent window (Split and Highlight): 3 px halo in agent color (at 18%)...
 pub const PANE_HALO_W: f32 = 3.0;
-/// ...e o conteúdo das outras janelas a 62% de opacidade (voltam a 100% com o mouse em cima).
+/// ...and other windows dimmed to 62% opacity (restored to 100% on hover).
 pub const PANE_DIM_OPACITY: f32 = 0.62;
-/// Cabeçalho da barra direita (abas Tarefas/Conversa/Git/GitHub).
+/// Right sidebar header (Tasks/Chat/Git/GitHub tabs).
 pub const TOPBAR_H: f32 = 32.0;
 pub const SIDEBAR_DEFAULT_W: f32 = 220.0;
 pub const SIDEBAR_MIN_W: f32 = 150.0;
 pub const SIDEBAR_MAX_W: f32 = 480.0;
-/// Barra lateral direita (Conversa integrada): não recolhe, só muda de largura.
+/// Right sidebar (Unified chat): does not collapse, only resizes.
 pub const RIGHT_DEFAULT_W: f32 = 330.0;
 pub const RIGHT_MIN_W: f32 = 280.0;
-/// Padrão anterior (380): quem nunca arrastou a barra tinha esse valor salvo e passa ao novo padrão.
+/// Previous default (380): users who never dragged the bar had this saved and upgrade to new default.
 pub const RIGHT_OLD_DEFAULT_W: f32 = 380.0;
 pub const RIGHT_MAX_W: f32 = 640.0;
 
-/// Cor CSS com alfa (`rgba(r, g, b, a)`).
+/// CSS color with alpha (`rgba(r, g, b, a)`).
 pub fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, (a.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
-/// A mesma cor com outro alfa (0..=1), sem herdar o que já tinha.
+/// Same color with replacement alpha (0..=1), without inheriting previous alpha.
 pub fn with_alpha(c: Color32, alpha: f32) -> Color32 {
     let [r, g, b, _] = c.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(r, g, b, (alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
-/// Converte `#rgb`, `#rrggbb` ou `#rrggbbaa` em [`Color32`].
+/// Converts `#rgb`, `#rrggbb` or `#rrggbbaa` to [`Color32`].
 pub fn parse_hex_color(s: &str) -> Option<Color32> {
     let h = s.trim().strip_prefix('#')?;
     if !h.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -286,33 +286,33 @@ pub fn parse_hex_color(s: &str) -> Option<Color32> {
     }
 }
 
-/// `filter: brightness(f)` aproximado.
+/// Approximate `filter: brightness(f)`.
 pub fn brighten(c: Color32, f: f32) -> Color32 {
     let ch = |v: u8| ((v as f32) * f).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgba_unmultiplied(ch(c.r()), ch(c.g()), ch(c.b()), c.a())
 }
 
-/// Aplica opacidade (multiplica o alfa).
+/// Applies opacity (multiplies alpha).
 pub fn with_opacity(c: Color32, opacity: f32) -> Color32 {
     c.gamma_multiply(opacity.clamp(0.0, 1.0))
 }
 
-/// O vidro como se fosse opaco (sobre o fundo): para esconder algo atrás de um trecho de uma barra.
+/// Glass as if opaque (over background): used to hide content behind part of a sidebar.
 pub fn glass_solid() -> Color32 {
     over(pal().glass, pal().bg)
 }
 
-/// O poço central como se fosse opaco (sobre o fundo).
+/// Center well as if opaque (over background).
 pub fn well_solid() -> Color32 {
     over(pal().well, pal().bg)
 }
 
-/// A faixa de abas como se fosse opaca (sobre o poço): o fim dos degradês de rolagem das abas.
+/// Tab strip as if opaque (over well): scroll fade end color for tabs.
 pub fn strip_solid() -> Color32 {
     over(pal().strip, well_solid())
 }
 
-/// `top` desenhado sobre `bottom` (composição normal). O resultado é opaco se `bottom` for.
+/// `top` drawn over `bottom` (standard alpha compositing). Result is opaque if `bottom` is.
 pub fn over(top: Color32, bottom: Color32) -> Color32 {
     let a = top.a() as f32 / 255.0;
     let t = top.to_srgba_unmultiplied();
@@ -326,20 +326,20 @@ pub fn over(top: Color32, bottom: Color32) -> Color32 {
     Color32::from_rgba_unmultiplied(ch(0), ch(1), ch(2), (out_a * 255.0).round() as u8)
 }
 
-// ---------- Fontes ----------
+// ---------- Fonts ----------
 
-/// Famílias nomeadas registradas além de Proportional/Monospace.
+/// Named families registered in addition to Proportional/Monospace.
 pub const FAMILY_UI_MEDIUM: &str = "ui-medium";
 pub const FAMILY_UI_SEMIBOLD: &str = "ui-semibold";
 pub const FAMILY_UI_BOLD: &str = "ui-bold";
 pub const FAMILY_MONO_BOLD: &str = "mono-bold";
-/// IBM Plex Mono Medium: rótulos de seção em MAIÚSCULAS.
+/// IBM Plex Mono Medium: UPPERCASE section labels.
 pub const FAMILY_LABEL: &str = "label";
-/// IBM Plex Mono Regular: metadados e etiquetas.
+/// IBM Plex Mono Regular: metadata and badges.
 pub const FAMILY_META: &str = "meta";
 
-/// Inter (interface) e IBM Plex Mono (rótulos e metadados), ambas sob a licença OFL (ver
-/// `assets/fonts/OFL-*.txt`). Vão dentro do executável: o visual não depende do que há instalado.
+/// Inter (UI) and IBM Plex Mono (labels and metadata), both under OFL license (see
+/// `assets/fonts/OFL-*.txt`). Embedded in executable: visual styling is independent of installed fonts.
 const INTER_REGULAR: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
 const INTER_MEDIUM: &[u8] = include_bytes!("../assets/fonts/Inter-Medium.ttf");
 const INTER_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/Inter-SemiBold.ttf");
@@ -347,11 +347,11 @@ const INTER_BOLD: &[u8] = include_bytes!("../assets/fonts/Inter-Bold.ttf");
 const PLEX_MONO_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf");
 const PLEX_MONO_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Medium.ttf");
 
-/// Texto da interface (Inter Regular).
+/// UI text (Inter Regular).
 pub fn ui(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
 }
-#[allow(dead_code)] // Para a parte 2 (nomes de agente).
+#[allow(dead_code)] // For part 2 (agent names).
 pub fn ui_medium(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_UI_MEDIUM.into()))
 }
@@ -361,15 +361,15 @@ pub fn ui_semibold(size: f32) -> FontId {
 pub fn ui_bold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_UI_BOLD.into()))
 }
-/// Rótulos de seção em MAIÚSCULAS (IBM Plex Mono Medium). Use com [`LABEL_SPACING`].
+/// UPPERCASE section labels (IBM Plex Mono Medium). Use with [`LABEL_SPACING_EM`].
 pub fn label(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_LABEL.into()))
 }
-/// Metadados e etiquetas (IBM Plex Mono Regular).
+/// Metadata and badges (IBM Plex Mono Regular).
 pub fn meta(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_META.into()))
 }
-/// A fonte do terminal (a do sistema, que não muda).
+/// Terminal font (system font, unchanged).
 pub fn mono(size: f32) -> FontId {
     FontId::new(size, FontFamily::Monospace)
 }
@@ -377,13 +377,13 @@ pub fn mono_bold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FAMILY_MONO_BOLD.into()))
 }
 
-/// Espaçamento entre letras dos rótulos de seção: 0,1 em.
+/// Letter spacing for section labels: 0.1 em.
 pub const LABEL_SPACING_EM: f32 = 0.1;
 
-/// Candidatos de arquivo de fonte do sistema por papel: só o terminal e os símbolos (▾ ▸ ✕ …)
-/// que a Inter não tem. A interface usa as fontes embutidas.
+/// System font candidates by role: terminal and symbols (▾ ▸ ✕ …)
+/// missing from Inter. The UI uses embedded fonts.
 struct FontCandidates {
-    /// Fallback para símbolos ausentes na fonte da interface.
+    /// Fallback for missing symbols in UI font.
     symbols: &'static [&'static str],
     mono: &'static [&'static str],
     mono_bold: &'static [&'static str],
@@ -405,9 +405,9 @@ const CANDIDATES: FontCandidates = FontCandidates {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 const CANDIDATES: FontCandidates = FontCandidates {
-    // Debian/Ubuntu usam `/usr/share/fonts/truetype/<familia>/`; o Fedora instala cada
-    // subpacote na própria pasta (`dejavu-sans-mono-fonts/`). Faltar um caminho não quebra: o
-    // egui cai na fonte embutida.
+    // Debian/Ubuntu use `/usr/share/fonts/truetype/<family>/`; Fedora installs each
+    // subpackage in its own folder (`dejavu-sans-mono-fonts/`). Missing path does not fail:
+    // egui falls back to embedded font.
     symbols: &[
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
@@ -446,7 +446,7 @@ fn resolve_font_path(name: &str) -> PathBuf {
         if sys.exists() {
             return sys;
         }
-        // Fontes instaladas só para o usuário (ex.: Cascadia Mono via Windows Terminal/winget).
+        // User-installed fonts (e.g. Cascadia Mono via Windows Terminal/winget).
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
             let user = PathBuf::from(local).join("Microsoft").join("Windows").join("Fonts").join(name);
             if user.exists() {
@@ -468,22 +468,22 @@ fn load_first(list: &[&str]) -> Option<(String, Vec<u8>)> {
     })
 }
 
-/// Fontes carregadas (para log/diagnóstico).
+/// Loaded fonts (for log/diagnostics).
 #[derive(Debug, Default, Clone)]
 pub struct LoadedFonts {
     pub ui: Option<String>,
     pub mono: Option<String>,
 }
 
-/// Registra as fontes embutidas (interface, rótulos e metadados) e as do sistema (terminal e
-/// símbolos), mantendo as fontes padrão do egui como fallback — necessárias para emoji (📁 ⚙️ …).
+/// Registers embedded fonts (UI, labels and metadata) and system fonts (terminal and
+/// symbols), keeping egui default fonts as fallback — necessary for emoji (📁 ⚙️ …).
 pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
     let mut defs = FontDefinitions::default();
     let default_prop = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let default_mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
     let mut loaded = LoadedFonts::default();
 
-    // Fontes embutidas.
+    // Embedded fonts.
     for (key, bytes) in [
         ("inter", INTER_REGULAR),
         ("inter-medium", INTER_MEDIUM),
@@ -495,7 +495,7 @@ pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
         defs.font_data.insert(key.to_owned(), Arc::new(FontData::from_static(bytes)));
     }
 
-    // Fontes do sistema.
+    // System fonts.
     let add = |defs: &mut FontDefinitions, key: &str, list: &[&str]| -> Option<String> {
         let (path, bytes) = load_first(list)?;
         defs.font_data.insert(key.to_owned(), Arc::new(FontData::from_owned(bytes)));
@@ -505,7 +505,7 @@ pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
     let mut mono_b = add(&mut defs, "sys-mono-bold", CANDIDATES.mono_bold);
     let symbols = add(&mut defs, "sys-symbols", CANDIDATES.symbols);
 
-    // Cascadia Mono é uma fonte variável: o negrito vem do eixo `wght`.
+    // Cascadia Mono is a variable font: bold comes from the `wght` axis.
     if mono_b.is_none() {
         if let (Some(path), Some(data)) = (mono.as_ref(), defs.font_data.get("sys-mono").cloned()) {
             if path.to_lowercase().contains("cascadia") {
@@ -544,13 +544,13 @@ pub fn install_fonts(ctx: &egui::Context) -> LoadedFonts {
     defs.families
         .insert(FontFamily::Name(FAMILY_MONO_BOLD.into()), chain(&[mono_b.as_ref().map(|_| "sys-mono-bold"), mono_key], &default_mono));
 
-    loaded.ui = Some("Inter (embutida)".to_owned());
+    loaded.ui = Some("Inter (embedded)".to_owned());
     loaded.mono = mono;
     ctx.set_fonts(defs);
     loaded
 }
 
-/// A seleção de texto do egui acompanha a cor de destaque (chame a cada quadro; só reescreve o estilo quando a cor muda).
+/// egui text selection tracks accent color (call every frame; only rewrites style on color change).
 pub fn sync_selection(ctx: &egui::Context, accent: Color32) {
     let id = egui::Id::new("selection-accent");
     if ctx.data(|d| d.get_temp::<Color32>(id)) == Some(accent) {
@@ -560,8 +560,8 @@ pub fn sync_selection(ctx: &egui::Context, accent: Color32) {
     ctx.all_styles_mut(|s| s.visuals.selection.bg_fill = with_alpha(accent, 0.35));
 }
 
-/// Estilo base do egui (tema escuro com a paleta). Quase tudo é pintado à mão; isto cobre os
-/// widgets nativos usados (TextEdit, ScrollArea, tooltips).
+/// egui base styling (dark theme with palette). Almost everything is custom painted; this covers
+/// native widgets used (TextEdit, ScrollArea, tooltips).
 pub fn install_style(ctx: &egui::Context) {
     let p = pal();
     ctx.set_theme(egui::Theme::Dark);
@@ -575,7 +575,7 @@ pub fn install_style(ctx: &egui::Context) {
         style.spacing.button_padding = egui::vec2(0.0, 0.0);
         style.spacing.tooltip_width = 420.0;
 
-        // Barras de rolagem finas (5px, polegar translúcido, sem trilho).
+        // Thin scrollbars (5px, translucent thumb, trackless).
         let mut scroll = egui::style::ScrollStyle::solid();
         scroll.bar_width = 5.0;
         scroll.bar_inner_margin = 0.0;
@@ -652,20 +652,20 @@ mod tests {
         assert_eq!(p.bg, TERM_BG);
         assert_eq!(Some(p.text), parse_hex_color("#e6e8eb"));
         assert_eq!(Some(p.text_3), parse_hex_color("#939aa4"));
-        // rgba(44,47,54,.50) e rgba(255,255,255,.13): o alfa é arredondado para 0..=255.
-        // Color32 guarda o alfa pré-multiplicado: ao desfazer, cada canal pode variar em 1.
+        // rgba(44,47,54,.50) and rgba(255,255,255,.13): alpha is rounded to 0..=255.
+        // Color32 stores premultiplied alpha: unmultiplying can vary each channel by 1.
         let near = |c: Color32, want: [u8; 4]| c.to_srgba_unmultiplied().iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1);
         assert!(near(p.glass, [44, 47, 54, 128]), "{:?}", p.glass);
         assert!(near(p.glass_border, [255, 255, 255, 33]), "{:?}", p.glass_border);
         assert!(near(p.well, [22, 24, 28, 235]), "{:?}", p.well);
     }
 
-    // Não toca no global (`ui::draw` o muda em outros testes, em paralelo): só a conversão.
+    // Does not touch global (`ui::draw` changes it in other tests concurrently): conversion only.
     #[test]
     fn the_accent_is_the_active_agent_color_or_a_neutral_gray() {
         assert_eq!(unpack_accent(pack_accent(None)), pal().accent_neutral);
         assert_eq!(unpack_accent(pack_accent(Some(CLAUDE))), CLAUDE);
-        // Preto também é uma cor guardada.
+        // Black is also a stored color.
         assert_eq!(unpack_accent(pack_accent(Some(Color32::BLACK))), Color32::BLACK);
         assert_eq!(accent_soft(CLAUDE).a(), 46);
         assert_eq!(accent_wash(CLAUDE).a(), 26);
@@ -679,19 +679,19 @@ mod tests {
         assert_eq!(over(Color32::from_rgb(1, 2, 3), Color32::from_rgb(9, 9, 9)), Color32::from_rgb(1, 2, 3));
     }
 
-    /// Arquivos que podem criar cores: a paleta, as cores do terminal e os ícones (a marca).
+    /// Files allowed to create colors: palette, terminal colors and icons (brand).
     const COLOR_HOMES: [&str; 3] = ["theme.rs", "terminal/colors.rs", "icons.rs"];
 
-    /// Arquivos que ainda têm cor solta e as partes 2 e 3 do visual vão migrar para a paleta. A lista
-    /// só encolhe: um arquivo que ficou limpo tem de sair daqui (o teste cobra). Está vazia desde a parte 1.
+    /// Files that still have loose colors and parts 2 and 3 of the visual design will migrate to the palette.
+    /// The list only shrinks: a cleaned file must be removed (tested below). Empty since part 1.
     const STILL_LOOSE: [&str; 0] = [];
 
     const LOOSE_COLOR: [&str; 7] =
         ["Color32::from_rgb", "Color32::from_rgba", "from_gray", "from_rgba_", "from_white_alpha", "from_black_alpha", "theme::rgba("];
 
     fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        for entry in std::fs::read_dir(dir).expect("pasta de código") {
-            let path = entry.expect("entrada").path();
+        for entry in std::fs::read_dir(dir).expect("source directory") {
+            let path = entry.expect("entry").path();
             if path.is_dir() {
                 rust_files(&path, out);
             } else if path.extension().is_some_and(|e| e == "rs") {
@@ -700,7 +700,7 @@ mod tests {
         }
     }
 
-    /// Linhas com cor solta fora dos testes (tudo depois de `#[cfg(test)]` é teste) e fora de comentários.
+    /// Lines with loose colors outside tests (everything after `#[cfg(test)]` is test) and outside comments.
     fn loose_colors(text: &str) -> Vec<String> {
         text.lines()
             .take_while(|l| !l.trim_start().starts_with("#[cfg(test)]"))
@@ -717,20 +717,24 @@ mod tests {
         rust_files(&root, &mut files);
         let mut loose = Vec::new();
         for f in files {
-            let rel = f.strip_prefix(&root).expect("dentro de src").to_string_lossy().replace('\\', "/");
+            let rel = f.strip_prefix(&root).expect("inside src").to_string_lossy().replace('\\', "/");
             if COLOR_HOMES.contains(&rel.as_str()) || rel.ends_with("_tests.rs") {
                 continue;
             }
-            let lines = loose_colors(&std::fs::read_to_string(&f).expect("ler o arquivo"));
+            let lines = loose_colors(&std::fs::read_to_string(&f).expect("read file"));
             let listed = STILL_LOOSE.contains(&rel.as_str());
             if lines.is_empty() && listed {
-                panic!("{rel} já não tem cor solta: tire-o de STILL_LOOSE");
+                panic!("{rel} no longer has loose colors: remove it from STILL_LOOSE");
             }
             if !lines.is_empty() && !listed {
                 loose.push(format!("{rel}: {}", lines.join(" | ")));
             }
         }
-        assert!(loose.is_empty(), "cor solta fora de theme.rs, terminal/colors.rs e icons.rs (use theme::pal()):\n{}", loose.join("\n"));
+        assert!(
+            loose.is_empty(),
+            "loose color outside theme.rs, terminal/colors.rs and icons.rs (use theme::pal()):\n{}",
+            loose.join("\n")
+        );
     }
 
     #[test]
@@ -740,7 +744,7 @@ mod tests {
         assert_eq!(loose_colors("Color32::from_rgba_unmultiplied(1, 2, 3, 4)").len(), 1);
         assert!(loose_colors("// Color32::from_rgb(1, 2, 3)").is_empty());
         assert!(loose_colors("let c = theme::pal().text;").is_empty());
-        // O que vem depois de `#[cfg(test)]` é teste.
+        // Everything after #[cfg(test)] is a test.
         assert!(loose_colors("fn a() {}\n#[cfg(test)]\nmod t { let c = Color32::from_rgb(1, 2, 3); }").is_empty());
     }
 
@@ -770,29 +774,29 @@ mod tests {
     #[test]
     fn text_keeps_its_contrast_on_the_islands() {
         let p = pal();
-        // O vidro sobre o fundo e o fundo com o brilho mais forte (10% de laranja) que pode haver por trás.
+        // Glass over background and background with strongest glow (10% orange) that can appear behind.
         let glow = over(with_alpha(CLAUDE, 0.10), p.bg);
         for under in [p.bg, glow] {
             let glass = over(p.glass, under);
             let well = over(p.well, under);
             for (name, c) in [("text", p.text), ("text_2", p.text_2), ("text_3", p.text_3)] {
-                assert!(contrast(c, glass) >= 4.5, "{name} sobre o vidro: {}", contrast(c, glass));
-                assert!(contrast(c, well) >= 4.5, "{name} sobre a ilha central: {}", contrast(c, well));
+                assert!(contrast(c, glass) >= 4.5, "{name} on glass: {}", contrast(c, glass));
+                assert!(contrast(c, well) >= 4.5, "{name} on well: {}", contrast(c, well));
             }
         }
-        // A hierarquia do texto: mais forte → mais apagado.
+        // Text hierarchy: stronger → dimmer.
         assert!(rel_lum(p.text_strong) > rel_lum(p.text));
         assert!(rel_lum(p.text) > rel_lum(p.text_2));
         assert!(rel_lum(p.text_2) > rel_lum(p.text_3));
         assert!(rel_lum(p.text_3) > rel_lum(p.text_faint));
-        // O texto sobre cada cor de agente (botão primário, segmento ativo).
+        // Text over each agent color (primary button, active segment).
         for a in [CLAUDE, ANTIGRAVITY, SHELL, p.accent_neutral] {
-            assert!(contrast(p.on_accent, a) >= 4.5, "on_accent sobre {a:?}: {}", contrast(p.on_accent, a));
+            assert!(contrast(p.on_accent, a) >= 4.5, "on_accent on {a:?}: {}", contrast(p.on_accent, a));
         }
-        // O realce de sintaxe sobre o poço (o fundo dos arquivos) e sobre o trecho marcado da busca.
+        // Syntax highlighting over well (file background) and over highlighted search match.
         let well = over(p.well, p.bg);
         for c in [p.syn_keyword, p.syn_type, p.syn_function, p.syn_string, p.syn_number, p.syn_comment, p.syn_key, p.syn_meta] {
-            assert!(contrast(c, well) >= 4.5, "realce {c:?} sobre o poço: {}", contrast(c, well));
+            assert!(contrast(c, well) >= 4.5, "syntax {c:?} on well: {}", contrast(c, well));
         }
     }
 }

@@ -1,17 +1,18 @@
-//! Pintura da aba "GitHub" na barra direita (~330 px):
-//! - cabeçalho com `dono/repo` (abre no navegador), estado do login e botão Atualizar;
-//! - sub-abas PRs / Issues / Actions;
-//! - lista no alto e, ao selecionar, o detalhe embaixo: checks e jobs e, para o job vermelho, o fim
-//!   do log (rola dentro da barra, que mantém a largura, como o diff do Git);
-//! - ações "Abrir no navegador" e "Enviar para agente" (menu com os agentes do projeto e um cargo).
+//! Painting of the "GitHub" tab in the right bar (~330 px):
+//! - header with `owner/repo` (opens in the browser), login state and Refresh button;
+//! - PRs / Issues / Actions sub-tabs;
+//! - list on top and, when selected, the detail below: checks and jobs and, for the red job, the end
+//!   of the log (scrolls inside the bar, which keeps its width, like the Git diff);
+//! - "Open in the browser" and "Send to agent" actions (menu with the project's agents and a role).
 //!
-//! O estado e as chamadas ao core ficam em `github_ui.rs`; aqui o desenho só coleta as ações e as
-//! aplica no fim, fora das closures que seguram o `Deck`.
+//! The state and the core calls are in `github_ui.rs`; here the drawing only collects the actions and
+//! applies them at the end, outside the closures that hold the `Deck`.
 
 use agentdeck_core::github::{
     format_failed_job_prompt, format_issue_prompt, format_pr_prompt, CheckStatus, GithubError, GithubOverview, Issue, JobLog, PullRequest,
     WorkflowJob, WorkflowRun,
 };
+use agentdeck_core::t;
 use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, ScrollArea, Sense, TextEdit, Ui, Vec2};
 
 use super::{clickable, dot, frame, galley_trunc, place, section_label, shadow, text_in, text_w, tip};
@@ -33,18 +34,18 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     match view {
         GithubView::Loading => draw_loading(ui, rect),
         GithubView::NoProject => {
-            let msg = "Abra uma pasta com um repositório do GitHub para ver Pull Requests, Issues e Actions.";
+            let msg = t!("Open a folder with a GitHub repository to see pull requests, issues and Actions.");
             draw_empty_state(deck, ui, rect, "GitHub", msg, false);
         }
         GithubView::Error(error) => {
             let (title, mut detail) = match &error {
                 GithubError::NoGit | GithubError::NotARepo | GithubError::NoRemote | GithubError::NotGithubRemote { .. } => {
-                    ("Sem repositório no GitHub".to_owned(), error.to_string())
+                    (t!("No GitHub repository").to_owned(), error.to_string())
                 }
                 _ => (deck.github.repo.as_ref().map_or_else(|| "GitHub".to_owned(), |r| r.to_string()), error.to_string()),
             };
             if matches!(error, GithubError::NoRemote | GithubError::NotARepo) {
-                detail.push_str("\nQuando a pasta tiver um remoto \"origin\" do GitHub, os PRs, issues e execuções aparecem aqui.");
+                detail.push_str(t!("\nWhen the folder has a GitHub \"origin\" remote, pull requests, issues and runs show up here."));
             }
             draw_empty_state(deck, ui, rect, &title, &detail, true);
         }
@@ -56,10 +57,10 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
 
 fn draw_loading(ui: &Ui, rect: Rect) {
     let p = ui.painter_at(rect);
-    text_in(&p, rect, Align2::CENTER_CENTER, "Consultando o GitHub…", theme::ui(12.0), theme::pal().text_2);
+    text_in(&p, rect, Align2::CENTER_CENTER, t!("Querying GitHub…"), theme::ui(12.0), theme::pal().text_2);
 }
 
-/// Barra de título fixa + mensagem centralizada (sem projeto, sem remoto, erro sem dados antigos).
+/// Fixed title bar + centered message (no project, no remote, error without old data).
 fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detail: &str, can_retry: bool) {
     let p = ui.painter_at(rect);
     let top = Rect::from_min_size(rect.min, Vec2::new(rect.width(), REPO_BAR_H));
@@ -73,7 +74,7 @@ fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detai
 
     if can_retry {
         let btn = Rect::from_min_size(Pos2::new(top.max.x - PAD - 24.0, top.center().y - 12.0), Vec2::splat(24.0));
-        if icon_btn(deck, ui, &p, btn, "gh-retry-top", Icon::Refresh, "Tentar de novo", !deck.github.refreshing) {
+        if icon_btn(deck, ui, &p, btn, "gh-retry-top", Icon::Refresh, t!("Try again"), !deck.github.refreshing) {
             deck.github_refresh_now();
         }
     }
@@ -82,7 +83,7 @@ fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detai
     let mut job = egui::text::LayoutJob::simple(detail.to_owned(), theme::ui(12.0), theme::pal().text_2, body.width().max(80.0));
     job.halign = egui::Align::Center;
     let g = p.layout_job(job);
-    // Com `halign` centralizado, a âncora é o meio da linha.
+    // With `halign` centered, the anchor is the middle of the line.
     p.galley(Pos2::new(body.center().x, body.min.y), g, theme::pal().text_2);
 }
 
@@ -93,17 +94,19 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     draw_repo_bar(deck, ui, repo_bar, ov);
     y = repo_bar.max.y;
 
-    // Sem credencial: orientação curta (o tooltip explica o caminho).
+    // Without a credential: a short hint (the tooltip explains the way).
     if !ov.authenticated {
         let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), 22.0));
         let p = ui.painter_at(strip);
         p.rect_filled(strip, 0.0, theme::pal().hover);
         p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
         let txt = match ov.rate_limit {
-            Some(rl) if rl.remaining.is_some() && rl.limit.is_some() => {
-                format!("Sem login ({} de {} por hora) · faça um push na aba Git", rl.remaining.unwrap_or(0), rl.limit.unwrap_or(0))
-            }
-            _ => "Sem login (60 por hora) · faça um push na aba Git".to_owned(),
+            Some(rl) if rl.remaining.is_some() && rl.limit.is_some() => t!(
+                "Not signed in ({remaining} of {limit} per hour) · push from the Git tab",
+                remaining = rl.remaining.unwrap_or(0),
+                limit = rl.limit.unwrap_or(0)
+            ),
+            _ => t!("Not signed in (60 per hour) · push from the Git tab").to_owned(),
         };
         let inner = strip.shrink2(Vec2::new(PAD, 0.0));
         let g = galley_trunc(&p, &txt, theme::ui(10.5), theme::pal().text_2, inner.width());
@@ -111,12 +114,12 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         let r = ui.interact(strip, Id::new("gh-anon-strip"), Sense::hover());
         tip(
             r,
-            "Repositório público lido sem token (limite de 60 consultas por hora; o log dos jobs exige login).\nPara entrar sem guardar token no app: faça um push pela aba Git (abre o login do Git Credential Manager) ou rode \"gh auth login\".",
+            t!("Public repository read without a token (limit of 60 requests per hour; the job log requires signing in).\nTo sign in without storing a token in the app: push from the Git tab (opens the Git Credential Manager login) or run \"gh auth login\"."),
         );
         y = strip.max.y;
     }
 
-    // Aviso ou erro recente (a lista anterior continua na tela).
+    // Recent notice or error (the previous list stays on screen).
     if let Some((msg, is_err)) = deck.github.notice.clone() {
         let strip = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), 24.0));
         let p = ui.painter_at(strip);
@@ -133,7 +136,7 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         place(&p, txt_r, Align2::LEFT_CENTER, g, fg);
         let cr = clickable(ui, close_r, Id::new("gh-notice-close"));
         deck.icons.paint(&p, Icon::Close, close_r.center(), 12.0, if cr.hovered() { theme::pal().text } else { theme::pal().text_2 }, 0.0);
-        // A mensagem inteira, quando não cabe na faixa.
+        // The whole message, when it does not fit in the strip.
         let hover = ui.interact(txt_r, Id::new("gh-notice-text"), Sense::hover());
         tip(hover, msg);
         if cr.clicked() {
@@ -164,10 +167,12 @@ fn draw_repo_bar(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) 
 
     let refresh_r = Rect::from_min_size(Pos2::new(rect.max.x - PAD - 24.0, rect.center().y - 12.0), Vec2::splat(24.0));
     let refresh_tip = match ov.rate_limit {
-        Some(rl) if rl.remaining.is_some() && rl.limit.is_some() => {
-            format!("Atualizar ({} de {} consultas por hora restantes)", rl.remaining.unwrap_or(0), rl.limit.unwrap_or(0))
-        }
-        _ => "Atualizar os dados do GitHub".to_owned(),
+        Some(rl) if rl.remaining.is_some() && rl.limit.is_some() => t!(
+            "Refresh ({remaining} of {limit} requests per hour left)",
+            remaining = rl.remaining.unwrap_or(0),
+            limit = rl.limit.unwrap_or(0)
+        ),
+        _ => t!("Refresh the GitHub data").to_owned(),
     };
     if icon_btn(deck, ui, &p, refresh_r, "gh-refresh", Icon::Refresh, &refresh_tip, !deck.github.refreshing) {
         deck.github_refresh_now();
@@ -175,7 +180,7 @@ fn draw_repo_bar(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) 
 
     let open_w = 58.0;
     let open_r = Rect::from_min_size(Pos2::new(refresh_r.min.x - 4.0 - open_w, rect.center().y - 11.0), Vec2::new(open_w, 22.0));
-    if small_btn(ui, &p, open_r, "gh-open-repo", "Abrir ↗", &format!("Abrir {} no navegador", ov.repo.html_url()), false) {
+    if small_btn(ui, &p, open_r, "gh-open-repo", t!("Open ↗"), &t!("Open {repo} in the browser", repo = ov.repo.html_url()), false) {
         deck.open_github_browser(&ov.repo.html_url());
     }
 
@@ -185,8 +190,9 @@ fn draw_repo_bar(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) 
     let txt_r = Rect::from_min_max(Pos2::new(slug_r.min.x + 14.0, slug_r.min.y), slug_r.max);
     let g = galley_trunc(&p, &ov.repo.to_string(), theme::ui_bold(12.0), theme::pal().text, txt_r.width());
     place(&p, txt_r, Align2::LEFT_CENTER, g, theme::pal().text);
-    let auth = if ov.authenticated { "com login (Git Credential Manager ou gh)" } else { "sem login: só repositórios públicos" };
-    tip(sr, format!("{} · {auth}", ov.repo));
+    let auth =
+        if ov.authenticated { t!("signed in (Git Credential Manager or gh)") } else { t!("not signed in: public repositories only") };
+    tip(sr, t!("{repo} · {auth}", repo = ov.repo, auth = auth));
 }
 
 fn draw_subtabs(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
@@ -195,9 +201,9 @@ fn draw_subtabs(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     p.rect_filled(Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 1.0), rect.max), 0.0, theme::pal().separator);
 
     let items = [
-        (GithubTab::Prs, format!("PRs ({})", ov.prs.len())),
-        (GithubTab::Issues, format!("Issues ({})", ov.issues.len())),
-        (GithubTab::Actions, format!("Actions ({})", ov.runs.len())),
+        (GithubTab::Prs, t!("PRs ({count})", count = ov.prs.len())),
+        (GithubTab::Issues, t!("Issues ({count})", count = ov.issues.len())),
+        (GithubTab::Actions, t!("Actions ({count})", count = ov.runs.len())),
     ];
     let tab_w = (rect.width() - PAD * 2.0) / items.len() as f32;
     let active_color = deck.accent();
@@ -221,12 +227,12 @@ fn draw_subtabs(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     }
 }
 
-/// `v` entre `lo` e `hi`; se a área é tão pequena que `hi < lo`, vale `hi` (`f32::clamp` entraria em pânico).
+/// `v` between `lo` and `hi`; if the area is so small that `hi < lo`, `hi` wins (`f32::clamp` would panic).
 fn clamp_between(v: f32, lo: f32, hi: f32) -> f32 {
     v.min(hi).max(lo.min(hi))
 }
 
-/// Divide a área em lista (em cima) e detalhe (embaixo) quando há seleção.
+/// Splits the area into a list (on top) and a detail (below) when there is a selection.
 fn split_list_detail(rect: Rect, has_detail: bool, frac: f32, min_detail: f32) -> (Rect, Option<Rect>) {
     if !has_detail {
         return (rect, None);
@@ -236,7 +242,7 @@ fn split_list_detail(rect: Rect, has_detail: bool, frac: f32, min_detail: f32) -
     (Rect::from_min_max(rect.min, Pos2::new(rect.max.x, split_y)), Some(Rect::from_min_max(Pos2::new(rect.min.x, split_y), rect.max)))
 }
 
-/// Área rolável dentro de `rect` (recortada), como as listas da aba Git.
+/// Scrollable area inside `rect` (clipped), like the lists of the Git tab.
 fn child_ui(ui: &mut Ui, rect: Rect) -> Ui {
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(rect);
@@ -248,7 +254,7 @@ fn empty_msg(ui: &Ui, rect: Rect, msg: &str) {
     text_in(&p, rect.shrink(PAD), Align2::CENTER_CENTER, msg, theme::ui(12.0), theme::pal().text_2);
 }
 
-/// Linha de lista (fundo de seleção/hover e divisor). Devolve a resposta do clique.
+/// List row (selection/hover background and divider). Returns the click response.
 fn list_row(ui: &mut Ui, width: f32, selected: bool) -> (Rect, egui::Response) {
     let (row, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
     if resp.hovered() {
@@ -268,7 +274,7 @@ fn list_row(ui: &mut Ui, width: f32, selected: bool) -> (Rect, egui::Response) {
 
 fn draw_prs_tab(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     if ov.prs.is_empty() {
-        empty_msg(ui, rect, "Nenhum pull request aberto.");
+        empty_msg(ui, rect, t!("No open pull request."));
         return;
     }
     let selected = deck.github.selected_pr.and_then(|num| ov.prs.iter().find(|pr| pr.number == num)).cloned();
@@ -281,7 +287,7 @@ fn draw_prs_tab(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         for pr in &ov.prs {
             let (row, resp) = list_row(ui, list_rect.width(), active == Some(pr.number));
             draw_pr_row(&ui.painter_at(row), row, pr, active == Some(pr.number));
-            if tip(resp, format!("PR #{} · checks: {}", pr.number, pr.checks.label())).clicked() {
+            if tip(resp, t!("PR #{number} · checks: {status}", number = pr.number, status = pr.checks.label())).clicked() {
                 clicked = Some(pr.number);
             }
         }
@@ -309,7 +315,7 @@ fn draw_pr_row(p: &egui::Painter, row: Rect, pr: &PullRequest, selected: bool) {
     if pr.draft {
         let pill = Rect::from_min_size(Pos2::new(x, top_y + 1.0), Vec2::new(60.0, 14.0));
         frame(p, pill, 3.0, theme::pal().recess, theme::pal().glass_border);
-        text_in(p, pill, Align2::CENTER_CENTER, "RASCUNHO", theme::ui_bold(9.0), theme::pal().text_2);
+        text_in(p, pill, Align2::CENTER_CENTER, t!("DRAFT"), theme::ui_bold(9.0), theme::pal().text_2);
         x = pill.max.x + 5.0;
     }
     let title_r = Rect::from_min_max(Pos2::new(x, top_y), Pos2::new(row.max.x - PAD, top_y + 16.0));
@@ -331,13 +337,13 @@ fn draw_pr_row(p: &egui::Painter, row: Rect, pr: &PullRequest, selected: bool) {
 }
 
 fn draw_pr_detail(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview, pr: &PullRequest) {
-    let title = format!("PR #{} · {}", pr.number, pr.title);
+    let title = t!("PR #{number} · {title}", number = pr.number, title = pr.title);
     let Some(act) =
         detail_header(deck, ui, rect, Some(pr.checks), &title, "gh-pr-detail-close", &|d: &mut Deck| d.github.selected_pr = None)
     else {
         return;
     };
-    let (open, agent) = action_bar(ui, act, pr.number, "Enviar o PR com uma mensagem pronta de revisão");
+    let (open, agent) = action_bar(ui, act, pr.number, t!("Send the PR with a ready-made review message"));
     if open {
         deck.open_github_browser(&pr.html_url);
     }
@@ -361,7 +367,7 @@ fn draw_pr_detail(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview,
 
 fn draw_issues_tab(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     if ov.issues.is_empty() {
-        empty_msg(ui, rect, "Nenhuma issue aberta.");
+        empty_msg(ui, rect, t!("No open issue."));
         return;
     }
     let selected = deck.github.selected_issue.and_then(|num| ov.issues.iter().find(|i| i.number == num)).cloned();
@@ -408,7 +414,7 @@ fn draw_issue_row(p: &egui::Painter, row: Rect, issue: &Issue, selected: bool) {
     place(p, sub_r, Align2::LEFT_CENTER, gs, theme::pal().text_2);
 }
 
-/// `@autor · rótulos · N coment.`
+/// `@author · labels · N comments`
 fn issue_meta(issue: &Issue) -> String {
     let mut sub = format!("@{}", issue.author);
     if !issue.labels.is_empty() {
@@ -416,17 +422,19 @@ fn issue_meta(issue: &Issue) -> String {
         sub.push_str(&issue.labels.join(", "));
     }
     if issue.comments > 0 {
-        sub.push_str(&format!(" · {} coment.", issue.comments));
+        sub.push_str(" · ");
+        sub.push_str(&if issue.comments == 1 { t!("1 comment").to_owned() } else { t!("{count} comments", count = issue.comments) });
     }
     sub
 }
 
 fn draw_issue_detail(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview, issue: &Issue) {
-    let title = format!("Issue #{} · {}", issue.number, issue.title);
+    let title = t!("Issue #{number} · {title}", number = issue.number, title = issue.title);
     let Some(act) = detail_header(deck, ui, rect, None, &title, "gh-issue-close", &|d: &mut Deck| d.github.selected_issue = None) else {
         return;
     };
-    let (open, agent) = action_bar(ui, act, issue.number, "Enviar a issue com uma mensagem pronta para um agente resolver");
+    let agent_tip = t!("Send the issue with a ready-made message for an agent to solve");
+    let (open, agent) = action_bar(ui, act, issue.number, agent_tip);
     if open {
         deck.open_github_browser(&issue.html_url);
     }
@@ -443,7 +451,7 @@ fn draw_issue_detail(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOvervi
         ui.set_width(body_r.width());
         ui.label(egui::RichText::new(issue_meta(issue)).font(theme::ui(10.5)).color(theme::pal().text_2));
         ui.add_space(4.0);
-        let desc = if issue.body_preview.trim().is_empty() { "Sem descrição." } else { issue.body_preview.trim() };
+        let desc = if issue.body_preview.trim().is_empty() { t!("No description.") } else { issue.body_preview.trim() };
         ui.label(egui::RichText::new(desc).font(theme::ui(11.5)).color(theme::pal().text));
     });
 }
@@ -454,7 +462,7 @@ fn draw_issue_detail(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOvervi
 
 fn draw_actions_tab(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
     if ov.runs.is_empty() {
-        empty_msg(ui, rect, "Nenhuma execução do Actions encontrada.");
+        empty_msg(ui, rect, t!("No Actions run found."));
         return;
     }
     let selected = deck.github.selected_run.and_then(|id| ov.runs.iter().find(|r| r.id == id)).cloned();
@@ -470,7 +478,7 @@ fn draw_actions_tab(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOvervie
             let p = ui.painter_at(row);
             let btn_r = Rect::from_min_size(Pos2::new(row.max.x - PAD - 22.0, row.center().y - 10.0), Vec2::new(22.0, 20.0));
             draw_run_row(&p, Rect::from_min_max(row.min, Pos2::new(btn_r.min.x - 4.0, row.max.y)), run, active == Some(run.id));
-            if small_btn(ui, &p, btn_r, ("gh-run-open", run.id), "↗", "Abrir a execução no navegador", false) {
+            if small_btn(ui, &p, btn_r, ("gh-run-open", run.id), "↗", t!("Open the run in the browser"), false) {
                 open_url = Some(run.html_url.clone());
             } else if tip(resp, format!("{} · {}", run.name, run.status.label())).clicked() {
                 clicked = Some(run.id);
@@ -517,11 +525,11 @@ fn draw_run_row(p: &egui::Painter, row: Rect, run: &WorkflowRun, selected: bool)
 }
 
 // ---------------------------------------------------------------------------
-// Detalhe: cabeçalho, ações, jobs e log
+// Detail: header, actions, jobs and log
 // ---------------------------------------------------------------------------
 
-/// Fundo do detalhe + faixa de título com o botão de fechar. Devolve a faixa logo abaixo do título
-/// (para a barra de ações ou o conteúdo), ou `None` quando o detalhe foi fechado neste quadro.
+/// Detail background + title bar with the close button. Returns the band right below the title
+/// (for the action bar or the content), or `None` when the detail was closed in this frame.
 fn detail_header(
     deck: &mut Deck,
     ui: &mut Ui,
@@ -542,7 +550,7 @@ fn detail_header(
     let close_r = Rect::from_min_size(Pos2::new(head.max.x - PAD - 20.0, head.center().y - 10.0), Vec2::splat(20.0));
     let cr = clickable(ui, close_r, Id::new(close_id));
     deck.icons.paint(&p, Icon::Close, close_r.center(), 13.0, if cr.hovered() { theme::pal().text } else { theme::pal().text_2 }, 0.0);
-    if tip(cr, "Fechar o detalhe").clicked() {
+    if tip(cr, t!("Close the detail")).clicked() {
         close(deck);
         return None;
     }
@@ -558,7 +566,7 @@ fn detail_header(
     Some(Rect::from_min_size(Pos2::new(rect.min.x, head.max.y), Vec2::new(rect.width(), ACT_H)))
 }
 
-/// Barra com "Abrir no navegador" e "Enviar para agente". Devolve `(abrir, âncora do menu)`.
+/// Bar with "Open in the browser" and "Send to agent". Returns `(open, menu anchor)`.
 fn action_bar(ui: &mut Ui, bar: Rect, key: u64, agent_tip: &str) -> (bool, Option<Rect>) {
     let p = ui.painter_at(bar);
     p.rect_filled(bar, 0.0, theme::pal().chip);
@@ -566,12 +574,13 @@ fn action_bar(ui: &mut Ui, bar: Rect, key: u64, agent_tip: &str) -> (bool, Optio
     let half_w = (bar.width() - PAD * 2.0 - 6.0) * 0.5;
     let btn_open = Rect::from_min_size(Pos2::new(bar.min.x + PAD, bar.center().y - 11.0), Vec2::new(half_w, 22.0));
     let btn_agent = Rect::from_min_size(Pos2::new(btn_open.max.x + 6.0, bar.center().y - 11.0), Vec2::new(half_w, 22.0));
-    let open = small_btn(ui, &p, btn_open, ("gh-act-open", key), "Abrir no navegador", "Abrir esta página no navegador padrão", false);
-    let agent = small_btn(ui, &p, btn_agent, ("gh-act-agent", key), "Enviar para agente ▾", agent_tip, true);
+    let open =
+        small_btn(ui, &p, btn_open, ("gh-act-open", key), t!("Open in the browser"), t!("Open this page in the default browser"), false);
+    let agent = small_btn(ui, &p, btn_agent, ("gh-act-agent", key), t!("Send to agent ▾"), agent_tip, true);
     (open, agent.then_some(btn_agent))
 }
 
-/// Lista de checks/jobs e, embaixo, o log do job aberto.
+/// Check/job list and, below it, the log of the open job.
 #[allow(clippy::too_many_arguments)]
 fn draw_jobs_and_log(
     deck: &mut Deck,
@@ -603,11 +612,11 @@ fn draw_jobs_and_log(
 
     if jobs.is_empty() {
         let msg = if loading || !loaded {
-            "Carregando checks e jobs…"
+            t!("Loading checks and jobs…")
         } else if runs.is_empty() {
-            "Nenhuma execução do Actions para este commit."
+            t!("No Actions run for this commit.")
         } else {
-            "Esta execução não tem jobs."
+            t!("This run has no jobs.")
         };
         let p = ui.painter_at(jobs_rect);
         text_in(&p, jobs_rect, Align2::CENTER_CENTER, msg, theme::ui(11.5), theme::pal().text_2);
@@ -634,7 +643,7 @@ fn draw_jobs_and_log(
                     let mut right_x = row.max.x - PAD;
                     if !job.html_url.is_empty() {
                         let b = Rect::from_min_size(Pos2::new(right_x - 20.0, top_y), Vec2::new(20.0, 18.0));
-                        if small_btn(ui, &p, b, ("gh-job-open", job.id), "↗", "Abrir o job no navegador", false) {
+                        if small_btn(ui, &p, b, ("gh-job-open", job.id), "↗", t!("Open the job in the browser"), false) {
                             open_url = Some(job.html_url.clone());
                         }
                         right_x = b.min.x - 4.0;
@@ -646,8 +655,8 @@ fn draw_jobs_and_log(
                             &p,
                             b_fix,
                             ("gh-job-fix", job.id),
-                            "Corrigir ▾",
-                            "Enviar a falha e o fim do log para um agente corrigir",
+                            t!("Fix ▾"),
+                            t!("Send the failure and the end of the log to an agent to fix"),
                             true,
                         ) {
                             req_agent = Some((b_fix, job.clone()));
@@ -660,7 +669,7 @@ fn draw_jobs_and_log(
                             b_log,
                             ("gh-job-log", job.id),
                             "Log",
-                            "Ver o fim do log deste job",
+                            t!("View the end of this job's log"),
                             current_log == Some(job.id),
                         ) {
                             req_log = Some((job.id, job.name.clone()));
@@ -674,7 +683,7 @@ fn draw_jobs_and_log(
                     place(&p, name_r, Align2::LEFT_CENTER, gn, name_color);
 
                     if failed && !job.failed_steps.is_empty() {
-                        let step_txt = format!("falhou em: {}", job.failed_steps.join(", "));
+                        let step_txt = t!("failed at: {steps}", steps = job.failed_steps.join(", "));
                         let step_r = Rect::from_min_max(
                             Pos2::new(row.min.x + PAD + 14.0, top_y + 18.0),
                             Pos2::new(row.max.x - PAD, row.max.y - 2.0),
@@ -693,14 +702,14 @@ fn draw_jobs_and_log(
             deck.github_request_job_log(job_id, job_name, pr_number);
         }
         if let Some((anchor, job)) = req_agent {
-            // Garante o log (a mensagem leva o fim dele); se ainda não veio, a mensagem sai sem ele.
+            // Make sure the log exists (the message carries its end); if it has not arrived yet, the message goes without it.
             if !deck.github.job_logs.contains_key(&job.id) {
                 deck.github_request_job_log(job.id, job.name.clone(), pr_number);
             }
             let log = deck.github.job_logs.get(&job.id).and_then(|r| r.as_ref().ok());
             let run = runs.iter().find(|r| r.id == job.run_id).or_else(|| ov.runs.iter().find(|r| r.id == job.run_id));
             let prompt = format_failed_job_prompt(&ov.repo, pr, run, &job, log);
-            deck.open_github_agent_menu(anchor, format!("job \"{}\"", job.name), "ci", prompt);
+            deck.open_github_agent_menu(anchor, t!("job \"{name}\"", name = job.name), "ci", prompt);
         }
     }
 
@@ -710,7 +719,7 @@ fn draw_jobs_and_log(
     }
 }
 
-/// Fim do log do job: rolagem nos dois sentidos dentro da barra.
+/// End of the job log: scrolling in both directions inside the bar.
 #[allow(clippy::too_many_arguments)]
 fn draw_job_log_pane(
     deck: &mut Deck,
@@ -734,15 +743,22 @@ fn draw_job_log_pane(
     let close_r = Rect::from_min_size(Pos2::new(head.max.x - PAD - 18.0, head.center().y - 9.0), Vec2::splat(18.0));
     let cr = clickable(ui, close_r, Id::new("gh-log-close"));
     deck.icons.paint(&p, Icon::Close, close_r.center(), 12.0, if cr.hovered() { theme::pal().text } else { theme::pal().text_2 }, 0.0);
-    if tip(cr, "Fechar o log").clicked() {
+    if tip(cr, t!("Close the log")).clicked() {
         deck.github.open_log = None;
         return;
     }
 
     let log_state = deck.github.job_logs.get(&job_id).cloned();
     let send_r = Rect::from_min_size(Pos2::new(close_r.min.x - 4.0 - 84.0, head.center().y - 9.0), Vec2::new(84.0, 18.0));
-    if small_btn(ui, &p, send_r, ("gh-log-send", job_id), "Enviar ▾", "Enviar a falha e este trecho do log para um agente corrigir", true)
-    {
+    if small_btn(
+        ui,
+        &p,
+        send_r,
+        ("gh-log-send", job_id),
+        t!("Send ▾"),
+        t!("Send the failure and this log excerpt to an agent to fix"),
+        true,
+    ) {
         let fallback = || WorkflowJob {
             id: job_id,
             run_id: 0,
@@ -756,7 +772,7 @@ fn draw_job_log_pane(
         let log = log_state.as_ref().and_then(|r| r.as_ref().ok());
         let run = runs.iter().find(|r| r.id == job_ref.run_id).or_else(|| ov.runs.iter().find(|r| r.id == job_ref.run_id));
         let prompt = format_failed_job_prompt(&ov.repo, pr, run, &job_ref, log);
-        deck.open_github_agent_menu(send_r, format!("o log de \"{job_name}\""), "ci", prompt);
+        deck.open_github_agent_menu(send_r, t!("the log of \"{name}\"", name = job_name), "ci", prompt);
     }
 
     let title_r = Rect::from_min_max(Pos2::new(head.min.x + PAD, head.min.y), Pos2::new(send_r.min.x - 4.0, head.max.y));
@@ -766,7 +782,8 @@ fn draw_job_log_pane(
     let body = Rect::from_min_max(Pos2::new(rect.min.x, head.max.y), rect.max);
     match log_state {
         None => {
-            let msg = if deck.github.log_loading == Some(job_id) { "Baixando o fim do log…" } else { "Log indisponível." };
+            let msg =
+                if deck.github.log_loading == Some(job_id) { t!("Downloading the end of the log…") } else { t!("Log unavailable.") };
             text_in(&p, body, Align2::CENTER_CENTER, msg, theme::ui(11.0), theme::pal().text_2);
         }
         Some(Err(e)) => draw_wrapped(&p, body.shrink(PAD), &e.to_string()),
@@ -783,7 +800,7 @@ fn draw_wrapped(p: &egui::Painter, area: Rect, text: &str) {
 fn log_lines(ui: &mut Ui, body: Rect, log: &JobLog, job_id: u64) {
     if log.lines.is_empty() {
         let p = ui.painter_at(body);
-        text_in(&p, body, Align2::CENTER_CENTER, "O log deste job está vazio.", theme::ui(11.0), theme::pal().text_2);
+        text_in(&p, body, Align2::CENTER_CENTER, t!("This job's log is empty."), theme::ui(11.0), theme::pal().text_2);
         return;
     }
     let font = theme::mono(11.0);
@@ -792,7 +809,7 @@ fn log_lines(ui: &mut Ui, body: Rect, log: &JobLog, job_id: u64) {
     let content_w = (max_chars as f32 * cell + 24.0).max(body.width());
     let mut child = child_ui(ui, body);
     let n = log.lines.len();
-    // Abre no fim do log, que é onde o erro aparece.
+    // Opens at the end of the log, which is where the error shows up.
     ScrollArea::both().id_salt(("gh-log-scroll", job_id)).auto_shrink([false, false]).stick_to_bottom(true).show_rows(
         &mut child,
         LOG_LINE_H,
@@ -819,20 +836,20 @@ fn log_lines(ui: &mut Ui, body: Rect, log: &JobLog, job_id: u64) {
     );
 }
 
-/// Linha que o GitHub/compilador marca como erro.
+/// Line that GitHub/the compiler marks as an error.
 fn is_error_line(line: &str) -> bool {
     let l = line.trim_start();
     l.starts_with("##[error]") || l.starts_with("error") || l.contains("FAILED") || l.contains("panicked at") || l.starts_with("Error:")
 }
 
 // ---------------------------------------------------------------------------
-// Menu "Enviar para agente"
+// "Send to agent" menu
 // ---------------------------------------------------------------------------
 
 fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
     let Some(target) = deck.github.agent_menu.clone() else { return };
 
-    // Abas de agente abertas no projeto ativo (sem terminal comum).
+    // Agent tabs open in the active project (no plain terminal).
     let open_tabs: Vec<(String, String, Color32)> = deck
         .visible()
         .into_iter()
@@ -841,11 +858,11 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         .map(|i| (deck.tabs[i].ident.id(), deck.tabs[i].label.clone(), deck.tabs[i].color))
         .collect();
 
-    // Modelos para abrir (ou reaproveitar) uma instância com cargo, ex.: claude@review.
+    // Models to open (or reuse) an instance with a role, e.g. claude@review.
     let models: Vec<(String, String, Color32)> =
         deck.agents.new_tab_menu.iter().filter(|m| m.kind != "shell").map(|m| (m.kind.clone(), m.label.clone(), m.color)).collect();
     if models.is_empty() {
-        // A lista de agentes ainda não chegou do core: o menu aparece no quadro seguinte.
+        // The agent list has not arrived from the core yet: the menu shows up in the next frame.
         return;
     }
     if !models.iter().any(|(k, _, _)| *k == deck.github.new_role_kind) {
@@ -871,13 +888,13 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         let mut y = rect.min.y + 8.0;
 
         let head_r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, 18.0));
-        let title = format!("ENVIAR {} PARA", target.title.to_uppercase());
+        let title = t!("SEND {target} TO", target = target.title.to_uppercase());
         section_label(&p, head_r, &title);
         y += 18.0;
 
         if open_tabs.is_empty() {
             let r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, item_h));
-            text_in(&p, r, Align2::LEFT_CENTER, "Nenhum agente aberto neste projeto", theme::ui(12.0), theme::pal().text_2);
+            text_in(&p, r, Align2::LEFT_CENTER, t!("No agent open in this project"), theme::ui(12.0), theme::pal().text_2);
             y += item_h;
         }
         for (id, label, color) in &open_tabs {
@@ -900,7 +917,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         p.rect_filled(Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0, 1.0)), 0.0, theme::pal().separator);
         y += 7.0;
         let sub_r = Rect::from_min_size(Pos2::new(rect.min.x + 12.0, y), Vec2::new(w - 24.0, 18.0));
-        section_label(&p, sub_r, "OU ABRIR / USAR UM CARGO");
+        section_label(&p, sub_r, t!("OR OPEN / USE A ROLE"));
         y += 18.0;
 
         for (kind, label, color) in &models {
@@ -926,7 +943,7 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
         }
         y += 6.0;
 
-        // Cargo: caixa de texto + "Enviar".
+        // Role: text box + "Send".
         let btn_w = 70.0;
         let input_r = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, y), Vec2::new(w - 16.0 - btn_w - 6.0, 22.0));
         let send_r = Rect::from_min_size(Pos2::new(input_r.max.x + 6.0, y), Vec2::new(btn_w, 22.0));
@@ -938,20 +955,19 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
             .id(input_id)
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: 8, right: 8, top: 3, bottom: 3 }))
             .font(theme::mono(11.5))
-            .hint_text(egui::RichText::new("cargo (ex.: review)").font(theme::ui(11.5)).color(theme::pal().text_3))
+            .hint_text(egui::RichText::new(t!("role (e.g. review)")).font(theme::ui(11.5)).color(theme::pal().text_3))
             .vertical_align(egui::Align::Center)
             .desired_width(input_r.width() - 2.0)
             .show(&mut child);
         let enter = out.response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
         let spec = instance_spec(&deck.github.new_role_kind, &deck.github.new_role_name);
-        if small_btn(ui, &p, send_r, "gh-role-submit", "Enviar →", &format!("Enviar para {spec} (a aba é aberta se não existir)"), true)
-            || enter
-        {
+        let send_tip = t!("Send to {spec} (the tab opens if it does not exist)", spec = spec);
+        if small_btn(ui, &p, send_r, "gh-role-submit", t!("Send →"), &send_tip, true) || enter {
             chosen = Some(spec);
         }
         y += 28.0;
 
-        // Atalhos de cargo.
+        // Role shortcuts.
         let roles = ["review", "ci", "fix", "dev"];
         let rw = (w - 16.0 - 3.0 * 4.0) / 4.0;
         for (i, role) in roles.iter().enumerate() {
@@ -990,10 +1006,10 @@ fn draw_agent_menu(deck: &mut Deck, ctx: &egui::Context) {
 }
 
 // ---------------------------------------------------------------------------
-// Peças visuais
+// Visual pieces
 // ---------------------------------------------------------------------------
 
-/// Bolinha do estado dos checks: cheia (verde/vermelho/âmbar) ou só o anel quando não há checks.
+/// Checks status dot: filled (green/red/amber) or just the ring when there are no checks.
 fn paint_check_badge(p: &egui::Painter, center: Pos2, status: CheckStatus) {
     let color = match status {
         CheckStatus::Success => theme::pal().success,
@@ -1033,7 +1049,7 @@ fn icon_btn(
     tip(r, tooltip).clicked() && enabled
 }
 
-/// Botão de texto pequeno. `strong` = ação principal (negrito e realce no hover).
+/// Small text button. `strong` = primary action (bold and highlight on hover).
 fn small_btn(
     ui: &Ui,
     p: &egui::Painter,
@@ -1081,14 +1097,14 @@ mod tests {
         assert_eq!(list, rect);
         assert!(detail.is_none());
         let (list, detail) = split_list_detail(rect, true, 0.6, 180.0);
-        let detail = detail.expect("detalhe");
+        let detail = detail.expect("detail");
         assert_eq!(list.max.y, detail.min.y);
         assert!(detail.height() >= 180.0 && list.height() >= 44.0);
-        // Área pequena: a lista nunca some por completo.
+        // Small area: the list never disappears entirely.
         let small = Rect::from_min_size(Pos2::ZERO, Vec2::new(330.0, 200.0));
         let (list, detail) = split_list_detail(small, true, 0.6, 180.0);
         assert!(list.height() >= 44.0 && detail.is_some());
-        // Áreas minúsculas não derrubam o app.
+        // Tiny areas do not bring the app down.
         for h in [0.0, 10.0, 60.0, 120.0, 150.0] {
             let r = Rect::from_min_size(Pos2::ZERO, Vec2::new(330.0, h));
             let _ = split_list_detail(r, true, 0.6, 180.0);

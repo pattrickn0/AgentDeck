@@ -250,9 +250,9 @@ fn workspace_agents_md_and_spawn_specs() {
     let ws = env.core.workspace();
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md created in the app's workspace");
-    assert!(md.starts_with("<!-- agentdeck:start -->\nVocê está rodando dentro do AgentDeck"));
-    assert!(md.contains("Seu nome e cargo estão nas variáveis AGENTDECK_AGENT e AGENTDECK_ROLE"));
-    assert!(md.contains("NÃO use subagentes internos do seu CLI"));
+    assert!(md.starts_with("<!-- agentdeck:start -->\nYou are running inside AgentDeck"));
+    assert!(md.contains("Your name and role are in the AGENTDECK_AGENT and AGENTDECK_ROLE variables"));
+    assert!(md.contains("do NOT use your CLI's internal subagents"));
 
     let shell = env.core.spawn_spec(&p, "shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
@@ -267,11 +267,11 @@ fn workspace_agents_md_and_spawn_specs() {
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
-    assert_eq!(env.core.spawn_spec(&p, "nada").expect_err("unknown"), "Agente desconhecido: nada");
+    assert_eq!(env.core.spawn_spec(&p, "nada").expect_err("unknown"), "Unknown agent: nada");
     let missing = env.core.spawn_spec(&p, "antigravity").expect_err("not installed");
-    assert!(missing.starts_with("Antigravity CLI (agy) não encontrado."));
-    assert_eq!(env.core.spawn_spec(&p, "ollama").expect_err("the Ollama agent was removed"), "Agente desconhecido: ollama");
-    assert_eq!(env.core.spawn_spec("pdeadbeef", "shell").expect_err("no project"), "Projeto desconhecido: pdeadbeef");
+    assert!(missing.starts_with("Antigravity CLI (agy) not found."));
+    assert_eq!(env.core.spawn_spec(&p, "ollama").expect_err("the Ollama agent was removed"), "Unknown agent: ollama");
+    assert_eq!(env.core.spawn_spec("pdeadbeef", "shell").expect_err("no project"), "Unknown project: pdeadbeef");
 
     // Another project (not active): the terminal opens in its folder, which gets the AGENTS.md on the first tab.
     let other_dir = env.root.join("other");
@@ -286,7 +286,7 @@ fn workspace_agents_md_and_spawn_specs() {
     let claude = env.core.spawn_spec(&p, "claude").expect("claude");
     assert_eq!(claude.program, env.root.join("fake-bin").join(exe_name("claude")));
     assert_eq!(claude.args[0], "--append-system-prompt");
-    assert!(claude.args[1].contains("Seu nome aqui é \"claude\"."));
+    assert!(claude.args[1].contains("Your name here is \"claude\"."));
     let hooks = env.root.join("dados").join("hooks").join("claude-settings.json");
     assert_eq!(
         &claude.args[2..],
@@ -401,7 +401,10 @@ fn attachments_and_config_persistence() {
     // Session recorded.
     let sessions = std::fs::read_to_string(env.root.join("dados").join("sessions.json")).expect("sessions.json");
     assert!(sessions.contains(env.core.session_id()));
-    assert_eq!(env.core.transcribe_engine(), "indisponível");
+    assert_eq!(env.core.transcribe_engine(), "unavailable");
+    agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || {
+        assert_eq!(env.core.transcribe_engine(), "indisponível");
+    });
     assert!(env.core.transcribe_pcm16k(&[0.0; 160]).is_err());
     env.core.shutdown();
 }
@@ -654,7 +657,7 @@ fn a_role_opens_a_new_instance_and_new_forces_another() {
     for t in [first, second, third] {
         let (st, b) = t.join().expect("thread");
         assert_eq!(st, 500);
-        assert!(b["error"].as_str().expect("error").contains("fechada"), "{b}");
+        assert!(b["error"].as_str().expect("error").contains("was closed"), "{b}");
     }
     env.core.shutdown();
 }
@@ -863,7 +866,7 @@ fn one_app_per_data_dir() {
     let env = start(&[]);
     let second = Core::start_with(paths_in(&env.root), StartOptions { watch_workspace: false, system_dirs: false, ..Default::default() });
     let err = second.err().expect("the second instance in the same data folder is refused").to_string();
-    assert!(err.contains("já está usando a pasta de dados"), "{err}");
+    assert!(err.contains("is already using the data folder"), "{err}");
     env.core.shutdown();
 }
 
@@ -978,7 +981,7 @@ fn closing_the_askers_tab_drops_its_questions() {
     env.core.close_instance(&p, "claude@dev");
     let (st, b) = asking.join().expect("thread");
     assert_eq!(st, 500);
-    assert!(b["error"].as_str().expect("error").contains("fechada"), "{b}");
+    assert!(b["error"].as_str().expect("error").contains("was closed"), "{b}");
     // Without the old question, claude can ask claude@dev (no ghost "cycle").
     let claude = tab_token(&env, "claude");
     let port2 = env.core.bridge_port();
@@ -1341,8 +1344,8 @@ fn a_model_without_quota_is_refused_before_opening_the_tab() {
         ask_raw(port, &master, json!({"from": "shell", "to": "antigravity@arq", "message": "oi", "model": "gemini-4-argon-high"}));
     assert_eq!(st, 409, "{body}");
     let error = body["error"].as_str().expect("error");
-    assert!(error.starts_with("antigravity@arq usa gemini-4-argon-high e a cota de Gemini 4 Argon esgotada, renova em"), "{error}");
-    assert!(error.contains("--new --model <modelo>"), "{error}");
+    assert!(error.starts_with("antigravity@arq uses gemini-4-argon-high and its quota for Gemini 4 Argon exhausted, renews in"), "{error}");
+    assert!(error.contains("--new --model <model>"), "{error}");
     assert!(env.core.project_instance_ids(&p).is_empty(), "nothing was created");
     assert!(env.core.projects()[0].tab_models.is_empty());
 
@@ -1392,7 +1395,7 @@ fn a_model_conflict_on_an_open_instance_is_an_explicit_409() {
     // Another model for the same instance: a 409 with the way out through --new; nothing changes.
     let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@dev", "message": "oi", "model": "opus"}));
     assert_eq!(st, 409, "{body}");
-    assert_eq!(body["error"], "claude@dev já está aberta com sonnet; use --new para abrir outra com opus");
+    assert_eq!(body["error"], "claude@dev is already open with sonnet; use --new to open another one with opus");
     assert_eq!(env.core.project_instance_ids(&p), ["claude@dev"]);
     assert_eq!(state(&env).len(), 1);
     // Asking for a model on an instance open with the CLI default is a conflict too.
@@ -1400,7 +1403,7 @@ fn a_model_conflict_on_an_open_instance_is_an_explicit_409() {
     let (st, body) = ask_raw(port, &master, json!({"from": "shell", "to": "claude@qa", "message": "oi", "model": "opus"}));
     assert_eq!(
         (st, body["error"].as_str()),
-        (409, Some("claude@qa já está aberta com o modelo padrão; use --new para abrir outra com opus"))
+        (409, Some("claude@qa is already open with the default model; use --new to open another one with opus"))
     );
 
     // The same model, or none, delivers normally into the tab that already exists.
@@ -1478,12 +1481,12 @@ fn the_roster_and_the_team_show_the_models() {
     let (st, body) = http(port, "GET", "/agents", &host, &tab_token(&env, "claude"), "");
     assert_eq!(st, 200);
     assert_eq!(body["models"], json!({"claude@dev": "sonnet", "claude@main@ana": "opus"}));
-    assert_eq!(body["quota"], json!({"claude@dev": "cota: sem leitura", "claude@main@ana": "cota: sem leitura"}));
+    assert_eq!(body["quota"], json!({"claude@dev": "quota: no reading", "claude@main@ana": "quota: no reading"}));
     let (st, body) = http(port, "GET", "/team", &host, &tab_token(&env, "claude@dev"), "");
     assert_eq!(st, 200);
     // Only those in the answer (itself; the boss and the crew, if they had a model).
     assert_eq!(body["models"], json!({"claude@dev": "sonnet"}));
-    assert_eq!(body["quota"], json!({"claude@dev": "cota: sem leitura"}));
+    assert_eq!(body["quota"], json!({"claude@dev": "quota: no reading"}));
     assert_eq!(body["boss"], "claude");
     env.core.shutdown();
 }
@@ -1502,9 +1505,9 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let (st, body) = get("/models");
     assert_eq!(st, 200, "{body}");
     let text = body["text"].as_str().expect("text");
-    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n"), "{text}");
-    assert!(text.contains("opencode: não consegui listar os modelos"), "{text}");
-    assert!(text.contains("\n  cota: sem leitura\n\ncapability ("), "the capability comes after the agents: {text}");
+    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: no reading\n"), "{text}");
+    assert!(text.contains("opencode: could not list the models"), "{text}");
+    assert!(text.contains("\n  cota: no reading\n\ncapability ("), "the capability comes after the agents: {text}");
     assert!(text.contains("Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10)"), "{text}");
     assert!(!text.contains("antigravity"), "what is not installed does not show up: {text}");
 
@@ -1514,12 +1517,12 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     assert!(
         body["text"]
             .as_str()
-            .is_some_and(|t| t.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: sem leitura\n\ncapability (")),
+            .is_some_and(|t| t.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: no reading\n\ncapability (")),
         "{body}"
     );
     let (st, body) = get("/models?agent=agy");
     assert_eq!(st, 404);
-    assert!(body["error"].as_str().expect("error").contains("não está instalado"), "{body}");
+    assert!(body["error"].as_str().expect("error").contains("is not installed"), "{body}");
     assert_eq!(get("/models?agent=a%20b").0, 400);
 
     // With Antigravity installed and renewed (4%) and Claude at 60%, Antigravity comes before Claude.
@@ -1541,8 +1544,8 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let agy_pos = text.find("antigravity").expect("agy");
     let claude_pos = text.find("claude --model").expect("claude");
     assert!(agy_pos < claude_pos, "the one with the most room comes first:\n{text}");
-    assert!(text.contains("  cota: Gemini 4 Argon 4% usada (renova em 6 dias)"), "{text}");
-    assert!(text.contains("  cota: 60% usada (renova em 4 dias)"), "{text}");
+    assert!(text.contains("  cota: Gemini 4 Argon 4% used (renews in 6 days)"), "{text}");
+    assert!(text.contains("  cota: 60% used (renews in 4 days)"), "{text}");
     env.core.shutdown();
 }
 

@@ -1,262 +1,260 @@
-# Suporte a Linux (Ubuntu e Fedora)
+# Linux Support (Ubuntu and Fedora)
 
-Verificação feita nas tarefas `t29` (2026-10-22) e `t33` (2026-10-23). Este documento diz **o que foi conferido, como**,
-o que foi corrigido, as dependências de cada distro e o que continua sem validação. O roteiro manual de Windows
-continua em [testes.md](testes.md); o de Linux está aqui no fim.
+Verification performed in tasks `t29` (2026-10-22) and `t33` (2026-10-23). This document explains **what was checked, how**,
+what was fixed, the dependencies for each distro, and what remains unverified. The manual Windows test script
+remains in [testes.md](testes.md); the Linux script is at the end here.
 
-> **Resumo:** o app compila e passa os testes no Ubuntu (CI) e agora também no Fedora (job em contêiner). A interface
-> foi validada à mão só no X11 do Ubuntu; Wayland e um desktop Fedora de verdade ainda não foram testados. Não há
-> pacote, instalador nem arquivo `.desktop`. A cota do Antigravity passou a ler o chaveiro do sistema (t33) e, sob o
-> WSLg, o app abre pelo X11 (t33) — nenhum dos dois foi exercitado numa máquina Linux de verdade.
+> **Summary:** the app compiles and passes tests on Ubuntu (CI) and now also on Fedora (container job). The interface
+> was manually validated only on Ubuntu X11; Wayland and a real Fedora desktop have not yet been tested. There is no
+> package, installer, or `.desktop` file. Antigravity quota now reads the system keyring (t33), and under WSLg the
+> app opens via X11 (t33) — neither has been exercised on a real Linux machine.
 
-## 1. Como esta verificação foi feita
+## 1. How this verification was done
 
-Não havia máquina Linux, WSL nem Docker nesta máquina, então a verificação foi:
+There was no Linux machine, WSL, or Docker on this machine, so verification was:
 
-1. **CI do GitHub** (repositório `pattrickn0/AgentDeck`), lendo os logs dos jobs do Ubuntu e do Windows pelo endpoint
-   `/actions/jobs/<id>/logs`, mais a API de execuções.
-2. **Revisão do código** de tudo que tem caminho por plataforma: `process.rs`, `paths.rs`, `agents.rs`, `git.rs`,
+1. **GitHub CI** (repository `pattrickn0/AgentDeck`), reading Ubuntu and Windows job logs via the
+   `/actions/jobs/<id>/logs` endpoint, plus the workflow runs API.
+2. **Code review** of everything that has platform-specific paths: `process.rs`, `paths.rs`, `agents.rs`, `git.rs`,
    `github.rs`, `workspace.rs`, `whisper.rs`, `download.rs`, `usage/*`, `theme.rs`, `terminal/*`, `ui/projects.rs`,
-   `main.rs`, `crash.rs` e os testes com `#[cfg(unix)]`.
-3. **Conferência dos artefatos baixados**: nomes e SHA-256 dos pacotes do whisper.cpp no release `b5454` batem com as
-   constantes de `whisper.rs` (Ubuntu x64 e arm64).
-4. **Revisão das dependências** em `Cargo.lock`: não há `gtk-sys`/`glib-sys` (o `rfd 0.17` usa
-   `xdg-portal` + `wayland`), e o `ureq` usa rustls (sem OpenSSL).
+   `main.rs`, `crash.rs`, and tests with `#[cfg(unix)]`.
+3. **Verification of downloaded artifacts**: names and SHA-256 hashes of whisper.cpp packages in release `b5454` match
+   the constants in `whisper.rs` (Ubuntu x64 and arm64).
+4. **Dependency review** in `Cargo.lock`: no `gtk-sys`/`glib-sys` (`rfd 0.17` uses
+   `xdg-portal` + `wayland`), and `ureq` uses rustls (no OpenSSL).
 
-`cargo check --target x86_64-unknown-linux-gnu` chegou a ser tentado, mas para no `ring` porque não há toolchain
-`x86_64-linux-gnu-gcc` nesta máquina — por isso o build de Linux é verificado só pela CI.
+`cargo check --target x86_64-unknown-linux-gnu` was attempted, but stops at `ring` because there is no
+`x86_64-linux-gnu-gcc` toolchain on this machine — which is why the Linux build is verified only via CI.
 
-A cota do Antigravity e o WSLg (seções 2.7 e 2.8) foram verificados por revisão de código e pelas fontes
-(`zalando/go-keyring`, issues do `winit` e do WSLg). O módulo do chaveiro compila para `x86_64-unknown-linux-gnu`
-numa crate separada (como em `t29`, o workspace para no `ring` por falta do gcc cruzado) e o trecho que força o X11
-foi conferido do mesmo jeito; mas não houve Linux nem WSL para abrir o app.
+The Antigravity quota and WSLg (sections 2.7 and 2.8) were verified by code review and upstream sources
+(`zalando/go-keyring`, `winit` and WSLg issues). The keyring module compiles for `x86_64-unknown-linux-gnu`
+in a separate crate (as in `t29`, the workspace stops at `ring` due to the lack of a cross-gcc), and the code
+forcing X11 was verified the same way; but there was no Linux or WSL available to run the app.
 
-## 2. O que estava quebrado e foi corrigido
+## 2. What was broken and got fixed
 
-### 2.1 O teste que falhava só no Linux (desde 17/10)
+### 2.1 The test that failed only on Linux (since Oct 17)
 
-Os jobs do Ubuntu (`runs 42–46`) falhavam em `workspace::tests::read_dir_orders_and_filters`, sempre com
-`index out of bounds: the len is 0 but the index is 0` em `workspace.rs`. A linha era:
+Ubuntu jobs (`runs 42–46`) failed in `workspace::tests::read_dir_orders_and_filters`, always with
+`index out of bounds: the len is 0 but the index is 0` in `workspace.rs`. The line was:
 
 ```rust
 let sub_bs = read_dir(ws, "zeta\\");
-assert_eq!(sub_bs[0].rel_path, "zeta/in.json");   // panic no Linux
+assert_eq!(sub_bs[0].rel_path, "zeta/in.json");   // panic on Linux
 ```
 
-`read_dir` validava e juntava o caminho **antes** de trocar `\` por `/`. No Windows `zeta\` é o diretório `zeta`; no
-Unix a barra invertida faz parte do nome, então `ws.join("zeta\\")` procura um arquivo chamado `zeta\` e devolve
-vazio. Correção em `crates/core/src/workspace.rs`: normalizar o separador no começo de `read_dir`. O teste continua
-valendo (e passa) no Windows. Ver
+`read_dir` validated and joined the path **before** replacing `\` with `/`. On Windows `zeta\` is the directory `zeta`;
+on Unix the backslash is part of the filename, so `ws.join("zeta\\")` looks for a file named `zeta\` and returns
+empty. Fix in `crates/core/src/workspace.rs`: normalize the separator at the beginning of `read_dir`. The test remains
+valid (and passes) on Windows. See
 [aprendizados/caminho-com-barra-invertida-no-read-dir.md](aprendizados/caminho-com-barra-invertida-no-read-dir.md).
 
-### 2.2 A CI parou de validar o Linux (de 22/10 até a dívida de formatação ser paga)
+### 2.2 CI stopped validating Linux (from Oct 22 until formatting debt was paid)
 
-A partir do `run 47` (commit `146a486`), o passo **Formatação** (`cargo fmt --all -- --check`) falhava no Windows **e**
-no Ubuntu, e os passos de build, teste e clippy nem rodavam. A dívida foi paga depois: em 2026-10-24 a CI passou inteira
-nos três jobs (Windows, Ubuntu, Fedora), com a formatação.
+Starting with `run 47` (commit `146a486`), the **Formatting** step (`cargo fmt --all -- --check`) failed on Windows **and**
+Ubuntu, and the build, test, and clippy steps didn't even run. The debt was paid later: on 2026-10-24 CI passed completely
+across all three jobs (Windows, Ubuntu, Fedora), including formatting.
 
-### 2.3 Pasta de dados em instalação de sistema
+### 2.3 Data folder in system-wide installation
 
-`AppPaths::detect()` usava sempre a pasta do executável para `dados/`, `workspace/` e `whisper/`. Copiar o binário
-para `/usr/local/bin` (pasta do root) fazia o app falhar ao abrir a trava (`dados/.agentdeck.lock` → permissão
-negada). Agora, no Unix, se a pasta não for gravável (`access(2)`), os dados vão para `~/.local/share/AgentDeck`
-(padrão XDG). Pasta portátil e repositório em desenvolvimento continuam como antes, e `AGENTDECK_HOME` continua
-mandando. Correção em `crates/core/src/paths.rs`, com teste em `#[cfg(unix)]`.
+`AppPaths::detect()` always used the executable's directory for `dados/`, `workspace/`, and `whisper/`. Copying the binary
+to `/usr/local/bin` (root-owned directory) caused the app to fail when opening the lock (`dados/.agentdeck.lock` →
+permission denied). Now, on Unix, if the folder is not writable (`access(2)`), data goes to `~/.local/share/AgentDeck`
+(XDG standard). Portable folder and development repository continue as before, and `AGENTDECK_HOME` still takes
+precedence. Fix in `crates/core/src/paths.rs`, with a test under `#[cfg(unix)]`.
 
-### 2.4 Referência a um script que não existe
+### 2.4 Reference to a non-existent script
 
-A mensagem de erro do ditado mandava compilar o whisper.cpp com `scripts/build-whisper-linux.sh`, que não existe no
-repositório. A mensagem agora diz o que fazer de verdade (compilar com Vulkan/CUDA e pôr o `whisper-cli` no `PATH`, ou
-usar o motor de CPU).
+The dictation error message instructed compiling whisper.cpp with `scripts/build-whisper-linux.sh`, which does not exist
+in the repository. The message now explains what to actually do (compile with Vulkan/CUDA and place `whisper-cli` in
+`PATH`, or use the CPU engine).
 
-### 2.5 Fontes do terminal no Fedora
+### 2.5 Terminal fonts on Fedora
 
-Os caminhos de fonte do Linux só cobriam o layout do Debian/Ubuntu (`/usr/share/fonts/truetype/...`). O Fedora instala
-cada família na própria pasta (`/usr/share/fonts/dejavu-sans-mono-fonts/...`), então a lista não achava nada e o
-terminal caía na fonte embutida do egui. `theme.rs` ganhou os caminhos do Fedora (a interface já usa Inter/IBM Plex
-embutidas; isso vale para o terminal e para os símbolos).
+Linux font paths only covered the Debian/Ubuntu layout (`/usr/share/fonts/truetype/...`). Fedora installs each
+family into its own directory (`/usr/share/fonts/dejavu-sans-mono-fonts/...`), so the list found nothing and the
+terminal fell back to egui's built-in font. `theme.rs` gained Fedora paths (the UI already uses embedded Inter/IBM Plex;
+this applies to the terminal and symbols).
 
-### 2.6 Documentação e CI
+### 2.6 Documentation and CI
 
-- `README.md` e `CONTRIBUTING.md`: dependências corrigidas (sem GTK3, que não é usado), `xdg-utils`/portal, `libgomp`,
-  pasta de dados, URL do repositório novo (`AgentDeck`).
-- `.github/workflows/ci.yml`: saiu o `libgtk-3-dev`; entrou um job **`fedora`** (`container: fedora:latest`) que
-  instala as dependências do README e roda `cargo build --workspace` e `cargo test --workspace`.
+- `README.md` and `CONTRIBUTING.md`: dependencies corrected (no GTK3, which is unused), `xdg-utils`/portal, `libgomp`,
+  data folder, new repository URL (`AgentDeck`).
+- `.github/workflows/ci.yml`: removed `libgtk-3-dev`; added a **`fedora`** job (`container: fedora:latest`) that
+  installs README dependencies and runs `cargo build --workspace` and `cargo test --workspace`.
 
-### 2.7 Cota do Antigravity pelo chaveiro do sistema (t33)
+### 2.7 Antigravity quota via system keyring (t33)
 
-No Linux o `agy` não guarda o token em `~/.gemini/oauth_creds.json`: ele usa o **Secret Service** (o chaveiro do
-GNOME/KDE, por D-Bus), com `service=gemini`, `username=antigravity` e o mesmo JSON do Gerenciador de Credenciais
-do Windows. O app só olhava o arquivo, então a cota ficava "sem dados". `crates/core/src/usage/antigravity.rs`
-ganhou a leitura do chaveiro com a crate `secret-service` (Rust puro, por `zbus`; nenhuma biblioteca C nova na
-CI), numa thread própria com prazo de 3 s e só para itens já destravados — destravar abriria um pedido de senha
-em segundo plano. Sem sessão D-Bus (SSH, contêiner) a busca falha em silêncio e o app cai nos arquivos como
-antes; a leitura só acontece quando a home usada é a do sistema, como já era no Windows. Entrou também o arquivo
-que o `agy` grava quando não há chaveiro (`GEMINI_FORCE_FILE_STORAGE=true`, o caminho de SSH, contêiner e WSL):
-`~/.gemini/antigravity-cli/antigravity-oauth-token`, depois do `~/.gemini/oauth_creds.json` na ordem das fontes.
-Ver [aprendizados/antigravity-token-no-secret-service.md](aprendizados/antigravity-token-no-secret-service.md).
+On Linux, `agy` does not store the token in `~/.gemini/oauth_creds.json`: it uses **Secret Service** (the GNOME/KDE
+keyring over D-Bus), with `service=gemini`, `username=antigravity` and the same JSON as Windows Credential Manager.
+The app previously only checked the file, so the quota remained "no data". `crates/core/src/usage/antigravity.rs`
+gained keyring reading via the `secret-service` crate (pure Rust, over `zbus`; no new C libraries in CI), running in
+its own thread with a 3-second timeout and only for already unlocked items — unlocking would trigger a password prompt
+in the background. Without a D-Bus session (SSH, container), the lookup silently fails and the app falls back to files
+as before; keyring reading only occurs when the home used is the system home, as was already the case on Windows. Also
+added support for the file `agy` writes when there is no keyring (`GEMINI_FORCE_FILE_STORAGE=true`, the SSH,
+container, and WSL fallback): `~/.gemini/antigravity-cli/antigravity-oauth-token`, after `~/.gemini/oauth_creds.json`
+in source precedence. See [aprendizados/antigravity-token-no-secret-service.md](aprendizados/antigravity-token-no-secret-service.md).
 
-Para conferir: `secret-tool lookup service gemini username antigravity` (pacote `libsecret-tools` no Ubuntu,
-`libsecret` no Fedora) imprime o JSON, e pede para destravar o chaveiro se ele estiver trancado. Com o token válido,
-a cota aparece na próxima consulta (a cada 3 min, ou em 20 s depois de uma falha). Se não aparecer, rode com
-`RUST_LOG=debug`: o `agentdeck.log` registra quando o chaveiro não devolveu o token.
+To verify: `secret-tool lookup service gemini username antigravity` (`libsecret-tools` package on Ubuntu, `libsecret`
+on Fedora) prints the JSON and prompts to unlock the keyring if locked. With a valid token, quota appears on the next
+poll (every 3 min, or 20 s after a failure). If it doesn't appear, run with `RUST_LOG=debug`: `agentdeck.log` records
+when the keyring did not return a token.
 
-### 2.8 WSLg: abrir pelo X11 (t33)
+### 2.8 WSLg: open via X11 (t33)
 
-Sob o WSLg o desktop é um Weston 9 (Wayland) com um XWayland ao lado. O cliente Wayland do Weston 9 quebra
-janelas que desenham a própria decoração e redimensionam, e o Weston já caiu com clientes Wayland (`winit#4306`,
-`microsoft/wslg#1008` e `#633`). O app agora detecta o WSLg (`WSL_DISTRO_NAME` ou "microsoft" no
-`/proc/sys/kernel/osrelease`, mais a pasta `/mnt/wslg`) e força o backend X11 do `winit`
-(`crates/app/src/wslg.rs`, com teste da função pura; `main.rs`). Fora do WSLg nada muda, e um
-`WINIT_UNIX_BACKEND` definido pelo usuário continua mandando.
+Under WSLg, the desktop is Weston 9 (Wayland) alongside XWayland. The Weston 9 Wayland client breaks windows that
+draw client-side decorations and resize, and Weston has crashed with Wayland clients (`winit#4306`,
+`microsoft/wslg#1008` and `#633`). The app now detects WSLg (`WSL_DISTRO_NAME` or "microsoft" in
+`/proc/sys/kernel/osrelease`, plus the `/mnt/wslg` directory) and forces `winit`'s X11 backend
+(`crates/app/src/wslg.rs`, with tests for the pure function; `main.rs`). Outside WSLg nothing changes, and a
+user-defined `WINIT_UNIX_BACKEND` still takes precedence.
 
-O que o app não resolve, e por que o README manda usar o app nativo no Windows:
+What the app does not resolve, and why the README advises using the native app on Windows:
 
-- **Escala sempre 1**: no X11 a escala vem do XSettings (`Xft/DPI`), que o WSLg não publica; em tela de alta
-  densidade a interface fica pequena. O `winit` 0.30 não tem mais `WINIT_X11_SCALE_FACTOR` (foi removido), então
-  não há variável de ambiente para contornar — mudar isso exige tratar a escala no app.
-- **Janela maximizada sem decoração**: já apareceu deslocada em 32 px no WSLg; sem uma máquina Windows com WSLg,
-  não dá para confirmar nem corrigir.
-- **Redimensionamento e cursor**: são justamente os pontos que quebram no Wayland do WSLg; no X11 devem funcionar,
-  mas ninguém abriu o app lá.
+- **Scale always 1**: on X11 scaling comes from XSettings (`Xft/DPI`), which WSLg does not publish; on high-density
+  displays the UI appears small. `winit` 0.30 no longer has `WINIT_X11_SCALE_FACTOR` (it was removed), so there is
+  no environment variable workaround — fixing this requires handling scaling in the app.
+- **Maximized window without decorations**: has appeared shifted by 32 px in WSLg; without a Windows machine with WSLg,
+  this cannot be confirmed or fixed.
+- **Resizing and cursor**: these are precisely the failure points on WSLg Wayland; on X11 they should work, but nobody
+  has opened the app there.
 
-Ver [aprendizados/wslg-forca-x11.md](aprendizados/wslg-forca-x11.md).
+See [aprendizados/wslg-forca-x11.md](aprendizados/wslg-forca-x11.md).
 
-## 3. Dependências
+## 3. Dependencies
 
-### 3.1 Para compilar
+### 3.1 To compile
 
 | | Ubuntu 24.04+ | Fedora 41+ |
 | :-- | :-- | :-- |
 | Base | `build-essential pkg-config` | `gcc gcc-c++ make pkgconf-pkg-config` |
-| Áudio (padrão) | `libasound2-dev` | `alsa-lib-devel` |
-| Janela/teclado | `libxkbcommon-dev` | `libxkbcommon-devel` |
+| Audio (default) | `libasound2-dev` | `alsa-lib-devel` |
+| Window/keyboard | `libxkbcommon-dev` | `libxkbcommon-devel` |
 | Rust | 1.89+ (`rustup`) | 1.89+ (`rustup`) |
 
-Sem áudio: `cargo build -p agentdeck --no-default-features` dispensa a ALSA (fica sem som e sem microfone).
+Without audio: `cargo build -p agentdeck --no-default-features` avoids ALSA (leaves audio and microphone disabled).
 
-Não precisa de: GTK3/GTK4 (`rfd` usa o portal), OpenSSL (`ureq` com rustls), X11/Wayland de desenvolvimento (o winit
-carrega as bibliotecas em tempo de execução). O `libxkbcommon` não é exigido no link, mas é o que a CI instala e o que
-o teclado usa em Wayland.
+Not needed: GTK3/GTK4 (`rfd` uses the portal), OpenSSL (`ureq` with rustls), X11/Wayland development headers (winit
+loads libraries at runtime). `libxkbcommon` is not required at link time, but it is what CI installs and what the
+keyboard uses on Wayland.
 
-### 3.2 Para rodar
+### 3.2 To run
 
-| Recurso | Ubuntu | Fedora | Sem isso |
+| Feature | Ubuntu | Fedora | Without this |
 | :-- | :-- | :-- | :-- |
-| Janela | X11 ou Wayland + driver GL (`mesa`) | idem (`mesa-libGL`) | não abre |
-| Abrir pasta / links | `xdg-utils` (`xdg-open`) | `xdg-utils` | falha silenciosa |
-| Diálogo de arquivo | `xdg-desktop-portal` + `xdg-desktop-portal-gtk` | idem | o diálogo não abre |
-| Fonte do terminal | `fonts-dejavu-core` (ou Liberation/Noto) | `dejavu-sans-mono-fonts` | cai na fonte embutida do egui |
-| Chaveiro (cota do Antigravity) | Secret Service (`gnome-keyring`/`kwallet`) | idem | a cota do Antigravity fica sem dados |
-| Git / GitHub | `git` (e `gh` opcional) | `git` (`gh` opcional) | abas Git/GitHub sem função |
-| Ditado (CPU) | `libgomp`, `libstdc++` | `libgomp`, `libstdc++` | o `whisper-cli` baixado não roda |
-| Detectar GPU | `pciutils` (`lspci`), `nvidia-smi` | idem | cai no motor de CPU |
+| Window | X11 or Wayland + GL driver (`mesa`) | same (`mesa-libGL`) | does not open |
+| Open folder / links | `xdg-utils` (`xdg-open`) | `xdg-utils` | silent failure |
+| File dialog | `xdg-desktop-portal` + `xdg-desktop-portal-gtk` | same | dialog does not open |
+| Terminal font | `fonts-dejavu-core` (or Liberation/Noto) | `dejavu-sans-mono-fonts` | falls back to egui's built-in font |
+| Keyring (Antigravity quota) | Secret Service (`gnome-keyring`/`kwallet`) | same | Antigravity quota shows no data |
+| Git / GitHub | `git` (and optional `gh`) | `git` (optional `gh`) | Git/GitHub tabs non-functional |
+| Dictation (CPU) | `libgomp`, `libstdc++` | `libgomp`, `libstdc++` | downloaded `whisper-cli` will not run |
+| Detect GPU | `pciutils` (`lspci`), `nvidia-smi` | same | falls back to CPU engine |
 
-CLIs de agente: `npm install -g` dos mesmos pacotes do Windows; o Antigravity tem instalador próprio. O app
-procura no `PATH`, em `~/.local/bin`, em `~/.claude/local/claude` e em `~/.antigravity/bin/agy`.
+Agent CLIs: `npm install -g` of the same packages as Windows; Antigravity has its own installer. The app looks in
+`PATH`, `~/.local/bin`, `~/.claude/local/claude`, and `~/.antigravity/bin/agy`.
 
-## 4. O que está coberto pelo código e pelos testes
+## 4. What is covered by code and tests
 
-| Área | Como está no Linux |
+| Area | Status on Linux |
 | :-- | :-- |
-| Processos | grupo próprio por filho (`process_group(0)`) e `kill(-pid)` na árvore; testes `cfg(unix)` em `process.rs` |
+| Processes | own process group per child (`process_group(0)`) and `kill(-pid)` on tree; `cfg(unix)` tests in `process.rs` |
 | PTY/terminal | `portable-pty` + `alacritty_terminal`; `TERM=xterm-256color`, `COLORTERM=truecolor` |
-| Aba Terminal | `$SHELL` ou `/bin/bash`; sem shims `.cmd` (isso é só Windows) |
-| Ambiente das abas | `PATH` com a pasta de binários do app na frente; variáveis `AGENTDECK_*`; sem `PYTHONUTF8`/MSYS |
-| Instância única | trava de arquivo em `dados/.agentdeck.lock` |
-| Git | `git` do `PATH`, sem shell, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, SSH em `BatchMode` |
-| GitHub | token por `git credential fill` e, se houver, `gh auth token`; sem gravar em disco |
-| Agentes | resolução por `which`/pastas do usuário; sem `cmd.exe` |
-| Documentos/workspace | `workspace::read_dir` normaliza `/` e `\`; `read_text` recusa link que sai do projeto |
-| Whisper (CPU) | baixa `whisper-bin-ubuntu-x64.tar.gz` (ou arm64), `chmod 0o755`, `LD_LIBRARY_PATH` com a pasta do motor |
-| Uso/cotas | Antigravity lê o Secret Service (`service=gemini`, `username=antigravity`) e, sem ele, `~/.gemini/oauth_creds.json` e `~/.gemini/antigravity-cli/antigravity-oauth-token`; Codex lê `~/.codex/sessions` |
-| Interface | fontes embutidas; `xdg-open` para pastas; `open` (crate) para URLs |
+| Terminal tab | `$SHELL` or `/bin/bash`; no `.cmd` shims (Windows only) |
+| Tab environment | `PATH` with app binary directory prepended; `AGENTDECK_*` variables; no `PYTHONUTF8`/MSYS |
+| Single instance | file lock at `dados/.agentdeck.lock` |
+| Git | `PATH` `git`, without shell, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, SSH in `BatchMode` |
+| GitHub | token via `git credential fill` and, if available, `gh auth token`; no disk persistence |
+| Agents | resolved via `which`/user directories; no `cmd.exe` |
+| Documents/workspace | `workspace::read_dir` normalizes `/` and `\`; `read_text` rejects links outside project |
+| Whisper (CPU) | downloads `whisper-bin-ubuntu-x64.tar.gz` (or arm64), `chmod 0o755`, `LD_LIBRARY_PATH` with engine directory |
+| Usage/quotas | Antigravity reads Secret Service (`service=gemini`, `username=antigravity`) and, without it, `~/.gemini/oauth_creds.json` and `~/.gemini/antigravity-cli/antigravity-oauth-token`; Codex reads `~/.codex/sessions` |
+| Interface | embedded fonts; `xdg-open` for folders; `open` (crate) for URLs |
 
-A suíte tem 196 testes no app (mais 1 ignorado, o de cota real), 253 no core (mais 2 ignorados), 31 da ponte e 37 das
-tarefas, além dos de git/github; rodada localmente no Windows em 23/10, todos passam. No Linux, o único que falhava era
-o de `read_dir` (corrigido aqui); os demais rodaram
-verdes no Ubuntu até o `run 46`.
+The test suite has 196 tests in app (plus 1 ignored, for real quota), 253 in core (plus 2 ignored), 31 for bridge, and
+37 for tasks, in addition to git/github tests; run locally on Windows on 10/23, all pass. On Linux, the only failing
+test was `read_dir` (fixed here); the rest ran green on Ubuntu through `run 46`.
 
-## 5. O que continua sem verificação (ou sem suporte)
+## 5. What remains unverified (or unsupported)
 
-1. **Wayland**: a winit suporta, e o `rfd` também, mas ninguém abriu o app numa sessão Wayland. Testar janela, arrastar
-   divisórias, colar, IME e diálogo de arquivo. Contorno: `WINIT_UNIX_BACKEND=x11`.
-2. **Desktop Fedora de verdade**: o job novo prova build e testes, não a janela. Falta abrir o app num Fedora
-   Workstation (GNOME/Wayland) e repetir o roteiro do fim deste documento.
-3. **Empacotamento**: não há `.deb`, `.rpm`, Flatpak, AppImage, `.desktop` nem ícone instalado. O app roda da pasta
-   compilada; para o menu de aplicativos, é trabalho futuro.
-4. **Ditado com GPU**: o app não baixa motores CUDA/Vulkan para Linux (só o de CPU). Quem tem GPU precisa compilar o
-   whisper.cpp e deixar o `whisper-cli` no `PATH`; a detecção usa `lspci`/`nvidia-smi`.
-5. **Diálogo de arquivo sem portal**: em ambiente mínimo (i3, container, SSH) sem `xdg-desktop-portal` o diálogo não
-   abre. Não há aviso na interface; avaliar uma mensagem.
-6. **Textos com “Git Credential Manager”**: as mensagens de erro de Git/GitHub foram escritas no Windows e citam GCM e
-   “faça um push para entrar”. No Linux o caminho normal é `gh auth login` ou `credential.helper=store`; o texto
-   deveria citar os dois.
-7. **“Abrir pasta” ignora falha**: `Command::new("xdg-open").spawn()` sem tratar o erro; sem `xdg-utils` o clique não
-   faz nada e não avisa.
-8. **Versão do runner**: o rótulo `ubuntu-latest` migra para Ubuntu 26 a partir de 19/10/2026; o job pode mudar de
-   base sem aviso. Se aparecer dependência nova, conferir o log do passo “Dependências de sistema”.
-9. **Formatação**: se `cargo fmt --all -- --check` voltar a falhar, nenhum job chega a rodar os testes — inclusive o
-   Fedora. A base toda está no rustfmt: rode `cargo fmt --all` e inclua no commit o que ele mudar (ver
+1. **Wayland**: winit supports it, and so does `rfd`, but nobody has run the app in a Wayland session. Test window, dragging
+   splitters, paste, IME, and file dialog. Workaround: `WINIT_UNIX_BACKEND=x11`.
+2. **Real Fedora desktop**: the new job proves build and tests, not window rendering. Still needed: opening the app on a Fedora
+   Workstation (GNOME/Wayland) and repeating the manual script at the end of this document.
+3. **Packaging**: no `.deb`, `.rpm`, Flatpak, AppImage, `.desktop`, or installed icon. The app runs from the compiled
+   folder; app menu integration is future work.
+4. **Dictation with GPU**: the app does not download CUDA/Vulkan engines for Linux (only CPU). Users with a GPU need to compile
+   whisper.cpp and keep `whisper-cli` in `PATH`; detection uses `lspci`/`nvidia-smi`.
+5. **File dialog without portal**: in minimal environments (i3, container, SSH) without `xdg-desktop-portal`, the dialog does
+   not open. There is no UI warning; consider adding a message.
+6. **Texts referencing “Git Credential Manager”**: Git/GitHub error messages were written on Windows and mention GCM and
+   “push to log in”. On Linux the standard route is `gh auth login` or `credential.helper=store`; the text should mention both.
+7. **“Open folder” ignores failure**: `Command::new("xdg-open").spawn()` without error handling; without `xdg-utils` the
+   click does nothing and does not warn.
+8. **Runner version**: the `ubuntu-latest` label migrates to Ubuntu 26 starting 2026-10-19; the job base may change without
+   notice. If a new dependency appears, check the “System dependencies” step log.
+9. **Formatting**: if `cargo fmt --all -- --check` fails again, no job runs tests — including Fedora. The entire codebase
+   conforms to rustfmt: run `cargo fmt --all` and commit what it changes (see
    [aprendizados/base-toda-no-rustfmt.md](aprendizados/base-toda-no-rustfmt.md)).
-10. **WSLg**: o X11 foi forçado (seção 2.8), mas ninguém abriu o app dentro de um WSLg. Faltam: janela maximizada
-    (deslocamento de 32 px), escala (sempre 1, interface pequena em 4K), arrastar/redimensionar, cursor e a cota do
-    Antigravity lida do chaveiro de lá. Um `WINIT_UNIX_BACKEND=wayland` reproduz o caminho quebrado, para comparar.
+10. **WSLg**: X11 was forced (section 2.8), but nobody has opened the app inside WSLg. Still to check: maximized window
+    (32 px shift), scaling (always 1, small UI on 4K), drag/resize, cursor, and Antigravity quota read from the keyring
+    there. `WINIT_UNIX_BACKEND=wayland` reproduces the broken path, for comparison.
 
-## 6. Roteiro manual (Ubuntu e Fedora)
+## 6. Manual test script (Ubuntu and Fedora)
 
-Rodar numa pasta de dados separada para não mexer na configuração real:
+Run in a separate data folder to avoid affecting real configuration:
 `AGENTDECK_HOME=/tmp/agentdeck-teste ./target/release/agentdeck`.
 
-**Instalação e abertura**
+**Installation and launch**
 
-- [ ] `cargo build --workspace --release` termina sem erro (Ubuntu e Fedora).
-- [ ] O app abre em X11 e em Wayland (GNOME e KDE, se possível), com o tamanho de janela e o DPI corretos.
-- [ ] O terminal da aba “Terminal” abre o `$SHELL`, aceita acentos e cores, e redimensiona sem quebrar a linha.
-- [ ] Fechar o app e abrir de novo mantém projetos, abas e tamanhos; abrir uma segunda instância na mesma pasta avisa
-      que já está em uso; com `AGENTDECK_HOME` diferente, abre as duas.
+- [ ] `cargo build --workspace --release` completes without error (Ubuntu and Fedora).
+- [ ] App opens on X11 and Wayland (GNOME and KDE, if possible), with correct window size and DPI.
+- [ ] Terminal in the “Terminal” tab opens `$SHELL`, accepts accents and colors, and resizes without breaking line wraps.
+- [ ] Closing the app and reopening preserves projects, tabs, and sizes; opening a second instance in the same folder
+      warns that it is already in use; with a different `AGENTDECK_HOME`, opens both.
 
-**Agentes e memória**
+**Agents and memory**
 
-- [ ] O menu “+ Novo agente” lista os CLIs instalados e o cartão de cada um abre a aba certa.
-- [ ] `ask-agent --list`, `--team`, `--models` funcionam no terminal de fora do app.
-- [ ] `ask-agent claude "..."` numa aba e a resposta digitada chegam; a Conversa integrada mostra o par.
-- [ ] Criar uma tarefa (`--task new ... --start`), ver a worktree, entregar com `--task done` e ler o relatório.
-- [ ] `ask-agent --learn` mostra os aprendizados; o `AGENTS.md` do projeto é atualizado só onde já existia.
-- [ ] A cota do Antigravity aparece na barra de título com o `agy` logado; `secret-tool lookup service gemini
-      username antigravity` devolve o JSON e, com `RUST_LOG=debug`, o `agentdeck.log` não acusa falha ao ler o chaveiro.
+- [ ] The “+ New agent” menu lists installed CLIs, and each agent's card opens the correct tab.
+- [ ] `ask-agent --list`, `--team`, `--models` work in a terminal outside the app.
+- [ ] `ask-agent claude "..."` in a tab and the typed response arrive; Integrated Conversation shows the pair.
+- [ ] Create a task (`--task new ... --start`), inspect the worktree, submit with `--task done`, and read the report.
+- [ ] `ask-agent --learn` displays learnings; project `AGENTS.md` is updated only where it already existed.
+- [ ] Antigravity quota appears in the titlebar when `agy` is logged in; `secret-tool lookup service gemini
+      username antigravity` returns the JSON and, with `RUST_LOG=debug`, `agentdeck.log` reports no failure reading the keyring.
 
 **Interface**
 
-- [ ] Barra lateral, barra direita, abas, menus e modais desenham sem texto cortado nem sobreposição.
-- [ ] Arrastar divisórias, trocar para ORGANIZAÇÃO/Destaque e alternar Documentos (Ctrl+Shift+D).
-- [ ] Abrir uma pasta pelo botão (precisa de `xdg-open`) e escolher um arquivo no diálogo (precisa do portal).
-- [ ] Copiar e colar (Ctrl+C/Ctrl+V) entre o app e outro programa; colar uma imagem como anexo.
-- [ ] Aba Git (status, diff, histórico, stash) e aba GitHub (PRs, issues, Actions) num repositório real.
+- [ ] Sidebar, right panel, tabs, menus, and modals render without clipped text or overlap.
+- [ ] Drag dividers, switch to ORGANIZATION/Focus, and toggle Documents (Ctrl+Shift+D).
+- [ ] Open a folder via button (requires `xdg-open`) and pick a file in the dialog (requires portal).
+- [ ] Copy and paste (Ctrl+C/Ctrl+V) between the app and another program; paste an image as an attachment.
+- [ ] Git tab (status, diff, history, stash) and GitHub tab (PRs, issues, Actions) in a real repository.
 
-**Ditado**
+**Dictation**
 
-- [ ] Com microfone: segurar o atalho, falar e ver o texto na aba; o `.wav` temporário desaparece de `dados/`.
-- [ ] Sem microfone ou sem `libgomp`: o app explica o que falta em vez de travar.
+- [ ] With microphone: hold shortcut, speak, and see text appear in tab; temporary `.wav` disappears from `dados/`.
+- [ ] Without microphone or without `libgomp`: app explains what is missing instead of crashing.
 
-**WSLg (a partir do Windows, com o app compilado no WSL)**
+**WSLg (from Windows, with app built in WSL)**
 
-- [ ] `./target/release/agentdeck` abre pelo X11 (o log diz “WSLg detectado”); a janela não pisca, não some e o
-      terminal aceita teclado.
-- [ ] Maximizar, restaurar, arrastar e redimensionar; o cursor aparece e o texto não fica cortado.
-- [ ] Numa tela de alta densidade, anotar a escala (hoje é sempre 1, então a interface fica pequena) e o que falta.
-- [ ] `WINIT_UNIX_BACKEND=wayland ./target/release/agentdeck` reproduz a falha do Wayland do WSLg, para comparar.
+- [ ] `./target/release/agentdeck` opens via X11 (log shows “WSLg detected”); window doesn't flicker or vanish, and
+      terminal accepts keyboard input.
+- [ ] Maximize, restore, drag, and resize; cursor appears and text is not clipped.
+- [ ] On a high-DPI display, note the scale (currently always 1, so UI is small) and what is missing.
+- [ ] `WINIT_UNIX_BACKEND=wayland ./target/release/agentdeck` reproduces the WSLg Wayland failure, for comparison.
 
-**Fim**
+**Wrap-up**
 
-- [ ] `dados/agentdeck.log` e `dados/crash.log` existem e não têm erro repetido.
-- [ ] Ao fechar o app, não sobra processo `whisper-cli` nem agente órfão (`ps -ef | grep -E "whisper|claude"`).
+- [ ] `dados/agentdeck.log` and `dados/crash.log` exist and have no repeated errors.
+- [ ] On closing the app, no orphaned `whisper-cli` or agent processes remain (`ps -ef | grep -E "whisper|claude"`).
 
-## 7. Manutenção
+## 7. Maintenance
 
-- Mudou dependência de sistema, caminho de fonte, pasta de dados ou suporte a GPU? Atualize este arquivo e o README no
-  mesmo commit.
-- O job `fedora` da CI é o mínimo: ele não abre janela. Uma falha só nele costuma ser dependência de build faltando no
-  `dnf install`.
-- Ao acrescentar um teste que usa caminho, rode a suíte nos dois sentidos: `cargo test --workspace` no Windows **e** no
-  Linux (CI). O caso do `read_dir` mostra que um teste pode passar anos só num sistema.
+- Changed system dependencies, font paths, data directory, or GPU support? Update this file and the README in the same
+  commit.
+- The CI `fedora` job is minimal: it does not open a window. A failure occurring only there is usually a missing build
+  dependency in `dnf install`.
+- When adding a path-handling test, run the suite both ways: `cargo test --workspace` on Windows **and** on Linux (CI).
+  The `read_dir` issue demonstrates that a test can pass for years on only one OS.

@@ -1,41 +1,46 @@
-//! Mesa de tarefas: a unidade de trabalho do AgentDeck.
+//! The tasks desk: AgentDeck's unit of work.
 //!
-//! Uma **tarefa** tem um pedido (o brief), um agente com modelo, uma worktree + branch próprias, um
-//! relatório, um diff e um ciclo de vida que termina em validação (concluída) ou descarte:
+//! A **task** has a request (the brief), an agent with a model, its own worktree + branch, a report, a diff and a
+//! lifecycle that ends in validation (completed) or discard:
 //!
 //! ```text
-//! Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged (concluída)
+//! Draft ──start──▶ Running ──done──▶ Review ──merge──▶ Validating ──validate──▶ Merged (completed)
 //!   │  │              ▲                 │ └─discard──▶ Discarded     │ └─discard──▶ Discarded
 //!   │  │              ├───return────────┘                            │
 //!   │  │              └───────────────reject─────────────────────────┘
-//!   │  └─ escopo ocupado ─▶ Queued ──(a outra sai de Running/Review)──▶ Running
-//!   └─ start com erro ─▶ Failed ──(start de novo)──▶ Running
+//!   │  └─ scope taken ─▶ Queued ──(the other leaves Running/Review)──▶ Running
+//!   └─ start with an error ─▶ Failed ──(start again)──▶ Running
 //! ```
 //!
-//! **Escopo e fila:** a tarefa pode declarar os caminhos que vai mexer ([`Task::scope`], ver [`crate::scope`]). Ao
-//! iniciar, se o escopo se sobrepõe ao de uma tarefa em andamento ou em revisão (ou ao de outra que já espera na
-//! fila, que chegou antes), ela fica em `Queued`, dizendo por qual espera ([`Task::waiting_for`]), e começa sozinha
-//! quando essa tarefa é mesclada, descartada ou falha ([`Core::advance_queue`]), partindo da base daquele momento.
-//! `Validating` não segura a fila: o código já está na base. Sem escopo, nada disso vale.
+//! **Scope and queue:** a task can declare the paths it will touch ([`Task::scope`], see [`crate::scope`]). On
+//! start, if its scope overlaps that of a task that is running or in review (or of another one already waiting in
+//! the queue, which arrived earlier), it goes to `Queued`, saying which task it waits for ([`Task::waiting_for`]),
+//! and starts by itself when that task is merged, discarded or fails ([`Core::advance_queue`]), departing from the
+//! base as it is at that moment. `Validating` does not hold the queue: the code is already in the base. Without a
+//! scope, none of this applies.
 //!
-//! Mesclar é "o diff parecia certo"; o teste de verdade o usuário faz depois, no app compilado. Por isso
-//! mesclar **não** encerra o agente: a tarefa fica em `Validating` (aba, worktree e branch vivas, a branch
-//! alinhada com a base) até o usuário validar (limpa tudo) ou reprovar (volta ao mesmo agente).
+//! Merging is "the diff looked right"; the real test is done by the user afterwards, in the compiled app. That is
+//! why merging does **not** end the agent: the task stays in `Validating` (tab, worktree and branch alive, the
+//! branch aligned with the base) until the user validates (cleans everything up) or rejects (back to the same agent).
 //!
-//! - **Armazenamento:** `dados/tarefas/<projeto>.json`, gravado por arquivo temporário + `rename`
-//!   (uma gravação por vez), fora do repositório do usuário. O contador (`t1`, `t2`…) nunca reaproveita número.
-//! - **Worktrees:** `<raiz do repositório>/.agentdeck/worktrees/<id>`, dentro do repositório de propósito
-//!   (agentes confinados ao workspace, como o Antigravity, conseguem chegar lá). A pasta `/.agentdeck/` entra
-//!   uma vez em `<git comum>/info/exclude` (nunca no `.gitignore`).
-//! - **Git:** o mesmo executor seguro de [`crate::git`] (sem shell, sem prompts, com limite de tempo).
-//! - **Threads:** os métodos que rodam o git são bloqueantes; a interface os chama numa thread. Uma
-//!   operação do ciclo de vida por vez (`TaskStore::op`); consultas só pegam uma trava curta.
-//! - **Agente:** a instância da tarefa é `<modelo>@t<n>` (`claude@t3`), com o terminal na worktree
-//!   ([`Core::task_cwd`], usado por `agents::spawn_spec_for`). O brief e o feedback chegam pelo mesmo
-//!   caminho das mensagens entre agentes (`CoreEvent::Deliver` com `request: 0`, fila e regras de entrega).
+//! - **Storage:** `dados/tarefas/<project>.json`, written through a temporary file + `rename` (one write at a
+//!   time), outside the user's repository. The counter (`t1`, `t2`…) never reuses a number.
+//! - **Worktrees:** `<repository root>/.agentdeck/worktrees/<id>`, inside the repository on purpose (agents confined
+//!   to the workspace, like Antigravity, can reach it). The `/.agentdeck/` folder goes once into
+//!   `<common git dir>/info/exclude` (never into `.gitignore`).
+//! - **Git:** the same safe executor as [`crate::git`] (no shell, no prompts, with a time limit).
+//! - **Threads:** the methods that run git block; the interface calls them on a thread. One lifecycle operation at
+//!   a time (`TaskStore::op`); queries only take a short lock.
+//! - **Agent:** the task's instance is `<model>@t<n>` (`claude@t3`), with the terminal in the worktree
+//!   ([`Core::task_cwd`], used by `agents::spawn_spec_for`). The brief and the feedback arrive by the same path as
+//!   messages between agents (`CoreEvent::Deliver` with `request: 0`, queue and delivery rules).
 //!
-//! Quem pode o quê na ponte está em `bridge.rs`: o agente da tarefa só entrega o relatório (`done`) da
-//! própria tarefa e consulta; o resto é de quem criou a tarefa (outro agente ou o usuário).
+//! Who can do what on the bridge is in `bridge.rs`: the task's agent only delivers the report (`done`) of its own
+//! task and queries; the rest belongs to whoever created the task (another agent or the user).
+//!
+//! **Language:** the texts the desk shows (statuses, history events, refusals, notices) go through `t!`; the texts
+//! only agents read (the brief, the rules, the feedback messages, the boot line) are plain English. The stored
+//! `Feedback::origin` and `Task::creator` values (`revisão`, `validação`, `usuário`) are data and stay as they are.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -46,65 +51,67 @@ use crate::capability::Level;
 use crate::events::{FeedEntry, FeedKind};
 use crate::git::GitError;
 use crate::models;
+use crate::t;
 use crate::util::now_ms;
 
-/// Eventos guardados por tarefa (os mais antigos saem).
+/// Events kept per task (the oldest leave).
 pub const MAX_EVENTS: usize = 200;
-/// Feedbacks guardados por tarefa (os mais antigos saem), e o tamanho de cada um ao reaparecer numa mensagem.
+/// Feedbacks kept per task (the oldest leave).
 pub const MAX_FEEDBACKS: usize = 20;
-/// Mensagens guardadas por tarefa (as mais antigas saem).
+/// Messages kept per task (the oldest leave).
 pub const MAX_MESSAGES: usize = 300;
-/// Tamanho de cada mensagem guardada (em caracteres); o resto é cortado com um aviso.
+/// Size of each kept message (in characters); the rest is cut with a notice.
 pub const MAX_MESSAGE_CHARS: usize = 6_000;
+/// Size of each earlier feedback when it reappears in a message to the agent (in characters).
 const HISTORY_ITEM_CHARS: usize = 700;
-/// Mensagens ao agente mostram só os últimos feedbacks anteriores.
+/// Messages to the agent show only the latest earlier feedbacks.
 const HISTORY_SHOWN: usize = 5;
-/// Tamanho máximo do título (em caracteres).
+/// Maximum size of the title (in characters).
 pub const MAX_TITLE: usize = 120;
-/// Tamanho máximo do slug do título na branch.
+/// Maximum size of the title slug in the branch.
 pub const MAX_SLUG: usize = 40;
-/// Relatório e brief maiores que isto são cortados (em caracteres).
+/// A report or brief larger than this is cut (in characters).
 pub const MAX_TEXT: usize = 200_000;
-/// Texto do `git diff --stat` guardado (em caracteres).
-/// Arquivos fora do escopo guardados por tarefa.
+/// Files outside the scope kept per task.
 const MAX_OUTSIDE: usize = 100;
+/// Size of the kept `git diff --stat` text (in characters).
 const MAX_STAT: usize = 8_000;
-/// Nome da pasta, na raiz do repositório, que guarda as worktrees.
+/// Name of the folder, at the repository root, that holds the worktrees.
 pub const AGENTDECK_DIR: &str = ".agentdeck";
-/// Tentativas (e espera entre elas) para apagar a pasta de uma worktree enquanto o terminal do agente
-/// ainda a segura (no Windows, o processo demora um instante a morrer depois de a aba fechar).
+/// Attempts (and wait between them) to delete a worktree folder while the agent's terminal still holds it
+/// (on Windows the process takes a moment to die after the tab closes).
 const REMOVE_TRIES: u32 = 10;
 const REMOVE_WAIT: Duration = Duration::from_millis(300);
 
-// ---------- Tipos ----------
+// ---------- Types ----------
 
-/// Em que ponto do ciclo de vida a tarefa está.
+/// Where the task is in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
-    /// Criada; ainda sem worktree nem agente.
+    /// Created; still without a worktree or an agent.
     #[default]
     Draft,
-    /// Iniciada, mas o escopo se sobrepõe ao de outra tarefa em andamento: espera a vez, sem worktree nem agente.
-    /// Começa sozinha quando o escopo liberar.
+    /// Started, but its scope overlaps that of another task in progress: waits its turn, with no worktree or agent.
+    /// Starts by itself when the scope is free.
     Queued,
-    /// O agente está trabalhando na worktree.
+    /// The agent is working in the worktree.
     Running,
-    /// O agente entregou o relatório: espera a revisão (mesclar, devolver ou descartar).
+    /// The agent delivered the report: waits for the review (merge, return or discard).
     Review,
-    /// Mesclada na base e testada pelo usuário: concluída; worktree e branch removidas. (O nome `Merged`
-    /// fica no JSON para não quebrar tarefas antigas; para o usuário é "concluída".)
+    /// Merged into the base and tested by the user: completed; worktree and branch removed. (The name `Merged`
+    /// stays in the JSON so old tasks do not break; for the user it is "completed".)
     Merged,
-    /// Mesclada na base, esperando o usuário testar: o agente, a worktree e a branch continuam.
+    /// Merged into the base, waiting for the user to test it: the agent, the worktree and the branch remain.
     Validating,
-    /// Descartada; worktree e branch removidas.
+    /// Discarded; worktree and branch removed.
     Discarded,
-    /// Erro ao iniciar (ou de infraestrutura ao mesclar); a mensagem fica em `Task::error`.
+    /// Error on start (or an infrastructure error on merge); the message stays in `Task::error`.
     Failed,
 }
 
 impl TaskStatus {
-    /// Nome estável (o mesmo do JSON e da ponte).
+    /// Stable name (the same as in the JSON and on the bridge).
     pub fn as_str(self) -> &'static str {
         match self {
             TaskStatus::Draft => "draft",
@@ -118,129 +125,131 @@ impl TaskStatus {
         }
     }
 
-    /// Nome para mostrar a pessoas.
+    /// Name to show to people.
     pub fn label(self) -> &'static str {
         match self {
-            TaskStatus::Draft => "rascunho",
-            TaskStatus::Queued => "na fila",
-            TaskStatus::Running => "em andamento",
-            TaskStatus::Review => "em revisão",
-            TaskStatus::Merged => "concluída",
-            TaskStatus::Validating => "aguardando validação",
-            TaskStatus::Discarded => "descartada",
-            TaskStatus::Failed => "com erro",
+            TaskStatus::Draft => t!("draft"),
+            TaskStatus::Queued => t!("queued"),
+            TaskStatus::Running => t!("in progress"),
+            TaskStatus::Review => t!("in review"),
+            TaskStatus::Merged => t!("completed"),
+            TaskStatus::Validating => t!("awaiting validation"),
+            TaskStatus::Discarded => t!("discarded"),
+            TaskStatus::Failed => t!("errored"),
         }
     }
 
-    /// Concluída ou descartada: não há mais o que fazer com ela. `Validating` não é final: o agente continua vivo.
+    /// Completed or discarded: nothing more to do with it. `Validating` is not final: the agent stays alive.
     pub fn is_terminal(self) -> bool {
         matches!(self, TaskStatus::Merged | TaskStatus::Discarded)
     }
 }
 
-/// Uma linha do histórico curto da tarefa.
+/// One line of the task's short history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskEvent {
     pub at_ms: u64,
     pub text: String,
 }
 
-/// Um feedback dado ao agente: o pedido de ajustes da revisão ou o motivo da reprovação na validação.
+/// A feedback given to the agent: the review's request for changes or the reason for the rejection in validation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Feedback {
     pub at_ms: u64,
-    /// `revisão` ou `validação`.
+    /// `revisão` (review) or `validação` (validation). Saved data that `capability` reads (a `validação` counts as
+    /// a rejection), so the values stay in Portuguese; the messages to the agent show them in English.
     pub origin: String,
     pub text: String,
 }
 
-/// Uma mensagem da linha do tempo da tarefa: pergunta, resposta ou erro em que a instância dela fala ou ouve.
+/// A message on the task's timeline: a question, an answer or an error in which its instance speaks or listens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskMessage {
     pub at_ms: u64,
     pub kind: FeedKind,
-    /// Id da instância que fala, sem o projeto.
+    /// Id of the speaking instance, without the project.
     pub from: Option<String>,
     pub to: Option<String>,
     pub text: String,
 }
 
-/// Uma tarefa. Os campos são os do JSON em disco e os da ponte (`GET /tasks/<id>`).
+/// A task. The fields are those of the JSON on disk and of the bridge (`GET /tasks/<id>`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Task {
-    /// `t<n>`, um contador por projeto que nunca reaproveita número.
+    /// `t<n>`, a counter per project that never reuses a number.
     pub id: String,
     pub title: String,
-    /// O pedido, em markdown.
+    /// The request, in markdown.
     pub brief: String,
     pub status: TaskStatus,
-    /// Branch de onde a tarefa parte e em que é mesclada.
+    /// Branch the task departs from and is merged into.
     pub base: String,
-    /// `tarefa/<id>-<slug do título>`.
+    /// `tarefa/<id>-<title slug>`.
     pub branch: String,
-    /// Pasta (absoluta) da worktree: `<raiz do repositório>/.agentdeck/worktrees/<id>`.
+    /// Folder (absolute) of the worktree: `<repository root>/.agentdeck/worktrees/<id>`.
     pub worktree: PathBuf,
-    /// O tamanho do trabalho (`simples`, `media`, `complexa`), que decide quais modelos dão conta; não é o esforço.
-    /// Tarefas antigas, sem o campo, valem `media`.
+    /// The size of the work (`simples`, `media`, `complexa`), which decides which models can handle it; it is not the effort.
+    /// Old tasks, without the field, are `media`.
     pub level: Level,
-    /// Agente (`claude`, `antigravity`, `opencode`, `codex`…).
+    /// Agent (`claude`, `antigravity`, `opencode`, `codex`…).
     pub kind: String,
-    /// Modelo de LLM (pelas regras de `models.rs`); `None` = o padrão do CLI.
+    /// LLM model (by the rules of `models.rs`); `None` = the CLI's default.
     pub model: Option<String>,
-    /// Esforço pedido (`models::Effort`); `None` = o padrão do CLI. No Claude vai em `--effort` ao abrir a
-    /// aba; no Antigravity já está no sufixo de `model`.
+    /// Requested effort (`models::Effort`); `None` = the CLI's default. In Claude it goes in `--effort` when the
+    /// tab opens; in Antigravity it is already in the suffix of `model`.
     pub effort: Option<models::Effort>,
-    /// Id da instância (`claude@t3`).
+    /// Id of the instance (`claude@t3`).
     pub instance: String,
-    /// Quem criou: o id de um agente (`claude`) ou `usuário`. É o chefe da instância quando é um agente aberto.
+    /// Who created it: the id of an agent (`claude`) or `usuário` (the user; a protocol value). It is the instance's
+    /// boss when it is an open agent.
     pub creator: Option<String>,
     pub created_ms: u64,
     pub started_ms: Option<u64>,
-    /// Quando o relatório chegou (`Review`), quando foi mesclada (`Validating`) ou quando a tarefa terminou (`Merged`/`Discarded`).
+    /// When the report arrived (`Review`), when it was merged (`Validating`) or when the task ended (`Merged`/`Discarded`).
     pub finished_ms: Option<u64>,
-    /// O que o agente entregou em `ask-agent --task done`.
+    /// What the agent delivered in `ask-agent --task done`.
     pub report: Option<String>,
-    /// `git diff --stat base...branch` no momento do relatório.
+    /// `git diff --stat base...branch` at the moment of the report.
     pub diff_stat: Option<String>,
-    /// A mensagem do erro, em `Failed`.
+    /// The error message, in `Failed`.
     pub error: Option<String>,
-    /// Hash completo do commit da última mesclagem na base (`git rev-parse HEAD` logo depois do `merge --no-ff`);
-    /// `None` se a tarefa nunca foi mesclada. Uma nova mesclagem (depois de reprovar) sobrescreve. Serve ao diff
-    /// "o que foi mesclado" em `Validating`/`Merged` e a `task_merge` reconhecer uma tarefa já mesclada antes.
+    /// Full hash of the commit of the last merge into the base (`git rev-parse HEAD` right after `merge --no-ff`);
+    /// `None` if the task was never merged. A new merge (after a rejection) overwrites it. It serves the "what was
+    /// merged" diff in `Validating`/`Merged` and lets `task_merge` recognize a task merged before.
     pub merge_commit: Option<String>,
-    /// Histórico curto (no máximo [`MAX_EVENTS`]).
+    /// Short history (at most [`MAX_EVENTS`]).
     pub events: Vec<TaskEvent>,
-    /// Os feedbacks já dados ao agente, do mais antigo ao mais novo (no máximo [`MAX_FEEDBACKS`]); voltam
-    /// nas mensagens de devolução e de reprovação para o agente não repetir o que já lhe foi dito.
+    /// The feedbacks already given to the agent, oldest to newest (at most [`MAX_FEEDBACKS`]); they come back in
+    /// the return and reject messages so the agent does not repeat what it was already told.
     pub feedbacks: Vec<Feedback>,
-    /// Linha do tempo das mensagens do `ask-agent` em que a instância da tarefa fala ou ouve, da mais antiga
-    /// para a mais nova (no máximo [`MAX_MESSAGES`]). Ver [`Task::record_message`].
+    /// Timeline of the `ask-agent` messages in which the task's instance speaks or listens, oldest to newest (at
+    /// most [`MAX_MESSAGES`]). See [`Task::record_message`].
     pub messages: Vec<TaskMessage>,
-    /// Os caminhos (arquivos e pastas, relativos à raiz do repositório, já normalizados) que a tarefa declarou que
-    /// vai mexer; vazio = sem escopo (nunca entra na fila nem segura ninguém). Ver [`crate::scope`].
+    /// The paths (files and folders, relative to the repository root, already normalized) that the task declared it
+    /// will touch; empty = no scope (never queues and never holds anyone). See [`crate::scope`].
     pub scope: Vec<String>,
-    /// Quando entrou na fila (`Queued`); define a ordem entre as que esperam. `None` fora da fila.
+    /// When it entered the queue (`Queued`); defines the order among those waiting. `None` outside the queue.
     pub queued_ms: Option<u64>,
-    /// Em `Queued`, o id da tarefa por quem espera.
+    /// In `Queued`, the id of the task it waits for.
     pub waiting_for: Option<String>,
-    /// Os arquivos do diff entregue que ficam fora do escopo (sem `memory/**` e `Cargo.lock`); a revisão mostra
-    /// como aviso, nunca como bloqueio. Vazio sem escopo.
+    /// The files of the delivered diff that are outside the scope (without `memory/**` and `Cargo.lock`); the review
+    /// shows them as a warning, never as a block. Empty without a scope.
     pub outside_scope: Vec<String>,
 }
 
 impl Task {
-    /// A entrada do feed pertence à linha do tempo desta tarefa? Só as perguntas, respostas e erros em que a
-    /// instância da tarefa é quem manda ou quem recebe (o indicador "pensando" é transitório; o aviso do
-    /// sistema não tem remetente e a tarefa já registra o que importa no histórico).
+    /// Does the feed entry belong to this task's timeline? Only the questions, answers and errors in which the
+    /// task's instance is the sender or the receiver (the "thinking" indicator is transient; the system notice has
+    /// no sender and the task already records what matters in its history).
     pub fn owns_message(&self, entry: &FeedEntry) -> bool {
         matches!(entry.kind, FeedKind::Ask | FeedKind::Answer | FeedKind::Error)
             && !self.instance.is_empty()
             && (entry.from.as_deref() == Some(self.instance.as_str()) || entry.to.as_deref() == Some(self.instance.as_str()))
     }
 
-    /// Guarda a entrada na linha do tempo (texto cortado em [`MAX_MESSAGE_CHARS`]; as mais antigas saem além
-    /// de [`MAX_MESSAGES`]). Devolve `false`, sem guardar, se ela não é desta tarefa.
+    /// Stores the entry on the timeline (text cut at [`MAX_MESSAGE_CHARS`]; the oldest leave beyond
+    /// [`MAX_MESSAGES`]). Returns `false`, without storing, if it is not this task's.
     pub fn record_message(&mut self, entry: &FeedEntry) -> bool {
         if !self.owns_message(entry) {
             return false;
@@ -259,7 +268,7 @@ impl Task {
         true
     }
 
-    /// Guarda um feedback entregue ao agente (os mais antigos saem além de [`MAX_FEEDBACKS`]).
+    /// Stores a feedback delivered to the agent (the oldest leave beyond [`MAX_FEEDBACKS`]).
     pub fn add_feedback(&mut self, origin: &str, text: &str) {
         self.feedbacks.push(Feedback { at_ms: now_ms(), origin: origin.to_owned(), text: text.to_owned() });
         if self.feedbacks.len() > MAX_FEEDBACKS {
@@ -268,7 +277,7 @@ impl Task {
         }
     }
 
-    /// Acrescenta uma linha ao histórico.
+    /// Adds a line to the history.
     pub fn log(&mut self, text: impl Into<String>) {
         self.events.push(TaskEvent { at_ms: now_ms(), text: text.into() });
         if self.events.len() > MAX_EVENTS {
@@ -277,7 +286,7 @@ impl Task {
         }
     }
 
-    /// Versão enxuta (sem brief, relatório nem histórico) para listas.
+    /// Slim version (without brief, report or history) for lists.
     pub fn summary_json(&self) -> serde_json::Value {
         serde_json::json!({
             "id": self.id,
@@ -302,50 +311,50 @@ impl Task {
     }
 }
 
-/// O que se informa para criar uma tarefa ([`Core::task_create`]).
+/// What is given to create a task ([`Core::task_create`]).
 #[derive(Debug, Clone, Default)]
 pub struct TaskSpec {
     pub title: String,
-    /// O pedido (markdown). Pode ficar vazio: o título vai no lugar ao entregar ao agente.
+    /// The request (markdown). It may stay empty: the title goes in its place when delivering to the agent.
     pub brief: String,
-    /// Agente; vazio = escolher o CLI oficial com mais cota disponível. Aceita os apelidos (`agy`).
+    /// Agent; empty = choose the official CLI with the most quota available. Accepts the aliases (`agy`).
     pub kind: String,
-    /// Modelo pedido; `None` = o padrão do cargo ou do CLI.
+    /// Requested model; `None` = the default of the role or of the CLI.
     pub model: Option<String>,
-    /// Esforço pedido; `None` = o padrão do CLI. Só vale onde [`models::effort_unavailable`] não objeta.
+    /// Requested effort; `None` = the CLI's default. Only valid where [`models::effort_unavailable`] does not object.
     pub effort: Option<models::Effort>,
-    /// O tamanho do trabalho ([`Task::level`]); sem ele vale `media`.
+    /// The size of the work ([`Task::level`]); without it, `media`.
     pub level: Level,
-    /// Branch de partida e de mesclagem; `None` = a branch atual do repositório do projeto.
+    /// Branch to depart from and merge into; `None` = the current branch of the project's repository.
     pub base: Option<String>,
-    /// Quem pediu (id de agente ou `usuário`).
+    /// Who asked (agent id or `usuário`).
     pub creator: Option<String>,
-    /// Os caminhos que a tarefa vai mexer ([`Task::scope`]); vazio = sem escopo. Normalizados em `task_create`.
+    /// The paths the task will touch ([`Task::scope`]); empty = no scope. Normalized in `task_create`.
     pub scope: Vec<String>,
 }
 
-/// Por que uma operação com tarefas não foi feita. `http_status` é o código da ponte.
+/// Why an operation on tasks was not done. `http_status` is the bridge's code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskError {
-    /// Projeto ou tarefa que não existe (404).
+    /// A project or task that does not exist (404).
     NotFound(String),
-    /// Pedido mal formado: título vazio, agente ou modelo inválidos, projeto sem git… (400).
+    /// Malformed request: empty title, invalid agent or model, project without git… (400).
     Invalid(String),
-    /// Fora do momento certo ou com pendência a resolver: estado errado, repositório principal sujo, conflito (409).
+    /// Out of the right moment or with something to resolve: wrong state, dirty main repository, conflict (409).
     Conflict(String),
-    /// Erro de infraestrutura (git, disco) (500).
+    /// Infrastructure error (git, disk) (500).
     Failed(String),
 }
 
 impl TaskError {
-    /// A mensagem, sem o tipo.
+    /// The message, without the kind.
     pub fn message(&self) -> &str {
         match self {
             TaskError::NotFound(m) | TaskError::Invalid(m) | TaskError::Conflict(m) | TaskError::Failed(m) => m,
         }
     }
 
-    /// Código HTTP da ponte para este erro.
+    /// The bridge's HTTP code for this error.
     pub fn http_status(&self) -> u16 {
         match self {
             TaskError::Invalid(_) => 400,
@@ -364,80 +373,82 @@ impl std::fmt::Display for TaskError {
 
 impl std::error::Error for TaskError {}
 
-/// Uma recusa da mesclagem que tem saída que a tela pode oferecer num botão (a mensagem do erro continua sendo o
-/// texto para a linha de comando e para os agentes).
+/// A merge refusal that has a way out the screen can offer on a button (the error message remains the text for the
+/// command line and for the agents).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MergeBlock {
-    /// O repositório principal tem alterações suas sem commit (os arquivos): "guardar, mesclar e devolver".
+    /// The main repository has uncommitted changes of the user's (the files): "stash, merge and give back".
     MainDirty(Vec<String>),
-    /// A pasta da tarefa tem trabalho sem commit (os arquivos): "pedir ao agente para fazer o commit".
+    /// The task's folder has uncommitted work (the files): "ask the agent to commit".
     TaskDirty(Vec<String>),
-    /// A mesclagem deu conflito e foi desfeita (os arquivos): "pedir ao agente para resolver o conflito".
+    /// The merge conflicted and was undone (the files): "ask the agent to resolve the conflict".
     Conflict(Vec<String>),
 }
 
 impl MergeBlock {
-    /// Os arquivos, completos (a mensagem do erro corta em cinco).
+    /// The files, complete (the error message cuts at five).
     pub fn files(&self) -> &[String] {
         match self {
             MergeBlock::MainDirty(f) | MergeBlock::TaskDirty(f) | MergeBlock::Conflict(f) => f,
         }
     }
 
-    /// A explicação para quem não é desenvolvedor, no aviso da tela.
+    /// The explanation for someone who is not a developer, in the screen's notice.
     pub fn explain(&self, task: &Task) -> String {
         match self {
-            MergeBlock::MainDirty(f) => format!(
-                "Há alterações suas, ainda sem commit, na pasta principal do projeto ({}). O git não mescla por cima delas. \
-                 Você pode guardá-las por um instante: o AgentDeck mescla a tarefa e devolve cada alteração ao lugar.",
-                short_list(f)
+            MergeBlock::MainDirty(f) => t!(
+                "You have changes of your own, not yet committed, in the project's main folder ({files}). Git does not merge over them. \
+                 You can set them aside for a moment: AgentDeck merges the task and puts each change back in place.",
+                files = short_list(f)
             ),
-            MergeBlock::TaskDirty(f) => format!(
-                "O agente deixou trabalho sem commit na pasta da tarefa ({}). Só o que foi commitado entra na mesclagem. \
-                 Peça a ele para fazer o commit e entregar de novo.",
-                short_list(f)
+            MergeBlock::TaskDirty(f) => t!(
+                "The agent left uncommitted work in the task's folder ({files}). Only what was committed enters the merge. \
+                 Ask it to commit and deliver again.",
+                files = short_list(f)
             ),
-            MergeBlock::Conflict(f) => format!(
-                "A tarefa e a branch \"{}\" mudaram as mesmas linhas ({}). Nada foi mesclado e a tarefa continua em revisão. \
-                 Peça ao agente para juntar as duas versões e entregar de novo.",
-                task.base,
-                if f.is_empty() { "arquivos não identificados".to_owned() } else { short_list(f) }
+            MergeBlock::Conflict(f) => t!(
+                "The task and the branch \"{base}\" changed the same lines ({files}). Nothing was merged and the task is still in review. \
+                 Ask the agent to combine the two versions and deliver again.",
+                base = task.base,
+                files = if f.is_empty() { t!("unidentified files").to_owned() } else { short_list(f) }
             ),
         }
     }
 
-    /// O pedido pronto para devolver a tarefa ao agente (`task_return`); `None` para o que o agente não resolve.
+    /// The request ready to return the task to the agent (`task_return`); `None` for what the agent does not resolve.
+    /// Agent-facing text: plain English.
     pub fn return_feedback(&self, task: &Task) -> Option<String> {
         let list = |f: &[String]| f.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n");
         match self {
             MergeBlock::MainDirty(_) => None,
             MergeBlock::TaskDirty(f) => Some(format!(
-                "Não consegui mesclar a sua tarefa: a sua pasta ({wt}) tem trabalho sem commit, e só o que está commitado entra na mesclagem. Arquivos:\n\n{files}\n\n\
-                 Faça o commit do que faz parte da tarefa (git add e git commit) e descarte o que não faz (git restore, ou apague o arquivo). \
-                 Não deixe nada pendente: confira com git status e entregue de novo.",
+                "I could not merge your task: your folder ({wt}) has uncommitted work, and only what is committed enters the merge. Files:\n\n{files}\n\n\
+                 Commit what is part of the task (git add and git commit) and discard what is not (git restore, or delete the file). \
+                 Leave nothing pending: check with git status and deliver again.",
                 wt = task.worktree.display(),
                 files = list(f),
             )),
             MergeBlock::Conflict(f) => Some(format!(
-                "A mesclagem da sua branch ({branch}) em {base} deu conflito e foi desfeita. Arquivos em conflito:\n\n{files}\n\n\
-                 Na sua pasta ({wt}), rode git merge {base}, resolva os conflitos mantendo o que as duas versões trouxeram de útil, \
-                 rode os testes, faça o commit da mesclagem e entregue de novo.",
+                "Merging your branch ({branch}) into {base} conflicted and was undone. Conflicting files:\n\n{files}\n\n\
+                 In your folder ({wt}), run git merge {base}, resolve the conflicts keeping what both versions brought that is useful, \
+                 run the tests, commit the merge and deliver again.",
                 branch = task.branch,
                 base = task.base,
                 wt = task.worktree.display(),
-                files = if f.is_empty() { "- (o git não informou; veja com git merge)".to_owned() } else { list(f) },
+                files = if f.is_empty() { "- (git did not report them; check with git merge)".to_owned() } else { list(f) },
             )),
         }
     }
 }
 
-/// A mesclagem recusada: o erro de sempre e, quando há saída para o usuário, o motivo estruturado.
+/// The refused merge: the usual error and, when there is a way out for the user, the structured reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeRefusal {
     pub error: TaskError,
     pub block: Option<MergeBlock>,
-    /// O aviso do stash ("guardar minhas alterações"), que também vai no fim do erro: a tela que troca o erro pela
-    /// explicação de `block` o mostra à parte, senão o usuário não sabe onde ficaram as alterações dele.
+    /// The stash notice ("stash my changes"), which also goes at the end of the error: the screen that swaps the
+    /// error for the explanation of `block` shows it separately, otherwise the user does not know where their
+    /// changes went.
     pub stash_note: Option<String>,
 }
 
@@ -447,7 +458,7 @@ impl From<TaskError> for MergeRefusal {
     }
 }
 
-/// A mesclagem feita; `note` é o aviso sobre as alterações guardadas durante ela (devolvidas, ou ainda no stash).
+/// The merge done; `note` is the notice about the changes stashed during it (given back, or still in the stash).
 #[derive(Debug, Clone)]
 pub struct MergeOutcome {
     pub task: Task,
@@ -482,10 +493,10 @@ mod tests {
     pub(super) fn sample() -> Task {
         Task {
             id: "t3".into(),
-            title: "Corrigir o login".into(),
-            brief: "Faça X.\n\nDepois Y.".into(),
+            title: "Fix the login".into(),
+            brief: "Do X.\n\nThen Y.".into(),
             base: "main".into(),
-            branch: "tarefa/t3-corrigir-o-login".into(),
+            branch: "tarefa/t3-fix-the-login".into(),
             worktree: PathBuf::from("/repo/.agentdeck/worktrees/t3"),
             ..Task::default()
         }
@@ -514,7 +525,7 @@ mod tests {
         }
         assert_eq!(t.feedbacks.len(), MAX_FEEDBACKS);
         assert_eq!(t.feedbacks.first().map(|f| f.text.as_str()), Some("5"));
-        // Tarefas gravadas antes do campo existir continuam abrindo.
+        // Tasks saved before the field existed still open.
         let old: Task = serde_json::from_str(r#"{"id":"t1","title":"x"}"#).unwrap();
         assert!(old.feedbacks.is_empty());
     }
@@ -532,32 +543,40 @@ mod tests {
         ] {
             assert_eq!(s.is_terminal(), terminal, "{s:?}");
         }
-        // Estável: o JSON antigo (`merged`) segue valendo e o novo estado tem nome e rótulo próprios.
+        // Stable: the old JSON (`merged`) still holds and the new state has its own name and label.
         assert_eq!(serde_json::from_str::<TaskStatus>("\"merged\"").ok(), Some(TaskStatus::Merged));
         assert_eq!(serde_json::to_string(&TaskStatus::Validating).ok().as_deref(), Some("\"validating\""));
-        assert_eq!((TaskStatus::Validating.as_str(), TaskStatus::Validating.label()), ("validating", "aguardando validação"));
-        assert_eq!(TaskStatus::Merged.label(), "concluída");
+        assert_eq!((TaskStatus::Validating.as_str(), TaskStatus::Validating.label()), ("validating", "awaiting validation"));
+        assert_eq!(TaskStatus::Merged.label(), "completed");
+    }
+
+    #[test]
+    fn the_labels_follow_the_language() {
+        use crate::i18n::{with_lang, Lang};
+        assert_eq!(with_lang(Lang::PtBr, || TaskStatus::Validating.label()), "aguardando validação");
+        assert_eq!(with_lang(Lang::PtBr, || TaskStatus::Merged.label()), "concluída");
+        assert_eq!(with_lang(Lang::PtBr, || TaskStatus::Failed.label()), "com erro");
     }
 
     #[test]
     fn the_timeline_keeps_only_the_messages_of_the_task_instance() {
         let mut t = Task { instance: "claude@t3".into(), ..sample() };
-        // Pergunta feita pela tarefa, resposta recebida e erro que volta: todos são dela.
-        assert!(t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("antigravity"), "e o css?")));
+        // A question asked by the task, an answer received and an error that comes back: all are its own.
+        assert!(t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("antigravity"), "and the css?")));
         assert!(t.record_message(&entry(FeedKind::Answer, Some("antigravity"), Some("claude@t3"), "use flex")));
-        assert!(t.record_message(&entry(FeedKind::Error, Some("opencode"), Some("claude@t3"), "sem cota")));
-        // Outra instância, indicador transitório, mensagem do usuário e aviso do sistema ficam de fora.
-        assert!(!t.record_message(&entry(FeedKind::Ask, Some("claude"), Some("antigravity"), "outra")));
+        assert!(t.record_message(&entry(FeedKind::Error, Some("opencode"), Some("claude@t3"), "out of quota")));
+        // Another instance, a transient indicator, a user message and a system notice stay out.
+        assert!(!t.record_message(&entry(FeedKind::Ask, Some("claude"), Some("antigravity"), "another")));
         assert!(!t.record_message(&entry(FeedKind::Thinking, Some("claude@t3"), None, "⚙️ [read_file] x")));
-        assert!(!t.record_message(&entry(FeedKind::User, Some("você"), Some("claude@t3"), "oi")));
-        assert!(!t.record_message(&FeedEntry::system("Tarefa t3 iniciada")));
-        // `claude@t30` não é `claude@t3`.
+        assert!(!t.record_message(&entry(FeedKind::User, Some("você"), Some("claude@t3"), "hi")));
+        assert!(!t.record_message(&FeedEntry::system("Task t3 started")));
+        // `claude@t30` is not `claude@t3`.
         assert!(!t.record_message(&entry(FeedKind::Ask, Some("claude@t30"), Some("claude"), "x")));
         let texts: Vec<&str> = t.messages.iter().map(|m| m.text.as_str()).collect();
-        assert_eq!(texts, ["e o css?", "use flex", "sem cota"]);
+        assert_eq!(texts, ["and the css?", "use flex", "out of quota"]);
         assert_eq!(t.messages[0].from.as_deref(), Some("claude@t3"));
         assert_eq!(t.messages[1].to.as_deref(), Some("claude@t3"));
-        // Uma tarefa sem instância (rascunho) não adota mensagens sem remetente nem destinatário.
+        // A task without an instance (draft) does not adopt messages with no sender or receiver.
         let mut draft = sample();
         assert!(!draft.record_message(&entry(FeedKind::Answer, None, None, "x")));
     }
@@ -569,14 +588,10 @@ mod tests {
             t.record_message(&entry(FeedKind::Ask, Some("claude@t3"), Some("x"), &format!("m{i}")));
         }
         assert_eq!(t.messages.len(), MAX_MESSAGES);
-        assert_eq!(t.messages[0].text, "m5", "as mais antigas saem");
+        assert_eq!(t.messages[0].text, "m5", "the oldest leave");
         t.record_message(&entry(FeedKind::Answer, Some("x"), Some("claude@t3"), &"a".repeat(MAX_MESSAGE_CHARS * 2)));
         let last = &t.messages[t.messages.len() - 1].text;
-        assert!(
-            last.starts_with("aaaa") && last.contains("texto cortado") && last.chars().count() < MAX_MESSAGE_CHARS + 100,
-            "{}",
-            last.len()
-        );
+        assert!(last.starts_with("aaaa") && last.contains("text cut") && last.chars().count() < MAX_MESSAGE_CHARS + 100, "{}", last.len());
     }
 
     #[test]

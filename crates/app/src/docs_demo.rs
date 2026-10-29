@@ -1,13 +1,13 @@
-//! SOMENTE DEPURAÇÃO: documentos fictícios do modo Documentos (`AGENTDECK_DEBUG_UI=docs-demo…`), para
-//! capturas de tela sem git, sem agentes e sem arquivos de verdade.
+//! DEBUG ONLY: fake documents for Documents mode (`AGENTDECK_DEBUG_UI=docs-demo…`), for screenshots without git,
+//! without agents and without real files.
 //!
-//! - `docs-demo`: o diff de uma tarefa com quatro arquivos, em foco;
-//! - `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`: o documento em foco;
-//! - `docs-demo-edit` (editando, com alteração não salva), `docs-demo-find` (busca aberta no arquivo), `docs-demo-diff-find`
-//!   (busca no diff), `docs-demo-external` (o disco mudou com edição não salva), `docs-demo-confirm` (a pergunta ao fechar a
-//!   aba), `docs-demo-large` (arquivo grande, só leitura), `docs-demo-md-code` (markdown como código);
-//! - `docs-demo-many`: dez documentos (a faixa de abas rola);
-//! - `docs-demo-badge`: os agentes à vista, com o selo da chave (duas abas terminaram, uma trabalha).
+//! - `docs-demo`: the diff of a task with four files, in focus;
+//! - `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`: the document in focus;
+//! - `docs-demo-edit` (editing, with an unsaved change), `docs-demo-find` (search open in the file), `docs-demo-diff-find`
+//!   (search in the diff), `docs-demo-external` (the disk changed with an unsaved edit), `docs-demo-confirm` (the question
+//!   when closing the tab), `docs-demo-large` (large file, read only), `docs-demo-md-code` (markdown as code);
+//! - `docs-demo-many`: ten documents (the tab strip scrolls);
+//! - `docs-demo-badge`: the agents in view, with the switch badge (two tabs finished, one is working).
 
 use agentdeck_core::git::parse_diff;
 
@@ -21,11 +21,11 @@ index 0000000..a1b2c3d
 --- /dev/null
 +++ b/crates/app/src/docs.rs
 @@ -0,0 +1,9 @@
-+//! Modo Documentos do centro: o estado e a lógica pura.
++//! Documents mode of the center: the state and the pure logic.
 +
 +use std::collections::HashMap;
 +
-+/// O que o centro mostra.
++/// What the center shows.
 +pub enum CenterView {
 +    Agents,
 +    Docs,
@@ -57,14 +57,14 @@ index 1111111..2222222 100644
      Discard(String),
  }
 
--/// Diff completo aberto no lugar do detalhe.
+-/// Full diff opened in place of the detail.
 -#[derive(Debug, Clone)]
 -pub struct OpenDiff {
 -    pub id: String,
 -    pub diff: Option<Result<GitDiff, String>>,
 -}
 -
- /// Uma operação do ciclo de vida em andamento.
+ /// A lifecycle operation in progress.
  #[derive(Debug, Clone, PartialEq, Eq)]
  pub struct Busy {
 diff --git a/memory/pendencias.md b/memory/pendencias.md
@@ -72,39 +72,39 @@ index 9f8e7d6..5c4b3a2 100644
 --- a/memory/pendencias.md
 +++ b/memory/pendencias.md
 @@ -12,3 +12,4 @@
- - Mesa de tarefas: revisão sem becos sem saída.
--- Pedido e relatório aparecem como texto puro.
-+- Editor de arquivos: fase 2 do modo Documentos.
-+- Diff lado a lado.
- - Terminal: histórico duplicado no Claude Code.
+ - Task desk: review without dead ends.
+-- Brief and report show up as plain text.
++- File editor: phase 2 of Documents mode.
++- Side-by-side diff.
+ - Terminal: duplicated history in Claude Code.
 ";
 
-const FILE: &str = "//! Lê o arquivo de texto de um projeto, só para mostrar na tela.
+const FILE: &str = "//! Reads a project's text file, only to show it on screen.
 
 use std::path::Path;
 
-/// O limite do que se lê: acima disso o arquivo não vira texto.
+/// The limit of what is read: above it the file does not become text.
 pub const READ_TEXT_MAX: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextFile {
     Text(String),
-    /// Maior que o limite (tamanho em bytes).
+    /// Larger than the limit (size in bytes).
     TooLarge(u64),
-    /// Tem bytes nulos: não é texto.
+    /// Has null bytes: it is not text.
     Binary,
 }
 
 pub fn read_text(workspace: &Path, rel: &str) -> Result<TextFile, String> {
     if !crate::git::safe_rel(rel) {
-        return Err(format!(\"caminho inválido: {rel}\"));
+        return Err(format!(\"invalid path: {rel}\"));
     }
-    let full = std::fs::canonicalize(workspace.join(rel)).map_err(|e| format!(\"não consegui abrir {rel}: {e}\"))?;
-    let meta = std::fs::metadata(&full).map_err(|e| format!(\"não consegui ler {rel}: {e}\"))?;
+    let full = std::fs::canonicalize(workspace.join(rel)).map_err(|e| format!(\"could not open {rel}: {e}\"))?;
+    let meta = std::fs::metadata(&full).map_err(|e| format!(\"could not read {rel}: {e}\"))?;
     if meta.len() > READ_TEXT_MAX {
         return Ok(TextFile::TooLarge(meta.len()));
     }
-    let bytes = std::fs::read(&full).map_err(|e| format!(\"não consegui ler {rel}: {e}\"))?;
+    let bytes = std::fs::read(&full).map_err(|e| format!(\"could not read {rel}: {e}\"))?;
     if bytes.contains(&0) {
         return Ok(TextFile::Binary);
     }
@@ -117,37 +117,37 @@ mod tests {
 
     #[test]
     fn a_path_outside_the_workspace_is_refused() {
-        assert!(read_text(Path::new(\".\"), \"../segredo.txt\").is_err());
+        assert!(read_text(Path::new(\".\"), \"../secret.txt\").is_err());
     }
 }
 ";
 
-const REPORT: &str = "# Relatório da t19
+const REPORT: &str = "# t19 report
 
-Documentos no centro: uma chave **Agentes | Documentos** para ler diff, relatório e arquivos com a largura toda.
+Documents in the center: an **Agents | Documents** switch to read diff, report and files with the full width.
 
-## O que foi feito
+## What was done
 
-- a chave na barra de título, com o selo em *Agentes*;
-- o diff da tarefa, de um commit e de um arquivo, com a lista de arquivos à esquerda;
-- a visualização de arquivo (`Core::read_text`, limite de 1 MB);
-- o markdown formatado (pedido, relatório e os `.md` do explorador).
+- the switch in the title bar, with the badge on *Agents*;
+- the diff of a task, of a commit and of a file, with the file list on the left;
+- the file view (`Core::read_text`, 1 MB limit);
+- the formatted markdown (brief, report and the explorer's `.md` files).
 
-## Conferido
+## Checked
 
 - [x] `cargo fmt --all`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] teste manual no Windows com os agentes reais
+- [ ] manual test on Windows with the real agents
 
-## Arquivos
+## Files
 
-| Arquivo | O que mudou |
+| File | What changed |
 | :-- | :-- |
-| `crates/app/src/docs.rs` | estado e lógica pura |
-| `crates/app/src/ui/docs.rs` | a pintura |
+| `crates/app/src/docs.rs` | state and pure logic |
+| `crates/app/src/ui/docs.rs` | the painting |
 | `crates/core/src/workspace.rs` | `read_text` |
 
-> Os terminais continuam rodando escondidos; o PTY **não** é redimensionado.
+> The terminals keep running hidden; the PTY is **not** resized.
 
 ```rust
 pub fn toggle(&mut self, project: &str) {
@@ -159,26 +159,26 @@ pub fn toggle(&mut self, project: &str) {
 }
 ```
 
-1. Abra um diff pela mesa.
-2. Clique num arquivo da lista.
-3. Volte aos agentes com **Ctrl+Shift+D**.
+1. Open a diff from the desk.
+2. Click a file in the list.
+3. Go back to the agents with **Ctrl+Shift+D**.
 ";
 
-const README: &str = "# Guia de manutenção
+const README: &str = "# Maintenance guide
 
-Este guia é para quem vai manter o AgentDeck, sozinho ou junto com agentes de IA.
+This guide is for whoever is going to maintain AgentDeck, alone or together with AI agents.
 
-## Comandos do dia a dia
+## Everyday commands
 
 ```bash
 cargo run -p agentdeck
 cargo test --workspace
 ```
 
-Veja também o [GERAL.md](GERAL.md).
+See also [GERAL.md](GERAL.md).
 ";
 
-/// Aplica o estado de captura `item` (um dos `docs-demo*`).
+/// Applies the screenshot state `item` (one of the `docs-demo*`).
 pub fn apply(deck: &mut Deck, item: &str) {
     deck.docs.debug_hold = true;
     let project = deck.active_project.clone();
@@ -188,8 +188,8 @@ pub fn apply(deck: &mut Deck, item: &str) {
     open(
         deck,
         DocKind::Markdown(MdSource::TaskReport("t19".into())),
-        "t19 · relatório",
-        "t19 · relatório: Documentos no centro: chave Agentes | Documentos",
+        "t19 · report",
+        "t19 · report: Documents in the center: Agents | Documents switch",
         DocState::Markdown(REPORT.into()),
     );
     open(
@@ -197,26 +197,26 @@ pub fn apply(deck: &mut Deck, item: &str) {
         DocKind::Markdown(MdSource::File("memory/MANUTENCAO.md".into())),
         "MANUTENCAO.md",
         "memory/MANUTENCAO.md",
-        DocState::Source(Source::open(README, Lang::Markdown).expect("cabe no editor")),
+        DocState::Source(Source::open(README, Lang::Markdown).expect("fits in the editor")),
     );
     let file_state = if item == "docs-demo-large" {
         DocState::Text(TextDoc::highlighted(FILE, Lang::Rust))
     } else {
-        DocState::Source(Source::open(FILE, Lang::Rust).expect("cabe no editor"))
+        DocState::Source(Source::open(FILE, Lang::Rust).expect("fits in the editor"))
     };
     open(deck, DocKind::File("crates/core/src/workspace.rs".into()), "workspace.rs", "crates/core/src/workspace.rs", file_state);
     open(
         deck,
         DocKind::TaskDiff { id: "t19".into(), merged: false },
         "t19 · diff",
-        "t19 · alterações em relação a dev",
+        "t19 · changes against dev",
         DocState::Diff(DiffDoc::new(parse_diff(DIFF, 5000))),
     );
     if item == "docs-demo-many" {
         for n in 1..=9 {
-            let path = format!("crates/app/src/ui/arquivo_{n}.rs");
-            let state = DocState::Source(Source::open(FILE, Lang::Rust).expect("cabe no editor"));
-            open(deck, DocKind::File(path.clone()), &format!("arquivo_{n}.rs"), &path, state);
+            let path = format!("crates/app/src/ui/file_{n}.rs");
+            let state = DocState::Source(Source::open(FILE, Lang::Rust).expect("fits in the editor"));
+            open(deck, DocKind::File(path.clone()), &format!("file_{n}.rs"), &path, state);
         }
     }
     if item == "docs-demo-unreadable" {
@@ -225,10 +225,10 @@ pub fn apply(deck: &mut Deck, item: &str) {
             DocKind::File("whisper/models/ggml-base.bin".into()),
             "ggml-base.bin",
             "whisper/models/ggml-base.bin",
-            DocState::Unreadable("O arquivo tem 141,1 MB e passa do limite de 1,0 MB. Abra no programa padrão.".into()),
+            DocState::Unreadable(crate::docs::too_large_message(147_955_000)),
         );
     }
-    // O foco: cada variante olha para um documento.
+    // The focus: each variant looks at one document.
     let focus = match item {
         "docs-demo-file" | "docs-demo-many" | "docs-demo-edit" | "docs-demo-find" | "docs-demo-external" | "docs-demo-confirm"
         | "docs-demo-large" => DocKind::File("crates/core/src/workspace.rs".into()),
@@ -251,24 +251,24 @@ pub fn apply(deck: &mut Deck, item: &str) {
     match item {
         "docs-demo-edit" | "docs-demo-confirm" | "docs-demo-external" => source(deck, &mut |src| {
             src.set_editing(true);
-            src.text = src.text.replacen("Ok(TextFile::Text(", "Ok(TextFile::Utf8(", 1) + "\n// anotação nova, ainda sem gravar\n";
+            src.text = src.text.replacen("Ok(TextFile::Text(", "Ok(TextFile::Utf8(", 1) + "\n// new note, not saved yet\n";
             src.touched();
             if item == "docs-demo-external" {
-                src.external = Some(src.disk.replacen("READ_TEXT_MAX", "LIMITE_DE_LEITURA", 1));
+                src.external = Some(src.disk.replacen("READ_TEXT_MAX", "READ_TEXT_LIMIT", 1));
             }
         }),
         "docs-demo-find" | "docs-demo-diff-find" => {
             if item == "docs-demo-find" {
-                // Um arquivo comprido, com o achado no fim: a busca rola até ele.
+                // A long file, with the hit at the end: the search scrolls to it.
                 source(deck, &mut |src| {
-                    src.text = format!("{}// fim do arquivo\n", FILE.repeat(6));
+                    src.text = format!("{}// end of file\n", FILE.repeat(6));
                     src.disk = src.text.clone();
                     src.touched();
                 });
             }
             if let Some(tab) = uid.and_then(|u| deck.docs.get_mut(u)) {
                 tab.find.show();
-                tab.find.query = if item == "docs-demo-find" { "fim do arquivo".into() } else { "doc".into() };
+                tab.find.query = if item == "docs-demo-find" { "end of file".into() } else { "doc".into() };
             }
         }
         "docs-demo-md-code" => source(deck, &mut |src| src.raw = true),

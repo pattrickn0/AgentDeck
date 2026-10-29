@@ -1,5 +1,5 @@
-//! Como as instruções do AgentDeck chegam a cada CLI, num projeto do usuário que ainda não tem `AGENTS.md`:
-//! cada aba recebe pelo canal do próprio CLI, e só o que não tem outro jeito ganha um `AGENTS.md` novo.
+//! How the AgentDeck instructions reach each CLI, in a user project that does not have an `AGENTS.md` yet:
+//! each tab gets them through its own CLI's channel, and only what has no other way gets a new `AGENTS.md`.
 
 use std::path::{Path, PathBuf};
 
@@ -9,14 +9,14 @@ use crossbeam_channel::Receiver;
 
 struct Env {
     _tmp: tempfile::TempDir,
-    /// Onde ficam os projetos do usuário: fora da pasta do app (`root`), que o app trata como dele.
+    /// Where the user's projects live: outside the app folder (`root`), which the app treats as its own.
     users: tempfile::TempDir,
     core: Core,
     rx: Receiver<CoreEvent>,
     root: PathBuf,
 }
 
-/// `Core` em pastas temporárias com CLIs falsos (só precisam existir: a resolução não os executa).
+/// `Core` in temporary folders with fake CLIs (they only need to exist: resolution does not run them).
 fn start(agents: &[&str]) -> Env {
     let tmp = tempfile::tempdir().expect("tmp");
     let root = tmp.path().to_path_buf();
@@ -44,7 +44,7 @@ fn start(agents: &[&str]) -> Env {
     Env { _tmp: tmp, users: tempfile::tempdir().expect("tmp"), core, rx, root }
 }
 
-/// O executável de cada agente: o Antigravity é `agy`; os outros, o próprio nome.
+/// The executable of each agent: Antigravity is `agy`; the others use their own name.
 fn exe_name(name: &str) -> &str {
     if name == "antigravity" {
         "agy"
@@ -67,7 +67,7 @@ fn write_fake(dir: &Path, name: &str) {
 }
 
 impl Env {
-    /// Pasta nova do usuário (fora da pasta do app), sem `AGENTS.md`, como projeto aberto agora.
+    /// New user folder (outside the app folder), without an `AGENTS.md`, as a project opened now.
     fn user_project(&self, name: &str) -> (String, PathBuf) {
         let dir = self.users.path().join(name);
         std::fs::create_dir_all(&dir).expect("mkdir");
@@ -90,91 +90,91 @@ impl Env {
 }
 
 fn arg_after(args: &[String], flag: &str) -> String {
-    let i = args.iter().position(|a| a == flag).unwrap_or_else(|| panic!("sem {flag} em {args:?}"));
+    let i = args.iter().position(|a| a == flag).unwrap_or_else(|| panic!("no {flag} in {args:?}"));
     args[i + 1].clone()
 }
 
 #[test]
 fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
     let env = start(&["claude", "codex", "opencode", "aider", "interpreter", "antigravity"]);
-    let (project, dir) = env.user_project("novo");
+    let (project, dir) = env.user_project("new");
 
-    // Claude: prompt de sistema, com a regra dos subagentes e a memória geral.
+    // Claude: system prompt, with the subagent rule and the general memory.
     let claude = env.spec(&project, "claude");
     let text = arg_after(&claude.args, "--append-system-prompt");
-    assert!(text.contains("NÃO use subagentes internos do seu CLI"), "{text}");
+    assert!(text.contains("do NOT use your CLI's internal subagents"), "{text}");
     assert!(text.contains("memory/aprendizados/") && text.contains("ask-agent --learn"), "{text}");
     assert!(text.contains("ask-agent --task new"), "{text}");
 
-    // Codex: `-c developer_instructions=<texto TOML>`.
+    // Codex: `-c developer_instructions=<TOML text>`.
     let codex = env.spec(&project, "codex");
     let value = codex.args.iter().find(|a| a.starts_with("developer_instructions=")).expect("-c developer_instructions");
-    let toml = value.strip_prefix("developer_instructions=").expect("chave");
-    let decoded: String = serde_json::from_str(toml).expect("string TOML/JSON");
-    assert!(decoded.contains("NÃO use subagentes internos"), "{decoded}");
-    assert!(decoded.contains("Seu nome aqui é \"codex\""), "{decoded}");
+    let toml = value.strip_prefix("developer_instructions=").expect("key");
+    let decoded: String = serde_json::from_str(toml).expect("TOML/JSON string");
+    assert!(decoded.contains("do NOT use your CLI's internal subagents"), "{decoded}");
+    assert!(decoded.contains("Your name here is \"codex\""), "{decoded}");
 
-    // OpenCode: arquivo de instruções na configuração (e servidor próprio, que a lê).
+    // OpenCode: instructions file in the configuration (and its own server, which reads it).
     let opencode = env.spec(&project, "opencode");
     assert!(opencode.args.contains(&"--standalone".to_owned()), "{:?}", opencode.args);
     let config: serde_json::Value = serde_json::from_str(&opencode.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
-    let file = PathBuf::from(config["instructions"][0].as_str().expect("arquivo"));
+    let file = PathBuf::from(config["instructions"][0].as_str().expect("file"));
     assert!(file.starts_with(env.root.join("dados")), "{}", file.display());
-    let from_file = std::fs::read_to_string(&file).expect("ler");
-    assert!(from_file.contains("NÃO use subagentes internos") && from_file.contains("AGENTDECK_AGENT"), "{from_file}");
+    let from_file = std::fs::read_to_string(&file).expect("read");
+    assert!(from_file.contains("do NOT use your CLI's internal subagents") && from_file.contains("AGENTDECK_AGENT"), "{from_file}");
 
-    // Aider: o mesmo arquivo, como contexto só de leitura.
+    // Aider: the same file, as read-only context.
     let aider = env.spec(&project, "aider");
     assert_eq!(PathBuf::from(arg_after(&aider.args, "--read")), file);
 
-    // Open Interpreter: instruções personalizadas.
+    // Open Interpreter: custom instructions.
     let interpreter = env.spec(&project, "interpreter");
-    assert!(arg_after(&interpreter.args, "--custom_instructions").contains("NÃO use subagentes internos"));
+    assert!(arg_after(&interpreter.args, "--custom_instructions").contains("do NOT use your CLI's internal subagents"));
 
-    // Antigravity: um `AGENTS.md` da instância numa pasta de dados passada em `--add-dir` (o `agy` lê os das pastas
-    // adicionadas junto com o do projeto).
+    // Antigravity: an instance `AGENTS.md` in a data folder passed in `--add-dir` (`agy` reads the ones of the added
+    // folders together with the project one).
     let agy = env.spec(&project, "antigravity@arquiteto");
     let dirs: Vec<PathBuf> =
         agy.args.iter().zip(agy.args.iter().skip(1)).filter(|(a, _)| *a == "--add-dir").map(|(_, d)| PathBuf::from(d)).collect();
-    let own = dirs.iter().find(|d| d.join("AGENTS.md").is_file()).unwrap_or_else(|| panic!("sem AGENTS.md em {dirs:?}"));
+    let own = dirs.iter().find(|d| d.join("AGENTS.md").is_file()).unwrap_or_else(|| panic!("no AGENTS.md in {dirs:?}"));
     assert!(own.starts_with(env.root.join("dados")), "{}", own.display());
-    let agy_text = std::fs::read_to_string(own.join("AGENTS.md")).expect("ler");
-    assert!(agy_text.contains("NÃO use subagentes internos") && agy_text.contains("antigravity@arquiteto"), "{agy_text}");
+    let agy_text = std::fs::read_to_string(own.join("AGENTS.md")).expect("read");
+    assert!(agy_text.contains("do NOT use your CLI's internal subagents") && agy_text.contains("antigravity@arquiteto"), "{agy_text}");
 
-    // Nada disso suja o repositório do usuário.
-    assert!(!dir.join("AGENTS.md").exists(), "o app criou AGENTS.md para um CLI que tem canal próprio");
+    // None of that dirties the user's repository.
+    assert!(!dir.join("AGENTS.md").exists(), "the app created an AGENTS.md for a CLI that has its own channel");
     assert!(env.feed_texts().is_empty());
 }
 
 #[test]
 fn a_cli_that_only_reads_agents_md_gets_one_with_just_the_app_block() {
     let env = start(&["goose"]);
-    let (project, dir) = env.user_project("novo");
+    let (project, dir) = env.user_project("new");
     assert!(!dir.join("AGENTS.md").exists());
 
     env.spec(&project, "goose");
-    let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md criado");
+    let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md created");
     assert!(text.starts_with("<!-- agentdeck:start -->") && text.trim_end().ends_with("<!-- agentdeck:end -->"), "{text}");
-    assert!(text.contains("NÃO use subagentes internos") && text.contains("memory/aprendizados/"), "{text}");
-    // O usuário é avisado na Conversa, uma vez.
+    assert!(text.contains("do NOT use your CLI's internal subagents") && text.contains("memory/aprendizados/"), "{text}");
+    // The user is warned in the Conversation, once.
     let notices = env.feed_texts();
     assert_eq!(notices.len(), 1, "{notices:?}");
     assert!(notices[0].contains("AGENTS.md"), "{notices:?}");
 
-    // Abrir de novo não muda nada nem avisa de novo (nada novo no `git status`).
+    // Opening it again changes nothing and does not warn again (nothing new in `git status`).
     env.spec(&project, "goose");
-    assert_eq!(std::fs::read_to_string(dir.join("AGENTS.md")).expect("ler"), text);
+    assert_eq!(std::fs::read_to_string(dir.join("AGENTS.md")).expect("read"), text);
     assert!(env.feed_texts().is_empty());
 }
 
 #[test]
 fn the_users_own_agents_md_is_kept_and_not_announced_as_created() {
     let env = start(&["goose"]);
-    let (project, dir) = env.user_project("com-regras");
-    std::fs::write(dir.join("AGENTS.md"), "# Regras do meu projeto\n\nUse tabs.\n").expect("write");
+    let (project, dir) = env.user_project("with-rules");
+    std::fs::write(dir.join("AGENTS.md"), "# My project rules\n\nUse tabs.\n").expect("write");
 
     env.spec(&project, "goose");
-    let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("ler");
-    assert!(text.starts_with("# Regras do meu projeto\n\nUse tabs.\n") && text.contains("NÃO use subagentes internos"), "{text}");
+    let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("read");
+    assert!(text.starts_with("# My project rules\n\nUse tabs.\n") && text.contains("do NOT use your CLI's internal subagents"), "{text}");
     assert!(env.feed_texts().is_empty());
 }

@@ -1,24 +1,24 @@
-# 🧠 Modelos Neurais Whisper (`whisper/models/`)
+# 🧠 Whisper Neural Models (`whisper/models/`)
 
-Este diretório armazena os pesos pré-treinados dos modelos neurais Whisper no formato binário GGML.
-
----
-
-## 📦 Modelo Padrão: `ggml-large-v3-turbo.bin`
-
-- **Tamanho:** ~1,62 GB (1.624.555.275 bytes)
-- **Origem:** OpenAI Whisper large-v3-turbo / Repositório GGML Hugging Face
-- **Controle de Versão:** Por ultrapassar os limites de arquivos do Git e GitHub (100 MB), os arquivos `.bin` são **ignorados no repositório (`.gitignore`)**.
+This directory stores the pre-trained weights for Whisper neural models in GGML binary format.
 
 ---
 
-## ⚡ Como Obter o Modelo
+## 📦 Default Model: `ggml-large-v3-turbo.bin`
 
-### 1. Download Automático (Recomendado)
-Você não precisa baixar o modelo manualmente! Ao iniciar o AgentDeck pela primeira vez (`agentdeck.exe`), a aplicação verifica a existência de `whisper/models/ggml-large-v3-turbo.bin`. Se não o encontrar, ela inicia o download em segundo plano automaticamente exibindo o progresso em tempo real na interface gráfica.
+- **Size:** ~1.62 GB (1,624,555,275 bytes)
+- **Origin:** OpenAI Whisper large-v3-turbo / Hugging Face GGML Repository
+- **Version Control:** Because they exceed Git and GitHub file limits (100 MB), `.bin` files are **ignored in the repository (`.gitignore`)**.
 
-### 2. Download Manual (Ambientes Offline / Conexões Lentas)
-Caso prefira baixar previamente:
+---
+
+## ⚡ How to Obtain the Model
+
+### 1. Automatic Download (Recommended)
+You do not need to download the model manually! When launching AgentDeck for the first time (`agentdeck.exe`), the application checks for the presence of `whisper/models/ggml-large-v3-turbo.bin`. If not found, it automatically starts a background download, displaying real-time progress in the graphical interface.
+
+### 2. Manual Download (Offline Environments / Slow Connections)
+If you prefer to download in advance:
 
 #### Via PowerShell:
 ```powershell
@@ -30,4 +30,4 @@ Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/mai
 curl -L -o whisper/models/ggml-large-v3-turbo.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
 ```
 
-Após o download, certifique-se de que o arquivo esteja nomeado exatamente como `ggml-large-v3-turbo.bin` dentro da pasta `whisper/models/`.
+After downloading, ensure the file is named exactly `ggml-large-v3-turbo.bin` inside the `whisper/models/` folder.

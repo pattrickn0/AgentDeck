@@ -1,8 +1,8 @@
-//! Última atividade de cada aba de agente (saída no terminal ou turno em andamento).
+//! Last activity of each agent tab (terminal output or a turn in progress).
 //!
-//! A interface avisa aqui enquanto uma aba está trabalhando. A ponte usa isso para contar o
-//! tempo de espera de uma pergunta a partir do fim do trabalho da aba, e não de quando a
-//! pergunta foi feita: um agente ocupado numa tarefa longa não estoura o prazo.
+//! The UI reports here while a tab is working. The bridge uses it to count the waiting time of a
+//! question from the end of the tab's work, not from when the question was made: an agent busy
+//! with a long task does not run out of time.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -15,7 +15,7 @@ pub struct Activity {
 }
 
 impl Activity {
-    /// A aba `id` fez algo agora (produziu saída ou está no meio de um turno).
+    /// The tab `id` did something now (produced output or is in the middle of a turn).
     pub fn touch(&self, id: &str, at: Instant) {
         let mut last = self.last.lock();
         match last.get_mut(id) {
@@ -26,17 +26,17 @@ impl Activity {
         }
     }
 
-    /// Último sinal de atividade da aba `id`, se houve algum.
+    /// Last activity signal of the tab `id`, if there was one.
     pub fn last(&self, id: &str) -> Option<Instant> {
         self.last.lock().get(id).copied()
     }
 
-    /// A aba foi fechada.
+    /// The tab was closed.
     pub fn forget(&self, id: &str) {
         self.last.lock().remove(id);
     }
 
-    /// Esquece as abas cujas chaves começam com `prefix` (as de um projeto removido).
+    /// Forgets the tabs whose keys start with `prefix` (those of a removed project).
     pub fn forget_prefix(&self, prefix: &str) {
         self.last.lock().retain(|k, _| !k.starts_with(prefix));
     }
@@ -48,7 +48,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn guarda_o_sinal_mais_recente() {
+    fn keeps_the_most_recent_signal() {
         let a = Activity::default();
         let t0 = Instant::now();
         assert_eq!(a.last("x"), None);
@@ -60,7 +60,7 @@ mod tests {
     }
 
     #[test]
-    fn esquece_um_projeto_inteiro() {
+    fn forgets_a_whole_project() {
         let a = Activity::default();
         let t0 = Instant::now();
         for k in ["p1#claude", "p1#claude@dev", "p2#claude"] {

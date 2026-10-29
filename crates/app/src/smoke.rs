@@ -1,5 +1,5 @@
-//! Modo de verificação (porta do `AGENTDECK_SMOKE`): com `AGENTDECK_SMOKE=<pasta>`, após
-//! `AGENTDECK_SMOKE_DELAY` ms (padrão 4000) lê o framebuffer, salva `<pasta>/screen.png` e sai.
+//! Verification mode (port of `AGENTDECK_SMOKE`): with `AGENTDECK_SMOKE=<folder>`, after
+//! `AGENTDECK_SMOKE_DELAY` ms (default 4000) reads the framebuffer, saves `<folder>/screen.png` and exits.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -20,10 +20,10 @@ impl Smoke {
     }
 }
 
-/// Lê o framebuffer atual (RGBA, origem embaixo) e devolve as linhas de cima para baixo.
+/// Reads the current framebuffer (RGBA, origin at the bottom) and returns the rows top to bottom.
 pub fn read_framebuffer(gl: &glow::Context, width: u32, height: u32) -> Vec<u8> {
     let mut pixels = vec![0u8; (width * height * 4) as usize];
-    // SAFETY: buffer com o tamanho exato de width×height×RGBA8.
+    // SAFETY: buffer with the exact width×height×RGBA8 size.
     unsafe {
         gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
         gl.read_pixels(0, 0, width as i32, height as i32, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut pixels)));
@@ -48,7 +48,7 @@ pub fn save_png(path: &Path, width: u32, height: u32, rgba: &[u8]) -> anyhow::Re
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     let mut w = enc.write_header()?;
-    // Força alfa opaco (o framebuffer pode ter alfa < 1 em algumas configurações).
+    // Forces an opaque alpha (the framebuffer may have alpha < 1 in some configurations).
     let opaque: Vec<u8> = rgba.chunks(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
     w.write_image_data(&opaque)?;
     Ok(())

@@ -1,28 +1,28 @@
 # pty-probe
 
-Sonda usada nas investigações do terminal (`claude-code-sem-esc3j-no-windows`, `t37`). Roda um programa de verdade num PTY (ConPTY no
-Windows), alimenta o mesmo emulador do app (`alacritty_terminal` 0.26 e a mesma mudança de tamanho, `crates/app/src/terminal/resize.rs`,
-incluída por `#[path]`) e mede a grade, sem janela.
+Probe used in terminal investigations (`claude-code-sem-esc3j-no-windows`, `t37`). Runs a real program in a PTY (ConPTY on
+Windows), feeds the same emulator as the app (`alacritty_terminal` 0.26 and the same resize logic, `crates/app/src/terminal/resize.rs`,
+included via `#[path]`), and measures the grid, without a window.
 
 ```
 cd tools/pty-probe && cargo build --release
-PROBE_PROGRAM=C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe PROBE_ARGS=-NoLogo PROBE_BOOT=3 PROBE_CWD=C:/Users/<você> \
+PROBE_PROGRAM=C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe PROBE_ARGS=-NoLogo PROBE_BOOT=3 PROBE_CWD=C:/Users/<you> \
 RESIZE="12:30:120,15:58:120,18:58:60,21:58:120" \
-./target/release/pty-probe 58 120 <saida.bin> '1..400 | % { ("L{0:D5} " -f $_) + ("abcdefghij" * 8) }'
+./target/release/pty-probe 58 120 <output.bin> '1..400 | % { ("L{0:D5} " -f $_) + ("abcdefghij" * 8) }'
 ```
 
-- `pty-probe <linhas> <colunas> <saida> "<linha 1>" ["<linha 2>" ...]`: cada linha é digitada e enviada com Enter, a primeira depois de
-  `PROBE_BOOT` segundos (padrão 8) de silêncio, as outras quando a saída se aquieta.
-- `PROBE_PROGRAM` (obrigatório), `PROBE_ARGS` (separados por espaço), `PROBE_CWD`; para o Claude Code: `PROBE_ARGS="--model haiku"`, uma pasta
-  já confiável, e `PROBE_SETTINGS=<arquivo.json>` (vai em `--settings`; com `{"tui":"default"}` ele usa o modo clássico, com histórico; sem isso, a
-  tela alternativa).
-- `RESIZE="seg:linhas:colunas,..."`: trocas de tamanho, em segundos depois do primeiro envio (grade e PTY mudam juntos, como `Session::resize`).
-  Cada troca imprime, 0,9 s depois, o padrão da tela (`#` linha com texto, `.` vazia), o histórico e o relatório `SEQ`.
-- Relatório `SEQ`: lê as linhas `L00001 ...` na ordem histórico + tela e diz as que **pularam** (`puladas`), as que **repetem ou voltam**
-  (`repetidas/voltas`) e quantas linhas vazias ficaram entre duas consecutivas. Também avisa `VAO` (5+ linhas vazias seguidas com texto depois).
-- `PROBE_PULL=1`: desliga a correção do app (o `alacritty_terminal` puro), para comparar. `PROBE_WATCH=L00372,PS C`: mostra em que linha
-  cada texto está depois de cada troca.
-- Grava `<saida>` (bytes crus) e `<saida>.events.txt` (trocas de tamanho), o formato da gravação do app (`terminal/record.rs`), que os testes
-  reproduzem (`record::replay`).
-- O ambiente do programa é o do app: `TERM=xterm-256color`, `COLORTERM=truecolor`, sem `CLAUDE_CODE_*`/`CLAUDECODE`. Com o Claude Code a
-  sonda gasta tokens (uma resposta por linha enviada).
+- `pty-probe <lines> <columns> <output> "<line 1>" ["<line 2>" ...]`: each line is typed and sent with Enter, the first after
+  `PROBE_BOOT` seconds (default 8) of silence, the others when output settles down.
+- `PROBE_PROGRAM` (required), `PROBE_ARGS` (space-separated), `PROBE_CWD`; for Claude Code: `PROBE_ARGS="--model haiku"`, an already
+  trusted folder, and `PROBE_SETTINGS=<file.json>` (passed to `--settings`; with `{"tui":"default"}` it uses classic mode, with history; without it, the
+  alternate screen).
+- `RESIZE="sec:lines:columns,..."`: resize events, in seconds after the first input (grid and PTY resize together, like `Session::resize`).
+  Each resize prints, 0.9 s later, the screen pattern (`#` line with text, `.` empty), the history, and the `SEQ` report.
+- `SEQ` report: reads `L00001 ...` lines in history + screen order and reports those that **skipped** (`puladas`), those that **repeat or go back**
+  (`repetidas/voltas`), and how many empty lines remained between two consecutive lines. Also warns on `VAO` (5+ consecutive empty lines followed by text).
+- `PROBE_PULL=1`: disables the app fix (pure `alacritty_terminal`), for comparison. `PROBE_WATCH=L00372,PS C`: shows which line
+  each text is on after each resize.
+- Records `<output>` (raw bytes) and `<output>.events.txt` (resize events), the app's recording format (`terminal/record.rs`), which tests
+  replay (`record::replay`).
+- The program environment matches the app: `TERM=xterm-256color`, `COLORTERM=truecolor`, without `CLAUDE_CODE_*`/`CLAUDECODE`. With Claude Code, the
+  probe consumes tokens (one response per sent line).

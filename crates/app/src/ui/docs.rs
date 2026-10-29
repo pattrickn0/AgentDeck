@@ -1,6 +1,6 @@
-//! Modo Documentos do centro (ver `docs.rs`): a chave Agentes | Documentos da barra de título, a faixa de
-//! abas de documento (o mesmo desenho de `tabs.rs`) e o documento com a largura toda do centro.
-//! Diff, arquivo de texto (que também se edita) e markdown.
+//! Documents mode of the center (see `docs.rs`): the Agents | Documents switch of the title bar, the strip of
+//! document tabs (the same drawing as `tabs.rs`) and the document with the full width of the center.
+//! Diff, text file (which can also be edited) and markdown.
 
 use egui::{Align2, Id, Key, Painter, Pos2, Rect, Sense, Ui, Vec2};
 
@@ -9,72 +9,74 @@ use super::tabs::{self, Item, Lead, StripClick, StripKind};
 use super::{
     button, button_width, clickable, code, diff_view, frame, galley, galley_trunc, place, section_label, text_in, text_w, tip, ButtonKind,
 };
+use agentdeck_core::t;
+
 use crate::deck::Deck;
 use crate::docs::{file_name, After, Answer, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, Find, Unsaved};
 use crate::highlight::Lang;
 use crate::theme;
 
-/// Altura da linha com o título do documento e as ações dele.
+/// Height of the line with the document title and its actions.
 const SUBHEAD_H: f32 = 28.0;
-/// Altura de uma linha da lista de arquivos de um diff e do cabeçalho dela.
+/// Height of a row of a diff's file list and of its header.
 const FILE_ROW_H: f32 = 20.0;
 const FILE_HEAD_H: f32 = super::SECTION_LABEL_H;
-/// Abaixo desta largura a lista de arquivos do diff passa para cima do diff.
+/// Below this width the diff's file list moves above the diff.
 const NARROW_W: f32 = 560.0;
-/// Largura máxima da coluna do markdown (acima disso o texto fica comprido demais para ler).
+/// Maximum width of the markdown column (above it the text gets too long to read).
 const MD_MAX_W: f32 = 820.0;
 
 // ---------------------------------------------------------------------------
-// A chave
+// The switch
 // ---------------------------------------------------------------------------
 
-/// O que um clique na chave pede.
+/// What a click on the switch asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Switched {
     Agents,
     Docs,
 }
 
-/// Altura do trilho da chave (segmentos de 24 px e 2 px de cada lado).
+/// Height of the switch rail (24 px segments and 2 px on each side).
 pub const SWITCH_H: f32 = 28.0;
-/// A chave compacta da barra de título (barra lateral recolhida): segmentos de 20 px.
+/// The compact switch of the title bar (sidebar collapsed): 20 px segments.
 pub const SWITCH_COMPACT_H: f32 = 24.0;
-/// O selo de "Agentes": um ponto de 6 px, 6 px depois do nome.
+/// The "Agents" badge: a 6 px dot, 6 px after the name.
 const SELO: f32 = 6.0;
 const SELO_GAP: f32 = 6.0;
 
-/// Largura da chave compacta: dois segmentos iguais, do tamanho do maior rótulo.
+/// Width of the compact switch: two equal segments, the size of the largest label.
 pub fn switch_compact_width(painter: &Painter, deck: &Deck) -> f32 {
     let font = theme::ui_semibold(11.5);
-    let agents = text_w(painter, "Agentes", font.clone()) + SELO_GAP + SELO;
+    let agents = text_w(painter, t!("Agents"), font.clone()) + SELO_GAP + SELO;
     let docs = text_w(painter, &docs_label(deck.docs.count(&deck.active_project)), font);
     2.0 * (agents.max(docs) + 20.0) + 4.0
 }
 
-/// A palavra do segundo lado da chave: inteira se ela e a contagem (`full_w`) cabem no segmento de largura
-/// `seg_w` com folga, abreviada se não.
+/// The word on the second side of the switch: whole if it and the count (`full_w`) fit in the segment of width
+/// `seg_w` with room to spare, abbreviated if not.
 fn docs_word(full_w: f32, seg_w: f32) -> &'static str {
     if full_w + 8.0 <= seg_w {
-        "Documentos"
+        t!("Documents")
     } else {
-        "Docs"
+        t!("Docs")
     }
 }
 
-/// "Documentos n"; sem documento aberto, só "Documentos" (o zero é ruído).
+/// "Documents n"; with no document open, only "Documents" (the zero is noise).
 fn docs_label(n: usize) -> String {
     if n == 0 {
-        "Documentos".to_owned()
+        t!("Documents").to_owned()
     } else {
-        format!("Documentos {n}")
+        t!("Documents {n}", n)
     }
 }
 
-/// Pinta a chave **Agentes | Documentos n** em `rect` (o trilho, `SWITCH_H` ou `SWITCH_COMPACT_H` de
-/// altura): o segmento ativo na cor de destaque. O selo de "Agentes" mostra o que acontece nas abas
-/// enquanto se lê: um ponto se alguma terminou um turno sem ser vista (na cor do texto sobre o destaque
-/// se o lado está ativo, na cor do agente se não) e, lendo documentos, um que pulsa se alguma trabalha
-/// agora. Um clique troca o centro.
+/// Paints the **Agents | Documents n** switch in `rect` (the rail, `SWITCH_H` or `SWITCH_COMPACT_H`
+/// high): the active segment in the accent color. The "Agents" badge shows what happens in the tabs
+/// while reading: a dot if one finished a turn without being seen (in the text-on-accent color
+/// if the side is active, in the agent's color if not) and, while reading documents, one that pulses if one is working
+/// now. A click switches the center.
 pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
     let painter = ui.painter();
     let p = theme::pal();
@@ -108,7 +110,7 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
         }
         if which == Switched::Agents {
             let has_selo = badge.done > 0 || pulse;
-            let g = galley(painter, "Agentes", font, fg);
+            let g = galley(painter, t!("Agents"), font, fg);
             let total = g.size().x + if has_selo { SELO_GAP + SELO } else { 0.0 };
             let x = seg.center().x - total / 2.0;
             let text = place(
@@ -130,12 +132,12 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
             }
         } else {
-            // "Documentos" (ou "Docs", na barra lateral mais estreita) e a contagem, esta em `text_3`
-            // (apagada sobre o destaque); sem documento aberto, sem contagem.
+            // "Documents" (or "Docs", in the narrowest sidebar) and the count, this one in `text_3`
+            // (dimmed over the accent); with no document open, no count.
             let count = if n_docs > 0 { n_docs.to_string() } else { String::new() };
             let count_gap = if n_docs > 0 { 5.0 } else { 0.0 };
             let count_w = text_w(painter, &count, theme::ui(11.5));
-            let label = docs_word(text_w(painter, "Documentos", font.clone()) + count_gap + count_w, seg.width());
+            let label = docs_word(text_w(painter, t!("Documents"), font.clone()) + count_gap + count_w, seg.width());
             let g = galley(painter, label, font, fg);
             let count_color = if active {
                 theme::with_opacity(p.on_accent, 0.7)
@@ -170,32 +172,32 @@ pub fn switch(deck: &mut Deck, ui: &Ui, rect: Rect, id: &str) {
     }
 }
 
-/// A dica de cada lado da chave (com o atalho).
+/// The tooltip of each side of the switch (with the shortcut).
 fn switch_tip(which: Switched, n_docs: usize, done: usize, busy: usize) -> String {
     match which {
         Switched::Agents => {
-            let mut parts = vec!["Agentes: as janelas dos terminais".to_owned()];
+            let mut parts = vec![t!("Agents: the terminal windows").to_owned()];
             if done > 0 {
-                parts.push(format!("{done} terminou sem você ver"));
+                parts.push(t!("{done} finished without you seeing", done));
             }
             if busy > 0 {
-                parts.push(format!("{busy} trabalhando"));
+                parts.push(t!("{busy} working", busy));
             }
-            parts.push("Ctrl+Shift+D alterna".to_owned());
+            parts.push(t!("Ctrl+Shift+D toggles").to_owned());
             parts.join("\n")
         }
         Switched::Docs if n_docs == 0 => {
-            "Documentos: nada aberto neste projeto\nAbra um diff pela mesa de tarefas, um commit pela aba Git\nou um arquivo (duplo clique no explorador)".to_owned()
+            t!("Documents: nothing open in this project\nOpen a diff from the tasks desk, a commit from the Git tab\nor a file (double-click in the explorer)").to_owned()
         }
-        Switched::Docs => "Documentos: diff, arquivos e markdown, só para ler\nCtrl+Shift+D alterna".to_owned(),
+        Switched::Docs => t!("Documents: diffs, files and markdown, to read\nCtrl+Shift+D toggles").to_owned(),
     }
 }
 
 // ---------------------------------------------------------------------------
-// O centro em modo Documentos
+// The center in Documents mode
 // ---------------------------------------------------------------------------
 
-/// O que um clique no documento pede (aplicado depois de pintar).
+/// What a click on the document asks for (applied after painting).
 enum Act {
     Focus(u64),
     Close(u64),
@@ -205,7 +207,7 @@ enum Act {
     Save(u64),
 }
 
-/// Pinta os documentos do projeto ativo no lugar das janelas dos agentes.
+/// Paints the documents of the active project in place of the agent windows.
 pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     let painter = ui.painter_at(area);
     let project = deck.active_project.clone();
@@ -228,11 +230,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
         .collect();
     let uids: Vec<u64> = items.iter().map(|i| i.uid).collect();
     let Some(current) = deck.docs.current_uid(&project).and_then(|c| uids.iter().position(|u| *u == c)) else {
-        text_in(&painter, area, Align2::CENTER_CENTER, "Nenhum documento aberto neste projeto.", theme::ui(13.0), theme::pal().text_2);
+        text_in(&painter, area, Align2::CENTER_CENTER, t!("No document open in this project."), theme::ui(13.0), theme::pal().text_2);
         return;
     };
 
-    // ---------- Faixa de abas ----------
+    // ---------- Tab strip ----------
     let head = Rect::from_min_size(area.min, Vec2::new(area.width(), HEAD_H));
     painter.rect_filled(head, 0.0, theme::pal().strip);
     painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
@@ -252,7 +254,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
         _ => {}
     }
 
-    // ---------- Documento em foco ----------
+    // ---------- Focused document ----------
     let uid = uids[current];
     let below = Rect::from_min_max(Pos2::new(area.min.x, head.max.y), area.max);
     let mut cache = std::mem::take(&mut deck.docs.md_cache);
@@ -269,7 +271,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             Act::Save(uid) => deck.docs_save(uid, After::Nothing),
             Act::OpenExternal(rel) => {
                 if let Err(e) = deck.core.open_path(&rel) {
-                    deck.system(format!("Não foi possível abrir {rel} no programa padrão: {e}"));
+                    deck.system(t!("Could not open {rel} in the default program: {error}", rel, error = e));
                 }
             }
             Act::SelectFile(uid, n) => {
@@ -281,7 +283,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     }
 }
 
-/// O sinal do tipo de documento, antes do nome da aba.
+/// The sign of the document type, before the tab name.
 fn glyph(kind: &DocKind) -> &'static str {
     match kind {
         DocKind::TaskDiff { .. } | DocKind::CommitDiff(_) | DocKind::FileDiff { .. } => "±",
@@ -290,24 +292,24 @@ fn glyph(kind: &DocKind) -> &'static str {
     }
 }
 
-/// A linha de título do documento (com as ações), os avisos e a busca; depois, o corpo dele.
+/// The title line of the document (with the actions), the notices and the search; then, its body.
 fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonmark::CommonMarkCache, acts: &mut Vec<Act>) {
     let painter = ui.painter_at(area);
     let sub = Rect::from_min_size(area.min, Vec2::new(area.width(), SUBHEAD_H));
     painter.rect_filled(Rect::from_min_max(Pos2::new(sub.min.x, sub.max.y - 1.0), sub.max), 0.0, theme::pal().separator);
     let uid = tab.uid;
 
-    // Ações à direita, da última para a primeira.
+    // Actions on the right, from the last to the first.
     let mut right = sub.max.x - 8.0;
     let cy = sub.min.y + (SUBHEAD_H - 1.0) / 2.0;
     if let Some(path) = tab.kind.file_path() {
-        let label = "Abrir no programa padrão";
+        let label = t!("Open in the default program");
         if action(
             ui,
             &painter,
             &mut right,
             cy,
-            (label, "Abre o arquivo no programa que o Windows associou a ele"),
+            (label, t!("Opens the file in the program the system associates with it")),
             Id::new(("doc-open", uid)),
             (ButtonKind::Secondary, true),
         ) {
@@ -316,8 +318,8 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
     }
     if tab.kind.reloadable() {
         let loading = matches!(tab.state, DocState::Loading);
-        let tooltip = "Lê o documento de novo (com edição não salva, pergunta antes)";
-        if action(ui, &painter, &mut right, cy, ("Recarregar", tooltip), Id::new(("doc-reload", uid)), (ButtonKind::Secondary, !loading)) {
+        let tooltip = t!("Reads the document again (with an unsaved edit, it asks first)");
+        if action(ui, &painter, &mut right, cy, (t!("Reload"), tooltip), Id::new(("doc-reload", uid)), (ButtonKind::Secondary, !loading)) {
             acts.push(Act::Reload(uid));
         }
     }
@@ -326,28 +328,31 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
         dirty = src.dirty();
         let is_md = matches!(tab.kind, DocKind::Markdown(_));
         if src.can_edit() && src.editing {
-            let hint = "Para de editar (o que você digitou continua na tela até gravar ou fechar)";
-            if action(ui, &painter, &mut right, cy, ("Só leitura", hint), Id::new(("doc-stop", uid)), (ButtonKind::Secondary, true)) {
+            let hint = t!("Stops editing (what you typed stays on screen until you save or close)");
+            if action(ui, &painter, &mut right, cy, (t!("Read-only"), hint), Id::new(("doc-stop", uid)), (ButtonKind::Secondary, true)) {
                 src.editing = false;
             }
             let ready = src.dirty() && src.external.is_none() && !src.saving;
-            let label = if src.saving { "Gravando…" } else { "Salvar" };
-            let hint =
-                if src.external.is_some() { "Resolva primeiro o aviso: o arquivo mudou no disco" } else { "Grava o arquivo (Ctrl+S)" };
+            let label = if src.saving { t!("Saving…") } else { t!("Save") };
+            let hint = if src.external.is_some() {
+                t!("First resolve the notice: the file changed on disk")
+            } else {
+                t!("Saves the file (Ctrl+S)")
+            };
             if action(ui, &painter, &mut right, cy, (label, hint), Id::new(("doc-save", uid)), (ButtonKind::Primary, ready)) {
                 acts.push(Act::Save(uid));
             }
         } else if src.can_edit() {
-            let hint = "Edita o arquivo aqui mesmo (Ctrl+S grava)";
-            if action(ui, &painter, &mut right, cy, ("Editar", hint), Id::new(("doc-edit", uid)), (ButtonKind::Primary, true)) {
+            let hint = t!("Edits the file right here (Ctrl+S saves)");
+            if action(ui, &painter, &mut right, cy, (t!("Edit"), hint), Id::new(("doc-edit", uid)), (ButtonKind::Primary, true)) {
                 src.set_editing(true);
             }
         }
         if is_md && !src.editing {
             let (label, hint) = if src.raw {
-                ("Ver formatado", "Mostra o markdown formatado")
+                (t!("View formatted"), t!("Shows the formatted markdown"))
             } else {
-                ("Ver código", "Mostra o texto do markdown, com realce")
+                (t!("View code"), t!("Shows the markdown text, with highlighting"))
             };
             if action(ui, &painter, &mut right, cy, (label, hint), Id::new(("doc-raw", uid)), (ButtonKind::Secondary, true)) {
                 src.raw = !src.raw;
@@ -372,7 +377,7 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
             }
         }
         if dirty {
-            let g = galley(&painter, "● Não salvo", theme::ui(11.5), theme::pal().warning);
+            let g = galley(&painter, t!("● Unsaved"), theme::ui(11.5), theme::pal().warning);
             let w = g.size().x;
             place(
                 &painter,
@@ -396,7 +401,7 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
     let diff_path = tab.kind.diff_path().map(str::to_owned);
     let DocTab { state, find, shaped, .. } = tab;
     match state {
-        DocState::Loading => note(&painter, body, "Carregando…", theme::pal().text_2),
+        DocState::Loading => note(&painter, body, t!("Loading…"), theme::pal().text_2),
         DocState::Failed(e) => note(&painter, body, e, theme::pal().danger_text),
         DocState::Unreadable(why) => note(&painter, body, why, theme::pal().text_2),
         DocState::Diff(doc) => diff_body(ui, body, uid, doc, find, acts, diff_path.as_deref()),
@@ -407,8 +412,8 @@ fn document(ui: &mut Ui, area: Rect, tab: &mut DocTab, cache: &mut egui_commonma
     }
 }
 
-/// Um botão de texto no fim da linha de título; `right` anda para a esquerda. Devolve se foi clicado (um botão
-/// desligado aparece apagado e não clica).
+/// A text button at the end of the title line; `right` moves left. Returns whether it was clicked (a
+/// disabled button shows dimmed and does not click).
 fn action(
     ui: &Ui,
     painter: &Painter,
@@ -424,28 +429,28 @@ fn action(
     if enabled {
         return tip(button(ui, r, id, label, kind), tooltip).clicked();
     }
-    // Desligado: o mesmo desenho a 45%, sem clique.
+    // Disabled: the same drawing at 45%, no click.
     painter.rect_filled(r, 5.0, theme::with_alpha(theme::pal().text_strong, 0.03));
     text_in(painter, r, Align2::CENTER_CENTER, label, theme::ui(11.5), theme::with_opacity(theme::pal().text_2, 0.55));
     tip(ui.interact(r, id, Sense::hover()), tooltip);
     false
 }
 
-/// Uma mensagem no alto do corpo (carregando, erro, arquivo que não vira texto), com quebra de linha.
+/// A message at the top of the body (loading, error, file that does not become text), with line wrapping.
 pub(super) fn note(painter: &Painter, body: Rect, text: &str, color: egui::Color32) {
     let g = painter.layout(text.to_owned(), theme::ui(12.5), color, (body.width() - 28.0).max(40.0));
     painter.galley(body.min + Vec2::splat(14.0), g, color);
 }
 
 // ---------------------------------------------------------------------------
-// Avisos e busca
+// Notices and search
 // ---------------------------------------------------------------------------
 
-/// Altura de uma faixa de aviso e da barra de busca.
+/// Height of a notice strip and of the search bar.
 const NOTICE_H: f32 = 30.0;
 const FIND_H: f32 = 34.0;
 
-/// O que um botão de aviso pede.
+/// What a notice button asks for.
 #[derive(Clone, Copy)]
 enum Fix {
     KeepMine,
@@ -453,7 +458,7 @@ enum Fix {
     Dismiss,
 }
 
-/// Uma faixa de aviso no alto de `body` (que encolhe): o texto, na cor do tom, e os botões à direita. Devolve o botão clicado.
+/// A notice strip at the top of `body` (which shrinks): the text, in the tone color, and the buttons on the right. Returns the clicked button.
 fn notice(ui: &Ui, body: &mut Rect, tone: egui::Color32, text: &str, buttons: &[(&str, &str, Fix)], key: Id) -> Option<Fix> {
     let r = Rect::from_min_size(body.min, Vec2::new(body.width(), NOTICE_H));
     body.min.y += NOTICE_H;
@@ -478,7 +483,7 @@ fn notice(ui: &Ui, body: &mut Rect, tone: egui::Color32, text: &str, buttons: &[
     clicked
 }
 
-/// Os avisos do arquivo aberto como código (e do que só abriu em leitura), do mais importante ao menos.
+/// The notices of the file opened as code (and of the one that only opened read-only), from the most important to the least.
 fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
     let p = theme::pal();
     let key = Id::new(("doc-notice", tab.uid));
@@ -489,14 +494,10 @@ fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
                     ui,
                     body,
                     p.warning,
-                    "O arquivo mudou no disco (um agente?) enquanto você editava.",
+                    t!("The file changed on disk (an agent?) while you were editing."),
                     &[
-                        (
-                            "Manter a minha",
-                            "Fica com o que você digitou; a próxima gravação põe por cima do que está no disco",
-                            Fix::KeepMine,
-                        ),
-                        ("Recarregar a do disco", "Joga fora o que você digitou e mostra o que está no disco", Fix::TakeDisk),
+                        (t!("Keep mine"), t!("Keeps what you typed; the next save writes over what is on disk"), Fix::KeepMine),
+                        (t!("Reload from disk"), t!("Throws away what you typed and shows what is on disk"), Fix::TakeDisk),
                     ],
                     key.with("external"),
                 )
@@ -505,7 +506,7 @@ fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
                     ui,
                     body,
                     p.warning,
-                    "O arquivo foi apagado ou não abre mais. O que você editou continua aqui; Ctrl+S o grava de novo.",
+                    t!("The file was deleted or does not open any more. What you edited stays here; Ctrl+S saves it again."),
                     &[],
                     key.with("gone"),
                 )
@@ -522,8 +523,8 @@ fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
                     ui,
                     body,
                     p.danger,
-                    &format!("Não consegui gravar: {e}"),
-                    &[("Fechar", "Esconde o erro", Fix::Dismiss)],
+                    &t!("Could not save: {error}", error = e),
+                    &[(t!("Close"), t!("Hides the error"), Fix::Dismiss)],
                     key.with("error"),
                 ) {
                     src.save_error = None;
@@ -534,14 +535,14 @@ fn notices(ui: &Ui, body: &mut Rect, tab: &mut DocTab) {
             }
         }
         DocState::Text(_) => {
-            let why = "Aberto só para leitura: o arquivo é grande ou tem linha comprida demais para o editor.";
+            let why = t!("Opened read-only: the file is large or has a line too long for the editor.");
             notice(ui, body, p.text_2, why, &[], key.with("large"));
         }
         _ => {}
     }
 }
 
-/// A barra de busca (Ctrl+F): o campo, "n de m", anterior, próxima e fechar. Enter vai para a próxima (Shift+Enter, a anterior); Esc fecha.
+/// The search bar (Ctrl+F): the field, "n of m", previous, next and close. Enter goes to the next one (Shift+Enter, the previous); Esc closes.
 fn find_bar(ui: &mut Ui, body: &mut Rect, uid: u64, find: &mut Find) {
     let r = Rect::from_min_size(body.min, Vec2::new(body.width(), FIND_H));
     body.min.y += FIND_H;
@@ -557,7 +558,7 @@ fn find_bar(ui: &mut Ui, body: &mut Rect, uid: u64, find: &mut Find) {
         .id(id)
         .frame(egui::Frame::NONE)
         .font(theme::ui(12.0))
-        .hint_text("Buscar no documento")
+        .hint_text(t!("Search in the document"))
         .text_color(p.text)
         .desired_width(field.width() - 16.0)
         .show(&mut child);
@@ -575,8 +576,8 @@ fn find_bar(ui: &mut Ui, body: &mut Rect, uid: u64, find: &mut Find) {
     let n = find.count();
     let counter = match (find.query.is_empty(), n) {
         (true, _) => String::new(),
-        (false, 0) => "Nenhum resultado".to_owned(),
-        (false, n) => format!("{} de {n}", find.current.min(n - 1) + 1),
+        (false, 0) => t!("No results").to_owned(),
+        (false, n) => t!("{current} of {n}", current = find.current.min(n - 1) + 1, n),
     };
     let mut x = field.max.x + 10.0;
     if !counter.is_empty() {
@@ -592,7 +593,7 @@ fn find_bar(ui: &mut Ui, body: &mut Rect, uid: u64, find: &mut Find) {
         x += w + 10.0;
     }
     for (label, hint, act) in
-        [("‹", "Ocorrência anterior (Shift+Enter)", 0), ("›", "Próxima ocorrência (Enter)", 1), ("Fechar", "Fecha a busca (Esc)", 2)]
+        [("‹", t!("Previous match (Shift+Enter)"), 0), ("›", t!("Next match (Enter)"), 1), (t!("Close"), t!("Closes the search (Esc)"), 2)]
     {
         let w = if act == 2 { button_width(&painter, label, ButtonKind::Ghost) } else { 24.0 };
         let b = Rect::from_min_size(Pos2::new(x, r.min.y + 5.0), Vec2::new(w, 24.0));
@@ -611,42 +612,42 @@ fn find_bar(ui: &mut Ui, body: &mut Rect, uid: u64, find: &mut Find) {
 }
 
 // ---------------------------------------------------------------------------
-// A pergunta sobre edição não salva
+// The question about an unsaved edit
 // ---------------------------------------------------------------------------
 
-/// O modal de "Salvar as alterações?": ao fechar uma aba com edição, ao recarregar sobre ela ou ao fechar o app.
+/// The "Save the changes?" modal: when closing a tab with an edit, when reloading over it or when closing the app.
 pub fn unsaved_modal(deck: &mut Deck, ctx: &egui::Context) {
     let Some(asked) = deck.docs.confirm else { return };
-    let name_of = |uid: u64| deck.docs.get(uid).map_or_else(|| "o arquivo".to_owned(), |t| t.subtitle.clone());
+    let name_of = |uid: u64| deck.docs.get(uid).map_or_else(|| t!("the file").to_owned(), |t| t.subtitle.clone());
     let (title, detail, buttons): (String, String, Vec<(&str, Answer)>) = match asked {
         Unsaved::Tab(uid) => (
-            format!("Salvar as alterações de {}?", name_of(uid)),
-            "Se não salvar, o que você digitou se perde.".to_owned(),
-            vec![("Salvar", Answer::Save), ("Não salvar", Answer::Discard), ("Cancelar", Answer::Cancel)],
+            t!("Save the changes to {name}?", name = name_of(uid)),
+            t!("If you do not save, what you typed is lost.").to_owned(),
+            vec![(t!("Save"), Answer::Save), (t!("Don't save"), Answer::Discard), (t!("Cancel"), Answer::Cancel)],
         ),
         Unsaved::Revert(uid) => (
-            format!("Descartar as alterações de {}?", name_of(uid)),
-            "O arquivo volta a ser lido do disco; o que você digitou se perde.".to_owned(),
-            vec![("Descartar", Answer::Discard), ("Cancelar", Answer::Cancel)],
+            t!("Discard the changes to {name}?", name = name_of(uid)),
+            t!("The file is read from disk again; what you typed is lost.").to_owned(),
+            vec![(t!("Discard"), Answer::Discard), (t!("Cancel"), Answer::Cancel)],
         ),
         Unsaved::Busy => {
             let tabs = deck.working_tabs();
             let shown = tabs.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
-            let more = if tabs.len() > 4 { format!(" e mais {}", tabs.len() - 4) } else { String::new() };
+            let more = if tabs.len() > 4 { t!(" and {count} more", count = tabs.len() - 4) } else { String::new() };
             (
-                "Há agentes trabalhando".to_owned(),
-                format!("{shown}{more}. Se encerrar agora, o turno em andamento se perde."),
-                vec![("Encerrar mesmo assim", Answer::Discard), ("Cancelar", Answer::Cancel)],
+                t!("Agents are working").to_owned(),
+                t!("{shown}{more}. If you quit now, the turn in progress is lost.", shown, more),
+                vec![(t!("Quit anyway"), Answer::Discard), (t!("Cancel"), Answer::Cancel)],
             )
         }
         Unsaved::Quit => {
             let files: Vec<String> = deck.docs.unsaved().iter().map(|t| t.subtitle.clone()).collect();
             let shown = files.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
-            let more = if files.len() > 4 { format!(" e mais {}", files.len() - 4) } else { String::new() };
+            let more = if files.len() > 4 { t!(" and {count} more", count = files.len() - 4) } else { String::new() };
             (
-                "Há alterações não salvas".to_owned(),
-                format!("{shown}{more}. Se sair sem salvar, o que você digitou se perde."),
-                vec![("Salvar tudo e sair", Answer::Save), ("Sair sem salvar", Answer::Discard), ("Cancelar", Answer::Cancel)],
+                t!("There are unsaved changes").to_owned(),
+                t!("{shown}{more}. If you quit without saving, what you typed is lost.", shown, more),
+                vec![(t!("Save all and quit"), Answer::Save), (t!("Quit without saving"), Answer::Discard), (t!("Cancel"), Answer::Cancel)],
             )
         }
     };
@@ -732,11 +733,11 @@ fn diff_body(ui: &mut Ui, body: Rect, uid: u64, doc: &mut DiffDoc, find: &mut Fi
     super::git::diff_lines_at(ui, view, &doc.diff, None, &mut Vec::new(), id, opts);
 }
 
-/// A lista de arquivos do diff: letra do que mudou, nome e `+`/`−`. Clicar rola o diff até o arquivo.
+/// The diff's file list: letter of what changed, name and `+`/`−`. Clicking scrolls the diff to the file.
 fn file_list(ui: &mut Ui, area: Rect, uid: u64, doc: &DiffDoc, acts: &mut Vec<Act>) {
     let painter = ui.painter_at(area);
     let (added, removed) = doc.files.iter().fold((0, 0), |(a, r), f| (a + f.added, r + f.removed));
-    let title = format!("{} arquivo(s)", doc.files.len());
+    let title = t!("{count} file(s)", count = doc.files.len());
     let head = section_label(&painter, Rect::from_min_size(area.min, Vec2::new(area.width(), FILE_HEAD_H)), &title);
     let totals = format!("+{added} −{removed}");
     text_in(&painter, head.shrink2(Vec2::new(12.0, 0.0)), Align2::RIGHT_CENTER, &totals, theme::meta(10.0), theme::pal().text_2);
@@ -754,7 +755,7 @@ fn file_list(ui: &mut Ui, area: Rect, uid: u64, doc: &DiffDoc, acts: &mut Vec<Ac
                 let (r, _) = ui.allocate_exact_size(Vec2::new(rows.width(), FILE_ROW_H), Sense::hover());
                 let resp = clickable(ui, r, Id::new(("doc-file", uid, n)));
                 file_row(ui.painter(), r, file, n == doc.selected, resp.hovered());
-                if tip(resp, format!("{}\nClique para ir até ele no diff", file.path)).clicked() {
+                if tip(resp, t!("{path}\nClick to go to it in the diff", path = file.path)).clicked() {
                     acts.push(Act::SelectFile(uid, n));
                 }
             }
@@ -798,8 +799,8 @@ fn file_row(p: &Painter, r: Rect, file: &DiffFile, selected: bool, hovered: bool
 // Markdown
 // ---------------------------------------------------------------------------
 
-/// O markdown formatado (`egui_commonmark`: títulos, listas, caixas `- [ ]`, tabelas, citações, código),
-/// numa coluna centrada de até `MD_MAX_W`.
+/// The formatted markdown (`egui_commonmark`: headings, lists, `- [ ]` boxes, tables, quotes, code),
+/// in a centered column of up to `MD_MAX_W`.
 fn markdown_body(ui: &mut Ui, body: Rect, uid: u64, text: &str, cache: &mut egui_commonmark::CommonMarkCache) {
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(body);
@@ -819,7 +820,7 @@ fn markdown_body(ui: &mut Ui, body: Rect, uid: u64, text: &str, cache: &mut egui
     });
 }
 
-/// O estilo do texto do markdown: o egui zera o espaçamento do app, e o `egui_commonmark` precisa dele.
+/// The markdown text style: egui zeroes the app's spacing, and `egui_commonmark` needs it.
 fn markdown_style(ui: &mut Ui) {
     let style = ui.style_mut();
     style.spacing.item_spacing = Vec2::new(6.0, 8.0);
@@ -840,9 +841,9 @@ mod tests {
 
     #[test]
     fn the_documents_word_shrinks_in_a_narrow_segment() {
-        // "Documentos 13" precisa de ~80 px mais folga.
-        assert_eq!(docs_word(80.0, 100.0), "Documentos");
-        assert_eq!(docs_word(80.0, 88.0), "Documentos");
+        // "Documents 13" needs ~80 px plus room to spare.
+        assert_eq!(docs_word(80.0, 100.0), "Documents");
+        assert_eq!(docs_word(80.0, 88.0), "Documents");
         assert_eq!(docs_word(80.0, 87.0), "Docs");
         assert_eq!(docs_word(80.0, 60.0), "Docs");
     }
