@@ -9,7 +9,7 @@ use super::tabs::{self, Item, Lead, StripClick, StripKind};
 use super::{
     button, button_width, clickable, code, diff_view, frame, galley, galley_trunc, place, section_label, text_in, text_w, tip, ButtonKind,
 };
-use agentdeck_core::t;
+use holt_core::t;
 
 use crate::deck::Deck;
 use crate::docs::{file_name, After, Answer, CenterView, DiffDoc, DiffFile, DocKind, DocState, DocTab, Find, Unsaved};

@@ -48,14 +48,14 @@ pub fn install(dir: &Path) {
     debug_trigger();
 }
 
-/// DEBUG ONLY: `AGENTDECK_DEBUG_CRASH=panic|heap` crashes the app 3 s after opening, to
+/// DEBUG ONLY: `HOLT_DEBUG_CRASH=panic|heap` crashes the app 3 s after opening, to
 /// verify crash logging works.
 fn debug_trigger() {
-    let Some(kind) = agentdeck_core::env_var("DEBUG_CRASH") else { return };
+    let Some(kind) = holt_core::env_var("DEBUG_CRASH") else { return };
     let _ = std::thread::Builder::new().name("crash-test".into()).spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(3));
         match kind.as_str() {
-            "panic" => panic!("test crash (AGENTDECK_DEBUG_CRASH=panic)"),
+            "panic" => panic!("test crash (HOLT_DEBUG_CRASH=panic)"),
             "heap" => {
                 // SAFETY: deliberate double free to corrupt heap; debug only.
                 unsafe {

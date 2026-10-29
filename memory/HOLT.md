@@ -1,6 +1,6 @@
-# AgentDeck: vision and direction
+# Holt: vision and direction
 
-**AgentDeck** is the development environment for AI agents. Since 2026-10-17 the
+**Holt** is the development environment for AI agents. Since 2026-10-17 the
 product has been driven by Claude (the orchestrator); the user follows along as client and collaborator and is the one who approves
 what goes into `main` (`main` is the stable version; day-to-day work happens on `dev`).
 
@@ -25,15 +25,15 @@ what goes into `main` (`main` is the stable version; day-to-day work happens on 
   app delivers the right piece to each agent at the right time.
 - **No freezing magic.** No hidden prompts, no frozen dialogs, no orphan processes; errors with explanation.
 
-## What AgentDeck is and is not (user, 2026-10-23)
+## What Holt is and is not (user, 2026-10-23)
 
 - **100% Rust**, no other technology (no Electron, Tauri, or web). Systems: **Windows and Linux**; macOS is not on the roadmap.
 - **Revolves around agent CLIs** (Claude Code, Antigravity, Codex, OpenCode, and whatever exists), cloud or not:
   whatever is installed is used. **It is not a local model app**: the dedicated Ollama agent (`ollama-agent`) is removed; a local
   model remains possible through a CLI that supports it (e.g. OpenCode).
-- **Visible agents**: when an agent needs another, it opens an instance in AgentDeck (tab) via `ask-agent` or the
+- **Visible agents**: when an agent needs another, it opens an instance in Holt (tab) via `ask-agent` or the
   tasks desk, **not a CLI-internal subagent**, unless the user explicitly asks.
-- **Three memories**: **general** (how to use AgentDeck, identical for everyone, delivered by the app to every CLI in any
+- **Three memories**: **general** (how to use Holt, identical for everyone, delivered by the app to every CLI in any
   project); **project** (`memory/learnings/` in the user's repository, versioned in it); and **local** (the
   user's and CLIs', which never goes into git).
 - **MIT** license. Currently only the user develops; contributions from others, perhaps after release.
@@ -79,8 +79,9 @@ what goes into `main` (`main` is the stable version; day-to-day work happens on 
    gains "document tabs" alongside terminal tabs, and a task diff (and later file editor and a more
    useful explorer) opens in them, in full-screen width. It is what was missing for the human to validate without leaving the app.
    Phase 2 (side-by-side diff, editor extras, explorer) is in [ideas.md](ideas.md).
-5. **Rename to AgentDeck and visual identity** (agreed on 2026-10-22). **Done**: the name (task `t20`, with migration
-   of legacy names: see [MANUTENCAO.md](MANUTENCAO.md), section 6) and visual design (`t21`–`t23`). **Themes** were set
-   aside on 2026-10-24 ([ideas.md](ideas.md)).
+5. **Rename (AgentDeck, then Holt) and visual identity** (agreed on 2026-10-22). **Done**: the name (task `t20` renamed
+   CommandDeck to AgentDeck; task `t1` renamed it to **Holt** on 2026-10-29, with the migration of the old names: see
+   [MAINTENANCE.md](MAINTENANCE.md), section 6) and visual design (`t21`–`t23`). **Themes** were set aside on
+   2026-10-24 ([ideas.md](ideas.md)). An otter logo is an idea ([ideas.md](ideas.md)).
 6. **Replace `main` with `dev`**: **done on 2026-10-24**. `main` is the Rust rewrite; the TypeScript pilot
    was deleted. The next step is the "After `main`" block above.

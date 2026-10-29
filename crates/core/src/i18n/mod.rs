@@ -11,7 +11,7 @@
 //! with `pub const ENTRIES: &[(&str, &str)]` as `(English, Portuguese)` pairs, so tasks converting different areas
 //! never touch the same file. Text shared by several areas (Close, Cancel, Save...) goes in `common.rs`.
 //!
-//! **Text only agents read never goes through `t!`** and stays in English: `ask-agent` output, the AgentDeck
+//! **Text only agents read never goes through `t!`** and stays in English: `ask-agent` output, the Holt
 //! instructions given to every tab, task briefs and feedback, bridge responses. The bridge also runs its request
 //! threads under [`english`], so a core function shared by the UI and the bridge answers agents in English even when
 //! the user chose Portuguese.
@@ -21,7 +21,7 @@
 //! including the `\` line continuation) and fails if a literal has no pt-BR entry or an entry is no longer used by
 //! any `t!`. Lines that start with `//` (comments and doc comments) are skipped. So: write the key as a plain
 //! `"..."` literal inside `t!` (no raw strings, no constants), add the pair to the area file, run
-//! `cargo test -p agentdeck-core i18n`.
+//! `cargo test -p holt-core i18n`.
 
 use std::cell::Cell;
 use std::fmt::Display;
@@ -321,7 +321,7 @@ mod tests {
         while let Some(found) = code[from..].find(CALL) {
             let at = from + found;
             from = at + 3;
-            // `assert!(`, `format!(`...: the `t` must start the macro name (a path like `agentdeck_core::t!(` is fine).
+            // `assert!(`, `format!(`...: the `t` must start the macro name (a path like `holt_core::t!(` is fine).
             if code[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') {
                 continue;
             }

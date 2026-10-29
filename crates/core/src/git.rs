@@ -674,7 +674,7 @@ pub fn classify_error(stderr: &str) -> GitError {
     if low.contains("permission denied (publickey") || low.contains("sign_and_send_pubkey") || low.contains("no mutual signature algorithm")
     {
         return GitError::Auth(t!(
-            "{output}\nIf your SSH key has a passphrase, AgentDeck cannot ask for it: load the key into ssh-agent and try again.\n• Windows (PowerShell; the first time as administrator): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
+            "{output}\nIf your SSH key has a passphrase, Holt cannot ask for it: load the key into ssh-agent and try again.\n• Windows (PowerShell; the first time as administrator): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
             output = short
         ));
     }
@@ -690,7 +690,7 @@ pub fn classify_error(stderr: &str) -> GitError {
     // `commit.gpgsign` with a locked key or with no agent/pinentry that can ask for the passphrase.
     if low.contains("gpg failed to sign") || low.contains("no pinentry") || low.contains("inappropriate ioctl for device") {
         return GitError::Failed(t!(
-            "The commit was not made: the GPG signature (commit.gpgsign) needs the key unlocked, and AgentDeck cannot open the passphrase prompt. Unlock the key in a terminal tab (echo test | gpg --clearsign) and try again right after; the passphrase stays in gpg-agent for a few minutes. If you do not want to sign in this repository: git config commit.gpgsign false\n{output}",
+            "The commit was not made: the GPG signature (commit.gpgsign) needs the key unlocked, and Holt cannot open the passphrase prompt. Unlock the key in a terminal tab (echo test | gpg --clearsign) and try again right after; the passphrase stays in gpg-agent for a few minutes. If you do not want to sign in this repository: git config commit.gpgsign false\n{output}",
             output = short
         ));
     }
@@ -878,7 +878,7 @@ impl Repo {
             cmd.args(["-u", &k]);
         }
         cmd.env("LC_ALL", "C").env("GPG_TTY", "not a tty").env("PINENTRY_USER_DATA", "USE_CURSES=0");
-        match run_captured_raw(cmd, Some(b"agentdeck".to_vec()), Duration::from_secs(5), None, None, 64 << 10) {
+        match run_captured_raw(cmd, Some(b"holt".to_vec()), Duration::from_secs(5), None, None, 64 << 10) {
             Ok(out) if matches!(out.exit, Exit::Code(Some(0))) => Ok(()),
             Ok(out) if matches!(out.exit, Exit::TimedOut) => {
                 Err(classify_error("error: gpg failed to sign the data (no response from gpg-agent)"))
@@ -1547,7 +1547,7 @@ impl Core {
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("tmp");
-    let tmp = parent.join(format!(".{name}.agentdeck-tmp"));
+    let tmp = parent.join(format!(".{name}.holt-tmp"));
     std::fs::write(&tmp, bytes)?;
     if let Err(e) = std::fs::rename(&tmp, path) {
         // On Windows, `rename` over an existing file sometimes requires removing it or trying again.

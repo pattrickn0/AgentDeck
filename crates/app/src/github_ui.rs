@@ -1,4 +1,4 @@
-//! State of the "GitHub" tab in the right bar and bridge between [`Deck`] and [`agentdeck_core::github`].
+//! State of the "GitHub" tab in the right bar and bridge between [`Deck`] and [`holt_core::github`].
 //!
 //! Every GitHub call (`git remote`, `git credential fill`, `gh auth token` and the REST API) runs
 //! outside the interface thread and comes back through [`CoreEvent::Github`]; here live only the
@@ -7,13 +7,13 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use agentdeck_core::github::{
+use egui::Rect;
+use holt_core::github::{
     CheckStatus, GithubError, GithubEvent, GithubOverview, GithubPayload, Issue, JobLog, PrChecksDetail, PullRequest, RateLimitInfo,
     RepoSlug, WorkflowJob, WorkflowRun,
 };
-use agentdeck_core::t;
-use agentdeck_core::Ident;
-use egui::Rect;
+use holt_core::t;
+use holt_core::Ident;
 
 use crate::deck::{Deck, RightView};
 
@@ -31,7 +31,7 @@ pub enum GithubTab {
 pub enum GithubView {
     #[default]
     Loading,
-    /// No project open in AgentDeck.
+    /// No project open in Holt.
     NoProject,
     /// Failure with no previous data on screen (no GitHub remote, network, refused login, limit...).
     Error(GithubError),
@@ -90,7 +90,7 @@ pub struct GithubUi {
     /// Role typed by the user (e.g. `review`).
     pub new_role_name: String,
 
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=github*`): ignores real events and reads.
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=github*`): ignores real events and reads.
     pub debug_hold: bool,
 }
 
@@ -396,7 +396,7 @@ impl Deck {
 }
 
 // ---------------------------------------------------------------------------
-// Fake data for screenshots (`AGENTDECK_DEBUG_UI=github-demo`)
+// Fake data for screenshots (`HOLT_DEBUG_UI=github-demo`)
 // ---------------------------------------------------------------------------
 
 const DEMO_SHA_42: &str = "61621aa9c4f01b2e3d4a5f60718293a4b5c6d7e8";
@@ -410,7 +410,7 @@ pub fn demo_overview() -> GithubOverview {
         base_branch: "dev".into(),
         head_sha: sha.into(),
         draft,
-        html_url: format!("https://github.com/pattr/agentdeck/pull/{number}"),
+        html_url: format!("https://github.com/pattr/holt/pull/{number}"),
         updated_at: "2026-10-16T03:30:00Z".into(),
         checks,
     };
@@ -420,7 +420,7 @@ pub fn demo_overview() -> GithubOverview {
         author: author.into(),
         labels: labels.iter().map(|l| (*l).to_owned()).collect(),
         comments,
-        html_url: format!("https://github.com/pattr/agentdeck/issues/{number}"),
+        html_url: format!("https://github.com/pattr/holt/issues/{number}"),
         updated_at: "2026-10-15T21:10:00Z".into(),
         body_preview: body.into(),
     };
@@ -434,11 +434,11 @@ pub fn demo_overview() -> GithubOverview {
         status,
         raw_status: if conclusion.is_some() { "completed".into() } else { "in_progress".into() },
         conclusion: conclusion.map(str::to_owned),
-        html_url: format!("https://github.com/pattr/agentdeck/actions/runs/{id}"),
+        html_url: format!("https://github.com/pattr/holt/actions/runs/{id}"),
         created_at: "2026-10-16T03:28:00Z".into(),
     };
     GithubOverview {
-        repo: RepoSlug::new("pattr", "agentdeck"),
+        repo: RepoSlug::new("pattr", "holt"),
         authenticated: true,
         prs: vec![
             pr(42, "feat(github): pull requests, issues and Actions", "pattr", "feat/github", DEMO_SHA_42, false, CheckStatus::Failure),
@@ -510,7 +510,7 @@ pub fn demo_pr_detail() -> PrChecksDetail {
         name: name.into(),
         status,
         conclusion: Some(conclusion.into()),
-        html_url: format!("https://github.com/pattr/agentdeck/actions/runs/9001/job/{id}"),
+        html_url: format!("https://github.com/pattr/holt/actions/runs/9001/job/{id}"),
         failed_steps: steps.iter().map(|s| (*s).to_owned()).collect(),
     };
     PrChecksDetail {
@@ -529,15 +529,15 @@ pub fn demo_pr_detail() -> PrChecksDetail {
 pub fn demo_job_log() -> JobLog {
     JobLog {
         lines: [
-            "Checking agentdeck-core v0.3.0 (D:\\a\\agentdeck\\crates\\core)",
-            "Checking agentdeck v0.3.0 (D:\\a\\agentdeck\\crates\\app)",
+            "Checking holt-core v0.3.0 (D:\\a\\holt\\crates\\core)",
+            "Checking holt v0.3.0 (D:\\a\\holt\\crates\\app)",
             "error: redundant closure",
             "  --> crates/core/src/github.rs:312:44",
             "   |",
             "312|     let slug = url.and_then(|u| parse_github_remote(&u));",
             "   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself",
             "   = note: `-D clippy::redundant-closure` implied by `-D warnings`",
-            "error: could not compile `agentdeck-core` (lib) due to 1 previous error",
+            "error: could not compile `holt-core` (lib) due to 1 previous error",
             "##[error]Process completed with exit code 101.",
         ]
         .iter()
@@ -578,6 +578,6 @@ mod tests {
         assert!(detail.jobs.iter().any(|j| j.status == CheckStatus::Failure));
         let ui = GithubUi { view: GithubView::Ready(ov), ..Default::default() };
         assert_eq!(ui.open_prs_count(), 4);
-        assert!(ui.tab_tooltip().contains("pattr/agentdeck"));
+        assert!(ui.tab_tooltip().contains("pattr/holt"));
     }
 }

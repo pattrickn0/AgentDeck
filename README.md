@@ -1,9 +1,9 @@
-# ⚡ AgentDeck
+# ⚡ Holt
 
 **A desktop terminal where your AI agents work as a team.** Claude Code, Codex, Antigravity, and OpenCode
 run side by side, talk to each other, and receive isolated tasks that you review and merge, without losing track of anything.
 
-![AgentDeck with Claude, Codex, and OpenCode in Highlight mode and the tasks desk on the right](docs/screenshots/main.png)
+![Holt with Claude, Codex, and OpenCode in Highlight mode and the tasks desk on the right](docs/screenshots/main.png)
 
 100% Rust, native for **Windows** and **Linux**. MIT License.
 
@@ -15,7 +15,7 @@ Each agent CLI is good on its own, but working with several at the same time tur
 copy text from one to another, lose track of what each one is doing, and hope two agents don't touch the same
 file.
 
-AgentDeck brings everything together in one window and gives agents what they need to collaborate:
+Holt brings everything together in one window and gives agents what they need to collaborate:
 
 - **A way to communicate.** Inside any tab, the agent runs `ask-agent codex "review this"`. The message is
   typed into the other agent's terminal, and the reply returns to whoever asked. You see everything happening and can
@@ -37,7 +37,7 @@ No invisible work: every agent has a real terminal tab, and none launches hidden
 - **Team**: drag one agent onto another in the sidebar to define boss and subordinates.
 - **Plan usage** in the title bar: each agent's 5-hour session and weekly limits, with warnings starting at 80%. An exhausted
   model receives no requests.
-- **AgentDeck instructions in every tab**, delivered via each CLI's native channel, without depending on your project's `AGENTS.md`.
+- **Holt instructions in every tab**, delivered via each CLI's native channel, without depending on your project's `AGENTS.md`.
 - **No blocking prompts**: folders opened as projects are automatically registered as trusted in Claude, Codex, and
   Antigravity, so tabs opened in the background won't stall on "Do you trust this folder?".
 
@@ -79,7 +79,7 @@ At any stage before completion, the task can be discarded, and the branch and fo
 
 ## Supported CLIs
 
-Install whichever you want to use. AgentDeck uses whatever it finds installed.
+Install whichever you want to use. Holt uses whatever it finds installed.
 
 | CLI | Installation |
 | :-- | :-- |
@@ -100,10 +100,10 @@ There is no installer yet: the app runs from the folder where it was built.
 Prerequisite: [Rust](https://rustup.rs) 1.89 or newer.
 
 ```powershell
-git clone https://github.com/pattrickn0/AgentDeck.git
-cd AgentDeck
+git clone https://github.com/pattrickn0/Holt.git
+cd Holt
 cargo build --workspace --release
-.\target\release\agentdeck.exe
+.\target\release\holt.exe
 ```
 
 ### Linux
@@ -118,25 +118,25 @@ sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel libxkbcommon
 # openSUSE
 sudo zypper install gcc gcc-c++ make pkgconf-pkg-config alsa-devel libxkbcommon-devel
 
-git clone https://github.com/pattrickn0/AgentDeck.git
-cd AgentDeck
+git clone https://github.com/pattrickn0/Holt.git
+cd Holt
 cargo build --workspace --release
 ```
 
-The release build also adds AgentDeck, with its icon, to the app menu (`~/.local/share/applications`); open it from
-there or run `./target/release/agentdeck`. To skip that, build with `AGENTDECK_NO_DESKTOP_ENTRY=1`; to remove it,
+The release build also adds Holt, with its icon, to the app menu (`~/.local/share/applications`); open it from
+there or run `./target/release/holt`. To skip that, build with `HOLT_NO_DESKTOP_ENTRY=1`; to remove it,
 `scripts/install-desktop.sh --uninstall`.
 
 - To open folders and links and choose files: `xdg-utils` and `xdg-desktop-portal` with a backend
   (`xdg-desktop-portal-gtk` in GNOME/XFCE, `xdg-desktop-portal-kde` in KDE).
-- Without sound or microphone (drops the ALSA requirement): `cargo build -p agentdeck --no-default-features --release`.
+- Without sound or microphone (drops the ALSA requirement): `cargo build -p holt --no-default-features --release`.
 - Tested on X11 (Ubuntu) and on GNOME/Wayland (openSUSE Tumbleweed); Fedora is checked in CI, and in WSLg the app opens
   via X11 automatically. If the window misbehaves on Wayland, try `WINIT_UNIX_BACKEND=x11`. Details and limitations in
   [memory/LINUX.md](memory/LINUX.md).
 
 ### The two executables
 
-The build produces `agentdeck` (the app) and `ask-agent` (the command that agents use). They need to stay **in the same
+The build produces `holt` (the app) and `ask-agent` (the command that agents use). They need to stay **in the same
 folder**. Inside tabs, the app automatically adds `ask-agent` to `PATH`.
 
 ## Getting started
@@ -198,7 +198,7 @@ in the ☰ menu reverses this.
 
 ## Data and privacy
 
-- **Nothing passes through an AgentDeck server**, because it does not have one. The CLIs themselves communicate with
+- **Nothing passes through a Holt server**, because it does not have one. The CLIs themselves communicate with
   the cloud; quota reading uses credentials they already store on your machine.
 - Inter-agent communication is a local HTTP bridge, strictly on `127.0.0.1`, with a token per tab: an agent cannot
   impersonate another.
@@ -207,8 +207,8 @@ in the ☰ menu reverses this.
 - Opening a folder as a project counts as trusting it: the app registers it as trusted in Claude Code
   (`~/.claude.json`) and in Antigravity (`~/.gemini/antigravity-cli/settings.json`). Your home folder and drive roots
   are never registered.
-- Runtime data lives in `data/`, next to the executable (or in `AGENTDECK_HOME`). Configuration is stored in
-  `%APPDATA%\AgentDeck\config.json` on Windows and in `~/.config/AgentDeck/config.json` on Linux.
+- Runtime data lives in `data/`, next to the executable (or in `HOLT_HOME`). Configuration is stored in
+  `%APPDATA%\Holt\config.json` on Windows and in `~/.config/Holt/config.json` on Linux.
 
 ## Documentation
 
@@ -217,7 +217,7 @@ Project documentation lives in [`memory/`](memory/OVERVIEW.md), versioned alongs
 - [OVERVIEW.md](memory/OVERVIEW.md): the starting point, covering how the app works, what you can do, and the documentation map.
 - [ARCHITECTURE.md](memory/ARCHITECTURE.md): crates, workflows, and the inter-agent bridge contract.
 - [MAINTENANCE.md](memory/MAINTENANCE.md): how to build, test, and maintain, with a hands-on introduction to Rust.
-- [AGENTDECK.md](memory/AGENTDECK.md): product vision and direction.
+- [HOLT.md](memory/HOLT.md): product vision and direction.
 - [backlog.md](memory/backlog.md) and [history.md](memory/history.md): what comes next and what has already been done.
 - [learnings/](memory/learnings/README.md): pitfalls and decisions that the code does not show.
 

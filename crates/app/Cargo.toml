@@ -1,6 +1,6 @@
 [package]
-name = "agentdeck"
-description = "AgentDeck — native interface (winit + egui) that connects AI agents."
+name = "holt"
+description = "Holt — native interface (winit + egui) that connects AI agents."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ default = ["audio"]
 audio = ["dep:cpal"]
 
 [dependencies]
-agentdeck-core.workspace = true
+holt-core.workspace = true
 anyhow.workspace = true
 parking_lot.workspace = true
 crossbeam-channel.workspace = true

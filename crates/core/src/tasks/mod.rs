@@ -1,4 +1,4 @@
-//! The tasks desk: AgentDeck's unit of work.
+//! The tasks desk: Holt's unit of work.
 //!
 //! A **task** has a request (the brief), an agent with a model, its own worktree + branch, a report, a diff and a
 //! lifecycle that ends in validation (completed) or discard:
@@ -25,8 +25,8 @@
 //!
 //! - **Storage:** `data/tasks/<project>.json`, written through a temporary file + `rename` (one write at a
 //!   time), outside the user's repository. The counter (`t1`, `t2`…) never reuses a number.
-//! - **Worktrees:** `<repository root>/.agentdeck/worktrees/<id>`, inside the repository on purpose (agents confined
-//!   to the workspace, like Antigravity, can reach it). The `/.agentdeck/` folder goes once into
+//! - **Worktrees:** `<repository root>/.holt/worktrees/<id>`, inside the repository on purpose (agents confined
+//!   to the workspace, like Antigravity, can reach it). The `/.holt/` folder goes once into
 //!   `<common git dir>/info/exclude` (never into `.gitignore`).
 //! - **Git:** the same safe executor as [`crate::git`] (no shell, no prompts, with a time limit).
 //! - **Threads:** the methods that run git block; the interface calls them on a thread. One lifecycle operation at
@@ -77,7 +77,10 @@ const MAX_OUTSIDE: usize = 100;
 /// Size of the kept `git diff --stat` text (in characters).
 const MAX_STAT: usize = 8_000;
 /// Name of the folder, at the repository root, that holds the worktrees.
-pub const AGENTDECK_DIR: &str = ".agentdeck";
+pub const HOLT_DIR: &str = ".holt";
+/// Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): the folder AgentDeck used. Tasks opened before the rename keep
+/// their `<root>/.agentdeck/worktrees/<id>` path (it is stored in the task), so the path guards accept both roots.
+pub const LEGACY_HOLT_DIR: &str = ".agentdeck";
 /// Attempts (and wait between them) to delete a worktree folder while the agent's terminal still holds it
 /// (on Windows the process takes a moment to die after the tab closes).
 const REMOVE_TRIES: u32 = 10;
@@ -204,7 +207,7 @@ pub struct Task {
     pub base: String,
     /// `task/<id>-<title slug>`.
     pub branch: String,
-    /// Folder (absolute) of the worktree: `<repository root>/.agentdeck/worktrees/<id>`.
+    /// Folder (absolute) of the worktree: `<repository root>/.holt/worktrees/<id>`.
     pub worktree: PathBuf,
     /// The size of the work (`simples`, `media`, `complexa`), which decides which models can handle it; it is not the effort.
     /// Old tasks, without the field, are `media`.
@@ -416,7 +419,7 @@ impl MergeBlock {
         match self {
             MergeBlock::MainDirty(f) => t!(
                 "You have changes of your own, not yet committed, in the project's main folder ({files}). Git does not merge over them. \
-                 You can set them aside for a moment: AgentDeck merges the task and puts each change back in place.",
+                 You can set them aside for a moment: Holt merges the task and puts each change back in place.",
                 files = short_list(f)
             ),
             MergeBlock::TaskDirty(f) => t!(
@@ -496,7 +499,7 @@ mod store;
 mod text;
 
 pub use git_ops::dirty_paths;
-pub use lifecycle::exclude_with_agentdeck;
+pub use lifecycle::exclude_with_holt;
 pub use text::{boot_line, branch_name, clean_title, memory_block, parse_task_id, reject_message, return_message, slugify, start_message};
 
 pub(crate) use git_ops::{changed_files, union_files, worktree_dirty_unlocked};
@@ -515,7 +518,7 @@ mod tests {
             brief: "Do X.\n\nThen Y.".into(),
             base: "main".into(),
             branch: "task/t3-fix-the-login".into(),
-            worktree: PathBuf::from("/repo/.agentdeck/worktrees/t3"),
+            worktree: PathBuf::from("/repo/.holt/worktrees/t3"),
             ..Task::default()
         }
     }

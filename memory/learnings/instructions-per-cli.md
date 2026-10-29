@@ -1,9 +1,9 @@
 ---
-title: Each CLI receives AgentDeck instructions through its own channel
+title: Each CLI receives Holt instructions through its own channel
 summary: Claude, Codex, OpenCode, Aider, and Interpreter via CLI flags/config; Antigravity via AGENTS.md in data/ with --add-dir; Goose and Copilot only via project AGENTS.md (created with app marker block only).
 touches: [crates/core/src/agents.rs, crates/core/src/models.rs, crates/core/src/workspace.rs, crates/core/src/headless.rs, AGENTS.md]
 ---
-AgentDeck instructions (rule against internal subagents, `ask-agent`, shared memory) cannot depend on the
+Holt instructions (rule against internal subagents, `ask-agent`, shared memory) cannot depend on the
 user's `AGENTS.md`: a new project lacks one, and an agent lacking instructions launches its CLI's built-in subagents.
 
 - **Claude:** `--append-system-prompt`. **Codex:** `-c developer_instructions=<TOML>`; in a `.cmd` shim quotes are lost

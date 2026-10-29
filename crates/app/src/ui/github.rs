@@ -8,12 +8,12 @@
 //! The state and the core calls are in `github_ui.rs`; here the drawing only collects the actions and
 //! applies them at the end, outside the closures that hold the `Deck`.
 
-use agentdeck_core::github::{
+use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, ScrollArea, Sense, TextEdit, Ui, Vec2};
+use holt_core::github::{
     format_failed_job_prompt, format_issue_prompt, format_pr_prompt, CheckStatus, GithubError, GithubOverview, Issue, JobLog, PullRequest,
     WorkflowJob, WorkflowRun,
 };
-use agentdeck_core::t;
-use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, ScrollArea, Sense, TextEdit, Ui, Vec2};
+use holt_core::t;
 
 use super::{clickable, dot, frame, galley_trunc, place, section_label, shadow, text_in, text_w, tip};
 use crate::deck::Deck;
@@ -1087,7 +1087,7 @@ mod tests {
         assert!(is_error_line("error[E0308]: mismatched types"));
         assert!(is_error_line("##[error]Process completed with exit code 101."));
         assert!(is_error_line("thread 'main' panicked at src/lib.rs:1:1"));
-        assert!(!is_error_line("   Compiling agentdeck v0.3.0"));
+        assert!(!is_error_line("   Compiling holt v0.3.0"));
     }
 
     #[test]

@@ -14,8 +14,8 @@ use crate::icons::Icon;
 use crate::split;
 use crate::terminal::view::{self, Metrics};
 use crate::theme;
-use agentdeck_core::t;
-use agentdeck_core::Organization;
+use holt_core::t;
+use holt_core::Organization;
 
 /// Height of the tab header of each window.
 pub const HEAD_H: f32 = 30.0;

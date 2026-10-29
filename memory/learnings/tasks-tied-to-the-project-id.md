@@ -5,7 +5,7 @@ touches: [crates/core/src/tasks/**, crates/core/src/config.rs, crates/core/src/l
 ---
 The task board stores tasks in `data/tasks/<project id>.json` (and task descriptions in `<id>-tNN-brief.md`). Removing a
 project from the list does not delete this file, but re-adding the same directory used to generate a new id (`p` + hex) and the
-board appeared empty. Worktrees (`.agentdeck/worktrees/`) move along with the folder, but each task's `worktree` field
+board appeared empty. Worktrees (`.holt/worktrees/`) move along with the folder, but each task's `worktree` field
 and git's internal records (`.git/worktrees/*/gitdir`) still referenced the old path.
 
 **Why:** on 2026-10-24, directory `commanddeck-dev` was renamed to `agentdeck`, the project was removed and re-added, and 47
@@ -20,7 +20,7 @@ intent is "the path entered by the user".
 
 Manual recovery (the paragraph below) is only needed for projects removed prior to this change that lack a saved pair.
 With the app closed (it keeps the project list in memory and writes it when modifying tasks): copy `<old id>.json`
-to `<new id>.json` (the id is found in `projectList` in `%APPDATA%\AgentDeck\config.json`), update the old path in the
+to `<new id>.json` (the id is found in `projectList` in `%APPDATA%\Holt\config.json`), update the old path in the
 `worktree` field, rename `<old id>-tNN-*.md` files, and run `git worktree repair <worktrees>`; or add
 `{"id": "<old id>", "path": "<the folder>"}` to `removedProjects` and re-add the folder via the app, which is the path
 implemented in `t50`.

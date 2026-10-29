@@ -16,12 +16,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use agentdeck_core::SpawnSpec;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use crossbeam_channel::Sender;
+use holt_core::SpawnSpec;
 use parking_lot::Mutex;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize};
 
@@ -154,7 +154,7 @@ pub struct Shared {
     pub last_output: Mutex<Option<Instant>>,
     /// (generation, exit code) when the process exits.
     exit: Mutex<Option<(u64, i64)>>,
-    /// Raw output recording (only with `AGENTDECK_DEBUG_PTY=1`, see [`record`]).
+    /// Raw output recording (only with `HOLT_DEBUG_PTY=1`, see [`record`]).
     recorder: Mutex<Option<record::Recorder>>,
 }
 
@@ -337,7 +337,7 @@ impl Session {
             self.record_to.as_ref().and_then(|(dir, name)| match record::Recorder::start(dir, name, self.size) {
                 Ok(r) => Some(r),
                 Err(e) => {
-                    log::warn!("AGENTDECK_DEBUG_PTY: could not open recording at {}: {e}", dir.display());
+                    log::warn!("HOLT_DEBUG_PTY: could not open recording at {}: {e}", dir.display());
                     None
                 }
             });

@@ -25,7 +25,7 @@ ConPTY: whatever was at the top stays at the top and extra lines remain blank at
 
 **How to investigate the next occurrence:** the probe `tools/pty-probe` (README) runs any CLI, applies size changes (`RESIZE`), and checks
 numbering (`L00001 ...`) and gaps; `PROBE_PULL=1` disables the fix for comparison; `PROBE_WATCH=L00372,...` shows where each line is. In the app,
-the tab context menu item "Record terminal (diagnostics)" (right-click; or `AGENTDECK_DEBUG_PTY=1`) writes to `data/pty/` the raw bytes (`.bin`),
+the tab context menu item "Record terminal (diagnostics)" (right-click; or `HOLT_DEBUG_PTY=1`) writes to `data/pty/` the raw bytes (`.bin`),
 size changes (`.events.txt`), and the grid 1.5 s after last output (`.grid.txt`); "Save grid snapshot now" immediately captures the grid
 and opens the directory. A grid with text and a blank pane = rendering bug; a blank grid, and `.bin` replayed in a fresh `Term` also blank = CLI/ConPTY.
 The `.bin` contains everything displayed by the CLI: do not share without reviewing.

@@ -9,7 +9,7 @@ use super::{clickable, dot, frame, galley_trunc, place, shadow, text_in, text_w,
 use crate::deck::Deck;
 use crate::dictation::{self, ButtonVisual, MicTarget};
 use crate::theme;
-use agentdeck_core::t;
+use holt_core::t;
 
 /// What a click on the strip asks for. The numbers are positions in the item list (`strip` turns them into
 /// the indexes of `Deck::tabs`).
@@ -524,7 +524,7 @@ fn tab_tip(label: &str, model: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdeck_core::i18n::{self, Lang};
+    use holt_core::i18n::{self, Lang};
 
     /// Five 100 px tabs.
     const W: [f32; 5] = [100.0; 5];

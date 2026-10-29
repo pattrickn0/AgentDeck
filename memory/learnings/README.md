@@ -1,6 +1,6 @@
 # Project learnings
 
-AgentDeck's long-term memory: one `.md` file per item the project has learned that a future agent should not
+Holt's long-term memory: one `.md` file per item the project has learned that a future agent should not
 need to rediscover (a pitfall, a decision, a convention). Versioned in git, learnings go through the same review
 and merge workflow as code. This `README.md` does not count as a learning.
 

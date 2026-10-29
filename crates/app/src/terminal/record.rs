@@ -1,4 +1,4 @@
-//! Raw output recording for a tab, debug only (`AGENTDECK_DEBUG_PTY=1`, off by default).
+//! Raw output recording for a tab, debug only (`HOLT_DEBUG_PTY=1`, off by default).
 //!
 //! Useful for bugs that only show up in the user's session (e.g. top half of the terminal blank): with
 //! recording enabled, each tab process creates three files in `data/pty/` with the same prefix

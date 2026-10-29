@@ -1,7 +1,7 @@
 //! Write scope and queue of the tasks desk, with real git (skips with a notice if `git` is not installed):
 //! a task whose scope overlaps that of another one in progress waits in the queue and starts by itself, departing
 //! from the base already with the other's merge.
-use agentdeck_core::{Task, TaskError, TaskSpec, TaskStatus};
+use holt_core::{Task, TaskError, TaskSpec, TaskStatus};
 
 #[path = "support/tasks_env.rs"]
 mod env;

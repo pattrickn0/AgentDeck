@@ -1,4 +1,4 @@
-//! `ask-agent` — asks something to another agent through the AgentDeck bridge (port of bin/ask-agent.js).
+//! `ask-agent` — asks something to another agent through the Holt bridge (port of bin/ask-agent.js).
 //!
 //! Usage: ask-agent <agent> "message"     (or "-" to read the message from stdin; "--file <file>" from a file)
 //!      ask-agent --new <agent> "message"   (opens another instance, even if one already exists)
@@ -26,11 +26,11 @@
 //! recommended path for long texts or ones with accents: in Windows PowerShell, piping through the shell
 //! turns accents and dashes into `?` (the `$OutputEncoding` is US-ASCII).
 //!
-//! In a tab, `ask-agent` waits for the answer for up to `AGENTDECK_ASK_WAIT` seconds (default 90, below
+//! In a tab, `ask-agent` waits for the answer for up to `HOLT_ASK_WAIT` seconds (default 90, below
 //! Claude Code's default Bash timeout; `0` = until the end). If the other agent takes longer, it ends with a
 //! notice, and the answer is typed later into the asker's terminal.
 //!
-//! Exit codes: 0 = success; 1 = operational error; 2 = argument error or outside AgentDeck.
+//! Exit codes: 0 = success; 1 = operational error; 2 = argument error or outside Holt.
 //! `--signal` and `--usage` always exit with 0 (a hook that fails must not get in the agent's way).
 
 use std::collections::{BTreeMap, HashMap};
@@ -39,9 +39,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
-use agentdeck_core::usage::{from_claude_statusline, quota_advisory, usage_to_json};
-use agentdeck_core::util::decode_text;
-use agentdeck_core::{AgentUsage, Ident};
+use holt_core::usage::{from_claude_statusline, quota_advisory, usage_to_json};
+use holt_core::util::decode_text;
+use holt_core::{AgentUsage, Ident};
 use serde_json::{json, Value};
 
 const USAGE: &str =
@@ -72,9 +72,9 @@ impl Bridge {
             ureq::Agent::config_builder().proxy(None).http_status_as_error(false).timeout_global(timeout).build().into();
         let url = format!("http://127.0.0.1:{}{route}", self.port);
         let resp = match (method, body) {
-            ("GET", _) => agent.get(&url).header("x-agentdeck-token", &self.token).header("content-type", "application/json").call(),
-            (_, Some(b)) => agent.post(&url).header("x-agentdeck-token", &self.token).send_json(b),
-            (_, None) => agent.post(&url).header("x-agentdeck-token", &self.token).send_empty(),
+            ("GET", _) => agent.get(&url).header("x-holt-token", &self.token).header("content-type", "application/json").call(),
+            (_, Some(b)) => agent.post(&url).header("x-holt-token", &self.token).send_json(b),
+            (_, None) => agent.post(&url).header("x-holt-token", &self.token).send_empty(),
         };
         let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
@@ -94,7 +94,7 @@ fn fail(msg: impl std::fmt::Display, code: u8) -> ExitCode {
 fn signal_body(state: &str, arg: Option<&str>, stdin: impl FnOnce() -> String) -> Value {
     if state == "idle" {
         // Codex's `notify` appends its JSON to the command: the thread id in it is the conversation `codex resume` takes.
-        let thread = arg.and_then(agentdeck_core::resume::notify_thread_id);
+        let thread = arg.and_then(holt_core::resume::notify_thread_id);
         return thread.map_or_else(|| json!({ "state": state }), |t| json!({ "state": state, "session": t }));
     }
     if state != "session" {
@@ -110,7 +110,7 @@ fn signal_body(state: &str, arg: Option<&str>, stdin: impl FnOnce() -> String) -
 }
 
 fn main() -> ExitCode {
-    let env = |k: &str| agentdeck_core::env_var(k);
+    let env = |k: &str| holt_core::env_var(k);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a == "--usage") {
         let bridge = env("PORT").zip(env("TOKEN")).map(|(port, token)| Bridge { port, token });
@@ -120,7 +120,7 @@ fn main() -> ExitCode {
         if args.first().is_some_and(|a| a == "--signal") {
             return ExitCode::SUCCESS;
         }
-        return fail("run this command from inside an AgentDeck terminal.", 2);
+        return fail("run this command from inside a Holt terminal.", 2);
     };
     let from = env("AGENT").unwrap_or_else(|| "shell".into());
     let depth: i64 = env("DEPTH").and_then(|d| d.trim().parse::<f64>().ok()).map(|d| d as i64).unwrap_or(0);
@@ -341,7 +341,7 @@ fn models_command(bridge: &Bridge, only: Option<&str>) -> ExitCode {
 /// Reads the quota line of the inventory (`--models`) without blocking the send if the read fails.
 fn quota_advisory_for_target(bridge: &Bridge, target: &str) -> Option<String> {
     let target = Ident::parse(target)?;
-    let kind = agentdeck_core::agents::resolve_alias(&target.kind);
+    let kind = holt_core::agents::resolve_alias(&target.kind);
     if !["claude", "antigravity", "codex"].contains(&kind) {
         return None;
     }
@@ -641,7 +641,7 @@ fn take_body_file(args: &mut Vec<String>) -> Result<Option<String>, String> {
 /// The task id (`t3`, `3`) the way the bridge expects it.
 fn task_id(arg: Option<&String>) -> Result<String, String> {
     let arg = arg.ok_or("missing the task id (e.g. t3).")?;
-    agentdeck_core::tasks::parse_task_id(arg).ok_or_else(|| format!("invalid task id: \"{arg}\" (use t3 or 3)."))
+    holt_core::tasks::parse_task_id(arg).ok_or_else(|| format!("invalid task id: \"{arg}\" (use t3 or 3)."))
 }
 
 /// Reads what comes after `--task`.
@@ -1018,7 +1018,7 @@ fn statusline(bridge: Option<Bridge>) -> ExitCode {
 
 /// "session 34% · week 12%", with a line break (empty without data).
 fn usage_line(u: &AgentUsage) -> String {
-    let pct = |w: Option<agentdeck_core::UsageWindow>| w.map(|w| format!("{:.0}%", w.used * 100.0));
+    let pct = |w: Option<holt_core::UsageWindow>| w.map(|w| format!("{:.0}%", w.used * 100.0));
     let parts: Vec<String> =
         [("session", pct(u.session)), ("week", pct(u.weekly))].into_iter().filter_map(|(k, v)| Some(format!("{k} {}", v?))).collect();
     if parts.is_empty() {
@@ -1038,7 +1038,7 @@ fn user_statusline(status: &Value) -> Option<String> {
     let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| agentdeck_core::util::home_dir().join(".claude"));
+        .unwrap_or_else(|| holt_core::util::home_dir().join(".claude"));
     let mut files: Vec<PathBuf> = Vec::new();
     if let Some(p) = &project {
         files.push(p.join(".claude").join("settings.local.json"));
@@ -1318,7 +1318,7 @@ ready"
     fn task_output_is_readable() {
         let t = json!({
             "id": "t3", "title": "Fix login", "status": "review", "base": "main", "branch": "task/t3-fix-login",
-            "instance": "claude@t3", "model": "sonnet", "creator": "claude", "worktree": "/r/.agentdeck/worktrees/t3",
+            "instance": "claude@t3", "model": "sonnet", "creator": "claude", "worktree": "/r/.holt/worktrees/t3",
             "diff_stat": " a.rs | 2 +-", "report": "Done.", "events": [{ "at_ms": 1, "text": "created" }, { "at_ms": 2, "text": "started" }]
         });
         assert_eq!(task_line(&t), "t3    review     claude@t3 (sonnet)         Fix login");

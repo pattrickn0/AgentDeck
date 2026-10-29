@@ -1,7 +1,7 @@
 //! The app's log on disk: a window app on Windows has no stderr, so what `log` writes
-//! (info level by default) also goes to `<data>/agentdeck.log`.
+//! (info level by default) also goes to `<data>/holt.log`.
 //!
-//! The file moves to `agentdeck.log.1` (replacing the previous one) when it grows past `MAX_LOG`;
+//! The file moves to `holt.log.1` (replacing the previous one) when it grows past `MAX_LOG`;
 //! the check runs on every write, not only when the app opens.
 
 use std::fs::{File, OpenOptions};
@@ -20,9 +20,9 @@ pub struct LogFile {
 }
 
 impl LogFile {
-    /// Opens (or creates) `<dir>/agentdeck.log`. When it cannot open, only stderr gets the log.
+    /// Opens (or creates) `<dir>/holt.log`. When it cannot open, only stderr gets the log.
     pub fn open(dir: &Path) -> Self {
-        Self::with_max(dir.join("agentdeck.log"), MAX_LOG)
+        Self::with_max(dir.join("holt.log"), MAX_LOG)
     }
 
     fn with_max(path: PathBuf, max: u64) -> Self {
@@ -78,20 +78,20 @@ mod tests {
     fn it_appends_to_the_file_and_rotates_when_it_grows_past_the_limit() {
         let dir = std::env::temp_dir().join(format!("cd-logfile-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut log = LogFile::with_max(dir.join("agentdeck.log"), 100);
+        let mut log = LogFile::with_max(dir.join("holt.log"), 100);
         log.write_all(b"first\n").unwrap();
         log.write_all(&[b'x'; 120]).unwrap();
         // Past the limit: the next write starts a new file and the previous one becomes .log.1.
         log.write_all(b"after\n").unwrap();
         log.flush().unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("agentdeck.log")).unwrap(), "after\n");
-        let old = std::fs::read_to_string(dir.join("agentdeck.log.1")).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("holt.log")).unwrap(), "after\n");
+        let old = std::fs::read_to_string(dir.join("holt.log.1")).unwrap();
         assert!(old.starts_with("first\n") && old.len() == "first\n".len() + 120);
         // Reopening the app continues the file that already exists.
         drop(log);
-        let mut again = LogFile::with_max(dir.join("agentdeck.log"), 100);
+        let mut again = LogFile::with_max(dir.join("holt.log"), 100);
         again.write_all(b"more\n").unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("agentdeck.log")).unwrap(), "after\nmore\n");
+        assert_eq!(std::fs::read_to_string(dir.join("holt.log")).unwrap(), "after\nmore\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

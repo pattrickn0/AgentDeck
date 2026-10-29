@@ -9,7 +9,7 @@ license = "MIT"
 rust-version = "1.89"
 
 [workspace.dependencies]
-agentdeck-core = { path = "crates/core" }
+holt-core = { path = "crates/core" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
@@ -29,7 +29,7 @@ env_logger = "0.11"
 tempfile = "3"
 
 # ---------------------------------------------------------------------------
-# Native UI (crate `agentdeck`) — a separate block to make merges easier.
+# Native UI (crate `holt`) — a separate block to make merges easier.
 # ---------------------------------------------------------------------------
 winit = "0.30"
 glutin = "0.32"

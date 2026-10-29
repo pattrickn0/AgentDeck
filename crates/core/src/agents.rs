@@ -33,7 +33,7 @@ pub struct SpawnSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub cwd: PathBuf,
-    /// COMPLETE environment to use (already derived from the process environment, with PATH/AGENTDECK_* injected
+    /// COMPLETE environment to use (already derived from the process environment, with PATH/HOLT_* injected
     /// and CLAUDECODE & co. removed). The UI must clear the inherited environment and apply this one.
     pub env: BTreeMap<String, String>,
     /// Tab label (e.g. "Claude").
@@ -458,24 +458,23 @@ impl Registry {
         text
     }
 
-    /// The AgentDeck instructions, the "general memory" shared by every agent. With `self_id`, it carries the
+    /// The Holt instructions, the "general memory" shared by every agent. With `self_id`, it carries the
     /// instance name and the list of the other agents; without it (file text, the same for any tab), it tells the
     /// agent to read the name from the environment variable and lists nobody, so the file does not change from machine to machine.
     pub fn bridge_instructions(&self, self_id: Option<&str>) -> String {
-        const INTRO: &str = "You are running inside AgentDeck, an environment that connects several AI agents.";
+        const INTRO: &str = "You are running inside Holt, an environment that connects several AI agents.";
         let (first, listed) = match self_id {
             Some(id) => {
                 let others: Vec<String> = self.peers().into_iter().filter(|p| p != id).collect();
                 (format!("{INTRO} Your name here is \"{id}\"."), format!(" (agents: {})", others.join(",")))
             }
-            None => (
-                format!("{INTRO} Your name and role are in the AGENTDECK_AGENT and AGENTDECK_ROLE variables; never ask who you are."),
-                String::new(),
-            ),
+            None => {
+                (format!("{INTRO} Your name and role are in the HOLT_AGENT and HOLT_ROLE variables; never ask who you are."), String::new())
+            }
         };
         [
             first,
-            format!("To talk to another agent, run this in the shell: ask-agent <agent> \"message\"{listed}. If you need another agent, open it in AgentDeck (ask-agent <agent>, ask-agent <agent>@<role> or ask-agent --task new): do NOT use your CLI's internal subagents (Task/Agent tool, sub-agents) unless the user asks for it."),
+            format!("To talk to another agent, run this in the shell: ask-agent <agent> \"message\"{listed}. If you need another agent, open it in Holt (ask-agent <agent>, ask-agent <agent>@<role> or ask-agent --task new): do NOT use your CLI's internal subagents (Task/Agent tool, sub-agents) unless the user asks for it."),
             "The answer comes on stdout and can take minutes (timeout up to 600000 ms). If ask-agent warns that the answer will be typed later in this terminal, do not repeat the question; if it does not show up, run ask-agent --inbox (--all: the last 20).".to_owned(),
             "ask-agent --models [<agent>] lists the agents, this machine's models and the quota of each one (from the most free to the most spent): before delegating or opening tasks, look at everyone's quota and choose among the models capable of the size of the work, and among them the one with the most free quota, instead of always using the same one (the bridge refuses the exhausted ones). The history of each pair is kept and the user sees everything in the \"Integrated chat\": do not report or summarize the conversation; talk with the other agent until it is done, without stopping to ask the user.".to_owned(),
             "Each tab is an instance <model>[@<role>[@<name>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev \"task\" opens the tab if it does not exist; --new opens another one with the same role; --model <model> picks the LLM when opening. Large work becomes a task, with its own worktree, branch and agent: ask-agent --task new \"title\" --start --file <request.md>.".to_owned(),
@@ -568,18 +567,18 @@ pub(crate) fn build_agent_env(
             continue;
         }
         let removed = if cfg!(windows) { REMOVE.iter().any(|r| r.eq_ignore_ascii_case(&k)) } else { REMOVE.contains(&k.as_str()) }
-            // Nothing from the AgentDeck that opened this app (e.g. the app running inside a tab of
-            // another AgentDeck) leaks to the agents: role, data folder, debug…
+            // Nothing from the Holt that opened this app (e.g. the app running inside a tab of
+            // another Holt) leaks to the agents: role, data folder, debug…
             || (crate::env::is_app_var(&k) && !crate::env::is_app_var_named(&k, "ASK_WAIT"));
         if !removed {
             env.insert(k, v);
         }
     }
     env.insert("PATH".into(), format!("{}{PATH_SEP}{old_path}", bin_dir.display()));
-    env.insert("AGENTDECK_PORT".into(), port.to_string());
-    env.insert("AGENTDECK_TOKEN".into(), token.to_owned());
-    env.insert("AGENTDECK_AGENT".into(), agent_id.to_owned());
-    env.insert("AGENTDECK_DEPTH".into(), depth.to_string());
+    env.insert("HOLT_PORT".into(), port.to_string());
+    env.insert("HOLT_TOKEN".into(), token.to_owned());
+    env.insert("HOLT_AGENT".into(), agent_id.to_owned());
+    env.insert("HOLT_DEPTH".into(), depth.to_string());
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
     if cfg!(windows) {
@@ -648,10 +647,10 @@ fn user_statusline_in(file: &Path) -> Option<serde_json::Value> {
     (!cmd.is_empty() && !cmd.contains("ask-agent --usage")).then(|| sl.clone())
 }
 
-/// Name of the file (in `data/`) with the AgentDeck instructions, for the CLIs that read instructions from a file.
-const INSTRUCTIONS_FILE: &str = "agentdeck-instructions.md";
+/// Name of the file (in `data/`) with the Holt instructions, for the CLIs that read instructions from a file.
+const INSTRUCTIONS_FILE: &str = "holt-instructions.md";
 
-/// Writes `data/agentdeck-instructions.md` (only if it changed) and returns the path. It stays outside the user's repository.
+/// Writes `data/holt-instructions.md` (only if it changed) and returns the path. It stays outside the user's repository.
 fn write_instructions_file(data_dir: &Path, text: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(INSTRUCTIONS_FILE);
@@ -665,7 +664,7 @@ fn write_instructions_file(data_dir: &Path, text: &str) -> std::io::Result<PathB
     Ok(path)
 }
 
-/// Arguments that pass the AgentDeck instructions to `kind`, without touching the user's repository. Claude
+/// Arguments that pass the Holt instructions to `kind`, without touching the user's repository. Claude
 /// (`--append-system-prompt`) and OpenCode (configuration, see [`models::opencode_tui`]) are assembled separately.
 /// - Codex: `-c developer_instructions=…` (the value is TOML; in a `.cmd` shim the quotes do not survive and the text
 ///   goes raw, which Codex accepts as text when it is not valid TOML);
@@ -710,8 +709,8 @@ pub(crate) fn spawn_spec(core: &Core, project: &str, kind: &str) -> Result<Spawn
     spawn_spec_for(core, project, &Ident::main(kind))
 }
 
-/// Like [`spawn_spec`], for an instance: `AGENTDECK_AGENT` gets its id and the role goes
-/// in `AGENTDECK_ROLE` and in the system prompt. The terminal opens in the folder of project `project`
+/// Like [`spawn_spec`], for an instance: `HOLT_AGENT` gets its id and the role goes
+/// in `HOLT_ROLE` and in the system prompt. The terminal opens in the folder of project `project`
 /// (on the first tab of a project that is not the active one, its AGENTS.md is written).
 pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
     let project_dir = core.project_path(project).ok_or_else(|| t!("Unknown project: {project}", project))?;
@@ -729,11 +728,11 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     // No CLI depends on the user's `AGENTS.md`: each one gets the instructions through the channel it has.
     let instructions = reg.bridge_instructions_for(ident);
     let generic_file = write_instructions_file(&core.paths().data_dir, &reg.bridge_instructions(None))
-        .map_err(|e| log::warn!("could not write the AgentDeck instructions file: {e}"))
+        .map_err(|e| log::warn!("could not write the Holt instructions file: {e}"))
         .ok();
     let mut env = agent_env(core, &id, 0, &core.tab_token(project, &id));
     if let Some(role) = &ident.role {
-        env.insert("AGENTDECK_ROLE".into(), role.clone());
+        env.insert("HOLT_ROLE".into(), role.clone());
     }
 
     // Requested > saved > role default; it is saved for the interface and for reopening the app.
@@ -893,12 +892,12 @@ mod tests {
     fn the_generic_instructions_do_not_list_the_installed_agents() {
         let reg = registry();
         let text = reg.bridge_instructions(None);
-        assert!(text.contains("AGENTDECK_AGENT") && text.contains("AGENTDECK_ROLE") && !text.contains("(agents:"), "{text}");
+        assert!(text.contains("HOLT_AGENT") && text.contains("HOLT_ROLE") && !text.contains("(agents:"), "{text}");
     }
 
     #[test]
     fn each_cli_gets_its_own_instruction_channel() {
-        let file = Path::new("/data/agentdeck-instructions.md");
+        let file = Path::new("/data/holt-instructions.md");
         let text = "Você \"é\"
 ok";
         // Codex: TOML value (basic string) with quotes and line break escaped; in a shim, the raw text.
@@ -911,7 +910,7 @@ ok";
 ok"
             ]
         );
-        assert_eq!(instruction_args("aider", text, Some(file), false), ["--read", "/data/agentdeck-instructions.md"]);
+        assert_eq!(instruction_args("aider", text, Some(file), false), ["--read", "/data/holt-instructions.md"]);
         assert!(instruction_args("aider", text, None, false).is_empty());
         assert_eq!(instruction_args("interpreter", text, Some(file), false), ["--custom_instructions", text]);
         // Claude and OpenCode are assembled separately; Antigravity reads the AGENTS.md.
@@ -958,31 +957,31 @@ ok"
             ("CLAUDE_CODE_ENTRYPOINT".to_owned(), "cli".to_owned()),
             ("HOME".to_owned(), "/h".to_owned()),
             ("PATH".to_owned(), "/usr/bin".to_owned()),
-            // Inherited from an AgentDeck that opened this one (app running inside a tab).
-            ("AGENTDECK_ROLE".to_owned(), "dev".to_owned()),
-            ("AGENTDECK_HOME".to_owned(), "/outro".to_owned()),
-            ("AGENTDECK_TOKEN".to_owned(), "old".to_owned()),
-            ("AGENTDECK_DEBUG_UI".to_owned(), "1".to_owned()),
+            // Inherited from a Holt that opened this one (app running inside a tab).
+            ("HOLT_ROLE".to_owned(), "dev".to_owned()),
+            ("HOLT_HOME".to_owned(), "/outro".to_owned()),
+            ("HOLT_TOKEN".to_owned(), "old".to_owned()),
+            ("HOLT_DEBUG_UI".to_owned(), "1".to_owned()),
             // User's configuration: still valid.
-            ("AGENTDECK_ASK_WAIT".to_owned(), "300".to_owned()),
+            ("HOLT_ASK_WAIT".to_owned(), "300".to_owned()),
             // Model of the OpenCode tab that opened this app: it does not reach the agents.
             ("OPENCODE_CONFIG_CONTENT".to_owned(), r#"{"model":"herdado"}"#.to_owned()),
         ];
         let env = build_agent_env(base, Path::new("/app/bin"), 1234, "tok", "claude", 1);
-        for k in ["AGENTDECK_ROLE", "AGENTDECK_HOME", "AGENTDECK_DEBUG_UI"] {
+        for k in ["HOLT_ROLE", "HOLT_HOME", "HOLT_DEBUG_UI"] {
             assert!(!env.contains_key(k), "{k} inherited");
         }
-        assert_eq!(env["AGENTDECK_TOKEN"], "tok");
-        assert_eq!(env["AGENTDECK_ASK_WAIT"], "300");
+        assert_eq!(env["HOLT_TOKEN"], "tok");
+        assert_eq!(env["HOLT_ASK_WAIT"], "300");
         assert!(!env.contains_key("CLAUDECODE"));
         assert!(!env.contains_key("CLAUDE_CODE_ENTRYPOINT"));
         assert!(!env.contains_key("OPENCODE_CONFIG_CONTENT"), "the configuration of the OpenCode tab that opened the app leaked");
         assert_eq!(env["HOME"], "/h");
         assert_eq!(env["PATH"], format!("/app/bin{PATH_SEP}/usr/bin"));
-        assert_eq!(env["AGENTDECK_PORT"], "1234");
-        assert_eq!(env["AGENTDECK_TOKEN"], "tok");
-        assert_eq!(env["AGENTDECK_AGENT"], "claude");
-        assert_eq!(env["AGENTDECK_DEPTH"], "1");
+        assert_eq!(env["HOLT_PORT"], "1234");
+        assert_eq!(env["HOLT_TOKEN"], "tok");
+        assert_eq!(env["HOLT_AGENT"], "claude");
+        assert_eq!(env["HOLT_DEPTH"], "1");
         assert_eq!(env["TERM"], "xterm-256color");
         assert_eq!(env["COLORTERM"], "truecolor");
     }

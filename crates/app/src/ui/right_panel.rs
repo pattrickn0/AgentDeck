@@ -11,8 +11,8 @@ use super::{
 };
 use crate::deck::{Deck, FeedItem, RightView};
 use crate::theme;
-use agentdeck_core::i18n::{self, Lang};
-use agentdeck_core::{t, DownloadProgress, DownloadState, FeedKind};
+use holt_core::i18n::{self, Lang};
+use holt_core::{t, DownloadProgress, DownloadState, FeedKind};
 
 /// Height of the download strip (below the header, only during a download).
 const DOWNLOAD_H: f32 = 22.0;

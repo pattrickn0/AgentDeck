@@ -10,9 +10,9 @@
   GTK3 is not needed.
 
 ```bash
-git clone https://github.com/pattrickn0/AgentDeck.git
-cd AgentDeck
-cargo run -p agentdeck          # runs the app (debug mode)
+git clone https://github.com/pattrickn0/Holt.git
+cd Holt
+cargo run -p holt          # runs the app (debug mode)
 ```
 
 ## Before opening a PR
@@ -30,7 +30,7 @@ been verified on Linux, what is pending, and how to test manually are in [`memor
 ## Project principles
 
 1. **Privacy:** `.wav` audio is deleted immediately after transcription; attachments and long prompts are retained for the last 5 sessions only.
-2. **Isolated folder:** each agent works in the **project** folder in which the tab was opened (or, in a task, in its own worktree, `<repo>/.agentdeck/worktrees/<id>`), never in the app's files. The app only creates `AGENTS.md` inside the app's own folder (`workspace/`); in project folders it only updates the block of an already existing `AGENTS.md`, and never writes to the user's home directory.
+2. **Isolated folder:** each agent works in the **project** folder in which the tab was opened (or, in a task, in its own worktree, `<repo>/.holt/worktrees/<id>`), never in the app's files. The app only creates `AGENTS.md` inside the app's own folder (`workspace/`); in project folders it only updates the block of an already existing `AGENTS.md`, and never writes to the user's home directory.
 3. **Secure local bridge:** `127.0.0.1` only, a random token **per agent process** (the bridge knows who is asking via the token) and `Host` header validation. Text coming from another agent never goes raw to a terminal (`util::terminal_text`) or to the command line of a `.cmd` shim.
 4. **UI never blocks:** everything that can block (processes, network, transcription) runs in a thread.
 5. **Language:** code comments, docs and commit messages in English. User-facing text goes through `t!("English text")`

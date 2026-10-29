@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use agentdeck_core::TaskStatus;
+use holt_core::TaskStatus;
 
 #[path = "support/tasks_env.rs"]
 mod env;

@@ -1,11 +1,11 @@
 //! Syntax highlighting for Documents mode: the lexicon (`Tok`, `Span`, `Lang`, `highlight_lines`...) lives in the core
-//! (`agentdeck_core::highlight`, also used by `ask-agent --outline`) and is re-exported here; what stays here is the UI:
+//! (`holt_core::highlight`, also used by `ask-agent --outline`) and is re-exported here; what stays here is the UI:
 //! the search in the text, the composition of the highlight with the search marks ([`pieces`]) and the cache per version
 //! of the text ([`Cache`]). See `memory/learnings/documents-editor.md`.
 
 use std::ops::Range;
 
-pub use agentdeck_core::highlight::{highlight_line, highlight_lines, Carry, Lang, Span, Tok};
+pub use holt_core::highlight::{highlight_line, highlight_lines, Carry, Lang, Span, Tok};
 
 // ---------------------------------------------------------------------------
 // Search and composition

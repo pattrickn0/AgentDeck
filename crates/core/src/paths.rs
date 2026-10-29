@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 pub struct AppPaths {
     /// Base folder of the app (where `data/`, `workspace/` and `whisper/` live).
     pub app_dir: PathBuf,
-    /// Folder of the executables (`agentdeck`, `ask-agent`). It goes at the start of the agents' PATH.
+    /// Folder of the executables (`holt`, `ask-agent`). It goes at the start of the agents' PATH.
     pub bin_dir: PathBuf,
     /// `<app_dir>/data` (or the legacy `<app_dir>/dados` while an older version still holds it).
     pub data_dir: PathBuf,
@@ -14,12 +14,12 @@ pub struct AppPaths {
     pub default_workspace: PathBuf,
     /// `<app_dir>/whisper`
     pub whisper_dir: PathBuf,
-    /// `<config_dir>/AgentDeck/config.json`
+    /// `<config_dir>/Holt/config.json` (see `config::legacy_config_files` for where it is copied from)
     pub config_file: PathBuf,
 }
 
 impl AppPaths {
-    /// Resolves from the current executable. `AGENTDECK_HOME` overrides `app_dir` and isolates the app
+    /// Resolves from the current executable. `HOLT_HOME` overrides `app_dir` and isolates the app
     /// completely: the config also lives inside that folder (`cfg/config.json`), so tests and
     /// parallel instances never touch the user's config.
     /// In development (`target/debug|release`), walks up to the repository root (the folder with
@@ -32,26 +32,32 @@ impl AppPaths {
             Some(home) => Self::isolated(home, exe_dir),
             None => {
                 let found = find_app_dir(&exe_dir);
-                Self::with_dirs(fallback_data_dir(&found).unwrap_or(found), exe_dir)
+                Self::with_dirs(fallback_data_dir(&found).map(|dir| adopt_legacy_home(&dir)).unwrap_or(found), exe_dir)
             }
         };
         paths.adopt_legacy_names();
         paths
     }
 
-    /// Moves what older versions saved under Portuguese names to the English ones: `dados/` to `data/`, and inside
-    /// it `anexos/` to `attachments/`, `tarefas/` to `tasks/` and `capacidade.json` to `capability.json`. An entry
-    /// that already exists in the new place is kept there (an identical file in the old place is dropped). While an
-    /// older version still runs on `dados/` (its lock is held), this run keeps using `dados/` and moves nothing.
+    /// Moves what older versions saved under old names to the current ones: `dados/` to `data/`, and inside it
+    /// `anexos/` to `attachments/`, `tarefas/` to `tasks/`, `capacidade.json` to `capability.json` and the four files
+    /// named after AgentDeck (`.agentdeck.lock`, `.agentdeck.bridge`, `agentdeck.log`, `agentdeck-instructions.md`)
+    /// to their Holt names. An entry that already exists in the new place is kept there (an identical file in the old
+    /// place is dropped). While an older version still runs on `dados/` (its lock is held), this run keeps using
+    /// `dados/` and moves nothing; the same goes for the AgentDeck names while `data/.agentdeck.lock` is held.
     pub fn adopt_legacy_names(&mut self) {
         let legacy = self.app_dir.join(LEGACY_DATA_DIR);
         if legacy.is_dir() {
             if legacy_lock_held(&legacy) {
-                log::warn!("an older AgentDeck is using {}: this run keeps that folder", legacy.display());
+                log::warn!("an older Holt is using {}: this run keeps that folder", legacy.display());
                 self.data_dir = legacy;
                 return;
             }
             merge_into(&legacy, &self.data_dir);
+        }
+        if legacy_lock_held(&self.data_dir) {
+            log::warn!("an AgentDeck is using {}: its file names stay as they are", self.data_dir.display());
+            return;
         }
         for (old, new) in LEGACY_DATA_ENTRIES {
             let old = self.data_dir.join(old);
@@ -68,7 +74,7 @@ impl AppPaths {
     }
 
     pub fn with_dirs(app_dir: PathBuf, bin_dir: PathBuf) -> Self {
-        let config_file = dirs::config_dir().unwrap_or_else(|| app_dir.clone()).join("AgentDeck").join("config.json");
+        let config_file = dirs::config_dir().unwrap_or_else(|| app_dir.clone()).join("Holt").join("config.json");
         Self {
             data_dir: app_dir.join(DATA_DIR),
             default_workspace: app_dir.join("workspace"),
@@ -87,12 +93,20 @@ pub const DATA_DIR: &str = "data";
 pub const LEGACY_DATA_DIR: &str = "dados";
 
 /// Entries of the data folder renamed to English: (old, new).
-const LEGACY_DATA_ENTRIES: [(&str, &str); 3] = [("anexos", "attachments"), ("tarefas", "tasks"), ("capacidade.json", "capability.json")];
+const LEGACY_DATA_ENTRIES: [(&str, &str); 7] = [
+    ("anexos", "attachments"),
+    ("tarefas", "tasks"),
+    ("capacidade.json", "capability.json"),
+    // Migration from AgentDeck (remove after 0.4, `memory/MAINTENANCE.md` §6).
+    (".agentdeck.lock", ".holt.lock"),
+    (".agentdeck.bridge", ".holt.bridge"),
+    ("agentdeck.log", "holt.log"),
+    ("agentdeck-instructions.md", "holt-instructions.md"),
+];
 
-/// Does a running older version hold the lock of the legacy data folder?
-fn legacy_lock_held(legacy: &Path) -> bool {
-    let Ok(file) = std::fs::OpenOptions::new().write(true).open(legacy.join(".agentdeck.lock")) else { return false };
-    matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+/// Does a running AgentDeck (or older version) hold the lock of `dir` (`.agentdeck.lock`)?
+fn legacy_lock_held(dir: &Path) -> bool {
+    crate::activation::lock_held(dir, ".agentdeck.lock")
 }
 
 /// Moves `from` to `to`. Folders are merged entry by entry; an entry that exists on both sides stays where it is in
@@ -133,7 +147,7 @@ fn find_app_dir(exe_dir: &Path) -> PathBuf {
 
 /// Linux/macOS: an app installed in a system folder (e.g. `/usr/local/bin`) cannot create
 /// `data/` next to the executable. In that case the data goes to the user's folder
-/// (`~/.local/share/AgentDeck`, the XDG default). In a portable folder (or in the repository
+/// (`~/.local/share/Holt`, the XDG default; see [`adopt_legacy_home`]). In a portable folder (or in the repository
 /// during development) everything stays next to the executable, as on Windows.
 #[cfg(unix)]
 fn fallback_data_dir(app_dir: &Path) -> Option<PathBuf> {
@@ -144,9 +158,25 @@ fn fallback_data_dir(app_dir: &Path) -> Option<PathBuf> {
     if can_write(probe) {
         return None;
     }
-    let dir = dirs::data_dir()?.join("AgentDeck");
+    let dir = dirs::data_dir()?.join("Holt");
     log::warn!("{} is not writable: the app data goes to {}", probe.display(), dir.display());
     Some(dir)
+}
+
+/// Migration from AgentDeck (remove after 0.4, `memory/MAINTENANCE.md` §6): `~/.local/share/AgentDeck` becomes
+/// `home` (`~/.local/share/Holt`) when that does not exist yet. Returns the folder to use: the old one while a running
+/// AgentDeck holds its lock, `home` otherwise.
+fn adopt_legacy_home(home: &Path) -> PathBuf {
+    let legacy = home.with_file_name("AgentDeck");
+    if home.exists() || !legacy.is_dir() {
+        return home.to_path_buf();
+    }
+    if legacy_lock_held(&legacy) {
+        log::warn!("an AgentDeck is using {}: this run keeps that folder", legacy.display());
+        return legacy;
+    }
+    merge_into(&legacy, home);
+    home.to_path_buf()
 }
 
 #[cfg(not(unix))]
@@ -169,7 +199,7 @@ mod tests {
 
     #[test]
     fn isolated_home_keeps_the_config_inside_it() {
-        let home = PathBuf::from("/tmp/agentdeck-home");
+        let home = PathBuf::from("/tmp/holt-home");
         let p = AppPaths::isolated(home.clone(), PathBuf::from("/tmp/bin"));
         assert_eq!(p.config_file, home.join("cfg").join("config.json"));
         assert_eq!(p.data_dir, home.join("data"));
@@ -218,6 +248,70 @@ mod tests {
     }
 
     #[test]
+    fn the_agentdeck_names_in_the_data_folder_become_the_holt_ones() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let data = tmp.path().join("data");
+        std::fs::create_dir_all(&data).expect("mkdir");
+        for (old, _) in &LEGACY_DATA_ENTRIES[3..] {
+            std::fs::write(data.join(old), old).expect("write");
+        }
+        // An entry that already has the new name stays as it is; the different old one stays behind.
+        std::fs::write(data.join("holt.log"), "new log").expect("write");
+        std::fs::write(data.join("agentdeck.log"), "old log").expect("write");
+        let mut p = AppPaths::isolated(tmp.path().to_path_buf(), tmp.path().join("bin"));
+        p.adopt_legacy_names();
+        assert_eq!(p.data_dir, data);
+        assert_eq!(std::fs::read_to_string(data.join(".holt.lock")).expect("lock"), ".agentdeck.lock");
+        assert_eq!(std::fs::read_to_string(data.join(".holt.bridge")).expect("bridge"), ".agentdeck.bridge");
+        assert_eq!(std::fs::read_to_string(data.join("holt-instructions.md")).expect("instructions"), "agentdeck-instructions.md");
+        assert_eq!(std::fs::read_to_string(data.join("holt.log")).expect("log"), "new log");
+        assert!(data.join("agentdeck.log").is_file(), "kept: both existed");
+        assert!(
+            !data.join(".agentdeck.lock").exists()
+                && !data.join(".agentdeck.bridge").exists()
+                && !data.join("agentdeck-instructions.md").exists()
+        );
+    }
+
+    #[test]
+    fn a_running_agentdeck_keeps_its_file_names() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let data = tmp.path().join("data");
+        std::fs::create_dir_all(&data).expect("mkdir");
+        std::fs::write(data.join("agentdeck.log"), "log").expect("write");
+        let held = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(data.join(".agentdeck.lock")).expect("lock");
+        held.try_lock().expect("lock");
+        let mut p = AppPaths::isolated(tmp.path().to_path_buf(), tmp.path().join("bin"));
+        p.adopt_legacy_names();
+        assert!(data.join("agentdeck.log").is_file() && data.join(".agentdeck.lock").is_file());
+        assert!(!data.join("holt.log").exists() && !data.join(".holt.lock").exists());
+        drop(held);
+        p.adopt_legacy_names();
+        assert!(data.join("holt.log").is_file() && data.join(".holt.lock").is_file(), "moved once the old one is gone");
+    }
+
+    #[test]
+    fn the_agentdeck_user_data_folder_moves_to_holt() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let (old, new) = (tmp.path().join("AgentDeck"), tmp.path().join("Holt"));
+        assert_eq!(adopt_legacy_home(&new), new, "nothing to move");
+        std::fs::create_dir_all(old.join("data")).expect("mkdir");
+        std::fs::write(old.join("data").join("a"), "x").expect("write");
+        assert_eq!(adopt_legacy_home(&new), new);
+        assert!(new.join("data").join("a").is_file() && !old.exists());
+        // The new folder exists: the old one is left alone.
+        std::fs::create_dir_all(&old).expect("mkdir");
+        assert_eq!(adopt_legacy_home(&new), new);
+        assert!(old.is_dir());
+        // A running AgentDeck keeps its folder.
+        std::fs::remove_dir_all(&new).expect("rm");
+        let held = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(old.join(".agentdeck.lock")).expect("lock");
+        held.try_lock().expect("lock");
+        assert_eq!(adopt_legacy_home(&new), old);
+        assert!(!new.exists());
+    }
+
+    #[test]
     fn a_writable_folder_keeps_the_data_next_to_the_executable() {
         let tmp = tempfile::tempdir().expect("tmp");
         assert!(fallback_data_dir(tmp.path()).is_none(), "a writable folder has no fallback");
@@ -234,7 +328,7 @@ mod tests {
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o500)).expect("chmod");
         // Running as root, `access` ignores the permissions and the case cannot be simulated.
         if !can_write(&bin) {
-            assert_eq!(fallback_data_dir(&bin), dirs::data_dir().map(|d| d.join("AgentDeck")));
+            assert_eq!(fallback_data_dir(&bin), dirs::data_dir().map(|d| d.join("Holt")));
         }
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).expect("chmod back");
     }
@@ -256,7 +350,7 @@ mod tests {
         std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o700)).expect("chmod");
         std::fs::set_permissions(app.join("data"), std::fs::Permissions::from_mode(0o500)).expect("chmod");
         if !can_write(&app.join("data")) {
-            assert_eq!(fallback_data_dir(&app), dirs::data_dir().map(|d| d.join("AgentDeck")));
+            assert_eq!(fallback_data_dir(&app), dirs::data_dir().map(|d| d.join("Holt")));
         }
         std::fs::set_permissions(app.join("data"), std::fs::Permissions::from_mode(0o700)).expect("chmod back");
     }

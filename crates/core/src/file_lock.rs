@@ -18,7 +18,7 @@ pub(crate) struct Leftovers {
     pub files: Vec<PathBuf>,
     /// How many files were left in total (as far as the search went).
     pub total: usize,
-    /// The processes that have one of those files open ("agentdeck.exe (pid 123)"); empty outside Windows.
+    /// The processes that have one of those files open ("holt.exe (pid 123)"); empty outside Windows.
     pub holders: Vec<String>,
 }
 

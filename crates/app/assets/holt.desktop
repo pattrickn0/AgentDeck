@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=AgentDeck
+Name=Holt
 Comment=Development environment for AI coding agents
 Exec="@EXEC@"
-Icon=agentdeck
+Icon=holt
 Terminal=false
 Categories=Development;
-StartupWMClass=agentdeck
+StartupWMClass=holt

@@ -1,8 +1,8 @@
-//! Fake interface states for screenshots (`AGENTDECK_DEBUG_UI`) and visual checks. DEBUG ONLY.
+//! Fake interface states for screenshots (`HOLT_DEBUG_UI`) and visual checks. DEBUG ONLY.
 
 use crate::{deck::Deck, theme};
 
-/// DEBUG ONLY: fake projects in the sidebar (`AGENTDECK_DEBUG_UI=projects-demo`): one active with three agents (one busy), another with one, another empty.
+/// DEBUG ONLY: fake projects in the sidebar (`HOLT_DEBUG_UI=projects-demo`): one active with three agents (one busy), another with one, another empty.
 fn debug_projects() -> Vec<crate::deck::ProjectView> {
     use crate::deck::{AgentBadge, ProjectView};
     let agent = |id: &str, parent: Option<&str>, kind: &str, label: &str, color, busy| AgentBadge {
@@ -33,7 +33,7 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
     vec![
         project(
             "p1",
-            "agentdeck-dev",
+            "holt-dev",
             true,
             vec![
                 agent("claude", None, "claude", "Claude", theme::CLAUDE, true),
@@ -48,11 +48,11 @@ fn debug_projects() -> Vec<crate::deck::ProjectView> {
     ]
 }
 
-/// DEBUG ONLY: fake usage in the title bar (`AGENTDECK_DEBUG_UI=usage-demo` and `usage-panel`): Claude
+/// DEBUG ONLY: fake usage in the title bar (`HOLT_DEBUG_UI=usage-demo` and `usage-panel`): Claude
 /// in the middle of the session, Antigravity with the week in warning (and the three model groups), Codex with the session exhausted.
-fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage> {
-    use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
-    let now = agentdeck_core::util::now_ms();
+fn debug_usage() -> std::collections::HashMap<String, holt_core::AgentUsage> {
+    use holt_core::{AgentUsage, UsageGroup, UsageWindow};
+    let now = holt_core::util::now_ms();
     let w = |used, hours: u64| Some(UsageWindow { used, resets_at_ms: Some(now + hours * 3_600_000) });
     std::collections::HashMap::from([
         ("claude".into(), AgentUsage { session: w(0.34, 2), weekly: w(0.12, 100), updated_ms: now - 60_000, ..Default::default() }),
@@ -82,10 +82,10 @@ fn debug_usage() -> std::collections::HashMap<String, agentdeck_core::AgentUsage
     ])
 }
 
-/// DEBUG ONLY: `AGENTDECK_DEBUG_UI=chat,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-level,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agent>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agent>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` opens menus/states
+/// DEBUG ONLY: `HOLT_DEBUG_UI=chat,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-level,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agent>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agent>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` opens menus/states
 /// for screenshots in smoke mode.
 pub(crate) fn apply(deck: &mut Deck) {
-    let Some(v) = agentdeck_core::env_var("DEBUG_UI") else { return };
+    let Some(v) = holt_core::env_var("DEBUG_UI") else { return };
     for item in v.split(',').map(str::trim) {
         match item {
             "chat" => deck.set_right_view(crate::deck::RightView::Chat),
@@ -137,8 +137,8 @@ pub(crate) fn apply(deck: &mut Deck) {
                 deck.git.debug_hold = true;
                 let mut st = g::demo_conflicts_status();
                 if item == "git-rebase" {
-                    st.state = agentdeck_core::git::RepoState::Rebasing;
-                    st.entries.retain(|e| e.kind != agentdeck_core::git::EntryKind::Unmerged);
+                    st.state = holt_core::git::RepoState::Rebasing;
+                    st.entries.retain(|e| e.kind != holt_core::git::EntryKind::Unmerged);
                 }
                 if matches!(item, "git-history" | "git-commit" | "git-stash" | "git-stash-diff" | "git-hunks" | "git-branches-merge") {
                     st = g::demo_status();
@@ -230,13 +230,13 @@ pub(crate) fn apply(deck: &mut Deck) {
             "github-norepo" => {
                 deck.github.debug_hold = true;
                 deck.set_right_view(crate::deck::RightView::GitHub);
-                deck.github.view = crate::github_ui::GithubView::Error(agentdeck_core::github::GithubError::NoRemote);
+                deck.github.view = crate::github_ui::GithubView::Error(holt_core::github::GithubError::NoRemote);
             }
             "github-error" => {
                 deck.github.debug_hold = true;
                 deck.set_right_view(crate::deck::RightView::GitHub);
-                deck.github.view = crate::github_ui::GithubView::Error(agentdeck_core::github::GithubError::NotFound {
-                    repo: "pattr/agentdeck".into(),
+                deck.github.view = crate::github_ui::GithubView::Error(holt_core::github::GithubError::NotFound {
+                    repo: "pattr/holt".into(),
                     authenticated: false,
                 });
             }
@@ -323,7 +323,7 @@ pub(crate) fn apply(deck: &mut Deck) {
     }
 }
 
-/// DEBUG ONLY: fake states of the Tasks tab (`AGENTDECK_DEBUG_UI=tasks-*`), without git or the core.
+/// DEBUG ONLY: fake states of the Tasks tab (`HOLT_DEBUG_UI=tasks-*`), without git or the core.
 fn debug_tasks(deck: &mut Deck, item: &str) {
     use crate::tasks_ui::{self as t, Confirm, FormMenu, TasksView};
     deck.set_right_view(crate::deck::RightView::Tasks);
@@ -382,21 +382,21 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                 "tasks-refused-main" | "tasks-refused-main-files" => {
                     let files = ["crates/app/src/deck.rs", "crates/app/src/app.rs", "memory/backlog.md"].map(String::from).to_vec();
                     deck.tasks.notice = Some("the main repository has uncommitted changes".into());
-                    deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::MainDirty(files));
+                    deck.tasks.notice_block = Some(holt_core::MergeBlock::MainDirty(files));
                     deck.tasks.notice_files = item == "tasks-refused-main-files";
                 }
                 "tasks-refused-commit" => {
                     let files = ["crates/core/src/tasks.rs", "memory/manual-tests.md"].map(String::from).to_vec();
                     deck.tasks.notice = Some("the task's worktree has uncommitted work".into());
-                    deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::TaskDirty(files));
+                    deck.tasks.notice_block = Some(holt_core::MergeBlock::TaskDirty(files));
                 }
                 "tasks-refused-conflict" => {
                     deck.tasks.notice = Some("conflict while merging".into());
-                    deck.tasks.notice_block = Some(agentdeck_core::MergeBlock::Conflict(vec!["crates/app/src/app.rs".into()]));
+                    deck.tasks.notice_block = Some(holt_core::MergeBlock::Conflict(vec!["crates/app/src/app.rs".into()]));
                 }
                 "tasks-stash-kept" => {
                     deck.tasks.notice_info = true;
-                    deck.tasks.notice = Some("Your uncommitted changes are still kept in the git stash (\"agentdeck: saved before merging task t4\"): handing them back would clash with what the task brought in crates/app/src/app.rs. Nothing was lost. To recover them: open a terminal in the project folder, run git stash list to find the entry and git stash pop to bring it back (resolving the clash).".into());
+                    deck.tasks.notice = Some("Your uncommitted changes are still kept in the git stash (\"holt: saved before merging task t4\"): handing them back would clash with what the task brought in crates/app/src/app.rs. Nothing was lost. To recover them: open a terminal in the project folder, run git stash list to find the entry and git stash pop to bring it back (resolving the clash).".into());
                 }
                 "tasks-busy" => deck.tasks.busy = Some(t::Busy { id: "t4".into(), label: "Merging…" }),
                 _ => {}
@@ -423,20 +423,20 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                 if item.starts_with("tasks-new-provider") || item == "tasks-new-opencode" { "opencode".into() } else { "claude".into() };
             if item == "tasks-new-effort" {
                 f.model = Some("sonnet".into());
-                f.effort = Some(agentdeck_core::models::Effort::High);
+                f.effort = Some(holt_core::models::Effort::High);
             }
             if item == "tasks-new-level" {
                 f.kind_is_auto = false;
                 f.model = Some("haiku".into());
-                f.level = agentdeck_core::capability::Level::Complex;
+                f.level = holt_core::capability::Level::Complex;
             }
             f.base = "dev".into();
             f.title = "Document the bridge /tasks routes".into();
             f.brief = "Explain each route in memory/ARCHITECTURE.md, with the example body and the error codes.\n\nAlso check the ask-agent --task text.".into();
             if item == "tasks-new-attach" {
                 f.attachments = vec![
-                    r"C:\Users\you\agentdeck-dev\data\attachments\1a2b3c-screenshot.png".into(),
-                    r"C:\Users\you\agentdeck-dev\data\attachments\9f8e-report.pdf".into(),
+                    r"C:\Users\you\holt-dev\data\attachments\1a2b3c-screenshot.png".into(),
+                    r"C:\Users\you\holt-dev\data\attachments\9f8e-report.pdf".into(),
                 ];
             }
             f.focus_title = false;
@@ -459,9 +459,9 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
     }
 }
 
-/// Fake progress for screenshots of the download bar (`AGENTDECK_DEBUG_UI`).
-fn debug_download(kind: &str) -> agentdeck_core::DownloadProgress {
-    use agentdeck_core::{DownloadProgress, DownloadState};
+/// Fake progress for screenshots of the download bar (`HOLT_DEBUG_UI`).
+fn debug_download(kind: &str) -> holt_core::DownloadProgress {
+    use holt_core::{DownloadProgress, DownloadState};
     let mut p = DownloadProgress {
         label: "large-v3-turbo model".into(),
         state: DownloadState::Downloading,

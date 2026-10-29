@@ -7,10 +7,10 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::time::Duration;
 
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::FeedKind;
-use agentdeck_core::{Config, Core, CoreEvent, StartOptions};
 use crossbeam_channel::Receiver;
+use holt_core::paths::AppPaths;
+use holt_core::FeedKind;
+use holt_core::{Config, Core, CoreEvent, StartOptions};
 use serde_json::{json, Value};
 
 struct Env {
@@ -73,8 +73,8 @@ fn tab_token(env: &Env, id: &str) -> String {
 
 /// Token that the tab of instance `id` in project `project` receives in the environment.
 fn tab_token_in(env: &Env, project: &str, id: &str) -> String {
-    let ident = agentdeck_core::Ident::parse(id).expect("id");
-    env.core.spawn_spec_for(project, &ident).expect("spec").env["AGENTDECK_TOKEN"].clone()
+    let ident = holt_core::Ident::parse(id).expect("id");
+    env.core.spawn_spec_for(project, &ident).expect("spec").env["HOLT_TOKEN"].clone()
 }
 
 /// Path of the fake agent compiled with the tests (the `fake_agent` `[[bin]]`).
@@ -98,7 +98,7 @@ fn says(text: &str) -> Value {
 /// Fake agent that prints the arguments (the instructions become `<sys>`), the environment and echoes
 /// the prompt received on stdin.
 fn echoing_agent() -> Value {
-    json!({ "echo_args": true, "echo_env": ["AGENTDECK_AGENT", "AGENTDECK_DEPTH"], "echo_stdin": true })
+    json!({ "echo_args": true, "echo_env": ["HOLT_AGENT", "HOLT_DEPTH"], "echo_stdin": true })
 }
 
 /// Installs the fake agent `name` in `dir`: this crate's binary under the name the PATH looks for,
@@ -117,7 +117,7 @@ fn install_fake(dir: &Path, name: &str, spec: &Value) {
 
 /// Minimal HTTP client (allows forging the Host header).
 fn http(port: u16, method: &str, path: &str, host: &str, token: &str, body: &str) -> (u16, Value) {
-    http_with_token_header(port, "x-agentdeck-token", method, path, host, token, body)
+    http_with_token_header(port, "x-holt-token", method, path, host, token, body)
 }
 
 /// Like [`http`], with the token header name of your choice.
@@ -147,7 +147,7 @@ fn ask(env: &Env, body: Value) -> (u16, Value) {
     http(port, "POST", "/ask", &format!("127.0.0.1:{port}"), env.core.bridge_token(), &body.to_string())
 }
 
-/// The old name's header (`x-commanddeck-token`) no longer works: only `x-agentdeck-token` authenticates.
+/// The CommandDeck header (`x-commanddeck-token`) no longer works: only `x-holt-token` authenticates.
 #[test]
 fn the_old_token_header_is_refused() {
     let env = start(&[("claude", says("ok"))]);
@@ -158,6 +158,20 @@ fn the_old_token_header_is_refused() {
     let (st, b) = http_with_token_header(port, "x-commanddeck-token", "GET", "/agents", &host, &token, "");
     assert_eq!((st, b), (403, json!({"error": "invalid token"})));
     assert_eq!(http(port, "GET", "/agents", &host, &token, "").0, 200);
+}
+
+/// Migration (remove after 0.4): an `ask-agent` of the AgentDeck days sends `x-agentdeck-token`, and the new header wins
+/// when both come.
+#[test]
+fn the_old_agentdeck_token_header_still_authenticates() {
+    let env = start(&[("claude", says("ok"))]);
+    let port = env.core.bridge_port();
+    let token = env.core.bridge_token().to_owned();
+    let host = format!("127.0.0.1:{port}");
+
+    assert_eq!(http_with_token_header(port, "x-agentdeck-token", "GET", "/agents", &host, &token, "").0, 200);
+    let (st, _) = http_with_token_header(port, "x-agentdeck-token", "GET", "/agents", &host, "wrong", "");
+    assert_eq!(st, 403);
 }
 
 /// Waits for `CoreEvent::Activate` (the other events that arrive first are ignored).
@@ -196,14 +210,14 @@ fn activate_needs_the_master_token() {
 fn a_second_launch_activates_the_running_instance() {
     let env = start(&[("claude", says("ok"))]);
     let data_dir = paths_in(&env.root).data_dir;
-    assert!(agentdeck_core::activation::activate_running(&data_dir));
+    assert!(holt_core::activation::activate_running(&data_dir));
     assert!(got_activate(&env));
 
     // Once shut down, it releases the lock and deletes the file: there is no one left to ask.
     env.core.shutdown();
     let Env { core, _tmp, .. } = env;
     drop(core);
-    assert!(!agentdeck_core::activation::activate_running(&data_dir));
+    assert!(!holt_core::activation::activate_running(&data_dir));
 }
 
 #[test]
@@ -250,20 +264,20 @@ fn workspace_agents_md_and_spawn_specs() {
     let ws = env.core.workspace();
     assert_eq!(ws, env.root.join("workspace"));
     let md = std::fs::read_to_string(ws.join("AGENTS.md")).expect("AGENTS.md created in the app's workspace");
-    assert!(md.starts_with("<!-- agentdeck:start -->\nYou are running inside AgentDeck"));
-    assert!(md.contains("Your name and role are in the AGENTDECK_AGENT and AGENTDECK_ROLE variables"));
+    assert!(md.starts_with("<!-- holt:start -->\nYou are running inside Holt"));
+    assert!(md.contains("Your name and role are in the HOLT_AGENT and HOLT_ROLE variables"));
     assert!(md.contains("do NOT use your CLI's internal subagents"));
 
     let shell = env.core.spawn_spec(&p, "shell").expect("shell");
     assert_eq!(shell.label, "Terminal");
     assert_eq!(shell.cwd, ws);
-    assert_eq!(shell.env["AGENTDECK_AGENT"], "shell");
-    assert_eq!(shell.env["AGENTDECK_PORT"], env.core.bridge_port().to_string());
+    assert_eq!(shell.env["HOLT_AGENT"], "shell");
+    assert_eq!(shell.env["HOLT_PORT"], env.core.bridge_port().to_string());
     // Each tab has its own token (the master one does not go to the agents), stable while it exists.
-    let token = shell.env["AGENTDECK_TOKEN"].clone();
+    let token = shell.env["HOLT_TOKEN"].clone();
     assert_ne!(token, env.core.bridge_token());
     assert_eq!(token.len(), 32);
-    assert_eq!(env.core.spawn_spec(&p, "shell").expect("again").env["AGENTDECK_TOKEN"], token);
+    assert_eq!(env.core.spawn_spec(&p, "shell").expect("again").env["HOLT_TOKEN"], token);
     assert!(shell.env["PATH"].starts_with(&env.root.join("bin").display().to_string()));
     assert!(!shell.double_enter_on_mention);
 
@@ -279,8 +293,8 @@ fn workspace_agents_md_and_spawn_specs() {
     assert_eq!(env.core.active_project_id(), p, "creating a project does not switch the active one");
     let spec = env.core.spawn_spec(&other.id, "shell").expect("shell");
     assert_eq!(spec.cwd, other_dir);
-    assert_ne!(spec.env["AGENTDECK_TOKEN"], token, "each project's shell has its own token");
-    assert!(std::fs::read_to_string(other_dir.join("AGENTS.md")).expect("AGENTS.md of the other project").contains("AGENTDECK_AGENT"));
+    assert_ne!(spec.env["HOLT_TOKEN"], token, "each project's shell has its own token");
+    assert!(std::fs::read_to_string(other_dir.join("AGENTS.md")).expect("AGENTS.md of the other project").contains("HOLT_AGENT"));
     assert_eq!(env.core.workspace(), ws);
 
     let claude = env.core.spawn_spec(&p, "claude").expect("claude");
@@ -323,7 +337,7 @@ fn ask_runs_headless_with_sessions() {
     assert!(answer.contains("[--append-system-prompt] [<sys>] [--add-dir]"), "{answer}");
     assert!(answer.contains("ENV: claude 1"), "{answer}");
     assert!(answer.contains(
-        "[Message from the agent \"shell\" received by AgentDeck]\n\nWhat is the capital?\n\nAnswer the agent \"shell\" directly. The user follows the conversation in the Conversation tab in real time."
+        "[Message from the agent \"shell\" received by Holt]\n\nWhat is the capital?\n\nAnswer the agent \"shell\" directly. The user follows the conversation in the Conversation tab in real time."
     ));
     let sid = answer.split("[--session-id] [").nth(1).and_then(|s| s.split(']').next()).expect("sid").to_owned();
 
@@ -404,7 +418,7 @@ fn attachments_and_config_persistence() {
     let sessions = std::fs::read_to_string(env.root.join("data").join("sessions.json")).expect("sessions.json");
     assert!(sessions.contains(env.core.session_id()));
     assert_eq!(env.core.transcribe_engine(), "unavailable");
-    agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || {
+    holt_core::i18n::with_lang(holt_core::i18n::Lang::PtBr, || {
         assert_eq!(env.core.transcribe_engine(), "indisponível");
     });
     assert!(env.core.transcribe_pcm16k(&[0.0; 160]).is_err());
@@ -415,15 +429,15 @@ fn attachments_and_config_persistence() {
 fn spawn_spec_for_an_instance_carries_its_identity() {
     let env = start(&[]);
     let p = env.core.active_project_id();
-    let ident = agentdeck_core::Ident::parse("shell@qa@ana").expect("id");
+    let ident = holt_core::Ident::parse("shell@qa@ana").expect("id");
     let spec = env.core.spawn_spec_for(&p, &ident).expect("shell always exists");
     assert_eq!(spec.kind, "shell");
-    assert_eq!(spec.env["AGENTDECK_AGENT"], "shell@qa@ana");
+    assert_eq!(spec.env["HOLT_AGENT"], "shell@qa@ana");
     assert_eq!(spec.cwd, env.root.join("workspace"));
-    // `shell@main@ana` has no role: no AGENTDECK_ROLE.
-    let main = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("shell@main@bia").expect("id")).expect("spec");
-    assert_eq!(main.env["AGENTDECK_AGENT"], "shell@main@bia");
-    assert!(!main.env.contains_key("AGENTDECK_ROLE"));
+    // `shell@main@ana` has no role: no HOLT_ROLE.
+    let main = env.core.spawn_spec_for(&p, &holt_core::Ident::parse("shell@main@bia").expect("id")).expect("spec");
+    assert_eq!(main.env["HOLT_AGENT"], "shell@main@bia");
+    assert!(!main.env.contains_key("HOLT_ROLE"));
     env.core.shutdown();
 }
 
@@ -595,7 +609,7 @@ fn removing_a_project_closes_its_instances() {
 }
 
 /// Next delivery requested from the interface (ignores the other events).
-fn next_delivery(env: &Env) -> agentdeck_core::Delivery {
+fn next_delivery(env: &Env) -> holt_core::Delivery {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
@@ -846,8 +860,8 @@ fn statusline_reports_usage_of_the_tab_model() {
     // The model comes from the token (`claude@dev` → `claude`), not from the body.
     let usage = env.core.usage_snapshot();
     let claude = &usage["claude"];
-    assert_eq!(claude.session, Some(agentdeck_core::UsageWindow { used: 0.34, resets_at_ms: Some(1_760_000_000_000) }));
-    assert_eq!(claude.weekly, Some(agentdeck_core::UsageWindow { used: 1.0, resets_at_ms: None }));
+    assert_eq!(claude.session, Some(holt_core::UsageWindow { used: 0.34, resets_at_ms: Some(1_760_000_000_000) }));
+    assert_eq!(claude.weekly, Some(holt_core::UsageWindow { used: 1.0, resets_at_ms: None }));
     assert!(claude.updated_ms > 0 && !claude.local);
     assert!(env.rx.try_iter().any(|e| matches!(e, CoreEvent::UsageChanged)));
     // The same usage again does not wake the UI.
@@ -874,7 +888,7 @@ fn one_app_per_data_dir() {
 
 #[test]
 fn headless_runs_get_their_own_short_lived_token() {
-    let env = start(&[("claude", json!({ "print_env": "AGENTDECK_TOKEN" }))]);
+    let env = start(&[("claude", json!({ "print_env": "HOLT_TOKEN" }))]);
     let (st, b) = ask(&env, json!({"from": "shell", "to": "claude", "message": "hi"}));
     assert_eq!(st, 200, "{b}");
     let token = b["answer"].as_str().expect("token").trim().to_owned();
@@ -1049,14 +1063,14 @@ fn the_team_can_be_reorganized_and_survives_renames_and_closes() {
     assert!(env.core.set_boss(&p, "shell@qa", Some("shell@nothing")).is_err());
 
     // Renaming takes the team along; closing passes the crew to the grandparent; releasing at the root removes the boss.
-    let ana = agentdeck_core::Ident::parse("shell@dev@ana").expect("id");
+    let ana = holt_core::Ident::parse("shell@dev@ana").expect("id");
     env.core.rename_instance(&p, "shell@dev", &ana).expect("renames");
     assert_eq!(env.core.team(&p, "shell@qa").boss.as_deref(), Some("shell@dev@ana"));
     env.core.close_instance(&p, "shell@dev@ana");
     assert_eq!(env.core.team(&p, "shell@qa").boss.as_deref(), Some("shell"));
     assert_eq!(env.core.team(&p, "shell").crew, ["shell@qa"]);
     env.core.set_boss(&p, "shell@qa", None).expect("root");
-    assert_eq!(env.core.team(&p, "shell"), agentdeck_core::Team::default());
+    assert_eq!(env.core.team(&p, "shell"), holt_core::Team::default());
     assert!(env.core.projects()[0].tab_parents.is_empty(), "saved in the project's config");
     env.core.shutdown();
 }
@@ -1104,7 +1118,7 @@ fn renaming_both_tabs_mid_question_still_delivers_the_late_answer() {
     let q = next_delivery(&env);
     assert_eq!(asking.join().expect("thread").0, 202);
     // Both tabs change names while the answer has not arrived.
-    let ident = |s: &str| agentdeck_core::Ident::parse(s).expect("id");
+    let ident = |s: &str| holt_core::Ident::parse(s).expect("id");
     env.core.rename_instance(&p, "claude", &ident("claude@lead")).expect("renames");
     env.core.rename_instance(&p, "claude@dev", &ident("claude@dev@ana")).expect("renames");
     // The tab's token follows the instance; the answer goes by the number and reaches the new name.
@@ -1328,7 +1342,7 @@ fn the_team_notice_waits_for_a_message_that_is_really_typed() {
 
 #[test]
 fn a_model_without_quota_is_refused_before_opening_the_tab() {
-    use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
+    use holt_core::{AgentUsage, UsageGroup, UsageWindow};
     let env = start(&[]);
     fake_cli(&env, "agy");
     env.core.enable_tab_delivery();
@@ -1475,7 +1489,7 @@ fn the_roster_and_the_team_show_the_models() {
     let host = format!("127.0.0.1:{port}");
     let second = env.core.register_instance_with_model(&p, "claude", Some("opus")).expect("registra");
     assert_eq!(second.id(), "claude@main@ana");
-    let dev = agentdeck_core::Ident::parse("claude@dev").expect("id");
+    let dev = holt_core::Ident::parse("claude@dev").expect("id");
     env.core.restore_instance(&p, "claude@dev");
     env.core.assign_model(&p, &dev, Some("sonnet"));
     env.core.set_boss(&p, "claude@dev", Some("claude")).expect("team");
@@ -1495,7 +1509,7 @@ fn the_roster_and_the_team_show_the_models() {
 
 #[test]
 fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listing() {
-    use agentdeck_core::{AgentUsage, UsageGroup, UsageWindow};
+    use holt_core::{AgentUsage, UsageGroup, UsageWindow};
     let env = start(&[]);
     // The installed `opencode` lists nothing (the fake exits with no output): one failure line, the rest goes on.
     fake_cli(&env, "claude");
@@ -1563,7 +1577,7 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
         fake_cli(&env, cli);
     }
     let p = env.core.active_project_id();
-    let ident = |s: &str| agentdeck_core::Ident::parse(s).expect("id");
+    let ident = |s: &str| holt_core::Ident::parse(s).expect("id");
     let saved = |env: &Env| env.core.projects()[0].tab_models.clone();
     let tail = |args: &[String], n: usize| args[args.len() - n..].to_vec();
     let data = env.root.join("data").display().to_string();
@@ -1603,9 +1617,9 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
     let oc = env.core.spawn_spec_for(&p, &ident("opencode")).expect("opencode");
     assert_eq!((&oc.args[..2], oc.args.len()), (&["--standalone".to_owned(), "--session".to_owned()][..], 3), "{:?}", oc.args);
     let conf: Value = serde_json::from_str(&oc.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
-    let instructions = env.root.join("data").join("agentdeck-instructions.md");
+    let instructions = env.root.join("data").join("holt-instructions.md");
     assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free", "instructions": [instructions.to_string_lossy()]}));
-    // Without a model, OpenCode still gets the AgentDeck instructions (own server + file in the configuration).
+    // Without a model, OpenCode still gets the Holt instructions (own server + file in the configuration).
     env.core.update_config(|c| {
         c.role_models.remove("opencode");
     });
@@ -1678,7 +1692,7 @@ fn headless_runs_get_the_requested_or_default_model() {
     env.core.shutdown();
 }
 
-/// With the real CLIs installed: `cargo test -p agentdeck-core --test bridge -- --ignored --nocapture`.
+/// With the real CLIs installed: `cargo test -p holt-core --test bridge -- --ignored --nocapture`.
 #[test]
 #[ignore = "uses the agy and opencode installed on the machine"]
 fn the_models_inventory_of_this_machine() {
@@ -1694,11 +1708,11 @@ fn the_models_inventory_of_this_machine() {
     let (core, _rx) = Core::start_with(paths, opts).expect("start");
     let started = std::time::Instant::now();
     let items = core.models_inventory(None).expect("inventory");
-    println!("{}\n({:?})", agentdeck_core::models::format_inventory(&items, &core.quota_lines()), started.elapsed());
+    println!("{}\n({:?})", holt_core::models::format_inventory(&items, &core.quota_lines()), started.elapsed());
     core.shutdown();
 }
 
-/// With the real CLIs installed: `cargo test -p agentdeck-core --test bridge -- --ignored --nocapture`.
+/// With the real CLIs installed: `cargo test -p holt-core --test bridge -- --ignored --nocapture`.
 #[test]
 #[ignore = "uses the agy and opencode installed on the machine"]
 fn the_known_models_come_from_the_installed_clis() {
@@ -1727,7 +1741,7 @@ fn the_known_models_come_from_the_installed_clis() {
 }
 
 /// Runs the command of `spec` for real (the fake agent) and returns its exit code and output.
-fn run_spec(spec: &agentdeck_core::SpawnSpec) -> (i32, String) {
+fn run_spec(spec: &holt_core::SpawnSpec) -> (i32, String) {
     let out = std::process::Command::new(&spec.program)
         .args(&spec.args)
         .current_dir(&spec.cwd)
@@ -1761,7 +1775,7 @@ fn a_claude_tab_resumes_its_own_conversation_and_a_refused_resume_starts_over() 
         &json!({ "echo_args": true, "fail_on_arg": "--resume", "stderr": "No conversation found with session ID", "fail_exit": 1 }),
     );
     let p = env.core.active_project_id();
-    let ident = |s: &str| agentdeck_core::Ident::parse(s).expect("id");
+    let ident = |s: &str| holt_core::Ident::parse(s).expect("id");
     let stored = |id: &str| env.core.tab_session(&p, id);
 
     // First launch: an id is generated, saved at once and asked for with --session-id; never --continue.
@@ -1797,7 +1811,7 @@ fn a_claude_tab_resumes_its_own_conversation_and_a_refused_resume_starts_over() 
     let (code, _) = run_spec(&resumed);
     assert_eq!(code, 1);
     let now = std::time::Instant::now();
-    assert!(agentdeck_core::resume::resume_failed(resumed.resumed, Some(now), now, i64::from(code)));
+    assert!(holt_core::resume::resume_failed(resumed.resumed, Some(now), now, i64::from(code)));
     env.core.forget_tab_session(&p, "claude@dev");
     std::fs::remove_file(&transcript).expect("rm");
     let fresh = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("fresh");
@@ -1838,7 +1852,7 @@ fn an_opencode_tab_keeps_one_session_id_next_to_its_own_server_flag() {
     let env = start(&[]);
     install_fake(&env.root.join("fake-bin"), "opencode", &json!({ "echo_args": true }));
     let p = env.core.active_project_id();
-    let ident = agentdeck_core::Ident::parse("opencode").expect("id");
+    let ident = holt_core::Ident::parse("opencode").expect("id");
     let first = env.core.spawn_spec_for(&p, &ident).expect("first");
     let id = arg_after(&first.args, "--session").expect("--session").to_owned();
     // OpenCode demands the `ses` prefix; `--session` creates the session when it does not exist yet.
@@ -1851,14 +1865,14 @@ fn an_opencode_tab_keeps_one_session_id_next_to_its_own_server_flag() {
     let (code, out) = run_spec(&second);
     assert_eq!((code, out.contains(&format!("[--session] [{id}]"))), (0, true), "{out}");
     // A tab of the same CLI has its own session.
-    let other = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("opencode@qa").expect("id")).expect("other");
+    let other = env.core.spawn_spec_for(&p, &holt_core::Ident::parse("opencode@qa").expect("id")).expect("other");
     assert_ne!(arg_after(&other.args, "--session"), Some(id.as_str()));
     // A session reported later (hook channel) replaces the saved one.
     assert!(env.core.set_tab_session(&p, "opencode", "ses_newone"));
     assert_eq!(arg_after(&env.core.spawn_spec_for(&p, &ident).expect("third").args, "--session"), Some("ses_newone"));
     // Agents that cannot resume get nothing.
     fake_cli(&env, "aider");
-    let aider = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("aider").expect("id")).expect("aider");
+    let aider = env.core.spawn_spec_for(&p, &holt_core::Ident::parse("aider").expect("id")).expect("aider");
     assert!(!aider.resumed && !aider.args.iter().any(|a| a.contains("session") || a == "resume"), "{:?}", aider.args);
     assert_eq!(env.core.tab_session(&p, "aider"), None);
     env.core.shutdown();
@@ -1871,7 +1885,7 @@ fn an_antigravity_tab_learns_its_conversation_from_its_log_and_resumes_it() {
     let env = start(&[]);
     install_fake(&env.root.join("fake-bin"), "agy", &json!({ "echo_args": true }));
     let p = env.core.active_project_id();
-    let ident = agentdeck_core::Ident::parse("antigravity@dev").expect("id");
+    let ident = holt_core::Ident::parse("antigravity@dev").expect("id");
 
     // First launch: nothing to resume, no id invented, but the log is asked for (one file per tab, in the data folder).
     let first = env.core.spawn_spec_for(&p, &ident).expect("first");
@@ -1882,7 +1896,7 @@ fn an_antigravity_tab_learns_its_conversation_from_its_log_and_resumes_it() {
     let (code, out) = run_spec(&first);
     assert_eq!((code, out.contains("[--log-file]")), (0, true), "{out}");
     // Another tab of the same CLI gets a log of its own.
-    let other = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("antigravity@qa").expect("id")).expect("other");
+    let other = env.core.spawn_spec_for(&p, &holt_core::Ident::parse("antigravity@qa").expect("id")).expect("other");
     assert_ne!(arg_after(&other.args, "--log-file"), arg_after(&first.args, "--log-file"));
 
     // The user sends the first message: `agy` writes the conversation it created into the log, and the tab saves it.
@@ -1930,7 +1944,7 @@ fn a_codex_tab_learns_its_thread_from_notify_and_resumes_it() {
     let env = start(&[]);
     install_fake(&env.root.join("fake-bin"), "codex", &json!({ "echo_args": true }));
     let p = env.core.active_project_id();
-    let ident = agentdeck_core::Ident::parse("codex@dev").expect("id");
+    let ident = holt_core::Ident::parse("codex@dev").expect("id");
     let thread = "01a187e4-5d25-7c61-9416-9143d2b8a5e5";
     let title_thread = "01a187e4-9778-7e20-8302-a5c03b0d4cb1";
 

@@ -3,7 +3,7 @@
 //!
 //! Pure logic independent of painting, with tests, in the style of [`crate::split`].
 
-use agentdeck_core::t;
+use holt_core::t;
 
 use crate::audio;
 
@@ -225,7 +225,7 @@ pub fn mic_tooltip(visual: ButtonVisual, available: bool, setup: Setup, engine_l
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdeck_core::i18n::{self, Lang};
+    use holt_core::i18n::{self, Lang};
 
     #[test]
     fn target_stays_pinned_to_the_tab_where_recording_started() {

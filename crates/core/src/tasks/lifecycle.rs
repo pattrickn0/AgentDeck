@@ -6,7 +6,7 @@ use super::git_ops::{
 use super::text::{cap_text, short_list};
 use super::{
     boot_line, branch_name, changed_files, clean_title, git_error, memory_block, return_message, start_message, Task, TaskError, TaskSpec,
-    TaskStatus, AGENTDECK_DIR, MAX_OUTSIDE, MAX_TEXT,
+    TaskStatus, HOLT_DIR, MAX_OUTSIDE, MAX_TEXT,
 };
 use crate::capability;
 use crate::events::{CoreEvent, Delivery, FeedEntry};
@@ -16,16 +16,16 @@ use crate::t;
 use crate::util::{self, now_ms};
 use crate::{models, Core};
 
-/// The new content of `info/exclude` with `/.agentdeck/`, or `None` if it is already there.
-pub fn exclude_with_agentdeck(existing: &str) -> Option<String> {
-    if existing.lines().map(str::trim).any(|l| matches!(l, "/.agentdeck/" | "/.agentdeck" | ".agentdeck/" | ".agentdeck")) {
+/// The new content of `info/exclude` with `/.holt/`, or `None` if it is already there.
+pub fn exclude_with_holt(existing: &str) -> Option<String> {
+    if existing.lines().map(str::trim).any(|l| matches!(l, "/.holt/" | "/.holt" | ".holt/" | ".holt")) {
         return None;
     }
     let mut text = existing.to_owned();
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
-    text.push_str("# AgentDeck: task worktrees\n/.agentdeck/\n");
+    text.push_str("# Holt: task worktrees\n/.holt/\n");
     Some(text)
 }
 
@@ -115,7 +115,7 @@ impl Core {
             .ok_or_else(|| TaskError::Invalid(t!("agent \"{kind}\" cannot have a task instance", kind = &kind)))?;
         let mut task = Task {
             branch: branch_name(&id, &title),
-            worktree: util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees").join(&id)),
+            worktree: util::absolutize(&repo.root.join(HOLT_DIR).join("worktrees").join(&id)),
             id: id.clone(),
             title,
             brief,
@@ -308,13 +308,12 @@ impl Core {
         crate::situation::render(&others, &commits, &task.base, cited, crate::situation::BUDGET)
     }
 
-    /// Worktree + branch of the task: excludes `/.agentdeck/` from git, cleans up what a previous attempt left
+    /// Worktree + branch of the task: excludes `/.holt/` from git, cleans up what a previous attempt left
     /// and creates the worktree from the base.
     fn prepare_worktree(&self, project: &str, task: &Task, retry: bool) -> Result<(), TaskError> {
         let repo = self.task_repo(project)?;
         self.ensure_exclude(&repo)?;
-        let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
-        if !safe_worktree(&task.worktree, &expected) || !valid_task_branch(&task.branch) {
+        if !safe_worktree(&task.worktree, &repo.root) || !valid_task_branch(&task.branch) {
             return Err(TaskError::Failed(t!(
                 "data of task {id} outside what was expected (folder {folder} / branch {branch}); I touched nothing",
                 id = &task.id,
@@ -347,7 +346,7 @@ impl Core {
         Ok(())
     }
 
-    /// Writes `/.agentdeck/` into `<common git dir>/info/exclude`, once (never into `.gitignore`).
+    /// Writes `/.holt/` into `<common git dir>/info/exclude`, once (never into `.gitignore`).
     fn ensure_exclude(&self, repo: &Repo) -> Result<(), TaskError> {
         let common = repo
             .read(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
@@ -357,7 +356,7 @@ impl Core {
             .unwrap_or_else(|| repo.git_dir.clone());
         let file = common.join("info").join("exclude");
         let existing = std::fs::read_to_string(&file).unwrap_or_default();
-        if let Some(text) = exclude_with_agentdeck(&existing) {
+        if let Some(text) = exclude_with_holt(&existing) {
             std::fs::create_dir_all(common.join("info"))
                 .and_then(|_| std::fs::write(&file, text))
                 .map_err(|e| TaskError::Failed(t!("could not write {file}: {error}", file = file.display(), error = e)))?;
@@ -648,10 +647,10 @@ mod tests {
 
     #[test]
     fn exclude_is_written_once() {
-        let first = exclude_with_agentdeck("# rules\n*.log").unwrap();
-        assert_eq!(first, "# rules\n*.log\n# AgentDeck: task worktrees\n/.agentdeck/\n");
-        assert_eq!(exclude_with_agentdeck(&first), None);
-        assert!(exclude_with_agentdeck("").unwrap().ends_with("/.agentdeck/\n"));
-        assert_eq!(exclude_with_agentdeck("a\n/.agentdeck/\n"), None);
+        let first = exclude_with_holt("# rules\n*.log").unwrap();
+        assert_eq!(first, "# rules\n*.log\n# Holt: task worktrees\n/.holt/\n");
+        assert_eq!(exclude_with_holt(&first), None);
+        assert!(exclude_with_holt("").unwrap().ends_with("/.holt/\n"));
+        assert_eq!(exclude_with_holt("a\n/.holt/\n"), None);
     }
 }

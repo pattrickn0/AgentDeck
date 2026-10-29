@@ -6,9 +6,9 @@ impl Deck {
     /// At app startup: downloads what is missing (whoever already uses dictation) or opens the question (whoever was never asked).
     pub fn dictation_startup(&mut self) {
         match self.core.dictation_startup() {
-            agentdeck_core::whisper::Startup::Ensure => self.core.ensure_whisper_async(),
-            agentdeck_core::whisper::Startup::Ask => self.dictation_prompt = true,
-            agentdeck_core::whisper::Startup::Skip => {}
+            holt_core::whisper::Startup::Ensure => self.core.ensure_whisper_async(),
+            holt_core::whisper::Startup::Ask => self.dictation_prompt = true,
+            holt_core::whisper::Startup::Skip => {}
         }
     }
 
@@ -51,7 +51,7 @@ impl Deck {
     fn mic_ready(&mut self) -> bool {
         // Built without audio (`--no-default-features`): offering the download would be 1.6 GB for nothing to record.
         if !crate::audio::AVAILABLE {
-            self.system(t!("Voice dictation is unavailable: AgentDeck was built without the audio feature."));
+            self.system(t!("Voice dictation is unavailable: Holt was built without the audio feature."));
             return false;
         }
         match self.dictation_setup() {

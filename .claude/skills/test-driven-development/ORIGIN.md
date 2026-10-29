@@ -6,5 +6,5 @@ Copied from [obra/superpowers](https://github.com/obra/superpowers) 7.0.1 (commi
 Changes: in `writing-good-tests.md`, the reference to `superpowers:writing-skills` (not brought in) was removed.
 The examples are in TypeScript/npm; here the command is `cargo test --workspace`.
 
-Use in AgentDeck: test before code. Only four Superpowers skills were brought in (see the `ORIGIN.md` of
+Use in Holt: test before code. Only four Superpowers skills were brought in (see the `ORIGIN.md` of
 `systematic-debugging`).

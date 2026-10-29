@@ -30,7 +30,7 @@ jobs:
       - name: Build
         run: cargo build --workspace --locked
       - name: Build without audio
-        run: cargo build -p agentdeck --no-default-features --locked
+        run: cargo build -p holt --no-default-features --locked
       - name: Tests
         shell: bash
         run: set -o pipefail; cargo test --workspace --locked 2>&1 | tee ci.log

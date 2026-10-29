@@ -6,7 +6,7 @@ an item, **remove it from here** and add a line of what was done to [history.md]
 
 What is not among the next steps stays in [ideas.md](ideas.md): undated ideas and known limitations. An idea
 only enters here when another item leaves (the list never exceeds 10). **Manual tests** stay in [manual-tests.md](manual-tests.md); a
-test that fails becomes an item here. Product direction and decision-makers are in [AGENTDECK.md](AGENTDECK.md).
+test that fails becomes an item here. Product direction and decision-makers are in [HOLT.md](HOLT.md).
 
 ## Now
 
@@ -14,8 +14,9 @@ test that fails becomes an item here. Product direction and decision-makers are 
    "Record the terminal (diagnostics)" in the tab menu and send `data/pty/`), the document editor (`t39`), quota refusal
    (`ask-agent --models antigravity`, `--team`), and choice by model capability (`t52`: task level,
    "capability" block in `--models`; see manual-tests.md). When the metric has enough tasks, review the `capability.json` table and
-   default models per agent (`defaults`). Also from the user: rename the local `commanddeck-dev` folder (the
-   GitHub repository is already named `AgentDeck`).
+   default models per agent (`defaults`). Also from the user, after the rename to Holt (`t1`): rename the GitHub repository
+   `pattrickn0/AgentDeck` → `pattrickn0/Holt` (update `origin`) and, optionally, the local folder `~/AgentDeck` → `~/Holt`
+   (then rebuild so the menu entry points at the new path); steps in [MAINTENANCE.md](MAINTENANCE.md), section 6.
 2. [ ] **Background and system tray** (decided on 2026-10-24). T1a (`t44`): `Deck::tick` was moved out of rendering and
    `Deck::background` runs from the event loop with the window hidden or minimized. T1b (`t48`, done, needs validation in use):
    the X hides the window to the tray, without asking (Windows: `tray-icon`; Linux: `ksni`; without `StatusNotifierWatcher` the X
@@ -35,7 +36,7 @@ test that fails becomes an item here. Product direction and decision-makers are 
    disk and only a notice is sent to the terminal (`ask-agent --read <n>`); the notice is repeated at turn end if unread;
    reply deadline counts from when read; pending messages survive app exit.
 6. [ ] **Worktree folder not removed upon validation: find root cause.** Logging already exists (2026-10-24, `file_lock.rs`): on
-   every `remove_task_worktree` failure, `agentdeck.log` and the task warning report which files remained and which process holds
+   every `remove_task_worktree` failure, `holt.log` and the task warning report which files remained and which process holds
    them open (Restart Manager), or if only empty directories remained (a process with its current directory inside it). Awaiting
    the next real occurrence: read the notice (search for "worktree" in log) and fix the cause.
 7. [ ] **Retire integrated Conversation.** The per-task timeline already exists (t43, MESSAGES section in detail view, stored in
@@ -44,5 +45,5 @@ test that fails becomes an item here. Product direction and decision-makers are 
 
 ## Later (on the list, not yet)
 
-8. [ ] **Installer for Windows**, and in the same version remove config migration from `CommandDeck/` (`config::legacy_config_files`;
-   list and rationale in [MAINTENANCE.md](MAINTENANCE.md), section 6).
+8. [ ] **Installer for Windows**, and in the same version (0.4) remove the AgentDeck → Holt migration (config copy, `data/`
+   renames, old env vars/header/marker/worktree root; the list is in [MAINTENANCE.md](MAINTENANCE.md), section 6).

@@ -1,6 +1,6 @@
 //! Local HTTP bridge agent → agent (equivalent to `startBridge`).
 //!
-//! It listens only on 127.0.0.1 (ephemeral port), requires the `x-agentdeck-token` token and validates
+//! It listens only on 127.0.0.1 (ephemeral port), requires the `x-holt-token` token and validates
 //! the `Host` header against DNS rebinding. Each agent process gets its own token, and it is the token
 //! that says who is asking (the body's `from` is only valid with the master token, used in tests).
 //! Requests for the same `from->to` pair are served in order of arrival (FIFO queue per pair), one at a
@@ -189,16 +189,20 @@ fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
     req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
 }
 
-/// The token header (`x-agentdeck-token`); empty if missing.
+/// The token header (`x-holt-token`); empty if missing. Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): an
+/// `ask-agent` of the AgentDeck days still sends `x-agentdeck-token`.
 fn token_header(req: &Request) -> &str {
-    header(req, "x-agentdeck-token").filter(|v| !v.is_empty()).unwrap_or("")
+    header(req, "x-holt-token")
+        .filter(|v| !v.is_empty())
+        .or_else(|| header(req, "x-agentdeck-token").filter(|v| !v.is_empty()))
+        .unwrap_or("")
 }
 
 /// Serves a request. `port` is the bridge port (known before the first request: the `Host` is
 /// validated from the start) and `slot` its place among the [`MAX_ACTIVE`].
 fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodies: &Arc<AtomicU64>) {
     let Some(inner) = weak.upgrade() else {
-        return reply(req, 503, json!({ "error": "AgentDeck shutting down" }));
+        return reply(req, 503, json!({ "error": "Holt shutting down" }));
     };
     let core = Core { inner };
     let Some(auth) = core.authenticate(token_header(&req)) else {
@@ -214,7 +218,7 @@ fn handle(weak: Weak<CoreInner>, mut req: Request, port: u16, slot: Active, bodi
     // which the app writes next to the data folder lock: an agent does not bring the user's window to the front.
     if *req.method() == Method::Post && req.url() == "/activate" {
         if !matches!(auth, Auth::Master) {
-            return reply(req, 403, json!({ "error": "only AgentDeck itself can request this" }));
+            return reply(req, 403, json!({ "error": "only Holt itself can request this" }));
         }
         core.emit(CoreEvent::Activate);
         return reply(req, 200, json!({ "ok": true }));
@@ -565,7 +569,7 @@ fn usage(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
 fn tab_prompt(from: &str, request: u64, message: &str) -> String {
     let message = terminal_text(message);
     format!(
-        "[Message from the agent \"{from}\" received by AgentDeck]\n\n{message}\n\n\
+        "[Message from the agent \"{from}\" received by Holt]\n\n{message}\n\n\
 Answer by running in the shell: ask-agent --reply {request} \"your answer\"\n\
 (the answer only reaches \"{from}\" through that command; text written only here is not delivered. For long answers or ones with accents, \
 write them to a file and use: ask-agent --reply {request} --file <file>). The user follows the conversation in the Conversation tab."
@@ -584,7 +588,7 @@ fn wait_reply(core: &Core, rx: &crossbeam_channel::Receiver<Reply>, until: impl 
             Ok(reply) => return Some(reply),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                 if core.inner.state.shutdown.load(Ordering::SeqCst) {
-                    return Some(Reply::Failed("AgentDeck shutting down".into()));
+                    return Some(Reply::Failed("Holt shutting down".into()));
                 }
             }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return Some(Reply::Failed("question cancelled".into())),
@@ -603,13 +607,13 @@ fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request:
     inbox_push(core, &scoped(project, &asker.id()), request, target, text, failed);
     let prompt = match outcome {
         Reply::Answer(text) => format!(
-            "[Answer from the agent \"{target}\" to your question #{request}, received by AgentDeck]\n\n{}\n\n\
+            "[Answer from the agent \"{target}\" to your question #{request}, received by Holt]\n\n{}\n\n\
 Continue the task based on this answer. The user follows the conversation in the Conversation tab.",
             terminal_text(&text)
         ),
         Reply::Failed(text) => {
             core.feed(FeedEntry::new(FeedKind::Error, Some(target), Some(&asker.id()), text.clone()).in_project(project));
-            format!("[AgentDeck] Question #{request} to \"{target}\" ended without an answer: {}", terminal_text(&text))
+            format!("[Holt] Question #{request} to \"{target}\" ended without an answer: {}", terminal_text(&text))
         }
     };
     core.emit(CoreEvent::Deliver(Delivery {
@@ -929,7 +933,7 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
 
     caller.feed(core, FeedKind::Ask, from, &to, message.clone());
     let prompt = format!(
-        "[Message from the agent \"{from}\" received by AgentDeck]\n\n{message}\n\nAnswer the agent \"{from}\" directly. The user follows the conversation in the Conversation tab in real time."
+        "[Message from the agent \"{from}\" received by Holt]\n\n{message}\n\nAnswer the agent \"{from}\" directly. The user follows the conversation in the Conversation tab in real time."
     );
     let session_key = format!("{}->{}", caller.key(from), caller.key(&to));
     let result = {
@@ -1180,7 +1184,7 @@ mod tests {
     #[test]
     fn the_tab_prompt_names_the_request() {
         let p = tab_prompt("claude@dev", 7, "do\x1b[201~ x");
-        assert!(p.starts_with("[Message from the agent \"claude@dev\" received by AgentDeck]\n\ndo[201~ x\n\n"), "{p}");
+        assert!(p.starts_with("[Message from the agent \"claude@dev\" received by Holt]\n\ndo[201~ x\n\n"), "{p}");
         assert!(p.contains("ask-agent --reply 7 \"your answer\""), "{p}");
         assert!(p.contains("Answer by running in the shell: ask-agent --reply 7 "), "{p}");
         assert!(!p.contains('\x1b'));

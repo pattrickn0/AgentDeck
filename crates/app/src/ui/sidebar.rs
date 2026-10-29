@@ -9,9 +9,9 @@ use super::{clickable, galley_trunc, paint_splitter, place, section_label, segme
 use crate::deck::{Deck, TreeRow};
 use crate::icons::Icon;
 use crate::theme;
-use agentdeck_core::git::{EntryKind, GitEntry};
-use agentdeck_core::t;
-use agentdeck_core::Organization;
+use holt_core::git::{EntryKind, GitEntry};
+use holt_core::t;
+use holt_core::Organization;
 
 /// Height of an explorer row.
 const FILE_ROW_H: f32 = 20.0;

@@ -16,7 +16,7 @@ remains in [manual-tests.md](manual-tests.md); the Linux script is at the end he
 
 There was no Linux machine, WSL, or Docker on this machine, so verification was:
 
-1. **GitHub CI** (repository `pattrickn0/AgentDeck`), reading Ubuntu and Windows job logs via the
+1. **GitHub CI** (repository `pattrickn0/Holt`), reading Ubuntu and Windows job logs via the
    `/actions/jobs/<id>/logs` endpoint, plus the workflow runs API.
 2. **Code review** of everything that has platform-specific paths: `process.rs`, `paths.rs`, `agents.rs`, `git.rs`,
    `github.rs`, `workspace.rs`, `whisper.rs`, `download.rs`, `usage/*`, `theme.rs`, `terminal/*`, `ui/projects.rs`,
@@ -61,9 +61,9 @@ across all three jobs (Windows, Ubuntu, Fedora), including formatting.
 ### 2.3 Data folder in system-wide installation
 
 `AppPaths::detect()` always used the executable's directory for `data/`, `workspace/`, and `whisper/`. Copying the binary
-to `/usr/local/bin` (root-owned directory) caused the app to fail when opening the lock (`data/.agentdeck.lock` →
-permission denied). Now, on Unix, if the folder is not writable (`access(2)`), data goes to `~/.local/share/AgentDeck`
-(XDG standard). Portable folder and development repository continue as before, and `AGENTDECK_HOME` still takes
+to `/usr/local/bin` (root-owned directory) caused the app to fail when opening the lock (`data/.holt.lock` →
+permission denied). Now, on Unix, if the folder is not writable (`access(2)`), data goes to `~/.local/share/Holt`
+(XDG standard). Portable folder and development repository continue as before, and `HOLT_HOME` still takes
 precedence. Fix in `crates/core/src/paths.rs`, with a test under `#[cfg(unix)]`.
 
 ### 2.4 Reference to a non-existent script
@@ -82,7 +82,7 @@ this applies to the terminal and symbols).
 ### 2.6 Documentation and CI
 
 - `README.md` and `CONTRIBUTING.md`: dependencies corrected (no GTK3, which is unused), `xdg-utils`/portal, `libgomp`,
-  data folder, new repository URL (`AgentDeck`).
+  data folder, new repository URL (`Holt`).
 - `.github/workflows/ci.yml`: removed `libgtk-3-dev`; added a **`fedora`** job (`container: fedora:latest`) that
   installs README dependencies and runs `cargo build --workspace` and `cargo test --workspace`.
 
@@ -101,7 +101,7 @@ in source precedence. See [learnings/antigravity-token-in-secret-service.md](lea
 
 To verify: `secret-tool lookup service gemini username antigravity` (`libsecret-tools` package on Ubuntu, `libsecret`
 on Fedora) prints the JSON and prompts to unlock the keyring if locked. With a valid token, quota appears on the next
-poll (every 3 min, or 20 s after a failure). If it doesn't appear, run with `RUST_LOG=debug`: `agentdeck.log` records
+poll (every 3 min, or 20 s after a failure). If it doesn't appear, run with `RUST_LOG=debug`: `holt.log` records
 when the keyring did not return a token.
 
 ### 2.8 WSLg: open via X11 (t33)
@@ -132,10 +132,10 @@ See [learnings/wslg-forces-x11.md](learnings/wslg-forces-x11.md).
   (`ParkedGl::reopen`), so egui's textures survive. Checked with a scripted close/reopen; X11 and Windows still hide.
 - **Crash on every exit** (`SIGSEGV` in `wl_proxy_destroy`): `run_app` closes winit's Wayland connection before `App`
   is dropped, and egui-winit's clipboard and the window were dropped after it. `App::exiting` now drops them first.
-- **Generic icon, no app-menu entry**: Wayland ignores the window icon. The window now has app id `agentdeck`
-  (`WM_CLASS` on X11), and `cargo build --release` installs `agentdeck.desktop` (from `crates/app/assets/`, `Exec` =
+- **Generic icon, no app-menu entry**: Wayland ignores the window icon. The window now has app id `holt`
+  (`WM_CLASS` on X11), and `cargo build --release` installs `holt.desktop` (from `crates/app/assets/`, `Exec` =
   the built binary) and the icon under `~/.local/share` (`crates/app/build.rs`; not in CI, not when cross-compiling,
-  not with `AGENTDECK_NO_DESKTOP_ENTRY`). `scripts/install-desktop.sh` does it for another binary, or `--uninstall`s.
+  not with `HOLT_NO_DESKTOP_ENTRY`). `scripts/install-desktop.sh` does it for another binary, or `--uninstall`s.
 - **No terminal font**: openSUSE puts fonts straight in `/usr/share/fonts/truetype/`; those paths were added.
 
 See [learnings/wayland-close-destroys-the-window.md](learnings/wayland-close-destroys-the-window.md).
@@ -151,7 +151,7 @@ See [learnings/wayland-close-destroys-the-window.md](learnings/wayland-close-des
 | Window/keyboard | `libxkbcommon-dev` | `libxkbcommon-devel` | `libxkbcommon-devel` |
 | Rust | 1.89+ (`rustup`) | 1.89+ (`rustup`) | 1.89+ (`rustup`) |
 
-Without audio: `cargo build -p agentdeck --no-default-features` avoids ALSA (leaves audio and microphone disabled).
+Without audio: `cargo build -p holt --no-default-features` avoids ALSA (leaves audio and microphone disabled).
 
 Not needed: GTK3/GTK4 (`rfd` uses the portal), OpenSSL (`ureq` with rustls), X11/Wayland development headers (winit
 loads libraries at runtime). `libxkbcommon` is not required at link time, but it is what CI installs and what the
@@ -180,8 +180,8 @@ Agent CLIs: `npm install -g` of the same packages as Windows; Antigravity has it
 | Processes | own process group per child (`process_group(0)`) and `kill(-pid)` on tree; `cfg(unix)` tests in `process.rs` |
 | PTY/terminal | `portable-pty` + `alacritty_terminal`; `TERM=xterm-256color`, `COLORTERM=truecolor` |
 | Terminal tab | `$SHELL` or `/bin/bash`; no `.cmd` shims (Windows only) |
-| Tab environment | `PATH` with app binary directory prepended; `AGENTDECK_*` variables; no `PYTHONUTF8`/MSYS |
-| Single instance | file lock at `data/.agentdeck.lock` |
+| Tab environment | `PATH` with app binary directory prepended; `HOLT_*` variables; no `PYTHONUTF8`/MSYS |
+| Single instance | file lock at `data/.holt.lock` |
 | Git | `PATH` `git`, without shell, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, SSH in `BatchMode` |
 | GitHub | token via `git credential fill` and, if available, `gh auth token`; no disk persistence |
 | Agents | resolved via `which`/user directories; no `cmd.exe` |
@@ -223,7 +223,7 @@ test was `read_dir` (fixed here); the rest ran green on Ubuntu through `run 46`.
 ## 6. Manual test script (Ubuntu and Fedora)
 
 Run in a separate data folder to avoid affecting real configuration:
-`AGENTDECK_HOME=/tmp/agentdeck-test ./target/release/agentdeck`.
+`HOLT_HOME=/tmp/holt-test ./target/release/holt`.
 
 **Installation and launch**
 
@@ -231,7 +231,7 @@ Run in a separate data folder to avoid affecting real configuration:
 - [ ] App opens on X11 and Wayland (GNOME and KDE, if possible), with correct window size and DPI.
 - [ ] Terminal in the “Terminal” tab opens `$SHELL`, accepts accents and colors, and resizes without breaking line wraps.
 - [ ] Closing the app and reopening preserves projects, tabs, and sizes; opening a second instance in the same folder
-      warns that it is already in use; with a different `AGENTDECK_HOME`, opens both.
+      warns that it is already in use; with a different `HOLT_HOME`, opens both.
 
 **Agents and memory**
 
@@ -241,7 +241,7 @@ Run in a separate data folder to avoid affecting real configuration:
 - [ ] Create a task (`--task new ... --start`), inspect the worktree, submit with `--task done`, and read the report.
 - [ ] `ask-agent --learn` displays learnings; project `AGENTS.md` is updated only where it already existed.
 - [ ] Antigravity quota appears in the titlebar when `agy` is logged in; `secret-tool lookup service gemini
-      username antigravity` returns the JSON and, with `RUST_LOG=debug`, `agentdeck.log` reports no failure reading the keyring.
+      username antigravity` returns the JSON and, with `RUST_LOG=debug`, `holt.log` reports no failure reading the keyring.
 
 **Interface**
 
@@ -258,15 +258,15 @@ Run in a separate data folder to avoid affecting real configuration:
 
 **WSLg (from Windows, with app built in WSL)**
 
-- [ ] `./target/release/agentdeck` opens via X11 (log shows “WSLg detected”); window doesn't flicker or vanish, and
+- [ ] `./target/release/holt` opens via X11 (log shows “WSLg detected”); window doesn't flicker or vanish, and
       terminal accepts keyboard input.
 - [ ] Maximize, restore, drag, and resize; cursor appears and text is not clipped.
 - [ ] On a high-DPI display, note the scale (currently always 1, so UI is small) and what is missing.
-- [ ] `WINIT_UNIX_BACKEND=wayland ./target/release/agentdeck` reproduces the WSLg Wayland failure, for comparison.
+- [ ] `WINIT_UNIX_BACKEND=wayland ./target/release/holt` reproduces the WSLg Wayland failure, for comparison.
 
 **Wrap-up**
 
-- [ ] `data/agentdeck.log` and `data/crash.log` exist and have no repeated errors.
+- [ ] `data/holt.log` and `data/crash.log` exist and have no repeated errors.
 - [ ] On closing the app, no orphaned `whisper-cli` or agent processes remain (`ps -ef | grep -E "whisper|claude"`).
 
 ## 7. Maintenance

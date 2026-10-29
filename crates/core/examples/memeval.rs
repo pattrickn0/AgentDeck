@@ -1,10 +1,10 @@
 //! Memory ruler: measures what each way of delivering learnings would have got right in the merged tasks.
 //!
 //! ```text
-//! cargo run -p agentdeck-core --example memeval -- <repository> <tasks file> [options]
+//! cargo run -p holt-core --example memeval -- <repository> <tasks file> [options]
 //! ```
 //!
-//! The `<tasks file>` is the `data/tasks/<project>.json` of AgentDeck. Read-only: the program calls the installed
+//! The `<tasks file>` is the `data/tasks/<project>.json` of Holt. Read-only: the program calls the installed
 //! `git` and prints tables; nothing is written.
 //!
 //! For each case (a merged task, or a direct commit of `dev` with a big enough diff):
@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
 
-use agentdeck_core::learnings::{self, Learning};
+use holt_core::learnings::{self, Learning};
 
 /// Commits with more files than this (reformattings, renames) do not teach co-change.
 const MAX_COMMIT_FILES: usize = 15;
@@ -465,7 +465,7 @@ fn learnings_at(repo: &Repo, tree: &[(String, String, u64)], blobs: &mut HashMap
             .entry((path.clone(), sha.clone()))
             .or_insert_with(|| {
                 let raw = repo.bytes(&["cat-file", "blob", sha]).ok()?;
-                learnings::parse(path, &agentdeck_core::util::decode_text(&raw)).ok()
+                learnings::parse(path, &holt_core::util::decode_text(&raw)).ok()
             })
             .clone();
         out.extend(learning);
@@ -792,7 +792,7 @@ fn take_value(args: &mut Vec<String>, flag: &str) -> Option<String> {
 fn run(repo: &str, tasks: &str, min_files: usize, detail: bool) -> Result<(), String> {
     let repo = Repo { dir: PathBuf::from(repo) };
     let tasks_json = std::fs::read(tasks).map_err(|e| format!("{tasks}: {e}"))?;
-    let tasks_json = agentdeck_core::util::decode_text(&tasks_json);
+    let tasks_json = holt_core::util::decode_text(&tasks_json);
     let hist = parse_history(
         &repo.text(&["log", "--no-merges", "--name-only", "--format=%x01%H %ct", "HEAD"]).map_err(|e| format!("history: {e}"))?,
     );

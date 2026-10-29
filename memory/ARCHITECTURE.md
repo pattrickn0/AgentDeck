@@ -1,4 +1,4 @@
-# AgentDeck architecture
+# Holt architecture
 
 Overview and map of documents: [OVERVIEW.md](OVERVIEW.md). Practical guide and file map: [MAINTENANCE.md](MAINTENANCE.md).
 
@@ -20,12 +20,12 @@ Native desktop application in Rust (rewritten from the old Electron version, no 
 
 ```
 crates/
-├── core   (agentdeck-core)   backend without graphical interface
-├── app    (agentdeck)        winit + egui window and terminal emulator
-└── cli    (agentdeck-cli)    ask-agent binary
+├── core   (holt-core)   backend without graphical interface
+├── app    (holt)        winit + egui window and terminal emulator
+└── cli    (holt-cli)    ask-agent binary
 ```
 
-- **`app` ↔ `core` boundary:** the UI only speaks to the backend via `agentdeck_core::Core` methods (`crates/core/src/lib.rs`) and receives events through a channel (`events.rs`), waking the winit loop via `EventLoopProxy`. Blocking operations (git, GitHub, model listing, transcription, document read/write) always run in threads outside the UI.
+- **`app` ↔ `core` boundary:** the UI only speaks to the backend via `holt_core::Core` methods (`crates/core/src/lib.rs`) and receives events through a channel (`events.rs`), waking the winit loop via `EventLoopProxy`. Blocking operations (git, GitHub, model listing, transcription, document read/write) always run in threads outside the UI.
 - **Work with and without frame (`crates/app/src/app.rs`, `crates/app/src/deck/`):** work that does not depend on drawing (core events, thread replies, `ask-agent` deliveries to terminals, delayed answers, scheduled Enter, turn completion, and timers) runs before each frame with the window visible and, when the window is in the tray, minimized, or has 0×0 area (on Windows there is no `WM_PAINT`), in a background step in the event loop every ≥ 50 ms (`ControlFlow::WaitUntil`). Without a frame, the PTY is never resized blindly.
 - **Extension for RAG (`crates/core/src/context.rs`):** `ContextProvider` trait, queried by the headless runner before sending the prompt.
 
@@ -37,10 +37,10 @@ crates/
 
 Each interactive tab (and headless execution) receives a sanitized environment:
 
-- **Injected:** `AGENTDECK_PORT` (TCP port on `127.0.0.1`), `AGENTDECK_TOKEN` (128-bit token **exclusive to the tab or execution**), `AGENTDECK_AGENT` (instance id, e.g. `claude@dev`), `AGENTDECK_ROLE` (when there is a role), `AGENTDECK_DEPTH` (delegation depth), `PATH` (with executable folder up front), `TERM=xterm-256color`, `COLORTERM=truecolor`, and on Windows, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `MSYS_NO_PATHCONV=1`, and `MSYS2_ARG_CONV_EXCL=*` (prevents Git Bash from converting `/command` into a path).
-- **Filtered:** any `AGENTDECK_*` inherited from the external environment (except `AGENTDECK_ASK_WAIT`, a user configuration), Claude nested session variables (`CLAUDECODE`, `CLAUDE_CODE_*`), `ELECTRON_RUN_AS_NODE`, and `OPENCODE_CONFIG_CONTENT` (inserted later only for the OpenCode tab it belongs to).
+- **Injected:** `HOLT_PORT` (TCP port on `127.0.0.1`), `HOLT_TOKEN` (128-bit token **exclusive to the tab or execution**), `HOLT_AGENT` (instance id, e.g. `claude@dev`), `HOLT_ROLE` (when there is a role), `HOLT_DEPTH` (delegation depth), `PATH` (with executable folder up front), `TERM=xterm-256color`, `COLORTERM=truecolor`, and on Windows, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `MSYS_NO_PATHCONV=1`, and `MSYS2_ARG_CONV_EXCL=*` (prevents Git Bash from converting `/command` into a path).
+- **Filtered:** any `HOLT_*` inherited from the external environment (except `HOLT_ASK_WAIT`, a user configuration), Claude nested session variables (`CLAUDECODE`, `CLAUDE_CODE_*`), `ELECTRON_RUN_AS_NODE`, and `OPENCODE_CONFIG_CONTENT` (inserted later only for the OpenCode tab it belongs to).
 
-### AgentDeck instructions and folder trust (`agents.rs`, `trust.rs`, `workspace.rs`)
+### Holt instructions and folder trust (`agents.rs`, `trust.rs`, `workspace.rs`)
 
 Bridge instructions (use of `ask-agent`, prohibition of CLI-internal subagents without user request, `--models`/`--team`/`--learn`/`--outline`, and `memory/learnings/`) arrive through each CLI's dedicated channel, without depending on a prior `AGENTS.md`:
 
@@ -48,25 +48,25 @@ Bridge instructions (use of `ask-agent`, prohibition of CLI-internal subagents w
 | :-- | :-- |
 | Claude | `--append-system-prompt <text>` (includes name and role), `--allowedTools "Bash(ask-agent:*)"`, and `--settings data/hooks/claude-settings.json` |
 | Codex | `-c developer_instructions=<TOML>` (or raw text in `.cmd` shim) and, outside shims, `-c notify=["ask-agent","--signal","idle"]` |
-| OpenCode | `--standalone` + `OPENCODE_CONFIG_CONTENT={"model":…,"instructions":["data/agentdeck-instructions.md"]}` (`models.rs`) |
-| Aider | `--read data/agentdeck-instructions.md` |
+| OpenCode | `--standalone` + `OPENCODE_CONFIG_CONTENT={"model":…,"instructions":["data/holt-instructions.md"]}` (`models.rs`) |
+| Aider | `--read data/holt-instructions.md` |
 | Open Interpreter | `--custom_instructions <text>` |
 | Antigravity | `--add-dir data/agy/<instance>` (where the app writes an `AGENTS.md` with instance name and role, combined with project's by `agy`) |
-| Goose, Copilot | read only the folder's `AGENTS.md`: if missing, the app creates one with only the `<!-- agentdeck:start/end -->` block and notifies in Conversation; if already present, updates only the block |
+| Goose, Copilot | read only the folder's `AGENTS.md`: if missing, the app creates one with only the `<!-- holt:start/end -->` block and notifies in Conversation; if already present, updates only the block |
 | Amazon Q, Terminal | no instruction channel |
 
-The text in a shared file (`data/agentdeck-instructions.md` and `AGENTS.md` block) does not list agents installed on the machine, so as not to dirty `git status` across computers.
+The text in a shared file (`data/holt-instructions.md` and `AGENTS.md` block) does not list agents installed on the machine, so as not to dirty `git status` across computers.
 
 **Folder trust (`crates/core/src/trust.rs`):** before opening a tab, the app registers trust for the working folder and project folder so background tabs do not stall on *"Do you trust this folder?"*: in Claude in `~/.claude.json` (if no parent folder is already accepted), in Codex via `-c projects={…}` on the command line, and in Antigravity in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json` (exact path, removed alongside task worktree). User home and drive root are never added.
 
 ### Token identity and project isolation (`bridge.rs`, `instances.rs`)
 
-- **Identity:** the bridge identifies callers via the `x-agentdeck-token` header (token per open instance or headless execution). The JSON `"from"` field is ignored for agent tokens; only the app's master token can supply `"from"` and `"project"`.
+- **Identity:** the bridge identifies callers via the `x-holt-token` header (token per open instance or headless execution). The JSON `"from"` field is ignored for agent tokens; only the app's master token can supply `"from"` and `"project"`.
 - **Project scope:** the token carries the project (`p` + 8 hex). Internally, pending questions, per-pair queues, activity, and inbox use the `<project>#<id>` key, allowing two projects to each have their own `claude@dev` without crossing messages or cycles. For agents and users, ids appear without the prefix.
 
 ### Bridge HTTP contract (`crates/core/src/bridge.rs`)
 
-Every request requires `x-agentdeck-token` (constant-time comparison) and `Host: 127.0.0.1:<port>` or `localhost:<port>` (other value or missing → **403**). Global limits: up to **128** concurrent requests (**503** above; HTTP 202 questions occupy a slot until delayed reply completes), individual body up to **16 MB** (**413** above), and sum of bodies reading/in flight up to **64 MB** (**503** above).
+Every request requires `x-holt-token` (constant-time comparison) and `Host: 127.0.0.1:<port>` or `localhost:<port>` (other value or missing → **403**). Global limits: up to **128** concurrent requests (**503** above; HTTP 202 questions occupy a slot until delayed reply completes), individual body up to **16 MB** (**413** above), and sum of bodies reading/in flight up to **64 MB** (**503** above).
 
 | Route | Body / parameters | Response and HTTP codes |
 | :-- | :-- | :-- |
@@ -88,11 +88,11 @@ Every request requires `x-agentdeck-token` (constant-time comparison) and `Host:
 | `POST /tasks/<id>/done` | `{"report"}` | **200** `{"task"}` moving to `review` (task owner or master token only; valid in `running` or `validating` with new commits); **400** empty; **403** another agent; **409** invalid state |
 | `POST /tasks/<id>/return`, `/reject` | `{"feedback"}` | **200** `{"task"}` returning from `review` (`return`) or rejecting from `validating` (`reject`) to `running`; **400** empty; **403** task agent; **409** invalid state |
 
-**Exit codes of `ask-agent` (`crates/cli/src/bin/ask-agent.rs`):** `0` success, `1` bridge/agent error, `2` argument error or environment outside AgentDeck (`--signal` always exits 0 to avoid breaking hooks).
+**Exit codes of `ask-agent` (`crates/cli/src/bin/ask-agent.rs`):** `0` success, `1` bridge/agent error, `2` argument error or environment outside Holt (`--signal` always exits 0 to avoid breaking hooks).
 
 ### Single instance and system tray (`activation.rs`, `app/src/tray.rs`)
 
-- **Second launch:** the core holds the `data/.agentdeck.lock` lock and writes port + master token to `data/.agentdeck.bridge`. A second launch detects the occupied lock, calls `AllowSetForegroundWindow` (on Windows) + `POST /activate`, and exits; the running instance restores and focuses the window.
+- **Second launch:** the core holds the `data/.holt.lock` lock and writes port + master token to `data/.holt.bridge`. A second launch detects the occupied lock, calls `AllowSetForegroundWindow` (on Windows) + `POST /activate`, and exits; the running instance restores and focuses the window.
 - **System tray:** closing the window (×, `Alt+F4`, or title bar button) hides the window to the tray (`tray-icon` on Windows, `ksni`/StatusNotifierItem on Linux), keeping agents and bridge active in the background; without a tray (Linux without `StatusNotifierWatcher`), the × quits instead. **Exit** in the tray menu (or the × without a tray) closes the app, prompting for confirmation in the window if there is an unsaved document or an agent in turn.
 
 ---
@@ -113,7 +113,7 @@ Every request requires `x-agentdeck-token` (constant-time comparison) and `Host:
 
 1. **Resolution and queue:** `POST /ask` resolves destination in caller's project (or creates instance and opens tab in background, up to 8 automatic tabs). Calls for same `from->to` pair follow a FIFO queue; in headless, sessions for the pair are resumed in Claude (`--session-id`/`--resume`) and Antigravity (`--conversation`).
 2. **Cycles and depth:** if target already waits directly or indirectly for caller, `/ask` rejects with **409**. Pending question chain between tabs is rejected starting at depth 2.
-3. **Synchronous or delayed reply (HTTP 202):** `ask-agent` waits up to `AGENTDECK_ASK_WAIT` (default 90 s). If `ask-agent --reply <n>` arrives in time, it outputs to stdout with HTTP 200 and the client confirms receipt in `POST /inbox/delivered` (since `tiny_http` does not detect if client died before reading 200). If exceeding 90 s, `/ask` returns **202** freeing `ask-agent` (question stops blocking cycles, but continues counting toward depth) and, when destination replies (within 10 min), the reply is typed into caller's terminal. `shell` tabs and headless executions always wait up to 10 min.
+3. **Synchronous or delayed reply (HTTP 202):** `ask-agent` waits up to `HOLT_ASK_WAIT` (default 90 s). If `ask-agent --reply <n>` arrives in time, it outputs to stdout with HTTP 200 and the client confirms receipt in `POST /inbox/delivered` (since `tiny_http` does not detect if client died before reading 200). If exceeding 90 s, `/ask` returns **202** freeing `ask-agent` (question stops blocking cycles, but continues counting toward depth) and, when destination replies (within 10 min), the reply is typed into caller's terminal. `shell` tabs and headless executions always wait up to 10 min.
 4. **Inbox (`inbox.rs`):** each reply (up to 20 per instance) stays as "undelivered" until `/inbox/delivered` or typing in tab. If caller tab closed or died, app notifies in Conversation and reply remains available in `ask-agent --inbox`.
 
 ### When to type in the terminal (`crates/core/src/delivery.rs`, `crates/app/src/deck/`)
@@ -139,7 +139,7 @@ Draft ──start──▶ Running ──done──▶ Review ──merge──�
   └─ start error ▶ Failed ──start again──▶ Running
 ```
 
-- **Storage and worktrees (`tasks/store.rs`, `tasks/git_ops.rs`):** saved in `data/tasks/<project>.json` (outside repo; removing and re-adding folder preserves project id). Worktrees live in `<repo root>/.agentdeck/worktrees/<id>` — inside repository so workspace-confined agents (such as Antigravity) have access — and `/.agentdeck/` is recorded in `<common git>/info/exclude` (never in `.gitignore`).
+- **Storage and worktrees (`tasks/store.rs`, `tasks/git_ops.rs`):** saved in `data/tasks/<project>.json` (outside repo; removing and re-adding folder preserves project id). Worktrees live in `<repo root>/.holt/worktrees/<id>` — inside repository so workspace-confined agents (such as Antigravity) have access — and `/.holt/` is recorded in `<common git>/info/exclude` (never in `.gitignore`).
 - **Start and delivery (`tasks/lifecycle.rs`, `tasks/text.rs`):** creates worktree and branch from base, registers `<model>@<id>` subordinate to creator, and delivers brief with memory and rules. When the tab needs to be opened, writes brief (or feedback) to `data/tasks/<project>-<id>-brief.md` (or `-feedback.md`) and passes a short ASCII line as initial CLI argument (`claude "<line>"`, `agy -i "<line>"`, `opencode --prompt "<line>"`), avoiding loss of text while TUI initializes.
 - **Scope and queue (`scope.rs`, `tasks/lifecycle.rs`):** scope lists relative paths (no globs); two scopes collide when one equals or is a path-component prefix of the other (`memory/` and `Cargo.lock` reserve nothing). If colliding with task in `Running`, `Review`, or ahead in queue, enters `Queued` without creating worktree or tab. When blocking task is merged, discarded, or fails to start, queue advances automatically, creating worktree from current base head (`Validating` does not hold the queue). On `done`, files touched outside scope produce a warning in review.
 - **Merge (`tasks/merge.rs`, `tasks/stash.rs`):** requires main repo on base branch and clean (ignoring and restoring automatic `AGENTS.md` block) and clean worktree. Performs `git merge --no-ff`, aligns task branch (`git merge --ff-only`), and transitions to `Validating` keeping tab, worktree, and branch alive. In UI, blockages offer one-click resolution — including stashing local changes in a `git stash`, merging, and reapplying by SHA hash after pre-verifying with `git merge-tree --write-tree`.

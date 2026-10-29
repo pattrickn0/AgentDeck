@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use agentdeck_core::git::{extract_hunk_patch, ConflictChoice, EntryKind, GitError, RepoState};
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, StartOptions};
+use holt_core::git::{extract_hunk_patch, ConflictChoice, EntryKind, GitError, RepoState};
+use holt_core::paths::AppPaths;
+use holt_core::{Config, Core, StartOptions};
 
 /// Folder of the isolated global configuration (created once for the test process).
 fn isolated_config() -> &'static Path {
@@ -79,7 +79,7 @@ macro_rules! need_git {
     };
 }
 
-fn paths(st: &agentdeck_core::git::GitStatus) -> Vec<(String, char, char, EntryKind)> {
+fn paths(st: &holt_core::git::GitStatus) -> Vec<(String, char, char, EntryKind)> {
     st.entries.iter().map(|e| (e.path.clone(), e.index, e.worktree, e.kind)).collect()
 }
 
@@ -419,7 +419,7 @@ fn gpgsign_without_agent_fails_fast_with_explanation() {
     // Enables `commit.gpgsign` pointing at a nonexistent program/without an agent: it must fail fast
     // (< 5 s, never waiting for the 120 s COMMIT_TIMEOUT) and guide the user without turning the option off.
     assert!(git(ws, &["config", "commit.gpgsign", "true"]).status.success());
-    assert!(git(ws, &["config", "gpg.program", "gpg-missing-agentdeck"]).status.success());
+    assert!(git(ws, &["config", "gpg.program", "gpg-missing-holt"]).status.success());
     let t0 = std::time::Instant::now();
     let err = core.git_commit("signed", false).unwrap_err();
     assert!(t0.elapsed() < std::time::Duration::from_secs(10), "took {:?}", t0.elapsed());
@@ -481,8 +481,8 @@ fn conflict_variants_diff_cc_stash_pop_and_rebase_continue() {
 
     // The diff of a file in conflict (`diff --cc`, `@@@`) has line numbers and no crash.
     let d = core.git_diff(&st.entries[0], false).expect("diff --cc");
-    assert!(d.lines.iter().any(|l| l.kind == agentdeck_core::git::DiffKind::Hunk && l.text.starts_with("@@@")));
-    assert!(d.lines.iter().any(|l| l.kind == agentdeck_core::git::DiffKind::Add && l.text.contains("FEAT")));
+    assert!(d.lines.iter().any(|l| l.kind == holt_core::git::DiffKind::Hunk && l.text.starts_with("@@@")));
+    assert!(d.lines.iter().any(|l| l.kind == holt_core::git::DiffKind::Add && l.text.contains("FEAT")));
     assert!(extract_hunk_patch(&d, 0).is_none(), "combined diff does not become a hunk patch");
 
     // a.txt: "both"; c.txt: "theirs" (whole file); b.txt (modify/delete): "theirs" = delete.

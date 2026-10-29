@@ -1,12 +1,12 @@
-# AgentDeck: overview
+# Holt: overview
 
 Starting point of the documentation, for humans and for AI agents working on the project. It explains
-**how AgentDeck works under the hood** (the "environment" where agents run), **what you can do**
+**how Holt works under the hood** (the "environment" where agents run), **what you can do**
 with it, and **which rules each document defines**. Technical details are in the other files in this folder.
 
 | Document | Read when |
 | :-- | :-- |
-| [AGENTDECK.md](AGENTDECK.md) | you want to know where the product is headed, principles, and the order of what comes next |
+| [HOLT.md](HOLT.md) | you want to know where the product is headed, principles, and the order of what comes next |
 | [OVERVIEW.md](OVERVIEW.md) (this file) | you want the general map and what can be done in the app |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | you are going to work on the bridge, tabs, instances, tasks, or the inter-agent protocol |
 | [MAINTENANCE.md](MAINTENANCE.md) | you are going to compile, test, find a file, or follow a recipe (e.g., new agent) |
@@ -18,13 +18,13 @@ with it, and **which rules each document defines**. Technical details are in the
 
 ---
 
-## 1. Environment: how AgentDeck works
+## 1. Environment: how Holt works
 
 ### The app
 
 Native desktop terminal in Rust (winit + egui). There are two executables, which must remain **in the same folder**:
 
-- `agentdeck` (crate `app`): the window, the terminal tabs, and the right sidebar (tasks desk, integrated Conversation,
+- `holt` (crate `app`): the window, the terminal tabs, and the right sidebar (tasks desk, integrated Conversation,
   Git, and GitHub);
 - `ask-agent` (crate `cli`): the command agents use to talk to each other and operate tasks.
 
@@ -36,13 +36,13 @@ The "backend" is the `core` crate, with no UI. The UI only talks to it via `Core
 | Folder | Contents |
 | :-- | :-- |
 | `workspace/` | the legacy workspace, from the time when there was a global folder. Today each **project** has its own folder (the `cwd` of its tabs); `workspace/` only serves as a migration target from an old config |
-| `data/` | runtime data: attachments (`attachments/`), prompts (`prompts/`), hooks (`hooks/`), instructions (`agentdeck-instructions.md`, `agy/<instance>/AGENTS.md`), tasks (`tasks/<project>.json` and `*-brief.md`/`-feedback.md`), sessions, `usage.json`, `crash.log`, `agentdeck.log` (rotates above 2 MB), lock `.agentdeck.lock` and `.agentdeck.bridge` |
+| `data/` | runtime data: attachments (`attachments/`), prompts (`prompts/`), hooks (`hooks/`), instructions (`holt-instructions.md`, `agy/<instance>/AGENTS.md`), tasks (`tasks/<project>.json` and `*-brief.md`/`-feedback.md`), sessions, `usage.json`, `crash.log`, `holt.log` (rotates above 2 MB), lock `.holt.lock` and `.holt.bridge` |
 | `whisper/` | engine and models for voice dictation (whisper.cpp) |
-| `%APPDATA%\AgentDeck\config.json` | configuration (on first run, copied from `%APPDATA%\CommandDeck\config.json` if it exists). With `AGENTDECK_HOME`, everything stays inside that folder |
+| `%APPDATA%\Holt\config.json` | configuration (on first run, copied from `%APPDATA%\AgentDeck\config.json` if it exists). With `HOLT_HOME`, everything stays inside that folder |
 
 **One window per data folder:** opening the app again with the same `data/` brings the live instance back (`POST /activate`)
 and exits silently; the window × hides to the system tray (or quits, without a tray) and exit is handled by the icon menu. For another
-isolated instance, use `AGENTDECK_HOME`.
+isolated instance, use `HOLT_HOME`.
 
 ### Tabs are instances
 
@@ -63,15 +63,15 @@ The name is the address used by `ask-agent`. Tabs return with the same name and 
 
 | Variable | What it is |
 | :-- | :-- |
-| `AGENTDECK_AGENT` | instance name (`claude@dev`) |
-| `AGENTDECK_ROLE` | role, when present |
-| `AGENTDECK_PORT` | local HTTP bridge port (only on `127.0.0.1`) |
-| `AGENTDECK_TOKEN` | **tab-specific** token: how the bridge knows who is asking and from which project |
-| `AGENTDECK_DEPTH` | conversation depth (used in headless mode) |
-| `AGENTDECK_ASK_WAIT` | how many seconds `ask-agent` waits for a response (default 90; `0` = until completion). User-configurable |
+| `HOLT_AGENT` | instance name (`claude@dev`) |
+| `HOLT_ROLE` | role, when present |
+| `HOLT_PORT` | local HTTP bridge port (only on `127.0.0.1`) |
+| `HOLT_TOKEN` | **tab-specific** token: how the bridge knows who is asking and from which project |
+| `HOLT_DEPTH` | conversation depth (used in headless mode) |
+| `HOLT_ASK_WAIT` | how many seconds `ask-agent` waits for a response (default 90; `0` = until completion). User-configurable |
 | `PATH` | executable directory comes first, so `ask-agent` is always found |
 
-No other `AGENTDECK_*` variable from the app environment is passed to agents. AgentDeck instructions (with the rule
+No other `HOLT_*` variable from the app environment is passed to agents. Holt instructions (with the rule
 not to use CLI-internal subagents) arrive through each CLI's dedicated channel, without depending on a user's `AGENTS.md`
 (only Goose and Copilot create `AGENTS.md` if the folder does not have one), and folder trust is registered before opening the
 tab. Details in [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -93,7 +93,7 @@ Everything appears in the **integrated Conversation**, and the user can interven
 
 | Area | What it has |
 | :-- | :-- |
-| Title bar | custom (no system title bar): ☰ (settings), collapse sidebar, brand and "AgentDeck", `/ <project>` and branch chip (with the sidebar collapsed, the compact **Agents \| Documents toggle** appears right after); on the right, **usage for each agent with quota** (logo + 5h session and weekly bars; amber starting at 80%, red at 100%; hovering opens the **usage panel** with groups and renewal times) and minimize/maximize/close |
+| Title bar | custom (no system title bar): ☰ (settings), collapse sidebar, brand and "Holt", `/ <project>` and branch chip (with the sidebar collapsed, the compact **Agents \| Documents toggle** appears right after); on the right, **usage for each agent with quota** (logo + 5h session and weekly bars; amber starting at 80%, red at 100%; hovering opens the **usage panel** with groups and renewal times) and minimize/maximize/close |
 | Left sidebar | the **Agents \| Documents toggle** at the top, **PROJECTS** (each project with its agents in a tree and model on the right; the active one has "+ New agent"; "+" in the header opens a folder as a project; right-click renames, opens folder, or removes), **ORGANIZATION** (`Tabs \| Split \| Highlight`), and **FILES**, the explorer (with Git status letter, refresh, and collapse all); collapses with `Ctrl+B` |
 | Center | two views (`Ctrl+Shift+D`): **Agents** (terminals organized in Tabs, Split, or Highlight; in each pane header are tabs, `⋮⋮` handle, microphone, attachment, and "+") and **Documents** (diff, editable files, and markdown occupying the entire center) |
 | Right sidebar | **fixed, does not collapse**; width adjustable via border. Four tabs at the top: **Tasks** (the first; badge counts review + validation), **Conversation** (read-only: the feed of inter-agent messages, with unread counter), **Git**, and **GitHub** (with open PR count) |
@@ -114,7 +114,7 @@ Everything appears in the **integrated Conversation**, and the user can interven
   (`Ctrl+S` preserving CRLF/LF and BOM, with confirmation on close without saving and notification if disk changes externally); up to 1 MB
   open read-only. Diffs feature a file list on the left, highlighting, search, and copy of code only; `.md`, Brief, and
   Report open formatted.
-- **Tasks tab:** each task runs in an agent with its own branch and worktree (`.agentdeck/worktrees/tN`). Lifecycle:
+- **Tasks tab:** each task runs in an agent with its own branch and worktree (`.holt/worktrees/tN`). Lifecycle:
   *Running* → (`--task done`) *In review* → (merge) *Waiting for validation* (tab, worktree, and branch remain alive
   to test the app) → (validate) *Completed*; *Reject* returns it to the same agent. The **+ New** form takes title,
   brief, **level** (*Simple*, *Medium*, *Complex*), agent/model (recommended by capability + quota headroom), effort,
@@ -202,7 +202,7 @@ Each document covers a specific topic. Changed the topic? Update the document **
 | File | Purpose | Rules it defines / how to maintain |
 | :-- | :-- | :-- |
 | `memory/OVERVIEW.md` | overview and this map | update when a new document, folder, command, or limit is introduced |
-| `memory/AGENTDECK.md` | product vision and direction | the orchestrator decides the order of what comes next; update when direction changes |
+| `memory/HOLT.md` | product vision and direction | the orchestrator decides the order of what comes next; update when direction changes |
 | `memory/learnings/` | long-term memory: one file per pitfall, decision, or convention that is not obvious from the code | format and when to create in `learnings/README.md`; `touches` must exist (verified by test `every_learning_in_the_repository_is_valid`) |
 | `memory/ARCHITECTURE.md` | stack, crates, bridge protocol, instances, tab delivery, tasks, and memory | **contract**: routes, HTTP codes, environment variables, and bridge limits. Changed the protocol? Update here |
 | `memory/MAINTENANCE.md` | practical guide: Rust, commands, code map, recipes | code map and recipes (e.g., new agent: prompt never raw on command line, hooks if CLI supports them) |
@@ -213,7 +213,7 @@ Each document covers a specific topic. Changed the topic? Update the document **
 | `memory/LINUX.md` | dependencies, verified items, and manual script for Linux (Ubuntu and Fedora) | update in the same commit that changes a system dependency, font path, data folder, or GPU support; Linux failures become items in `backlog.md` |
 | `README.md` (root) | overview, how to build and run, `ask-agent` examples | stays in the root because GitHub displays it on the repository page |
 | `CONTRIBUTING.md` (root) | how to contribute and **project principles** | run `cargo fmt`, `clippy -D warnings`, and `cargo test` before PR; privacy; UI never hangs; texts in pt-BR. Stays in the root because GitHub displays it when opening PRs |
-| `AGENTS.md` (root) and `workspace/AGENTS.md` | instructions read by agent CLIs | **generated by the app**: block between `<!-- agentdeck:start -->` and `<!-- agentdeck:end -->` is rewritten on each start; edit only outside it. Located in working folder root because CLIs look for them there |
+| `AGENTS.md` (root) and `workspace/AGENTS.md` | instructions read by agent CLIs | **generated by the app**: block between `<!-- holt:start -->` and `<!-- holt:end -->` is rewritten on each start; edit only outside it. Located in working folder root because CLIs look for them there |
 | `workspace/README.md` | what the `workspace/` folder is (legacy workspace and app's `AGENTS.md`) | isolation: agents work in the project or task folder, not in app files |
 | `data/README.md` | what goes into `data/` (attachments, prompts, tasks, hooks, `crash.log`) | privacy: audio deleted after transcription, retention of only recent sessions, nothing versioned |
 | `whisper/README.md`, `whisper/models/README.md` | engine and models for dictation | located next to the binaries and models they describe |

@@ -1,6 +1,6 @@
 ---
 title: The close button hides to system tray and a second launch activates the running instance
-summary: Quitting is done via the tray menu; the second instance reads the bridge in data/.agentdeck.bridge and sends POST /activate with the master token.
+summary: Quitting is done via the tray menu; the second instance reads the bridge in data/.holt.bridge and sends POST /activate with the master token.
 touches: [crates/app/src/app.rs, crates/app/src/tray.rs, crates/core/src/activation.rs, crates/core/src/bridge.rs]
 ---
 The window's × (`CloseRequested`, Alt+F4, and the drawn × on the titlebar) **does not quit**: it hides to the system tray
@@ -16,7 +16,7 @@ invisible with no way back, and minimizing (the old behavior) left no way to qui
 other exit (`tray::close_action`).
 
 A second launch no longer fails with "another window is already using the folder": `main` calls `activation::activate_running`,
-which only acts if the lock `data/.agentdeck.lock` is held by another process, reads `data/.agentdeck.bridge` (port and master
+which only acts if the lock `data/.holt.lock` is held by another process, reads `data/.holt.bridge` (port and master
 token, written after the bridge is up), and sends `POST /activate`. The file alone proves nothing: whoever acquires the lock
 deletes the file left by a crash, and an instance still starting up (lock held, file absent) is awaited for up to 6 s.
 On Wayland hiding is impossible and the window is destroyed instead (see

@@ -1,6 +1,6 @@
 //! Folder trust. Claude, Codex and Antigravity ask "Do you trust this folder?" the first time they open
 //! in a folder, and a tab opened in the background (by `ask-agent` or by a task) hangs on the question, without
-//! anyone seeing it. Opening the folder as a project in AgentDeck is already the user's decision, so the app records trust
+//! anyone seeing it. Opening the folder as a project in Holt is already the user's decision, so the app records trust
 //! before opening the CLI (verified on 2026-10-25 with Claude Code 2.1.310, Codex 0.164.0 and `agy` 1.4.7):
 //!
 //! - **Claude:** `projects["C:/folder"].hasTrustDialogAccepted` in `~/.claude.json`; applies to subfolders (a task's
@@ -199,7 +199,7 @@ fn read_json(file: &Path) -> std::io::Result<Option<Value>> {
 /// Writes to a temporary file alongside and renames: the CLI never reads a half-written file.
 fn write_json(file: &Path, value: &Value) -> std::io::Result<()> {
     let text = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
-    let tmp = file.with_extension(format!("agentdeck-{}.tmp", std::process::id()));
+    let tmp = file.with_extension(format!("holt-{}.tmp", std::process::id()));
     std::fs::write(&tmp, text)?;
     std::fs::rename(&tmp, file).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
@@ -226,11 +226,8 @@ mod tests {
 
     #[test]
     fn codex_gets_the_trust_on_the_command_line() {
-        let args = codex_args(&[Path::new("/p/project/.agentdeck/worktrees/t1"), Path::new("/p/project")]);
-        assert_eq!(
-            args,
-            ["-c", "projects={'/p/project/.agentdeck/worktrees/t1'={trust_level='trusted'},'/p/project'={trust_level='trusted'}}"]
-        );
+        let args = codex_args(&[Path::new("/p/project/.holt/worktrees/t1"), Path::new("/p/project")]);
+        assert_eq!(args, ["-c", "projects={'/p/project/.holt/worktrees/t1'={trust_level='trusted'},'/p/project'={trust_level='trusted'}}"]);
         assert!(codex_args(&[Path::new("/p/o'brien")]).is_empty(), "single quotes do not fit in string literal");
     }
 
@@ -253,7 +250,7 @@ mod tests {
         std::fs::write(&file, r#"{"numStartups": 3, "projects": {"/p/project": {"hasTrustDialogAccepted": true, "x": 1}}}"#).unwrap();
         // Worktree inside project inherits: file does not change.
         let before = std::fs::read_to_string(&file).unwrap();
-        trust_claude(&file, Path::new("/p/project/.agentdeck/worktrees/t1")).unwrap();
+        trust_claude(&file, Path::new("/p/project/.holt/worktrees/t1")).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
 
         trust_claude(&file, Path::new("/p/new")).unwrap();
@@ -312,7 +309,7 @@ mod tests {
         assert_eq!(agy_key(Path::new("C:/Users/you/project/")), r"C:\Users\you\project");
         assert!(claude_trusted(
             serde_json::json!({"c:/users/you/project": {"hasTrustDialogAccepted": true}}).as_object().unwrap(),
-            Path::new(r"C:\Users\you\project\.agentdeck\worktrees\t3")
+            Path::new(r"C:\Users\you\project\.holt\worktrees\t3")
         ));
     }
 }

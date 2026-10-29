@@ -7,11 +7,11 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use agentdeck_core::git::{
+use holt_core::git::{
     extract_hunk_patch, ConflictBlock, ConflictChoice, DiffKind, DiffLine, EntryKind, GitBranch, GitCommit, GitCommitDetail,
     GitConflictFile, GitDiff, GitEntry, GitError, GitStash, GitStatus, RepoState,
 };
-use agentdeck_core::{t, Core};
+use holt_core::{t, Core};
 
 use crate::deck::{Deck, RightView, UiMsg};
 
@@ -811,12 +811,12 @@ impl Deck {
     }
 }
 
-/// DEBUG ONLY (`AGENTDECK_DEBUG_UI=git-demo`): fake status for screenshots.
+/// DEBUG ONLY (`HOLT_DEBUG_UI=git-demo`): fake status for screenshots.
 pub fn demo_status() -> GitStatus {
     let e =
         |path: &str, index: char, worktree: char, kind: EntryKind| GitEntry { path: path.into(), orig_path: None, index, worktree, kind };
     GitStatus {
-        root: std::path::PathBuf::from("/projetos/agentdeck"),
+        root: std::path::PathBuf::from("/projetos/holt"),
         prefix: String::new(),
         branch: Some("feat/barra-direita".into()),
         head: Some("b1457ef".into()),
@@ -857,7 +857,7 @@ pub fn demo_diff() -> GitDiff {
     }
 }
 
-/// DEBUG ONLY: diff with two hunks (`AGENTDECK_DEBUG_UI=git-hunks`).
+/// DEBUG ONLY: diff with two hunks (`HOLT_DEBUG_UI=git-hunks`).
 pub fn demo_hunks_diff() -> GitDiff {
     let mut d = demo_diff();
     let l = |kind, old, new, text: &str| DiffLine { kind, old, new, text: text.into() };
@@ -882,7 +882,7 @@ pub fn demo_branches() -> Vec<GitBranch> {
     ]
 }
 
-/// DEBUG ONLY: fake history (`AGENTDECK_DEBUG_UI=git-log`).
+/// DEBUG ONLY: fake history (`HOLT_DEBUG_UI=git-log`).
 pub fn demo_log() -> Vec<GitCommit> {
     let c = |h: &str, author: &str, date: &str, subject: &str| GitCommit {
         hash: format!("{h}000000000000000000000000000000000"),
@@ -901,13 +901,13 @@ pub fn demo_log() -> Vec<GitCommit> {
     ]
 }
 
-/// DEBUG ONLY: detail of a commit (`AGENTDECK_DEBUG_UI=git-commit`).
+/// DEBUG ONLY: detail of a commit (`HOLT_DEBUG_UI=git-commit`).
 pub fn demo_commit_detail() -> GitCommitDetail {
     GitCommitDetail {
         hash: "61621aa000000000000000000000000000000000".into(),
         short_hash: "61621aa".into(),
         author: "Ana".into(),
-        email: "ana@agentdeck.dev".into(),
+        email: "ana@holt.dev".into(),
         date: "12 min ago".into(),
         message: "fix(terminal): synchronized update deadline\n\nReleases the held output after 150 ms when the end of the block is lost."
             .into(),
@@ -916,7 +916,7 @@ pub fn demo_commit_detail() -> GitCommitDetail {
     }
 }
 
-/// DEBUG ONLY: fake stashes (`AGENTDECK_DEBUG_UI=git-stash`).
+/// DEBUG ONLY: fake stashes (`HOLT_DEBUG_UI=git-stash`).
 pub fn demo_stashes() -> Vec<GitStash> {
     vec![
         GitStash { index: 0, date: "25 min ago".into(), message: "On feat/git: conflict editor draft".into() },
@@ -924,7 +924,7 @@ pub fn demo_stashes() -> Vec<GitStash> {
     ]
 }
 
-/// DEBUG ONLY: status with a conflict and a merge in progress (`AGENTDECK_DEBUG_UI=git-conflicts`).
+/// DEBUG ONLY: status with a conflict and a merge in progress (`HOLT_DEBUG_UI=git-conflicts`).
 pub fn demo_conflicts_status() -> GitStatus {
     let mut st = demo_status();
     st.state = RepoState::Merging;
@@ -937,7 +937,7 @@ pub fn demo_conflicts_status() -> GitStatus {
     st
 }
 
-/// DEBUG ONLY: file in conflict with blocks (`AGENTDECK_DEBUG_UI=git-conflicts`).
+/// DEBUG ONLY: file in conflict with blocks (`HOLT_DEBUG_UI=git-conflicts`).
 pub fn demo_conflict_file() -> GitConflictFile {
     GitConflictFile {
         path: "crates/core/src/git.rs".into(),
@@ -998,6 +998,6 @@ mod tests {
         let detached = GitStatus { head: Some("abc1234567".into()), ..Default::default() };
         assert_eq!(chip_text(&detached), "abc1234");
         assert_eq!(chip_text(&GitStatus::default()), "(no commits)");
-        assert_eq!(agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || chip_text(&GitStatus::default())), "(sem commits)");
+        assert_eq!(holt_core::i18n::with_lang(holt_core::i18n::Lang::PtBr, || chip_text(&GitStatus::default())), "(sem commits)");
     }
 }

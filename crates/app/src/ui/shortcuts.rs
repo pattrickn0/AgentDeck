@@ -8,7 +8,7 @@ use egui::{Align2, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
 use super::{button, button_width, clickable, frame, galley, galley_trunc, place, separator, shadow, text_in, text_w, ButtonKind};
 use crate::deck::Deck;
 use crate::theme;
-use agentdeck_core::t;
+use holt_core::t;
 
 const ID_SHORTCUTS_OPEN: &str = "shortcuts-modal-open";
 
@@ -18,7 +18,7 @@ pub struct ShortcutItem {
     pub desc: &'static str,
 }
 
-/// The AgentDeck shortcuts (as documented in the README). A function, not a constant: the text goes through `t!`.
+/// The Holt shortcuts (as documented in the README). A function, not a constant: the text goes through `t!`.
 pub fn shortcuts() -> Vec<ShortcutItem> {
     vec![
         ShortcutItem { keys: vec!["Ctrl+T"], desc: t!("New tab of the same agent (collapsed bar: choose)") },
@@ -146,7 +146,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         y += 22.0;
 
         // Explanation
-        let hint_g = galley(&p, t!("Main AgentDeck shortcuts and actions"), theme::ui(11.5), pal.text_2);
+        let hint_g = galley(&p, t!("Main Holt shortcuts and actions"), theme::ui(11.5), pal.text_2);
         place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)), Align2::LEFT_CENTER, hint_g, pal.text_2);
         y += 22.0;
 
@@ -209,7 +209,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdeck_core::i18n;
+    use holt_core::i18n;
 
     #[test]
     fn shortcuts_list_contains_readme_items() {

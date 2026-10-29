@@ -325,9 +325,9 @@ impl Config {
             None => Self::default_for(paths),
         };
         let from_legacy = file.filter(|f| **f != paths.config_file);
-        // From the CommandDeck configuration comes everything (it is the same format). From the older ones
+        // From the AgentDeck configuration comes everything (it is the same format). From the older ones
         // the tabs do not come: the first opening starts without agents.
-        if from_legacy.is_some_and(|f| !is_commanddeck_config(f)) {
+        if from_legacy.is_some_and(|f| !is_agentdeck_config(f)) {
             cfg.open_tabs.clear();
             cfg.active_tab_index = -1;
             for p in &mut cfg.project_list {
@@ -336,9 +336,9 @@ impl Config {
             }
         }
         cfg.fix_workspace(paths, home);
-        // Name migration: copies the CommandDeck configuration to the new place (the old one stays as
+        // Name migration: copies the AgentDeck configuration to the new place (the old one stays as
         // it is, for whoever still opens the previous version).
-        if let Some(f) = from_legacy.filter(|f| is_commanddeck_config(f)) {
+        if let Some(f) = from_legacy.filter(|f| is_agentdeck_config(f)) {
             match cfg.save(&paths.config_file) {
                 Ok(()) => log::info!("config copied from {} to {}", f.display(), paths.config_file.display()),
                 Err(e) => log::warn!("could not copy the config from {} to {}: {e}", f.display(), paths.config_file.display()),
@@ -499,21 +499,15 @@ impl Config {
     }
 }
 
-/// Configurations of earlier versions: `CommandDeck` (the name before AgentDeck, in the same format),
-/// the Electron version (userData = "CommandDeck Terminal") and the old name "orquestra". The first one that
-/// exists is the source when `AgentDeck/config.json` does not exist yet.
+/// Configurations of earlier versions: `AgentDeck` (the name before Holt, in the same format) and the old name
+/// "orquestra". The first one that exists is the source when `Holt/config.json` does not exist yet.
 ///
-/// The ONLY reservation of the CommandDeck name that the app still carries (the variables `COMMANDDECK_*`, the bridge
-/// header, the `AGENTS.md` marker and the lock left in t32): whoever never opened AgentDeck would lose the
-/// project list. It goes away (this function, `is_commanddeck_config`, the copy in `load_from` and the tests
-/// `*_commanddeck_*`) in a version after the promotion of `dev` to `main`; see `memory/backlog.md`.
+/// Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): whoever never opened Holt would lose the project list and
+/// the tabs. It goes away (this function, `is_agentdeck_config`, the copy in `load_from` and the tests
+/// `*_agentdeck_*`) one release after the rename.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
-    vec![
-        base.join("CommandDeck").join("config.json"),
-        base.join("CommandDeck Terminal").join("config.json"),
-        base.join("orquestra").join("config.json"),
-    ]
+    vec![base.join("AgentDeck").join("config.json"), base.join("orquestra").join("config.json")]
 }
 
 /// The text of `config.json`: UTF-8, with or without BOM, or UTF-16 with BOM (edited with PowerShell 5.1: `Set-Content
@@ -529,7 +523,7 @@ fn config_text(bytes: &[u8]) -> Option<String> {
 }
 
 /// Files to try, in order: the one at `paths.config_file` and, after it, those of earlier versions. With
-/// `AGENTDECK_HOME` (the configuration lives inside the app folder) the app is isolated and does not read the
+/// `HOLT_HOME` (the configuration lives inside the app folder) the app is isolated and does not read the
 /// user's configurations.
 pub(crate) fn config_candidates(paths: &AppPaths) -> Vec<PathBuf> {
     let mut candidates = vec![paths.config_file.clone()];
@@ -539,10 +533,10 @@ pub(crate) fn config_candidates(paths: &AppPaths) -> Vec<PathBuf> {
     candidates
 }
 
-/// `true` if `file` is the CommandDeck configuration: the same format as AgentDeck's, so tabs and
+/// `true` if `file` is the AgentDeck configuration: the same format as Holt's, so tabs and
 /// layout apply and the file is copied to the new place.
-fn is_commanddeck_config(file: &Path) -> bool {
-    file.parent().and_then(Path::file_name).is_some_and(|d| d == "CommandDeck")
+fn is_agentdeck_config(file: &Path) -> bool {
+    file.parent().and_then(Path::file_name).is_some_and(|d| d == "AgentDeck")
 }
 
 #[cfg(test)]
@@ -845,13 +839,13 @@ mod tests {
         assert_eq!(project.active_tab, -1);
     }
 
-    /// Name migration: the CommandDeck configuration becomes the AgentDeck one, with projects and tabs, and the
+    /// Name migration: the AgentDeck configuration becomes the Holt one, with projects and tabs, and the
     /// old file stays there.
     #[test]
-    fn the_commanddeck_config_is_copied_to_the_new_place() {
+    fn the_agentdeck_config_is_copied_to_the_new_place() {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
-        let old = tmp.path().join("CommandDeck").join("config.json");
+        let old = tmp.path().join("AgentDeck").join("config.json");
         std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
         let mut project = ProjectCfg::new(tmp.path().join("my-project"), None, &[]);
         project.open_tabs = vec!["claude".into(), "claude@dev".into()];
@@ -879,10 +873,10 @@ mod tests {
 
     /// With the new configuration already in place, the old one is neither read nor overwrites anything.
     #[test]
-    fn the_new_config_wins_over_the_commanddeck_one() {
+    fn the_new_config_wins_over_the_agentdeck_one() {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
-        let old = tmp.path().join("CommandDeck").join("config.json");
+        let old = tmp.path().join("AgentDeck").join("config.json");
         std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
         std::fs::write(&old, r#"{"whisperLang": "es"}"#).expect("write");
         Config { whisper_lang: "en".into(), ..Config::default() }.save(&p.config_file).expect("writes the new one");
@@ -892,16 +886,16 @@ mod tests {
     }
 
     #[test]
-    fn candidates_start_with_the_new_file_then_commanddeck() {
+    fn candidates_start_with_the_new_file_then_agentdeck() {
         let tmp = tempfile::tempdir().expect("tmp");
         let normal = AppPaths { config_file: tmp.path().join("cfg-do-usuario").join("config.json"), ..paths(&tmp.path().join("app")) };
         let c = config_candidates(&normal);
         assert_eq!(c[0], normal.config_file);
         if dirs::config_dir().is_some() {
-            assert_eq!(c[1].parent().and_then(Path::file_name).and_then(|n| n.to_str()), Some("CommandDeck"));
+            assert_eq!(c[1].parent().and_then(Path::file_name).and_then(|n| n.to_str()), Some("AgentDeck"));
             assert_eq!(legacy_config_files().len(), c.len() - 1);
         }
-        // Isolated (`AGENTDECK_HOME`): does not read the user's configurations.
+        // Isolated (`HOLT_HOME`): does not read the user's configurations.
         assert_eq!(config_candidates(&paths(tmp.path())), vec![paths(tmp.path()).config_file]);
     }
 

@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use agentdeck_core::t;
-use agentdeck_core::{Core, CoreEvent};
 use crossbeam_channel::Receiver;
 use glow::HasContext;
+use holt_core::t;
+use holt_core::{Core, CoreEvent};
 use parking_lot::Mutex;
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
@@ -176,8 +176,8 @@ impl App {
                 // No console on Windows: without the dialog, the app would just close with no explanation.
                 rfd::MessageDialog::new()
                     .set_level(rfd::MessageLevel::Error)
-                    .set_title("AgentDeck")
-                    .set_description(t!("AgentDeck could not start: {error}", error = format!("{e:#}")))
+                    .set_title("Holt")
+                    .set_description(t!("Holt could not start: {error}", error = format!("{e:#}")))
                     .set_buttons(rfd::MessageButtons::Ok)
                     .show();
                 event_loop.exit();
@@ -186,7 +186,7 @@ impl App {
         };
         core.set_waker(Self::waker(&self.proxy));
         // DEBUG ONLY: writes the bridge port and token for end-to-end tests with `ask-agent`.
-        if let Some(file) = agentdeck_core::env_var_os("DEBUG_BRIDGE") {
+        if let Some(file) = holt_core::env_var_os("DEBUG_BRIDGE") {
             let _ = std::fs::write(file, format!("{}\n{}\n", core.bridge_port(), core.bridge_token()));
         }
         // Saved window size (the window opens before the configuration is read).
@@ -202,11 +202,11 @@ impl App {
         }
         // DEBUG ONLY: screenshots and fake states do not write to the configuration (an "empty" or
         // "sidebar-collapsed" would stay saved and erase the real tabs).
-        if self.smoke.is_some() || agentdeck_core::env_var_os("DEBUG_UI").is_some() {
+        if self.smoke.is_some() || holt_core::env_var_os("DEBUG_UI").is_some() {
             core.disable_config_writes();
         }
         // Screenshots and fake states leave no icon in the user's tray.
-        if self.smoke.is_none() && agentdeck_core::env_var_os("DEBUG_UI").is_none() && agentdeck_core::env_var_os("SMOKE").is_none() {
+        if self.smoke.is_none() && holt_core::env_var_os("DEBUG_UI").is_none() && holt_core::env_var_os("SMOKE").is_none() {
             let proxy = self.proxy.clone();
             let on_command: tray::OnCommand = Arc::new(move |cmd| {
                 let _ = proxy.lock().send_event(UserEvent::Tray(cmd));
@@ -227,7 +227,7 @@ impl App {
         let saved = self.core.as_ref().map(|c| c.config()).and_then(|c| size_to_persist(false, (c.window_width, c.window_height)));
         let (w, h) = saved.map_or((1280.0, 860.0), |(w, h)| (w as f64, h as f64));
         let attrs = WindowAttributes::default()
-            .with_title("AgentDeck")
+            .with_title("Holt")
             // The title bar is drawn by the interface (`ui/titlebar.rs`).
             .with_decorations(false)
             .with_inner_size(winit::dpi::LogicalSize::new(w, h))
@@ -458,8 +458,8 @@ impl App {
         if self.frames == 1 {
             glw.window.set_visible(true);
         }
-        // A screenshot (AGENTDECK_SMOKE) does not download whisper nor ask: every temporary folder would start 1.6 GB.
-        if self.frames == self.core_frame && agentdeck_core::env_var_os("SMOKE").is_none() {
+        // A screenshot (HOLT_SMOKE) does not download whisper nor ask: every temporary folder would start 1.6 GB.
+        if self.frames == self.core_frame && holt_core::env_var_os("SMOKE").is_none() {
             // After the first frame: whoever already uses dictation downloads what is missing in the background; whoever
             // was never asked sees the question (Whisper is optional and only downloads with a "yes").
             if let Some(deck) = self.deck.as_mut() {
@@ -712,9 +712,9 @@ fn is_wayland(event_loop: &ActiveEventLoop) -> bool {
     }
 }
 
-/// Wayland app id and X11 `WM_CLASS`: the `.desktop` entry is `agentdeck.desktop`.
+/// Wayland app id and X11 `WM_CLASS`: the `.desktop` entry is `holt.desktop`.
 #[cfg(target_os = "linux")]
-const APP_ID: &str = "agentdeck";
+const APP_ID: &str = "holt";
 
 /// The window icon (taskbar and Alt+Tab): the app's mark, from the same drawing as the `.ico`.
 fn window_icon() -> Option<winit::window::Icon> {

@@ -1,4 +1,4 @@
-//! DEBUG ONLY: fake documents for Documents mode (`AGENTDECK_DEBUG_UI=docs-demo…`), for screenshots without git,
+//! DEBUG ONLY: fake documents for Documents mode (`HOLT_DEBUG_UI=docs-demo…`), for screenshots without git,
 //! without agents and without real files.
 //!
 //! - `docs-demo`: the diff of a task with four files, in focus;
@@ -9,7 +9,7 @@
 //! - `docs-demo-many`: ten documents (the tab strip scrolls);
 //! - `docs-demo-badge`: the agents in view, with the switch badge (two tabs finished, one is working).
 
-use agentdeck_core::git::parse_diff;
+use holt_core::git::parse_diff;
 
 use crate::deck::Deck;
 use crate::docs::{Badge, CenterView, DiffDoc, DocKind, DocState, MdSource, Source, TextDoc, Unsaved};
@@ -166,12 +166,12 @@ pub fn toggle(&mut self, project: &str) {
 
 const README: &str = "# Maintenance guide
 
-This guide is for whoever is going to maintain AgentDeck, alone or together with AI agents.
+This guide is for whoever is going to maintain Holt, alone or together with AI agents.
 
 ## Everyday commands
 
 ```bash
-cargo run -p agentdeck
+cargo run -p holt
 cargo test --workspace
 ```
 

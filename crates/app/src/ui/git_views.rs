@@ -3,8 +3,8 @@
 
 use egui::{Align2, Color32, Id, Key, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use agentdeck_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
-use agentdeck_core::t;
+use holt_core::git::{ConflictBlock, ConflictChoice, EntryKind, GitStash, GitStatus, RepoState};
+use holt_core::t;
 
 use super::git::{diff_lines, Act, BTN_H};
 use super::{clickable, frame, galley, galley_spaced, galley_trunc, place, text_in, text_w, tip};

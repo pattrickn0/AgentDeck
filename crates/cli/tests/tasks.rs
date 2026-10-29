@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, Ident, StartOptions};
+use holt_core::paths::AppPaths;
+use holt_core::{Config, Core, Ident, StartOptions};
 
 fn git_exe() -> Option<PathBuf> {
     which::which("git").ok()
@@ -77,10 +77,10 @@ fn start_core(root: &Path) -> Core {
 /// `ask-agent` with the master token (user) or a tab's (`agent = Some((id, token))`).
 fn run(core: &Core, agent: Option<(&str, &str)>, args: &[&str], stdin: &str) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    cmd.args(args).env_remove("AGENTDECK_DEPTH").env("AGENTDECK_PORT", core.bridge_port().to_string());
+    cmd.args(args).env_remove("HOLT_DEPTH").env_remove("AGENTDECK_DEPTH").env("HOLT_PORT", core.bridge_port().to_string());
     match agent {
-        Some((id, token)) => cmd.env("AGENTDECK_TOKEN", token).env("AGENTDECK_AGENT", id),
-        None => cmd.env("AGENTDECK_TOKEN", core.bridge_token()).env("AGENTDECK_AGENT", "shell"),
+        Some((id, token)) => cmd.env("HOLT_TOKEN", token).env("HOLT_AGENT", id),
+        None => cmd.env("HOLT_TOKEN", core.bridge_token()).env("HOLT_AGENT", "shell"),
     };
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
@@ -146,7 +146,7 @@ fn the_task_commands_drive_the_whole_lifecycle() {
     assert!(text(&out.stdout).contains("Worktree:") && text(&out.stdout).contains("Base: main"), "{}", text(&out.stdout));
 
     // The task's agent delivers the report (its tab's token); it cannot touch the rest.
-    let token = core.spawn_spec_for(&project, &Ident::parse("claude@t1").expect("id")).expect("spec").env["AGENTDECK_TOKEN"].clone();
+    let token = core.spawn_spec_for(&project, &Ident::parse("claude@t1").expect("id")).expect("spec").env["HOLT_TOKEN"].clone();
     let agent = Some(("claude@t1", token.as_str()));
     std::fs::write(t1.worktree.join("login.txt"), "ok\n").expect("w");
     git(&t1.worktree, &["add", "-A"]);
@@ -252,7 +252,7 @@ fn the_scope_flag_queues_an_overlapping_task_and_shows_it() {
     let shown = text(&out.stdout);
     assert!(shown.contains("queued: the scope overlaps that of t1"), "{shown}");
     let t2 = core.task(&project, "t2").expect("t2");
-    assert_eq!((t2.status, t2.waiting_for.as_deref()), (agentdeck_core::TaskStatus::Queued, Some("t1")));
+    assert_eq!((t2.status, t2.waiting_for.as_deref()), (holt_core::TaskStatus::Queued, Some("t1")));
     assert_eq!(t2.scope, ["crates/core/src/git.rs"], "the path arrives normalized");
 
     let list = text(&run(&core, None, &["--task", "list"], "").stdout);
@@ -265,7 +265,7 @@ fn the_scope_flag_queues_an_overlapping_task_and_shows_it() {
     let out = run(&core, None, &["--task", "start", "t2"], "");
     assert!(text(&out.stdout).contains("Task t2 queued"), "{}", text(&out.stdout));
     assert_eq!(run(&core, None, &["--task", "discard", "t1"], "").status.code(), Some(0));
-    assert_eq!(core.task(&project, "t2").expect("t2").status, agentdeck_core::TaskStatus::Running);
+    assert_eq!(core.task(&project, "t2").expect("t2").status, holt_core::TaskStatus::Running);
 
     // Invalid scope: the bridge refuses and nothing is created.
     let out = run(&core, None, &["--task", "new", "Bad", "request", "--scope", "crates/*.rs"], "");

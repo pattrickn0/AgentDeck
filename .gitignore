@@ -54,5 +54,5 @@ dados/
 # Temporary agent worktrees (Claude Code)
 .claude/worktrees/
 
-# Worktrees and folders of the AgentDeck tasks desk
-/.agentdeck/
+# Worktrees and folders of the Holt tasks desk
+/.holt/

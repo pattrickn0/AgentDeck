@@ -5,8 +5,8 @@
 
 pub const ENTRIES: &[(&str, &str)] = &[
     (
-        "Another AgentDeck window is already using the data folder {dir}.\n\nClose it, or set AGENTDECK_HOME to another folder to open a separate instance.",
-        "Outra janela do AgentDeck já está usando a pasta de dados {dir}.\n\nFeche-a, ou defina AGENTDECK_HOME com outra pasta para abrir uma instância separada.",
+        "Another Holt window is already using the data folder {dir}.\n\nClose it, or set HOLT_HOME to another folder to open a separate instance.",
+        "Outra janela do Holt já está usando a pasta de dados {dir}.\n\nFeche-a, ou defina HOLT_HOME com outra pasta para abrir uma instância separada.",
     ),
     ("\"{who}\" is not open in this project", "\"{who}\" não está aberto neste projeto"),
     ("\"{b}\" is already part of the team of \"{id}\": it cannot be its boss", "\"{b}\" já faz parte da equipe de \"{id}\": não pode ser o chefe dele"),
@@ -16,8 +16,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ),
     ("unknown project: {id}", "projeto desconhecido: {id}"),
     (
-        "AgentDeck created an AGENTS.md with only its own instructions in this folder, because this CLI only reads instructions from there. It shows up as a new file in git: commit it or delete it as you like.",
-        "O AgentDeck criou um AGENTS.md só com as instruções dele nesta pasta, porque este CLI só lê instruções de lá. Ele aparece como arquivo novo no git: faça o commit ou apague-o à vontade.",
+        "Holt created an AGENTS.md with only its own instructions in this folder, because this CLI only reads instructions from there. It shows up as a new file in git: commit it or delete it as you like.",
+        "O Holt criou um AGENTS.md só com as instruções dele nesta pasta, porque este CLI só lê instruções de lá. Ele aparece como arquivo novo no git: faça o commit ou apague-o à vontade.",
     ),
     ("the project no longer exists", "o projeto não existe mais"),
     ("no project open", "nenhum projeto aberto"),

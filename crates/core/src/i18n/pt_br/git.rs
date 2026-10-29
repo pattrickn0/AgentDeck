@@ -22,12 +22,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("The remote refused: {message}", "O remoto recusou: {message}"),
     ("Authentication failed: {message}", "Falha de autenticação: {message}"),
     (
-        "{output}\nIf your SSH key has a passphrase, AgentDeck cannot ask for it: load the key into ssh-agent and try again.\n• Windows (PowerShell; the first time as administrator): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
-        "{output}\nSe a sua chave SSH tem senha, o AgentDeck não consegue perguntá-la: carregue a chave no ssh-agent e tente de novo.\n• Windows (PowerShell; na primeira vez como administrador): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
+        "{output}\nIf your SSH key has a passphrase, Holt cannot ask for it: load the key into ssh-agent and try again.\n• Windows (PowerShell; the first time as administrator): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
+        "{output}\nSe a sua chave SSH tem senha, o Holt não consegue perguntá-la: carregue a chave no ssh-agent e tente de novo.\n• Windows (PowerShell; na primeira vez como administrador): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
     ),
     (
-        "The commit was not made: the GPG signature (commit.gpgsign) needs the key unlocked, and AgentDeck cannot open the passphrase prompt. Unlock the key in a terminal tab (echo test | gpg --clearsign) and try again right after; the passphrase stays in gpg-agent for a few minutes. If you do not want to sign in this repository: git config commit.gpgsign false\n{output}",
-        "O commit não foi feito: a assinatura GPG (commit.gpgsign) precisa da chave destravada, e o AgentDeck não consegue abrir o pedido de senha. Destrave a chave numa aba de terminal (echo teste | gpg --clearsign) e tente de novo em seguida; a senha fica no gpg-agent por alguns minutos. Se não quiser assinar neste repositório: git config commit.gpgsign false\n{output}",
+        "The commit was not made: the GPG signature (commit.gpgsign) needs the key unlocked, and Holt cannot open the passphrase prompt. Unlock the key in a terminal tab (echo test | gpg --clearsign) and try again right after; the passphrase stays in gpg-agent for a few minutes. If you do not want to sign in this repository: git config commit.gpgsign false\n{output}",
+        "O commit não foi feito: a assinatura GPG (commit.gpgsign) precisa da chave destravada, e o Holt não consegue abrir o pedido de senha. Destrave a chave numa aba de terminal (echo teste | gpg --clearsign) e tente de novo em seguida; a senha fica no gpg-agent por alguns minutos. Se não quiser assinar neste repositório: git config commit.gpgsign false\n{output}",
     ),
     ("git failed with no message", "o git falhou sem mensagem"),
     ("Failed to run git: {error}", "falha ao rodar o git: {error}"),
