@@ -73,6 +73,7 @@ pub fn show(deck: &mut Deck, ui: &mut Ui, body: Rect, idx: usize) -> bool {
     clicked
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw(
     ui: &mut Ui,
     body: Rect,
@@ -282,11 +283,8 @@ fn draw(
     if submit {
         acts.push(Act::Submit);
     }
-    let _ = icons_unused(icons);
     ui.interact(body, Id::new(("chat-body", uid)), Sense::click()).clicked() || resp.response.clicked()
 }
-
-fn icons_unused(_: &mut IconCache) {}
 
 fn working_text(chat: &ChatTab) -> String {
     let secs = chat.turn_started.map_or(0, |t| t.elapsed().as_secs());

@@ -316,13 +316,13 @@ impl Deck {
             tool("t2", "Read", json!({ "file_path": "crates/app/src/ui/menus.rs" }), ok("t2", "fn tab_context_menu(...)")),
             Item::Assistant {
                 message: "m2".into(),
-                text: "The menu is a plain list of `MenuItem`s and every action goes through `deck.close_tab(idx)`.\n\n- add one entry that closes every other tab of the pane\n- keep the index of the survivor stable\n\n```rust\nitems.push((TabAction::CloseOthers, t!(\"Close others\"), None));\n```".into(),
+                text: "The menu is a plain list of `MenuItem`s and every action goes through `deck.close_tab(idx)`.\n\n- add one entry that closes every other tab of the pane\n- keep the index of the survivor stable\n\n```rust\nitems.push((TabAction::CloseOthers, label, None));\n```".into(),
                 streaming: false,
             },
             tool(
                 "t3",
                 "Edit",
-                json!({ "file_path": "crates/app/src/ui/menus.rs", "old_string": "    items.push((TabAction::Close, t!(\"Close\"), None));", "new_string": "    items.push((TabAction::Close, t!(\"Close\"), None));\n    if siblings > 1 {\n        items.push((TabAction::CloseOthers, t!(\"Close others\"), None));\n    }" }),
+                json!({ "file_path": "crates/app/src/ui/menus.rs", "old_string": "    items.push((TabAction::Close, tr(\"Close\"), None));", "new_string": "    items.push((TabAction::Close, tr(\"Close\"), None));\n    if siblings > 1 {\n        items.push((TabAction::CloseOthers, label, None));\n    }" }),
                 ok("t3", "updated"),
             ),
             Item::User { text: "Which key did you pick for the new menu entry? I'm documenting it in the manual tests.".into(), from: Some("claude@dev".into()) },

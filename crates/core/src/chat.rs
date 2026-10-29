@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 
 use crate::agents::SpawnSpec;
+use crate::t;
 use crate::{process, Core};
 
 /// Tool results longer than this are cut when stored (the interface shows a few lines anyway).
@@ -522,7 +523,7 @@ impl Transcript {
                     }
                 }
             }
-            ChatEvent::Interrupted => self.push(Item::Notice { text: "Interrupted.".into(), error: false }),
+            ChatEvent::Interrupted => self.push(Item::Notice { text: t!("Interrupted.").to_owned(), error: false }),
             ChatEvent::Result(r) => {
                 self.pending_turns = self.pending_turns.saturating_sub(1);
                 self.finish_streaming();
@@ -652,7 +653,7 @@ pub fn history_file(config_dir: &Path, session: &str) -> Option<std::path::PathB
 /// What the composer does with a line that starts with `/`: the name of the command, if it is a terminal-only one.
 pub fn terminal_only_command(text: &str, from_cli: &[String]) -> Option<String> {
     let name = text.trim().strip_prefix('/')?.split_whitespace().next()?.to_lowercase();
-    (TERMINAL_ONLY_COMMANDS.contains(&name.as_str()) || from_cli.iter().any(|c| *c == name)).then_some(name)
+    (TERMINAL_ONLY_COMMANDS.contains(&name.as_str()) || from_cli.contains(&name)).then_some(name)
 }
 
 // ---------- View of a tab ----------

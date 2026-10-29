@@ -120,7 +120,7 @@ fn the_tab_goes_to_the_terminal_and_back_on_the_same_conversation() {
     env.deck.set_tab_view(0, false);
     assert!(env.deck.tabs[0].chat.is_none() && env.deck.tabs[0].alive);
     let spec = env.deck.tabs[0].spec.as_ref().expect("spec");
-    assert!(spec.resumed && spec.args.iter().any(|a| *a == session) && !spec.args.iter().any(|a| a == "stream-json"), "{:?}", spec.args);
+    assert!(spec.resumed && spec.args.contains(&session) && !spec.args.iter().any(|a| a == "stream-json"), "{:?}", spec.args);
     assert!(!env.core.tab_is_chat(&env.project(), &env.deck.tabs[0].ident), "the choice is remembered");
 
     env.deck.set_tab_view(0, true);
