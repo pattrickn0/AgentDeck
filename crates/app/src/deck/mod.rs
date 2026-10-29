@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use agentdeck_core::delivery::{self, Gate, Mailbox, TabState};
+use agentdeck_core::resume;
 use agentdeck_core::t;
 use agentdeck_core::{
     AgentInfo, Core, CoreEvent, Delivery, DictationChoice, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident,
@@ -158,13 +159,13 @@ pub struct Tab {
     idle_deadline: Option<Instant>,
     /// There has been output since the tab became busy (only then the end of the turn rings and marks "done").
     busy_output: bool,
-    spec: Option<SpawnSpec>,
+    pub(crate) spec: Option<SpawnSpec>,
     pending_resize: Option<(GridSize, Instant)>,
     /// When this tab's PTY was last resized: the next one only goes out after the CLI
     /// finishes reprinting the conversation (see [`Tab::resize_blocked_until`]).
     last_resize: Option<Instant>,
     /// When the current process was started (the delivery rule gives the TUI time to come up).
-    spawned_at: Option<Instant>,
+    pub(crate) spawned_at: Option<Instant>,
 }
 
 impl Tab {
@@ -706,6 +707,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         kind: kind.to_owned(),
         double_enter_on_mention: false,
         model: None,
+        resumed: false,
     }
 }
 

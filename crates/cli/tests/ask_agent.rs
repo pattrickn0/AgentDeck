@@ -264,3 +264,45 @@ fn the_model_option_is_checked_and_does_not_mix_with_boss_or_reply() {
     }
     core.shutdown();
 }
+
+/// `ask-agent --signal session` the way Claude's `SessionStart` hook calls it: with the tab's token and the JSON on stdin.
+fn session_hook(core: &Core, token: &str, args: &[&str], stdin: &str) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    scrub_app_env(&mut cmd);
+    cmd.args(["--signal", "session"]).args(args);
+    cmd.env("AGENTDECK_PORT", core.bridge_port().to_string()).env("AGENTDECK_TOKEN", token);
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn ask-agent");
+    let _ = child.stdin.take().expect("stdin").write_all(stdin.as_bytes());
+    child.wait_with_output().expect("output")
+}
+
+#[test]
+fn the_session_hook_saves_the_new_conversation_id_of_the_tab() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let core = start_core(tmp.path());
+    if cfg!(windows) {
+        let bin = tmp.path().join("home").join(".local").join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        std::fs::write(bin.join("claude.exe"), b"").expect("write");
+    }
+    let project = core.active_project_id();
+    let ident = agentdeck_core::Ident::parse("claude@dev").expect("id");
+    let token = core.spawn_spec_for(&project, &ident).expect("spec").env["AGENTDECK_TOKEN"].clone();
+    let first = core.tab_session(&project, "claude@dev").expect("saved by the first launch");
+
+    // `/clear`: Claude calls the hook with the new id in the JSON on stdin.
+    let json = r#"{"session_id":"7f0c1a52-1111-4222-8333-944455556666","hook_event_name":"SessionStart","source":"clear"}"#;
+    let out = session_hook(&core, &token, &[], json);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(core.tab_session(&project, "claude@dev").as_deref(), Some("7f0c1a52-1111-4222-8333-944455556666"));
+    assert_ne!(first, "7f0c1a52-1111-4222-8333-944455556666");
+    // Junk on stdin, or the master token: the hook still exits with 0 and nothing changes.
+    assert_eq!(session_hook(&core, &token, &[], "junk").status.code(), Some(0));
+    assert_eq!(session_hook(&core, core.bridge_token(), &[], json).status.code(), Some(0));
+    assert_eq!(core.tab_session(&project, "claude@dev").as_deref(), Some("7f0c1a52-1111-4222-8333-944455556666"));
+    // The id can also come as an argument (for CLIs whose hook does not use stdin).
+    assert_eq!(session_hook(&core, &token, &["abc-123"], "").status.code(), Some(0));
+    assert_eq!(core.tab_session(&project, "claude@dev").as_deref(), Some("abc-123"));
+    core.shutdown();
+}

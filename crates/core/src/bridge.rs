@@ -512,7 +512,9 @@ fn reply_pending(core: &Core, caller: &Caller, msg: &Value) -> (u16, Value) {
 }
 
 /// `POST /signal` `{"state":"busy"|"idle"}`: agent hook saying that it started or ended a turn
-/// (`ask-agent --signal`). Only a tab's process signals.
+/// (`ask-agent --signal`). `{"state":"session","session":"<id>"}` reports the CLI's conversation id (Claude's
+/// `SessionStart` hook, which fires again after `/clear`): it is saved for the tab so reopening the app resumes it.
+/// Only a tab's process signals.
 fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
     let Auth::Agent(Caller { id, project, tab: true }) = auth else {
         return (400, json!({ "error": "only a tab's process sends signals" }));
@@ -520,7 +522,15 @@ fn signal(core: &Core, auth: &Auth, msg: &Value) -> (u16, Value) {
     let busy = match msg.get("state").and_then(Value::as_str) {
         Some("busy") => true,
         Some("idle") => false,
-        _ => return (400, json!({ "error": "invalid state (use busy or idle)" })),
+        Some("session") => {
+            let session = msg.get("session").and_then(Value::as_str).unwrap_or("");
+            return if core.set_tab_session(project, id, session) {
+                (200, json!({ "ok": true }))
+            } else {
+                (400, json!({ "error": "invalid session id, or this agent does not resume conversations" }))
+            };
+        }
+        _ => return (400, json!({ "error": "invalid state (use busy, idle or session)" })),
     };
     core.emit(CoreEvent::AgentSignal { project: project.clone(), id: id.clone(), busy });
     (200, json!({ "ok": true }))
