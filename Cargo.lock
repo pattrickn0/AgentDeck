@@ -1772,6 +1772,7 @@ dependencies = [
  "portable-pty",
  "raw-window-handle",
  "rfd",
+ "serde_json",
  "tempfile",
  "tray-icon",
  "windows-sys 0.61.2",

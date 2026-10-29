@@ -86,6 +86,8 @@ pub struct PermissionRequest {
     pub tool: String,
     pub input: Value,
     pub description: String,
+    /// What "allow for this session" would add (`permission_suggestions` of the request); empty = the CLI offers none.
+    pub suggestions: Vec<Value>,
 }
 
 /// End of a turn (`result`).
@@ -102,12 +104,23 @@ pub struct TurnResult {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatEvent {
     /// `system` / `init`, sent at the start of every turn.
-    Init { session: String, model: String, commands: Vec<String>, terminal_commands: Vec<String> },
+    Init {
+        session: String,
+        model: String,
+        commands: Vec<String>,
+        terminal_commands: Vec<String>,
+    },
     /// `system` / `status` `requesting`: the CLI is calling the model.
     Requesting,
-    TextDelta { message: String, text: String },
+    TextDelta {
+        message: String,
+        text: String,
+    },
     /// A complete assistant message (or the part of one that just finished).
-    Assistant { message: String, blocks: Vec<Block> },
+    Assistant {
+        message: String,
+        blocks: Vec<Block>,
+    },
     ToolResults(Vec<ToolOutcome>),
     Permission(PermissionRequest),
     /// The CLI withdrew a permission request (`control_cancel_request`).
@@ -116,7 +129,9 @@ pub enum ChatEvent {
     Interrupted,
     Result(TurnResult),
     /// A control request this module does not know: it has to be answered, or the CLI waits for it.
-    UnknownRequest { request_id: String },
+    UnknownRequest {
+        request_id: String,
+    },
     /// A line with nothing to show (rate limits, hooks, partial tool input...).
     Ignored,
 }
@@ -239,6 +254,7 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                     tool: str_of(req, "tool_name").to_owned(),
                     input: req.get("input").cloned().unwrap_or(Value::Null),
                     description: str_of(req, "description").to_owned(),
+                    suggestions: req.get("permission_suggestions").and_then(Value::as_array).cloned().unwrap_or_default(),
                 })
             } else {
                 ChatEvent::UnknownRequest { request_id }
@@ -268,7 +284,9 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
 fn user_text(content: &Value) -> String {
     match content {
         Value::String(s) => s.clone(),
-        Value::Array(parts) => parts.iter().filter(|p| str_of(p, "type") == "text").map(|p| str_of(p, "text")).collect::<Vec<_>>().join("\n"),
+        Value::Array(parts) => {
+            parts.iter().filter(|p| str_of(p, "type") == "text").map(|p| str_of(p, "text")).collect::<Vec<_>>().join("\n")
+        }
         _ => String::new(),
     }
 }
@@ -280,15 +298,17 @@ pub fn user_message_json(text: &str) -> String {
     json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
 }
 
-/// The answer to a [`PermissionRequest`]: `input` is sent back unchanged when allowing.
-pub fn permission_response_json(request_id: &str, allow: bool, input: &Value, deny_message: &str) -> String {
-    let response = if allow {
+/// The answer to a [`PermissionRequest`]: `input` is sent back unchanged when allowing, with `rules` (the request's
+/// suggestions) when the user allowed it for the rest of the session.
+pub fn permission_response_json(request_id: &str, allow: bool, input: &Value, deny_message: &str, rules: &[Value]) -> String {
+    let response = if allow && !rules.is_empty() {
+        json!({ "behavior": "allow", "updatedInput": input, "updatedPermissions": rules })
+    } else if allow {
         json!({ "behavior": "allow", "updatedInput": input })
     } else {
         json!({ "behavior": "deny", "message": deny_message })
     };
-    json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } })
-        .to_string()
+    json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } }).to_string()
 }
 
 /// Cuts the current turn.
@@ -328,19 +348,30 @@ pub struct PermissionCard {
     pub tool: String,
     pub input: Value,
     pub description: String,
+    pub suggestions: Vec<Value>,
     pub state: PermState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     /// What the user typed, or a message another agent sent to this tab (`from` = the agent's id).
-    User { text: String, from: Option<String> },
-    Assistant { message: String, text: String, streaming: bool },
+    User {
+        text: String,
+        from: Option<String>,
+    },
+    Assistant {
+        message: String,
+        text: String,
+        streaming: bool,
+    },
     Thinking(String),
     Tool(ToolCall),
     Permission(PermissionCard),
     /// Something Holt says in the conversation (a terminal-only command, an interrupt, an error).
-    Notice { text: String, error: bool },
+    Notice {
+        text: String,
+        error: bool,
+    },
 }
 
 /// The conversation of one chat tab.
@@ -478,6 +509,7 @@ impl Transcript {
                     tool: p.tool.clone(),
                     input: p.input.clone(),
                     description: p.description.clone(),
+                    suggestions: p.suggestions.clone(),
                     state: PermState::Pending,
                 }));
             }
@@ -541,8 +573,7 @@ impl Transcript {
         let mut t = Transcript::default();
         for line in jsonl.lines() {
             let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            if v.get("isSidechain").and_then(Value::as_bool).unwrap_or(false) || v.get("isMeta").and_then(Value::as_bool).unwrap_or(false)
-            {
+            if v.get("isSidechain").and_then(Value::as_bool).unwrap_or(false) || v.get("isMeta").and_then(Value::as_bool).unwrap_or(false) {
                 continue;
             }
             let content = v.get("message").and_then(|m| m.get("content")).unwrap_or(&Value::Null);
@@ -597,7 +628,10 @@ fn history_user_text(text: &str) -> Option<String> {
         let tag = |name: &str| -> String {
             let open = format!("<{name}>");
             let close = format!("</{name}>");
-            text.split_once(&open).and_then(|(_, rest)| rest.split_once(&close)).map(|(inner, _)| inner.trim().to_owned()).unwrap_or_default()
+            text.split_once(&open)
+                .and_then(|(_, rest)| rest.split_once(&close))
+                .map(|(inner, _)| inner.trim().to_owned())
+                .unwrap_or_default()
         };
         let (name, args) = (tag("command-name"), tag("command-args"));
         return Some(if args.is_empty() { name } else { format!("{name} {args}") });
@@ -619,6 +653,38 @@ pub fn history_file(config_dir: &Path, session: &str) -> Option<std::path::PathB
 pub fn terminal_only_command(text: &str, from_cli: &[String]) -> Option<String> {
     let name = text.trim().strip_prefix('/')?.split_whitespace().next()?.to_lowercase();
     (TERMINAL_ONLY_COMMANDS.contains(&name.as_str()) || from_cli.iter().any(|c| *c == name)).then_some(name)
+}
+
+// ---------- View of a tab ----------
+
+impl Core {
+    /// Whether the tab shows the chat view: the user's choice for this tab, else the default of its CLI.
+    pub fn tab_is_chat(&self, project: &str, ident: &crate::Ident) -> bool {
+        if !supports(&ident.kind) {
+            return false;
+        }
+        let choice = self.inner.config.read().project(project).and_then(|p| p.tab_views.get(&ident.id()).cloned());
+        choice.is_none_or(|v| v != "terminal")
+    }
+
+    /// Saves the user's choice of view for the tab.
+    pub fn set_tab_chat(&self, project: &str, id: &str, chat: bool) {
+        self.update_project(project, |p| {
+            p.tab_views.insert(id.to_owned(), if chat { "chat" } else { "terminal" }.to_owned());
+        });
+    }
+
+    /// Reads the saved conversation of a tab from the CLI's own transcript, for a resumed chat to show it.
+    pub fn chat_history(&self, project: &str, id: &str) -> Transcript {
+        let Some(session) = self.tab_session(project, id) else { return Transcript::default() };
+        let config_dir = crate::resume::claude_config_dir(&self.inner.home);
+        let Some(text) = history_file(&config_dir, &session).and_then(|p| std::fs::read_to_string(p).ok()) else {
+            return Transcript::default();
+        };
+        let mut t = Transcript::from_history(&text, ITEMS_MAX);
+        t.session = Some(session);
+        t
+    }
 }
 
 // ---------- Process ----------
@@ -716,8 +782,8 @@ impl ChatProcess {
         self.send_line(user_message_json(text));
     }
 
-    pub fn answer_permission(&self, request_id: &str, allow: bool, input: &Value, deny_message: &str) {
-        self.send_line(permission_response_json(request_id, allow, input, deny_message));
+    pub fn answer_permission(&self, request_id: &str, allow: bool, input: &Value, deny_message: &str, rules: &[Value]) {
+        self.send_line(permission_response_json(request_id, allow, input, deny_message, rules));
     }
 
     pub fn interrupt(&self) {
@@ -790,6 +856,7 @@ mod tests {
         assert!(call.outcome.as_ref().is_some_and(|o| o.is_error));
         let Some(Item::Permission(card)) = t.items.iter().find(|i| matches!(i, Item::Permission(_))) else { panic!() };
         assert_eq!(card.tool, "Write");
+        assert_eq!(card.suggestions.len(), 1);
         assert_eq!(card.state, PermState::Cancelled);
         assert!(!t.waiting_for_permission());
     }
@@ -806,7 +873,9 @@ mod tests {
         assert_eq!(card.tool, "Write");
         t.answer_permission(&card.request_id, true);
         assert!(t.pending_permission().is_none());
-        assert!(matches!(t.items.iter().find(|i| matches!(i, Item::Permission(_))), Some(Item::Permission(p)) if p.state == PermState::Allowed));
+        assert!(
+            matches!(t.items.iter().find(|i| matches!(i, Item::Permission(_))), Some(Item::Permission(p)) if p.state == PermState::Allowed)
+        );
     }
 
     #[test]
@@ -851,12 +920,18 @@ mod tests {
         let m: Value = serde_json::from_str(&user_message_json("hi\nthere")).unwrap();
         assert_eq!((m["type"].as_str(), m["message"]["content"].as_str()), (Some("user"), Some("hi\nthere")));
         let input = json!({ "file_path": "/x" });
-        let ok: Value = serde_json::from_str(&permission_response_json("r1", true, &input, "")).unwrap();
+        let ok: Value = serde_json::from_str(&permission_response_json("r1", true, &input, "", &[])).unwrap();
         assert_eq!(ok["response"]["request_id"], "r1");
         assert_eq!(ok["response"]["response"]["behavior"], "allow");
         assert_eq!(ok["response"]["response"]["updatedInput"], input);
-        let no: Value = serde_json::from_str(&permission_response_json("r2", false, &input, "No.")).unwrap();
-        assert_eq!((no["response"]["response"]["behavior"].as_str(), no["response"]["response"]["message"].as_str()), (Some("deny"), Some("No.")));
+        let rules = [json!({ "type": "setMode", "mode": "acceptEdits", "destination": "session" })];
+        let session: Value = serde_json::from_str(&permission_response_json("r3", true, &input, "", &rules)).unwrap();
+        assert_eq!(session["response"]["response"]["updatedPermissions"], json!(rules));
+        let no: Value = serde_json::from_str(&permission_response_json("r2", false, &input, "No.", &[])).unwrap();
+        assert_eq!(
+            (no["response"]["response"]["behavior"].as_str(), no["response"]["response"]["message"].as_str()),
+            (Some("deny"), Some("No."))
+        );
         let i: Value = serde_json::from_str(&interrupt_json()).unwrap();
         assert_eq!(i["request"]["subtype"], "interrupt");
     }
@@ -924,7 +999,14 @@ mod tests {
     fn a_dead_process_frees_the_tab_and_withdraws_the_cards() {
         let mut t = Transcript::default();
         t.push_user("x", None);
-        t.apply(&ChatEvent::Permission(PermissionRequest { request_id: "r".into(), tool_use_id: "t".into(), tool: "Bash".into(), input: Value::Null, description: String::new() }));
+        t.apply(&ChatEvent::Permission(PermissionRequest {
+            request_id: "r".into(),
+            tool_use_id: "t".into(),
+            tool: "Bash".into(),
+            input: Value::Null,
+            description: String::new(),
+            suggestions: vec![],
+        }));
         assert!(t.busy() && t.waiting_for_permission());
         t.process_ended();
         assert!(!t.busy() && !t.waiting_for_permission());

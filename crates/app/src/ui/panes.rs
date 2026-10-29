@@ -260,35 +260,42 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
 
     // ---------- Terminal ----------
     let idx = plan.shown;
-    deck.fit_tab(idx, body);
-    let has_focus = focused && deck.term_focus && deck.window_focused;
-    let elapsed = deck.blink_epoch.elapsed().as_millis();
-    let blink_on = (elapsed / 600).is_multiple_of(2);
-    let preedit = if has_focus { deck.ime_preedit.clone() } else { String::new() };
-    let tab = &mut deck.tabs[idx];
-    let color = tab.color;
-    let id = Id::new(("terminal", tab.uid));
-    let resp = view::show(ui, body, id, &tab.session, &mut tab.view, has_focus, blink_on, &preedit, m);
-    // System IME anchored on the focused terminal's cursor (candidates and emoji picker).
-    if let (true, Some(cell)) = (has_focus, resp.cursor_rect) {
-        ctx.output_mut(|o| {
-            o.ime = Some(egui::output::IMEOutput {
-                purpose: egui::IMEPurpose::Terminal,
-                rect: cell,
-                cursor_rect: cell,
-                should_interrupt_composition: false,
+    let color = deck.tabs[idx].color;
+    if deck.tabs[idx].chat.is_some() {
+        // The chat view has its own text field; the terminal below does not exist for this tab.
+        if super::chat::show(deck, ui, body, idx) {
+            clicks.push(Click::Focus(idx));
+        }
+    } else {
+        deck.fit_tab(idx, body);
+        let has_focus = focused && deck.term_focus && deck.window_focused;
+        let elapsed = deck.blink_epoch.elapsed().as_millis();
+        let blink_on = (elapsed / 600).is_multiple_of(2);
+        let preedit = if has_focus { deck.ime_preedit.clone() } else { String::new() };
+        let tab = &mut deck.tabs[idx];
+        let id = Id::new(("terminal", tab.uid));
+        let resp = view::show(ui, body, id, &tab.session, &mut tab.view, has_focus, blink_on, &preedit, m);
+        // System IME anchored on the focused terminal's cursor (candidates and emoji picker).
+        if let (true, Some(cell)) = (has_focus, resp.cursor_rect) {
+            ctx.output_mut(|o| {
+                o.ime = Some(egui::output::IMEOutput {
+                    purpose: egui::IMEPurpose::Terminal,
+                    rect: cell,
+                    cursor_rect: cell,
+                    should_interrupt_composition: false,
+                });
             });
-        });
-    }
-    if resp.focus {
-        clicks.push(Click::Focus(idx));
-    }
-    if !resp.to_pty.is_empty() {
-        deck.terminal_mouse_bytes(idx, &resp.to_pty);
-    }
-    if has_focus {
-        let next = 600 - (elapsed % 600) as u64;
-        ctx.request_repaint_after(Duration::from_millis(next));
+        }
+        if resp.focus {
+            clicks.push(Click::Focus(idx));
+        }
+        if !resp.to_pty.is_empty() {
+            deck.terminal_mouse_bytes(idx, &resp.to_pty);
+        }
+        if has_focus {
+            let next = 600 - (elapsed % 600) as u64;
+            ctx.request_repaint_after(Duration::from_millis(next));
+        }
     }
 
     // Highlight (Split and Highlight): the other windows sit at 62% and go back to 100% with the mouse over them.

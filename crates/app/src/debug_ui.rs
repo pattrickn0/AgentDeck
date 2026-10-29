@@ -89,6 +89,7 @@ pub(crate) fn apply(deck: &mut Deck) {
     for item in v.split(',').map(str::trim) {
         match item {
             "chat" => deck.set_right_view(crate::deck::RightView::Chat),
+            "chat-demo" => deck.debug_chat_demo = true,
             "settings" => deck.settings_open = true,
             "dictation-ask" => deck.dictation_prompt = true,
             "shortcuts" => deck.toggle_shortcuts = true,

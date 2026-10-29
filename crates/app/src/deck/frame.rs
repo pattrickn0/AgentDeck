@@ -156,7 +156,9 @@ impl Deck {
                             TabDelivery::TypeInTab(idx) => {
                                 let refs: Vec<String> = files.iter().map(|f| holt_core::util::ref_path(&self.workspace, f)).collect();
                                 let text = util::tab_file_refs_text(&self.tabs[idx].kind, &refs);
-                                if !text.is_empty() {
+                                if self.chat_insert(idx, &text) {
+                                    self.activate(idx);
+                                } else if !text.is_empty() {
                                     let bracketed =
                                         self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
                                     let safe = holt_core::util::terminal_text(&text);
@@ -196,6 +198,7 @@ impl Deck {
                 }
                 let pairs: Vec<(u64, bool)> = self.tabs.iter().map(|t| (t.uid, t.alive)).collect();
                 match crate::dictation::resolve_tab_delivery(&pairs, uid) {
+                    TabDelivery::TypeInTab(idx) if self.chat_insert(idx, &text) => {}
                     TabDelivery::TypeInTab(idx) => {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
                         let safe = holt_core::util::terminal_text(&text);
@@ -269,7 +272,9 @@ impl Deck {
                 self.tree.active_file = Some(rel.clone());
                 if let Some(idx) = self.active.filter(|&i| self.tabs[i].alive) {
                     let text = util::tab_file_refs_text(&self.tabs[idx].kind, &[rel]);
-                    if !text.is_empty() {
+                    if self.chat_insert(idx, &text) {
+                        // The reference is in the composer.
+                    } else if !text.is_empty() {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
                         let safe = holt_core::util::terminal_text(&text);
                         self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
@@ -284,7 +289,8 @@ impl Deck {
         let mut chime = false;
         let metrics = self.metrics.clone();
         let dragging = ctx.is_some_and(|ctx| ctx.input(|i| i.pointer.primary_down()));
-        let mut exits = Vec::new();
+        // Chat tabs: what their processes said, and the ones that ended.
+        let mut exits = self.pump_chat();
         // Tabs whose turn ended because the end notice never came (see `idle_deadline`): the hook that did come
         // already told the core (`POST /signal`), which reminds about unread mail.
         let mut released = Vec::new();
@@ -390,6 +396,7 @@ impl Deck {
             if self.reopen_without_resume(i, code) {
                 continue;
             }
+            self.chat_ended(i, code);
             let tab = &mut self.tabs[i];
             tab.alive = false;
             tab.busy = false;
@@ -408,7 +415,10 @@ impl Deck {
                 }
             }
             self.core.instance_ended(&tab.project, &tab.ident.id());
-            tab.session.print(&format!("\r\n\x1b[90m[{}]\x1b[0m\r\n", t!("process ended (code {code}) — press Enter to restart", code)));
+            if tab.chat.is_none() {
+                tab.session
+                    .print(&format!("\r\n\x1b[90m[{}]\x1b[0m\r\n", t!("process ended (code {code}) — press Enter to restart", code)));
+            }
         }
         // Messages from other agents: typed into the terminal when the tab becomes free (one at a time;
         // rule in `holt_core::delivery`).
@@ -450,7 +460,11 @@ impl Deck {
                                 prompt.push_str("\n\n");
                                 prompt.push_str(&notice);
                             }
-                            self.submit(i, &prompt);
+                            if self.tabs[i].chat.is_some() {
+                                self.chat_deliver(i, &prompt, &q.from);
+                            } else {
+                                self.submit(i, &prompt);
+                            }
                             if q.answer {
                                 self.core.answer_typed(q.request);
                             }
