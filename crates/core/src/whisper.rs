@@ -334,6 +334,15 @@ pub fn normalize_transcription(text: &str) -> String {
     out
 }
 
+/// Loudest sample below which a recording is taken as silence (-40 dBFS). Speech peaks well above it even on a weak
+/// microphone; a dead or wrong input stays far below (about -76 dBFS measured on Linux). Whisper fed silence does not
+/// say so: it makes up a short phrase ("e aí", "Thank you."), which would be typed as if dictated.
+const SILENCE_PEAK: f32 = 0.01;
+
+fn is_silence(samples: &[f32]) -> bool {
+    samples.iter().all(|s| s.abs() < SILENCE_PEAK)
+}
+
 /// 16-bit PCM WAV, mono, 16 kHz (f32 samples in -1..1).
 pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     const RATE: u32 = 16_000;
@@ -429,6 +438,9 @@ pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<
     let list = engines(core);
     if list.is_empty() {
         anyhow::bail!(t!("local transcription is not ready yet (see the integrated chat)"));
+    }
+    if is_silence(samples) {
+        anyhow::bail!(t!("the microphone recorded only silence: check the input device in the system's sound settings"));
     }
     let dir = crate::attachments::attachments_dir(&core.paths().data_dir)?;
     let wav = dir.join(unique_wav_name());
@@ -663,6 +675,15 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_silent_recording_never_reaches_whisper() {
+        // Dead input as measured on openSUSE/PipeWire: peak 33 of 32768.
+        assert!(is_silence(&[0.0, 0.001, -0.00101, 0.0005]));
+        assert!(is_silence(&[]));
+        // Quiet speech on a weak microphone still peaks above -40 dBFS.
+        assert!(!is_silence(&[0.0, 0.002, -0.03, 0.001]));
+    }
 
     #[test]
     fn normalization() {

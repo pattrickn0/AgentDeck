@@ -31,6 +31,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "a transcrição local ainda não está pronta (veja a Conversa integrada)",
     ),
     ("no speech detected", "nenhuma fala detectada"),
+    (
+        "the microphone recorded only silence: check the input device in the system's sound settings",
+        "o microfone gravou só silêncio: confira o dispositivo de entrada nas configurações de som do sistema",
+    ),
     ("transcription interrupted: the app is closing", "transcrição interrompida: o app está fechando"),
     ("whisper-cli ({engine}) not found", "whisper-cli ({engine}) não encontrado"),
     ("whisper exited with code {code}", "whisper saiu com código {code}"),

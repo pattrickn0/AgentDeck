@@ -41,12 +41,14 @@ fn main() -> anyhow::Result<()> {
     // `ureq-proto` dumps the request headers at TRACE, including the `Authorization` with the
     // GitHub token, and `ureq` logs every request at DEBUG (headers, IPs). Both stay at WARN,
     // even with RUST_LOG=trace: `filter_module` pins the level (it is not a ceiling), and at
-    // DEBUG they filled the log on every usage query.
+    // DEBUG they filled the log on every usage query. `zbus` (the Linux tray, over D-Bus) logs every menu
+    // event at INFO: 139 of 156 lines of a session's log.
     // The log also goes to `<data>/holt.log`: a window app has no stderr.
     let data_dir = AppPaths::detect().data_dir;
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .filter_module("ureq_proto", log::LevelFilter::Warn)
         .filter_module("ureq", log::LevelFilter::Warn)
+        .filter_module("zbus", log::LevelFilter::Warn)
         .target(env_logger::Target::Pipe(Box::new(logfile::LogFile::open(&data_dir))))
         .init();
     crash::install(&data_dir);
