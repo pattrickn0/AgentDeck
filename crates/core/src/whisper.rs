@@ -25,8 +25,32 @@ const RELEASE: &str = "https://github.com/ggml-org/whisper.cpp/releases/download
 const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
 /// Model SHA-256: matches Hugging Face LFS ETag.
 const MODEL_SHA256: &str = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69";
-/// Vocabulary that guides proper noun recognition.
-pub const WHISPER_PROMPT: &str = "Holt, Claude, Antigravity, agy, Claude Code, Ollama, Codex, OpenCode, Aider, Goose, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.";
+/// Vocabulary that guides proper noun recognition (the agent names are the point).
+const PROMPT_NAMES: &str = "Holt, Claude, Antigravity, agy, Claude Code, Ollama, Codex, OpenCode, Aider, Goose, terminal, CLI";
+
+/// Vocabulary prompt for a spoken language code (`en`, `pt`, `auto`...): English and Portuguese get their own
+/// wording, any other language gets only the language-neutral names.
+pub fn whisper_prompt(lang: &str) -> String {
+    match lang {
+        "en" => format!("{PROMPT_NAMES}, Claude assistant, Google Antigravity, Vulkan, NVIDIA, AMD."),
+        "pt" => format!("{PROMPT_NAMES}, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD."),
+        _ => format!("{PROMPT_NAMES}, Google Antigravity, Vulkan, NVIDIA, AMD."),
+    }
+}
+
+/// `whisper-cli` arguments that depend on the dictation settings: spoken language and translation into English.
+pub fn language_args(lang: &str, translate: bool) -> Vec<String> {
+    let lang = if lang.is_empty() { "auto" } else { lang };
+    let mut args = vec!["-l".to_owned(), lang.to_owned()];
+    if translate {
+        args.push("-tr".to_owned());
+    }
+    args
+}
+/// Name of the Whisper model in use, for display.
+pub fn model_name() -> &'static str {
+    MODEL_FILE.trim_start_matches("ggml-").trim_end_matches(".bin")
+}
 pub const UNAVAILABLE: &str = "unavailable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,27 +332,37 @@ fn engines(core: &Core) -> Vec<Engine> {
 }
 
 /// Corrects common phonetic variations of agent names.
-pub fn normalize_transcription(text: &str) -> String {
+///
+/// `lang` is the spoken language setting: the Portuguese rules apply for `pt` and for `auto` (which may hear
+/// Portuguese); the agent-name rules always apply. With translation on, the output is English: no Portuguese rules.
+pub fn normalize_transcription(text: &str, lang: &str, translate: bool) -> String {
     static RULES: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
+    static PT_RULES: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
+    let compile = |list: &[(&str, &'static str)]| -> Vec<(regex::Regex, &'static str)> {
+        list.iter().filter_map(|(re, rep)| regex::Regex::new(re).ok().map(|r| (r, *rep))).collect()
+    };
     let rules = RULES.get_or_init(|| {
-        [
-            // Claude with command context ("Cláudio Code" → "Claude Code").
-            (r"(?i)\b(?:Cl[áa]udio|Cl[áa]ud[eê]|Cl[áa]udi[ao])\b(\s+(?:Code|CLI|agente|assistente))", "Claude${1}"),
-            (r"(?i)\bCloud\s+(Code|CLI|agente|assistente)\b", "Claude ${1}"),
-            (r"(?i)\b(com o|para o|pro|ao|chama o|pergunta pro|pergunta ao)\s+Cloud\b", "${1} Claude"),
-            (r"(?i)\b(com o|para o|pro|chama o|pergunta pro|pergunta ao)\s+Cl[áa]udio\b", "${1} Claude"),
+        compile(&[
             // Antigravity.
             (
                 r"(?i)\b(?:Anti-?crafty|Anti-?craft|Anti-?graft(?:ing)?|Anti-?graph|Anti-gravity|Anti\s+gravity|Antigraviti)\b",
                 "Antigravity",
             ),
-        ]
-        .into_iter()
-        .filter_map(|(re, rep)| regex::Regex::new(re).ok().map(|r| (r, rep)))
-        .collect()
+        ])
     });
+    let pt_rules = PT_RULES.get_or_init(|| {
+        compile(&[
+            // Claude with command context ("Cláudio Code" → "Claude Code").
+            (r"(?i)\b(?:Cl[áa]udio|Cl[áa]ud[eê]|Cl[áa]udi[ao])\b(\s+(?:Code|CLI|agente|assistente))", "Claude${1}"),
+            (r"(?i)\bCloud\s+(Code|CLI|agente|assistente)\b", "Claude ${1}"),
+            (r"(?i)\b(com o|para o|pro|ao|chama o|pergunta pro|pergunta ao)\s+Cloud\b", "${1} Claude"),
+            (r"(?i)\b(com o|para o|pro|chama o|pergunta pro|pergunta ao)\s+Cl[áa]udio\b", "${1} Claude"),
+        ])
+    });
+    let portuguese = !translate && matches!(lang, "pt" | "auto" | "");
     let mut out = text.to_owned();
-    for (re, rep) in rules {
+    let all = rules.iter().chain(portuguese.then_some(pt_rules).into_iter().flatten());
+    for (re, rep) in all {
         out = re.replace_all(&out, *rep).into_owned();
     }
     out
@@ -370,20 +404,19 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
 fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String> {
     let dir = &core.paths().whisper_dir;
     let exe = whisper_cli(dir, engine).ok_or_else(|| t!("whisper-cli ({engine}) not found", engine = engine.label()))?;
-    let lang = Some(core.config().whisper_lang).filter(|l| !l.is_empty()).unwrap_or_else(|| "auto".into());
+    let cfg = core.config();
+    let (lang, translate) = (cfg.whisper_lang.clone(), cfg.whisper_translate);
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(2).max(1);
     // Process runs in executable's directory: relative paths would become invalid.
     let (exe, model, wav) = (crate::util::absolutize(&exe), crate::util::absolutize(&model_path(dir)), crate::util::absolutize(wav));
     let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("-m").arg(&model).arg("-f").arg(&wav).args([
-        "-l",
-        &lang,
+    cmd.arg("-m").arg(&model).arg("-f").arg(&wav).args(language_args(&lang, translate)).args([
         "-nt",
         "-np",
         "-t",
         &threads.to_string(),
         "--prompt",
-        WHISPER_PROMPT,
+        &whisper_prompt(&lang),
         "-mc",
         "0",
         "--carry-initial-prompt",
@@ -411,7 +444,7 @@ fn run_whisper(core: &Core, engine: Engine, wav: &Path) -> Result<String, String
     let out = run_captured(cmd, None, Duration::from_secs(600), Some(shutdown), Some(&core.inner.processes)).map_err(|e| e.to_string())?;
     let text = out.stdout.replace("[BLANK_AUDIO]", " ").split_whitespace().collect::<Vec<_>>().join(" ");
     match out.exit {
-        Exit::Code(Some(0)) => Ok(normalize_transcription(&text)),
+        Exit::Code(Some(0)) => Ok(normalize_transcription(&text, &lang, translate)),
         Exit::Cancelled => Err(t!("transcription interrupted: the app is closing").into()),
         exit => {
             let last = out.stderr.trim().lines().last().map(str::to_owned).filter(|l| !l.is_empty());
@@ -687,13 +720,43 @@ mod tests {
 
     #[test]
     fn normalization() {
-        assert_eq!(normalize_transcription("abre o Cláudio Code agora"), "abre o Claude Code agora");
-        assert_eq!(normalize_transcription("usa o Cloud CLI"), "usa o Claude CLI");
-        assert_eq!(normalize_transcription("pergunta pro Cloud sobre isso"), "pergunta pro Claude sobre isso");
-        assert_eq!(normalize_transcription("chama o Claudio"), "chama o Claude");
-        assert_eq!(normalize_transcription("pede ao Anti-crafty e ao Anti gravity"), "pede ao Antigravity e ao Antigravity");
+        let n = |t: &str| normalize_transcription(t, "pt", false);
+        assert_eq!(n("abre o Cláudio Code agora"), "abre o Claude Code agora");
+        assert_eq!(n("usa o Cloud CLI"), "usa o Claude CLI");
+        assert_eq!(n("pergunta pro Cloud sobre isso"), "pergunta pro Claude sobre isso");
+        assert_eq!(n("chama o Claudio"), "chama o Claude");
+        assert_eq!(n("pede ao Anti-crafty e ao Anti gravity"), "pede ao Antigravity e ao Antigravity");
         // Without context, "Cláudio" (proper noun) and "cloud" stay as they are.
-        assert_eq!(normalize_transcription("o Cláudio foi à cloud"), "o Cláudio foi à cloud");
+        assert_eq!(n("o Cláudio foi à cloud"), "o Cláudio foi à cloud");
+    }
+
+    #[test]
+    fn portuguese_rules_depend_on_the_language() {
+        let text = "pergunta pro Cloud sobre o Anti gravity";
+        assert_eq!(normalize_transcription(text, "auto", false), "pergunta pro Claude sobre o Antigravity");
+        // English or another language, or a translation into English: only the agent names are fixed.
+        for (lang, tr) in [("en", false), ("es", false), ("pt", true)] {
+            assert_eq!(normalize_transcription(text, lang, tr), "pergunta pro Cloud sobre o Antigravity", "{lang} {tr}");
+        }
+    }
+
+    #[test]
+    fn prompt_depends_on_the_language() {
+        assert!(whisper_prompt("en").contains("Claude assistant") && !whisper_prompt("en").contains("assistente"));
+        assert!(whisper_prompt("pt").contains("assistente Claude"));
+        for lang in ["en", "pt", "auto", "ja"] {
+            assert!(whisper_prompt(lang).contains("Antigravity") && whisper_prompt(lang).contains("Codex"), "{lang}");
+        }
+        let neutral = whisper_prompt("ja");
+        assert!(!neutral.contains("assistente") && !neutral.contains("assistant"));
+    }
+
+    #[test]
+    fn language_arguments() {
+        assert_eq!(language_args("en", false), ["-l", "en"]);
+        assert_eq!(language_args("pt", true), ["-l", "pt", "-tr"]);
+        assert_eq!(language_args("auto", true), ["-l", "auto", "-tr"]);
+        assert_eq!(language_args("", false), ["-l", "auto"]);
     }
 
     #[test]

@@ -375,7 +375,11 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     let btn_h = 28.0;
     // Four rows (three switches and the language), then the test button; voice dictation is optional: a
     // status row and a button to download or remove it.
-    let h = 6.0 + title_h + 2.0 + item_h * 4.0 + 13.0 + btn_h + 13.0 + item_h + btn_h + 8.0;
+    // The Dictation section sits between the language and the test button: label, 3 rows of language chips, the
+    // translate switch and a hint.
+    let chip_h = 24.0;
+    let dict_h = 13.0 + title_h + chip_h * 3.0 + 4.0 + item_h + 36.0;
+    let h = 6.0 + title_h + 2.0 + item_h * 4.0 + dict_h + 13.0 + btn_h + 13.0 + item_h + btn_h + 8.0;
     // The ☰ button sits in the left corner of the title bar: the menu opens aligned with it.
     let pos = keep_on_screen(ctx, Pos2::new(anchor.min.x + 4.0, anchor.max.y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
@@ -384,6 +388,13 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
     let mut toggle_keys = false;
     let mut test = false;
     let mut language = None;
+    let mut spoken = None;
+    let mut toggle_translate = false;
+    let (whisper_lang, translate) = {
+        let c = deck.core.config();
+        (c.whisper_lang, c.whisper_translate)
+    };
+    let engine_label = deck.engine_label.clone();
     let mut dictation_click = false;
     let setup = deck.dictation_setup();
     let confirm_remove = deck.dictation_confirm_remove;
@@ -458,10 +469,64 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
             language = Some(LANGS[i]);
         }
 
+        // Dictation: the language Whisper hears, and translating into English.
         separator(p, Pos2::new(inner.min.x + 4.0, item4.max.y + 6.5), Pos2::new(inner.max.x - 4.0, item4.max.y + 6.5));
+        let dict = Rect::from_min_size(Pos2::new(inner.min.x, item4.max.y + 13.0), Vec2::new(inner.width(), title_h));
+        section_label(p, Rect::from_min_size(Pos2::new(rect.min.x, dict.min.y), Vec2::new(rect.width(), title_h)), t!("DICTATION"));
+        let cell_w = (inner.width() - 4.0) / 3.0;
+        let grid_top = dict.max.y;
+        for (i, (code, name)) in SPOKEN.iter().enumerate() {
+            let cell = Rect::from_min_size(
+                Pos2::new(inner.min.x + 2.0 + cell_w * (i % 3) as f32, grid_top + chip_h * (i / 3) as f32),
+                Vec2::new(cell_w, chip_h),
+            )
+            .shrink2(Vec2::new(1.0, 1.0));
+            let on = whisper_lang == *code;
+            let r = super::clickable(ui, cell, Id::new(("setting-spoken", *code)));
+            if on {
+                p.rect_filled(cell, 5.0, theme::accent_soft(theme::accent()));
+            } else if r.hovered() {
+                p.rect_filled(cell, 5.0, pal.hover);
+            }
+            let label = match *code {
+                "auto" => t!("Auto-detect"),
+                "ja" => t!("Japanese"),
+                "zh" => t!("Chinese"),
+                _ => name,
+            };
+            text_in(p, cell, Align2::CENTER_CENTER, label, theme::ui(11.5), if on { pal.text_strong } else { pal.text });
+            if r.clicked() {
+                spoken = Some(*code);
+            }
+        }
+        let tr_row = Rect::from_min_size(Pos2::new(inner.min.x, grid_top + chip_h * 3.0 + 4.0), Vec2::new(inner.width(), item_h));
+        let r = super::clickable(ui, tr_row, Id::new("setting-translate"));
+        if r.hovered() {
+            p.rect_filled(tr_row, 5.0, pal.hover);
+        }
+        text_in(p, tr_row.shrink2(Vec2::new(8.0, 0.0)), Align2::LEFT_CENTER, t!("Translate to English"), theme::ui(12.0), pal.text);
+        checkbox(p, Rect::from_center_size(Pos2::new(tr_row.max.x - 15.0, tr_row.center().y), Vec2::splat(14.0)), translate);
+        if r.clicked() {
+            toggle_translate = true;
+        }
+        super::tip(r, t!("Whisper only translates into English."));
+        let engine = if engine_label.is_empty() { t!("unavailable").to_owned() } else { engine_label };
+        let hint = Rect::from_min_size(Pos2::new(inner.min.x + 8.0, tr_row.max.y + 2.0), Vec2::new(inner.width() - 16.0, 26.0));
+        text_in(
+            p,
+            hint.with_max_y(hint.min.y + 13.0),
+            Align2::LEFT_CENTER,
+            t!("Speak in any language, get English text"),
+            theme::ui(10.5),
+            pal.text_3,
+        );
+        let engine_line = t!("Engine: {engine} · {model}", engine, model = holt_core::whisper::model_name());
+        text_in(p, hint.with_min_y(hint.min.y + 13.0), Align2::LEFT_CENTER, &engine_line, theme::ui(10.5), pal.text_3);
+
+        separator(p, Pos2::new(inner.min.x + 4.0, item4.max.y + dict_h - 6.5), Pos2::new(inner.max.x - 4.0, item4.max.y + dict_h - 6.5));
 
         // ▶ Test sound
-        let btn = Rect::from_min_size(Pos2::new(inner.min.x + 2.0, item4.max.y + 13.0), Vec2::new(inner.width() - 4.0, btn_h));
+        let btn = Rect::from_min_size(Pos2::new(inner.min.x + 2.0, item4.max.y + dict_h), Vec2::new(inner.width() - 4.0, btn_h));
         if button(ui, btn, Id::new("setting-test-sound"), t!("▶ Test sound"), ButtonKind::Secondary).clicked() {
             test = true;
         }
@@ -521,8 +586,21 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         deck.core.update_config(|c| c.app_shortcuts_first = v);
     }
     if let Some(lang) = language {
-        // `update_config` applies the language at once: the next frame is already in it.
-        deck.core.update_config(|c| c.language = lang);
+        // `update_config` applies the language at once: the next frame is already in it. The dictation language
+        // follows it unless the user chose another one.
+        deck.core.update_config(|c| {
+            if c.whisper_lang == c.language.whisper_code() {
+                c.whisper_lang = lang.whisper_code().into();
+            }
+            c.language = lang;
+        });
+    }
+    // Read from the config at each dictation: the change applies to the next one.
+    if let Some(code) = spoken {
+        deck.core.update_config(|c| c.whisper_lang = code.into());
+    }
+    if toggle_translate {
+        deck.core.update_config(|c| c.whisper_translate = !c.whisper_translate);
     }
     if test {
         deck.play_sound(true);
@@ -539,6 +617,20 @@ pub fn settings_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect) {
         deck.settings_open = false;
     }
 }
+
+/// Spoken languages offered for dictation: Whisper code and name. Japanese and Chinese are written in English
+/// because the embedded fonts have no CJK glyphs.
+const SPOKEN: [(&str, &str); 9] = [
+    ("auto", "Auto-detect"),
+    ("en", "English"),
+    ("pt", "Português"),
+    ("es", "Español"),
+    ("fr", "Français"),
+    ("de", "Deutsch"),
+    ("it", "Italiano"),
+    ("ja", "Japanese"),
+    ("zh", "Chinese"),
+];
 
 /// Checkbox with a dynamic `accent-color`.
 fn checkbox(p: &egui::Painter, r: Rect, checked: bool) {

@@ -48,6 +48,14 @@ impl Lang {
         }
     }
 
+    /// The Whisper language code for speaking this UI language (`en`, `pt`).
+    pub fn whisper_code(self) -> &'static str {
+        match self {
+            Lang::En => "en",
+            Lang::PtBr => "pt",
+        }
+    }
+
     /// Reads a saved code; anything unknown is English (a bad value never throws away the whole config).
     pub fn from_code(code: &str) -> Lang {
         match code.trim().to_ascii_lowercase().as_str() {
