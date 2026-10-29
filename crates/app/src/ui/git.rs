@@ -1,14 +1,16 @@
-//! Aba "Git" da barra direita: branch e sincronização no topo, alterações em seções (ou o diff de
-//! um arquivo) no meio e a caixa de commit embaixo. O estado e as operações ficam em `git_ui.rs`.
+//! "Git" tab of the right bar: branch and synchronization at the top, changes in sections (or the
+//! diff of a file) in the middle and the commit box at the bottom. The state and the operations live in
+//! `git_ui.rs`.
 //!
-//! O desenho só *coleta* o que foi clicado ([`Act`]); as ações são aplicadas no fim, com o estado
-//! inteiro de volta no `Deck`.
+//! The drawing only *collects* what was clicked ([`Act`]); the actions are applied at the end, with the
+//! whole state back in the `Deck`.
 
 use egui::{Align2, Area, Color32, Id, Key, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use agentdeck_core::git::{
     valid_branch_name, ConflictChoice, DiffKind, EntryKind, GitBranch, GitCommit, GitDiff, GitEntry, GitStash, GitStatus, RepoState,
 };
+use agentdeck_core::t;
 
 use super::git_views;
 use super::{
@@ -29,7 +31,7 @@ const MSG_ROWS: f32 = 3.0;
 pub(super) const BTN_H: f32 = 28.0;
 pub const COMMIT_ID: &str = "git-commit-msg";
 
-/// O que foi clicado neste quadro.
+/// What was clicked in this frame.
 pub(super) enum Act {
     Refresh,
     Init,
@@ -43,9 +45,9 @@ pub(super) enum Act {
     UnstageAll,
     AskDiscard(GitEntry),
     OpenDiff(GitEntry, bool),
-    /// "Abrir em Documentos": o diff do arquivo, só leitura, no modo Documentos.
+    /// "Open in Documents": the diff of the file, read-only, in the Documents mode.
     OpenDiffCenter(GitEntry, bool),
-    /// "Abrir em Documentos" no detalhe de um commit: hash, hash curto e assunto.
+    /// "Open in Documents" in the detail of a commit: hash, short hash and subject.
     OpenCommitCenter(String, String, String),
     CloseDiff,
     OpenFile(String),
@@ -54,7 +56,7 @@ pub(super) enum Act {
     Toggle(Section),
     DismissNotice,
     SetSub(GitSubView),
-    /// Prepara/tira da preparação o trecho (hunk) `n` do diff aberto.
+    /// Stages/unstages hunk `n` of the open diff.
     HunkStage(usize),
     HunkDiscard(usize),
     Continue,
@@ -86,7 +88,7 @@ fn letter_color(letter: char, section: Section) -> Color32 {
     }
 }
 
-/// Nome do arquivo e a pasta (`crates/app/x.rs` → `x.rs`, `crates/app`).
+/// File name and folder (`crates/app/x.rs` → `x.rs`, `crates/app`).
 fn split_path(path: &str) -> (&str, &str) {
     let trimmed = path.trim_end_matches('/');
     match trimmed.rfind('/') {
@@ -97,24 +99,24 @@ fn split_path(path: &str) -> (&str, &str) {
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let mut acts = Vec::new();
-    // O status sai do Deck enquanto desenha (evita clonar milhares de entradas por quadro).
+    // The status leaves the Deck while drawing (avoids cloning thousands of entries per frame).
     let view = std::mem::replace(&mut deck.git.view, GitView::Loading);
     match &view {
-        GitView::Loading => message(ui, rect, "Lendo o repositório…", None, &[], &mut acts),
+        GitView::Loading => message(ui, rect, t!("Reading the repository…"), None, &[], &mut acts),
         GitView::NoGit => message(
             ui,
             rect,
-            "O git não foi encontrado.",
-            Some("Instale em git-scm.com e clique em Tentar de novo."),
-            &[("Tentar de novo", Act::Refresh)],
+            t!("Git was not found."),
+            Some(t!("Install it from git-scm.com and click Try again.")),
+            &[(t!("Try again"), Act::Refresh)],
             &mut acts,
         ),
         GitView::NotRepo => message(
             ui,
             rect,
-            "Esta pasta não é um repositório git.",
-            Some("Crie um repositório aqui, ou clone um projeto pelo terminal (git clone …) e abra a pasta dele."),
-            &[("Inicializar repositório", Act::Init)],
+            t!("This folder is not a git repository."),
+            Some(t!("Create a repository here, or clone a project from the terminal (git clone …) and open its folder.")),
+            &[(t!("Initialize repository"), Act::Init)],
             &mut acts,
         ),
         GitView::Unsafe(path) => {
@@ -122,13 +124,15 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             message(
                 ui,
                 rect,
-                "O git não confia nesta pasta (ela pertence a outro usuário).",
-                Some(&format!("Para liberar, rode no terminal:\n{cmd}")),
-                &[("Copiar comando", Act::Copy(cmd.clone())), ("Tentar de novo", Act::Refresh)],
+                t!("Git does not trust this folder (it belongs to another user)."),
+                Some(&t!("To allow it, run in the terminal:\n{cmd}", cmd)),
+                &[(t!("Copy command"), Act::Copy(cmd.clone())), (t!("Try again"), Act::Refresh)],
                 &mut acts,
             );
         }
-        GitView::Error(e) => message(ui, rect, "Não consegui ler o repositório.", Some(e), &[("Tentar de novo", Act::Refresh)], &mut acts),
+        GitView::Error(e) => {
+            message(ui, rect, t!("Could not read the repository."), Some(e), &[(t!("Try again"), Act::Refresh)], &mut acts)
+        }
         GitView::Ready(st) => ready(deck, ui, rect, st, &mut acts),
     }
     deck.git.view = view;
@@ -189,7 +193,7 @@ fn apply(deck: &mut Deck, ctx: &egui::Context, act: Act) {
     }
 }
 
-/// Estado vazio: título, explicação e botões.
+/// Empty state: title, explanation and buttons.
 fn message(ui: &mut Ui, rect: Rect, title: &str, detail: Option<&str>, buttons: &[(&str, Act)], acts: &mut Vec<Act>) {
     let painter = ui.painter_at(rect);
     let p = theme::pal();
@@ -220,7 +224,7 @@ fn message(ui: &mut Ui, rect: Rect, title: &str, detail: Option<&str>, buttons: 
     }
 }
 
-/// Botão pequeno com ícone (e texto opcional à direita do ícone).
+/// Small button with an icon (and optional text to the right of the icon).
 fn icon_button(deck: &mut Deck, ui: &Ui, r: Rect, icon: Icon, label: &str, tooltip: &str, enabled: bool) -> bool {
     let resp = if enabled {
         clickable(ui, r, Id::new(("git-btn", tooltip)))
@@ -261,7 +265,7 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
     let painter = ui.painter_at(rect);
     let busy = deck.git.busy.is_some();
 
-    // ---------- Topo: branch e sincronização ----------
+    // ---------- Top: branch and synchronization ----------
     let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), HEAD_H));
     let mut right = head.max.x - 6.0;
     let mut place_btn = |label: &str| {
@@ -271,11 +275,13 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         r
     };
     let (push_label, push_tip) = if st.upstream.is_none() {
-        ("Publicar".to_owned(), "Publicar a branch no remoto (git push -u)".to_owned())
+        (t!("Publish").to_owned(), t!("Publish the branch to the remote (git push -u)").to_owned())
     } else if st.ahead > 0 {
-        (st.ahead.to_string(), format!("Enviar {} commit(s) (git push)", st.ahead))
+        let tip =
+            if st.ahead == 1 { t!("Push 1 commit (git push)").to_owned() } else { t!("Push {count} commits (git push)", count = st.ahead) };
+        (st.ahead.to_string(), tip)
     } else {
-        (String::new(), "Enviar (git push)".to_owned())
+        (String::new(), t!("Push (git push)").to_owned())
     };
     let push_r = place_btn(&push_label);
     let pull_label = if st.behind > 0 { st.behind.to_string() } else { String::new() };
@@ -285,15 +291,22 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
     if icon_button(deck, ui, push_r, Icon::ArrowUp, &push_label, &push_tip, can_sync) {
         acts.push(Act::Push);
     }
-    let pull_tip =
-        if st.behind > 0 { format!("Puxar {} commit(s) (git pull --ff-only)", st.behind) } else { "Puxar (git pull --ff-only)".into() };
+    let pull_tip = if st.behind > 0 {
+        if st.behind == 1 {
+            t!("Pull 1 commit (git pull --ff-only)").to_owned()
+        } else {
+            t!("Pull {count} commits (git pull --ff-only)", count = st.behind)
+        }
+    } else {
+        t!("Pull (git pull --ff-only)").to_owned()
+    };
     if icon_button(deck, ui, pull_r, Icon::ArrowDown, &pull_label, &pull_tip, can_sync && st.upstream.is_some()) {
         acts.push(Act::Pull);
     }
-    if icon_button(deck, ui, fetch_r, Icon::Refresh, "", "Buscar do remoto (git fetch)", !busy) {
+    if icon_button(deck, ui, fetch_r, Icon::Refresh, "", t!("Fetch from the remote (git fetch)"), !busy) {
         acts.push(Act::Fetch);
     }
-    // Botão da branch (abre o menu).
+    // Branch button (opens the menu).
     let branch_r = Rect::from_min_max(Pos2::new(head.min.x + 6.0, head.min.y + 3.0), Pos2::new(right - 4.0, head.max.y - 3.0));
     let resp = clickable(ui, branch_r, Id::new("git-branch-btn"));
     if resp.hovered() || deck.git.branch_menu {
@@ -301,8 +314,8 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
     }
     deck.icons.paint(&painter, Icon::GitBranch, Pos2::new(branch_r.min.x + 12.0, branch_r.center().y), 14.0, theme::pal().text, 0.0);
     let name = st.branch.clone().unwrap_or_else(|| match &st.head {
-        Some(h) => format!("{} (destacado)", h.chars().take(7).collect::<String>()),
-        None => "(sem commits)".into(),
+        Some(h) => t!("{hash} (detached)", hash = h.chars().take(7).collect::<String>()),
+        None => t!("(no commits)").into(),
     });
     let count = st.entries.len();
     let label = if count > 0 { format!("{name} · {count}  ▾") } else { format!("{name}  ▾") };
@@ -314,18 +327,24 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         g,
         theme::pal().text,
     );
+    let changes = if count == 1 { t!("1 change").to_owned() } else { t!("{count} changes", count) };
     let tip_text = match &st.upstream {
-        Some(u) => {
-            format!("Trocar ou criar branch\n{name} · {} alteração(ões)\nAcompanha {u} · {} à frente, {} atrás", count, st.ahead, st.behind)
-        }
-        None => format!("Trocar ou criar branch\n{name} · {} alteração(ões)\nSem upstream (ainda não publicada)", count),
+        Some(u) => t!(
+            "Switch or create a branch\n{name} · {changes}\nTracks {upstream} · {ahead} ahead, {behind} behind",
+            name,
+            changes,
+            upstream = u,
+            ahead = st.ahead,
+            behind = st.behind
+        ),
+        None => t!("Switch or create a branch\n{name} · {changes}\nNo upstream (not published yet)", name, changes),
     };
     if tip(resp, tip_text).clicked() && !busy {
         acts.push(Act::BranchMenu);
     }
     painter.rect_filled(Rect::from_min_max(Pos2::new(head.min.x, head.max.y - 1.0), head.max), 0.0, theme::pal().separator);
 
-    // ---------- Faixas ----------
+    // ---------- Banners ----------
     let mut y = head.max.y;
     if let Some(label) = deck.git.busy {
         banner(ui, rect, &mut y, label, theme::pal().text, false, acts);
@@ -333,11 +352,15 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
     }
     y += git_views::op_banner(ui, rect, y, st, busy, acts);
     if !st.prefix.is_empty() {
-        let text = format!("Repositório em {} (a pasta de trabalho é a subpasta {})", st.root.display(), st.prefix.trim_end_matches('/'));
+        let text = t!(
+            "Repository at {root} (the working folder is the subfolder {prefix})",
+            root = st.root.display(),
+            prefix = st.prefix.trim_end_matches('/')
+        );
         banner(ui, rect, &mut y, &text, theme::pal().text_2, false, acts);
     }
     if st.truncated {
-        banner(ui, rect, &mut y, "Alterações demais: mostrando as primeiras 5000.", theme::pal().warning, false, acts);
+        banner(ui, rect, &mut y, t!("Too many changes: showing the first 5000."), theme::pal().warning, false, acts);
     }
     if let Some((text, error)) = deck.git.notice.clone() {
         banner(ui, rect, &mut y, &text, if error { theme::pal().danger_text } else { theme::pal().text_2 }, true, acts);
@@ -345,7 +368,7 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
 
     y += git_views::tab_strip(deck, ui, rect, y, st, acts);
 
-    // ---------- Rodapé: commit (só em Alterações) ----------
+    // ---------- Footer: commit (only in Changes) ----------
     let changes_view = deck.git.subview == GitSubView::Changes;
     let msg_h = MSG_ROWS * MSG_FONT * theme::LINE_HEIGHT + 14.0;
     let footer_h = if changes_view { 8.0 + msg_h + 6.0 + BTN_H + 10.0 } else { 0.0 };
@@ -355,7 +378,7 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
         commit_box(deck, ui, footer, msg_h, staged, busy, acts);
     }
 
-    // ---------- Meio: a visão escolhida ----------
+    // ---------- Middle: the chosen view ----------
     let body = Rect::from_min_max(Pos2::new(rect.min.x, y), Pos2::new(rect.max.x, footer.min.y));
     if body.height() >= 20.0 {
         match deck.git.subview {
@@ -376,7 +399,7 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
     branch_menu(deck, ui.ctx(), branch_r, busy);
 }
 
-/// Faixa de uma linha sob o topo (aviso, estado do repositório, erro com ×). Avança `y`.
+/// One-line strip under the top (notice, repository state, error with ×). Advances `y`.
 fn banner(ui: &mut Ui, rect: Rect, y: &mut f32, text: &str, color: Color32, dismiss: bool, acts: &mut Vec<Act>) {
     let r = Rect::from_min_size(Pos2::new(rect.min.x, *y), Vec2::new(rect.width(), BANNER_H));
     *y = r.max.y;
@@ -397,7 +420,7 @@ fn banner(ui: &mut Ui, rect: Rect, y: &mut f32, text: &str, color: Color32, dism
     }
 }
 
-/// Faixa indeterminada (vai e volta) de operação em andamento.
+/// Indeterminate strip (back and forth) of an operation in progress.
 pub(super) fn busy_bar(ui: &Ui, r: Rect) {
     let t = ui.ctx().input(|i| i.time);
     let phase = ((t * 0.9) % 2.0) as f32;
@@ -417,9 +440,9 @@ fn lists(deck: &mut Deck, ui: &mut Ui, body: Rect, st: &GitStatus, busy: bool, a
         if groups.is_empty() {
             let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 60.0), Sense::hover());
             let text = if st.head.is_none() {
-                "Nada para fazer commit ainda: crie arquivos na pasta de trabalho."
+                t!("Nothing to commit yet: create files in the working folder.")
             } else {
-                "Nenhuma alteração. Tudo commitado."
+                t!("No changes. Everything is committed.")
             };
             let g = ui.painter().layout(text.to_owned(), theme::ui(12.5), theme::pal().text_2, r.width() - 28.0);
             ui.painter().galley(Pos2::new(r.min.x + 14.0, r.min.y + 14.0), g, theme::pal().text_2);
@@ -461,12 +484,12 @@ fn section_header(deck: &mut Deck, ui: &mut Ui, section: Section, rows: &[Row], 
         theme::meta(10.0),
         p.text_3,
     );
-    // Ação em lote à direita.
+    // Batch action on the right.
     let (label, tooltip, act) = match section {
-        Section::Staged => ("−", "Tirar tudo da preparação", Some(Act::UnstageAll)),
-        // Só os arquivos desta seção (o "+" das alterações não prepara os não rastreados e vice-versa).
-        Section::Changes => ("+", "Preparar as alterações", Some(Act::Stage(rows.iter().map(|r| r.entry.path.clone()).collect()))),
-        Section::Untracked => ("+", "Preparar os não rastreados", Some(Act::Stage(rows.iter().map(|r| r.entry.path.clone()).collect()))),
+        Section::Staged => ("−", t!("Unstage all"), Some(Act::UnstageAll)),
+        // Only the files of this section (the "+" of the changes does not stage the untracked ones and vice versa).
+        Section::Changes => ("+", t!("Stage the changes"), Some(Act::Stage(rows.iter().map(|r| r.entry.path.clone()).collect()))),
+        Section::Untracked => ("+", t!("Stage the untracked files"), Some(Act::Stage(rows.iter().map(|r| r.entry.path.clone()).collect()))),
         Section::Conflicts => ("", "", None),
     };
     if let Some(act) = act {
@@ -504,19 +527,19 @@ fn file_row(deck: &mut Deck, ui: &mut Ui, section: Section, i: usize, row: &crat
     if hovered {
         painter.rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), 4.0, theme::pal().hover);
     }
-    // Ações (aparecem no hover).
+    // Actions (shown on hover).
     let mut buttons: Vec<(&str, &str, Act)> = Vec::new();
     let path = row.entry.path.clone();
     match section {
-        Section::Conflicts => buttons.push(("+", "Marcar como resolvido (prepara o arquivo como está)", Act::Stage(vec![path.clone()]))),
-        Section::Staged => buttons.push(("−", "Tirar da preparação", Act::Unstage(vec![path.clone()]))),
+        Section::Conflicts => buttons.push(("+", t!("Mark as resolved (stages the file as it is)"), Act::Stage(vec![path.clone()]))),
+        Section::Staged => buttons.push(("−", t!("Unstage the file"), Act::Unstage(vec![path.clone()]))),
         Section::Changes => {
-            buttons.push(("+", "Preparar", Act::Stage(vec![path.clone()])));
-            buttons.push(("↶", "Descartar alterações", Act::AskDiscard(row.entry.clone())));
+            buttons.push(("+", t!("Stage"), Act::Stage(vec![path.clone()])));
+            buttons.push(("↶", t!("Discard changes"), Act::AskDiscard(row.entry.clone())));
         }
         Section::Untracked => {
-            buttons.push(("+", "Preparar", Act::Stage(vec![path.clone()])));
-            buttons.push(("↶", "Apagar arquivo não rastreado", Act::AskDiscard(row.entry.clone())));
+            buttons.push(("+", t!("Stage"), Act::Stage(vec![path.clone()])));
+            buttons.push(("↶", t!("Delete untracked file"), Act::AskDiscard(row.entry.clone())));
         }
     }
     let mut bx = r.max.x - 8.0;
@@ -540,7 +563,7 @@ fn file_row(deck: &mut Deck, ui: &mut Ui, section: Section, i: usize, row: &crat
             }
         }
     }
-    // Letra, nome e pasta.
+    // Letter, name and folder.
     let lx = r.min.x + 14.0;
     text_in(
         &painter,
@@ -592,7 +615,7 @@ fn file_row(deck: &mut Deck, ui: &mut Ui, section: Section, i: usize, row: &crat
 
 fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bool, acts: &mut Vec<Act>) {
     let painter = ui.painter_at(body);
-    // Cabeçalho: voltar, caminho, ações.
+    // Header: back, path, actions.
     let head = Rect::from_min_size(body.min, Vec2::new(body.width(), 28.0));
     painter.rect_filled(head, 0.0, theme::pal().chip);
     let back = Rect::from_min_size(Pos2::new(head.min.x + 6.0, head.min.y + 3.0), Vec2::new(26.0, 22.0));
@@ -601,18 +624,18 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
         painter.rect_filled(back, 5.0, theme::pal().separator);
     }
     text_in(&painter, back, Align2::CENTER_CENTER, "←", theme::ui(15.0), theme::pal().text);
-    if tip(br, "Voltar às alterações").clicked() {
+    if tip(br, t!("Back to the changes")).clicked() {
         acts.push(Act::CloseDiff);
     }
     let mut right = head.max.x - 6.0;
     let entry = &open.entry;
     let mut buttons: Vec<(&str, &str, Act)> = Vec::new();
     if open.staged {
-        buttons.push(("−", "Tirar da preparação", Act::Unstage(vec![entry.path.clone()])));
+        buttons.push(("−", t!("Unstage the file"), Act::Unstage(vec![entry.path.clone()])));
     } else {
-        buttons.push(("+", "Preparar", Act::Stage(vec![entry.path.clone()])));
+        buttons.push(("+", t!("Stage"), Act::Stage(vec![entry.path.clone()])));
         if entry.kind != EntryKind::Unmerged {
-            buttons.push(("↶", "Descartar alterações", Act::AskDiscard(entry.clone())));
+            buttons.push(("↶", t!("Discard changes"), Act::AskDiscard(entry.clone())));
         }
     }
     for (j, (label, tooltip, act)) in buttons.into_iter().enumerate() {
@@ -636,13 +659,13 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
             acts.push(act);
         }
     }
-    // "Abrir em Documentos": com texto se sobra lugar para o caminho; senão, só o ícone (com a dica).
-    let center_tip = "Abre este diff, só para ler, com a largura toda do centro (o preparo por trecho continua aqui)";
+    // "Open in Documents": with text if there is room for the path; otherwise only the icon (with the tooltip).
+    let center_tip = t!("Opens this diff, read-only, with the full width of the center (staging by hunk stays here)");
     let compact = git_views::open_docs_compact(ui, right - (back.max.x + 8.0));
     if git_views::open_docs(ui, &mut right, head.min.y + 3.0, compact, center_tip, Id::new("git-diff-center")) {
         acts.push(Act::OpenDiffCenter(entry.clone(), open.staged));
     }
-    let side = if open.staged { "preparado" } else { "não preparado" };
+    let side = if open.staged { t!("staged") } else { t!("not staged") };
     let title = format!("{}  · {side}", entry.path);
     let g = galley_trunc(&painter, &title, theme::ui(12.0), theme::pal().text, right - back.max.x - 12.0);
     place(
@@ -657,21 +680,28 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
         Id::new("git-diff-title"),
         Sense::click(),
     );
-    if tip(hover, format!("{}\n(duplo clique abre o arquivo)", entry.path)).double_clicked() {
+    if tip(hover, t!("{path}\n(double-click opens the file)", path = entry.path)).double_clicked() {
         acts.push(Act::OpenFile(entry.path.clone()));
     }
 
     let area = Rect::from_min_max(Pos2::new(body.min.x, head.max.y), body.max);
     match &open.diff {
         None => {
-            text_in(&ui.painter_at(area), area.shrink(14.0), Align2::LEFT_TOP, "Carregando o diff…", theme::ui(12.5), theme::pal().text_2);
+            text_in(
+                &ui.painter_at(area),
+                area.shrink(14.0),
+                Align2::LEFT_TOP,
+                t!("Loading the diff…"),
+                theme::ui(12.5),
+                theme::pal().text_2,
+            );
         }
         Some(Err(e)) => {
             let g = ui.painter().layout(e.clone(), theme::ui(12.5), theme::pal().danger_text, area.width() - 28.0);
             ui.painter_at(area).galley(area.min + Vec2::splat(14.0), g, theme::pal().danger_text);
         }
         Some(Ok(diff)) => {
-            // Trechos só valem para um arquivo rastreado e sem conflito.
+            // Hunks only apply to a tracked file without a conflict.
             let hunks =
                 (!matches!(entry.kind, EntryKind::Untracked | EntryKind::Unmerged)).then_some(HunkCtx { staged: open.staged, busy });
             diff_lines(ui, area, diff, hunks, acts)
@@ -679,7 +709,7 @@ fn diff_view(deck: &mut Deck, ui: &mut Ui, body: Rect, open: &OpenDiff, busy: bo
     }
 }
 
-/// Botões por trecho (hunk) do diff: preparar/tirar e descartar.
+/// Per-hunk buttons of the diff: stage/unstage and discard.
 #[derive(Clone, Copy)]
 pub(super) struct HunkCtx {
     staged: bool,
@@ -691,8 +721,8 @@ pub(super) fn diff_lines(ui: &mut Ui, area: Rect, diff: &GitDiff, hunks: Option<
     diff_lines_at(ui, area, diff, hunks, acts, id, super::diff_view::View::default());
 }
 
-/// O desenho do diff, com a identidade da rolagem escolhida por quem chama (cada documento do modo
-/// Documentos tem a sua) e, em `view`, o que mais ele sabe (a linha para onde rolar neste quadro, a busca).
+/// The diff drawing, with the scroll identity chosen by the caller (each Documents mode document has its
+/// own) and, in `view`, what else it knows (the line to scroll to in this frame, the search).
 pub(super) fn diff_lines_at(
     ui: &mut Ui,
     area: Rect,
@@ -704,12 +734,12 @@ pub(super) fn diff_lines_at(
 ) {
     let mut notes: Vec<&str> = Vec::new();
     if diff.binary {
-        notes.push("Arquivo binário: o conteúdo não é mostrado.");
+        notes.push(t!("Binary file: the content is not shown."));
     } else if diff.lines.is_empty() {
-        notes.push("Sem diferenças para mostrar.");
+        notes.push(t!("No differences to show."));
     }
     if diff.truncated {
-        notes.push("Diff grande: mostrando só o começo.");
+        notes.push(t!("Large diff: showing only the beginning."));
     }
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Min)));
     child.set_clip_rect(area);
@@ -717,11 +747,11 @@ pub(super) fn diff_lines_at(
         let (r, _) = child.allocate_exact_size(Vec2::new(area.width(), 22.0), Sense::hover());
         text_in(child.painter(), r.shrink2(Vec2::new(12.0, 0.0)), Align2::LEFT_CENTER, note, theme::ui(12.0), theme::pal().warning);
     }
-    // Diff combinado (`@@@`, de um conflito) não vira patch de trecho.
+    // A combined diff (`@@@`, from a conflict) does not become a hunk patch.
     let hunks = hunks
         .filter(|_| !diff.binary && !diff.truncated && !diff.lines.iter().any(|l| l.kind == DiffKind::Hunk && l.text.starts_with("@@@")));
     let rest = Rect::from_min_max(Pos2::new(area.min.x, child.cursor().min.y), area.max);
-    // O texto do cabeçalho de cada trecho quebra antes da faixa dos botões.
+    // The header text of each hunk wraps before the button strip.
     let reserve = hunks.map_or(0.0, |h| hunk_strip_w(child.painter(), h.staged) + 6.0);
     super::diff_view::draw(&mut child, rest, diff, id, reserve, view, |ui, row, n| {
         if let Some(h) = hunks {
@@ -730,20 +760,20 @@ pub(super) fn diff_lines_at(
     });
 }
 
-/// Botões do cabeçalho de um trecho, fixos na borda direita da área visível.
-/// Os botões de um trecho: (rótulo, dica, perigoso).
+/// Header buttons of a hunk, fixed to the right edge of the visible area.
+/// The buttons of a hunk: (label, tooltip, dangerous).
 fn hunk_items(staged: bool) -> Vec<(&'static str, &'static str, bool)> {
     if staged {
-        vec![("Tirar", "Tira só este trecho da preparação", false)]
+        vec![(t!("Unstage"), t!("Unstages only this hunk"), false)]
     } else {
         vec![
-            ("Preparar", "Prepara só este trecho (git apply --cached)", false),
-            ("Descartar", "Descarta só este trecho da cópia de trabalho", true),
+            (t!("Stage"), t!("Stages only this hunk (git apply --cached)"), false),
+            (t!("Discard"), t!("Discards only this hunk from the working copy"), true),
         ]
     }
 }
 
-/// Largura da faixa dos botões de um trecho, da borda direita da área até o primeiro botão.
+/// Width of the button strip of a hunk, from the right edge of the area to the first button.
 fn hunk_strip_w(painter: &egui::Painter, staged: bool) -> f32 {
     let total: f32 = hunk_items(staged).iter().map(|(l, ..)| galley(painter, l, theme::ui(11.0), theme::pal().text).size().x + 16.0).sum();
     total + 6.0 + 6.0
@@ -754,8 +784,8 @@ fn hunk_buttons(ui: &Ui, area: Rect, row: Rect, n: usize, h: HunkCtx, acts: &mut
     let y = row.min.y + 1.0;
     let ht = row.height() - 2.0;
     let items = hunk_items(h.staged);
-    // Faixa opaca atrás dos botões (com a cor da linha do trecho): o texto do cabeçalho não aparece
-    // entre eles.
+    // Opaque strip behind the buttons (with the color of the hunk line): the header text does not show
+    // between them.
     let strip =
         Rect::from_min_max(Pos2::new(area.max.x - hunk_strip_w(ui.painter(), h.staged), row.min.y), Pos2::new(area.max.x, row.max.y));
     ui.painter().rect_filled(strip, 0.0, theme::glass_solid());
@@ -786,7 +816,7 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
     let id = Id::new(COMMIT_ID);
     let focused = ui.ctx().memory(|m| m.has_focus(id));
     frame(&painter, msg_r, 6.0, p.recess, if focused { theme::accent() } else { p.separator });
-    // Ctrl+Enter faz o commit.
+    // Ctrl+Enter makes the commit.
     let ctrl_enter = focused && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(msg_r.shrink(1.0)));
     child.set_clip_rect(msg_r.shrink(1.0));
@@ -796,16 +826,16 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { left: 9, right: 9, top: 6, bottom: 6 }))
             .font(theme::ui(12.0))
             .text_color(p.text)
-            .hint_text(egui::RichText::new("Mensagem do commit (Ctrl+Enter)").font(theme::ui(12.0)).color(p.text_3))
+            .hint_text(egui::RichText::new(t!("Commit message (Ctrl+Enter)")).font(theme::ui(12.0)).color(p.text_3))
             .desired_width(ui.available_width())
             .desired_rows(MSG_ROWS as usize)
             .min_size(Vec2::new(ui.available_width(), msg_r.height() - 2.0));
         te.show(ui);
     });
     let by = msg_r.max.y + 6.0;
-    // "Corrigir último commit".
+    // "Amend last commit".
     let box_r = Rect::from_min_size(Pos2::new(x0 + 2.0, by + (BTN_H - 14.0) / 2.0), Vec2::splat(14.0));
-    let label_w = galley(&painter, "Corrigir último commit", theme::ui(11.5), p.text_2).size().x;
+    let label_w = galley(&painter, t!("Amend last commit"), theme::ui(11.5), p.text_2).size().x;
     let amend_r = Rect::from_min_max(Pos2::new(x0, by), Pos2::new(box_r.max.x + 8.0 + label_w, by + BTN_H));
     let ar = clickable(ui, amend_r, Id::new("git-amend"));
     painter.rect(
@@ -822,14 +852,14 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
         &painter,
         Rect::from_min_max(Pos2::new(box_r.max.x + 8.0, by), Pos2::new(amend_r.max.x, by + BTN_H)),
         Align2::LEFT_CENTER,
-        "Corrigir último commit",
+        t!("Amend last commit"),
         theme::ui(11.5),
         if ar.hovered() { p.text } else { p.text_2 },
     );
-    if tip(ar, "Junta as alterações preparadas ao último commit e permite mudar a mensagem (git commit --amend)").clicked() {
+    if tip(ar, t!("Adds the staged changes to the last commit and lets you change the message (git commit --amend)")).clicked() {
         acts.push(Act::ToggleAmend);
     }
-    // Botão Commit.
+    // Commit button.
     let label = if staged > 0 { format!("Commit ({staged})") } else { "Commit".into() };
     let bw = button_width(&painter, &label, ButtonKind::Primary);
     let b = Rect::from_min_size(Pos2::new(x1 - bw, by), Vec2::new(bw, BTN_H));
@@ -843,18 +873,18 @@ fn commit_box(deck: &mut Deck, ui: &mut Ui, footer: Rect, msg_h: f32, staged: us
     }
     text_in(&painter, b, Align2::CENTER_CENTER, &label, theme::ui_semibold(11.5), if ready { p.on_accent } else { p.text_3 });
     let why = if staged == 0 && !deck.git.amend {
-        "Prepare (+) as alterações que vão no commit"
+        t!("Stage (+) the changes that go in the commit")
     } else if deck.git.message.trim().is_empty() {
-        "Escreva a mensagem do commit"
+        t!("Write the commit message")
     } else {
-        "Fazer o commit do que está preparado"
+        t!("Commit what is staged")
     };
     if (tip(r, why).clicked() || ctrl_enter) && ready {
         acts.push(Act::Commit);
     }
 }
 
-/// Menu de branches (abre sob o botão da branch): filtro, locais, remotas e "criar".
+/// Branch menu (opens under the branch button): filter, local, remote and "create".
 fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
     if !deck.git.branch_menu {
         return;
@@ -881,16 +911,16 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
     let mut create = false;
     let mut new_mode: Option<BranchMenuMode> = None;
     let hint = match mode {
-        BranchMenuMode::Switch => "Buscar ou criar branch…",
-        BranchMenuMode::Merge => "Buscar a branch a mesclar aqui…",
-        BranchMenuMode::Rebase => "Buscar a branch-base do rebase…",
+        BranchMenuMode::Switch => t!("Find or create a branch…"),
+        BranchMenuMode::Merge => t!("Find the branch to merge here…"),
+        BranchMenuMode::Rebase => t!("Find the base branch of the rebase…"),
     };
     let p = theme::pal();
     Area::new(Id::new("git-branch-menu")).order(Order::Foreground).fixed_pos(pos).constrain(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
         shadow(ui.painter(), rect, 8, 8, 24, p.shadow);
         frame(ui.painter(), rect, 8.0, p.popup, p.glass_border);
-        // Filtro / nome da branch nova.
+        // Filter / name of the new branch.
         let filter_id = Id::new("git-branch-filter");
         let focused = ui.ctx().memory(|m| m.has_focus(filter_id));
         let fr = Rect::from_min_size(rect.min + Vec2::new(8.0, 8.0), Vec2::new(w - 16.0, 26.0));
@@ -908,11 +938,11 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
             out.response.request_focus();
         }
         let enter = out.response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-        // Trocar / Mesclar / Rebase (segmented control).
+        // Switch / Merge / Rebase (segmented control).
         let modes = [BranchMenuMode::Switch, BranchMenuMode::Merge, BranchMenuMode::Rebase];
         let cur_idx = modes.iter().position(|&m| m == mode).unwrap_or(0);
         let seg_r = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, fr.max.y + 6.0), Vec2::new(w - 16.0, MODE_H));
-        if let Some(idx) = segmented(ui, seg_r, Id::new("git-branch-mode"), &["Trocar", "Mesclar", "Rebase"], cur_idx, false) {
+        if let Some(idx) = segmented(ui, seg_r, Id::new("git-branch-mode"), &[t!("Switch"), t!("Merge"), t!("Rebase")], cur_idx, false) {
             if modes[idx] != mode {
                 new_mode = Some(modes[idx]);
             }
@@ -932,10 +962,10 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
                 let _ = id;
                 enabled && resp.clicked()
             };
-            if can_create && item(ui, &format!("+ Criar branch \"{filter}\""), p.info, !busy, ("create", "")) {
+            if can_create && item(ui, &t!("+ Create branch \"{filter}\"", filter), p.info, !busy, ("create", "")) {
                 create = true;
             }
-            for (title, list) in [("LOCAIS", &locals), ("REMOTAS", &remotes)] {
+            for (title, list) in [(t!("LOCAL"), &locals), (t!("REMOTE"), &remotes)] {
                 if list.is_empty() {
                     continue;
                 }
@@ -944,7 +974,7 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
                 for b in list {
                     let text = if b.current { format!("✓ {}", b.name) } else { format!("   {}", b.name) };
                     let color = if b.current { p.text } else { p.text_2 };
-                    // Mesclar/rebase da branch atual nela mesma não faz sentido.
+                    // Merging/rebasing the current branch onto itself makes no sense.
                     let same = current.as_deref() == Some(b.name.as_str());
                     if item(ui, &text, color, !b.current && !same && !busy, ("b", &b.name)) {
                         chosen = Some(b.clone());
@@ -953,7 +983,7 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
             }
             if rows == 0 {
                 let (r, _) = ui.allocate_exact_size(Vec2::new(w - 8.0, row), Sense::hover());
-                let text = if filter.is_empty() { "Carregando…" } else { "Nome de branch inválido" };
+                let text = if filter.is_empty() { t!("Loading…") } else { t!("Invalid branch name") };
                 text_in(ui.painter(), r.shrink2(Vec2::new(10.0, 0.0)), Align2::LEFT_CENTER, text, theme::ui(12.0), p.text_2);
             }
         });
@@ -976,55 +1006,59 @@ fn branch_menu(deck: &mut Deck, ctx: &egui::Context, anchor: Rect, busy: bool) {
     }
 }
 
-/// Texto da confirmação: (título, detalhe, rótulo do botão perigoso).
+/// Confirmation text: (title, detail, label of the dangerous button).
 fn confirm_texts(action: &ConfirmAction) -> (String, String, &'static str) {
     match action {
         ConfirmAction::DiscardFile(entry) => {
             if entry.kind == EntryKind::Untracked {
                 (
-                    format!("Apagar {}?", entry.path),
-                    "O arquivo não rastreado será removido do disco. Não dá para desfazer.".into(),
-                    "Apagar",
+                    t!("Delete {path}?", path = entry.path),
+                    t!("The untracked file will be removed from the disk. This cannot be undone.").into(),
+                    t!("Delete"),
                 )
             } else if entry.kind == EntryKind::Unmerged {
                 (
-                    format!("Descartar o conflito em {}?", entry.path),
-                    "O arquivo volta ao que está no commit atual (as alterações dos dois lados nele se perdem). Não dá para desfazer."
+                    t!("Discard the conflict in {path}?", path = entry.path),
+                    t!("The file goes back to what is in the current commit (the changes of both sides in it are lost). This cannot be undone.")
                         .into(),
-                    "Descartar",
+                    t!("Discard"),
                 )
             } else {
                 (
-                    format!("Descartar as alterações em {}?", entry.path),
-                    "O arquivo volta ao que está preparado/commitado. Não dá para desfazer.".into(),
-                    "Descartar",
+                    t!("Discard the changes in {path}?", path = entry.path),
+                    t!("The file goes back to what is staged/committed. This cannot be undone.").into(),
+                    t!("Discard"),
                 )
             }
         }
         ConfirmAction::DiscardHunk { path, .. } => (
-            format!("Descartar este trecho de {path}?"),
-            "O trecho volta ao que está preparado/commitado. Não dá para desfazer.".into(),
-            "Descartar",
+            t!("Discard this hunk of {path}?", path),
+            t!("The hunk goes back to what is staged/committed. This cannot be undone.").into(),
+            t!("Discard"),
         ),
         ConfirmAction::DropStash(s) => (
-            format!("Apagar o stash@{{{}}}?", s.index),
-            format!("\"{}\" será removido da lista. Não dá para desfazer.", s.message),
-            "Apagar",
+            t!("Delete stash@{{index}}?", index = s.index),
+            t!("\"{message}\" will be removed from the list. This cannot be undone.", message = s.message),
+            t!("Delete"),
         ),
         ConfirmAction::AbortOp(state) => {
             let what = match state {
-                RepoState::Merging => "a mesclagem",
-                RepoState::Rebasing => "o rebase",
-                RepoState::CherryPicking => "o cherry-pick",
-                RepoState::Reverting => "o revert",
-                RepoState::Normal => "a operação",
+                RepoState::Merging => t!("the merge"),
+                RepoState::Rebasing => t!("the rebase"),
+                RepoState::CherryPicking => t!("the cherry-pick"),
+                RepoState::Reverting => t!("the revert"),
+                RepoState::Normal => t!("the operation"),
             };
-            (format!("Abortar {what}?"), "A branch volta ao estado de antes e o que foi resolvido até aqui se perde.".into(), "Abortar")
+            (
+                t!("Abort {what}?", what),
+                t!("The branch goes back to its previous state and what was resolved so far is lost.").into(),
+                t!("Abort"),
+            )
         }
     }
 }
 
-/// Confirmação antes de uma ação que não dá para desfazer.
+/// Confirmation before an action that cannot be undone.
 fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect) {
     let Some(action) = deck.git.confirm.clone() else { return };
     super::modal_backdrop(deck, ctx, "git-confirm-backdrop");
@@ -1047,10 +1081,10 @@ fn confirm_dialog(deck: &mut Deck, ctx: &egui::Context, panel: Rect) {
         let by = rect.max.y - 14.0 - BTN_H;
         let dw = button_width(ui.painter(), danger, ButtonKind::Primary);
         let d = Rect::from_min_size(Pos2::new(rect.max.x - 14.0 - dw, by), Vec2::new(dw, BTN_H));
-        let cw = button_width(ui.painter(), "Cancelar", ButtonKind::Secondary);
+        let cw = button_width(ui.painter(), t!("Cancel"), ButtonKind::Secondary);
         let c = Rect::from_min_size(Pos2::new(d.min.x - 8.0 - cw, by), Vec2::new(cw, BTN_H));
         let dr = button_danger(ui, d, Id::new("git-confirm-yes"), danger);
-        let cr = button(ui, c, Id::new("git-confirm-no"), "Cancelar", ButtonKind::Secondary);
+        let cr = button(ui, c, Id::new("git-confirm-no"), t!("Cancel"), ButtonKind::Secondary);
         if dr.clicked() {
             decided = Some(true);
         } else if cr.clicked() || ui.input(|i| i.key_pressed(Key::Escape)) {
