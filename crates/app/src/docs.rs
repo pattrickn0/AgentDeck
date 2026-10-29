@@ -1,10 +1,10 @@
-//! Modo Documentos do centro: o estado e a lógica pura (a pintura fica em `ui/docs.rs`).
+//! Documents mode of the center: the state and the pure logic (the painting lives in `ui/docs.rs`).
 //!
-//! O centro alterna entre os agentes (a tela dividida) e os documentos: diff de uma tarefa, de um
-//! commit ou de um arquivo, arquivo de texto e markdown. Os arquivos de texto pequenos se leem e se **editam** (`Source`:
-//! `Ctrl+S` grava, com o mesmo fim de linha e sem acrescentar BOM; o aviso quando um agente muda o arquivo com edição
-//! aberta). Os documentos são por projeto e não são gravados entre aberturas. Abrir um documento já aberto só o foca;
-//! abrir qualquer um muda o centro para Documentos, e fechar o último volta para Agentes.
+//! The center switches between the agents (the split screen) and the documents: diff of a task, of a commit or of a
+//! file, text file and markdown. Small text files are read and **edited** (`Source`: `Ctrl+S` writes, with the same
+//! line ending and without adding a BOM; the notice when an agent changes the file with an edit open). Documents are
+//! per project and are not saved between openings. Opening a document that is already open only focuses it; opening any
+//! document switches the center to Documents, and closing the last one goes back to Agents.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -12,18 +12,18 @@ use std::sync::Arc;
 
 use agentdeck_core::git::{DiffKind, EntryKind, GitDiff, GitEntry, GitError};
 use agentdeck_core::workspace::READ_TEXT_MAX;
-use agentdeck_core::{Eol, TextFile};
+use agentdeck_core::{t, Eol, TextFile};
 
 use crate::deck::{Deck, UiMsg};
 use crate::highlight::{self, Lang, Span};
 
-/// A fonte e a altura de uma linha do arquivo de texto (a mesma do diff).
+/// The font and the height of a line of the text file (the same as the diff's).
 pub const TEXT_FONT: f32 = 12.0;
 pub const TEXT_ROW_H: f32 = 17.0;
 
-/// O que o desenho de um arquivo guarda entre quadros: o realce por versão do texto e o galley já montado. O `TextEdit`
-/// pede o galley a cada quadro; sem este cache o arquivo todo seria percorrido, colorido e medido de novo 60 vezes por
-/// segundo.
+/// What the drawing of a file keeps between frames: the highlight per version of the text and the galley already
+/// built. The `TextEdit` asks for the galley every frame; without this cache the whole file would be walked, colored and
+/// measured again 60 times per second.
 #[derive(Debug, Clone, Default)]
 pub struct Shaped {
     pub hl: highlight::Cache,
@@ -31,7 +31,7 @@ pub struct Shaped {
     galley: Option<Arc<egui::Galley>>,
 }
 
-/// Para que o galley guardado vale: o texto, a linguagem, a largura de quebra, a escala da tela e a busca.
+/// What the saved galley is valid for: the text, the language, the wrap width, the screen scale and the search.
 #[derive(Debug, Clone, PartialEq)]
 struct ShapeKey {
     hash: u64,
@@ -42,8 +42,8 @@ struct ShapeKey {
 }
 
 impl Shaped {
-    /// O galley de `text` (monoespaçado, realçado, quebrando em `wrap` px), refeito só se algo da chave mudou.
-    /// `marks` são as ocorrências da busca, em bytes de `text`, e `current` a atual entre elas.
+    /// The galley of `text` (monospace, highlighted, wrapping at `wrap` px), rebuilt only if something in the key changed.
+    /// `marks` are the search hits, in bytes of `text`, and `current` the current one among them.
     pub fn galley(&mut self, fonts: &egui::Context, text: &str, lang: Lang, wrap: f32, find: &Find) -> Arc<egui::Galley> {
         let hash = highlight::text_hash(text);
         let ppp = fonts.pixels_per_point();
@@ -81,7 +81,7 @@ impl Shaped {
     }
 }
 
-/// O que o centro mostra.
+/// What the center shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CenterView {
     #[default]
@@ -89,43 +89,43 @@ pub enum CenterView {
     Docs,
 }
 
-/// De onde vem o texto de um documento markdown.
+/// Where the text of a markdown document comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MdSource {
-    /// Um `.md` do projeto (caminho relativo).
+    /// A `.md` of the project (relative path).
     File(String),
-    /// O pedido da tarefa (id): o texto vem da tarefa já carregada.
+    /// The task brief (id): the text comes from the task already loaded.
     TaskBrief(String),
-    /// O relatório da tarefa (id).
+    /// The task report (id).
     TaskReport(String),
 }
 
-/// O que um documento é. Dois documentos do mesmo projeto com o mesmo `DocKind` são o mesmo.
+/// What a document is. Two documents of the same project with the same `DocKind` are the same.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DocKind {
-    /// O diff da tarefa: o da branch (`merged` falso) ou, depois da mesclagem, o que ela trouxe. Os dois são
-    /// documentos diferentes: a tarefa que muda de estado não volta ao diff antigo.
+    /// The diff of the task: the branch's (`merged` false) or, after the merge, what it brought. The two are
+    /// different documents: a task that changes state does not go back to the old diff.
     TaskDiff {
         id: String,
         merged: bool,
     },
-    /// O diff de um commit (hash completo).
+    /// The diff of a commit (full hash).
     CommitDiff(String),
-    /// O diff de um arquivo alterado (caminho a partir da raiz do repositório), no lado preparado ou no não
-    /// preparado; `orig` é o nome antigo de um renomeado.
+    /// The diff of a changed file (path from the repository root), on the staged or the unstaged side; `orig` is the
+    /// old name of a renamed one.
     FileDiff {
         path: String,
         orig: Option<String>,
         staged: bool,
         untracked: bool,
     },
-    /// Um arquivo de texto do projeto (caminho relativo).
+    /// A text file of the project (relative path).
     File(String),
     Markdown(MdSource),
 }
 
 impl DocKind {
-    /// O arquivo do projeto que o documento lê, se for de arquivo (recarrega quando ele muda).
+    /// The project file the document reads, if it is a file (it reloads when the file changes).
     pub fn file_path(&self) -> Option<&str> {
         match self {
             DocKind::File(p) | DocKind::Markdown(MdSource::File(p)) => Some(p),
@@ -133,7 +133,7 @@ impl DocKind {
         }
     }
 
-    /// O arquivo de um diff de um arquivo só (o realce do código do diff).
+    /// The file of a single-file diff (for highlighting the diff code).
     pub fn diff_path(&self) -> Option<&str> {
         match self {
             DocKind::FileDiff { path, .. } => Some(path),
@@ -141,27 +141,27 @@ impl DocKind {
         }
     }
 
-    /// Dá para ler de novo (botão de recarregar): tudo que vem do core, não o texto de uma tarefa.
+    /// Can be read again (reload button): everything that comes from the core, not the text of a task.
     pub fn reloadable(&self) -> bool {
         !matches!(self, DocKind::Markdown(MdSource::TaskBrief(_) | MdSource::TaskReport(_)))
     }
 
-    /// A leitura usa o projeto **ativo** na hora em que a thread roda (arquivo, commit, arquivo alterado): se o usuário
-    /// trocou de projeto nesse meio-tempo, o resultado é de outro projeto. O diff da tarefa passa o projeto e não tem esse risco.
+    /// The read uses the **active** project at the moment the thread runs (file, commit, changed file): if the user
+    /// switched projects in the meantime, the result is from another project. The task diff passes the project and has no such risk.
     pub fn reads_active_project(&self) -> bool {
         matches!(self, DocKind::CommitDiff(_) | DocKind::FileDiff { .. } | DocKind::File(_) | DocKind::Markdown(MdSource::File(_)))
     }
 }
 
-/// Um arquivo dentro de um diff (a lista da esquerda).
+/// A file inside a diff (the list on the left).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffFile {
     pub path: String,
-    /// `A` novo, `D` apagado, `R` renomeado, `M` alterado.
+    /// `A` new, `D` deleted, `R` renamed, `M` modified.
     pub status: char,
     pub added: usize,
     pub removed: usize,
-    /// Índice, em `GitDiff::lines`, da linha `diff --git` deste arquivo (para onde a lista rola).
+    /// Index, in `GitDiff::lines`, of this file's `diff --git` line (where the list scrolls to).
     pub line: usize,
 }
 
@@ -169,9 +169,9 @@ pub struct DiffFile {
 pub struct DiffDoc {
     pub diff: GitDiff,
     pub files: Vec<DiffFile>,
-    /// O arquivo selecionado na lista (o último em que se clicou).
+    /// The file selected in the list (the last one clicked).
     pub selected: usize,
-    /// Linha para onde o diff rola no próximo quadro (clique na lista).
+    /// Line the diff scrolls to in the next frame (click on the list).
     pub jump: Option<usize>,
 }
 
@@ -181,7 +181,7 @@ impl DiffDoc {
         Self { diff, files, selected: 0, jump: None }
     }
 
-    /// Seleciona o arquivo `n` da lista e pede a rolagem até ele.
+    /// Selects file `n` of the list and asks to scroll to it.
     pub fn select(&mut self, n: usize) {
         if let Some(f) = self.files.get(n) {
             self.selected = n;
@@ -190,13 +190,13 @@ impl DiffDoc {
     }
 }
 
-/// As linhas de um arquivo de texto que não abre no editor (grande demais, linha comprida demais).
+/// The lines of a text file that does not open in the editor (too large, line too long).
 #[derive(Debug, Clone)]
 pub struct TextDoc {
     pub lines: Vec<String>,
-    /// A linha mais comprida, em caracteres (a largura da rolagem horizontal).
+    /// The longest line, in characters (the width of the horizontal scroll).
     pub max_chars: usize,
-    /// O realce de cada linha (vazio sem linguagem); calculado uma vez, quando o arquivo carrega.
+    /// The highlighting of each line (empty without a language); computed once, when the file loads.
     pub spans: Vec<Vec<Span>>,
 }
 
@@ -206,8 +206,8 @@ impl PartialEq for TextDoc {
     }
 }
 
-/// Uma linha com mais caracteres que isto é cortada na tela (como o diff faz com 1000): um arquivo de 1 MB numa linha só
-/// (JSON minificado) não deve travar a pintura.
+/// A line with more characters than this is cut on screen (as the diff does with 1000): a 1 MB file on a single line
+/// (minified JSON) must not freeze the painting.
 const TEXT_LINE_MAX: usize = 2000;
 
 impl TextDoc {
@@ -227,7 +227,7 @@ impl TextDoc {
         Self { lines, max_chars, spans: Vec::new() }
     }
 
-    /// Como [`TextDoc::new`], com o realce de `lang` (uma vez só, aqui: a pintura só lê).
+    /// Like [`TextDoc::new`], with the highlighting of `lang` (only once, here: painting only reads it).
     pub fn highlighted(text: &str, lang: Lang) -> Self {
         let mut doc = Self::new(text);
         if lang != Lang::Plain {
@@ -237,44 +237,44 @@ impl TextDoc {
     }
 }
 
-/// Acima disto o arquivo abre só em leitura, sem editor: o desenho do editor refaz as letras de todo o texto e, com
-/// vários MB, travaria a interface.
+/// Above this the file opens read-only, without the editor: the editor drawing reshapes the letters of the whole text and,
+/// with several MB, would freeze the interface.
 pub const EDIT_MAX: usize = 256 * 1024;
-/// Uma linha mais comprida que isto (JSON minificado) também deixa o editor de fora.
+/// A line longer than this (minified JSON) also keeps the editor out.
 const EDIT_LINE_MAX: usize = 4000;
 
-/// Um arquivo de texto aberto como código: o texto que está na tela (que se edita, se o usuário pedir), o que está no
-/// disco, e o que é preciso para gravar de volta igual. Também serve à leitura: o mesmo desenho dá seleção, cópia e busca.
+/// A text file opened as code: the text on screen (which is edited, if the user asks), what is on the
+/// disk, and what is needed to write it back the same. It also serves reading: the same drawing gives selection, copy and search.
 #[derive(Debug, Clone)]
 pub struct Source {
-    /// O texto na tela: com `\n`, sem BOM.
+    /// The text on screen: with `\n`, no BOM.
     pub text: String,
-    /// O que está no disco, no mesmo formato; `text != disk` é "edição não salva".
+    /// What is on the disk, in the same format; `text != disk` is "unsaved edit".
     pub disk: String,
     pub eol: Eol,
     pub bom: bool,
     pub lang: Lang,
-    /// O usuário está editando (senão, só lendo).
+    /// The user is editing (otherwise, only reading).
     pub editing: bool,
-    /// Markdown: o código em vez do texto formatado.
+    /// Markdown: the code instead of the formatted text.
     pub raw: bool,
-    /// Por que não dá para editar: gravar de volta mudaria o que o usuário não tocou.
+    /// Why it cannot be edited: writing it back would change what the user did not touch.
     pub locked: Option<String>,
-    /// O disco mudou com edição não salva: o texto de lá, esperando a escolha entre manter a minha ou recarregar.
+    /// The disk changed with an unsaved edit: the text from there, waiting for the choice between keeping mine or reloading.
     pub external: Option<String>,
-    /// O BOM, o fim de linha e a trava do texto de `external`: recarregá-lo adota os três (gravar com os do arquivo
-    /// antigo reescreveria todas as linhas, ou gravaria por cima de bytes que não viraram texto).
+    /// The BOM, the line ending and the lock of the `external` text: reloading it adopts all three (writing with the old
+    /// file's ones would rewrite every line, or write over bytes that did not become text).
     external_form: Option<(bool, Eol, Option<String>)>,
-    /// O arquivo sumiu (ou ficou ilegível) enquanto havia edição não salva: ela continua aqui.
+    /// The file disappeared (or became unreadable) while there was an unsaved edit: the edit stays here.
     pub gone: bool,
-    /// Uma gravação em andamento, e o erro da última que falhou.
+    /// A save in progress, and the error of the last one that failed.
     pub saving: bool,
     pub save_error: Option<String>,
-    /// Muda a cada alteração do texto (a chave do que se guarda: realce, busca).
+    /// Changes on every text change (the key of what is cached: highlighting, search).
     pub version: u64,
 }
 
-/// O texto como o editor o guarda (sem BOM, com `\n`), o BOM e o fim de linha; e por que não dá para editar, se não dá.
+/// The text as the editor keeps it (no BOM, with `\n`), the BOM and the line ending; and why it cannot be edited, if it cannot.
 fn read_source(raw: &str) -> (String, bool, Eol, Option<String>) {
     let (body, bom) = match raw.strip_prefix('\u{feff}') {
         Some(rest) => (rest, true),
@@ -286,23 +286,24 @@ fn read_source(raw: &str) -> (String, bool, Eol, Option<String>) {
             body.replace("\r\n", "\n"),
             Eol::Lf,
             Some(
-                "Este arquivo mistura fins de linha (CRLF e LF): gravar de volta mudaria linhas que você não tocou. Só leitura.".to_owned(),
+                t!("This file mixes line endings (CRLF and LF): writing it back would change lines you did not touch. Read-only.")
+                    .to_owned(),
             ),
         ),
     };
     if locked.is_none() && body.contains('\u{fffd}') {
-        locked = Some("Este arquivo não é UTF-8 (há bytes que não viram texto): gravar de volta o estragaria. Só leitura.".to_owned());
+        locked = Some(t!("This file is not UTF-8 (some bytes do not become text): writing it back would damage it. Read-only.").to_owned());
     }
     (text, bom, eol, locked)
 }
 
 impl Source {
-    /// O texto cabe no editor: não passa de `EDIT_MAX` e nenhuma linha passa de `EDIT_LINE_MAX`.
+    /// The text fits in the editor: it does not go over `EDIT_MAX` and no line goes over `EDIT_LINE_MAX`.
     pub fn fits(raw: &str) -> bool {
         raw.len() <= EDIT_MAX && !raw.split('\n').any(|l| l.len() > EDIT_LINE_MAX)
     }
 
-    /// O arquivo como código, se cabe no editor (`EDIT_MAX`, sem linha comprida demais); senão `None`.
+    /// The file as code, if it fits in the editor (`EDIT_MAX`, no line too long); otherwise `None`.
     pub fn open(raw: &str, lang: Lang) -> Option<Source> {
         if raw.len() > EDIT_MAX || raw.split('\n').any(|l| l.len() > EDIT_LINE_MAX) {
             return None;
@@ -330,13 +331,13 @@ impl Source {
         self.text != self.disk
     }
 
-    /// `raw` (o que o disco tem agora) é o que já está em `disk`?
+    /// Is `raw` (what the disk has now) what is already in `disk`?
     pub fn is_disk(&self, raw: &str) -> bool {
         self.external.is_none() && !self.gone && read_source(raw).0 == self.disk
     }
 
-    /// O arquivo foi lido de novo (o watcher avisou). Sem edição não salva, a tela acompanha o disco; com ela, nada do
-    /// que o usuário digitou se perde: se o disco mudou de fato, o texto de lá espera em `external`.
+    /// The file was read again (the watcher said so). Without an unsaved edit, the screen follows the disk; with one, nothing
+    /// the user typed is lost: if the disk really changed, the text from there waits in `external`.
     pub fn reload(&mut self, raw: &str) {
         let (text, bom, eol, locked) = read_source(raw);
         self.gone = false;
@@ -353,7 +354,7 @@ impl Source {
             self.external = None;
             self.external_form = None;
         } else if text == self.text {
-            // O agente escreveu o mesmo que o usuário: não há o que escolher.
+            // The agent wrote the same as the user: there is nothing to choose.
             self.disk = text;
             self.external = None;
             self.external_form = None;
@@ -363,7 +364,7 @@ impl Source {
         }
     }
 
-    /// "Manter a minha": o disco que mudou passa a ser a base; a edição continua e a próxima gravação a põe por cima.
+    /// "Keep mine": the disk that changed becomes the base; the edit goes on and the next save writes it over.
     pub fn keep_mine(&mut self) {
         if let Some(ext) = self.external.take() {
             self.disk = ext;
@@ -371,7 +372,7 @@ impl Source {
         self.external_form = None;
     }
 
-    /// "Recarregar a do disco": a edição é descartada.
+    /// "Reload from disk": the edit is discarded.
     pub fn take_disk(&mut self) {
         if let Some(ext) = self.external.take() {
             self.text = ext.clone();
@@ -381,7 +382,7 @@ impl Source {
         }
     }
 
-    /// O texto de `external` virou o da tela: o BOM, o fim de linha e a trava passam a ser os dele.
+    /// The `external` text became the one on screen: the BOM, the line ending and the lock become its own.
     fn adopt_external_form(&mut self) {
         if let Some((bom, eol, locked)) = self.external_form.take() {
             (self.bom, self.eol, self.locked) = (bom, eol, locked);
@@ -391,7 +392,7 @@ impl Source {
         }
     }
 
-    /// Começa a editar (se pode). Markdown vai para o código enquanto se edita.
+    /// Starts editing (if allowed). Markdown goes to code while it is edited.
     pub fn set_editing(&mut self, on: bool) {
         if on && self.can_edit() {
             self.editing = true;
@@ -401,7 +402,7 @@ impl Source {
         }
     }
 
-    /// Joga fora a edição: a tela volta ao que está no disco (ou ao texto novo que o disco trouxe).
+    /// Throws the edit away: the screen goes back to what is on the disk (or to the new text the disk brought).
     pub fn discard(&mut self) {
         if self.external.is_some() {
             self.adopt_external_form();
@@ -412,7 +413,7 @@ impl Source {
         self.save_error = None;
     }
 
-    /// A gravação de `saved` deu certo.
+    /// The save of `saved` succeeded.
     pub fn mark_saved(&mut self, saved: &str) {
         self.disk = saved.to_owned();
         self.external = None;
@@ -422,32 +423,32 @@ impl Source {
         self.save_error = None;
     }
 
-    /// O texto foi editado (o editor devolveu mudança).
+    /// The text was edited (the editor returned a change).
     pub fn touched(&mut self) {
         self.version += 1;
     }
 
-    /// Dá para editar? (Não, se `locked`.)
+    /// Can it be edited? (Not if `locked`.)
     pub fn can_edit(&self) -> bool {
         self.locked.is_none()
     }
 }
 
-/// A busca do documento aberto (`Ctrl+F`).
+/// The search of the open document (`Ctrl+F`).
 #[derive(Debug, Clone, Default)]
 pub struct Find {
     pub open: bool,
     pub query: String,
-    /// A posição, nas ocorrências, da atual.
+    /// The position, among the matches, of the current one.
     pub current: usize,
-    /// O campo pede o foco no próximo quadro.
+    /// The field asks for focus in the next frame.
     pub focus: bool,
-    /// Rolar até a ocorrência atual no próximo quadro.
+    /// Scroll to the current match in the next frame.
     pub jump: bool,
-    /// Ocorrências em bytes do texto (arquivo no editor) ou linhas (diff, arquivo grande); só uma das duas se usa.
+    /// Matches in bytes of the text (file in the editor) or lines (diff, large file); only one of the two is used.
     pub ranges: Vec<Range<usize>>,
     pub lines: Vec<usize>,
-    /// Para que consulta e versão do texto as ocorrências valem.
+    /// Which query and text version the matches are for.
     key: Option<(String, u64)>,
 }
 
@@ -466,8 +467,8 @@ impl Find {
         self.ranges.len() + self.lines.len()
     }
 
-    /// Refaz as ocorrências se a consulta ou a versão do texto mudaram (`search` devolve bytes e linhas). Uma consulta
-    /// nova leva à primeira ocorrência; editar o texto não rola a tela.
+    /// Redoes the matches if the query or the text version changed (`search` returns bytes and lines). A new
+    /// query goes to the first match; editing the text does not scroll the screen.
     pub fn refresh(&mut self, version: u64, search: impl FnOnce(&str) -> (Vec<Range<usize>>, Vec<usize>)) {
         let same_query = self.key.as_ref().is_some_and(|(q, _)| *q == self.query);
         if self.key.as_ref().is_some_and(|(q, v)| *q == self.query && *v == version) {
@@ -483,7 +484,7 @@ impl Find {
         }
     }
 
-    /// A próxima (ou a anterior) ocorrência, dando a volta.
+    /// The next (or the previous) match, wrapping around.
     pub fn step(&mut self, back: bool) {
         let n = self.count();
         if n > 0 {
@@ -492,17 +493,17 @@ impl Find {
         }
     }
 
-    /// De que consulta e versão do texto as ocorrências são (a chave do que depende delas, como o galley).
+    /// Which query and text version the matches are from (the key of what depends on them, like the galley).
     pub fn stamp(&self) -> Option<&(String, u64)> {
         self.key.as_ref().filter(|_| self.open && !self.query.is_empty())
     }
 
-    /// A ocorrência atual, em bytes (arquivo no editor).
+    /// The current match, in bytes (file in the editor).
     pub fn current_range(&self) -> Option<&Range<usize>> {
         self.ranges.get(self.current)
     }
 
-    /// A linha da ocorrência atual (diff, arquivo grande).
+    /// The line of the current match (diff, large file).
     pub fn current_line(&self) -> Option<usize> {
         self.lines.get(self.current).copied()
     }
@@ -514,15 +515,15 @@ pub enum DocState {
     Failed(String),
     Diff(DiffDoc),
     Text(TextDoc),
-    /// Um arquivo de texto pequeno, como código: lê, seleciona, busca e edita.
+    /// A small text file, as code: reads, selects, searches and edits.
     Source(Source),
-    /// O texto markdown, desenhado já formatado (pedido e relatório da tarefa).
+    /// The markdown text, drawn already formatted (the task's request and report).
     Markdown(String),
-    /// Um arquivo que não vira texto na tela (grande demais ou binário): a explicação.
+    /// A file that does not become text on screen (too large or binary): the explanation.
     Unreadable(String),
 }
 
-/// O que chegou de uma leitura feita fora da thread da interface.
+/// What came from a read done off the interface thread.
 #[derive(Debug, Clone)]
 pub enum Loaded {
     Diff(Result<GitDiff, String>),
@@ -532,12 +533,12 @@ pub enum Loaded {
 #[derive(Debug, Clone)]
 pub struct DocTab {
     pub uid: u64,
-    /// Id do projeto a que o documento pertence.
+    /// Id of the project the document belongs to.
     pub project: String,
     pub kind: DocKind,
-    /// O nome curto, na aba.
+    /// The short name, on the tab.
     pub title: String,
-    /// A linha de cima do documento (caminho, tarefa, commit) e a dica da aba.
+    /// The top line of the document (path, task, commit) and the tab tooltip.
     pub subtitle: String,
     pub state: DocState,
     pub find: Find,
@@ -549,23 +550,23 @@ impl DocTab {
         Self { uid, project, kind, title, subtitle, state, find: Find::default(), shaped: Shaped::default() }
     }
 
-    /// Há edição não salva.
+    /// There is an unsaved edit.
     pub fn dirty(&self) -> bool {
         matches!(&self.state, DocState::Source(s) if s.dirty())
     }
 
-    /// A linguagem do realce, pelo nome do arquivo.
+    /// The highlighting language, from the file name.
     pub fn lang(&self) -> Lang {
         self.kind.file_path().map_or(Lang::Plain, Lang::from_path)
     }
 
-    /// Aplica o resultado de uma leitura. O estado vira o que o tipo do documento mostra; o arquivo
-    /// selecionado e a rolagem de um diff relido não se perdem (o `selected` só é mantido se ainda existe). Um arquivo
-    /// aberto como código com edição não salva nunca é trocado por uma leitura: ela só vira aviso (`Source::reload`).
+    /// Applies the result of a read. The state becomes what the document type shows; the selected file
+    /// and the scroll of a reread diff are not lost (`selected` is kept only if it still exists). A file
+    /// opened as code with an unsaved edit is never replaced by a read: the read only becomes a notice (`Source::reload`).
     pub fn apply(&mut self, loaded: Loaded) {
         if let DocState::Source(src) = &mut self.state {
             match &loaded {
-                // Um arquivo que cresceu além do editor só segue o disco se não há edição a proteger.
+                // A file that grew beyond the editor only follows the disk if there is no edit to protect.
                 Loaded::Text(Ok(TextFile::Text(raw))) if src.dirty() || Source::fits(raw) => return src.reload(raw),
                 Loaded::Text(_) if src.dirty() => {
                     src.gone = true;
@@ -590,13 +591,9 @@ impl DocTab {
                 }
                 DocState::Diff(doc)
             }
-            Loaded::Text(Ok(TextFile::TooLarge(bytes))) => DocState::Unreadable(format!(
-                "O arquivo tem {} e passa do limite de {}. Abra no programa padrão.",
-                size_label(bytes),
-                size_label(READ_TEXT_MAX)
-            )),
+            Loaded::Text(Ok(TextFile::TooLarge(bytes))) => DocState::Unreadable(too_large_message(bytes)),
             Loaded::Text(Ok(TextFile::Binary)) => {
-                DocState::Unreadable("O arquivo é binário: o conteúdo não aparece aqui. Abra no programa padrão.".into())
+                DocState::Unreadable(t!("The file is binary: the content does not show here. Open it in the default program.").into())
             }
             Loaded::Text(Ok(TextFile::Text(text))) => match Source::open(&text, lang).filter(|_| from_file) {
                 Some(source) => DocState::Source(source),
@@ -606,7 +603,7 @@ impl DocTab {
         };
     }
 
-    /// O texto já está na tela igual ao que chegou (a releitura do watcher não precisa repintar nada).
+    /// The text on screen is already the same as what arrived (the watcher's reread does not need to repaint anything).
     pub fn same_text(&self, loaded: &Loaded) -> bool {
         match (&self.state, loaded) {
             (DocState::Source(old), Loaded::Text(Ok(TextFile::Text(new)))) => old.is_disk(new),
@@ -617,12 +614,26 @@ impl DocTab {
     }
 }
 
-/// "12 KB", "1,5 MB".
+/// Why a file over the read limit does not open here.
+pub fn too_large_message(bytes: u64) -> String {
+    t!(
+        "The file has {size} and goes over the limit of {limit}. Open it in the default program.",
+        size = size_label(bytes),
+        limit = size_label(READ_TEXT_MAX)
+    )
+}
+
+/// "12 KB", "1.5 MB" ("1,5 MB" in Portuguese).
 pub fn size_label(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     let b = bytes as f64;
     if b >= KB * KB {
-        format!("{:.1} MB", b / (KB * KB)).replace('.', ",")
+        let text = format!("{:.1} MB", b / (KB * KB));
+        if agentdeck_core::i18n::lang() == agentdeck_core::i18n::Lang::PtBr {
+            text.replace('.', ",")
+        } else {
+            text
+        }
     } else if b >= KB {
         format!("{:.0} KB", b / KB)
     } else {
@@ -630,50 +641,50 @@ pub fn size_label(bytes: u64) -> String {
     }
 }
 
-/// Os documentos do app e o que o centro mostra.
+/// The app's documents and what the center shows.
 #[derive(Default)]
 pub struct Docs {
     pub view: CenterView,
     tabs: Vec<DocTab>,
-    /// O documento em foco de cada projeto.
+    /// The focused document of each project.
     current: HashMap<String, u64>,
     next_uid: u64,
-    /// SOMENTE DEPURAÇÃO (`AGENTDECK_DEBUG_UI=docs-demo`): os documentos são fictícios; nada é lido nem relido.
+    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=docs-demo`): the documents are fake; nothing is read or reread.
     pub debug_hold: bool,
-    /// SOMENTE DEPURAÇÃO (`docs-demo-badge`): o selo da chave, em vez do das abas de verdade.
+    /// DEBUG ONLY (`docs-demo-badge`): the switch badge, instead of the one of the real tabs.
     pub debug_badge: Option<Badge>,
-    /// O cache do markdown formatado (links e rolagem), compartilhado pelos documentos.
+    /// The cache of the formatted markdown (links and scroll), shared by the documents.
     pub md_cache: egui_commonmark::CommonMarkCache,
-    /// A pergunta aberta sobre edição não salva (fechar a aba ou o app).
+    /// The open question about an unsaved edit (closing the tab or the app).
     pub confirm: Option<Unsaved>,
-    /// Gravações em andamento e o que fazer quando terminarem.
+    /// Saves in progress and what to do when they finish.
     pub pending: HashMap<u64, After>,
 }
 
-/// O que a pergunta sobre edição não salva decide.
+/// What the question about an unsaved edit decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unsaved {
-    /// Fechar a aba do documento (uid).
+    /// Close the document tab (uid).
     Tab(u64),
-    /// Fechar o app.
+    /// Close the app.
     Quit,
-    /// Fechar o app com agentes no meio de um turno (o fechamento mata o processo e o turno se perde).
+    /// Close the app with agents in the middle of a turn (closing kills the process and the turn is lost).
     Busy,
-    /// Descartar a edição e ler o arquivo do disco (o botão Recarregar).
+    /// Discard the edit and read the file from disk (the Reload button).
     Revert(u64),
 }
 
-/// O que fazer depois que uma gravação der certo.
+/// What to do after a save succeeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum After {
     Nothing,
-    /// Fechar a aba.
+    /// Close the tab.
     Close,
-    /// Sair do app (quando não sobrar nada por gravar).
+    /// Quit the app (when nothing is left to save).
     Quit,
 }
 
-/// A resposta do usuário à pergunta sobre edição não salva.
+/// The user's answer to the question about an unsaved edit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answer {
     Save,
@@ -681,18 +692,18 @@ pub enum Answer {
     Cancel,
 }
 
-/// O resultado de `Docs::open`.
+/// The result of `Docs::open`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Opened {
     pub uid: u64,
-    /// O documento é novo (quem abriu precisa carregá-lo).
+    /// The document is new (whoever opened it has to load it).
     pub fresh: bool,
 }
 
 impl Docs {
-    /// Abre o documento, ou só foca se o projeto já o tem aberto, e muda o centro para Documentos. Um documento cujo
-    /// texto vem da tarefa (pedido, relatório) não é relido: ao abri-lo de novo, o estado e os títulos passam a ser os
-    /// de agora (o relatório mudou depois de uma devolução).
+    /// Opens the document, or only focuses it if the project already has it open, and switches the center to Documents. A document
+    /// whose text comes from the task (request, report) is not reread: when it is opened again, the state and the titles become
+    /// the current ones (the report changed after a return).
     pub fn open(&mut self, project: &str, kind: DocKind, title: String, subtitle: String, state: DocState) -> Opened {
         self.view = CenterView::Docs;
         if let Some(t) = self.tabs.iter_mut().find(|t| t.project == project && t.kind == kind) {
@@ -716,8 +727,8 @@ impl Docs {
         }
     }
 
-    /// Fecha o documento. O foco passa ao vizinho (o da direita, ou o último); se o projeto fica sem
-    /// documentos e o centro mostrava Documentos, volta para Agentes.
+    /// Closes the document. Focus goes to the neighbour (the one on the right, or the last); if the project is left without
+    /// documents and the center showed Documents, it goes back to Agents.
     pub fn close(&mut self, uid: u64) {
         let Some(pos) = self.tabs.iter().position(|t| t.uid == uid) else { return };
         let project = self.tabs.remove(pos).project;
@@ -731,14 +742,14 @@ impl Docs {
         self.sync(&project);
     }
 
-    /// Tira do centro o que não existe: Documentos num projeto sem documento vira Agentes.
+    /// Takes out of the center what does not exist: Documents in a project with no document becomes Agents.
     pub fn sync(&mut self, project: &str) {
         if self.view == CenterView::Docs && self.count(project) == 0 {
             self.view = CenterView::Agents;
         }
     }
 
-    /// Alterna a chave. Sem documentos no projeto, fica em Agentes.
+    /// Toggles the switch. Without documents in the project, it stays on Agents.
     pub fn toggle(&mut self, project: &str) {
         self.view = match self.view {
             CenterView::Docs => CenterView::Agents,
@@ -747,17 +758,17 @@ impl Docs {
         };
     }
 
-    /// Quantos documentos o projeto tem abertos.
+    /// How many documents the project has open.
     pub fn count(&self, project: &str) -> usize {
         self.tabs.iter().filter(|t| t.project == project).count()
     }
 
-    /// Os documentos do projeto, na ordem de abertura.
+    /// The documents of the project, in opening order.
     pub fn of_project<'a>(&'a self, project: &'a str) -> impl Iterator<Item = &'a DocTab> {
         self.tabs.iter().filter(move |t| t.project == project)
     }
 
-    /// O documento em foco do projeto (o primeiro, se nenhum foi escolhido).
+    /// The focused document of the project (the first one, if none was chosen).
     pub fn current_uid(&self, project: &str) -> Option<u64> {
         self.current.get(project).copied().or_else(|| self.of_project(project).next().map(|t| t.uid))
     }
@@ -770,7 +781,7 @@ impl Docs {
         self.tabs.iter_mut().find(|t| t.uid == uid)
     }
 
-    /// Foco no documento seguinte (ou anterior) do projeto, dando a volta.
+    /// Focus on the next (or previous) document of the project, wrapping around.
     pub fn cycle(&mut self, project: &str, back: bool) {
         let uids: Vec<u64> = self.of_project(project).map(|t| t.uid).collect();
         let n = uids.len();
@@ -782,8 +793,8 @@ impl Docs {
         self.current.insert(project.to_owned(), uids[next]);
     }
 
-    /// O que reler quando `project` está ativo: os arquivos (o watcher avisou, ou o projeto voltou à tela) e o que ficou
-    /// "Carregando…" porque a resposta chegou com outro projeto ativo e foi descartada (`accepts_load`).
+    /// What to reread when `project` is active: the files (the watcher said so, or the project came back to the screen) and what
+    /// stayed "Loading…" because the answer arrived with another project active and was discarded (`accepts_load`).
     pub fn to_reread(&self, project: &str) -> Vec<u64> {
         self.of_project(project)
             .filter(|t| t.kind.file_path().is_some() || (matches!(t.state, DocState::Loading) && t.kind.reads_active_project()))
@@ -791,23 +802,23 @@ impl Docs {
             .collect()
     }
 
-    /// A resposta de leitura de `uid` vale? Não vale se o documento fechou, nem se ele lê o projeto ativo e o ativo
-    /// agora não é o dele (a thread leu o workspace de outro projeto).
+    /// Is the read answer for `uid` valid? Not if the document closed, nor if it reads the active project and the active
+    /// one is now not its own (the thread read another project's workspace).
     pub fn accepts_load(&self, uid: u64, active_project: &str) -> bool {
         self.get(uid).is_some_and(|t| !t.kind.reads_active_project() || t.project == active_project)
     }
 
-    /// Os documentos com edição não salva, de todos os projetos.
+    /// The documents with an unsaved edit, of every project.
     pub fn unsaved(&self) -> Vec<&DocTab> {
         self.tabs.iter().filter(|t| t.dirty()).collect()
     }
 
-    /// Alguma gravação ainda não voltou.
+    /// Some save has not come back yet.
     pub fn saving(&self) -> bool {
         self.tabs.iter().any(|t| matches!(&t.state, DocState::Source(s) if s.saving))
     }
 
-    /// Um projeto removido leva os documentos dele.
+    /// A removed project takes its documents with it.
     pub fn drop_project(&mut self, project: &str) {
         self.tabs.retain(|t| t.project != project);
         self.current.remove(project);
@@ -815,17 +826,17 @@ impl Docs {
     }
 }
 
-/// O selo do lado "Agentes" da chave: o que aconteceu nas abas enquanto se lê um documento.
+/// The badge on the "Agents" side of the switch: what happened in the tabs while a document is being read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Badge {
-    /// Abas que terminaram um turno sem ser vistas.
+    /// Tabs that finished a turn without being seen.
     pub done: usize,
-    /// Abas trabalhando agora.
+    /// Tabs working right now.
     pub busy: usize,
 }
 
 impl Badge {
-    /// De `(done, busy)` de cada aba do projeto.
+    /// From the `(done, busy)` of each tab of the project.
     pub fn of(tabs: impl IntoIterator<Item = (bool, bool)>) -> Self {
         tabs.into_iter()
             .fold(Self::default(), |b, (done, busy)| Self { done: b.done + usize::from(done), busy: b.busy + usize::from(busy) })
@@ -837,8 +848,8 @@ impl Badge {
     }
 }
 
-/// Os arquivos de um diff, na ordem em que aparecem, com o que cada um mudou. O caminho vem de `+++ b/…`
-/// (ou de `--- a/…` num arquivo apagado), porque o cabeçalho `diff --git a/x b/y` é ambíguo com espaços.
+/// The files of a diff, in the order they appear, with what each one changed. The path comes from `+++ b/…`
+/// (or from `--- a/…` for a deleted file), because the `diff --git a/x b/y` header is ambiguous with spaces.
 pub fn diff_files(diff: &GitDiff) -> Vec<DiffFile> {
     let mut files: Vec<DiffFile> = Vec::new();
     let mut in_header = false;
@@ -867,7 +878,7 @@ pub fn diff_files(diff: &GitDiff) -> Vec<DiffFile> {
                     file.path = unquote(p.strip_prefix("a/").unwrap_or(p));
                 }
             } else if t.starts_with("Binary files ") {
-                // `Binary files a/x and b/y differ`: o cabeçalho já deu o caminho.
+                // `Binary files a/x and b/y differ`: the header already gave the path.
             }
             continue;
         }
@@ -885,14 +896,14 @@ pub fn diff_files(diff: &GitDiff) -> Vec<DiffFile> {
     files
 }
 
-/// O caminho de um `diff --git a/x b/y` (a parte depois de `diff --git `): o `b/…`; com espaços, onde
-/// a metade de `a/` e a de `b/` são iguais.
+/// The path of a `diff --git a/x b/y` (the part after `diff --git `): the `b/…`; with spaces, where
+/// the `a/` half and the `b/` half are equal.
 fn header_path(rest: &str, git: bool) -> String {
     if !git {
         return unquote(rest);
     }
     let rest = rest.trim();
-    // Sem renomeação as duas metades são iguais: `a/<p> b/<p>`.
+    // Without a rename both halves are equal: `a/<p> b/<p>`.
     if let Some(a) = rest.strip_prefix("a/").filter(|a| a.len() >= 3 && (a.len() - 3) % 2 == 0) {
         let n = (a.len() - 3) / 2;
         if a.is_char_boundary(n) && a.is_char_boundary(n + 3) && &a[n..n + 3] == " b/" && a[..n] == a[n + 3..] {
@@ -910,23 +921,23 @@ fn unquote(path: &str) -> String {
     p.strip_prefix('"').and_then(|p| p.strip_suffix('"')).unwrap_or(p).to_owned()
 }
 
-/// O nome do arquivo (último componente) de um caminho com `/` ou `\`.
+/// The file name (last component) of a path with `/` or `\`.
 pub fn file_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().filter(|n| !n.is_empty()).unwrap_or(path)
 }
 
 // ---------------------------------------------------------------------------
-// O Deck e os documentos: abrir, ler (fora da thread da interface) e a troca do centro
+// The Deck and the documents: opening, reading (off the interface thread) and switching the center
 // ---------------------------------------------------------------------------
 
 impl Deck {
-    /// O centro volta a mostrar os agentes (clicar num agente, abrir uma aba).
+    /// The center goes back to showing the agents (clicking an agent, opening a tab).
     pub fn show_agents(&mut self) {
         self.docs.view = CenterView::Agents;
     }
 
-    /// O centro trocou de lado: o terminal perde o teclado ao ler documentos, e ao voltar a aba que
-    /// estava ativa conta como vista.
+    /// The center switched sides: the terminal loses the keyboard while documents are read, and when coming back the tab that
+    /// was active counts as seen.
     pub(crate) fn center_changed(&mut self) {
         self.center_seen = self.docs.view;
         match self.docs.view {
@@ -944,7 +955,7 @@ impl Deck {
         }
     }
 
-    /// O selo do lado "Agentes" da chave: as abas do projeto ativo que terminaram sem ser vistas ou estão trabalhando.
+    /// The badge on the "Agents" side of the switch: the tabs of the active project that finished without being seen or are working.
     pub fn agents_badge(&self) -> Badge {
         if let Some(badge) = self.docs.debug_badge {
             return badge;
@@ -952,7 +963,7 @@ impl Deck {
         Badge::of(self.visible().into_iter().map(|i| (self.tabs[i].done, self.tabs[i].busy)))
     }
 
-    /// Abre (ou foca) um documento do projeto ativo e começa a lê-lo se for novo.
+    /// Opens (or focuses) a document of the active project and starts reading it if it is new.
     fn docs_open(&mut self, kind: DocKind, title: String, subtitle: String, state: DocState) {
         let project = self.active_project.clone();
         if project.is_empty() {
@@ -964,7 +975,7 @@ impl Deck {
         }
     }
 
-    /// O diff da tarefa: o da branch, ou o que a mesclagem trouxe (ver `tasks_ui::shows_merged_diff`).
+    /// The task diff: the branch's, or what the merge brought (see `tasks_ui::shows_merged_diff`).
     pub fn docs_open_task_diff(&mut self, id: &str) {
         let Some(task) = self.tasks.task(id) else { return };
         let merged = crate::tasks_ui::shows_merged_diff(task);
@@ -973,33 +984,33 @@ impl Deck {
         self.docs_open(DocKind::TaskDiff { id: id.to_owned(), merged }, title, subtitle, DocState::Loading);
     }
 
-    /// O pedido ou o relatório da tarefa, já formatados. O texto vem da tarefa carregada, sem ler nada.
+    /// The task's request or report, already formatted. The text comes from the loaded task, without reading anything.
     pub fn docs_open_task_text(&mut self, id: &str, report: bool) {
         let Some(task) = self.tasks.task(id) else { return };
         let (what, text) = if report {
-            ("relatório", task.report.clone().unwrap_or_else(|| "A tarefa ainda não tem relatório.".to_owned()))
+            (t!("report"), task.report.clone().unwrap_or_else(|| t!("The task has no report yet.").to_owned()))
         } else {
-            ("pedido", task.brief.clone())
+            (t!("request"), task.brief.clone())
         };
         let source = if report { MdSource::TaskReport(id.to_owned()) } else { MdSource::TaskBrief(id.to_owned()) };
         let (title, subtitle) = (format!("{} · {what}", task.id), format!("{} · {what}: {}", task.id, task.title));
         self.docs_open(DocKind::Markdown(source), title, subtitle, DocState::Markdown(text));
     }
 
-    /// O diff de um commit do Histórico da aba Git.
+    /// The diff of a commit from the History of the Git tab.
     pub fn docs_open_commit(&mut self, hash: &str, short_hash: &str, subject: &str) {
         let (title, subtitle) = (short_hash.to_owned(), format!("{short_hash}  {subject}"));
         self.docs_open(DocKind::CommitDiff(hash.to_owned()), title, subtitle, DocState::Loading);
     }
 
-    /// O diff de um arquivo alterado da aba Git (só leitura; o preparo por trecho continua na barra direita).
+    /// The diff of a changed file of the Git tab (read-only; staging by hunk stays in the right bar).
     pub fn docs_open_file_diff(&mut self, entry: &GitEntry, staged: bool) {
         let side = if staged {
-            "preparado"
+            t!("staged")
         } else if entry.kind == EntryKind::Untracked {
-            "não rastreado"
+            t!("untracked")
         } else {
-            "não preparado"
+            t!("not staged")
         };
         let title = format!("{} · diff", file_name(&entry.path));
         let subtitle = format!("{}  · {side}", entry.path);
@@ -1012,7 +1023,7 @@ impl Deck {
         self.docs_open(kind, title, subtitle, DocState::Loading);
     }
 
-    /// Um arquivo do projeto (caminho relativo a ele): `.md` formatado, o resto como texto.
+    /// A project file (path relative to it): `.md` formatted, the rest as text.
     pub fn docs_open_file(&mut self, rel: &str) {
         let ext = std::path::Path::new(rel).extension().and_then(|e| e.to_str()).unwrap_or("");
         let is_md = ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown");
@@ -1020,8 +1031,8 @@ impl Deck {
         self.docs_open(kind, file_name(rel).to_owned(), rel.to_owned(), DocState::Loading);
     }
 
-    /// Fecha um documento (se era o último do projeto, o centro volta para os agentes). Sem perguntar: quem fecha pela
-    /// interface usa [`Deck::docs_request_close`].
+    /// Closes a document (if it was the last one of the project, the center goes back to the agents). Without asking: the
+    /// interface uses [`Deck::docs_request_close`].
     pub fn docs_close(&mut self, uid: u64) {
         self.docs.close(uid);
         if self.docs.confirm == Some(Unsaved::Tab(uid)) || self.docs.confirm == Some(Unsaved::Revert(uid)) {
@@ -1030,7 +1041,7 @@ impl Deck {
         self.docs.pending.remove(&uid);
     }
 
-    /// O pedido de fechar um documento (o ×): com edição não salva, pergunta antes.
+    /// The request to close a document (the ×): with an unsaved edit, it asks first.
     pub fn docs_request_close(&mut self, uid: u64) {
         if self.docs.get(uid).is_some_and(DocTab::dirty) {
             self.docs.focus(uid);
@@ -1040,15 +1051,15 @@ impl Deck {
         }
     }
 
-    /// O pedido de encerrar o app (o "Encerrar" da bandeja; o × da janela só a esconde): com edição não salva ou
-    /// com agente no meio de um turno, pergunta antes.
+    /// The request to quit the app (the tray's "Quit"; the window × only hides it): with an unsaved edit or
+    /// with an agent in the middle of a turn, it asks first.
     pub fn request_quit(&mut self) {
         let first = self.docs.unsaved().first().map(|t| (t.uid, t.project.clone()));
         let Some((uid, project)) = first else {
             self.quit_unless_working();
             return;
         };
-        // Mostra o primeiro documento com edição, se é do projeto à vista.
+        // Shows the first document with an edit, if it belongs to the project on screen.
         if project == self.active_project {
             self.docs.focus(uid);
             self.docs.view = CenterView::Docs;
@@ -1056,7 +1067,7 @@ impl Deck {
         self.docs.confirm = Some(Unsaved::Quit);
     }
 
-    /// Sai, ou pergunta antes se algum agente está no meio de um turno.
+    /// Quits, or asks first if some agent is in the middle of a turn.
     fn quit_unless_working(&mut self) {
         if self.tabs.iter().any(|t| t.busy) {
             self.docs.confirm = Some(Unsaved::Busy);
@@ -1065,13 +1076,13 @@ impl Deck {
         }
     }
 
-    /// Nomes das abas com agente no meio de um turno.
+    /// Names of the tabs with an agent in the middle of a turn.
     pub fn working_tabs(&self) -> Vec<String> {
         self.tabs.iter().filter(|t| t.busy).map(|t| t.label.clone()).collect()
     }
 
-    /// Lê o documento de novo (botão de recarregar). Um arquivo aberto como código não passa por "Carregando…": se tem
-    /// edição não salva, pergunta antes de jogá-la fora; senão relê e a tela acompanha o disco.
+    /// Reads the document again (reload button). A file opened as code does not go through "Loading…": if it has
+    /// an unsaved edit, it asks before throwing it away; otherwise it rereads and the screen follows the disk.
     pub fn docs_reload(&mut self, uid: u64) {
         let Some(tab) = self.docs.get_mut(uid).filter(|t| t.kind.reloadable()) else { return };
         if tab.dirty() {
@@ -1084,7 +1095,7 @@ impl Deck {
         }
     }
 
-    /// `Ctrl+F`: abre a busca do documento. O markdown formatado não tem onde marcar o achado: a busca mostra o código.
+    /// `Ctrl+F`: opens the document search. The formatted markdown has nowhere to mark the match: the search shows the code.
     pub fn docs_find(&mut self, uid: u64) {
         let Some(tab) = self.docs.get_mut(uid) else { return };
         if let DocState::Source(src) = &mut tab.state {
@@ -1095,31 +1106,31 @@ impl Deck {
         }
     }
 
-    /// Grava a edição de `uid` (`Ctrl+S`). `after` é o que fazer quando a gravação der certo. Não grava com o disco
-    /// mudado e a escolha (manter a minha / recarregar) por fazer: o aviso do documento pede isso antes.
+    /// Saves the edit of `uid` (`Ctrl+S`). `after` is what to do when the save succeeds. It does not save with the disk
+    /// changed and the choice (keep mine / reload) still to be made: the document notice asks for that first.
     pub fn docs_save(&mut self, uid: u64, after: After) {
         let Some(tab) = self.docs.get_mut(uid) else { return };
         let (Some(rel), project) = (tab.kind.file_path().map(str::to_owned), tab.project.clone()) else { return };
         let DocState::Source(src) = &mut tab.state else { return };
         if src.saving {
-            // A gravação já em andamento leva o que vem depois (ex.: "Salvar tudo e sair" logo depois do Ctrl+S).
+            // The save already in progress takes what comes next (e.g. "Save all and quit" right after Ctrl+S).
             if after != After::Nothing {
                 self.docs.pending.insert(uid, after);
             }
             return;
         }
         if src.locked.is_some() || src.external.is_some() {
-            // Pedido pela pergunta de fechar (o Ctrl+S e o botão já ficam desligados): mostra o documento e diz por quê.
+            // Asked by the close question (Ctrl+S and the button are already off): shows the document and says why.
             if after != After::Nothing {
                 let why = if src.external.is_some() {
-                    "o arquivo mudou no disco; escolha antes entre manter a sua edição ou recarregar a do disco"
+                    t!("the file changed on disk; first choose between keeping your edit or reloading the one from disk")
                 } else {
-                    "o arquivo está só em leitura"
+                    t!("the file is read-only")
                 };
                 let name = tab.subtitle.clone();
                 self.docs.focus(uid);
                 self.docs.view = CenterView::Docs;
-                self.system(format!("Não gravei {name}: {why}."));
+                self.system(t!("I did not save {name}: {why}.", name, why));
             }
             return;
         }
@@ -1136,8 +1147,8 @@ impl Deck {
         });
     }
 
-    /// Grava todas as edições (a pergunta de fechar o app) e sai quando a última terminar. Se alguma não pode ser gravada
-    /// (o disco mudou e falta escolher), o app não sai: o documento é mostrado.
+    /// Saves every edit (the app close question) and quits when the last one finishes. If one of them cannot be saved
+    /// (the disk changed and the choice is missing), the app does not quit: the document is shown.
     pub fn docs_save_all_and_quit(&mut self) {
         let blocked = self.docs.unsaved().iter().find(|t| matches!(&t.state, DocState::Source(s) if s.external.is_some())).map(|t| t.uid);
         if let Some(uid) = blocked {
@@ -1151,7 +1162,7 @@ impl Deck {
         }
     }
 
-    /// A gravação de `uid` voltou. `saved` é o texto que foi gravado (o da tela pode ter mudado desde então).
+    /// The save of `uid` came back. `saved` is the text that was saved (the one on screen may have changed since).
     pub fn on_doc_saved(&mut self, uid: u64, saved: String, result: Result<(), String>) {
         let after = self.docs.pending.remove(&uid).unwrap_or(After::Nothing);
         let Some(tab) = self.docs.get_mut(uid) else { return };
@@ -1164,20 +1175,20 @@ impl Deck {
                 let name = tab.subtitle.clone();
                 self.docs.focus(uid);
                 self.docs.view = CenterView::Docs;
-                // O documento pode ser de um projeto que não está à vista: o aviso também vai para a Conversa.
-                self.system(format!("Não consegui gravar {name}: {e}"));
+                // The document may be from a project that is not on screen: the notice also goes to the Conversation.
+                self.system(t!("Could not save {name}: {error}", name, error = e));
                 return;
             }
         }
         self.docs_finish(uid, after);
     }
 
-    /// O que vem depois de uma gravação (ou de um "nada a gravar").
+    /// What comes after a save (or after a "nothing to save").
     fn docs_finish(&mut self, uid: u64, after: After) {
         match after {
             After::Nothing => {}
             After::Close => {
-                // Digitou mais enquanto gravava: a aba fica, com o que falta gravar.
+                // More was typed during the save: the tab stays, with what is left to save.
                 if self.docs.get(uid).is_some_and(|t| !t.dirty()) {
                     self.docs_close(uid);
                 }
@@ -1190,7 +1201,7 @@ impl Deck {
         }
     }
 
-    /// A resposta da pergunta sobre edição não salva.
+    /// The answer to the question about an unsaved edit.
     pub fn docs_answer(&mut self, answer: Answer) {
         let Some(asked) = self.docs.confirm else { return };
         if answer == Answer::Cancel {
@@ -1226,7 +1237,7 @@ impl Deck {
         }
     }
 
-    /// Os arquivos abertos do projeto ativo mudaram no disco (o watcher avisou): relê, sem piscar.
+    /// The open files of the active project changed on disk (the watcher said so): rereads, without flicker.
     pub fn docs_reload_files(&mut self) {
         if self.docs.debug_hold {
             return;
@@ -1236,7 +1247,7 @@ impl Deck {
         }
     }
 
-    /// Lê o documento numa thread; o resultado volta como `UiMsg::Doc`.
+    /// Reads the document in a thread; the result comes back as `UiMsg::Doc`.
     fn docs_load(&mut self, uid: u64) {
         let Some(tab) = self.docs.get(uid).filter(|_| !self.docs.debug_hold) else { return };
         let (project, kind) = (tab.project.clone(), tab.kind.clone());
@@ -1260,8 +1271,8 @@ impl Deck {
         }
     }
 
-    /// A leitura de um documento chegou. Um documento fechado nesse meio-tempo, ou de um projeto que já não é o ativo
-    /// (a leitura foi feita na pasta do outro), ignora a resposta; um arquivo que não mudou não é repintado.
+    /// A document read arrived. A document closed in the meantime, or one of a project that is no longer the active one
+    /// (the read was done in the other one's folder), ignores the answer; a file that did not change is not repainted.
     pub fn on_doc_loaded(&mut self, uid: u64, loaded: Loaded) {
         if self.docs.debug_hold || !self.docs.accepts_load(uid, &self.active_project) {
             return;
@@ -1305,7 +1316,7 @@ mod tests {
         assert_eq!(again, Opened { uid: a.uid, fresh: false });
         assert_eq!(docs.count(P), 2);
         assert_eq!(docs.current_uid(P), Some(a.uid));
-        assert_eq!(docs.view, CenterView::Docs, "focar também leva o centro para os documentos");
+        assert_eq!(docs.view, CenterView::Docs, "focusing also takes the center to the documents");
     }
 
     #[test]
@@ -1315,12 +1326,12 @@ mod tests {
         let b = open(&mut docs, "p2", DocKind::File("a.rs".into()));
         assert_ne!(a.uid, b.uid);
         assert!(b.fresh);
-        // A mesma chave com outro lado é outro documento.
+        // The same key with another side is another document.
         let file_diff = |staged| DocKind::FileDiff { path: "a.rs".into(), orig: None, staged, untracked: false };
         let s = open(&mut docs, "p1", file_diff(true));
         let u = open(&mut docs, "p1", file_diff(false));
         assert_ne!(s.uid, u.uid);
-        // O diff da tarefa antes e depois de mesclar também.
+        // The task diff before and after merging too.
         let before = open(&mut docs, "p1", DocKind::TaskDiff { id: "t1".into(), merged: false });
         let after = open(&mut docs, "p1", DocKind::TaskDiff { id: "t1".into(), merged: true });
         assert_ne!(before.uid, after.uid);
@@ -1337,10 +1348,10 @@ mod tests {
         assert_eq!(docs.count("p3"), 0);
         let names: Vec<&str> = docs.of_project("p1").map(|t| t.kind.file_path().unwrap_or("")).collect();
         assert_eq!(names, ["a.rs", "b.rs"]);
-        // Cada projeto lembra o seu foco.
+        // Each project remembers its focus.
         let c = docs.current_uid("p2").expect("foco");
         assert_eq!(docs.get(c).map(|t| t.project.as_str()), Some("p2"));
-        // Num projeto sem documentos o centro não fica em Documentos.
+        // In a project without documents the center does not stay on Documents.
         docs.sync("p3");
         assert_eq!(docs.view, CenterView::Agents);
     }
@@ -1353,10 +1364,10 @@ mod tests {
         let c = open(&mut docs, P, DocKind::File("c.rs".into())).uid;
         docs.focus(b);
         docs.close(b);
-        assert_eq!(docs.current_uid(P), Some(c), "o da direita assume");
+        assert_eq!(docs.current_uid(P), Some(c), "the one on the right takes over");
         docs.close(c);
-        assert_eq!(docs.current_uid(P), Some(a), "sem vizinho à direita, o da esquerda");
-        // Fechar o que não está em foco não mexe no foco.
+        assert_eq!(docs.current_uid(P), Some(a), "without a neighbour on the right, the one on the left");
+        // Closing one that is not focused does not touch the focus.
         let d = open(&mut docs, P, DocKind::File("d.rs".into())).uid;
         docs.focus(d);
         docs.close(a);
@@ -1365,7 +1376,7 @@ mod tests {
         docs.close(d);
         assert_eq!(docs.count(P), 0);
         assert_eq!(docs.view, CenterView::Agents);
-        // Fechar um que não existe não faz nada.
+        // Closing one that does not exist does nothing.
         docs.close(999);
     }
 
@@ -1382,7 +1393,7 @@ mod tests {
         docs.toggle("outro");
         assert_eq!(docs.view, CenterView::Agents);
         docs.toggle("outro");
-        assert_eq!(docs.view, CenterView::Agents, "o outro projeto não tem documentos");
+        assert_eq!(docs.view, CenterView::Agents, "the other project has no documents");
         assert_eq!(docs.current_uid(P), Some(uid));
     }
 
@@ -1432,17 +1443,17 @@ mod tests {
         let mut docs = Docs::default();
         let kind = DocKind::Markdown(MdSource::TaskReport("t1".into()));
         let text = |s: &str| DocState::Markdown(s.to_owned());
-        let first = docs.open(P, kind.clone(), "t1 · relatório".into(), "antigo".into(), text("relatório velho"));
+        let first = docs.open(P, kind.clone(), "t1 · report".into(), "old".into(), text("old report"));
         assert!(first.fresh);
-        let again = docs.open(P, kind, "t1 · relatório".into(), "novo".into(), text("relatório novo"));
+        let again = docs.open(P, kind, "t1 · report".into(), "new".into(), text("new report"));
         assert_eq!(again, Opened { uid: first.uid, fresh: false });
-        let tab = docs.get(first.uid).expect("aba");
-        assert!(matches!(&tab.state, DocState::Markdown(t) if t == "relatório novo"));
-        assert_eq!(tab.subtitle, "novo");
-        // O que vem do core não é trocado ao reabrir (só o "Recarregar" ou o watcher relê).
+        let tab = docs.get(first.uid).expect("tab");
+        assert!(matches!(&tab.state, DocState::Markdown(t) if t == "new report"));
+        assert_eq!(tab.subtitle, "new");
+        // What comes from the core is not replaced on reopening (only "Reload" or the watcher rereads).
         let file = DocKind::File("a.rs".into());
         let f = docs.open(P, file.clone(), "a.rs".into(), String::new(), DocState::Loading);
-        docs.get_mut(f.uid).expect("aba").state = DocState::Failed("x".into());
+        docs.get_mut(f.uid).expect("tab").state = DocState::Failed("x".into());
         docs.open(P, file, "a.rs".into(), String::new(), DocState::Loading);
         assert!(matches!(docs.get(f.uid).map(|t| &t.state), Some(DocState::Failed(_))));
     }
@@ -1457,11 +1468,11 @@ mod tests {
         let task = open(&mut docs, "p1", DocKind::TaskDiff { id: "t1".into(), merged: false }).uid;
         for uid in [file, md, commit, changed] {
             assert!(docs.accepts_load(uid, "p1"));
-            assert!(!docs.accepts_load(uid, "p2"), "lido na pasta do outro projeto");
+            assert!(!docs.accepts_load(uid, "p2"), "read in the other project's folder");
         }
-        // O diff da tarefa passa o projeto na chamada: vale de qualquer lugar.
+        // The task diff passes the project in the call: it is valid from anywhere.
         assert!(docs.accepts_load(task, "p2"));
-        // Documento fechado: ignora.
+        // Closed document: ignored.
         docs.close(file);
         assert!(!docs.accepts_load(file, "p1"));
     }
@@ -1472,7 +1483,7 @@ mod tests {
         let file = open(&mut docs, "p1", DocKind::File("a.rs".into())).uid;
         let commit = open(&mut docs, "p1", DocKind::CommitDiff("abc".into())).uid;
         let done = open(&mut docs, "p1", DocKind::CommitDiff("def".into())).uid;
-        docs.get_mut(done).expect("aba").state = DocState::Failed("x".into());
+        docs.get_mut(done).expect("tab").state = DocState::Failed("x".into());
         open(&mut docs, "p1", DocKind::TaskDiff { id: "t1".into(), merged: false });
         open(&mut docs, "p2", DocKind::CommitDiff("ghi".into()));
         assert_eq!(docs.to_reread("p1"), [file, commit]);
@@ -1540,7 +1551,7 @@ Binary files a/img.png and b/img.png differ
                 ("img.png", 'M', 0, 0),
             ]
         );
-        // Cada arquivo aponta para a sua linha `diff --git`.
+        // Each file points at its own `diff --git` line.
         for f in &files {
             assert!(diff.lines[f.line].text.starts_with("diff --git "));
         }
@@ -1577,7 +1588,7 @@ Binary files a/img.png and b/img.png differ
         doc.select(2);
         assert_eq!((doc.selected, doc.jump), (2, Some(doc.files[2].line)));
         doc.select(99);
-        assert_eq!(doc.selected, 2, "índice fora da lista não muda nada");
+        assert_eq!(doc.selected, 2, "an index outside the list changes nothing");
     }
 
     fn tab(kind: DocKind) -> DocTab {
@@ -1588,24 +1599,24 @@ Binary files a/img.png and b/img.png differ
     fn a_loaded_file_becomes_text_or_markdown_by_kind() {
         let mut t = tab(DocKind::File("a.rs".into()));
         t.apply(Loaded::Text(Ok(TextFile::Text("um\n\tdois\n".into()))));
-        // Um arquivo que cabe no editor abre como código (lê, busca e edita)...
-        let DocState::Source(src) = &t.state else { panic!("código") };
+        // A file that fits in the editor opens as code (reads, searches and edits)...
+        let DocState::Source(src) = &t.state else { panic!("code") };
         assert_eq!((src.text.as_str(), src.lang, src.editing), ("um\n\tdois\n", Lang::Rust, false));
-        // ...e o grande demais, ou com linha comprida demais, só se lê.
+        // ...and a file too large, or with a line too long, is only read.
         let big = "x\n".repeat(EDIT_MAX / 2 + 1);
         t.apply(Loaded::Text(Ok(TextFile::Text(big))));
         assert!(matches!(&t.state, DocState::Text(d) if d.lines.len() > 1000));
         t.apply(Loaded::Text(Ok(TextFile::Text(format!("curta\n{}\n", "y".repeat(EDIT_LINE_MAX + 1))))));
-        let DocState::Text(doc) = &t.state else { panic!("texto") };
+        let DocState::Text(doc) = &t.state else { panic!("text") };
         assert_eq!(doc.lines[0], "curta");
         t.apply(Loaded::Text(Ok(TextFile::Text("um\n\tdois\n".into()))));
         assert!(matches!(&t.state, DocState::Source(_)));
 
         let mut m = tab(DocKind::Markdown(MdSource::File("a.md".into())));
         m.apply(Loaded::Text(Ok(TextFile::Text("# Oi".into()))));
-        let DocState::Source(md) = &m.state else { panic!("markdown como código") };
+        let DocState::Source(md) = &m.state else { panic!("markdown as code") };
         assert_eq!((md.text.as_str(), md.lang), ("# Oi", Lang::Markdown));
-        // O pedido e o relatório de uma tarefa não vêm de arquivo: seguem como markdown formatado.
+        // A task's request and report do not come from a file: they stay as formatted markdown.
         let mut brief = tab(DocKind::Markdown(MdSource::TaskBrief("t1".into())));
         brief.apply(Loaded::Text(Ok(TextFile::Text("# Oi".into()))));
         assert!(matches!(&brief.state, DocState::Markdown(t) if t == "# Oi"));
@@ -1621,8 +1632,8 @@ Binary files a/img.png and b/img.png differ
         assert_eq!((s.text.as_str(), s.eol, s.bom, s.locked.is_none()), ("um\ndois\n", Eol::Crlf, true, true));
         let s = source("um\ndois");
         assert_eq!((s.eol, s.bom), (Eol::Lf, false));
-        // Fim de linha misturado, ou texto que não é UTF-8: só leitura, com a razão.
-        assert!(source("a\r\nb\n").locked.as_deref().is_some_and(|m| m.contains("mistura")));
+        // Mixed line endings, or text that is not UTF-8: read-only, with the reason.
+        assert!(source("a\r\nb\n").locked.as_deref().is_some_and(|m| m.contains("mixes")));
         assert!(source("a\u{fffd}b").locked.as_deref().is_some_and(|m| m.contains("UTF-8")));
         assert!(!source("a\u{fffd}b").can_edit());
     }
@@ -1639,7 +1650,7 @@ Binary files a/img.png and b/img.png differ
         let mut s = source("um\n");
         let v = s.version;
         s.reload("um\n");
-        assert_eq!(s.version, v, "o mesmo texto não conta como mudança");
+        assert_eq!(s.version, v, "the same text does not count as a change");
         s.reload("dois\n");
         assert_eq!((s.text.as_str(), s.disk.as_str(), s.external.is_none()), ("dois\n", "dois\n", true));
         assert!(s.version > v);
@@ -1655,7 +1666,7 @@ Binary files a/img.png and b/img.png differ
         s.reload("\u{feff}um\r\nagente\r\n");
         s.take_disk();
         assert_eq!((s.text.as_str(), s.eol, s.bom), ("um\nagente\n", Eol::Crlf, true));
-        // Manter a minha deixa o formato do arquivo que estava aberto.
+        // Keeping mine keeps the format of the file that was open.
         let mut s = source("um\n");
         s.set_editing(true);
         s.text = "um\nminha\n".into();
@@ -1663,7 +1674,7 @@ Binary files a/img.png and b/img.png differ
         s.reload("um\r\nagente\r\n");
         s.keep_mine();
         assert_eq!((s.eol, s.bom), (Eol::Lf, false));
-        // O texto do agente que não é UTF-8 trava a gravação, e a edição sai.
+        // The agent's text that is not UTF-8 locks saving, and the edit goes away.
         let mut s = source("um\n");
         s.set_editing(true);
         s.text = "um\nminha\n".into();
@@ -1680,20 +1691,20 @@ Binary files a/img.png and b/img.png differ
         s.text = "um\nminha linha\n".into();
         s.touched();
         assert!(s.dirty());
-        // O disco ainda é o mesmo: nada a avisar (é o que a leitura do watcher traz depois de gravar).
+        // The disk is still the same: nothing to warn about (it is what the watcher's read brings after saving).
         s.reload("um\n");
         assert!(s.external.is_none());
         assert!(s.is_disk("um\n"));
-        // O agente mudou: o texto dele espera; o meu continua intacto.
+        // The agent changed it: its text waits; mine stays intact.
         s.reload("um\nlinha do agente\n");
         assert_eq!(s.external.as_deref(), Some("um\nlinha do agente\n"));
         assert_eq!(s.text, "um\nminha linha\n");
-        assert!(!s.is_disk("um\nlinha do agente\n"), "a releitura repete o aviso em vez de ser ignorada");
-        // Manter a minha: o disco novo vira a base e a edição continua para gravar por cima.
+        assert!(!s.is_disk("um\nlinha do agente\n"), "the reread repeats the notice instead of being ignored");
+        // Keep mine: the new disk becomes the base and the edit goes on, to be saved over it.
         s.keep_mine();
         assert_eq!((s.disk.as_str(), s.text.as_str(), s.external.is_none()), ("um\nlinha do agente\n", "um\nminha linha\n", true));
         assert!(s.dirty());
-        // Recarregar a do disco: a edição se descarta.
+        // Reload from disk: the edit is discarded.
         s.reload("outra\n");
         s.take_disk();
         assert_eq!((s.text.as_str(), s.disk.as_str(), s.dirty()), ("outra\n", "outra\n", false));
@@ -1712,10 +1723,10 @@ Binary files a/img.png and b/img.png differ
         let mut s = source("um\n");
         s.text = "dois\n".into();
         s.saving = true;
-        // O usuário digitou mais enquanto a gravação de "dois" andava.
+        // The user typed more while the save of "dois" was going on.
         s.text = "dois e meio\n".into();
         s.mark_saved("dois\n");
-        assert!(!s.saving && s.dirty(), "o que veio depois ainda falta gravar");
+        assert!(!s.saving && s.dirty(), "what came after still has to be saved");
         s.mark_saved("dois e meio\n");
         assert!(!s.dirty());
     }
@@ -1733,20 +1744,20 @@ Binary files a/img.png and b/img.png differ
     fn a_dirty_file_is_never_replaced_by_a_read() {
         let mut t = tab(DocKind::File("a.rs".into()));
         t.apply(Loaded::Text(Ok(TextFile::Text("um\n".into()))));
-        let DocState::Source(src) = &mut t.state else { panic!("código") };
+        let DocState::Source(src) = &mut t.state else { panic!("code") };
         src.set_editing(true);
         src.text = "meu\n".into();
-        // O arquivo foi apagado, ficou binário ou grande demais: a edição fica e o aviso aparece.
+        // The file was deleted, became binary or too large: the edit stays and the notice shows.
         for gone in [Loaded::Text(Err("sumiu".into())), Loaded::Text(Ok(TextFile::Binary)), Loaded::Text(Ok(TextFile::TooLarge(9)))] {
             t.apply(gone);
-            let DocState::Source(src) = &t.state else { panic!("a edição continua") };
+            let DocState::Source(src) = &t.state else { panic!("the edit stays") };
             assert!(src.gone && src.text == "meu\n" && src.editing);
         }
-        // Voltou: o aviso some e o disco novo vira o aviso de "mudou".
+        // It came back: the notice goes away and the new disk becomes the "changed" notice.
         t.apply(Loaded::Text(Ok(TextFile::Text("novo\n".into()))));
-        let DocState::Source(src) = &t.state else { panic!("código") };
+        let DocState::Source(src) = &t.state else { panic!("code") };
         assert!(!src.gone && src.external.as_deref() == Some("novo\n") && src.text == "meu\n");
-        // A mesma leitura de novo não repinta quando a tela já a mostra (sem edição) e repete o aviso com ela.
+        // The same read again does not repaint when the screen already shows it (no edit) and repeats the notice with one.
         assert!(!t.same_text(&Loaded::Text(Ok(TextFile::Text("novo\n".into())))));
     }
 
@@ -1777,21 +1788,21 @@ Binary files a/img.png and b/img.png differ
         f.step(false);
         assert_eq!(f.current_range(), Some(&(7..9)));
         f.step(false);
-        assert_eq!(f.current, 0, "dá a volta");
+        assert_eq!(f.current, 0, "wraps around");
         f.step(true);
         assert_eq!(f.current, 2);
-        // A mesma consulta e versão não refaz; editar o texto refaz sem rolar a tela.
+        // The same query and version do not redo; editing the text redoes without scrolling the screen.
         f.jump = false;
-        f.refresh(1, |_| panic!("não devia buscar de novo"));
+        f.refresh(1, |_| panic!("should not search again"));
         f.refresh(2, |q| (highlight::find_all("ab", q), Vec::new()));
         assert_eq!((f.count(), f.current, f.jump), (1, 0, false));
-        // Uma consulta nova volta à primeira ocorrência e rola até ela.
+        // A new query goes back to the first match and scrolls to it.
         f.query = "b".into();
         f.refresh(2, |q| (highlight::find_all("ab b", q), Vec::new()));
         assert_eq!((f.count(), f.current, f.jump), (2, 0, true));
         assert_eq!(f.stamp().map(|(q, v)| (q.as_str(), *v)), Some(("b", 2)));
         f.close();
-        assert!(f.stamp().is_none(), "fechada, a busca não marca nada");
+        assert!(f.stamp().is_none(), "closed, the search marks nothing");
     }
 
     #[test]
@@ -1815,22 +1826,22 @@ Binary files a/img.png and b/img.png differ
         let mut find = Find::default();
         let a = shaped.galley(&ctx, "fn a() {}\nlet x = 1;", Lang::Rust, 600.0, &find);
         let again = shaped.galley(&ctx, "fn a() {}\nlet x = 1;", Lang::Rust, 600.0, &find);
-        assert!(Arc::ptr_eq(&a, &again), "o mesmo texto reaproveita o galley");
+        assert!(Arc::ptr_eq(&a, &again), "the same text reuses the galley");
         assert_eq!(shaped.hl.runs, 1);
         let wider = shaped.galley(&ctx, "fn a() {}\nlet x = 1;", Lang::Rust, 800.0, &find);
         assert!(!Arc::ptr_eq(&a, &wider));
-        assert_eq!(shaped.hl.runs, 1, "a largura não refaz o realce");
+        assert_eq!(shaped.hl.runs, 1, "the width does not redo the highlighting");
         let edited = shaped.galley(&ctx, "fn b() {}\nlet x = 1;", Lang::Rust, 800.0, &find);
         assert!(!Arc::ptr_eq(&wider, &edited));
         assert_eq!(shaped.hl.runs, 2);
-        // A busca aberta marca as ocorrências (outro galley); fechada, volta ao de antes.
+        // The open search marks the matches (another galley); closed, it goes back to the previous one.
         find.show();
         find.query = "x".into();
         find.refresh(1, |q| (highlight::find_all("fn b() {}\nlet x = 1;", q), Vec::new()));
         let marked = shaped.galley(&ctx, "fn b() {}\nlet x = 1;", Lang::Rust, 800.0, &find);
         assert!(!Arc::ptr_eq(&edited, &marked));
-        assert_eq!(shaped.hl.runs, 2, "a busca não refaz o realce");
-        // Todo o texto está no galley, sem perder nem repetir nada.
+        assert_eq!(shaped.hl.runs, 2, "the search does not redo the highlighting");
+        // The whole text is in the galley, without losing or repeating anything.
         assert_eq!(marked.job.text, "fn b() {}\nlet x = 1;");
     }
 
@@ -1852,10 +1863,10 @@ Binary files a/img.png and b/img.png differ
     fn big_binary_and_failed_files_explain_themselves() {
         let mut t = tab(DocKind::File("a.bin".into()));
         t.apply(Loaded::Text(Ok(TextFile::TooLarge(3 * 1024 * 1024))));
-        assert!(matches!(&t.state, DocState::Unreadable(m) if m.contains("3,0 MB") && m.contains("1,0 MB")));
+        assert!(matches!(&t.state, DocState::Unreadable(m) if m.contains("3.0 MB") && m.contains("1.0 MB")));
         t.apply(Loaded::Text(Ok(TextFile::Binary)));
-        assert!(matches!(&t.state, DocState::Unreadable(m) if m.contains("binário")));
-        t.apply(Loaded::Text(Err("não consegui abrir a.bin".into())));
+        assert!(matches!(&t.state, DocState::Unreadable(m) if m.contains("binary")));
+        t.apply(Loaded::Text(Err("could not open a.bin".into())));
         assert!(matches!(&t.state, DocState::Failed(m) if m.contains("a.bin")));
     }
 
@@ -1884,10 +1895,12 @@ Binary files a/img.png and b/img.png differ
     }
 
     #[test]
-    fn sizes_are_written_in_portuguese() {
+    fn sizes_use_the_decimal_separator_of_the_language() {
         assert_eq!(size_label(512), "512 bytes");
         assert_eq!(size_label(2048), "2 KB");
-        assert_eq!(size_label(1_572_864), "1,5 MB");
+        assert_eq!(size_label(1_572_864), "1.5 MB");
+        let pt = agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || size_label(1_572_864));
+        assert_eq!(pt, "1,5 MB");
     }
 
     #[test]
