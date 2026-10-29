@@ -1,5 +1,5 @@
-//! `#sidebar`: a chave Agentes | Documentos, os projetos e agentes, a organização das janelas e o
-//! explorador de arquivos estilo VS Code, mais o divisor redimensionável.
+//! `#sidebar`: the Agents | Documents switch, the projects and agents, the window organization and the
+//! VS Code-style file explorer, plus the resizable divider.
 
 use std::collections::HashMap;
 
@@ -10,54 +10,56 @@ use crate::deck::{Deck, TreeRow};
 use crate::icons::Icon;
 use crate::theme;
 use agentdeck_core::git::{EntryKind, GitEntry};
+use agentdeck_core::t;
 use agentdeck_core::Organization;
 
-/// Altura de uma linha do explorador.
+/// Height of an explorer row.
 const FILE_ROW_H: f32 = 20.0;
-/// Margem lateral das linhas (a seleção não encosta na borda da ilha) e recuo por nível de pasta.
+/// Side margin of the rows (the selection does not touch the island edge) and indent per folder level.
 const SIDE_MARGIN: f32 = 4.0;
 const FILE_INDENT: f32 = 12.0;
-/// Altura do trilho da chave ORGANIZAÇÃO (segmentos de 20 px e 2 px de cada lado).
+/// Height of the ORGANIZATION switch track (20 px segments and 2 px on each side).
 const ORG_H: f32 = 24.0;
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
     let ctx = ui.ctx().clone();
 
-    // Mantém a raiz do workspace logicamente expandida para que `deck.tree_rows()` liste os arquivos.
+    // Keeps the workspace root logically expanded so that `deck.tree_rows()` lists the files.
     deck.tree.expanded.insert(String::new());
 
     let dragging = ctx.dragged_id().is_some() || deck.pane_drag.is_some() || deck.drop_hover;
 
-    // ---------- Chave Agentes | Documentos, com a largura da ilha (margem de 6 px) ----------
+    // ---------- Agents | Documents switch, with the island width (6 px margin) ----------
     let switch = Rect::from_min_size(Pos2::new(rect.min.x + 6.0, rect.min.y + 6.0), Vec2::new(rect.width() - 12.0, super::docs::SWITCH_H));
     super::docs::switch(deck, ui, switch, "side-center");
     let mut top_y = switch.max.y + 6.0;
     separator(&painter, Pos2::new(rect.min.x, top_y + 0.5), Pos2::new(rect.max.x, top_y + 0.5));
     top_y += 1.0;
 
-    // ---------- Seção PROJETOS ----------
+    // ---------- PROJECTS section ----------
     super::projects::draw(deck, ui, &mut top_y, rect, dragging);
 
-    // ---------- Seção ORGANIZAÇÃO (como as janelas se arrumam) ----------
+    // ---------- ORGANIZATION section (how the windows are arranged) ----------
     let org_head = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 4.0), Vec2::new(rect.width(), super::SECTION_LABEL_H));
-    section_label(&painter, org_head, "ORGANIZAÇÃO");
+    section_label(&painter, org_head, t!("ORGANIZATION"));
     let org = Rect::from_min_size(Pos2::new(rect.min.x + 10.0, org_head.max.y), Vec2::new(rect.width() - 20.0, ORG_H));
     let modes = [Organization::Tabs, Organization::Split, Organization::Highlight];
     let mode = modes.iter().position(|m| *m == deck.organization).unwrap_or(0);
-    if let Some(picked) = segmented(ui, org, Id::new("org-mode"), &["Abas", "Dividida", "Destaque"], mode, false) {
+    let segments = [t!("Tabs"), t!("Split"), t!("Highlight")];
+    if let Some(picked) = segmented(ui, org, Id::new("org-mode"), &segments, mode, false) {
         deck.set_organization(modes[picked]);
     }
     top_y = org.max.y + 8.0;
     separator(&painter, Pos2::new(rect.min.x, top_y + 0.5), Pos2::new(rect.max.x, top_y + 0.5));
     top_y += 1.0;
 
-    // ---------- Seção ARQUIVOS com ações rápidas ----------
+    // ---------- FILES section with quick actions ----------
     let head_rect = Rect::from_min_size(Pos2::new(rect.min.x, top_y + 4.0), Vec2::new(rect.width(), super::SECTION_LABEL_H));
     top_y = head_rect.max.y;
-    section_label(&painter, head_rect, "ARQUIVOS");
+    section_label(&painter, head_rect, t!("FILES"));
 
-    // Botão Atualizar (Icon::Refresh)
+    // Refresh button (Icon::Refresh)
     let refresh_r = Rect::from_min_size(Pos2::new(head_rect.max.x - 24.0, head_rect.min.y + 1.0), Vec2::new(20.0, 20.0));
     let refresh_resp = clickable(ui, refresh_r, Id::new("tree-refresh-btn"));
     let r_hov = refresh_resp.hovered() && !dragging;
@@ -67,12 +69,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     }
     let r_color = if r_hov { theme::pal().text } else { theme::pal().text_2 };
     deck.icons.paint(&painter, Icon::Refresh, refresh_r.center(), 13.0, r_color, 0.0);
-    if tip(refresh_resp, "Atualizar explorador").clicked() {
+    if tip(refresh_resp, t!("Refresh explorer")).clicked() {
         deck.refresh_tree();
         deck.tree.expanded.insert(String::new());
     }
 
-    // Botão Recolher tudo (ícone VS Code no painter)
+    // Collapse all button (VS Code icon drawn on the painter)
     let collapse_r = Rect::from_min_size(Pos2::new(refresh_r.min.x - 22.0, head_rect.min.y + 1.0), Vec2::new(20.0, 20.0));
     let collapse_resp = clickable(ui, collapse_r, Id::new("tree-collapse-btn"));
     let c_hov = collapse_resp.hovered() && !dragging;
@@ -82,13 +84,13 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     }
     let c_color = if c_hov { theme::pal().text } else { theme::pal().text_2 };
     paint_collapse_all(&painter, collapse_r.center(), c_color);
-    if tip(collapse_resp, "Recolher todas as pastas").clicked() {
+    if tip(collapse_resp, t!("Collapse all folders")).clicked() {
         deck.tree.expanded.retain(|p| p.is_empty());
         deck.tree.expanded.insert(String::new());
     }
     let list_top = top_y + 2.0;
 
-    // ---------- Lista de arquivos da árvore ----------
+    // ---------- File list of the tree ----------
     let list_rect = Rect::from_min_max(Pos2::new(rect.min.x, list_top), rect.max);
     let rows = deck.tree_rows();
     let marks = git_marks(deck);
@@ -130,7 +132,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     }
 }
 
-/// A letra do Git de um arquivo alterado (`M`, `A`, `D`, `R`, `U`, `?`).
+/// The Git letter of a changed file (`M`, `A`, `D`, `R`, `U`, `?`).
 fn git_mark(e: &GitEntry) -> char {
     match e.kind {
         EntryKind::Untracked => '?',
@@ -140,8 +142,8 @@ fn git_mark(e: &GitEntry) -> char {
     }
 }
 
-/// A letra do Git de cada arquivo alterado do projeto, pelo caminho relativo ao workspace (o `status` vem
-/// com caminhos relativos à raiz do repositório, que pode ser uma pasta acima do workspace).
+/// The Git letter of every changed file of the project, by the path relative to the workspace (the `status`
+/// comes with paths relative to the repository root, which may be a folder above the workspace).
 fn git_marks(deck: &Deck) -> HashMap<String, char> {
     let Some(st) = deck.git.status() else { return HashMap::new() };
     st.entries
@@ -150,8 +152,8 @@ fn git_marks(deck: &Deck) -> HashMap<String, char> {
         .collect()
 }
 
-/// Desenha o ícone de "Recolher todas as pastas" do VS Code no painter: um quadrado com "−"
-/// e, atrás dele, a borda de outro quadrado (acima e à direita).
+/// Draws the VS Code "Collapse all folders" icon on the painter: a square with "−"
+/// and, behind it, the edge of another square (above and to the right).
 fn paint_collapse_all(painter: &egui::Painter, center: Pos2, color: Color32) {
     let stroke = Stroke::new(1.0, color);
     let front = Rect::from_center_size(center + Vec2::new(-1.0, 1.0), Vec2::splat(9.0));
@@ -188,11 +190,11 @@ fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::R
     if let Some(bg) = bg {
         painter.rect_filled(inner, 4.0, bg);
     }
-    // O primeiro nível da raiz tem depth 1 em TreeRow: vira recuo 0.
+    // The first level of the root has depth 1 in TreeRow: it becomes indent 0.
     let depth = row.depth.saturating_sub(1);
     let x0 = inner.min.x + 8.0 + depth as f32 * FILE_INDENT;
     let cy = rect.center().y;
-    // Caixa de 14 px: a seta da pasta (gira ao abrir) ou o sinal do tipo do arquivo, sempre em cinza.
+    // 14 px box: the folder arrow (it turns when opening) or the file type sign, always in gray.
     let box_c = Pos2::new(x0 + 7.0, cy);
     if row.entry.is_dir {
         let t = ctx.animate_bool_with_time(Id::new(("tree-chev", &row.entry.rel_path)), row.expanded, 0.12);
@@ -200,7 +202,7 @@ fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::R
     } else {
         file_icon(deck, painter, Rect::from_center_size(box_c, Vec2::splat(14.0)), &row.entry.name);
     }
-    // A letra do Git à direita (IBM Plex Mono 10 px).
+    // The Git letter on the right (IBM Plex Mono 10 px).
     let right = inner.max.x - 8.0;
     let mut name_right = right;
     if let Some(m) = mark {
@@ -215,13 +217,13 @@ fn paint_row(deck: &mut Deck, ui: &Ui, rect: Rect, row: &TreeRow, resp: &egui::R
         );
         name_right = right - w - 6.0;
     }
-    // Nome com reticências.
+    // Name with ellipsis.
     let name_x = x0 + 14.0 + 5.0;
     let g = galley_trunc(painter, &row.entry.name, theme::ui(11.5), fg, (name_right - name_x).max(1.0));
     place(painter, Rect::from_min_max(Pos2::new(name_x, rect.min.y), Pos2::new(name_right, rect.max.y)), Align2::LEFT_CENTER, g, fg);
 }
 
-/// O sinal do tipo do arquivo na caixa de 14 px, em cinza (o usuário pediu menos cor).
+/// The sign of the file type in the 14 px box, in gray (the user asked for less color).
 fn file_icon(deck: &mut Deck, painter: &egui::Painter, rect: Rect, name: &str) {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     let ext = if name.contains('.') { ext } else { String::new() };
@@ -233,7 +235,7 @@ fn file_icon(deck: &mut Deck, painter: &egui::Painter, rect: Rect, name: &str) {
     }
 }
 
-/// O texto do sinal de uma extensão (`None`: ícone de arquivo genérico).
+/// The text of the sign of an extension (`None`: generic file icon).
 fn badge_text(ext: &str) -> Option<&'static str> {
     Some(match ext {
         "js" | "mjs" | "cjs" => "JS",
@@ -249,7 +251,7 @@ fn badge_text(ext: &str) -> Option<&'static str> {
     })
 }
 
-/// `#sidebar-splitter`: arrastar redimensiona entre 150 e 480 px.
+/// `#sidebar-splitter`: dragging resizes between 150 and 480 px.
 pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect) {
     let hit = line;
     let r = ui.interact(hit, Id::new("sidebar-splitter"), Sense::drag());
@@ -273,7 +275,7 @@ pub fn splitter(deck: &mut Deck, ui: &mut Ui, line: Rect, full: Rect) {
     let hot = r.hovered() || deck.sidebar_dragging.is_some();
     let painter = ui.painter_at(full);
     paint_splitter(&painter, line, hot, deck.accent());
-    tip(r, "Arraste para redimensionar barra lateral");
+    tip(r, t!("Drag to resize the sidebar"));
 }
 
 #[cfg(test)]
@@ -292,7 +294,7 @@ mod tests {
         assert_eq!(git_mark(&entry(EntryKind::Ordinary, 'A', '.')), 'A');
         assert_eq!(git_mark(&entry(EntryKind::Ordinary, '.', 'D')), 'D');
         assert_eq!(git_mark(&entry(EntryKind::Ordinary, '.', 'M')), 'M');
-        // Adicionado e depois editado continua "A".
+        // Added and then edited still stays "A".
         assert_eq!(git_mark(&entry(EntryKind::Ordinary, 'A', 'M')), 'A');
     }
 

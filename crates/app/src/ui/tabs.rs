@@ -1,6 +1,6 @@
-//! Faixa de abas do cabeçalho de cada janela da tela dividida (antes ficava na topbar). O mesmo desenho
-//! (rolagem, setas ‹ ›, menu ▾) serve à faixa de documentos do modo Documentos (`ui/docs.rs`): a faixa
-//! pinta uma lista de [`Item`], e `strip` monta essa lista a partir das abas dos agentes.
+//! Tab strip of each window's header on the split screen (it used to be in the topbar). The same drawing
+//! (scroll, ‹ › arrows, ▾ menu) serves the document strip of the Documents mode (`ui/docs.rs`): the strip
+//! paints a list of [`Item`], and `strip` builds that list from the agent tabs.
 
 use egui::{Align2, Area, Color32, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
@@ -9,9 +9,10 @@ use super::{clickable, dot, frame, galley_trunc, place, shadow, text_in, text_w,
 use crate::deck::Deck;
 use crate::dictation::{self, ButtonVisual, MicTarget};
 use crate::theme;
+use agentdeck_core::t;
 
-/// O que um clique na faixa pede. Os números são posições na lista de itens (`strip` os converte nos
-/// índices de `Deck::tabs`).
+/// What a click on the strip asks for. The numbers are positions in the item list (`strip` turns them into
+/// the indexes of `Deck::tabs`).
 pub enum StripClick {
     Activate(usize),
     Close(usize),
@@ -19,37 +20,37 @@ pub enum StripClick {
     ContextMenu(usize, Pos2),
 }
 
-/// O que vem antes do nome da aba.
+/// What comes before the tab name.
 #[derive(Clone, Copy)]
 pub enum Lead {
-    /// A bolinha do agente (pulsa trabalhando, ganha o anel ao concluir sem ser vista).
+    /// The agent's dot (pulses while working, gets the ring when it finishes unseen).
     Dot,
-    /// Um sinal do tipo de documento.
+    /// A sign of the document type.
     Glyph(&'static str),
 }
 
-/// Uma aba da faixa.
+/// One tab of the strip.
 pub struct Item {
-    /// Identifica a aba entre quadros (ids de interação).
+    /// Identifies the tab between frames (interaction ids).
     pub uid: u64,
     pub label: String,
     pub color: Color32,
     pub alive: bool,
     pub busy: bool,
-    /// Terminou um turno sem ser vista.
+    /// Finished a turn without being seen.
     pub done: bool,
-    /// O estado do ditado nesta aba.
+    /// The dictation state in this tab.
     pub mic: ButtonVisual,
     pub lead: Lead,
-    /// A dica ao passar o mouse.
+    /// The hint when the mouse passes over it.
     pub tip: String,
-    /// Tem edição não salva (documento): um ponto no lugar do "✕" até o mouse chegar nele.
+    /// Has unsaved edits (document): a dot in place of the "✕" until the mouse reaches it.
     pub dirty: bool,
 }
 
-/// Como a faixa se comporta: o prefixo dos ids (abas de agente e de documento não se misturam), se
-/// duplo clique renomeia e botão direito abre o menu da aba e se a pílula ativa leva a cor do agente
-/// (documento não tem cor: a ativa fica em `selected`).
+/// How the strip behaves: the id prefix (agent and document tabs do not mix), whether a double click
+/// renames and a right click opens the tab menu, and whether the active pill takes the agent's color
+/// (a document has no color: the active one stays `selected`).
 #[derive(Clone, Copy)]
 pub struct StripKind {
     pub scope: &'static str,
@@ -59,47 +60,47 @@ pub struct StripKind {
 
 const TAB_FONT: f32 = 11.5;
 const LABEL_MAX: f32 = 140.0;
-/// Pílula de uma aba: 22 px de altura, 8 px de padding, 3 px de espaço entre elas e 4 px de margem na faixa.
+/// One tab's pill: 22 px tall, 8 px padding, 3 px between them and a 4 px margin in the strip.
 const PILL_H: f32 = 22.0;
 const PILL_PAD: f32 = 8.0;
 const PILL_GAP: f32 = 3.0;
 const STRIP_PAD: f32 = 4.0;
-/// A caixa do ponto (7 px) e a do "✕" (16 px, o alvo do clique).
+/// The dot box (7 px) and the "✕" box (16 px, the click target).
 const DOT_BOX: f32 = 7.0;
 const CLOSE_BOX: f32 = 16.0;
-/// Espaço do indicador vermelho pulsante quando a aba está gravando áudio.
+/// Space of the pulsing red indicator while the tab is recording audio.
 const REC_INDICATOR_W: f32 = 14.0;
-/// Seta de rolagem das abas escondidas: botão 20×20 (como os do cabeçalho) sobre fundo sólido,
-/// seguido do degradê que o liga às abas.
+/// Scroll arrow of the hidden tabs: a 20×20 button (like the header ones) over a solid background,
+/// followed by the gradient that links it to the tabs.
 const ARROW_BTN: f32 = 20.0;
 const ARROW_ZONE_W: f32 = 24.0;
 const FADE_W: f32 = 18.0;
-/// Espaço do botão "▾" (todas as abas), reservado no fim da faixa quando ela rola.
+/// Space of the "▾" button (all tabs), reserved at the end of the strip when it scrolls.
 const LIST_W: f32 = 26.0;
 const LIST_MENU_W: f32 = 260.0;
 const LIST_ITEM_H: f32 = 26.0;
 const LIST_MAX_ROWS: usize = 14;
-/// Folga ao decidir se uma aba está inteira à vista (evita seta por causa de fração de pixel).
+/// Slack when deciding whether a tab is entirely in view (avoids an arrow because of a pixel fraction).
 const EDGE_EPS: f32 = 0.5;
 
-/// Largura de uma pílula: padding, ponto, nome (`label_w`), o que vem depois dele (`extra_w`: estado do
-/// ditado), o "✕" e o padding. O espaço até a próxima não entra.
+/// Width of a pill: padding, dot, name (`label_w`), what comes after it (`extra_w`: dictation state),
+/// the "✕" and the padding. The space up to the next one does not enter.
 fn pill_width(label_w: f32, extra_w: f32) -> f32 {
     PILL_PAD + DOT_BOX + PILL_GAP + label_w + extra_w + PILL_GAP + CLOSE_BOX + PILL_PAD
 }
 
-/// Abas que não aparecem inteiras em cada lado da faixa (posição na lista da janela).
+/// Tabs that do not show up whole on each side of the strip (position in the window list).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct Hidden {
-    /// A mais próxima da borda esquerda.
+    /// The one closest to the left edge.
     left: Option<usize>,
-    /// A mais próxima da borda direita.
+    /// The one closest to the right edge.
     right: Option<usize>,
 }
 
-/// Quais abas estão cortadas ou fora da área de largura `view_w`, com a faixa rolada em `scroll`.
-/// De um lado que tem aba escondida entra a seta, que cobre `edge` px da borda: ali a aba que só
-/// aparece debaixo dela também conta como escondida.
+/// Which tabs are cut off or outside the area of width `view_w`, with the strip scrolled by `scroll`.
+/// From a side that has a hidden tab the arrow comes in, covering `edge` px of the edge: there the tab
+/// that only shows up beneath it also counts as hidden.
 fn hidden_tabs(widths: &[f32], scroll: f32, view_w: f32, edge: f32) -> Hidden {
     let (mut cut_left, mut cut_right) = (false, false);
     let mut start = 0.0;
@@ -123,8 +124,8 @@ fn hidden_tabs(widths: &[f32], scroll: f32, view_w: f32, edge: f32) -> Hidden {
     hidden
 }
 
-/// Rolagem mínima, a partir de `scroll`, que deixa a aba `n` inteira à vista, fora das setas (que
-/// cobrem `edge` px de cada borda onde há mais abas); limitada ao conteúdo.
+/// Minimum scroll, from `scroll`, that leaves tab `n` entirely in view, clear of the arrows (which
+/// cover `edge` px of each edge where there are more tabs); limited to the content.
 fn scroll_to_show(widths: &[f32], n: usize, scroll: f32, view_w: f32, edge: f32) -> f32 {
     let total: f32 = widths.iter().sum();
     let start: f32 = widths[..n].iter().sum();
@@ -141,8 +142,8 @@ fn scroll_to_show(widths: &[f32], n: usize, scroll: f32, view_w: f32, edge: f32)
     target.clamp(0.0, (total - view_w).max(0.0))
 }
 
-/// Pinta as abas `tabs` (índices de `deck.tabs`) em `rect`, com rolagem horizontal quando não
-/// cabem. `shown` é a aba visível da janela; `focused`, se a janela tem o foco.
+/// Paints the tabs `tabs` (indexes of `deck.tabs`) in `rect`, with horizontal scrolling when they do not
+/// fit. `shown` is the visible tab of the window; `focused`, whether the window has the focus.
 pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize, focused: bool, scroll_id: Id) -> Option<StripClick> {
     let items: Vec<Item> = tabs
         .iter()
@@ -173,8 +174,8 @@ pub fn strip(deck: &mut Deck, ui: &Ui, rect: Rect, tabs: &[usize], shown: usize,
     })
 }
 
-/// A faixa de abas propriamente dita: pinta `items`, com a de posição `shown` à vista, e devolve o clique
-/// (posições em `items`).
+/// The tab strip itself: paints `items`, with the one at position `shown` in view, and returns the click
+/// (positions in `items`).
 pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: bool, scroll_id: Id, kind: StripKind) -> Option<StripClick> {
     let ctx = ui.ctx().clone();
     let painter = ui.painter_at(rect);
@@ -187,8 +188,8 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
             let lw = text_w(&painter, &item.label, font).min(LABEL_MAX);
             let sw = match item.mic {
                 ButtonVisual::Recording => REC_INDICATOR_W,
-                ButtonVisual::Opening => 6.0 + text_w(&painter, "Abrindo…", theme::ui(TAB_FONT)),
-                ButtonVisual::Transcribing => 6.0 + text_w(&painter, "Transcrevendo…", theme::ui(TAB_FONT)),
+                ButtonVisual::Opening => 6.0 + text_w(&painter, t!("Opening…"), theme::ui(TAB_FONT)),
+                ButtonVisual::Transcribing => 6.0 + text_w(&painter, t!("Transcribing…"), theme::ui(TAB_FONT)),
                 _ => 0.0,
             };
             pill_width(lw, sw) + PILL_GAP
@@ -197,11 +198,11 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
     let total: f32 = widths.iter().sum();
 
     let overflow = total + STRIP_PAD > rect.width();
-    // Com a faixa rolando, o fim dela fica para o botão "▾"; as abas só aparecem em `view`.
+    // With the strip scrolling, its end is left for the "▾" button; the tabs only show up in `view`.
     let view = if overflow { Rect::from_min_max(rect.min, Pos2::new(rect.max.x - LIST_W, rect.max.y)) } else { rect };
 
-    // Rolagem horizontal (sem barra visível). A aba visível é trazida à vista quando muda (ou
-    // quando a largura muda); fora isso o usuário rola à vontade, pela roda ou pelas setas.
+    // Horizontal scrolling (no visible bar). The visible tab is brought into view when it changes (or
+    // when the width changes); otherwise the user scrolls freely, with the wheel or the arrows.
     let mut scroll = ctx.data(|d| d.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
     if overflow {
         let over = ui.interact(rect, scroll_id.with("area"), Sense::hover());
@@ -237,8 +238,8 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         let close_rect = Rect::from_center_size(Pos2::new(r.max.x - PILL_PAD - CLOSE_BOX / 2.0, r.center().y), Vec2::splat(CLOSE_BOX));
         let close_resp = ui.interact(close_rect.intersect(view), Id::new((kind.scope, "close", item.uid)), Sense::click());
 
-        // A pílula ativa leva a cor do agente (documento não tem cor: `selected`); com a janela sem o
-        // foco, a ativa fica neutra e só o ponto guarda a cor.
+        // The active pill takes the agent's color (a document has no color: `selected`); with the window
+        // without focus, the active one stays neutral and only the dot keeps the color.
         let solid = is_shown && focused && kind.colored;
         let fill = if solid {
             Some(item.color)
@@ -265,7 +266,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         } else {
             p.text_2
         };
-        // Sem processo, a aba fica a 40%.
+        // Without a process, the tab stays at 40%.
         let lead_color = if solid {
             p.on_accent
         } else if item.alive {
@@ -286,7 +287,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
                 painter.circle_filled(dot_pos, 3.5 + 3.5 * wave, theme::with_opacity(lead_color, 0.45 * (1.0 - wave)));
                 painter.circle_filled(dot_pos, 3.5, lead_color);
             }
-            // Terminou sem ser vista: o ponto vira um anel de 1,5 px.
+            // Finished unseen: the dot becomes a 1.5 px ring.
             Lead::Dot if item.done => {
                 painter.circle_stroke(dot_pos, 3.25, Stroke::new(1.5, lead_color));
             }
@@ -308,7 +309,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
             painter.hline(lr.min.x..=lr.max.x, lr.center().y + 0.5, Stroke::new(1.0, color));
         }
         let after_x = lr.max.x;
-        // Indicador de estado do ditado na aba (o botão fica no cabeçalho do painel).
+        // Dictation state indicator on the tab (the button lives in the panel's header).
         match item.mic {
             ButtonVisual::Recording => {
                 let alpha = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
@@ -318,7 +319,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
                 painter.circle_filled(rec_pos, 3.6, theme::with_opacity(p.danger, alpha));
             }
             ButtonVisual::Opening | ButtonVisual::Transcribing => {
-                let st = if item.mic == ButtonVisual::Opening { "Abrindo…" } else { "Transcrevendo…" };
+                let st = if item.mic == ButtonVisual::Opening { t!("Opening…") } else { t!("Transcribing…") };
                 let scolor = if solid { theme::with_opacity(p.on_accent, 0.75) } else { p.text_2 };
                 let sg = galley_trunc(&painter, st, theme::ui(TAB_FONT), scolor, (close_rect.min.x - after_x - 8.0).max(10.0));
                 let x0 = after_x + 6.0;
@@ -340,7 +341,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
         if close_hot || resp.hovered() {
             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        // O "✕" é desenhado (a Inter não o tem). Escuro sobre a cor do agente.
+        // The "✕" is drawn (Inter does not have it). Dark over the agent's color.
         let x_color = match (solid, close_hot) {
             (true, true) => p.on_accent,
             (true, false) => theme::with_opacity(p.on_accent, 0.6),
@@ -356,7 +357,7 @@ pub fn strip_items(ui: &Ui, rect: Rect, items: &[Item], shown: usize, focused: b
             painter.line_segment([c + Vec2::new(-h, h), c + Vec2::new(h, -h)], Stroke::new(1.3, x_color));
         }
 
-        if tip(close_resp, if item.dirty { "Fechar (tem alterações não salvas)" } else { "Fechar" }).clicked() {
+        if tip(close_resp, if item.dirty { t!("Close (has unsaved changes)") } else { t!("Close") }).clicked() {
             click = Some(StripClick::Close(n));
         } else if kind.tab_menu && resp.double_clicked() {
             click = Some(StripClick::Rename(n));
@@ -404,7 +405,7 @@ enum Dir {
     Down,
 }
 
-/// Seta fina (chevron) centrada em `c`.
+/// A thin arrow (chevron) centered on `c`.
 fn chevron(painter: &Painter, c: Pos2, dir: Dir, color: Color32) {
     let (a, b, d) = match dir {
         Dir::Left => (Vec2::new(1.5, -4.0), Vec2::new(-1.5, 0.0), Vec2::new(1.5, 4.0)),
@@ -416,7 +417,7 @@ fn chevron(painter: &Painter, c: Pos2, dir: Dir, color: Color32) {
     painter.line_segment([c + b, c + d], s);
 }
 
-/// Degradê horizontal da cor da faixa (`strip_solid`) (em `solid_x`) a transparente (em `far_x`), entre `top` e `bottom`.
+/// Horizontal gradient from the strip color (`strip_solid`) (at `solid_x`) to transparent (at `far_x`), between `top` and `bottom`.
 fn fade(painter: &Painter, top: f32, bottom: f32, solid_x: f32, far_x: f32) {
     let (opaque, clear) = (theme::strip_solid(), theme::with_alpha(theme::strip_solid(), 0.0));
     let mut mesh = egui::Mesh::default();
@@ -429,8 +430,8 @@ fn fade(painter: &Painter, top: f32, bottom: f32, solid_x: f32, far_x: f32) {
     painter.add(mesh);
 }
 
-/// Seta de uma borda da faixa (há abas escondidas desse lado): fundo sólido, degradê e botão.
-/// Devolve se foi clicada; `target` é o nome da aba escondida mais próxima, que a dica cita.
+/// Arrow of one edge of the strip (there are hidden tabs on that side): solid background, gradient and button.
+/// Returns whether it was clicked; `target` is the name of the nearest hidden tab, which the hint mentions.
 fn edge_arrow(ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, target: &str, id: Id) -> bool {
     painter.rect_filled(zone, 0.0, theme::strip_solid());
     let (solid_x, far_x) = if dir == Dir::Left { (zone.max.x, zone.max.x + FADE_W) } else { (zone.min.x, zone.min.x - FADE_W) };
@@ -441,10 +442,10 @@ fn edge_arrow(ui: &Ui, painter: &Painter, zone: Rect, dir: Dir, target: &str, id
         painter.rect_filled(btn, 4.0, theme::pal().hover);
     }
     chevron(painter, btn.center(), dir, if resp.hovered() { theme::pal().text } else { theme::pal().text_2 });
-    tip(resp, format!("Mostrar «{target}»")).clicked()
+    tip(resp, t!("Show “{target}”", target)).clicked()
 }
 
-/// Botão "▾" no fim da faixa e o menu com todas as abas da janela. Devolve a aba escolhida.
+/// "▾" button at the end of the strip and the menu with all the tabs of the window. Returns the chosen tab.
 fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize, id: Id, scope: &'static str) -> Option<usize> {
     let ctx = ui.ctx();
     painter.rect_filled(zone, 0.0, theme::strip_solid());
@@ -456,7 +457,7 @@ fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize
         painter.rect_filled(btn, 4.0, theme::pal().hover);
     }
     chevron(painter, btn.center(), Dir::Down, if hot { theme::pal().text } else { theme::pal().text_2 });
-    if tip(resp, if scope == "tab" { "Todas as abas" } else { "Todos os documentos" }).clicked() {
+    if tip(resp, if scope == "tab" { t!("All tabs") } else { t!("All documents") }).clicked() {
         open = !open;
     }
 
@@ -512,17 +513,20 @@ fn tab_list(ui: &Ui, painter: &Painter, zone: Rect, items: &[Item], shown: usize
     chosen
 }
 
-/// Dica da aba: o nome, o modelo (inteiro) e como renomear.
+/// Tab hint: the name, the model (whole) and how to rename it.
 fn tab_tip(label: &str, model: Option<&str>) -> String {
-    let model = model.map(|m| format!("\nModelo: {m}")).unwrap_or_default();
-    format!("{label}{model}\nDuplo clique ou botão direito para renomear")
+    match model {
+        Some(model) => t!("{label}\nModel: {model}\nDouble click or right click to rename", label, model = model),
+        None => t!("{label}\nDouble click or right click to rename", label),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentdeck_core::i18n::{self, Lang};
 
-    /// Cinco abas de 100 px.
+    /// Five 100 px tabs.
     const W: [f32; 5] = [100.0; 5];
 
     #[test]
@@ -533,11 +537,11 @@ mod tests {
 
     #[test]
     fn the_cut_tab_counts_as_hidden_on_the_side_it_is_cut() {
-        // No começo: só há o que ver à direita; a terceira está cortada (200..300 em 0..250).
+        // At the start: there is only something to see on the right; the third is cut (200..300 in 0..250).
         assert_eq!(hidden_tabs(&W, 0.0, 250.0, 0.0), Hidden { left: None, right: Some(2) });
-        // No meio (rolada 120): a segunda cortada à esquerda; a quarta, cortada à direita (300..400 em 120..370).
+        // In the middle (scrolled 120): the second is cut on the left; the fourth is cut on the right (300..400 in 120..370).
         assert_eq!(hidden_tabs(&W, 120.0, 250.0, 0.0), Hidden { left: Some(1), right: Some(3) });
-        // No fim (rolada 250): só há o que ver à esquerda; a mais próxima é a terceira, cortada.
+        // At the end (scrolled 250): there is only something to see on the left; the nearest is the third, cut.
         assert_eq!(hidden_tabs(&W, 250.0, 250.0, 0.0), Hidden { left: Some(2), right: None });
     }
 
@@ -550,28 +554,28 @@ mod tests {
 
     #[test]
     fn a_tab_under_the_arrow_counts_as_hidden() {
-        // Rolada 100: a segunda começa na borda (100..200), mas a seta de 24 px a cobre; a primeira é a escondida.
+        // Scrolled 100: the second starts at the edge (100..200), but the 24 px arrow covers it; the first is the hidden one.
         assert_eq!(hidden_tabs(&W, 100.0, 250.0, 24.0).left, Some(1));
-        // Sem aba cortada do lado, não há seta e nada fica coberto: a quinta termina na borda direita.
+        // With no tab cut on that side there is no arrow and nothing is covered: the fifth ends at the right edge.
         assert_eq!(hidden_tabs(&W, 250.0, 250.0, 24.0).right, None);
     }
 
     #[test]
     fn the_arrow_scrolls_to_the_nearest_hidden_tab() {
-        // Para a esquerda: a aba escondida encosta na borda esquerda.
+        // To the left: the hidden tab touches the left edge.
         assert_eq!(scroll_to_show(&W, 1, 120.0, 250.0, 0.0), 100.0);
-        // Para a direita: a aba escondida encosta na borda direita.
+        // To the right: the hidden tab touches the right edge.
         assert_eq!(scroll_to_show(&W, 2, 0.0, 250.0, 0.0), 50.0);
-        // Já à vista: não mexe.
+        // Already in view: it does not move.
         assert_eq!(scroll_to_show(&W, 1, 50.0, 250.0, 0.0), 50.0);
-        // Nunca passa do fim do conteúdo nem do começo.
+        // It never goes past the end of the content nor the start.
         assert_eq!(scroll_to_show(&W, 4, 0.0, 250.0, 0.0), 250.0);
         assert_eq!(scroll_to_show(&W, 0, 250.0, 250.0, 0.0), 0.0);
     }
 
     #[test]
     fn the_shown_tab_stays_clear_of_the_arrows() {
-        // Com abas dos dois lados, sobra a largura da seta junto à borda; nas pontas, não.
+        // With tabs on both sides, the arrow width is left along the edge; at the ends, it is not.
         assert_eq!(scroll_to_show(&W, 2, 0.0, 250.0, 24.0), 74.0);
         assert_eq!(scroll_to_show(&W, 2, 400.0, 250.0, 24.0), 176.0);
         assert_eq!(scroll_to_show(&W, 0, 250.0, 250.0, 24.0), 0.0);
@@ -600,17 +604,21 @@ mod tests {
 
     #[test]
     fn a_pill_is_as_wide_as_its_parts() {
-        // padding 8 + ponto 7 + 6 + nome + 6 + ✕ 16 + padding 8.
+        // padding 8 + dot 7 + 6 + name + 6 + ✕ 16 + padding 8.
         assert_eq!(pill_width(50.0, 0.0), 8.0 + 7.0 + 3.0 + 50.0 + 3.0 + 16.0 + 8.0);
-        // O estado do ditado ("Transcrevendo…") alarga a pílula.
+        // The dictation state ("Transcribing…") widens the pill.
         assert_eq!(pill_width(50.0, 20.0) - pill_width(50.0, 0.0), 20.0);
     }
 
     #[test]
     fn the_tip_names_the_full_model() {
-        assert_eq!(tab_tip("Claude · Dev", None), "Claude · Dev\nDuplo clique ou botão direito para renomear");
+        let tip = || tab_tip("Claude · Dev", None);
+        assert_eq!(i18n::english(tip), "Claude · Dev\nDouble click or right click to rename");
+        assert_eq!(i18n::with_lang(Lang::PtBr, tip), "Claude · Dev\nDuplo clique ou botão direito para renomear");
+        let with_model = || tab_tip("OpenCode", Some("opencode/glm-5.3-flash-free"));
+        assert_eq!(i18n::english(with_model), "OpenCode\nModel: opencode/glm-5.3-flash-free\nDouble click or right click to rename");
         assert_eq!(
-            tab_tip("OpenCode", Some("opencode/glm-5.3-flash-free")),
+            i18n::with_lang(Lang::PtBr, with_model),
             "OpenCode\nModelo: opencode/glm-5.3-flash-free\nDuplo clique ou botão direito para renomear"
         );
     }

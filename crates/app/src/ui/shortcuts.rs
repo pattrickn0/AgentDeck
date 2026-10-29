@@ -1,60 +1,63 @@
-//! Modal de atalhos de teclado (Ctrl+/).
+//! Keyboard shortcuts modal (Ctrl+/).
 //!
-//! Exibe os atalhos reais documentados no README e permite fechar com Esc,
-//! clique fora ou pelo botão de fechar.
+//! Shows the real shortcuts documented in the README and closes with Esc, a click
+//! outside or the close button.
 
 use egui::{Align2, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::{button, button_width, clickable, frame, galley, galley_trunc, place, separator, shadow, text_in, text_w, ButtonKind};
 use crate::deck::Deck;
 use crate::theme;
+use agentdeck_core::t;
 
 const ID_SHORTCUTS_OPEN: &str = "shortcuts-modal-open";
 
-/// Um item da lista de atalhos.
+/// One item of the shortcut list.
 pub struct ShortcutItem {
-    pub keys: &'static [&'static str],
+    pub keys: Vec<&'static str>,
     pub desc: &'static str,
 }
 
-/// Lista de atalhos do AgentDeck (conforme README).
-pub const SHORTCUTS: &[ShortcutItem] = &[
-    ShortcutItem { keys: &["Ctrl+T"], desc: "Nova aba do mesmo agente (barra recolhida: escolher)" },
-    ShortcutItem { keys: &["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: "Alternar abas (ou documentos, no modo Documentos)" },
-    ShortcutItem { keys: &["Ctrl+Alt+setas"], desc: "Ir para a janela vizinha (tela dividida)" },
-    ShortcutItem { keys: &["Ctrl+B"], desc: "Mostrar ou ocultar barra lateral *" },
-    ShortcutItem { keys: &["Ctrl+Shift+D"], desc: "Alternar o centro: Agentes / Documentos" },
-    ShortcutItem { keys: &["Ctrl+S"], desc: "Gravar o arquivo em edição (modo Documentos)" },
-    ShortcutItem { keys: &["Ctrl+F"], desc: "Buscar no documento aberto (modo Documentos)" },
-    ShortcutItem { keys: &["Ctrl+Shift+M"], desc: "Ditar por voz na aba ativa (sem enviar)" },
-    ShortcutItem { keys: &["Duplo clique"], desc: "Renomear aba (modelo@cargo@nome)" },
-    ShortcutItem { keys: &["Ctrl+/"], desc: "Mostrar ou fechar estes atalhos" },
-];
+/// The AgentDeck shortcuts (as documented in the README). A function, not a constant: the text goes through `t!`.
+pub fn shortcuts() -> Vec<ShortcutItem> {
+    vec![
+        ShortcutItem { keys: vec!["Ctrl+T"], desc: t!("New tab of the same agent (collapsed bar: choose)") },
+        ShortcutItem { keys: vec!["Ctrl+Tab", "Ctrl+Shift+Tab"], desc: t!("Switch tabs (or documents, in Documents mode)") },
+        ShortcutItem { keys: vec![t!("Ctrl+Alt+arrows")], desc: t!("Go to the neighboring pane (split view)") },
+        ShortcutItem { keys: vec!["Ctrl+B"], desc: t!("Show or hide the sidebar *") },
+        ShortcutItem { keys: vec!["Ctrl+Shift+D"], desc: t!("Switch the center: Agents / Documents") },
+        ShortcutItem { keys: vec!["Ctrl+S"], desc: t!("Save the file being edited (Documents mode)") },
+        ShortcutItem { keys: vec!["Ctrl+F"], desc: t!("Search the open document (Documents mode)") },
+        ShortcutItem { keys: vec!["Ctrl+Shift+M"], desc: t!("Dictate by voice in the active tab (nothing is sent)") },
+        ShortcutItem { keys: vec![t!("Double click")], desc: t!("Rename tab (model@role@name)") },
+        ShortcutItem { keys: vec!["Ctrl+/"], desc: t!("Show or close these shortcuts") },
+    ]
+}
 
-/// Nota dos atalhos marcados com `*`, conforme a opção "Atalhos do app acima do terminal".
+/// Note for the shortcuts marked with `*`, following the "App shortcuts above the terminal" option.
 pub fn terminal_note(app_first: bool) -> &'static str {
     if app_first {
-        "* Também com o terminal focado (opção em ☰ Configurações)."
+        t!("* Also with the terminal focused (option in ☰ Settings).")
     } else {
-        "* Com o terminal focado, vai para o terminal (tmux). Mude em ☰ Configurações."
+        t!("* With the terminal focused, it goes to the terminal (tmux). Change it in ☰ Settings.")
     }
 }
 
-/// Informa se o modal de atalhos está aberto.
+/// Tells whether the shortcuts modal is open.
 #[allow(dead_code)]
 pub fn is_open(ctx: &egui::Context) -> bool {
     let id = Id::new(ID_SHORTCUTS_OPEN);
     ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false)
 }
 
-/// Altera a visibilidade do modal de atalhos.
+/// Changes the visibility of the shortcuts modal.
 #[allow(dead_code)]
 pub fn set_open(ctx: &egui::Context, open: bool) {
     let id = Id::new(ID_SHORTCUTS_OPEN);
     ctx.data_mut(|d| d.insert_temp(id, open));
 }
 
-/// Alterna a visibilidade do modal de atalhos.
+/// Toggles the visibility of the shortcuts modal.
 #[allow(dead_code)]
 pub fn toggle(ctx: &egui::Context) -> bool {
     let new_state = !is_open(ctx);
@@ -62,12 +65,12 @@ pub fn toggle(ctx: &egui::Context) -> bool {
     new_state
 }
 
-/// Modal que lista os atalhos de teclado da aplicação.
+/// Modal that lists the application's keyboard shortcuts.
 pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
     let id = Id::new(ID_SHORTCUTS_OPEN);
     let mut open = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
 
-    // Abre / fecha com Ctrl+/ (ou Ctrl+? dependendo do layout de teclado)
+    // Opens / closes with Ctrl+/ (or Ctrl+? depending on the keyboard layout)
     let triggered = ctx.input_mut(|i| {
         i.consume_key(egui::Modifiers::COMMAND, Key::Slash)
             || i.consume_key(egui::Modifiers::CTRL, Key::Slash)
@@ -79,7 +82,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
             || i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::Questionmark)
     });
 
-    // Ctrl+/ com o terminal focado chega pelo teclado do app (`Deck::handle_key`), não pelo egui.
+    // Ctrl+/ with the terminal focused arrives through the app's keyboard (`Deck::handle_key`), not through egui.
     let triggered = triggered || std::mem::take(&mut deck.toggle_shortcuts);
     if triggered {
         open = !open;
@@ -93,18 +96,19 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
     let screen = ctx.content_rect();
     super::modal_backdrop(deck, ctx, "shortcuts-backdrop");
 
+    let items = shortcuts();
     let note = terminal_note(deck.app_shortcuts_first);
     let w = 560.0;
-    let h = 150.0 + SHORTCUTS.len() as f32 * 26.0;
+    let h = 150.0 + items.len() as f32 * 26.0;
     let center = screen.center();
     let rect = Rect::from_center_size(center, Vec2::new(w, h));
     let mut close = false;
 
-    // Fecha ao clicar fora do retângulo do modal
+    // Closes on a click outside the modal rectangle
     if ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))) {
         close = true;
     }
-    // Fecha ao pressionar Esc
+    // Closes on Esc
     if ctx.input(|i| i.key_pressed(Key::Escape)) {
         close = true;
     }
@@ -118,8 +122,8 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
 
         let mut y = r.min.y + 14.0;
 
-        // Título (13 px 600)
-        let title_g = galley(&p, "Atalhos de Teclado", theme::ui_semibold(13.0), pal.text_strong);
+        // Title (13 px 600)
+        let title_g = galley(&p, t!("Keyboard Shortcuts"), theme::ui_semibold(13.0), pal.text_strong);
         place(
             &p,
             Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 70.0, 20.0)),
@@ -128,7 +132,7 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
             pal.text_strong,
         );
 
-        // Botão fechar (✕)
+        // Close button (✕)
         let close_x_r = Rect::from_min_size(Pos2::new(r.max.x - 36.0, y), Vec2::new(20.0, 20.0));
         let cr_x = clickable(ui, close_x_r, Id::new("shortcuts-close-x"));
         if cr_x.hovered() {
@@ -141,17 +145,17 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         }
         y += 22.0;
 
-        // Explicação
-        let hint_g = galley(&p, "Principais atalhos e ações do AgentDeck", theme::ui(11.5), pal.text_2);
+        // Explanation
+        let hint_g = galley(&p, t!("Main AgentDeck shortcuts and actions"), theme::ui(11.5), pal.text_2);
         place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 16.0)), Align2::LEFT_CENTER, hint_g, pal.text_2);
         y += 22.0;
 
-        // Linha divisória
+        // Divider line
         separator(&p, Pos2::new(r.min.x + 20.0, y + 0.5), Pos2::new(r.max.x - 20.0, y + 0.5));
         y += 8.0;
 
-        // Lista de atalhos
-        for item in SHORTCUTS {
+        // Shortcut list
+        for item in &items {
             let mut kx = r.min.x + 20.0;
             for (idx, key) in item.keys.iter().enumerate() {
                 if idx > 0 {
@@ -181,18 +185,18 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
         let note_g = galley_trunc(&p, note, theme::ui(11.5), pal.text_2, w - 40.0);
         place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(w - 40.0, 18.0)), Align2::LEFT_CENTER, note_g, pal.text_2);
         y += 22.0;
-        // Linha divisória antes do rodapé
+        // Divider line before the footer
         separator(&p, Pos2::new(r.min.x + 20.0, y + 0.5), Pos2::new(r.max.x - 20.0, y + 0.5));
         y += 10.0;
 
-        // Rodapé
-        let footer_hint = galley(&p, "Pressione Esc ou clique fora para fechar", theme::ui(11.5), pal.text_2);
+        // Footer
+        let footer_hint = galley(&p, t!("Press Esc or click outside to close"), theme::ui(11.5), pal.text_2);
         place(&p, Rect::from_min_size(Pos2::new(r.min.x + 20.0, y), Vec2::new(280.0, 26.0)), Align2::LEFT_CENTER, footer_hint, pal.text_2);
 
-        let btn_w = button_width(&p, "Fechar", ButtonKind::Secondary);
+        let btn_w = button_width(&p, t!("Close"), ButtonKind::Secondary);
         let btn_h = 26.0;
         let close_btn_r = Rect::from_min_size(Pos2::new(r.max.x - 20.0 - btn_w, y), Vec2::new(btn_w, btn_h));
-        if button(ui, close_btn_r, Id::new("shortcuts-close-btn"), "Fechar", ButtonKind::Secondary).clicked() {
+        if button(ui, close_btn_r, Id::new("shortcuts-close-btn"), t!("Close"), ButtonKind::Secondary).clicked() {
             close = true;
         }
     });
@@ -205,22 +209,25 @@ pub fn shortcuts_modal(deck: &mut Deck, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentdeck_core::i18n;
 
     #[test]
     fn shortcuts_list_contains_readme_items() {
-        let keys_joined: Vec<String> = SHORTCUTS.iter().map(|s| s.keys.join(" ")).collect();
-        let all_keys = keys_joined.join(" | ");
+        i18n::english(|| {
+            let keys_joined: Vec<String> = shortcuts().iter().map(|s| s.keys.join(" ")).collect();
+            let all_keys = keys_joined.join(" | ");
 
-        assert!(all_keys.contains("Ctrl+T"), "deve conter Ctrl+T");
-        assert!(all_keys.contains("Ctrl+Tab"), "deve conter Ctrl+Tab");
-        assert!(all_keys.contains("Ctrl+Shift+Tab"), "deve conter Ctrl+Shift+Tab");
-        assert!(all_keys.contains("Ctrl+B"), "deve conter Ctrl+B");
-        assert!(all_keys.contains("Ctrl+Shift+M"), "deve conter Ctrl+Shift+M");
-        assert!(all_keys.contains("Ctrl+Shift+D"), "deve conter Ctrl+Shift+D");
-        assert!(all_keys.contains("Duplo clique"), "deve conter Duplo clique");
-        assert!(all_keys.contains("Ctrl+/"), "deve conter Ctrl+/");
-        assert!(!all_keys.contains("Ctrl+L"), "não deve conter Ctrl+L (não é atalho do app)");
-        assert!(terminal_note(false).contains("terminal") && terminal_note(true).contains('*'));
+            assert!(all_keys.contains("Ctrl+T"), "must contain Ctrl+T");
+            assert!(all_keys.contains("Ctrl+Tab"), "must contain Ctrl+Tab");
+            assert!(all_keys.contains("Ctrl+Shift+Tab"), "must contain Ctrl+Shift+Tab");
+            assert!(all_keys.contains("Ctrl+B"), "must contain Ctrl+B");
+            assert!(all_keys.contains("Ctrl+Shift+M"), "must contain Ctrl+Shift+M");
+            assert!(all_keys.contains("Ctrl+Shift+D"), "must contain Ctrl+Shift+D");
+            assert!(all_keys.contains("Double click"), "must contain Double click");
+            assert!(all_keys.contains("Ctrl+/"), "must contain Ctrl+/");
+            assert!(!all_keys.contains("Ctrl+L"), "must not contain Ctrl+L (not an app shortcut)");
+            assert!(terminal_note(false).contains("terminal") && terminal_note(true).contains('*'));
+        });
     }
 
     #[test]

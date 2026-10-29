@@ -1,5 +1,5 @@
-//! Destaque de arrastar e soltar arquivos (`#drop-overlay`): destaca o painel de agente (ou o
-//! formulário "Nova tarefa") que vai receber os arquivos soltos.
+//! Drag-and-drop highlight for files (`#drop-overlay`): highlights the agent pane (or the
+//! "New task" form) that will receive the dropped files.
 
 use egui::{Align2, Id, LayerId, Order, Pos2, Rect, Stroke, Vec2};
 
@@ -47,9 +47,9 @@ pub fn drop_overlay(deck: &mut Deck, ctx: &egui::Context, full: Rect) {
     place(&p, sr, Align2::CENTER_CENTER, sub, theme::pal().text_2);
 }
 
-/// Borda tracejada (`border: 2px dashed`) acompanhando os cantos arredondados.
+/// Dashed border (`border: 2px dashed`) following the rounded corners.
 fn dashed_round_rect(p: &egui::Painter, r: Rect, radius: f32, stroke: Stroke) {
-    // Contorno amostrado e dividido em traços de 6px com 6px de espaço (padrão do Chromium ≈ 3×largura).
+    // Sampled outline split into 6px dashes with 6px of space (Chromium's default ≈ 3×width).
     let mut pts = Vec::new();
     let corners = [
         (Pos2::new(r.max.x - radius, r.min.y + radius), -90.0f32),
