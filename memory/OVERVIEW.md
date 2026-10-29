@@ -157,7 +157,8 @@ of the bridge is in [ARCHITECTURE.md](ARCHITECTURE.md).
 - View multiple agents at the same time in **split screen** or **highlight** (`Tabs | Split | Highlight`).
 - Track **usage** for each agent with quota (session and week) in the title bar and usage panel.
 - Talk to an agent via its tab's terminal, reference files (`@file`), attach files/images (button, drag-and-drop,
-  or `Ctrl+V`), and use **voice dictation** (`Ctrl+Shift+M` or microphone icon, via local whisper.cpp).
+  or `Ctrl+V`), and use **voice dictation** (`Ctrl+Shift+M` or microphone icon, via local whisper.cpp; ☰ Settings → Dictation sets the spoken language
+  or auto-detect, and translating into English).
 - Follow inter-agent conversations in the integrated Conversation (read-only) and intervene directly in terminals.
 - Read and edit project files with syntax highlighting and search, or read diffs and reports full-width in
   **Documents** mode (`Ctrl+Shift+D`).
