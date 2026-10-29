@@ -1,16 +1,16 @@
-//! Segunda abertura do app: em vez de recusar ("outra janela já usa a pasta de dados"), a nova instância pede à viva que
-//! mostre a janela (`POST /activate` na ponte) e sai em silêncio.
+//! Second opening of the app: instead of refusing ("another window is already using the data folder"), the new
+//! instance asks the live one to show its window (`POST /activate` on the bridge) and exits silently.
 //!
-//! A instância viva grava porta e token da ponte em `dados/.agentdeck.bridge` depois de subir a ponte e apaga o arquivo
-//! ao encerrar. O arquivo sozinho não prova que há instância (um travamento deixa um velho): quem decide é a trava da
-//! pasta ([`crate::lock_data_dir`]), e o arquivo velho é apagado por quem pega a trava.
+//! The live instance writes the bridge port and token to `dados/.agentdeck.bridge` after starting the bridge and
+//! deletes the file on shutdown. The file alone does not prove that an instance exists (a crash leaves an old one):
+//! the folder lock decides ([`crate::lock_data_dir`]), and whoever takes the lock deletes the stale file.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// Porta (linha 1) e token (linha 2) da ponte da instância viva.
+/// Port (line 1) and token (line 2) of the live instance's bridge.
 const BRIDGE_FILE: &str = ".agentdeck.bridge";
-/// Quanto esperar uma instância que ainda está subindo (trava pega, ponte ainda não publicada).
+/// How long to wait for an instance that is still starting (lock taken, bridge not published yet).
 const STARTUP_WAIT: Duration = Duration::from_secs(6);
 const POLL: Duration = Duration::from_millis(200);
 const POST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -19,19 +19,19 @@ fn bridge_file(data_dir: &Path) -> PathBuf {
     data_dir.join(BRIDGE_FILE)
 }
 
-/// Publica porta e token da ponte para a segunda abertura.
+/// Publishes the bridge port and token for the second opening.
 pub(crate) fn publish(data_dir: &Path, port: u16, token: &str) {
     if let Err(e) = std::fs::write(bridge_file(data_dir), format!("{port}\n{token}\n")) {
-        log::warn!("não consegui gravar {}: {e}", bridge_file(data_dir).display());
+        log::warn!("could not write {}: {e}", bridge_file(data_dir).display());
     }
 }
 
-/// Apaga o arquivo da ponte (a instância encerra, ou pegou a trava e o que havia era de uma que travou).
+/// Deletes the bridge file (the instance is shutting down, or it took the lock and the one there belonged to a crash).
 pub(crate) fn forget(data_dir: &Path) {
     let _ = std::fs::remove_file(bridge_file(data_dir));
 }
 
-/// A ponte da instância viva (`None` enquanto ela ainda não a publicou).
+/// The live instance's bridge (`None` while it has not published it yet).
 fn read(data_dir: &Path) -> Option<(u16, String)> {
     let text = std::fs::read_to_string(bridge_file(data_dir)).ok()?;
     let mut lines = text.lines();
@@ -40,30 +40,30 @@ fn read(data_dir: &Path) -> Option<(u16, String)> {
     (!token.is_empty()).then_some((port, token))
 }
 
-/// Há uma instância viva usando `data_dir` (a trava está pega por outro handle).
+/// Is there a live instance using `data_dir` (is the lock held by another handle)?
 fn running(data_dir: &Path) -> bool {
     let Ok(file) = std::fs::OpenOptions::new().write(true).open(data_dir.join(crate::LOCK_FILE)) else { return false };
     matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
 }
 
-/// `POST /activate` autenticado. `true` = a instância respondeu 200.
+/// Authenticated `POST /activate`. `true` = the instance answered 200.
 fn post_activate(port: u16, token: &str) -> bool {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(POST_TIMEOUT)).build().into();
     match agent.post(format!("http://127.0.0.1:{port}/activate")).header("x-agentdeck-token", token).send_empty() {
         Ok(resp) => resp.status().as_u16() == 200,
         Err(e) => {
-            log::warn!("a instância em execução não respondeu ao /activate: {e}");
+            log::warn!("the running instance did not answer /activate: {e}");
             false
         }
     }
 }
 
-/// O Windows só deixa trazer uma janela para a frente a quem recebeu o foco do usuário: este processo (que o usuário
-/// acabou de abrir) passa o direito à instância viva, senão a janela só pisca na barra de tarefas.
+/// Windows only lets a window come to the front for whoever received the user's focus: this process (which the user
+/// just opened) hands that right to the live instance; otherwise the window just flashes on the taskbar.
 #[cfg(windows)]
 fn allow_foreground() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
-    // SAFETY: chamada sem ponteiros.
+    // SAFETY: call takes no pointers.
     unsafe {
         AllowSetForegroundWindow(ASFW_ANY);
     }
@@ -72,8 +72,9 @@ fn allow_foreground() {
 #[cfg(not(windows))]
 fn allow_foreground() {}
 
-/// Se outra instância do app usa `data_dir`, pede a ela que mostre a janela e devolve `true` (esta pode sair em silêncio).
-/// `false`: não há instância viva, ou ela não respondeu (travada): siga o início normal, que mostra o erro da trava.
+/// If another instance of the app uses `data_dir`, asks it to show its window and returns `true` (this one may exit
+/// silently). `false`: there is no live instance, or it did not answer (stuck): go on with the normal startup, which
+/// shows the lock error.
 pub fn activate_running(data_dir: &Path) -> bool {
     if !running(data_dir) {
         return false;
@@ -84,7 +85,7 @@ pub fn activate_running(data_dir: &Path) -> bool {
         if let Some((port, token)) = read(data_dir) {
             return post_activate(port, &token);
         }
-        // Sem arquivo: a instância ainda está subindo. Espera até ela publicar a ponte.
+        // No file: the instance is still starting. Wait until it publishes the bridge.
         if Instant::now() >= give_up || !running(data_dir) {
             return false;
         }
@@ -102,10 +103,10 @@ mod tests {
         assert_eq!(read(tmp.path()), None);
         publish(tmp.path(), 4242, "abc123");
         assert_eq!(read(tmp.path()), Some((4242, "abc123".to_owned())));
-        std::fs::write(bridge_file(tmp.path()), "não é porta\ntoken\n").expect("write");
+        std::fs::write(bridge_file(tmp.path()), "not a port\ntoken\n").expect("write");
         assert_eq!(read(tmp.path()), None);
         std::fs::write(bridge_file(tmp.path()), "80\n").expect("write");
-        assert_eq!(read(tmp.path()), None, "sem token não vale");
+        assert_eq!(read(tmp.path()), None, "without a token it does not count");
         forget(tmp.path());
         assert!(!bridge_file(tmp.path()).exists());
     }
@@ -113,10 +114,10 @@ mod tests {
     #[test]
     fn without_a_live_instance_there_is_nothing_to_activate() {
         let tmp = tempfile::tempdir().expect("tmp");
-        assert!(!running(tmp.path()), "sem arquivo de trava");
-        // Arquivo velho de uma instância que travou: a trava está livre, então não há a quem pedir.
-        publish(tmp.path(), 1, "velho");
-        let _free = crate::lock_data_dir(tmp.path()).expect("trava");
+        assert!(!running(tmp.path()), "without a lock file");
+        // Old file from an instance that crashed: the lock is free, so there is nobody to ask.
+        publish(tmp.path(), 1, "old");
+        let _free = crate::lock_data_dir(tmp.path()).expect("lock");
         drop(_free);
         assert!(!activate_running(tmp.path()));
     }
@@ -124,7 +125,7 @@ mod tests {
     #[test]
     fn a_held_lock_is_seen_as_a_running_instance() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let held = crate::lock_data_dir(tmp.path()).expect("trava");
+        let held = crate::lock_data_dir(tmp.path()).expect("lock");
         assert!(running(tmp.path()));
         drop(held);
         assert!(!running(tmp.path()));

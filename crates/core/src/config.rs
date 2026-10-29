@@ -1,4 +1,4 @@
-//! Configuração persistida (equivalente ao `config.json` do Electron, com campos extras de layout).
+//! Persisted configuration (equivalent to the Electron `config.json`, with extra layout fields).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,31 +7,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths::AppPaths;
 
-/// Um projeto: uma pasta com as próprias abas (instâncias de agentes) e o próprio layout.
+/// A project: a folder with its own tabs (agent instances) and its own layout.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProjectCfg {
-    /// Id curto e estável (`p` + 8 hex), gerado na criação. É o escopo das instâncias na ponte.
+    /// Short, stable id (`p` + 8 hex), generated on creation. It is the scope of the instances on the bridge.
     pub id: String,
     pub name: String,
     pub path: PathBuf,
-    /// Id de cada aba aberta, na ordem da barra (restaurado quando o projeto é aberto).
+    /// Id of each open tab, in the order of the bar (restored when the project is opened).
     pub open_tabs: Vec<String>,
-    /// Índice em `open_tabs` da aba ativa (-1 = nenhuma).
+    /// Index in `open_tabs` of the active tab (-1 = none).
     pub active_tab: i32,
-    /// Ordem das janelas da tela dividida (grupos: `claude`, `antigravity`, `codex`…).
+    /// Order of the split-screen windows (groups: `claude`, `antigravity`, `codex`…).
     pub pane_order: Vec<String>,
-    /// Proporções das linhas da grade e das colunas de cada linha (vazias = iguais). Só valem se
-    /// o formato da grade ainda for o mesmo.
+    /// Proportions of the grid rows and of the columns of each row (empty = equal). They only apply if
+    /// the grid shape is still the same.
     pub split_rows: Vec<f32>,
     pub split_cols: Vec<Vec<f32>>,
-    /// Quem abriu cada aba (id da aba → id de quem a chamou pelo `ask-agent`): a hierarquia da
-    /// lista de agentes na barra lateral. Abas abertas pelo usuário não entram.
+    /// Who opened each tab (tab id → id of whoever called it through `ask-agent`): the hierarchy of the
+    /// agent list in the sidebar. Tabs opened by the user do not go in.
     pub tab_parents: BTreeMap<String, String>,
-    /// Modelo de LLM de cada instância (id da aba → modelo, ex.: `claude@dev` → `sonnet`). O id não
-    /// muda com o modelo; só as instâncias que escolheram (ou herdaram) um modelo entram aqui.
+    /// LLM model of each instance (tab id → model, e.g. `claude@dev` → `sonnet`). The id does not
+    /// change with the model; only the instances that chose (or inherited) a model go in here.
     pub tab_models: BTreeMap<String, String>,
-    /// A lista de agentes do projeto está recolhida na barra lateral.
+    /// The project's agent list is collapsed in the sidebar.
     pub collapsed: bool,
 }
 
@@ -54,14 +54,14 @@ impl Default for ProjectCfg {
 }
 
 impl ProjectCfg {
-    /// Projeto novo na pasta `path`, com um id que não está em `taken`. Sem `name`, o nome é o
-    /// da pasta.
+    /// New project in folder `path`, with an id that is not in `taken`. Without `name`, the name is the
+    /// folder's.
     pub fn new(path: PathBuf, name: Option<&str>, taken: &[ProjectCfg]) -> Self {
         Self::with_id(path, name, None, taken)
     }
 
-    /// Como [`ProjectCfg::new`], mas com `id` de um projeto removido (a mesma pasta readicionada
-    /// reaproveita o id). Se o id já é de algum projeto de `taken` ou está vazio, gera outro.
+    /// Like [`ProjectCfg::new`], but with the `id` of a removed project (the same folder added again
+    /// reuses the id). If the id already belongs to a project of `taken` or is empty, another one is generated.
     fn with_id(path: PathBuf, name: Option<&str>, id: Option<String>, taken: &[ProjectCfg]) -> Self {
         let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned).unwrap_or_else(|| folder_name(&path));
         let id = id.filter(|id| !id.is_empty() && !taken.iter().any(|p| p.id == *id)).unwrap_or_else(|| loop {
@@ -74,8 +74,8 @@ impl ProjectCfg {
     }
 }
 
-/// Um projeto que saiu da lista: o id e a pasta, para readicionar a mesma pasta reaproveitar o id
-/// (e as tarefas em `dados/tarefas/<id>.json` voltarem à mesa).
+/// A project that left the list: the id and the folder, so that adding the same folder again reuses the id
+/// (and the tasks in `dados/tarefas/<id>.json` come back to the desk).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RemovedProject {
@@ -89,11 +89,11 @@ impl Default for RemovedProject {
     }
 }
 
-/// Quantos projetos removidos a config lembra (`removedProjects`).
+/// How many removed projects the config remembers (`removedProjects`).
 const REMOVED_PROJECTS_MAX: usize = 50;
 
-/// `true` se as duas pastas são a mesma coisa para a pessoa: `\` e `/` valem o mesmo, sem barra
-/// no fim e, só no Windows, sem diferenciar maiúsculas de minúsculas.
+/// `true` if the two folders are the same thing for the person: `\` and `/` are the same, no trailing
+/// slash and, only on Windows, case-insensitive.
 fn same_folder(a: &Path, b: &Path) -> bool {
     fn norm(p: &Path) -> String {
         let mut s = crate::util::strip_verbatim(p).to_string_lossy().replace('\\', "/");
@@ -109,7 +109,7 @@ fn same_folder(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// `p` + 8 hex aleatórios.
+/// `p` + 8 random hex digits.
 fn new_project_id() -> String {
     let mut buf = [0u8; 4];
     if getrandom::fill(&mut buf).is_err() {
@@ -118,26 +118,26 @@ fn new_project_id() -> String {
     format!("p{}", buf.iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
-/// Nome da pasta (ou o caminho inteiro, se não há nome: a raiz de um disco).
+/// The folder name (or the whole path, if there is no name: the root of a drive).
 fn folder_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
 
-/// Como as janelas dos agentes se arrumam no centro.
+/// How the agent windows are arranged in the center.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Organization {
-    /// Uma janela só, com todas as abas.
+    /// A single window, with all the tabs.
     Tabs,
-    /// Uma janela por CLI, numa grade.
+    /// One window per CLI, in a grid.
     #[default]
     Split,
-    /// A janela do CLI selecionado grande e as outras empilhadas ao lado.
+    /// The window of the selected CLI large and the others stacked beside it.
     Highlight,
 }
 
 impl Organization {
-    /// Organização de quem só tem o `splitEnabled` gravado.
+    /// The arrangement for whoever only has `splitEnabled` saved.
     pub fn from_split_enabled(on: bool) -> Self {
         if on {
             Self::Split
@@ -146,82 +146,82 @@ impl Organization {
         }
     }
 
-    /// O valor equivalente do `splitEnabled` (qualquer arrumação em janelas conta como ligada).
+    /// The equivalent value of `splitEnabled` (any arrangement in windows counts as on).
     pub fn split_enabled(self) -> bool {
         self != Self::Tabs
     }
 }
 
-/// A escolha da pessoa sobre o ditado por voz (Whisper local, download de ~1,6 GB).
+/// The person's choice about voice dictation (local Whisper, a download of ~1.6 GB).
 ///
-/// Gravada no `dictation` do `config.json` (`"unasked"`, `"yes"` ou `"no"`): um instalador pode escrever
-/// o campo para responder a pergunta antes da primeira abertura do app.
+/// Saved in `config.json`'s `dictation` (`"unasked"`, `"yes"` or `"no"`): an installer can write
+/// the field to answer the question before the app's first opening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DictationChoice {
-    /// Ainda não perguntado: na primeira abertura o app pergunta (ou, se o Whisper já está baixado, conta como `Yes`).
+    /// Not asked yet: on the first opening the app asks (or, if Whisper is already downloaded, it counts as `Yes`).
     #[default]
     Unasked,
-    /// Quer o ditado: o app baixa o que faltar.
+    /// The person wants dictation: the app downloads whatever is missing.
     Yes,
-    /// Não quer: o app não baixa nada (a pessoa pode baixar depois, pelas configurações).
+    /// The person does not want it: the app downloads nothing (they can download later, from the settings).
     No,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
-    /// Projetos do usuário, na ordem da barra lateral.
+    /// The user's projects, in the sidebar order.
     pub project_list: Vec<ProjectCfg>,
-    /// Os últimos projetos que saíram da lista (ver [`RemovedProject`]): readicionar a mesma pasta
-    /// reaproveita o id. Ausente nos arquivos antigos.
+    /// The last projects that left the list (see [`RemovedProject`]): adding the same folder again
+    /// reuses the id. Absent in old files.
     #[serde(default)]
     pub removed_projects: Vec<RemovedProject>,
-    /// Id do projeto ativo (vazio = nenhum projeto).
+    /// Id of the active project (empty = no project).
     pub active_project: String,
-    /// Pasta do projeto ativo (vazia = nenhum). Derivada de `active_project`, não é gravada.
-    /// No formato antigo era o workspace global (lido só para a migração).
+    /// Folder of the active project (empty = none). Derived from `active_project`, not saved.
+    /// In the old format it was the global workspace (read only for the migration).
     #[serde(skip_serializing)]
     pub workspace: PathBuf,
     pub whisper_lang: String,
-    /// Ditado por voz: ver [`DictationChoice`].
+    /// Voice dictation: see [`DictationChoice`].
     pub dictation: DictationChoice,
     pub sound_enabled: bool,
-    // --- Layout (novidade da versão Rust; a versão Electron guardava só em CSS) ---
+    // --- Layout (new in the Rust version; the Electron version kept it only in CSS) ---
     pub sidebar_width: f32,
     pub sidebar_collapsed: bool,
-    /// Largura da barra lateral direita (Conversa integrada); 0 = padrão. Ela não
-    /// recolhe. (Substitui `bottomHeight`/`feedCollapsed` do antigo painel de baixo, ignorados ao ler.)
+    /// Width of the right bar (integrated conversation); 0 = default. It does not
+    /// collapse. (Replaces `bottomHeight`/`feedCollapsed` of the old bottom panel, ignored when reading.)
     pub right_panel_width: f32,
-    /// Como as janelas dos agentes se arrumam. Ausente nos arquivos antigos: vale o `splitEnabled`
-    /// (ver `Config::organization`).
+    /// How the agent windows are arranged. Absent in old files: `splitEnabled` applies
+    /// (see `Config::organization`).
     pub organization: Option<Organization>,
-    /// Formato antigo da organização (ligada = Dividida): lido para não perder a escolha de quem já
-    /// usa e ainda gravado, para uma versão anterior entender o arquivo.
+    /// Old format of the organization (on = Split): read so that whoever already uses it does not lose the
+    /// choice, and still saved, so that an earlier version understands the file.
     pub split_enabled: bool,
-    /// Destaque: fração da largura do centro que a janela grande ocupa (0 = padrão, 2/3).
+    /// Highlight: fraction of the center width that the large window takes (0 = default, 2/3).
     pub highlight_ratio: f32,
-    /// Tamanho da janela no modo janela (nunca o da tela cheia: com a janela maximizada fica o de antes).
+    /// Window size in windowed mode (never the full-screen one: with the window maximized the previous one stays).
     pub window_width: f32,
     pub window_height: f32,
-    /// A janela estava maximizada ao fechar: reabre maximizada, mas com o tamanho normal guardado acima.
+    /// The window was maximized when closing: it reopens maximized, but with the normal size saved above.
     pub window_maximized: bool,
-    /// Abre sozinho a aba de um agente fechado quando outro agente o chama pelo `ask-agent`.
+    /// Opens the tab of a closed agent by itself when another agent calls it through `ask-agent`.
     pub auto_open_agent_tabs: bool,
-    /// Com o terminal focado, Ctrl+B é do app (barra lateral) em vez de ir ao terminal (prefixo
-    /// do tmux); desligado, vai ao terminal. Ctrl+T é sempre do app.
+    /// With the terminal focused, Ctrl+B belongs to the app (sidebar) instead of going to the terminal (the tmux
+    /// prefix); off, it goes to the terminal. Ctrl+T always belongs to the app.
     pub app_shortcuts_first: bool,
     /// Language of the app's text (`"en"` or `"pt-BR"`); absent or unknown = English. Agents always get English.
     pub language: crate::i18n::Lang,
-    /// Modelo padrão das instâncias novas, por `modelo@cargo` (`claude@dev`) ou só por `modelo`
-    /// (`opencode`); o `modelo@cargo` vale mais. Sem entrada, vale o padrão do próprio CLI.
+    /// Default model of new instances, by `model@role` (`claude@dev`) or only by `model`
+    /// (`opencode`); the `model@role` wins. Without an entry, the CLI's own default applies.
     pub role_models: BTreeMap<String, String>,
-    /// O grupo de modelos que a barra de título mostra, por agente (`antigravity` → `Gemini 4 Argon`). Sem
-    /// entrada (ou com um grupo que a fonte não devolve mais), vale o resumo.
+    /// The model group the title bar shows, per agent (`antigravity` → `Gemini 4 Argon`). Without an
+    /// entry (or with a group the source no longer returns), the summary applies.
     pub usage_pins: BTreeMap<String, String>,
-    // --- Formato antigo (antes dos projetos): lido só para a migração, nunca gravado. Agora
-    // cada projeto guarda as próprias abas e o próprio layout (ver `ProjectCfg`). ---
-    /// Pastas conhecidas (`projects`); os projetos agora ficam em `projectList`.
+    // --- Old format (before the projects): read only for the migration, never saved. Now
+    // each project keeps its own tabs and its own layout (see `ProjectCfg`). ---
+    /// Known folders (`projects`); the projects now live in `projectList`.
     #[serde(skip_serializing)]
     pub projects: Vec<PathBuf>,
     #[serde(skip_serializing)]
@@ -271,49 +271,49 @@ impl Default for Config {
 }
 
 impl Config {
-    /// A organização das janelas: a gravada ou, nos arquivos antigos, a que o `splitEnabled` dá.
+    /// The arrangement of the windows: the saved one or, in old files, the one `splitEnabled` gives.
     pub fn organization(&self) -> Organization {
         self.organization.unwrap_or_else(|| Organization::from_split_enabled(self.split_enabled))
     }
 
-    /// Grava a organização nos dois campos (o antigo continua coerente).
+    /// Saves the arrangement in both fields (the old one stays coherent).
     pub fn set_organization(&mut self, org: Organization) {
         self.organization = Some(org);
         self.split_enabled = org.split_enabled();
     }
 
-    /// Configuração de uma instalação nova: nenhum projeto.
+    /// Configuration of a fresh installation: no project.
     pub fn default_for(_paths: &AppPaths) -> Self {
         Self::default()
     }
 
-    /// Configuração com um único projeto, ativo, na pasta `path` (testes e uso embutido).
+    /// Configuration with a single active project in folder `path` (tests and embedded use).
     pub fn with_project(path: PathBuf) -> Self {
         let project = ProjectCfg::new(path.clone(), None, &[]);
         Self { active_project: project.id.clone(), workspace: path, project_list: vec![project], ..Self::default() }
     }
 
-    /// Carrega a configuração como o `loadConfig` do Electron: usa `paths.config_file` ou,
-    /// se não existir, a configuração legada (Electron/"orquestra"). As chaves do arquivo
-    /// sobrescrevem os padrões (como `Object.assign`). O formato antigo (um workspace global) é
-    /// migrado para projetos (ver [`Config::fix_workspace`]).
+    /// Loads the configuration like Electron's `loadConfig`: uses `paths.config_file` or, if it does not
+    /// exist, the legacy configuration (Electron/"orquestra"). The keys of the file
+    /// override the defaults (like `Object.assign`). The old format (a global workspace) is
+    /// migrated to projects (see [`Config::fix_workspace`]).
     pub fn load(paths: &AppPaths) -> Self {
         Self::load_from(&config_candidates(paths), paths, &crate::util::home_dir())
     }
 
-    /// Como [`Config::load`], com a lista de arquivos candidatos e a pasta pessoal explícitas.
+    /// Like [`Config::load`], with the list of candidate files and the home folder explicit.
     pub(crate) fn load_from(candidates: &[PathBuf], paths: &AppPaths, home: &Path) -> Self {
         let file = candidates.iter().find(|p| p.is_file());
         let mut cfg = match file {
             Some(f) => {
                 let text = std::fs::read(f).ok().and_then(|b| config_text(&b));
                 text.and_then(|t| Self::try_from_json_over_defaults(&t, paths)).unwrap_or_else(|| {
-                    // Ilegível: guarda uma cópia antes que a próxima gravação ponha os padrões por cima
-                    // (senão a lista de projetos se perde sem aviso).
+                    // Unreadable: keeps a copy before the next save puts the defaults on top of it
+                    // (otherwise the project list is lost without warning).
                     let backup = f.with_extension(format!("json.ilegivel-{}", crate::util::now_ms()));
                     match std::fs::copy(f, &backup) {
-                        Ok(_) => log::error!("configuração ilegível em {}; cópia guardada em {}", f.display(), backup.display()),
-                        Err(e) => log::error!("configuração ilegível em {} (e a cópia falhou: {e})", f.display()),
+                        Ok(_) => log::error!("unreadable config at {}; copy kept at {}", f.display(), backup.display()),
+                        Err(e) => log::error!("unreadable config at {} (and the copy failed: {e})", f.display()),
                     }
                     Self::default_for(paths)
                 })
@@ -321,8 +321,8 @@ impl Config {
             None => Self::default_for(paths),
         };
         let from_legacy = file.filter(|f| **f != paths.config_file);
-        // Da configuração do CommandDeck vem tudo (é o mesmo formato). Das mais antigas não vêm as
-        // abas: a primeira abertura começa sem agentes.
+        // From the CommandDeck configuration comes everything (it is the same format). From the older ones
+        // the tabs do not come: the first opening starts without agents.
         if from_legacy.is_some_and(|f| !is_commanddeck_config(f)) {
             cfg.open_tabs.clear();
             cfg.active_tab_index = -1;
@@ -332,23 +332,23 @@ impl Config {
             }
         }
         cfg.fix_workspace(paths, home);
-        // Migração do nome: copia a configuração do CommandDeck para o lugar novo (o antigo fica como
-        // está, para quem ainda abrir a versão anterior).
+        // Name migration: copies the CommandDeck configuration to the new place (the old one stays as
+        // it is, for whoever still opens the previous version).
         if let Some(f) = from_legacy.filter(|f| is_commanddeck_config(f)) {
             match cfg.save(&paths.config_file) {
-                Ok(()) => log::info!("configuração copiada de {} para {}", f.display(), paths.config_file.display()),
-                Err(e) => log::warn!("não consegui copiar a configuração de {} para {}: {e}", f.display(), paths.config_file.display()),
+                Ok(()) => log::info!("config copied from {} to {}", f.display(), paths.config_file.display()),
+                Err(e) => log::warn!("could not copy the config from {} to {}: {e}", f.display(), paths.config_file.display()),
             }
         }
         cfg
     }
 
-    /// Aplica o JSON salvo sobre os padrões. JSON inválido = padrões.
+    /// Applies the saved JSON on top of the defaults. Invalid JSON = defaults.
     pub fn from_json_over_defaults(text: &str, paths: &AppPaths) -> Self {
         Self::try_from_json_over_defaults(text, paths).unwrap_or_else(|| Self::default_for(paths))
     }
 
-    /// Como [`Config::from_json_over_defaults`], mas `None` se o JSON não pôde ser lido.
+    /// Like [`Config::from_json_over_defaults`], but `None` if the JSON could not be read.
     pub fn try_from_json_over_defaults(text: &str, paths: &AppPaths) -> Option<Self> {
         let defaults = Self::default_for(paths);
         let (Ok(serde_json::Value::Object(loaded)), Ok(serde_json::Value::Object(mut base))) =
@@ -357,7 +357,7 @@ impl Config {
             return None;
         };
         for (k, v) in loaded {
-            // `null` não sobrescreve um padrão tipado (o serde rejeitaria o objeto inteiro).
+            // `null` does not override a typed default (serde would reject the whole object).
             if !v.is_null() {
                 base.insert(k, v);
             }
@@ -365,9 +365,9 @@ impl Config {
         serde_json::from_value(serde_json::Value::Object(base)).ok()
     }
 
-    /// Migra o formato antigo, normaliza as pastas dos projetos (relativa → relativa à pasta do
-    /// app), valida o projeto ativo e deixa `workspace` = a pasta dele (vazia sem projeto).
-    /// Idempotente.
+    /// Migrates the old format, normalizes the project folders (relative → relative to the app
+    /// folder), validates the active project and leaves `workspace` = its folder (empty without a project).
+    /// Idempotent.
     pub(crate) fn fix_workspace(&mut self, paths: &AppPaths, home: &Path) {
         self.migrate_legacy(paths, home);
         for p in &mut self.project_list {
@@ -378,7 +378,7 @@ impl Config {
                 p.name = folder_name(&p.path);
             }
         }
-        // Projetos sem id ou sem pasta (config editada à mão) são descartados.
+        // Projects without an id or without a folder (hand-edited config) are dropped.
         self.project_list.retain(|p| !p.id.is_empty() && !p.path.as_os_str().is_empty());
         if self.project(&self.active_project).is_none() {
             self.active_project = self.project_list.first().map(|p| p.id.clone()).unwrap_or_default();
@@ -386,10 +386,10 @@ impl Config {
         self.workspace = self.active().map(|p| p.path.clone()).unwrap_or_default();
     }
 
-    /// Formato antigo (`projects` + `workspace` + abas e layout globais) → um projeto por pasta.
-    /// As abas e o layout vão para o projeto da pasta do `workspace`, que fica ativo. Regras do
-    /// workspace antigo: vazio → o workspace do app; relativo → relativo à pasta do app; a pasta
-    /// pessoal do usuário → o workspace do app.
+    /// Old format (`projects` + `workspace` + global tabs and layout) → one project per folder.
+    /// The tabs and the layout go to the project of the `workspace` folder, which becomes active. Old workspace
+    /// rules: empty → the app workspace; relative → relative to the app folder; the user's home
+    /// folder → the app workspace.
     fn migrate_legacy(&mut self, paths: &AppPaths, home: &Path) {
         let has_legacy = !self.projects.is_empty() || !self.workspace.as_os_str().is_empty();
         if self.project_list.is_empty() && has_legacy {
@@ -437,20 +437,20 @@ impl Config {
         self.split_cols.clear();
     }
 
-    /// O projeto `id`.
+    /// The project `id`.
     pub fn project(&self, id: &str) -> Option<&ProjectCfg> {
         self.project_list.iter().find(|p| p.id == id)
     }
 
-    /// O projeto ativo.
+    /// The active project.
     pub fn active(&self) -> Option<&ProjectCfg> {
         self.project(&self.active_project)
     }
 
-    /// Cria um projeto na pasta `path` e o põe no fim da lista. Se a pasta é a de um projeto
-    /// removido (ver [`Config::remove_project`]), reaproveita o id dele e tira o item de
-    /// `removed_projects` — desde que nenhum projeto da lista já use esse id. Sem `name`, o nome é
-    /// o da pasta.
+    /// Creates a project in folder `path` and puts it at the end of the list. If the folder is that of a
+    /// removed project (see [`Config::remove_project`]), reuses its id and takes the item out of
+    /// `removed_projects` — as long as no project in the list already uses that id. Without `name`, the name is
+    /// the folder's.
     pub fn add_project(&mut self, path: PathBuf, name: Option<&str>) -> ProjectCfg {
         let removed = match self.removed_projects.iter().position(|r| same_folder(&r.path, &path)) {
             Some(i) => Some(self.removed_projects.remove(i)),
@@ -461,16 +461,16 @@ impl Config {
         project
     }
 
-    /// Tira o projeto `id` da lista e guarda o par id + pasta em `removed_projects`, para a mesma
-    /// pasta readicionada reaproveitar o id (e achar as tarefas antigas). A lista guarda os
-    /// [`REMOVED_PROJECTS_MAX`] últimos. Se era o ativo, ativa o primeiro que sobrar (ou nenhum) e
-    /// acerta o `workspace`. `false` se o projeto não existe.
+    /// Takes project `id` out of the list and keeps the id + folder pair in `removed_projects`, so that the same
+    /// folder added again reuses the id (and finds the old tasks). The list keeps the last
+    /// [`REMOVED_PROJECTS_MAX`]. If it was the active one, activates the first that is left (or none) and
+    /// adjusts `workspace`. `false` if the project does not exist.
     pub fn remove_project(&mut self, id: &str) -> bool {
         let Some(pos) = self.project_list.iter().position(|p| p.id == id) else {
             return false;
         };
         let project = self.project_list.remove(pos);
-        // Uma entrada velha do mesmo id ou da mesma pasta não diz mais nada.
+        // An old entry of the same id or the same folder no longer means anything.
         self.removed_projects.retain(|r| r.id != project.id && !same_folder(&r.path, &project.path));
         self.removed_projects.push(RemovedProject { id: project.id, path: project.path });
         let extra = self.removed_projects.len().saturating_sub(REMOVED_PROJECTS_MAX);
@@ -482,27 +482,27 @@ impl Config {
         true
     }
 
-    /// Persiste em JSON indentado (2 espaços, como `JSON.stringify(config, null, 2)`).
+    /// Persists as indented JSON (2 spaces, like `JSON.stringify(config, null, 2)`).
     pub fn save(&self, file: &Path) -> std::io::Result<()> {
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir)?;
         }
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        // Grava ao lado e troca: uma queda no meio não deixa o arquivo pela metade.
+        // Writes beside it and swaps: a crash in the middle does not leave a half-written file.
         let tmp = file.with_extension("json.tmp");
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, file)
     }
 }
 
-/// Configurações de versões anteriores: `CommandDeck` (o nome antes de AgentDeck, no mesmo formato),
-/// a versão Electron (userData = "CommandDeck Terminal") e o nome antigo "orquestra". A primeira que
-/// existir é a origem quando `AgentDeck/config.json` ainda não existe.
+/// Configurations of earlier versions: `CommandDeck` (the name before AgentDeck, in the same format),
+/// the Electron version (userData = "CommandDeck Terminal") and the old name "orquestra". The first one that
+/// exists is the source when `AgentDeck/config.json` does not exist yet.
 ///
-/// ÚNICA reserva do nome CommandDeck que o app ainda carrega (as variáveis `COMMANDDECK_*`, o cabeçalho
-/// da ponte, o marcador do `AGENTS.md` e a trava saíram na t32): quem nunca abriu o AgentDeck perderia a
-/// lista de projetos. Sai (esta função, `is_commanddeck_config`, a cópia em `load_from` e os testes
-/// `*_commanddeck_*`) numa versão depois da promoção da `dev` para a `main`; ver `memory/pendencias.md`.
+/// The ONLY reservation of the CommandDeck name that the app still carries (the variables `COMMANDDECK_*`, the bridge
+/// header, the `AGENTS.md` marker and the lock left in t32): whoever never opened AgentDeck would lose the
+/// project list. It goes away (this function, `is_commanddeck_config`, the copy in `load_from` and the tests
+/// `*_commanddeck_*`) in a version after the promotion of `dev` to `main`; see `memory/pendencias.md`.
 pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     let Some(base) = dirs::config_dir() else { return Vec::new() };
     vec![
@@ -512,9 +512,9 @@ pub(crate) fn legacy_config_files() -> Vec<PathBuf> {
     ]
 }
 
-/// O texto do `config.json`: UTF-8, com ou sem BOM, ou UTF-16 com BOM (editado pelo PowerShell 5.1: `Set-Content
-/// -Encoding utf8` grava o BOM e `Out-File` grava UTF-16). Sem BOM e fora do UTF-8, `None`: o arquivo conta como
-/// ilegível (fica a cópia) em vez de virar texto com substituições, que estragaria as pastas dos projetos ao gravar.
+/// The text of `config.json`: UTF-8, with or without BOM, or UTF-16 with BOM (edited with PowerShell 5.1: `Set-Content
+/// -Encoding utf8` writes the BOM and `Out-File` writes UTF-16). Without a BOM and not UTF-8, `None`: the file counts as
+/// unreadable (the copy stays) instead of becoming text with replacements, which would spoil the project folders when saving.
 fn config_text(bytes: &[u8]) -> Option<String> {
     let bom = [&[0xEF, 0xBB, 0xBF][..], &[0xFF, 0xFE], &[0xFE, 0xFF]].iter().any(|b| bytes.starts_with(b));
     if bom {
@@ -524,9 +524,9 @@ fn config_text(bytes: &[u8]) -> Option<String> {
     }
 }
 
-/// Arquivos a tentar, em ordem: o de `paths.config_file` e, depois, os das versões anteriores. Com
-/// `AGENTDECK_HOME` (a configuração fica dentro da pasta do app) o app é isolado e não lê as
-/// configurações do usuário.
+/// Files to try, in order: the one at `paths.config_file` and, after it, those of earlier versions. With
+/// `AGENTDECK_HOME` (the configuration lives inside the app folder) the app is isolated and does not read the
+/// user's configurations.
 pub(crate) fn config_candidates(paths: &AppPaths) -> Vec<PathBuf> {
     let mut candidates = vec![paths.config_file.clone()];
     if !paths.config_file.starts_with(&paths.app_dir) {
@@ -535,8 +535,8 @@ pub(crate) fn config_candidates(paths: &AppPaths) -> Vec<PathBuf> {
     candidates
 }
 
-/// `true` se `file` é a configuração do CommandDeck: o mesmo formato do AgentDeck, então abas e
-/// layout valem e o arquivo é copiado para o lugar novo.
+/// `true` if `file` is the CommandDeck configuration: the same format as AgentDeck's, so tabs and
+/// layout apply and the file is copied to the new place.
 fn is_commanddeck_config(file: &Path) -> bool {
     file.parent().and_then(Path::file_name).is_some_and(|d| d == "CommandDeck")
 }
@@ -565,14 +565,14 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         let read = |json: &str| Config::from_json_over_defaults(json, &p);
-        // Sem `organization` (arquivo antigo): vale o `splitEnabled`, ou o padrão (Dividida).
+        // Without `organization` (old file): `splitEnabled` applies, or the default (Split).
         assert_eq!(read("{\"splitEnabled\": false}").organization(), Organization::Tabs);
         assert_eq!(read("{\"splitEnabled\": true}").organization(), Organization::Split);
         assert_eq!(read("{}").organization(), Organization::Split);
-        // A organização gravada manda, mesmo com o `splitEnabled` dizendo outra coisa.
+        // The saved organization wins, even with `splitEnabled` saying otherwise.
         assert_eq!(read("{\"organization\": \"highlight\", \"splitEnabled\": false}").organization(), Organization::Highlight);
         assert_eq!(read("{\"organization\": \"tabs\"}").organization(), Organization::Tabs);
-        // Gravar mantém o campo antigo coerente e volta igual.
+        // Saving keeps the old field coherent and reads back the same.
         let mut cfg = Config::default();
         cfg.set_organization(Organization::Highlight);
         assert!(cfg.split_enabled);
@@ -583,7 +583,7 @@ mod tests {
         assert!(!cfg.split_enabled);
     }
 
-    /// A escolha do ditado: arquivo antigo = "não perguntado"; um instalador pode gravar `"dictation": "yes"|"no"`.
+    /// The dictation choice: old file = "not asked"; an installer can write `"dictation": "yes"|"no"`.
     #[test]
     fn the_dictation_choice_defaults_to_unasked_and_is_writable_from_outside() {
         let read = |json: &str| serde_json::from_str::<Config>(json).expect("config");
@@ -635,11 +635,11 @@ mod tests {
         cfg.sidebar_width = 300.0;
         cfg.save(&p.config_file).expect("save");
         let text = std::fs::read_to_string(&p.config_file).expect("read");
-        assert!(text.contains("\n  \"whisperLang\": \"en\""), "JSON indentado com camelCase: {text}");
+        assert!(text.contains("\n  \"whisperLang\": \"en\""), "indented camelCase JSON: {text}");
         assert!(text.contains("\"projectList\"") && text.contains("\"openTabs\"") && text.contains("\"splitRows\""), "{text}");
-        // Os campos do formato antigo não são mais gravados.
+        // The fields of the old format are no longer saved.
         for old in ["\"workspace\"", "\"projects\"", "activeTabIndex"] {
-            assert!(!text.contains(old), "{old} gravado: {text}");
+            assert!(!text.contains(old), "{old} saved: {text}");
         }
         let back = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         assert_eq!(back.whisper_lang, "en");
@@ -647,9 +647,9 @@ mod tests {
         assert_eq!(back.active_project, project.id);
         assert_eq!(back.sidebar_width, 300.0);
         assert_eq!(back.workspace, tmp.path().join("proj"));
-        assert!(!p.config_file.with_extension("json.tmp").exists(), "o temporário vira o arquivo");
+        assert!(!p.config_file.with_extension("json.tmp").exists(), "the temporary file becomes the file");
 
-        // Arquivo ilegível: volta aos padrões, mas guarda uma cópia antes que alguém grave por cima.
+        // Unreadable file: back to the defaults, but keeps a copy before someone saves on top of it.
         std::fs::write(&p.config_file, "{\"projectList\": [ quebrado").expect("write");
         let broken = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         assert!(broken.project_list.is_empty());
@@ -659,12 +659,12 @@ mod tests {
             .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
             .filter(|n| n.contains("ilegivel"))
             .collect();
-        assert_eq!(kept.len(), 1, "cópia do arquivo ilegível: {kept:?}");
+        assert_eq!(kept.len(), 1, "copy of the unreadable file: {kept:?}");
     }
 
     #[test]
     fn a_config_edited_in_powershell_keeps_its_projects() {
-        // `Set-Content -Encoding utf8` grava o BOM; `Out-File` do PowerShell 5.1 grava UTF-16 LE com BOM.
+        // `Set-Content -Encoding utf8` writes the BOM; PowerShell 5.1's `Out-File` writes UTF-16 LE with a BOM.
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         std::fs::create_dir_all(p.config_file.parent().expect("dir")).expect("mkdir");
@@ -676,7 +676,7 @@ mod tests {
             assert_eq!(cfg.whisper_lang, "en");
             assert_eq!(cfg.project_list.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), [tmp.path().join("joão")]);
         }
-        // Sem BOM e fora do UTF-8 (cp1252): ilegível, com a cópia, em vez de "jo�o" gravado depois.
+        // Without a BOM and not UTF-8 (cp1252): unreadable, with the copy, instead of "jo�o" saved afterwards.
         std::fs::write(&p.config_file, b"{\"projectList\":[{\"id\":\"p1\",\"path\":\"C:/jo\xE3o\"}]}").expect("write");
         assert!(Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home()).project_list.is_empty());
         let kept = std::fs::read_dir(p.config_file.parent().expect("dir")).expect("ls").flatten();
@@ -699,7 +699,7 @@ mod tests {
         assert_eq!(back.project_list, vec![project]);
         assert_eq!(back.role_models, cfg.role_models);
         assert_eq!(back.usage_pins, cfg.usage_pins);
-        // Uma config antiga, sem os campos, continua valendo.
+        // An old config, without the fields, still applies.
         let old = Config::from_json_over_defaults(r#"{"projectList":[{"id":"p1","name":"x","path":"/x"}]}"#, &p);
         assert!(old.project_list[0].tab_models.is_empty() && old.role_models.is_empty());
     }
@@ -711,13 +711,13 @@ mod tests {
         assert!(a.id.starts_with('p') && a.id[1..].chars().all(|c| c.is_ascii_hexdigit()), "{}", a.id);
         assert_eq!(a.name, "meu-app");
         assert_eq!(a.active_tab, -1);
-        let b = ProjectCfg::new(PathBuf::from("/x/outro"), Some("  Outro nome "), std::slice::from_ref(&a));
+        let b = ProjectCfg::new(PathBuf::from("/x/other"), Some("  Other name "), std::slice::from_ref(&a));
         assert_ne!(a.id, b.id);
-        assert_eq!(b.name, "Outro nome");
+        assert_eq!(b.name, "Other name");
     }
 
-    /// Remover o projeto e readicionar a mesma pasta devolve o mesmo id (as tarefas em
-    /// `dados/tarefas/<id>.json` voltam à mesa).
+    /// Removing the project and adding the same folder again gives back the same id (the tasks in
+    /// `dados/tarefas/<id>.json` come back to the desk).
     #[test]
     fn reading_the_same_folder_after_removing_it_reuses_the_id() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -728,20 +728,20 @@ mod tests {
         assert!(cfg.project_list.is_empty());
 
         let again = cfg.add_project(tmp.path().join("proj"), None);
-        assert_eq!(again.id, a.id, "a mesma pasta é o mesmo projeto");
+        assert_eq!(again.id, a.id, "the same folder is the same project");
         assert_eq!(again.name, "proj");
-        assert!(cfg.removed_projects.is_empty(), "o item sai da lista ao ser reaproveitado");
+        assert!(cfg.removed_projects.is_empty(), "the item leaves the list when it is reused");
         assert_eq!(cfg.project_list, [again]);
-        assert!(!cfg.remove_project("pnada"), "projeto que não existe não entra na lista");
+        assert!(!cfg.remove_project("pnada"), "a project that does not exist does not go into the list");
         assert!(cfg.removed_projects.is_empty());
     }
 
-    /// A pasta vale como a pessoa a digita: outra barra, barra no fim e, no Windows, outra caixa.
+    /// The folder counts as the person types it: another slash, a trailing slash and, on Windows, another case.
     #[test]
     fn the_folder_comparison_ignores_the_kind_of_slash_and_the_trailing_one() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let folder = if cfg!(windows) { tmp.path().join("Projeto") } else { tmp.path().join("projeto") };
-        let same = if cfg!(windows) { tmp.path().join("PROJETO") } else { tmp.path().join("projeto") };
+        let folder = if cfg!(windows) { tmp.path().join("Project") } else { tmp.path().join("project") };
+        let same = if cfg!(windows) { tmp.path().join("PROJECT") } else { tmp.path().join("project") };
         let variants = [
             PathBuf::from(format!("{}/", same.display())),
             PathBuf::from(format!("{}\\", same.display())),
@@ -761,19 +761,19 @@ mod tests {
         let mut cfg = Config::default();
         let a = cfg.add_project(tmp.path().join("a"), None);
         assert!(cfg.remove_project(&a.id));
-        // Outra pasta: id novo, e o par removido continua guardado.
+        // Another folder: a new id, and the removed pair is still kept.
         let b = cfg.add_project(tmp.path().join("b"), None);
         assert_ne!(b.id, a.id);
         assert_eq!(cfg.removed_projects.len(), 1);
-        // Um projeto ativo já com esse id (config editada à mão): id novo em vez de dois iguais.
-        cfg.project_list.push(ProjectCfg { id: a.id.clone(), path: tmp.path().join("outro"), ..ProjectCfg::default() });
+        // An active project already with that id (hand-edited config): a new id instead of two equal ones.
+        cfg.project_list.push(ProjectCfg { id: a.id.clone(), path: tmp.path().join("other"), ..ProjectCfg::default() });
         let c = cfg.add_project(a.path.clone(), None);
         assert_ne!(c.id, a.id);
         assert_eq!(cfg.project_list.iter().filter(|p| p.id == a.id).count(), 1);
-        assert!(cfg.removed_projects.is_empty(), "a pasta foi readicionada: o item velho sai");
+        assert!(cfg.removed_projects.is_empty(), "the folder was added again: the old item leaves");
     }
 
-    /// A lista guarda os últimos 50 pares; a config antiga, sem `removedProjects`, abre normalmente.
+    /// The list keeps the last 50 pairs; the old config, without `removedProjects`, opens normally.
     #[test]
     fn the_removed_projects_are_bounded_and_optional() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -784,12 +784,12 @@ mod tests {
             assert!(cfg.remove_project(&a.id));
         }
         assert_eq!(cfg.removed_projects.len(), 50);
-        assert_eq!(cfg.removed_projects.first().expect("primeiro").path, tmp.path().join("p5"));
-        assert_eq!(cfg.removed_projects.last().expect("último").path, tmp.path().join("p54"));
+        assert_eq!(cfg.removed_projects.first().expect("first").path, tmp.path().join("p5"));
+        assert_eq!(cfg.removed_projects.last().expect("last").path, tmp.path().join("p54"));
         let first_id = cfg.removed_projects[0].id.clone();
 
         let old = Config::from_json_over_defaults(r#"{"projectList":[{"id":"p1","name":"x","path":"/x"}]}"#, &p);
-        assert!(old.removed_projects.is_empty(), "arquivo sem o campo continua abrindo");
+        assert!(old.removed_projects.is_empty(), "a file without the field keeps opening");
         let saved = Config { removed_projects: cfg.removed_projects.clone(), ..Config::default() };
         let text = serde_json::to_string(&saved).expect("json");
         assert!(text.contains(&format!(r#""removedProjects":[{{"id":"{first_id}","path":"#)), "{text}");
@@ -828,27 +828,27 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         let legacy = tmp.path().join("orquestra").join("config.json");
-        std::fs::create_dir_all(legacy.parent().expect("pai")).expect("mkdir");
-        let ws = tmp.path().join("ws-antigo");
+        std::fs::create_dir_all(legacy.parent().expect("parent")).expect("mkdir");
+        let ws = tmp.path().join("ws-old");
         let json = serde_json::json!({"whisperLang": "es", "workspace": ws, "openTabs": ["antigravity", "claude"], "activeTabIndex": 1});
         std::fs::write(&legacy, json.to_string()).expect("write");
         let cfg = Config::load_from(&[p.config_file.clone(), legacy], &p, no_home());
         assert_eq!(cfg.whisper_lang, "es");
-        let project = cfg.active().expect("o workspace vira projeto");
+        let project = cfg.active().expect("the workspace becomes a project");
         assert_eq!(project.path, ws);
-        assert!(project.open_tabs.is_empty(), "as abas da config legada não são abertas");
+        assert!(project.open_tabs.is_empty(), "the tabs of the legacy config are not opened");
         assert_eq!(project.active_tab, -1);
     }
 
-    /// Migração do nome: a configuração do CommandDeck vira a do AgentDeck, com projetos e abas, e o
-    /// arquivo antigo continua lá.
+    /// Name migration: the CommandDeck configuration becomes the AgentDeck one, with projects and tabs, and the
+    /// old file stays there.
     #[test]
     fn the_commanddeck_config_is_copied_to_the_new_place() {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         let old = tmp.path().join("CommandDeck").join("config.json");
-        std::fs::create_dir_all(old.parent().expect("pai")).expect("mkdir");
-        let mut project = ProjectCfg::new(tmp.path().join("meu-projeto"), None, &[]);
+        std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
+        let mut project = ProjectCfg::new(tmp.path().join("my-project"), None, &[]);
         project.open_tabs = vec!["claude".into(), "claude@dev".into()];
         project.active_tab = 1;
         let before = Config {
@@ -857,33 +857,33 @@ mod tests {
             whisper_lang: "es".into(),
             ..Config::default()
         };
-        before.save(&old).expect("grava a antiga");
+        before.save(&old).expect("writes the old one");
         let old_text = std::fs::read_to_string(&old).expect("read");
         assert!(!p.config_file.exists());
 
         let cfg = Config::load_from(&[p.config_file.clone(), old.clone()], &p, no_home());
         assert_eq!(cfg.whisper_lang, "es");
-        assert_eq!(cfg.project_list, vec![project.clone()], "projetos e abas vêm junto");
-        // Gravou no lugar novo e deixou o antigo como estava.
+        assert_eq!(cfg.project_list, vec![project.clone()], "projects and tabs come along");
+        // Wrote to the new place and left the old one as it was.
         assert!(p.config_file.is_file());
-        assert_eq!(std::fs::read_to_string(&old).expect("antigo"), old_text);
+        assert_eq!(std::fs::read_to_string(&old).expect("old"), old_text);
         let again = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         assert_eq!(again.project_list, vec![project]);
         assert_eq!(again.whisper_lang, "es");
     }
 
-    /// Com a configuração nova já existente, a antiga não é lida nem sobrescreve nada.
+    /// With the new configuration already in place, the old one is neither read nor overwrites anything.
     #[test]
     fn the_new_config_wins_over_the_commanddeck_one() {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         let old = tmp.path().join("CommandDeck").join("config.json");
-        std::fs::create_dir_all(old.parent().expect("pai")).expect("mkdir");
+        std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
         std::fs::write(&old, r#"{"whisperLang": "es"}"#).expect("write");
-        Config { whisper_lang: "en".into(), ..Config::default() }.save(&p.config_file).expect("grava a nova");
+        Config { whisper_lang: "en".into(), ..Config::default() }.save(&p.config_file).expect("writes the new one");
         let cfg = Config::load_from(&[p.config_file.clone(), old.clone()], &p, no_home());
         assert_eq!(cfg.whisper_lang, "en");
-        assert_eq!(std::fs::read_to_string(&old).expect("antigo"), r#"{"whisperLang": "es"}"#);
+        assert_eq!(std::fs::read_to_string(&old).expect("old"), r#"{"whisperLang": "es"}"#);
     }
 
     #[test]
@@ -896,7 +896,7 @@ mod tests {
             assert_eq!(c[1].parent().and_then(Path::file_name).and_then(|n| n.to_str()), Some("CommandDeck"));
             assert_eq!(legacy_config_files().len(), c.len() - 1);
         }
-        // Isolado (`AGENTDECK_HOME`): não lê as configurações do usuário.
+        // Isolated (`AGENTDECK_HOME`): does not read the user's configurations.
         assert_eq!(config_candidates(&paths(tmp.path())), vec![paths(tmp.path()).config_file]);
     }
 
@@ -907,7 +907,7 @@ mod tests {
         let cfg = Config::from_json_over_defaults(r#"{"soundEnabled": false, "extra": 1, "workspace": null}"#, &p);
         assert!(!cfg.sound_enabled);
         assert_eq!(cfg.whisper_lang, "pt");
-        // JSON inválido → padrões.
+        // Invalid JSON → defaults.
         let cfg = Config::from_json_over_defaults("{oops", &p);
         assert!(cfg.project_list.is_empty());
     }
@@ -919,7 +919,7 @@ mod tests {
         let cfg = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         assert!(cfg.project_list.is_empty());
         assert_eq!(cfg.active_project, "");
-        assert_eq!(cfg.workspace, PathBuf::new(), "não existe mais workspace padrão");
+        assert_eq!(cfg.workspace, PathBuf::new(), "there is no default workspace any more");
     }
 
     #[test]
@@ -937,7 +937,7 @@ mod tests {
             "splitCols": [[0.5, 0.5]],
             "soundEnabled": false
         });
-        std::fs::create_dir_all(p.config_file.parent().expect("pai")).expect("mkdir");
+        std::fs::create_dir_all(p.config_file.parent().expect("parent")).expect("mkdir");
         std::fs::write(&p.config_file, json.to_string()).expect("write");
         let cfg = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         let paths_of: Vec<&Path> = cfg.project_list.iter().map(|p| p.path.as_path()).collect();
@@ -949,11 +949,11 @@ mod tests {
         assert_eq!(active.active_tab, 1);
         assert_eq!(active.pane_order, ["claude", "shell"]);
         assert_eq!((active.split_rows.clone(), active.split_cols.clone()), (vec![0.3, 0.7], vec![vec![0.5, 0.5]]));
-        assert!(cfg.project_list[0].open_tabs.is_empty(), "as abas globais vão só para o projeto do workspace");
+        assert!(cfg.project_list[0].open_tabs.is_empty(), "the global tabs go only to the workspace project");
         assert_eq!(cfg.workspace, b);
         assert!(!cfg.sound_enabled);
 
-        // Gravada e lida de novo: igual, e sem migrar outra vez.
+        // Saved and read again: the same, and without migrating again.
         cfg.save(&p.config_file).expect("save");
         let again = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         assert_eq!(again.project_list, cfg.project_list);
@@ -965,12 +965,12 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let p = paths(tmp.path());
         let home = tmp.path().join("home").join("user");
-        // Workspace na pasta pessoal → o workspace do app (regra antiga), que vira um projeto.
+        // Workspace in the home folder → the app workspace (old rule), which becomes a project.
         let mut cfg = Config { workspace: home.join("."), projects: vec![home.join("proj")], ..Config::default() };
         cfg.fix_workspace(&p, &home);
         assert_eq!(cfg.project_list.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), [home.join("proj"), p.default_workspace.clone()]);
         assert_eq!(cfg.workspace, p.default_workspace);
-        // Idempotente.
+        // Idempotent.
         let before = cfg.project_list.clone();
         cfg.fix_workspace(&p, &home);
         assert_eq!(cfg.project_list, before);

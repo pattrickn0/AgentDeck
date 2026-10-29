@@ -1,42 +1,52 @@
-//! Quem segura uma pasta que não sai (a worktree de uma tarefa ao validar ou descartar): os arquivos que ficaram e,
-//! no Windows, os processos que os têm abertos (Restart Manager, o mesmo que o instalador do Windows usa para dizer
-//! "feche estes programas"). Serve só para o log e a mensagem: nada aqui fecha processo.
+//! What holds a folder that will not go away (a task worktree when validating or discarding): the files that were left
+//! and, on Windows, the processes that have them open (Restart Manager, the same thing the Windows installer uses to
+//! say "close these programs"). It only serves the log and the message: nothing here closes a process.
 
 use std::path::{Path, PathBuf};
 
-/// Quantos arquivos que ficaram entram na mensagem (o log leva o mesmo).
+use crate::t;
+
+/// How many leftover files go into the message (the log takes the same).
 const MAX_FILES: usize = 10;
-/// Quantas entradas a busca percorre, no máximo (uma worktree com `target/` pode ter dezenas de milhares).
+/// How many entries the search walks over, at most (a worktree with `target/` can have tens of thousands).
 const MAX_WALK: usize = 20_000;
 
-/// O que ficou de uma pasta que não saiu.
+/// What was left of a folder that did not go away.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct Leftovers {
-    /// Até [`MAX_FILES`] arquivos que ainda existem.
+    /// Up to [`MAX_FILES`] files that still exist.
     pub files: Vec<PathBuf>,
-    /// Quantos arquivos ficaram ao todo (até onde a busca foi).
+    /// How many files were left in total (as far as the search went).
     pub total: usize,
-    /// Os processos que têm algum desses arquivos aberto ("agentdeck.exe (pid 123)"); vazio fora do Windows.
+    /// The processes that have one of those files open ("agentdeck.exe (pid 123)"); empty outside Windows.
     pub holders: Vec<String>,
 }
 
 impl Leftovers {
-    /// Uma frase para o aviso da tarefa: quais arquivos ficaram e quem os segura, ou a pista de que só pastas
-    /// vazias ficaram (um processo com o diretório atual dentro dela, como o terminal do agente).
+    /// A sentence for the task warning: which files were left and who holds them, or the hint that only empty
+    /// folders were left (a process with its current directory inside it, such as the agent's terminal).
     pub fn describe(&self, dir: &Path) -> String {
         if self.total == 0 {
-            return "só pastas vazias ficaram: algum processo está com o diretório atual dentro dela (um terminal, o \
-                    agente, o editor)"
-                .to_owned();
+            return t!("only empty folders were left: some process has its current directory inside it (a terminal, the \
+                       agent, the editor)")
+            .to_owned();
         }
         let shown: Vec<String> = self.files.iter().map(|f| f.strip_prefix(dir).unwrap_or(f).to_string_lossy().replace('\\', "/")).collect();
-        let more = if self.total > shown.len() { format!(" e mais {}", self.total - shown.len()) } else { String::new() };
-        let holders = if self.holders.is_empty() { String::new() } else { format!("; aberto por: {}", self.holders.join(", ")) };
-        format!("{} arquivo(s) ficaram: {}{more}{holders}", self.total, shown.join(", "))
+        let files = shown.join(", ");
+        let more = self.total - shown.len();
+        let mut text = if more > 0 {
+            t!("{count} file(s) were left: {files}, and {more} more", count = self.total, files, more)
+        } else {
+            t!("{count} file(s) were left: {files}", count = self.total, files)
+        };
+        if !self.holders.is_empty() {
+            text.push_str(&t!("; open by: {holders}", holders = self.holders.join(", ")));
+        }
+        text
     }
 }
 
-/// Os arquivos que ainda existem em `dir` e quem os tem aberto.
+/// The files that still exist in `dir` and who has them open.
 pub(crate) fn leftovers(dir: &Path) -> Leftovers {
     let mut files = Vec::new();
     let mut total = 0;
@@ -65,7 +75,7 @@ pub(crate) fn leftovers(dir: &Path) -> Leftovers {
     Leftovers { files, total, holders }
 }
 
-/// Os processos que têm algum de `files` aberto, pelo Restart Manager.
+/// The processes that have any of `files` open, through the Restart Manager.
 #[cfg(windows)]
 fn holders(files: &[PathBuf]) -> Vec<String> {
     use std::os::windows::ffi::OsStrExt;
@@ -81,21 +91,21 @@ fn holders(files: &[PathBuf]) -> Vec<String> {
     let names: Vec<*const u16> = wide.iter().map(|w| w.as_ptr()).collect();
     let mut session = 0u32;
     let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
-    // SAFETY: `key` tem o tamanho que a API pede (CCH_RM_SESSION_KEY + 1); `session` só é usado se ela der certo.
+    // SAFETY: `key` has the size the API asks for (CCH_RM_SESSION_KEY + 1); `session` is only used if it succeeds.
     if unsafe { RmStartSession(&mut session, 0, key.as_mut_ptr()) } != ERROR_SUCCESS {
         return Vec::new();
     }
     let mut out = Vec::new();
-    // SAFETY: `names` aponta para textos terminados em NUL que vivem em `wide` até o fim da função.
+    // SAFETY: `names` points to NUL-terminated texts that live in `wide` until the end of the function.
     let registered = unsafe { RmRegisterResources(session, names.len() as u32, names.as_ptr(), 0, std::ptr::null(), 0, std::ptr::null()) };
     if registered == ERROR_SUCCESS {
         let mut infos: Vec<RM_PROCESS_INFO> = Vec::new();
         let (mut needed, mut count, mut reasons) = (0u32, 0u32, 0u32);
-        // Primeiro pergunta quantos são; depois lê (pode crescer no meio: tenta de novo algumas vezes).
+        // First asks how many they are; then reads (it can grow in between: try again a few times).
         for _ in 0..3 {
             infos.resize_with(needed as usize, Default::default);
             count = infos.len() as u32;
-            // SAFETY: `infos` tem `count` posições; a API escreve no máximo isso e diz em `needed` quantas precisa.
+            // SAFETY: `infos` has `count` slots; the API writes at most that many and says in `needed` how many it needs.
             let r = unsafe { RmGetList(session, &mut needed, &mut count, infos.as_mut_ptr(), &mut reasons) };
             if r == ERROR_SUCCESS {
                 infos.truncate(count as usize);
@@ -112,7 +122,7 @@ fn holders(files: &[PathBuf]) -> Vec<String> {
             out.push(format!("{name} (pid {})", info.Process.dwProcessId));
         }
     }
-    // SAFETY: fecha a sessão aberta acima, uma vez.
+    // SAFETY: closes the session opened above, once.
     unsafe { RmEndSession(session) };
     out.sort();
     out.dedup();
@@ -140,19 +150,19 @@ mod tests {
         let left = leftovers(dir);
         assert_eq!((left.total, left.files.len()), (12, MAX_FILES));
         let text = left.describe(dir);
-        assert!(text.starts_with("12 arquivo(s) ficaram: target/debug/f"), "{text}");
-        assert!(text.contains(" e mais 2"), "{text}");
-        // Só pastas vazias: a pista do diretório atual.
+        assert!(text.starts_with("12 file(s) were left: target/debug/f"), "{text}");
+        assert!(text.contains(", and 2 more"), "{text}");
+        // Only empty folders: the hint about the current directory.
         let empty = tempfile::tempdir().expect("tmp");
         std::fs::create_dir_all(empty.path().join("a/b")).expect("mkdir");
-        assert!(leftovers(empty.path()).describe(empty.path()).starts_with("só pastas vazias ficaram"));
+        assert!(leftovers(empty.path()).describe(empty.path()).starts_with("only empty folders were left"));
     }
 
     #[cfg(windows)]
     #[test]
     fn a_file_held_open_names_this_process() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let file = tmp.path().join("preso.txt");
+        let file = tmp.path().join("held.txt");
         std::fs::write(&file, b"x").expect("write");
         let _open = std::fs::File::open(&file).expect("open");
         let held = holders(&[file]);
