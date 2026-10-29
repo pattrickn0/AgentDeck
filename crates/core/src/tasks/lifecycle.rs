@@ -10,7 +10,7 @@ use super::{
     Task, TaskError, TaskSpec, TaskStatus, HOLT_DIR, MAX_OUTSIDE, MAX_TEXT,
 };
 use crate::capability;
-use crate::events::{CoreEvent, Delivery, FeedEntry};
+use crate::events::{CoreEvent, Delivery, FeedEntry, Tone};
 use crate::git::{run, Repo, COMMIT_TIMEOUT, WRITE_TIMEOUT};
 use crate::instances::Ident;
 use crate::t;
@@ -264,6 +264,7 @@ impl Core {
         self.deliver_to_task(project, &task, ident, prompt, boot, t!("brief delivered to the agent"));
         self.feed(
             FeedEntry::system(t!("Task {id} started: {title} ({instance})", id = &task.id, title = &task.title, instance = &task.instance))
+                .about_task(&task.id)
                 .in_project(project),
         );
         Ok(task)
@@ -551,7 +552,11 @@ impl Core {
             t.clone()
         });
         let task = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;
-        self.feed(FeedEntry::system(t!("Task {id} ready for review: {title}", id = &task.id, title = &task.title)).in_project(project));
+        self.feed(
+            FeedEntry::system(t!("Task {id} ready for review: {title}", id = &task.id, title = &task.title))
+                .about_task(&task.id)
+                .in_project(project),
+        );
         if task.merge_approved {
             return Ok(self.auto_merge_locked(project, task));
         }
@@ -580,6 +585,8 @@ impl Core {
                         id = &task.id,
                         reason = &stop.reason
                     ))
+                    .tone(Tone::Warning)
+                    .about_task(&task.id)
                     .in_project(project),
                 );
                 self.update_task(project, &task.id, |t| {

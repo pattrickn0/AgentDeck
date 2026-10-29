@@ -20,6 +20,7 @@ mod github_ui;
 mod highlight;
 mod icons;
 mod logfile;
+mod notices;
 mod smoke;
 mod split;
 #[cfg(test)]

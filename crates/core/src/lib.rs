@@ -59,7 +59,7 @@ use parking_lot::{Mutex, RwLock};
 pub use agents::{AgentInfo, SpawnSpec};
 pub use config::{Config, DictationChoice, Organization, ProjectCfg};
 pub use env::{env_var, env_var_os};
-pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind};
+pub use events::{CoreEvent, Delivery, DownloadProgress, DownloadState, FeedEntry, FeedKind, Tone};
 pub use exchange::PendingInfo;
 pub use headless::HeadlessOptions;
 pub use instances::Ident;
@@ -349,7 +349,7 @@ impl Core {
         }
     }
 
-    /// Shortcut to emit an entry in the "integrated conversation".
+    /// Emits a feed entry: agent messages (recorded in the task timeline) and system notices (the notifications).
     pub fn feed(&self, entry: FeedEntry) {
         self.record_task_message(&entry);
         self.emit(CoreEvent::Feed(entry));
@@ -588,7 +588,7 @@ impl Core {
     }
 
     /// The answer of question `request` did not reach whoever asked (`why`: the tab closed, the connection was
-    /// abandoned…). It stays in `ask-agent --inbox`; the project's integrated conversation warns.
+    /// abandoned…). It stays in `ask-agent --inbox`; a notification warns.
     pub fn answer_lost(&self, project: &str, request: u64, why: &str) {
         let Some((asker, entry)) = self.inner.inbox.find(request) else { return };
         let asker = instances::unscoped(&asker).1;

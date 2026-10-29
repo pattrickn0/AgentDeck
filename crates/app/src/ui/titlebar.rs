@@ -1,6 +1,6 @@
 //! The app's own title bar (the window has no system decoration and the bar has no background): ☰ menu,
 //! sidebar button, logo, the Agents | Documents switch (only with the sidebar collapsed),
-//! project and branch, subscription usage and minimize/maximize/close.
+//! project and branch, subscription usage, the notifications bell and minimize/maximize/close.
 
 use egui::{Align2, CursorIcon, Id, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand};
 
@@ -14,6 +14,8 @@ pub struct Anchors {
     pub settings_anchor: Rect,
     /// Anchor of the new-agent menu when the sidebar's row is not in view (Ctrl+T with the sidebar collapsed).
     pub fallback_anchor: Rect,
+    /// The notifications bell (its popover opens under it).
+    pub notices_anchor: Rect,
 }
 
 /// Width of each window button (minimize, maximize, close).
@@ -127,8 +129,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         deck.close_requested = true;
     }
 
-    // ---------- Subscription usage (left of the window buttons) ----------
-    let usage = Rect::from_min_max(Pos2::new(x + 12.0, rect.min.y), Pos2::new(min_btn.min.x - 6.0, rect.max.y));
+    // ---------- Notifications (left of the window buttons) ----------
+    let bell = Rect::from_min_size(Pos2::new(min_btn.min.x - 6.0 - ICON_BTN.x, cy - ICON_BTN.y / 2.0), ICON_BTN);
+    super::notices::bell(deck, ui, &painter, bell);
+
+    // ---------- Subscription usage (left of the bell) ----------
+    let usage = Rect::from_min_max(Pos2::new(x + 12.0, rect.min.y), Pos2::new(bell.min.x - 6.0, rect.max.y));
     if usage.width() > 0.0 {
         super::usage::draw(deck, ui, usage);
     }
@@ -137,7 +143,11 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
         resize_edges(&ctx);
     }
 
-    Anchors { settings_anchor: menu, fallback_anchor: Rect::from_min_size(Pos2::new(toggle.max.x, rect.max.y), Vec2::new(34.0, 0.0)) }
+    Anchors {
+        settings_anchor: menu,
+        fallback_anchor: Rect::from_min_size(Pos2::new(toggle.max.x, rect.max.y), Vec2::new(34.0, 0.0)),
+        notices_anchor: bell,
+    }
 }
 
 /// "Side panel" icon: a rounded window (12×10) with the left column, filled as far as the

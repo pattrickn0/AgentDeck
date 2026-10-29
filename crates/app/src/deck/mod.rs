@@ -113,7 +113,6 @@ struct Queued {
 pub enum RightView {
     /// Tasks desk (see `tasks_ui.rs`).
     Tasks,
-    Chat,
     /// The workspace git repository (see `git_ui.rs`).
     Git,
     /// GitHub PRs, issues and Actions (see `github_ui.rs`).
@@ -249,8 +248,6 @@ struct ProjectState {
     active_uid: Option<u64>,
     group_order: Vec<String>,
     split_ratios: split::Ratios,
-    /// Integrated conversation (the active project's lives in `Deck`).
-    feed: Vec<FeedItem>,
 }
 
 /// What the split view shows on this frame.
@@ -261,16 +258,6 @@ pub struct PanePlan {
     /// The visible tab (the most recently activated one).
     pub shown: usize,
     pub groups: Vec<String>,
-}
-
-pub struct FeedItem {
-    pub id: u64,
-    pub kind: FeedKind,
-    pub who: Option<String>,
-    pub to: Option<String>,
-    pub text: String,
-    pub time: String,
-    pub color: Color32,
 }
 
 /// Flattened row of the file tree.
@@ -371,17 +358,12 @@ pub struct Deck {
     projects: HashMap<String, ProjectState>,
     pub tree: TreeState,
 
-    // Integrated conversation (read only)
-    pub feed: Vec<FeedItem>,
-    thinking: HashMap<String, u64>,
-    next_feed_id: u64,
-    pub unseen: u32,
+    /// System notices: toasts and the bell's history.
+    pub notices: crate::notices::Notices,
     /// Download in progress (bar in the header) and, for an error, when it disappears.
     pub download: Option<(DownloadProgress, Option<Instant>)>,
     /// DEBUG ONLY: keeps the fake state of `HOLT_DEBUG_UI=download*`, ignoring the real download.
     pub debug_hold_download: bool,
-    pub feed_scroll_to_bottom: bool,
-    pub feed_near_bottom: bool,
 
     // Voice dictation (pinned to the `uid` of the tab where it started)
     recorder: Option<audio::Recorder>,
@@ -472,16 +454,6 @@ const IDLE_CHIME: Duration = Duration::from_millis(1200);
 /// An Enter (or submit) that produced no output at all (empty prompt, menu): the tab is freed after
 /// this time, silently. Without it the tab stayed "working" forever and held the bridge queue.
 const NO_OUTPUT_IDLE: Duration = Duration::from_secs(8);
-/// Messages kept in each project's Integrated conversation (the oldest leave): the list is
-/// redrawn every frame and, with no limit, a long session made the interface slow.
-const FEED_MAX: usize = 1000;
-
-fn cap_feed(feed: &mut Vec<FeedItem>) {
-    if feed.len() > FEED_MAX {
-        feed.drain(..feed.len() - FEED_MAX);
-    }
-}
-
 /// Closes the microphone on a thread (waiting for the capture to finish is not the interface thread's job).
 fn discard_recorder(rec: audio::Recorder) {
     let _ = std::thread::Builder::new().name("mic-close".into()).spawn(move || rec.cancel());
@@ -577,14 +549,9 @@ impl Deck {
             docs: crate::docs::Docs::default(),
             center_seen: crate::docs::CenterView::Agents,
             tree: TreeState { expanded: HashSet::from([String::new()]), ..Default::default() },
-            feed: Vec::new(),
-            thinking: HashMap::new(),
-            next_feed_id: 1,
-            unseen: 0,
+            notices: crate::notices::Notices::default(),
             download: None,
             debug_hold_download: false,
-            feed_scroll_to_bottom: false,
-            feed_near_bottom: true,
             recorder: None,
             recording_since: None,
             mic_phase: MicPhase::Idle,
@@ -624,9 +591,6 @@ impl Deck {
         deck.refresh_engine();
         // The bridge now types the agents' questions into the tabs (instead of running the agent separately).
         deck.core.enable_tab_delivery();
-        if holt_core::env_var("DEBUG_FEED").is_some_and(|v| v == "1") {
-            deck.debug_feed();
-        }
         // The branch chip in the top bar shows right away, and so does the number of tasks under review on the tab icon.
         deck.git_refresh();
         deck.tasks_refresh();
@@ -681,9 +645,9 @@ impl Deck {
 // Each section in a file (children of this module: they see `Deck`'s private fields).
 mod attachments;
 mod dictation;
-mod feed;
 mod frame;
 mod keyboard;
+mod notify;
 mod projects;
 mod sidebar;
 mod tabs;

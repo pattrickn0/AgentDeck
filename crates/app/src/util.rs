@@ -62,16 +62,6 @@ pub fn chip_label(reference: &str) -> String {
     }
 }
 
-/// Local time as `toLocaleTimeString('pt-BR')` (HH:MM:SS).
-pub fn time_pt_br(epoch_ms: u64) -> String {
-    use chrono::TimeZone;
-    let ms = if epoch_ms == 0 { chrono::Utc::now().timestamp_millis() } else { epoch_ms as i64 };
-    match chrono::Local.timestamp_millis_opt(ms) {
-        chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => t.format("%H:%M:%S").to_string(),
-        chrono::LocalResult::None => String::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,12 +103,5 @@ mod tests {
         assert_eq!(chip_label("nohyphen"), "nohyphen");
         assert_eq!(chip_label("C:/Users/x/AB-1.png"), "AB-1.png");
         assert_eq!(chip_label(r"C:\data\attachments\1a2b-photo.png"), "photo.png");
-    }
-
-    #[test]
-    fn time_format_shape() {
-        let t = time_pt_br(1_700_000_000_000);
-        assert_eq!(t.len(), 8);
-        assert_eq!(t.as_bytes()[2], b':');
     }
 }

@@ -528,7 +528,7 @@ fn mail_json(m: &crate::mail::Mail) -> Value {
 }
 
 /// `GET /mail/<n>`: the full text of a message, for its addressee only (the token says who is asking), which marks it
-/// as read. 403 for anyone else (another agent, or the master token: the user reads it in the Conversation tab).
+/// as read. 403 for anyone else (another agent, or the master token).
 fn read_mail(core: &Core, auth: &Auth, number: &str) -> (u16, Value) {
     let Auth::Agent(c) = auth else {
         return (403, json!({ "error": "only the addressee can read a mail" }));
@@ -659,7 +659,7 @@ fn tab_prompt(from: &str, request: u64, message: &str) -> String {
         "[Message from the agent \"{from}\" received by Holt]\n\n{message}\n\n\
 Answer by running in the shell: ask-agent --reply {request} \"your answer\"\n\
 (the answer only reaches \"{from}\" through that command; text written only here is not delivered. For long answers or ones with accents, \
-write them to a file and use: ask-agent --reply {request} --file <file>). The user follows the conversation in the Conversation tab."
+write them to a file and use: ask-agent --reply {request} --file <file>). Holt keeps the history of the conversation."
     )
 }
 
@@ -696,7 +696,7 @@ fn deliver_late(core: &Core, project: &str, asker: Ident, target: &str, request:
         Reply::Answer(text) => mail_or_text(core, project, (target, &asker.id()), (MailKind::Answer, request), &text, || {
             format!(
                 "[Answer from the agent \"{target}\" to your question #{request}, received by Holt]\n\n{}\n\n\
-Continue the task based on this answer. The user follows the conversation in the Conversation tab.",
+Continue the task based on this answer. Holt keeps the history of the conversation.",
                 terminal_text(&text)
             )
         }),
@@ -1026,7 +1026,7 @@ fn ask(core: &Core, caller: &Caller, msg: &Value, slot: Active) -> (u16, Value) 
 
     caller.feed(core, FeedKind::Ask, from, &to, message.clone());
     let prompt = format!(
-        "[Message from the agent \"{from}\" received by Holt]\n\n{message}\n\nAnswer the agent \"{from}\" directly. The user follows the conversation in the Conversation tab in real time."
+        "[Message from the agent \"{from}\" received by Holt]\n\n{message}\n\nAnswer the agent \"{from}\" directly. Holt keeps the history of the conversation."
     );
     let session_key = format!("{}->{}", caller.key(from), caller.key(&to));
     let result = {

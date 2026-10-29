@@ -117,25 +117,17 @@ impl Deck {
             state.active_uid = uid;
             state.group_order = std::mem::take(&mut self.group_order);
             state.split_ratios = std::mem::take(&mut self.split_ratios);
-            state.feed = std::mem::take(&mut self.feed);
         }
         self.active = None;
-        self.unseen = 0;
-        self.feed_scroll_to_bottom = true;
         match self.projects.get_mut(id) {
             Some(state) if state.loaded => {
                 self.group_order = std::mem::take(&mut state.group_order);
                 self.split_ratios = std::mem::take(&mut state.split_ratios);
-                self.feed = std::mem::take(&mut state.feed);
                 let uid = state.active_uid;
                 self.sync_groups();
                 self.show_project_tab(uid);
             }
-            Some(state) => {
-                self.feed = std::mem::take(&mut state.feed);
-                self.load_project(id);
-            }
-            None => self.load_project(id),
+            _ => self.load_project(id),
         }
         self.after_project_change();
     }

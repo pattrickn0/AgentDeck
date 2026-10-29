@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use egui::Color32;
 use holt_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_SHELL};
-use holt_core::{t, AgentInfo, Ident};
+use holt_core::{t, AgentInfo};
 
 use crate::theme;
 
@@ -112,27 +112,6 @@ impl Agents {
         }
     }
 
-    /// `whoColor(name)`; an instance (`claude@dev`) uses the model's color.
-    pub fn who_color(&self, name: Option<&str>) -> Color32 {
-        // "você" is the user's name in chat history saved before the English rename.
-        if name == Some("you") || name == Some("você") {
-            return theme::pal().user;
-        }
-        name.and_then(|n| self.colors.get(n).copied().or_else(|| Ident::parse(n).and_then(|i| self.colors.get(&i.kind).copied())))
-            .unwrap_or(theme::pal().text_2)
-    }
-
-    /// `whoName(name)`; an instance becomes `Claude · Dev · Ana`.
-    pub fn who_name(&self, name: &str) -> String {
-        if let Some(n) = self.names.get(name) {
-            return n.clone();
-        }
-        match Ident::parse(name) {
-            Some(i) if i.role.is_some() || i.name.is_some() => i.label(&self.who_name(&i.kind)),
-            _ => name.to_owned(),
-        }
-    }
-
     /// Restoration only opens tabs of known kinds (`if (COLORS[kind])`).
     pub fn knows(&self, kind: &str) -> bool {
         self.colors.contains_key(kind)
@@ -169,7 +148,5 @@ mod tests {
         assert_eq!(a.name("opencode"), "OpenCode");
         assert_eq!(a.name("unknown"), "unknown");
         assert_eq!(a.fallback_kind(), "claude");
-        assert_eq!(a.who_color(Some("you")), theme::pal().user);
-        assert_eq!(a.who_color(Some("unknown")), theme::pal().text_2);
     }
 }

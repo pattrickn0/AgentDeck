@@ -27,8 +27,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // Whisper
     ("unavailable", "indisponível"),
     (
-        "local transcription is not ready yet (see the integrated chat)",
-        "a transcrição local ainda não está pronta (veja a Conversa integrada)",
+        "local transcription is not ready yet (see the notifications)",
+        "a transcrição local ainda não está pronta (veja as notificações)",
     ),
     ("no speech detected", "nenhuma fala detectada"),
     (

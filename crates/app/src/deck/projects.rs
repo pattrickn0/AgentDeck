@@ -107,6 +107,7 @@ impl Deck {
         }
         self.projects.remove(id);
         self.docs.drop_project(id);
+        self.notices.forget_project(id);
         let was_active = id == self.active_project;
         self.core.remove_project(id);
         if was_active {
@@ -114,7 +115,6 @@ impl Deck {
             self.active = None;
             self.group_order.clear();
             self.split_ratios = split::Ratios::default();
-            self.feed.clear();
             let next = self.core.active_project_id();
             if next.is_empty() {
                 self.after_project_change();

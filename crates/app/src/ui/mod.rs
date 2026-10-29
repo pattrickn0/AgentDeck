@@ -10,6 +10,7 @@ mod git;
 mod git_views;
 mod github;
 mod menus;
+mod notices;
 mod overlay;
 mod panes;
 mod projects;
@@ -122,6 +123,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui) {
     docs::unsaved_modal(deck, &ctx);
     menus::dictation_modal(deck, &ctx);
     shortcuts::shortcuts_modal(deck, &ctx);
+    notices::draw(deck, &ctx, menus.notices_anchor, Pos2::new(panel.max.x - 8.0, panel.max.y - notices::TOAST_BOTTOM));
     overlay::drop_overlay(deck, &ctx, window);
 
     // An egui text field (e.g. the task form or the commit) has keyboard focus → the terminal does not.
