@@ -36,9 +36,10 @@ crates/
 │   ├── events.rs     CoreEvent: what the backend reports to the UI
 │   ├── agents.rs     agent list, where to find each CLI, command for each tab, bridge instructions
 │   ├── trust.rs      folder trust per CLI before opening tab (Claude, Codex, Antigravity)
-│   ├── bridge.rs     local HTTP server used by ask-agent (/agents, /models, /team, /ask, /reply, /signal, /usage, /learn, /outline, /inbox, /tasks, /activate)
+│   ├── bridge.rs     local HTTP server used by ask-agent (/agents, /models, /team, /ask, /reply, /signal, /usage, /learn, /outline, /inbox, /mail, /tasks, /activate)
 │   ├── exchange.rs   inter-tab questions awaiting reply (cycles, depth, reply by number)
 │   ├── inbox.rs      inbox of replies per instance (`ask-agent --inbox`)
+│   ├── mail.rs       long messages saved in `data/mail/` + one-line notice typed (`ask-agent --read`)
 │   ├── instances.rs  instance names (model@role@name) and destination resolution
 │   ├── team.rs       team: who reports to whom (pure functions)
 │   ├── activity.rs   last activity of each tab (queried by tab delivery)
@@ -101,7 +102,7 @@ crates/
 │       ├── tasks.rs (Tasks tab), git.rs + git_views.rs (Git tab), github.rs (GitHub tab)
 │       └── menus.rs (new tab, settings), shortcuts.rs (shortcuts), overlay.rs (drag-and-drop overlay), empty_state.rs (no open agent)
 └── cli/    (holt-cli)    ask-agent
-    ├── src/bin/ask-agent.rs     the agent command (`parse_task`, `learn_command`, `outline_command`, `models_command`, `inbox_command`, with tests)
+    ├── src/bin/ask-agent.rs     the agent command (`parse_task`, `learn_command`, `outline_command`, `models_command`, `inbox_command`, `read_command`, with tests)
     └── tests/ask_agent.rs, tests/tasks.rs   real `ask-agent` against a real bridge
 ```
 

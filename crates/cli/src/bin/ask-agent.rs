@@ -13,7 +13,8 @@
 //!      ask-agent --usage                      (Claude Code statusline: plan usage)
 //!      ask-agent --learn [<file>...]   (what the project has already learned, in general or about those files)
 //!      ask-agent --outline <file>...   (each file's signatures with the line, without the bodies)
-//!      ask-agent --inbox [--all]          (answers to your questions not delivered yet; --all: the last 20)
+//!      ask-agent --inbox [--all]          (answers to your questions and mail not read yet; --all: the last 20)
+//!      ask-agent --read <n>               (the full text of mail #n, a long message that was not typed into your terminal)
 //!      ask-agent --task new "title" [--agent <model>] [--model <m>] [--effort low|medium|high] [--level simple|medium|complex] [--base <branch>] [--start] -|"request"|--file <file> [--scope <path>...]
 //!      ask-agent --task list | show <id> | start <id> | merge <id> | validate <id> | discard <id>
 //!      ask-agent --task done <id> -|"report"|--file <file>   (only the agent of the task itself)
@@ -45,7 +46,7 @@ use holt_core::{AgentUsage, Ident};
 use serde_json::{json, Value};
 
 const USAGE: &str =
-    "Usage: ask-agent [--new] [--model <model>] <agent[@role[@name]]> \"message\"   |   ask-agent --reply <n> \"answer\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agent]   |   ask-agent --boss \"message\"   |   ask-agent --learn [<file>...]   |   ask-agent --outline <file>...   |   ask-agent --inbox [--all]   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tasks: ask-agent --task; a task's effort: --task new \"title\" --effort low|medium|high; the size of the work, which decides which models can handle it: --level simple|medium|complex (default medium); the write scope, with a queue: --task new \"title\" \"request\" --scope <path>...)";
+    "Usage: ask-agent [--new] [--model <model>] <agent[@role[@name]]> \"message\"   |   ask-agent --reply <n> \"answer\"   |   ask-agent --list   |   ask-agent --team   |   ask-agent --models [agent]   |   ask-agent --boss \"message\"   |   ask-agent --learn [<file>...]   |   ask-agent --outline <file>...   |   ask-agent --inbox [--all]   |   ask-agent --read <n>   |   ask-agent --task new|list|show|start|merge|validate|reject|discard|done|return ... (tasks: ask-agent --task; a task's effort: --task new \"title\" --effort low|medium|high; the size of the work, which decides which models can handle it: --level simple|medium|complex (default medium); the write scope, with a queue: --task new \"title\" \"request\" --scope <path>...)";
 
 /// Seconds `ask-agent` waits for the answer before leaving it to be typed later.
 const DEFAULT_WAIT: u64 = 90;
@@ -151,6 +152,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "--inbox") {
         return inbox_command(&bridge, &args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "--read") {
+        return read_command(&bridge, &args[1..]);
     }
     if args.first().is_some_and(|a| a == "--models") {
         return models_command(&bridge, args.get(1).map(String::as_str));
@@ -502,7 +506,7 @@ fn outline_command(bridge: &Bridge, paths: &[String]) -> ExitCode {
 // ---------- Inbox (`--inbox`) ----------
 
 const INBOX_USAGE: &str =
-    "Usage: ask-agent --inbox [--all]   (the answers to your questions that were not delivered yet; --all: the last 20)";
+    "Usage: ask-agent --inbox [--all]   (the answers to your questions that were not delivered yet and the mail you have not read; --all: the last 20)";
 
 /// How long ago `ts_ms` was (epoch in ms), in short text.
 fn age_text(ts_ms: u64, now_ms: u64) -> String {
@@ -527,8 +531,17 @@ fn inbox_entry_text(entry: &Value, now_ms: u64) -> String {
     format!("[{kind} from the agent \"{}\" to your question #{request}, {age}, {state}]\n\n{}", text("from"), text("text"))
 }
 
+/// A mail in the `--inbox` listing, on one line.
+fn mail_line(mail: &Value, now_ms: u64) -> String {
+    let n = mail.get("mail").and_then(Value::as_u64).unwrap_or(0);
+    let text = |k: &str| mail.get(k).and_then(Value::as_str).unwrap_or("");
+    let age = age_text(mail.get("ts").and_then(Value::as_u64).unwrap_or(0), now_ms);
+    let state = if mail.get("read").and_then(Value::as_bool).unwrap_or(false) { "read" } else { "not read" };
+    format!("[Mail #{n} from \"{}\", {age}, {state}] \"{}\" — read with: ask-agent --read {n}", text("from"), text("preview"))
+}
+
 /// `ask-agent --inbox [--all]`: prints the answers to this agent's questions that have not reached it yet
-/// (or the last 20, with `--all`). The printed ones become delivered.
+/// (or the last 20, with `--all`), then the mail it has not read. The printed answers become delivered.
 fn inbox_command(bridge: &Bridge, flags: &[String]) -> ExitCode {
     if flags.iter().any(|f| f == "-h" || f == "--help") {
         println!("{INBOX_USAGE}");
@@ -541,13 +554,73 @@ fn inbox_command(bridge: &Bridge, flags: &[String]) -> ExitCode {
     let route = if all { "/inbox?all=1" } else { "/inbox" };
     match bridge.request("GET", route, None, Some(Duration::from_secs(15))) {
         Ok((200, json)) => {
-            let answers = json.get("answers").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-            if answers.is_empty() {
-                println!("{}", if all { "The inbox is empty." } else { "No pending answer." });
+            let list = |k: &str| json.get(k).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+            let (answers, mail) = (list("answers"), list("mail"));
+            if answers.is_empty() && mail.is_empty() {
+                println!("{}", if all { "The inbox is empty." } else { "No pending answer or mail." });
                 return ExitCode::SUCCESS;
             }
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-            println!("{}", answers.iter().map(|e| inbox_entry_text(e, now)).collect::<Vec<_>>().join("\n\n---\n\n"));
+            let mut parts: Vec<String> = answers.iter().map(|e| inbox_entry_text(e, now)).collect();
+            if !mail.is_empty() {
+                parts.push(mail.iter().map(|m| mail_line(m, now)).collect::<Vec<_>>().join("\n"));
+            }
+            println!("{}", parts.join("\n\n---\n\n"));
+            ExitCode::SUCCESS
+        }
+        Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1),
+        Err(e) => fail(e, 1),
+    }
+}
+
+// ---------- Mail (`--read`) ----------
+
+const READ_USAGE: &str = "Usage: ask-agent --read <n>   (the full text of mail #n: a long message, or the late answer to a question, that Holt did not type into your terminal; only its addressee can read it)";
+
+/// Mail `mail` as the reader sees it: the header, the text and what to do next.
+fn mail_text(mail: &Value, now_ms: u64) -> String {
+    let text = |k: &str| mail.get(k).and_then(Value::as_str).unwrap_or("");
+    let n = mail.get("mail").and_then(Value::as_u64).unwrap_or(0);
+    let request = mail.get("request").and_then(Value::as_u64).unwrap_or(0);
+    let from = text("from");
+    let age = age_text(mail.get("ts").and_then(Value::as_u64).unwrap_or(0), now_ms);
+    let next = if text("kind") == "answer" {
+        "Continue the task based on this answer.".to_owned()
+    } else if mail.get("answerable").and_then(Value::as_bool).unwrap_or(false) {
+        format!(
+            "Answer by running in the shell: ask-agent --reply {request} \"your answer\" (the answer only reaches \"{from}\" through that command; \
+for long answers or ones with accents, write them to a file and use: ask-agent --reply {request} --file <file>)."
+        )
+    } else {
+        format!(
+            "Question #{request} is no longer waiting for an answer (it was answered, cancelled, expired or Holt was restarted). If a reply \
+is still useful, send it as a new message: ask-agent {from} \"message\"."
+        )
+    };
+    let header = if text("kind") == "answer" {
+        format!("[Mail #{n}: answer from the agent \"{from}\" to your question #{request}, {age}]")
+    } else {
+        format!("[Mail #{n} from \"{from}\", {age}]")
+    };
+    format!("{header}\n\n{}\n\n{next}", text("text"))
+}
+
+/// `ask-agent --read <n>`: prints mail #n (and marks it as read).
+fn read_command(bridge: &Bridge, args: &[String]) -> ExitCode {
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("{READ_USAGE}");
+        return ExitCode::SUCCESS;
+    }
+    let [number] = args else {
+        return fail(format!("--read needs the mail number.\n{READ_USAGE}"), 2);
+    };
+    let Ok(n) = number.trim_start_matches('#').parse::<u64>() else {
+        return fail(format!("\"{number}\" is not a mail number.\n{READ_USAGE}"), 2);
+    };
+    match bridge.request("GET", &format!("/mail/{n}"), None, Some(Duration::from_secs(30))) {
+        Ok((200, json)) => {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+            println!("{}", mail_text(&json, now));
             ExitCode::SUCCESS
         }
         Ok((_, json)) => fail(json.get("error").and_then(Value::as_str).unwrap_or("unknown error"), 1),
@@ -1153,6 +1226,23 @@ mod tests {
         assert_eq!(signal_body("session", Some(r#"{"session_id":"x1"}"#), no_stdin)["session"], "x1");
         // Nothing usable: an empty id (the bridge refuses it).
         assert_eq!(signal_body("session", None, || "not json".to_owned())["session"], "");
+    }
+
+    #[test]
+    fn mail_reads_with_how_to_go_on() {
+        let question = json!({"mail": 12, "from": "claude@dev", "kind": "question", "request": 7, "ts": 0, "text": "line 1\nline 2", "answerable": true});
+        let text = mail_text(&question, 120_000);
+        assert!(text.starts_with("[Mail #12 from \"claude@dev\", 2 min ago]\n\nline 1\nline 2\n\n"), "{text}");
+        assert!(text.contains("ask-agent --reply 7 \"your answer\"") && text.contains("--file <file>"), "{text}");
+        let closed = json!({"mail": 12, "from": "claude@dev", "kind": "question", "request": 7, "ts": 0, "text": "x", "answerable": false});
+        let text = mail_text(&closed, 0);
+        assert!(text.contains("no longer waiting") && text.contains("ask-agent claude@dev \"message\""), "{text}");
+        let answer = json!({"mail": 3, "from": "codex", "kind": "answer", "request": 2, "ts": 0, "text": "done", "answerable": false});
+        let text = mail_text(&answer, 0);
+        assert!(text.starts_with("[Mail #3: answer from the agent \"codex\" to your question #2, just now]\n\ndone\n\n"), "{text}");
+        assert!(text.ends_with("Continue the task based on this answer."), "{text}");
+        let line = mail_line(&json!({"mail": 4, "from": "a", "preview": "hello…", "ts": 0, "read": false}), 3_600_000);
+        assert_eq!(line, "[Mail #4 from \"a\", 1 h ago, not read] \"hello…\" — read with: ask-agent --read 4");
     }
 
     #[test]

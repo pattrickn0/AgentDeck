@@ -30,6 +30,7 @@ pub mod i18n;
 pub mod inbox;
 pub mod instances;
 pub mod learnings;
+pub mod mail;
 pub mod models;
 pub mod outline;
 pub mod paths;
@@ -128,6 +129,8 @@ pub(crate) struct CoreInner {
     pub exchange: exchange::Exchange,
     /// Answers received by each instance that asked (`ask-agent --inbox`).
     pub inbox: inbox::Inbox,
+    /// Long messages to the tabs, saved on disk (`ask-agent --read`).
+    pub mail: mail::MailStore,
     /// Last activity of each tab (scoped key); a question's deadline counts from it.
     pub activity: activity::Activity,
     /// Projects other than the active one whose AGENTS.md was already written in this session (in their first tab).
@@ -293,6 +296,7 @@ impl Core {
             instances: Mutex::new(HashMap::new()),
             exchange: exchange::Exchange::default(),
             inbox: inbox::Inbox::default(),
+            mail: mail::MailStore::new(paths.data_dir.join("mail")),
             activity: activity::Activity::default(),
             context_written: Mutex::new(HashSet::new()),
             tab_delivery: std::sync::atomic::AtomicBool::new(false),
@@ -548,6 +552,7 @@ impl Core {
         }
         self.inner.exchange.rename(&instances::scoped(project, old_id), &instances::scoped(project, &new_id));
         self.inner.inbox.rename(&instances::scoped(project, old_id), &instances::scoped(project, &new_id));
+        self.inner.mail.rename(project, old_id, &new_id);
         self.inner.activity.forget(&instances::scoped(project, old_id));
         self.update_project(project, |p| {
             team::rename(&mut p.tab_parents, old_id, &new_id);

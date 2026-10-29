@@ -167,6 +167,7 @@ ask-agent codex "Review parse_config in src/config.rs"
 ask-agent --model sonnet claude@dev "Implement item 3"   # opens claude@dev on Sonnet if needed
 ask-agent --reply 7 "Done: src/ is split"                # answer question #7
 ask-agent --boss "Review finished"                       # report up
+ask-agent --read 12                                      # long messages arrive as "[mail #12 …]": read the full text
 
 # Look around
 ask-agent --list        # open agents and instances

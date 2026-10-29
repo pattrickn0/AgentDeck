@@ -104,6 +104,8 @@ struct Queued {
     prompt: String,
     /// It is a late answer to a question of this tab, not a new question.
     answer: bool,
+    /// `prompt` is the notice of this mail (see `holt_core::mail`).
+    mail: Option<u64>,
 }
 
 /// What the right bar shows.

@@ -285,6 +285,9 @@ impl Deck {
         let metrics = self.metrics.clone();
         let dragging = ctx.is_some_and(|ctx| ctx.input(|i| i.pointer.primary_down()));
         let mut exits = Vec::new();
+        // Tabs whose turn ended because the end notice never came (see `idle_deadline`): the hook that did come
+        // already told the core (`POST /signal`), which reminds about unread mail.
+        let mut released = Vec::new();
         let active = self.active;
         // While reading documents no tab is in view: the end of a turn also counts as "unseen".
         let reading = self.docs.view == CenterView::Docs;
@@ -346,6 +349,7 @@ impl Deck {
                     tab.idle_deadline = None;
                     if tab.busy {
                         tab.busy = false;
+                        released.push((tab.project.clone(), tab.ident.id()));
                         if std::mem::take(&mut tab.busy_output) {
                             if active != Some(i) || reading {
                                 tab.done = true;
@@ -379,6 +383,9 @@ impl Deck {
                 }
             }
         }
+        for (project, id) in released {
+            self.core.mail_turn_ended(&project, &id);
+        }
         for (i, code) in exits {
             if self.reopen_without_resume(i, code) {
                 continue;
@@ -388,9 +395,14 @@ impl Deck {
             tab.busy = false;
             tab.done = false;
             for q in tab.queue.drain() {
+                if let Some(mail) = q.mail {
+                    self.core.mail_dropped(&tab.project, mail);
+                }
                 if q.answer {
-                    log::warn!("late answer #{} to \"{}\" lost: the tab ended before receiving it", q.request, tab.ident.id());
-                    self.core.answer_lost(&tab.project, q.request, "the tab ended before receiving it");
+                    if q.request != 0 {
+                        log::warn!("late answer #{} to \"{}\" lost: the tab ended before receiving it", q.request, tab.ident.id());
+                        self.core.answer_lost(&tab.project, q.request, "the tab ended before receiving it");
+                    }
                 } else if q.request != 0 {
                     self.core.fail_delivery(q.request, "the tab ended before receiving the message");
                 }
@@ -406,9 +418,14 @@ impl Deck {
                 Gate::Fail => {
                     let tab = &mut self.tabs[i];
                     for q in tab.queue.drain() {
+                        if let Some(mail) = q.mail {
+                            self.core.mail_dropped(&tab.project, mail);
+                        }
                         if q.answer {
-                            log::warn!("late answer #{} lost: the tab is not running", q.request);
-                            self.core.answer_lost(&tab.project, q.request, "the tab was not running");
+                            if q.request != 0 {
+                                log::warn!("late answer #{} lost: the tab is not running", q.request);
+                                self.core.answer_lost(&tab.project, q.request, "the tab was not running");
+                            }
                         } else if q.request != 0 {
                             self.core.fail_delivery(q.request, "the tab is not running");
                         }
@@ -420,6 +437,12 @@ impl Deck {
                         // work for nothing nor ask for a `--reply` that would return 404.
                         if q.request != 0 && !q.answer && !self.core.question_pending(q.request) {
                             log::info!("question #{} dropped before being typed: no answer is expected any more", q.request);
+                            if let Some(mail) = q.mail {
+                                self.core.mail_dropped(&self.tabs[i].project, mail);
+                            }
+                        } else if q.mail.is_some_and(|m| !self.core.mail_unread(&self.tabs[i].project, m)) {
+                            // Read while the notice waited for its turn: nothing to remind.
+                            log::info!("mail notice dropped before being typed: it was already read");
                         } else {
                             // The team notice is only spent when the message is actually typed.
                             let mut prompt = q.prompt;
@@ -430,6 +453,9 @@ impl Deck {
                             self.submit(i, &prompt);
                             if q.answer {
                                 self.core.answer_typed(q.request);
+                            }
+                            if let Some(mail) = q.mail {
+                                self.core.mail_typed(&self.tabs[i].project, mail);
                             }
                             want(now + FIRST_ENTER);
                         }

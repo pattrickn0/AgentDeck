@@ -132,11 +132,17 @@ impl Deck {
             match found {
                 // In a plain terminal the text would run as a command (the bridge already avoids that).
                 Some(i) if self.tabs[i].alive && self.tabs[i].kind != "shell" => {
-                    self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: true })
+                    self.tabs[i].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: true, mail: d.mail })
                 }
                 _ => {
-                    log::warn!("late answer #{} for \"{id}\" discarded: the tab is not open", d.request);
-                    self.core.answer_lost(&d.project, d.request, "the tab was not open");
+                    if let Some(mail) = d.mail {
+                        // Stays unread: the notice comes again when the tab is back.
+                        self.core.mail_dropped(&d.project, mail);
+                    }
+                    if d.request != 0 {
+                        log::warn!("late answer #{} for \"{id}\" discarded: the tab is not open", d.request);
+                        self.core.answer_lost(&d.project, d.request, "the tab was not open");
+                    }
                 }
             }
             return;
@@ -183,7 +189,7 @@ impl Deck {
         // alive) = type the text.
         let booted = boots.is_some() && self.core.take_boot_prompt(&d.project, &id).is_none() && self.tabs[idx].alive;
         if !booted {
-            self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: false });
+            self.tabs[idx].queue.push(Instant::now(), Queued { request: d.request, prompt: d.prompt, answer: false, mail: d.mail });
         }
     }
 
@@ -218,7 +224,7 @@ impl Deck {
             self.start(idx);
         }
         self.activate(idx);
-        self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), answer: false });
+        self.tabs[idx].queue.push(Instant::now(), Queued { request: 0, prompt: prompt.clone(), answer: false, mail: None });
         self.add_feed(FeedEntry::new(FeedKind::User, Some("you"), Some(&id), prompt));
         Ok(self.tabs[idx].label.clone())
     }
@@ -377,6 +383,8 @@ impl Deck {
                 tab.session_poll_at = Instant::now();
                 tab.model = spec.model.clone();
                 tab.spec = Some(spec);
+                // Mail that nobody told this process about (the app restarted, or the notice was lost).
+                self.core.mail_tab_started(&tab.project, &ident.id());
             }
             Err(msg) => {
                 tab.alive = false;

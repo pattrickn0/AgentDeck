@@ -447,6 +447,7 @@ impl Core {
             prompt,
             answer: false,
             boot,
+            mail: None,
         }));
         self.update_task(project, &task.id, |t| t.log(log));
     }

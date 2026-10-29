@@ -480,6 +480,7 @@ impl Registry {
             "Each tab is an instance <model>[@<role>[@<name>]] (claude, claude@dev, claude@dev@ana): ask-agent claude@dev \"task\" opens the tab if it does not exist; --new opens another one with the same role; --model <model> picks the LLM when opening. Large work becomes a task, with its own worktree, branch and agent: ask-agent --task new \"title\" --start --file <request.md>.".to_owned(),
             "Text with accents goes in a file (--file <file>): through standard input the Windows shell turns accents into \"?\".".to_owned(),
             "When another agent sends you a message, answer with the command it shows (ask-agent --reply <number> \"answer\" or --file <file>): only then does the answer reach it.".to_owned(),
+            "A long or multi-line message (or late answer) is not typed in full: you get a notice [mail #12 from claude@dev: \"…\"]. Read it with ask-agent --read 12 (it says how to answer); ask-agent --inbox lists unread mail.".to_owned(),
             "The agents form a team (boss and subordinates; the user can reorganize it). Before delegating or reporting, see your position with ask-agent --team; delegate preferably to the team and, when you finish something the boss asked for, report with ask-agent --boss \"message\".".to_owned(),
             "Project memory: memory/learnings/, one .md per trap, decision or convention that cost time and the code does not show. Format: header --- title: … / summary: one line / touches: [globs of the files; optional] --- and a short body, with Why and How to apply. Before touching files, run ask-agent --learn <file>... (without arguments: the index and the state of the tasks; with files, it warns if another task touches them); when you find out something like that, create the file. ask-agent --outline <file>... shows the signatures with the line, so you read only the part of a large file you need (offset).".to_owned(),
         ]
@@ -863,12 +864,12 @@ mod tests {
     }
 
     /// The instructions do not grow beyond what is needed (they were 2580 characters before t38; t40 added `--outline`
-    /// and t64's English text went a little past the old limit) and carry the subagent rule, the bridge and the general memory.
+    /// and t64's English text went a little past the old limit; the mail line took it to 3000) and carry the subagent rule, the bridge and the general memory.
     #[test]
     fn the_instructions_carry_the_rules_and_stay_short() {
         let reg = registry();
         let text = reg.bridge_instructions(Some("claude@dev"));
-        assert!(text.chars().count() <= 2800, "{} characters", text.chars().count());
+        assert!(text.chars().count() <= 3000, "{} characters", text.chars().count());
         for needle in [
             "do NOT use your CLI's internal subagents (Task/Agent tool, sub-agents) unless the user asks for it",
             "ask-agent <agent>@<role> or ask-agent --task new",
