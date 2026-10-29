@@ -8,7 +8,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("{agent} (not installed)", "{agent} (não instalado)"),
     ("Open {agent}", "Abrir {agent}"),
     // Startup
-    ("AgentDeck could not start: {error}", "Não foi possível iniciar o AgentDeck: {error}"),
+    ("Holt could not start: {error}", "Não foi possível iniciar o Holt: {error}"),
     // Attachments and drag and drop
     ("Drop to attach to the new task", "Solte para anexar à nova tarefa"),
     ("Copy under data/attachments cited in the request", "Cópia em data/attachments citada no pedido"),
@@ -24,8 +24,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ),
     ("Could not remove voice dictation: {error}.", "Não foi possível remover o ditado por voz: {error}."),
     (
-        "Voice dictation is unavailable: AgentDeck was built without the audio feature.",
-        "O ditado por voz não está disponível: o AgentDeck foi compilado sem o recurso de áudio.",
+        "Voice dictation is unavailable: Holt was built without the audio feature.",
+        "O ditado por voz não está disponível: o Holt foi compilado sem o recurso de áudio.",
     ),
     (
         "Voice dictation is still downloading (see the right bar). Try again when it finishes.",

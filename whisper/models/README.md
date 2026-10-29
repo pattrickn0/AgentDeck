@@ -15,7 +15,7 @@ This directory stores the pre-trained weights for Whisper neural models in GGML 
 ## ⚡ How to Obtain the Model
 
 ### 1. Automatic Download (Recommended)
-You do not need to download the model manually! When launching AgentDeck for the first time (`agentdeck.exe`), the application checks for the presence of `whisper/models/ggml-large-v3-turbo.bin`. If not found, it automatically starts a background download, displaying real-time progress in the graphical interface.
+You do not need to download the model manually! When launching Holt for the first time (`holt.exe`), the application checks for the presence of `whisper/models/ggml-large-v3-turbo.bin`. If not found, it automatically starts a background download, displaying real-time progress in the graphical interface.
 
 ### 2. Manual Download (Offline Environments / Slow Connections)
 If you prefer to download in advance:

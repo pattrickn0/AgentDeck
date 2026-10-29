@@ -3,11 +3,11 @@ use super::git_ops::{
 };
 use super::stash::{stash_pop, stash_push, Stash};
 use super::text::short_list;
-use super::{dirty_paths, git_error, MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskStatus, AGENTDECK_DIR};
+use super::{dirty_paths, git_error, MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskStatus};
 use crate::events::{CoreEvent, FeedEntry};
 use crate::git::{run, RepoState, COMMIT_TIMEOUT};
 use crate::t;
-use crate::util::{self, now_ms};
+use crate::util::now_ms;
 use crate::Core;
 
 impl Core {
@@ -55,8 +55,7 @@ impl Core {
             MergeRefusal { error: TaskError::Conflict(msg), block, stash_note: None }
         };
         let refuse = |t: &Task, msg: String| -> MergeRefusal { refuse_with(t, msg, None) };
-        let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
-        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &expected) {
+        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &repo.root) {
             return Err(TaskError::Failed(t!("data of task {id} outside what was expected; I merged nothing", id = &task.id)).into());
         }
         let _git = self.inner.git.op.lock();

@@ -3,7 +3,7 @@ name = "pty-probe"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Probe: runs a CLI (claude.exe) in a PTY with the AgentDeck emulator and measures the grid. See the README."
+description = "Probe: runs a CLI (claude.exe) in a PTY with the Holt emulator and measures the grid. See the README."
 
 [dependencies]
 alacritty_terminal = "0.26"

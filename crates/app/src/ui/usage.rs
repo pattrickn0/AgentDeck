@@ -5,10 +5,10 @@
 
 use std::collections::HashMap;
 
-use agentdeck_core::t;
-use agentdeck_core::usage::{UsageGroup, UsageWindow};
-use agentdeck_core::AgentUsage;
 use egui::{Align2, Color32, Id, Order, Painter, Pos2, Rect, Sense, Ui, Vec2};
+use holt_core::t;
+use holt_core::usage::{UsageGroup, UsageWindow};
+use holt_core::AgentUsage;
 
 use crate::deck::Deck;
 use crate::theme;
@@ -259,7 +259,7 @@ fn shown_bars(summary: [Option<Bar>; 2], groups: &[(String, [Option<Bar>; 2])], 
 /// if nothing was drawn), so the bar knows where the drag area ends.
 pub fn draw(deck: &mut Deck, ui: &Ui, rect: Rect) -> f32 {
     let usage_map = deck.usage();
-    let now_ms = agentdeck_core::util::now_ms();
+    let now_ms = holt_core::util::now_ms();
     let mut rows = Vec::new();
     let available: Vec<String> = deck.agents.available.iter().map(|a| a.id.clone()).collect();
     for model in ordered_models(&available, &usage_map) {
@@ -483,7 +483,7 @@ fn agent_block(deck: &mut Deck, ui: &Ui, block: Rect, row: &Row, now_ms: u64) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdeck_core::i18n::{with_lang, Lang};
+    use holt_core::i18n::{with_lang, Lang};
 
     fn w(used: f32, resets: Option<u64>) -> Option<UsageWindow> {
         Some(UsageWindow { used, resets_at_ms: resets })

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use agentdeck_core::models::short_model;
+use holt_core::models::short_model;
 
 use egui::{Align2, Color32, CursorIcon, Id, Order, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
@@ -11,7 +11,7 @@ use super::{clickable, dot, frame, galley, galley_trunc, menus, place, shadow, t
 use crate::deck::{AgentBadge, Deck, ProjectView};
 use crate::icons::Icon;
 use crate::theme;
-use agentdeck_core::t;
+use holt_core::t;
 
 /// Height of a project row and of the "+ New agent" row.
 pub const ROW_H: f32 = 22.0;

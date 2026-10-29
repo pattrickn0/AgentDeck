@@ -18,14 +18,15 @@ pub struct DirEntry {
 }
 
 /// Names ignored in the tree (`.gemini` is Antigravity's config folder, `~/.gemini/antigravity`;
-/// `.agentdeck` keeps the task worktrees). AgentDeck's own data folder is recognized by its lock file
+/// `.holt` keeps the task worktrees, and `.agentdeck` the ones opened before the rename). Holt's own data folder is recognized by its lock file
 /// ([`is_app_data_dir`]), not by name, so a project's own `data/` folder stays visible.
-pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".agentdeck", "$RECYCLE.BIN", "target"];
+pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".holt", ".agentdeck", "$RECYCLE.BIN", "target"];
 
-/// Is `dir` the data folder of an AgentDeck (it holds the instance lock file)? It is the app's own folder when the
-/// project is the AgentDeck repository (`data/`, or the legacy `dados/`).
+/// Is `dir` the data folder of a Holt (it holds the instance lock file)? It is the app's own folder when the
+/// project is the Holt repository (`data/`, or the legacy `dados/`). Migration (remove after 0.4,
+/// `memory/MAINTENANCE.md` §6): the lock of an AgentDeck counts too.
 pub fn is_app_data_dir(dir: &Path) -> bool {
-    dir.join(".agentdeck.lock").is_file()
+    dir.join(".holt.lock").is_file() || dir.join(".agentdeck.lock").is_file()
 }
 
 fn is_ignored_entry(name: &str) -> bool {
@@ -205,14 +206,15 @@ pub fn write_text(workspace: &Path, rel: &str, text_lf: &str, eol: Eol, bom: boo
 
 // ---------- AGENTS.md ----------
 
-pub const MARKER_START: &str = "<!-- agentdeck:start -->";
-pub const MARKER_END: &str = "<!-- agentdeck:end -->";
+pub const MARKER_START: &str = "<!-- holt:start -->";
+pub const MARKER_END: &str = "<!-- holt:end -->";
 
 fn marker_re() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        // Also recognizes the markers of older names (`jwic`, `orquestra`) and swaps them for the current one.
-        regex::Regex::new(r"<!-- (?:orquestra|jwic|agentdeck):start -->[\s\S]*?<!-- (?:orquestra|jwic|agentdeck):end -->")
+        // Also recognizes the markers of older names (`jwic`, `orquestra`, `agentdeck`) and swaps them for the current
+        // one. Migration (remove `agentdeck` after 0.4, `memory/MAINTENANCE.md` §6).
+        regex::Regex::new(r"<!-- (?:orquestra|jwic|agentdeck|holt):start -->[\s\S]*?<!-- (?:orquestra|jwic|agentdeck|holt):end -->")
             .expect("valid regex")
     })
 }
@@ -256,7 +258,7 @@ pub enum AgentContext {
     Created,
 }
 
-/// Keeps the AgentDeck marked block in the workspace's AGENTS.md (the Antigravity CLI has no
+/// Keeps the Holt marked block in the workspace's AGENTS.md (the Antigravity CLI has no
 /// flag to append instructions to the system prompt). Equivalent to `ensureAgentContext`.
 ///
 /// RULE: outside the app folder only updates an AGENTS.md that already exists; creating one in the user's folder
@@ -346,7 +348,7 @@ fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
 // ---------- Watcher ----------
 
 /// Changes in these folders do not reload the tree (`.gemini`: Antigravity's configuration).
-const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".agentdeck", "target"];
+const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".holt", ".agentdeck", "target"];
 
 /// `path` relative to `base`, comparing by components (no case difference and no verbatim prefix
 /// `\\?\` on Windows: `c:\x`, `C:\x` and `\\?\C:\x` are the same folder). `None` if it is outside.
@@ -360,7 +362,7 @@ fn rel_within(base: &Path, path: &Path) -> Option<PathBuf> {
 /// above it (a project in `C:\data\app`, for example) do not count.
 pub(crate) fn watch_ignored(workspace: &Path, path: &Path) -> bool {
     let Some(rel) = rel_within(workspace, path) else { return false };
-    // AgentDeck's own data folder (the app writes there all the time) is only checked at the first level.
+    // Holt's own data folder (the app writes there all the time) is only checked at the first level.
     if rel.components().next().is_some_and(|c| is_app_data_dir(&workspace.join(c.as_os_str()))) {
         return true;
     }
@@ -673,8 +675,9 @@ mod tests {
         for d in ["zeta", "Alpha", "node_modules", ".git", "data", "target"] {
             std::fs::create_dir_all(ws.join(d)).expect("mkdir");
         }
-        // AgentDeck's own data folder (it has the lock file) is hidden; a plain `data/` of the project would show.
-        std::fs::write(ws.join("data").join(".agentdeck.lock"), "").expect("lock");
+        // Holt's own data folder (it has the lock file) is hidden; a plain `data/` of the project would show.
+        std::fs::write(ws.join("data").join(".holt.lock"), "").expect("lock");
+        assert!(is_app_data_dir(&ws.join("data")));
         if cfg!(windows) {
             std::fs::create_dir_all(ws.join("$Recycle.Bin")).expect("mkdir");
         }
@@ -815,7 +818,7 @@ X
         let only_crlf = |t: &str| t.matches('\n').count() == t.matches("\r\n").count();
         for start in [
             "# Rules\r\n\r\nend\r\n",
-            "# Rules\r\n\r\n<!-- agentdeck:start -->\r\nold\r\n<!-- agentdeck:end -->\r\n",
+            "# Rules\r\n\r\n<!-- holt:start -->\r\nold\r\n<!-- holt:end -->\r\n",
             "# Rules\r\n\r\n<!-- jwic:start -->\r\nold\r\n<!-- jwic:end -->\r\n",
         ] {
             std::fs::write(&file, start).expect("write");
@@ -850,14 +853,45 @@ X
             let text = std::fs::read_to_string(&file).expect("read");
             let new_block = format!("{MARKER_START}{eol}new{eol}{MARKER_END}");
             assert_eq!(text, format!("{before}{new_block}{eol}{after}"), "only the block changes");
-            assert_eq!(text.matches("<!-- agentdeck:start -->").count(), 1);
+            assert_eq!(text.matches("<!-- holt:start -->").count(), 1);
             assert!(!text.contains("jwic"), "{text:?}");
             // With the new block, nothing else changes.
             assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Unchanged);
         }
     }
 
-    /// The old app does not recognize `agentdeck:` and appends its block at the end: the new app swaps the
+    /// Migration from AgentDeck: its block is replaced by the Holt one (not left beside it), the merge check ignores
+    /// both, and a block saved before the merge is put back over an `agentdeck:` one.
+    #[test]
+    fn an_agentdeck_block_is_replaced_by_the_holt_one() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outside"));
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        let file = ws.join("AGENTS.md");
+        for eol in ["\n", "\r\n"] {
+            let old_block = format!("<!-- agentdeck:start -->{eol}old text{eol}<!-- agentdeck:end -->");
+            let new_block = format!("{MARKER_START}{eol}new{eol}{MARKER_END}");
+            std::fs::write(&file, format!("# Rules{eol}{eol}{old_block}{eol}")).expect("write");
+            assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Written);
+            let text = std::fs::read_to_string(&file).expect("read");
+            assert_eq!(text, format!("# Rules{eol}{eol}{new_block}{eol}"));
+            assert!(!text.to_lowercase().contains("agentdeck"), "{text:?}");
+
+            // The merge check: HEAD still has the old block, the file the new one (or vice versa): only blocks differ.
+            let committed = format!("# Rules\n\n{}\n", old_block.replace("\r\n", "\n"));
+            assert!(only_marker_blocks_differ(&committed, &text));
+            assert!(!only_marker_blocks_differ(&committed, &text.replace("# Rules", "# My rules")));
+
+            // The saved block (an old one) goes back over the file the merge left with the other name.
+            std::fs::write(&file, format!("# Rules{eol}{eol}{old_block}{eol}")).expect("write");
+            restore_marker_block(&file, &format!("{new_block}{eol}")).expect("restore");
+            assert_eq!(std::fs::read_to_string(&file).expect("read"), format!("# Rules{eol}{eol}{new_block}{eol}"));
+            restore_marker_block(&file, &format!("x{old_block}")).expect("restore");
+            assert!(std::fs::read_to_string(&file).expect("read").contains("old text"), "a saved agentdeck block is recognized too");
+        }
+    }
+
+    /// The old app does not recognize `holt:` and appends its block at the end: the new app swaps the
     /// first one and deletes the others, without leaving blank lines piling up and without touching the rest.
     #[test]
     fn extra_blocks_from_an_old_app_are_removed() {
@@ -867,7 +901,7 @@ X
         let file = ws.join("AGENTS.md");
         for eol in ["\n", "\r\n"] {
             let new_block = format!("{MARKER_START}{eol}new{eol}{MARKER_END}");
-            let new_a = format!("<!-- agentdeck:start -->{eol}old{eol}<!-- agentdeck:end -->");
+            let new_a = format!("<!-- holt:start -->{eol}old{eol}<!-- holt:end -->");
             let old_b = format!("<!-- jwic:start -->{eol}ancient{eol}<!-- jwic:end -->");
             // At the end (the old app's case), in the middle and glued to the first.
             let cases = [

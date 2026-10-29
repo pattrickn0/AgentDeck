@@ -1,6 +1,6 @@
 [package]
-name = "agentdeck-core"
-description = "AgentDeck backend: agents, HTTP bridge, headless runs, tasks desk, workspace and transcription."
+name = "holt-core"
+description = "Holt backend: agents, HTTP bridge, headless runs, tasks desk, workspace and transcription."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

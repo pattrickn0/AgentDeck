@@ -226,8 +226,8 @@ impl Deck {
     /// Shows the tab of a task's agent. If it was closed and the task is still running, in
     /// review or waiting for validation, registers the instance again and opens the tab: the terminal opens in the task's
     /// worktree (`spawn_spec_for`) with the task's model. Returns the reason for the refusal.
-    pub fn open_task_tab(&mut self, task: &agentdeck_core::Task) -> Result<(), String> {
-        use agentdeck_core::TaskStatus;
+    pub fn open_task_tab(&mut self, task: &holt_core::Task) -> Result<(), String> {
+        use holt_core::TaskStatus;
         let project = self.active_project.clone();
         self.show_agents();
         if let Some(i) = self.tabs.iter().position(|t| t.project == project && t.ident.id() == task.instance) {
@@ -348,7 +348,7 @@ impl Deck {
         let spec = match self.core.spawn_spec_for(&self.tabs[idx].project, &ident) {
             Ok(spec) => Ok(spec),
             Err(e) if self.debug_fake_shell => {
-                log::warn!("AGENTDECK_DEBUG_FAKE_SHELL: using the local shell instead of '{}' ({e})", self.tabs[idx].kind);
+                log::warn!("HOLT_DEBUG_FAKE_SHELL: using the local shell instead of '{}' ({e})", self.tabs[idx].kind);
                 let cwd = self.core.project_path(&self.tabs[idx].project).unwrap_or_else(|| self.workspace.clone());
                 Ok(debug_fake_spec(&self.tabs[idx].kind, &cwd))
             }
@@ -679,7 +679,7 @@ impl Deck {
     }
 
     /// Plan usage by model (the fabricated one in debug).
-    pub fn usage(&self) -> HashMap<String, agentdeck_core::AgentUsage> {
+    pub fn usage(&self) -> HashMap<String, holt_core::AgentUsage> {
         match &self.debug_usage {
             Some(u) => u.clone(),
             None => self.core.usage_snapshot(),

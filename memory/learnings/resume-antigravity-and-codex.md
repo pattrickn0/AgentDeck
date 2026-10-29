@@ -28,7 +28,7 @@ on 2026-10-29 (`agy` 1.4.10, Codex 0.164.0):
   the useless one. `Core::set_tab_session` therefore accepts a Codex id only if `resume::codex_has_session` finds the rollout.
 - **Trap, `notify` on Windows:** the program in `notify=[…]` was **not found** when given as the bare name `ask-agent`, even
   with it first in `PATH` (also `ask-agent.exe`); the same command with the full path ran, with the tab's environment
-  (`AGENTDECK_*`) and the JSON intact. `codex_notify_arg` passes `<bin dir>/ask-agent[.exe]` (bare name only if the file is
+  (`HOLT_*`) and the JSON intact. `codex_notify_arg` passes `<bin dir>/ask-agent[.exe]` (bare name only if the file is
   not there). It is a TOML array written as JSON, which Codex parses.
 - **Trap, the npm shim:** `notify` needs the direct executable (a `.cmd` loses the quotes: `cmd-shims-on-windows.md`).
   `agents::codex_native_exe` finds the real `codex.exe` the shim's `bin/codex.js` would run

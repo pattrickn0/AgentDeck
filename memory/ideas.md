@@ -6,9 +6,15 @@ A limitation that starts getting in the way during actual use also moves up ther
 
 ## Ideas
 
+### Brand
+
+- **Otter logo for Holt** (user, 2026-10-29): the product is named after an otter's den, but the icon is still the old
+  one (`crates/app/assets/holt.png`/`.ico`, generated from `icons.rs` by `scripts/generate-icon.ps1`). Design an otter
+  logo and regenerate the icon, the title-bar mark and the tray icon.
+
 ### Tasks desk and models
 
-- **Acid test on a project other than AgentDeck** (user, 2026-10-24): a Godot game, after system tray and conversation
+- **Acid test on a project other than Holt** (user, 2026-10-24): a Godot game, after system tray and conversation
   resumption. So far the app was only used to build itself (Rust, full `memory/`, agents familiar with the repository).
   Points to observe: memory starting empty (do agents create learnings?), `--outline` without GDScript, reimporting the
   `.godot/` folder in each new worktree, reviewing `.tscn`/`.tres` and binary assets, running tests with `godot --headless`,
@@ -21,7 +27,7 @@ A limitation that starts getting in the way during actual use also moves up ther
   specifies which test covers each, and "awaiting validation" shows them as checkboxes (the format of `manual-tests.md`).
   Optional: making it mandatory would create unnecessary bureaucracy for small tasks.
 - **Project skills for the 4 official CLIs** (2026-10-24): each CLI searches for skills in a folder (`.claude/skills`,
-  Antigravity to be confirmed, `.agents/skills` in Codex, `.opencode/skills`); AgentDeck would provide a single folder for all.
+  Antigravity to be confirmed, `.agents/skills` in Codex, `.opencode/skills`); Holt would provide a single folder for all.
 - **Model selector showing only what the plan allows** (`t14`): the list comes from `agy models`/`opencode models` (what the
   CLI knows, not what the plan allows). On 2026-10-24 the user stated that in practice it already works this way; reopen if a
   model without access appears. If implemented, the same filter applies to `Core::models_inventory`.
@@ -99,4 +105,4 @@ For anyone modifying the code; these are not tasks.
   **Codex usage** was only tested with sample files.
 - **Select dropdown, spinner, and tooltips are custom-drawn**; blur behind drag overlay is approximated.
 - **Out of scope** (2026-10-23): dedicated Ollama agent and "local AI as an internal service"; local models enter through a
-  supported CLI (see [AGENTDECK.md](AGENTDECK.md), "What AgentDeck is and is not").
+  supported CLI (see [HOLT.md](HOLT.md), "What Holt is and is not").

@@ -154,12 +154,12 @@ impl Deck {
                         let pairs: Vec<(u64, bool)> = self.tabs.iter().map(|t| (t.uid, t.alive)).collect();
                         match crate::dictation::resolve_tab_delivery(&pairs, uid) {
                             TabDelivery::TypeInTab(idx) => {
-                                let refs: Vec<String> = files.iter().map(|f| agentdeck_core::util::ref_path(&self.workspace, f)).collect();
+                                let refs: Vec<String> = files.iter().map(|f| holt_core::util::ref_path(&self.workspace, f)).collect();
                                 let text = util::tab_file_refs_text(&self.tabs[idx].kind, &refs);
                                 if !text.is_empty() {
                                     let bracketed =
                                         self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                                    let safe = agentdeck_core::util::terminal_text(&text);
+                                    let safe = holt_core::util::terminal_text(&text);
                                     self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                                     self.activate(idx);
                                 }
@@ -198,7 +198,7 @@ impl Deck {
                 match crate::dictation::resolve_tab_delivery(&pairs, uid) {
                     TabDelivery::TypeInTab(idx) => {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                        let safe = agentdeck_core::util::terminal_text(&text);
+                        let safe = holt_core::util::terminal_text(&text);
                         self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                     }
                     TabDelivery::TabDead => {
@@ -271,7 +271,7 @@ impl Deck {
                     let text = util::tab_file_refs_text(&self.tabs[idx].kind, &[rel]);
                     if !text.is_empty() {
                         let bracketed = self.tabs[idx].session.shared.emu.lock().term.mode().contains(TermMode::BRACKETED_PASTE);
-                        let safe = agentdeck_core::util::terminal_text(&text);
+                        let safe = holt_core::util::terminal_text(&text);
                         self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                         self.set_term_focus(true);
                     }
@@ -399,7 +399,7 @@ impl Deck {
             tab.session.print(&format!("\r\n\x1b[90m[{}]\x1b[0m\r\n", t!("process ended (code {code}) — press Enter to restart", code)));
         }
         // Messages from other agents: typed into the terminal when the tab becomes free (one at a time;
-        // rule in `agentdeck_core::delivery`).
+        // rule in `holt_core::delivery`).
         for i in 0..self.tabs.len() {
             let Some(since) = self.tabs[i].queue.front_since() else { continue };
             match delivery::gate(&self.tab_state(i), since, now) {

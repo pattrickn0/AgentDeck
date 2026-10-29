@@ -5,9 +5,9 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
 
-use agentdeck_core::capability::Level;
-use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{t, FeedKind, MergeBlock, Task, TaskMessage, TaskStatus};
+use holt_core::capability::Level;
+use holt_core::models::{self, Effort};
+use holt_core::{t, FeedKind, MergeBlock, Task, TaskMessage, TaskStatus};
 
 use super::{
     button as ui_button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label,
@@ -86,7 +86,7 @@ enum Act {
 
 pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
     let mut acts = Vec::new();
-    let now = agentdeck_core::util::now_ms();
+    let now = holt_core::util::now_ms();
     match deck.tasks.view.clone() {
         TasksView::List => list_view(deck, ui, rect, now, &mut acts),
         TasksView::Detail(id) => match deck.tasks.task(&id).cloned() {
@@ -1297,7 +1297,7 @@ fn timeline(deck: &Deck, ui: &mut Ui, task: &Task, messages: &[&TaskMessage], ac
 }
 
 /// Events (newest first): date and time, and the text beside it.
-fn history(ui: &mut Ui, events: &[&agentdeck_core::TaskEvent]) {
+fn history(ui: &mut Ui, events: &[&holt_core::TaskEvent]) {
     if events.is_empty() {
         muted_line(ui, t!("Nothing recorded yet."));
         return;

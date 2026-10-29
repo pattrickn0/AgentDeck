@@ -74,8 +74,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // Dictation dialog
     ("Voice dictation (optional)", "Ditado por voz (opcional)"),
     (
-        "Speak instead of typing: AgentDeck transcribes your voice on this computer, without sending the audio over the internet.",
-        "Fale em vez de digitar: o AgentDeck transcreve a sua voz aqui no computador, sem enviar o áudio para a internet.",
+        "Speak instead of typing: Holt transcribes your voice on this computer, without sending the audio over the internet.",
+        "Fale em vez de digitar: o Holt transcreve a sua voz aqui no computador, sem enviar o áudio para a internet.",
     ),
     (
         "To do that it downloads Whisper (transcription model and engine): {size}, plus about 700 MB of the CUDA engine if there is an NVIDIA card. The download runs in the background and progress appears in the right bar.",

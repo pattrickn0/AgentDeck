@@ -1,6 +1,6 @@
 # 🎙️ Local Voice Transcription Subsystem (`whisper/`)
 
-The `whisper/` directory manages the entire Speech-to-Text voice inference engine of **AgentDeck**, based on the high-performance **`whisper.cpp`** project from GGML.
+The `whisper/` directory manages the entire Speech-to-Text voice inference engine of **Holt**, based on the high-performance **`whisper.cpp`** project from GGML.
 
 ---
 
@@ -37,10 +37,10 @@ whisper/
 
 ## 🧠 Neural Model (`large-v3-turbo`)
 
-AgentDeck uses the official **`large-v3-turbo`** model (~1.62 GB) from OpenAI converted to GGML format:
+Holt uses the official **`large-v3-turbo`** model (~1.62 GB) from OpenAI converted to GGML format:
 - **Exceptional Accuracy:** Native support for dozens of languages with a special focus on Portuguese and technical English.
-- **Optional download:** Voice dictation is optional. On first launch, AgentDeck asks if you want to use it; only with confirmation does it download the model (directly from Hugging Face, with progress in the right bar) and the CPU engine. Users who chose "Not now" can download it later (or remove what was downloaded) in Settings.
-- **Phonetic Context Injection:** Each inference includes a customized contextual prompt (`--prompt "AgentDeck, Claude, Antigravity, agy, Vulkan..."`) to ensure correct spelling of development terms.
+- **Optional download:** Voice dictation is optional. On first launch, Holt asks if you want to use it; only with confirmation does it download the model (directly from Hugging Face, with progress in the right bar) and the CPU engine. Users who chose "Not now" can download it later (or remove what was downloaded) in Settings.
+- **Phonetic Context Injection:** Each inference includes a customized contextual prompt (`--prompt "Holt, Claude, Antigravity, agy, Vulkan..."`) to ensure correct spelling of development terms.
 
 ---
 
@@ -57,7 +57,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-vulkan.ps1
 
 ## Third-party licenses
 
-The binaries versioned in `bin-cpu/` and `bin-vulkan/` are not AgentDeck code (MIT):
+The binaries versioned in `bin-cpu/` and `bin-vulkan/` are not Holt code (MIT):
 
 - whisper.cpp and ggml (whisper-cli.exe, whisper.dll, ggml*.dll): MIT, © the GGML project authors (https://github.com/ggml-org/whisper.cpp).
 - SDL2.dll: zlib (https://libsdl.org).

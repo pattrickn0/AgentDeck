@@ -1,6 +1,6 @@
 # Maintenance guide
 
-This guide is for whoever maintains AgentDeck, alone or alongside AI agents. It does not assume prior Rust experience.
+This guide is for whoever maintains Holt, alone or alongside AI agents. It does not assume prior Rust experience.
 Overview and document map: [OVERVIEW.md](OVERVIEW.md).
 
 ## 1. How Rust works in practice
@@ -16,7 +16,7 @@ Overview and document map: [OVERVIEW.md](OVERVIEW.md).
 ### Day-to-day commands
 
 ```bash
-cargo run -p agentdeck            # compiles and opens the app (debug)
+cargo run -p holt            # compiles and opens the app (debug)
 cargo build --workspace --release   # generates optimized .exe files in target/release/
 cargo test --workspace              # runs tests
 cargo clippy --workspace --all-targets -- -D warnings   # "linter": flags suspicious code
@@ -31,7 +31,7 @@ Minimum Rust version: **1.89** (`rust-version` in `Cargo.toml`). The initial com
 ```
 Cargo.toml                 workspace + shared dependency versions
 crates/
-├── core/   (agentdeck-core)   "backend": no graphical interface
+├── core/   (holt-core)   "backend": no graphical interface
 │   ├── lib.rs        Core: the API used by the UI (like IPC channels)
 │   ├── events.rs     CoreEvent: what the backend reports to the UI
 │   ├── agents.rs     agent list, where to find each CLI, command for each tab, bridge instructions
@@ -59,7 +59,7 @@ crates/
 │   ├── git.rs        workspace git: parse status/diff/branches (pure, with tests) and operations
 │   ├── github.rs     GitHub (PRs, issues, Actions): remote → owner/repo, credential helper token, REST API, parse (pure, with tests)
 │   ├── workspace.rs  working folder: tree listing, AGENTS.md, watcher, `resolve_workspace_path`, `read_text`, and `write_text` (text file up to 1 MB for Documents mode; with `safe_rel` and symlink check)
-│   ├── activation.rs activation of live instance on second launch (`data/.agentdeck.bridge` → `POST /activate`)
+│   ├── activation.rs activation of live instance on second launch (`data/.holt.bridge` → `POST /activate`)
 │   ├── attachments.rs, sessions.rs, config.rs, env.rs, paths.rs, process.rs, util.rs
 │   ├── examples/memeval.rs   measures recall/precision/size of learning delivery on completed tasks
 │   ├── tests/bridge.rs   end-to-end bridge tests
@@ -71,26 +71,26 @@ crates/
 │   ├── tests/tasks_queue.rs    write scope and automatic queue progression
 │   ├── tests/support/tasks_env.rs, fake_agent.rs   shared fixture and fake agent binary
 │   └── tests/github.rs   origin remote with real git; one `--ignored` test with real network and credentials
-├── app/    (agentdeck)        graphical interface (the main .exe)
+├── app/    (holt)        graphical interface (the main .exe)
 │   ├── main.rs / app.rs / window.rs / tray.rs / wslg.rs   winit window, OpenGL, event loop, system tray, and WSLg detection
-│   ├── debug_ui.rs   fictional screenshot scenarios (`AGENTDECK_DEBUG_UI=…`: `debug_ui::apply`, `debug_tasks`…)
+│   ├── debug_ui.rs   fictional screenshot scenarios (`HOLT_DEBUG_UI=…`: `debug_ui::apply`, `debug_tasks`…)
 │   ├── theme.rs      colors, fonts, and sizes (the "CSS")
 │   ├── icons.rs      SVG icons rasterized at runtime
 │   ├── util.rs       pure functions shared across the UI
 │   ├── agents.rs     colors, names, and agent menus on the UI side
 │   ├── highlight.rs  re-exports core lexer and adds search, `pieces`, and `Cache` for Documents mode
-│   ├── terminal/     terminal emulator: mod.rs (pty + alacritty_terminal), view.rs (drawing and mouse), input.rs (keyboard), colors.rs (palette), record.rs (PTY recording for debugging: tab menu or `AGENTDECK_DEBUG_PTY=1`), resize.rs (resizing as ConPTY expects)
+│   ├── terminal/     terminal emulator: mod.rs (pty + alacritty_terminal), view.rs (drawing and mouse), input.rs (keyboard), colors.rs (palette), record.rs (PTY recording for debugging: tab menu or `HOLT_DEBUG_PTY=1`), resize.rs (resizing as ConPTY expects)
 │   ├── git_ui.rs     state and actions for Git tab (sections, topbar chip, reloads)
 │   ├── github_ui.rs  state and actions for GitHub tab (core events, selection, "Send to agent" menu, demo data)
 │   ├── tasks_ui.rs   state and actions for Tasks tab (list, detail, form, thread calls to core) and pure functions (groups, diff summary, texts, buttons per state), with tests; demo data
 │   ├── tasks_flow_tests.rs   desk Deck end-to-end with real core and git (create, start, review, return, merge, validate, discard, reopen tab)
 │   ├── docs.rs       center Documents mode: `CenterView`, `DocKind`/`DocTab`/`DocState` (including `Source`, editable file, and `Find`, search), `Docs` (open, focus, close, duplicate, per project), file list of a diff (`diff_files`), toggle badge (`Badge`), and in `impl Deck`, open each document type and read off UI thread (`UiMsg::Doc`); pure tests
-│   ├── docs_demo.rs  fictional documents for `AGENTDECK_DEBUG_UI=docs-demo*`
+│   ├── docs_demo.rs  fictional documents for `HOLT_DEBUG_UI=docs-demo*`
 │   ├── dictation.rs  voice dictation: microphone states and fixed target in tab where recording started (pure functions, with tests)
 │   ├── split.rs      split screen: groups, grid, dividers, neighbors (pure functions, with tests)
 │   ├── deck/         tab state and UI logic: mod.rs (types, `Deck`, constants), frame.rs (frame, `work`/`background`, deliveries, events), tabs.rs, keyboard.rs, sidebar.rs, projects.rs, feed.rs, attachments.rs (attachments and dropped files), and dictation.rs
 │   ├── audio.rs      notification sound and microphone (cpal)
-│   ├── crash.rs      crash logging in data/crash.log; logfile.rs, app log in data/agentdeck.log; smoke.rs, screenshot capture (AGENTDECK_SMOKE)
+│   ├── crash.rs      crash logging in data/crash.log; logfile.rs, app log in data/holt.log; smoke.rs, screenshot capture (HOLT_SMOKE)
 │   └── ui/           mod.rs (rendering, modals) + background.rs (background with radial glows)
 │       ├── titlebar.rs (title bar) + usage.rs (agent usage in the bar)
 │       ├── panes.rs (split panes: header with handle, mic, attachment, and "+") + tabs.rs (tab strip: gradient, ‹ › arrows, ▾ menu; renders list of `Item`, serves agent tabs and document tabs)
@@ -100,7 +100,7 @@ crates/
 │       ├── right_panel.rs (right sidebar: Tasks/Conversation/Git/GitHub; Conversation is read-only)
 │       ├── tasks.rs (Tasks tab), git.rs + git_views.rs (Git tab), github.rs (GitHub tab)
 │       └── menus.rs (new tab, settings), shortcuts.rs (shortcuts), overlay.rs (drag-and-drop overlay), empty_state.rs (no open agent)
-└── cli/    (agentdeck-cli)    ask-agent
+└── cli/    (holt-cli)    ask-agent
     ├── src/bin/ask-agent.rs     the agent command (`parse_task`, `learn_command`, `outline_command`, `models_command`, `inbox_command`, with tests)
     └── tests/ask_agent.rs, tests/tasks.rs   real `ask-agent` against a real bridge
 ```
@@ -133,13 +133,13 @@ To change visuals, edit `theme.rs` (colors and sizes) or the corresponding area 
    observing the real CLI. To list models in the menu, add the agent to `Core::known_models`.
 5. Optionally, create an alias in `ALIASES`, and update the list of ids in the `workspace_agents_md_and_spawn_specs` test.
 
-**Changing a color or size.** Edit `crates/app/src/theme.rs`: colors are fields of `Palette` (read via `theme::pal()`); accent color is that of the active agent (`theme::accent()`). Right sidebar widths: `RIGHT_*_W`. The icon (`assets/agentdeck.ico`) is regenerated with `scripts/generate-icon.ps1`.
+**Changing a color or size.** Edit `crates/app/src/theme.rs`: colors are fields of `Palette` (read via `theme::pal()`); accent color is that of the active agent (`theme::accent()`). Right sidebar widths: `RIGHT_*_W`. The icon (`assets/holt.ico`) is regenerated with `scripts/generate-icon.ps1`.
 
 **Working on split screen.** Calculation is pure and tested in `crates/app/src/split.rs` (group of each tab,
 grid layout, rectangles, dividers, neighbor for shortcuts, pane order, focus on close);
 `Deck` holds the order (`group_order`), ratios (`split_ratios`), and which tab appears in each pane (most
 recently activated, `Tab::shown`); rendering lives in `crates/app/src/ui/panes.rs` (panes, dividers,
-dragging) and `ui/tabs.rs` (tab strip). To see dragging without a mouse: `AGENTDECK_DEBUG_UI=split-drag`.
+dragging) and `ui/tabs.rs` (tab strip). To see dragging without a mouse: `HOLT_DEBUG_UI=split-drag`.
 
 **Working on dictation and attachments.** Microphone and attachment buttons live in each pane header (`ui/panes.rs`) and act on its
 visible tab; microphone state and fixed transcription target are pure and tested functions in `crates/app/src/dictation.rs`
@@ -151,7 +151,7 @@ drag highlighting lives in `ui/overlay.rs`. The "New task" form attaches files t
 `base_command`); state and reloads in `crates/app/src/git_ui.rs`; rendering in `crates/app/src/ui/git.rs`
 (drawing only collects actions and applies them at the end). New git command: always `args([...])` with `--` before
 paths, never a shell; test output parsing with sample bytes and the flow in `tests/git.rs`. To view
-without a repository: `AGENTDECK_DEBUG_UI=git-demo` (or `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
+without a repository: `HOLT_DEBUG_UI=git-demo` (or `git-diff`, `git-branches`, `git-norepo`, `git-nogit`).
 
 **Working on the GitHub tab.** Fetching lives in `crates/core/src/github.rs` (`impl Core`: `github_refresh`,
 `github_load_pr`, `github_load_run_jobs`, `github_load_job_log`, all on dedicated threads returning
@@ -161,9 +161,9 @@ The token never leaves `SecretToken`: do not put it in logs, error `format!`, or
 live in `crates/app/src/github_ui.rs`; rendering in `crates/app/src/ui/github.rs`. Prompt messages
 sent to agents are built in core (`format_pr_prompt`, `format_issue_prompt`, `format_failed_job_prompt`) and
 delivered via `Deck::send_to_instance` (opens tab if missing and queues like any message from another
-agent, with `request: 0`). To view without network: `AGENTDECK_DEBUG_UI=github-demo` (or `github-issues`,
+agent, with `request: 0`). To view without network: `HOLT_DEBUG_UI=github-demo` (or `github-issues`,
 `github-actions`, `github-menu`, `github-norepo`, `github-error`). To test real network and login:
-`cargo test -p agentdeck-core --test github -- --ignored --nocapture`.
+`cargo test -p holt-core --test github -- --ignored --nocapture`.
 
 **New learning.** Create `memory/learnings/<name>.md` (format and criteria in `README.md` of the folder). Invalid frontmatter is
 ignored with a log warning, and the test `every_learning_in_the_repository_is_valid` (`learnings.rs`) fails if any file in the folder fails
@@ -184,10 +184,10 @@ Every core task call runs git, so goes to `Deck::spawn_bg` and returns as `UiMsg
 state has is `actions_for` (pure function, with tests); list grouping, diff summary (`parse_diff_stat`), and
 timestamp strings as well. Full diff comes from `Core::task_diff` and opens in the center (`Deck::docs_open_task_diff`, see "Working on
 Documents mode"), rendered by `ui::git::diff_lines_at` (`ui/diff_view.rs`), the same renderer as Git tab (without per-hunk buttons). Reopening a task tab is `Deck::open_task_tab` (registers instance
-again; terminal opens in worktree automatically). To view without git or agents: `AGENTDECK_DEBUG_UI=tasks-demo` (or
+again; terminal opens in worktree automatically). To view without git or agents: `HOLT_DEBUG_UI=tasks-demo` (or
 `tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-confirm`, `tasks-discard`,
 `tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` in `debug_ui.rs`).
-For minimum sidebar width, set `{"rightPanelWidth": 280}` in `cfg/config.json` inside `AGENTDECK_HOME` folder.
+For minimum sidebar width, set `{"rightPanelWidth": 280}` in `cfg/config.json` inside `HOLT_HOME` folder.
 
 **Working on Documents mode.** State and pure logic live in `crates/app/src/docs.rs` (`Docs`: open/focus/close per project, deduplicated;
 `diff_files`: file list of a `GitDiff`; `DocTab::apply`: what each type displays upon receiving data), with
@@ -199,14 +199,14 @@ reading in `Deck::docs_load` (in a thread, returns as `UiMsg::Doc`), and body in
 Non-negotiable rules: with center in Documents **no `fit_tab`** runs (PTY does not change size), terminal receives no keyboard
 or IME (`handle_key`, `handle_ime`), and turn end marks `Tab.done` even on active tab. The watcher (`CoreEvent::WorkspaceChanged`) reloads
 open files (`docs_reload_files`). `tasks_flow_tests.rs` covers flow with real core and git. To view without dependencies:
-`AGENTDECK_DEBUG_UI=docs-demo` (or `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`, `-edit`, `-find`, `-diff-find`,
+`HOLT_DEBUG_UI=docs-demo` (or `docs-demo-file`, `-md`, `-report`, `-unreadable`, `-many`, `-badge`, `-edit`, `-find`, `-diff-find`,
 `-external`, `-confirm`, `-large`, `-md-code`; `docs_demo.rs`).
 The editable file (`Source`), saving (`docs_save`, `write_text`), and close prompt are in `ARCHITECTURE.md` ("Documents mode and editor") and `memory/learnings/documents-editor.md`.
 
 **Plugging in RAG (future).** Implement `ContextProvider` trait (`context.rs`) and register via `core.register_context_provider(...)`. Headless runner already queries registered providers.
 
 **Adding a test.** Place a `#[test]` in a `#[cfg(test)] mod tests` block at the end of the file. For end-to-end tests, use `crates/core/tests/`.
-To invoke the bridge as a tab, obtain its token with `spawn_spec_for(&ident).env["AGENTDECK_TOKEN"]`
+To invoke the bridge as a tab, obtain its token with `spawn_spec_for(&ident).env["HOLT_TOKEN"]`
 (see `tab_token` in `tests/bridge.rs`); with master token, body `from` is accepted. Tests initialize
 `Core` with `system_dirs: false`, so as not to depend on CLIs installed on the machine.
 
@@ -215,28 +215,37 @@ To invoke the bridge as a tab, obtain its token with `spawn_spec_for(&ident).env
 - Always ask agents to run `cargo fmt`, `cargo clippy ... -D warnings`, and `cargo test --workspace` before concluding. That is the same as what CI runs.
 - Changes to `Core` (lib.rs) affect the UI. Ask for small changes and one area at a time (core **or** app).
 - **CI** (Continuous Integration) is GitHub's workflow (`.github/workflows/ci.yml`). On each push it compiles and tests on Windows, Ubuntu, and Fedora (Fedora in container, build and tests only), marking the commit/PR with ✅ or ❌. If ❌, open the run log to view the error. What has been verified on Linux is in [LINUX.md](LINUX.md).
-- To debug visually without opening the window: `AGENTDECK_SMOKE=<folder>` saves a `screen.png` capture and exits the app (without downloading Whisper, to avoid initiating 1.6 GB in every temp folder). There are also `AGENTDECK_DEBUG_FEED=1`, `AGENTDECK_DEBUG_FAKE_SHELL=1`, `AGENTDECK_DEBUG_PTY=1` (records raw PTY output of each tab in `data/pty/`, see `terminal/record.rs`; tab right-click menu toggles same recording without env var), and `AGENTDECK_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agent>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`). On Linux, run under `xvfb-run`.
+- To debug visually without opening the window: `HOLT_SMOKE=<folder>` saves a `screen.png` capture and exits the app (without downloading Whisper, to avoid initiating 1.6 GB in every temp folder). There are also `HOLT_DEBUG_FEED=1`, `HOLT_DEBUG_FAKE_SHELL=1`, `HOLT_DEBUG_PTY=1` (records raw PTY output of each tab in `data/pty/`, see `terminal/record.rs`; tab right-click menu toggles same recording without env var), and `HOLT_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agent>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`). On Linux, run under `xvfb-run`.
 - Logs: run with `RUST_LOG=debug` to view detailed messages in console (in debug builds).
 
 ## 5. Known limitations
 
 The list is in [ideas.md](ideas.md), section "Known limitations"; what has not yet run on Windows is in [manual-tests.md](manual-tests.md).
 
-## 6. Name migration (CommandDeck → AgentDeck)
+## 6. Name migration (AgentDeck → Holt)
 
-The app was formerly named CommandDeck and renamed to AgentDeck (task `t20`). In `t32` (2026-10-23, before promotion to `main`) the code
-stopped accepting legacy names: `COMMANDDECK_*` variables (only `AGENTDECK_*` are valid), the `x-commanddeck-token` header, the
-`<!-- commanddeck:start/end -->` marker in `AGENTS.md`, and the `data/.commanddeck.lock` lock. A tab opened by the old version
-must be closed and reopened; an `AGENTS.md` still containing a `commanddeck:` block gets the new block alongside it (remove old block manually).
+The app was named CommandDeck, then AgentDeck, and is now **Holt** (task `t1`, 2026-10-29; the CommandDeck leftovers were
+dropped in the same task). An existing install keeps its projects, tabs, tasks and history without manual steps. Everything
+below exists **only for that**, is marked `Migration (remove after 0.4)` in the code, and is covered by `*_agentdeck_*` tests.
+Remove all of it in 0.4 (or later, once nobody runs an AgentDeck any more):
 
-**Only one reservation remains**, in `config.rs`: `config::legacy_config_files` starts with `%APPDATA%/CommandDeck/config.json`. Anyone who never
-opened AgentDeck and updates would lose their project list; therefore, if `AgentDeck/config.json` is missing, the app **copies** the one from CommandDeck
-(with tabs; the old one is not deleted). Configurations from `CommandDeck Terminal` (Electron) and `orquestra` continue being read without
-tabs. With `AGENTDECK_HOME` the app is isolated and reads no user config. Executables are `agentdeck.exe` and `ask-agent`.
+| What | Where | Remove |
+| :-- | :-- | :-- |
+| Config copy `<config dir>/AgentDeck/config.json` → `Holt/config.json` (tabs kept, old file left) | `config::legacy_config_files`, `is_agentdeck_config`, the copy in `Config::load_from`; tests `the_agentdeck_config_*`, `the_new_config_wins_over_the_agentdeck_one`, `candidates_start_with_the_new_file_then_agentdeck` | the `AgentDeck` candidate and the copy |
+| Rename of `.agentdeck.lock`, `.agentdeck.bridge`, `agentdeck.log`, `agentdeck-instructions.md` in `data/` (nothing moves while the old lock is held) | `paths::LEGACY_DATA_ENTRIES` (last four), `AppPaths::adopt_legacy_names`; tests `the_agentdeck_names_*`, `a_running_agentdeck_keeps_its_file_names` | the four entries and the lock check in `adopt_legacy_names` |
+| `~/.local/share/AgentDeck` → `Holt` (Linux fallback data folder) | `paths::adopt_legacy_home`; test `the_agentdeck_user_data_folder_moves_to_holt` | the function and its call in `AppPaths::detect` |
+| Second launch / lock: find a running old AgentDeck (`.agentdeck.lock`, `.agentdeck.bridge`, header `x-agentdeck-token`) and refuse to start beside it | `activation` (`LEGACY_BRIDGE_FILE`, `LEGACY_TOKEN_HEADER`), `LEGACY_LOCK_FILE` and `lock_data_dir` in `lib.rs`; tests `the_bridge_file_of_an_old_agentdeck_is_found`, `a_running_old_agentdeck_*`, `a_running_agentdeck_blocks_the_data_dir` | the legacy constants and checks |
+| `AGENTS.md` block `<!-- agentdeck:start/end -->` replaced by the `holt:` block; merge helpers treat both as the app's block | `workspace::marker_re` (`agentdeck` in the alternation); test `an_agentdeck_block_is_replaced_by_the_holt_one` | `agentdeck` from the regex |
+| Task worktrees opened under `.agentdeck/worktrees/<id>` (path stored in the task JSON) | `tasks::LEGACY_HOLT_DIR`, `tasks::safe_worktree` (accepts both roots); `workspace::IGNORED`/`WATCH_IGNORED` list `.agentdeck`; `is_app_data_dir` accepts `.agentdeck.lock`; test `worktrees_of_tasks_opened_as_agentdeck_are_still_accepted` | the legacy root and entries |
+| Env vars `AGENTDECK_*` in tabs opened before the update | `env::LEGACY_PREFIX` (`env_var_os`, `is_app_var`, `is_app_var_named`); tests in `env.rs` and `old_agentdeck_variables_still_work_in_old_tabs` (cli) | the prefix |
+| Bridge header `x-agentdeck-token` | `bridge::token_header`; test `the_old_agentdeck_token_header_still_authenticates` | the `or_else` |
+| Linux menu: delete `agentdeck.desktop` and `agentdeck.png` when installing Holt's | `crates/app/build.rs` (`legacy`), `scripts/install-desktop.sh` | the `legacy` lines |
 
-**Until when:** in a version after promoting `dev` to `main` (item in [backlog.md](backlog.md)). Then remove
-`legacy_config_files`, `is_commanddeck_config`, the copy in `Config::load_from`, and `*_commanddeck_*` tests.
-Context: [learnings/commanddeck-config-migration.md](learnings/commanddeck-config-migration.md).
+Not migrated on purpose: `data/` keeps its name (so `target/release/data/` keeps working); `ask-agent` keeps its name;
+`memory/history.md` keeps describing the past under the old name. `COMMANDDECK_*`, `x-commanddeck-token` and the
+`commanddeck:` marker are gone for good. With `HOLT_HOME` the app is isolated and reads no user config.
+Context: [learnings/agentdeck-to-holt-migration.md](learnings/agentdeck-to-holt-migration.md).
 
-**After updating:** the GitHub repository is already named `AgentDeck`; remaining step is renaming the local folder `commanddeck-dev`
-(user action; GitHub redirects the old URL).
+**After updating (user steps):** rename the GitHub repository `pattrickn0/AgentDeck` → `pattrickn0/Holt` (GitHub redirects the
+old URL) and update `origin`; optionally rename the local folder `~/AgentDeck` → `~/Holt` and rebuild so the menu entry points
+at the new path.

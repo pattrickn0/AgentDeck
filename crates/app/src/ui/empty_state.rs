@@ -7,7 +7,7 @@ use super::{button, galley, place, ButtonKind};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
-use agentdeck_core::t;
+use holt_core::t;
 
 /// "Open folder…" button of the card shown without a project (an internal marker, not user-facing).
 const NEW_PROJECT: &str = "#new-project";
@@ -81,7 +81,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
 
     // The app mark (56 px) in place of the old terminal icon
     let icon_box = Rect::from_min_size(Pos2::new(cx - 29.0, y), Vec2::splat(58.0));
-    deck.icons.paint(&painter, Icon::AgentDeck, icon_box.center(), 56.0, theme::pal().text_strong, 0.0);
+    deck.icons.paint(&painter, Icon::Holt, icon_box.center(), 56.0, theme::pal().text_strong, 0.0);
     y = icon_box.max.y + 12.0;
 
     let tr = Rect::from_min_size(Pos2::new(rect.min.x, y), Vec2::new(rect.width(), title.size().y));

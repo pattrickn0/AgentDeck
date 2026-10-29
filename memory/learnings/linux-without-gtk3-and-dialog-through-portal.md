@@ -1,5 +1,5 @@
 ---
-title: On Linux AgentDeck does not use GTK3, and dialogs depend on the portal
+title: On Linux Holt does not use GTK3, and dialogs depend on the portal
 summary: rfd 0.17 uses xdg-portal (no gtk-sys); do not require gtk3-devel — but without xdg-desktop-portal dialogs will not open.
 touches: [README.md, CONTRIBUTING.md, .github/workflows/ci.yml, crates/app/Cargo.toml]
 ---

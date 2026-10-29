@@ -116,10 +116,10 @@ pub fn start_message(task: &Task, boss: Option<&str>, memory: &str) -> String {
         m => format!("{m}\n\n---\n"),
     };
     terminal_text(&format!(
-        "[AgentDeck · Task {id}: {title}]\n\n{brief}\n\n---\n{memory}\
+        "[Holt · Task {id}: {title}]\n\n{brief}\n\n---\n{memory}\
 Rules for task {id}:\n\
 - Work ONLY in the folder {wt}, on the branch {branch} (created from {base}). Do not touch the main repository or any other folder.\n\
-- Make small commits on that branch. Do not merge or push: AgentDeck does the merge, after the review.\n\
+- Make small commits on that branch. Do not merge or push: Holt does the merge, after the review.\n\
 - Do not ask anyone (another agent or the user) to merge or to run ask-agent --task merge: that decision belongs to whoever reviews. Your work ends at --task done.\n\
 - Before touching a file for the first time, run ask-agent --learn <file> (shows what the project has already learned about it).\n\
 - If you find something non-obvious that the next agent would need to know (a trap, a decision, a convention), create a file in memory/learnings/ on this branch (format in memory/learnings/README.md) and cite it in the report: it goes through the same review and merge as the code.\n\
@@ -140,7 +140,7 @@ Start now, on your own: this brief is your work order. Do not wait for confirmat
 /// The message that returns the task to the agent with the review feedback. Agent-facing text: plain English.
 pub fn return_message(task: &Task, feedback: &str, learnings: &str) -> String {
     terminal_text(&format!(
-        "[AgentDeck · Task {id}: {title} — changes requested in the review]\n\n{feedback}\n\n{history}{learned}---\n\
+        "[Holt · Task {id}: {title} — changes requested in the review]\n\n{feedback}\n\n{history}{learned}---\n\
 Continue in the same folder ({wt}) and on the branch {branch}, with small commits. When you finish, write the report to a file and run ask-agent --task done {id} --file <file> again \
 (delivering by file preserves accents).",
         id = task.id,
@@ -166,7 +166,7 @@ pub fn reject_message(task: &Task, feedback: &str, aligned: bool, learnings: &st
         )
     };
     terminal_text(&format!(
-        "[AgentDeck · Task {id}: {title} — rejected in validation]\n\n\
+        "[Holt · Task {id}: {title} — rejected in validation]\n\n\
 Your previous work was already merged into {base}, but the user tested it and rejected it for the following reason:\n\n{feedback}\n\n{history}{learned}---\n\
 Fix it in the same folder ({wt}) and on the same branch {branch}, with small commits.{align} When you finish, write the report to a file and run ask-agent --task done {id} --file <file> again \
 (delivering by file preserves accents).",
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn the_start_message_carries_the_brief_and_the_rules() {
         let m = start_message(&sample(), Some("claude"), "");
-        assert!(m.starts_with("[AgentDeck · Task t3: Fix the login]\n\nDo X.\n\nThen Y."), "{m}");
+        assert!(m.starts_with("[Holt · Task t3: Fix the login]\n\nDo X.\n\nThen Y."), "{m}");
         assert!(m.contains("ONLY in the folder") && m.contains("task/t3-fix-the-login") && m.contains("created from main"), "{m}");
         assert!(m.contains("ask-agent --task done t3 --file"), "{m}");
         assert!(m.contains("Do not merge or push"), "{m}");

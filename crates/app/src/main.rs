@@ -1,7 +1,7 @@
-//! AgentDeck — native interface (winit 0.30 + glutin/glow + egui).
+//! Holt — native interface (winit 0.30 + glutin/glow + egui).
 //!
 //! Port of `renderer/` + `preload.js` from the Electron version. The backend lives in
-//! `agentdeck_core::Core`; this crate takes care of the window, the terminals (PTY + VT emulation),
+//! `holt_core::Core`; this crate takes care of the window, the terminals (PTY + VT emulation),
 //! the file tree, the "Integrated conversation" and the audio.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -33,8 +33,8 @@ mod util;
 mod window;
 mod wslg;
 
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::Core;
+use holt_core::paths::AppPaths;
+use holt_core::Core;
 use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {
@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
     // even with RUST_LOG=trace: `filter_module` pins the level (it is not a ceiling), and at
     // DEBUG they filled the log on every usage query. `zbus` (the Linux tray, over D-Bus) logs every menu
     // event at INFO: 139 of 156 lines of a session's log.
-    // The log also goes to `<data>/agentdeck.log`: a window app has no stderr.
+    // The log also goes to `<data>/holt.log`: a window app has no stderr.
     let data_dir = AppPaths::detect().data_dir;
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .filter_module("ureq_proto", log::LevelFilter::Warn)
@@ -55,8 +55,8 @@ fn main() -> anyhow::Result<()> {
 
     // Second launch: the live instance's window comes back (it may be hidden in the tray) and this one exits
     // silently. If it does not answer (hung), the normal startup continues, which shows the lock error.
-    if agentdeck_core::activation::activate_running(&data_dir) {
-        log::info!("another AgentDeck instance is already open: I asked it to show its window");
+    if holt_core::activation::activate_running(&data_dir) {
+        log::info!("another Holt instance is already open: I asked it to show its window");
         return Ok(());
     }
 

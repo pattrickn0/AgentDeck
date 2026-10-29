@@ -8,9 +8,9 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use agentdeck_core::capability::{self, Level};
-use agentdeck_core::models::{self, Effort};
-use agentdeck_core::{t, FeedKind, MergeBlock, Task, TaskError, TaskEvent, TaskMessage, TaskSpec, TaskStatus};
+use holt_core::capability::{self, Level};
+use holt_core::models::{self, Effort};
+use holt_core::{t, FeedKind, MergeBlock, Task, TaskError, TaskEvent, TaskMessage, TaskSpec, TaskStatus};
 
 use crate::deck::{AttachTarget, Deck, UiMsg};
 
@@ -25,7 +25,7 @@ pub enum Group {
     /// Merged, waiting for the user to test them.
     Validating,
     Running,
-    /// Started, but waiting for the scope to free up (see `agentdeck_core::scope`).
+    /// Started, but waiting for the scope to free up (see `holt_core::scope`).
     Queued,
     Draft,
     Failed,
@@ -1180,12 +1180,12 @@ impl Deck {
 }
 
 // ---------------------------------------------------------------------------
-// Fake states (screenshots, `AGENTDECK_DEBUG_UI=tasks-*`)
+// Fake states (screenshots, `HOLT_DEBUG_UI=tasks-*`)
 // ---------------------------------------------------------------------------
 
 /// One task of each status, with realistic data.
 pub fn demo_tasks() -> Vec<Task> {
-    let now = agentdeck_core::util::now_ms();
+    let now = holt_core::util::now_ms();
     let min = 60_000u64;
     let ev = |ago_min: u64, text: &str| TaskEvent { at_ms: now - ago_min * min, text: text.to_owned() };
     let msg = |ago_min: u64, kind: FeedKind, from: &str, to: &str, text: &str| TaskMessage {
@@ -1200,8 +1200,8 @@ pub fn demo_tasks() -> Vec<Task> {
         title: title.to_owned(),
         status,
         base: "dev".into(),
-        branch: format!("task/{id}-{}", agentdeck_core::tasks::slugify(title, 40)),
-        worktree: format!(r"C:\Users\you\agentdeck-dev\.agentdeck\worktrees\{id}").into(),
+        branch: format!("task/{id}-{}", holt_core::tasks::slugify(title, 40)),
+        worktree: format!(r"C:\Users\you\holt-dev\.holt\worktrees\{id}").into(),
         kind: kind.to_owned(),
         model: model.map(str::to_owned),
         instance: format!("{kind}@{id}"),
@@ -1217,7 +1217,7 @@ pub fn demo_tasks() -> Vec<Task> {
         diff_stat: Some(" crates/app/src/tasks_ui.rs       | 412 +++++++++++++++++++++++++++\n crates/app/src/ui/tasks.rs      | 688 ++++++++++++++++++++++++++++++++++++\n crates/app/src/ui/right_panel.rs |  14 +-\n crates/core/src/tasks.rs        |  23 ++\n 4 files changed, 1129 insertions(+), 8 deletions(-)\n".into()),
         events: vec![
             ev(95, "created"),
-            ev(90, "started: worktree C:\\Users\\you\\agentdeck-dev\\.agentdeck\\worktrees\\t4 on branch task/t4-tasks-tab-in-the-right-bar"),
+            ev(90, "started: worktree C:\\Users\\you\\holt-dev\\.holt\\worktrees\\t4 on branch task/t4-tasks-tab-in-the-right-bar"),
             ev(90, "brief delivered to the agent"),
             ev(6, "report received; in review"),
         ],
@@ -1312,7 +1312,7 @@ pub fn demo_tasks() -> Vec<Task> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdeck_core::i18n::{with_lang, Lang};
+    use holt_core::i18n::{with_lang, Lang};
 
     fn task(id: &str, status: TaskStatus, activity: u64) -> Task {
         Task { id: id.into(), status, created_ms: 1, events: vec![TaskEvent { at_ms: activity, text: "x".into() }], ..Task::default() }

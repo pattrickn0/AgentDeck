@@ -19,7 +19,7 @@ Remaining development work is tracked in [backlog.md](backlog.md); overview in [
 
 ## Preparation
 
-- [x] Compile and launch: `cargo build --workspace --release` and `.\target\release\agentdeck.exe` (all three `.exe` in the same directory).
+- [x] Compile and launch: `cargo build --workspace --release` and `.\target\release\holt.exe` (all three `.exe` in the same directory).
 - [x] Have installed, if possible: Claude Code, Antigravity, Git for Windows. Optional: Codex (`npm i -g @openai/codex`), OpenCode.
 - [x] (Optional) Compile and launch on **Linux** following the "Build and run (Linux)" section of the README; note distribution and whether X11 or Wayland.
 - [x] First launch (without `config.json`) and relaunching after closing **all** tabs: opens **without tabs**; no agent launches automatically.
@@ -29,7 +29,7 @@ Remaining development work is tracked in [backlog.md](backlog.md); overview in [
 
 Via CLI (`ask-agent --task`):
 
-- [x] (real use, t1–t16) In a git project, from an orchestrator tab: `ask-agent --task new "test" --start -` with request on stdin. The task tab opens in the background, its terminal is at `<repo>\.agentdeck\worktrees\t1`, the request and rules arrive typed, and the main repository's `git status` remains clean.
+- [x] (real use, t1–t16) In a git project, from an orchestrator tab: `ask-agent --task new "test" --start -` with request on stdin. The task tab opens in the background, its terminal is at `<repo>\.holt\worktrees\t1`, the request and rules arrive typed, and the main repository's `git status` remains clean.
 - [x] (real use, t1–t16; `--boss` was not verified) In the task tab, make a commit and run `ask-agent --task done t1 -`. `--task show t1` shows the report and diff, and the task's `--boss` reaches whoever created it.
 - [x] (real use, t1–t16) In the task tab, write the report to a file with accented characters (e.g. `C:\Temp\relatorio.md`) and run `ask-agent --task done t1 --file C:\Temp\relatorio.md`: `--task show t1` displays full accents (without `?`).
 - [x] (real use, t1–t16) `--task return t1 "fix it"` types the feedback into the tab. Afterwards, `--task merge t1` creates the merge commit and the task transitions to **awaiting validation**: the tab, folder, and branch remain, and the task branch points to the same commit as the base.
@@ -56,7 +56,7 @@ Via the **Tasks** tab on the right panel:
 - [ ] **Quota warning (t49):** with target agent above 80% and another installed official CLI below 50%, run `ask-agent <agent> "message"`: warning appears before response and message still delivers; with another agent only at 50% or more, no warning appears.
 - [ ] "+ New": with empty title, button is disabled; base defaults to current branch; non-existent base gives inline error; Ctrl+Enter creates. With "Start now", detail opens in-progress and agent tab appears in worktree with prompt typed. Without it, task stays in draft and "Start" begins it.
 - [ ] **Effort in form** (t25): in "+ New", the EFFORT field defaults to "Default". With Claude, choose "High" and create with "Start now": card and detail show "Claude · <model> · high" and tab opens with `--effort high` (Claude shows effort in statusline or in `/model`; if not shown, check process command line). With Antigravity, choose a `…-argon-low` model and "High": task model becomes `…-argon-high`; with no model chosen selector is disabled with tooltip on hover. With OpenCode (and Codex) selector is disabled with tooltip. `ask-agent --task new "x" --effort high --start --file p.md` accepts `low|medium|high` (or aliases baixo|medio|alto) and `--effort max` errors out.
-- [ ] **Scope and queue** (t45): in "+ New", SCOPE field accepts one path per line. (1) Create task A with scope `crates/core` and "Start now"; create task B with scope `crates/core/src/git.rs` and "Start now": B opens in detail as **Queued** ("Queued · waiting for t1" on card, yellow banner "Queued: scope overlaps with task t1…" in detail), without tab or folder in `.agentdeck/worktrees`, only the Discard button. (2) Merge A via button: B starts automatically, its tab opens, and worktree already contains what A introduced (`git log` in its folder). Repeat discarding A instead of merging. (3) Two tasks with `crates/app` and `crates/cli` start together. (4) Two tasks that only mention `memory/backlog.md` (and `Cargo.lock`) beyond their scopes start together. (5) A task without scope starts immediately alongside an in-progress task. (6) A task that delivers changes outside its scope shows "Modified outside scope: <file>" banner in review and remains mergeable. (7) With B queued, close and reopen the app: it remains queued (card and `ask-agent --task list` show "queued" and "(waiting for t1)") and starts when A finishes. (8) `ask-agent --task new "x" "brief" --scope crates/core memory/OVERVIEW.md --start` displays scope on creation; `--scope 'crates/*.rs'` and `--scope C:\x` error out; `--task show` lists scope and, when queued, what it waits for. A task awaiting validation does not hold the queue: with A in "Awaiting validation", B (same scope) starts immediately.
+- [ ] **Scope and queue** (t45): in "+ New", SCOPE field accepts one path per line. (1) Create task A with scope `crates/core` and "Start now"; create task B with scope `crates/core/src/git.rs` and "Start now": B opens in detail as **Queued** ("Queued · waiting for t1" on card, yellow banner "Queued: scope overlaps with task t1…" in detail), without tab or folder in `.holt/worktrees`, only the Discard button. (2) Merge A via button: B starts automatically, its tab opens, and worktree already contains what A introduced (`git log` in its folder). Repeat discarding A instead of merging. (3) Two tasks with `crates/app` and `crates/cli` start together. (4) Two tasks that only mention `memory/backlog.md` (and `Cargo.lock`) beyond their scopes start together. (5) A task without scope starts immediately alongside an in-progress task. (6) A task that delivers changes outside its scope shows "Modified outside scope: <file>" banner in review and remains mergeable. (7) With B queued, close and reopen the app: it remains queued (card and `ask-agent --task list` show "queued" and "(waiting for t1)") and starts when A finishes. (8) `ask-agent --task new "x" "brief" --scope crates/core memory/OVERVIEW.md --start` displays scope on creation; `--scope 'crates/*.rs'` and `--scope C:\x` error out; `--task show` lists scope and, when queued, what it waits for. A task awaiting validation does not hold the queue: with A in "Awaiting validation", B (same scope) starts immediately.
 - [ ] Close the tab of an in-progress task: detail displays "Reopen tab", reopening it in the worktree with task model.
 - [ ] Agent runs `ask-agent --task done tN -`: card automatically transitions to "In review", icon badge increments, and "N files +X −Y" appears.
 - [ ] In review detail: report, changes per file, and "View full diff" opens diff **in center** (Documents mode, t19: file list on left, colors, long lines soft-wrapped, no horizontal scrolling); right panel remains on detail with review buttons visible. **Open in Documents** under Brief and Report opens each formatted.
@@ -98,7 +98,7 @@ Via the **Tasks** tab on the right panel:
 - [ ] **"Current situation" at task start** (t13/t16): with another task in progress having modified files in branch and **uncommitted files in worktree**, the new task receives "Current situation" section with the other task (id, title, state) and all those files, with warning if any are mentioned in the brief, plus latest base commits. Without other tasks, shows "none". Verify that `git add`/`commit` from other task agent doesn't fail due to this (no `index.lock`).
 - [ ] **Learnings in feedback** (t16): return (or reject) a task with feedback referencing a file with specific learning the agent hasn't received: message includes "What the project has learned about referenced files"; a file already in the brief or prior feedback is not repeated. Return also repeats previous feedbacks (up to 5).
 - [ ] **Learning created by agent** (t13): task agent creates a file in `memory/learnings/` on branch and cites it in report; after merge, `ask-agent --learn` in another task displays it. File with invalid frontmatter is ignored with log warning without crashing task.
-- [ ] **Instructions in every tab, in new project without `AGENTS.md`** (t38): open a new folder (without `AGENTS.md`) as a project and open a tab for each installed CLI. Automated tests cover arguments with mock agents; verify with real CLI that it **received and obeys** (ask "what did AgentDeck instruct you to do when you need another agent?" or ask for review by another agent and check if it opens a tab instead of a subagent):
+- [ ] **Instructions in every tab, in new project without `AGENTS.md`** (t38): open a new folder (without `AGENTS.md`) as a project and open a tab for each installed CLI. Automated tests cover arguments with mock agents; verify with real CLI that it **received and obeys** (ask "what did Holt instruct you to do when you need another agent?" or ask for review by another agent and check if it opens a tab instead of a subagent):
   - Claude (`--append-system-prompt`), OpenCode (`instructions` in `OPENCODE_CONFIG_CONTENT`; verified with `opencode run --standalone`, TUI remaining);
   - **Codex** (`-c developer_instructions=...`; not installed on dev machine): verify value enters and, with npm installation on Windows (shim `.cmd`, raw text without quotes), `codex` does not reject option;
   - **Aider** (`--read`) and **Open Interpreter** (`--custom_instructions`): verify flags exist in installed version;
@@ -122,7 +122,7 @@ Inter-agent conversation ★
 - [ ] Bridge: question with deferred response (202); rename caller tab and destination tab before response arrives. Response is typed into caller's renamed tab.
 - [ ] Bridge: after a 202, destination runs `ask-agent <caller> "question"`. Arrives as new question, while original keeps waiting for `--reply N`.
 - [ ] Bridge: replying via legacy alias (`ask-agent agy "..."` for Antigravity question) delivers reply, no 409.
-- [ ] Headless ("Open agent tabs" disabled): ask a question and kill agentdeck.exe via Task Manager during response. Headless claude/node process terminates alongside it.
+- [ ] Headless ("Open agent tabs" disabled): ask a question and kill holt.exe via Task Manager during response. Headless claude/node process terminates alongside it.
 
 When message is typed into tab ★
 
@@ -145,17 +145,17 @@ Team and hierarchical agents ★
 - [ ] Dropping onto project row returns agent to root.
 - [ ] In reorganized agent tab, `ask-agent --team` shows correct manager and team; `ask-agent --boss "hi"` reaches manager; without manager, `--boss` explains it reports to user.
   - Verified: on manager, `--team` shows team and `--boss` explains reporting to user. Remaining: verify in subordinate tab.
-- [ ] After reorganization, next message delivered to agent ends with "[AgentDeck] Your position in the team has changed…" (once only; if it ran `--team` earlier, omitted).
+- [ ] After reorganization, next message delivered to agent ends with "[Holt] Your position in the team has changed…" (once only; if it ran `--team` earlier, omitted).
 - [ ] Closing manager tab: their team moves up to their manager (or root). Renaming tab with team preserves hierarchy.
 - [ ] Team: changing agent manager and closing their tab before next message does not consume notice. Closing subordinate without team notifies manager on next message.
 
 Security, environment, and new agents
 
-- [ ] Open **second window** of AgentDeck: exits silently and first window comes to front (see "Tray and second instance"). Only if first is hung does "another window is already using data folder" appear.
-- [ ] With `AGENTDECK_HOME` pointing to another folder, second window opens (separate instance).
-- [ ] Launching AgentDeck **from inside a tab** of another AgentDeck: parent tab does not crash.
-- [ ] Data folder with `&` in path (`AGENTDECK_HOME=C:\tmp\Ana&Bia`): Claude tab (npm shim) opens and turn hooks work.
-- [ ] crash.log: normal app usage appends nothing; `AGENTDECK_DEBUG_CRASH=heap` records crash; crash.log exceeding 256 KB rolls to crash.log.1 on launch.
+- [ ] Open **second window** of Holt: exits silently and first window comes to front (see "Tray and second instance"). Only if first is hung does "another window is already using data folder" appear.
+- [ ] With `HOLT_HOME` pointing to another folder, second window opens (separate instance).
+- [ ] Launching Holt **from inside a tab** of another Holt: parent tab does not crash.
+- [ ] Data folder with `&` in path (`HOLT_HOME=C:\tmp\Ana&Bia`): Claude tab (npm shim) opens and turn hooks work.
+- [ ] crash.log: normal app usage appends nothing; `HOLT_DEBUG_CRASH=heap` records crash; crash.log exceeding 256 KB rolls to crash.log.1 on launch.
 - [ ] **Gemini no longer appears** in "+" or `ask-agent --list` (Antigravity is the Google agent).
 - [ ] **Codex**: opens via "+" tab; upon turn completion, question queue advances (`notify` notification). If it prompts for approval to run `ask-agent`, note it.
 - [ ] **OpenCode**: opens via "+" tab and responds to `ask-agent opencode "hi"`.
@@ -255,12 +255,12 @@ Split screen ★
 
 Dictation and attachments ★
 
-- [ ] **Optional dictation: clean initial launch** (t34): in data folder without `whisper/models/` and without `config.json` (use fresh `AGENTDECK_HOME`; executable's sibling `whisper/` must not have model), app launches normally and shows modal "Voice dictation (optional)" with download size (~1.6 GB). Nothing downloaded before user answers (right panel shows no progress).
+- [ ] **Optional dictation: clean initial launch** (t34): in data folder without `whisper/models/` and without `config.json` (use fresh `HOLT_HOME`; executable's sibling `whisper/` must not have model), app launches normally and shows modal "Voice dictation (optional)" with download size (~1.6 GB). Nothing downloaded before user answers (right panel shows no progress).
 - [ ] **Optional dictation: "Not now"** (t34): modal closes (Esc also closes), nothing downloads, `config.json` receives `"dictation": "no"`, and on restart prompt does not reappear. Window microphone (and `Ctrl+Shift+M`) opens same modal instead of recording; microphone tooltip reads "Voice dictation not installed: click to download".
 - [ ] **Optional dictation: download** (t34): "Download" in modal (or later via ☰ Settings → "Download (~1.6 GB)") saves `"dictation": "yes"`, displays progress banner on right panel, and when finished status in Settings becomes "installed"; microphone records and transcribes as before. During download microphone informs in Conversation that download is in progress (and button tooltip says same).
 - [ ] **Optional dictation: remove** (t34): ☰ Settings → "Remove from disk" asks confirmation ("Confirm: delete from disk"; closing menu cancels confirmation); confirming deletes `whisper/models/ggml-large-v3-turbo.bin` (and `bin-cuda/`), status becomes "not installed", config saves `"no"`, and microphone offers download again. While dictation is actively recording, removal is rejected with warning.
 - [ ] **Optional dictation: existing Whisper installations** (t34): with model already downloaded and config lacking `dictation` field (upgrading users), app prompts nothing and dictation functions as before; `config.json` acquires `"dictation": "yes"`.
-- [ ] **Optional dictation: screenshot mode** (t34): `AGENTDECK_SMOKE` continues without downloading or prompting; `AGENTDECK_DEBUG_UI=dictation-ask` displays modal to inspect UI.
+- [ ] **Optional dictation: screenshot mode** (t34): `HOLT_SMOKE` continues without downloading or prompting; `HOLT_DEBUG_UI=dictation-ask` displays modal to inspect UI.
 - [ ] **Tab-scoped dictation (`Ctrl+Shift+M` or microphone icon on tab)**: clicking tab microphone records (blinks red), clicking again transcribes ("Transcribing…" on tab) and types text into PTY of that tab **without Enter**; switching tabs during recording/transcription keeps target on starting tab; closing tab before completion discards text with notice in Conversation.
 - [ ] **Microphone and attachment in pane header** (t11): each pane has microphone and file attachment buttons next to "+"; both operate on the **visible tab of that pane** (not focused pane or first pane): with two panes, recording in second types into visible tab of second; changing visible tab updates target. Button is disabled when visible tab is dead (or while transcribing) and tab shows only indicator (pulsing red dot, "Opening…" or "Transcribing…").
 - [ ] **Attach via header** (t11): attachment button copies file to `data/attachments` and types `@path` in Claude (raw path in other CLIs) into visible tab **without Enter**; duplicate filename does not overwrite existing file.
@@ -285,7 +285,7 @@ Dictation and attachments ★
 ## Resume conversations (t76: Claude and OpenCode; t77: Antigravity and Codex)
 
 - [ ] Open a Claude tab and an OpenCode tab (and a second Claude tab with another role). In each, say something easy to recognise ("my favourite number is 7"). Quit the app (tray → Exit) and open it again: every tab comes back to **its own** conversation (ask "what number did I say?").
-- [ ] Same after a crash: kill `agentdeck.exe` from Task Manager, reopen; the conversations are back.
+- [ ] Same after a crash: kill `holt.exe` from Task Manager, reopen; the conversations are back.
 - [ ] In a Claude tab type `/clear`, say something new, quit and reopen: the tab resumes the conversation that started after `/clear` (not the one before).
 - [ ] Close one of the tabs with its × and open that agent again: it starts a **fresh** conversation (the others are untouched).
 - [ ] Open a Claude tab and quit before sending any message; reopen: the tab opens normally, with no "could not resume" notice.
@@ -295,13 +295,13 @@ Dictation and attachments ★
 - [ ] Antigravity: open a tab, send a message ("my favourite number is 7"), and check that `config.json` gets the tab's `tabSessions` entry (a UUID) and `data/agy-logs/antigravity.log` exists. Quit and reopen: the tab opens with `--conversation <that id>` and remembers the number. Before the first message the tab has no entry and reopens empty without a notice.
 - [ ] Antigravity: inside the tab type `/new`, say something, quit and reopen: it resumes the conversation that started after `/new` (the saved id follows the log).
 - [ ] Antigravity: two tabs of it (`antigravity` and `antigravity@qa`) keep separate conversations after a restart; delete `~/.gemini/antigravity-cli/conversations/<id>.db` of one and reopen: it opens empty and the entry is replaced after the first message.
-- [ ] Codex (npm install on Windows): open a tab and check in `data/agentdeck.log` or Task Manager that it runs `codex.exe` directly (not `cmd.exe /c codex`). Send a message and wait for the reply: `tabSessions` gets the thread id. Quit and reopen: the tab runs `codex resume <id>` and remembers the message. A second Codex tab (`codex@qa`) has its own thread.
+- [ ] Codex (npm install on Windows): open a tab and check in `data/holt.log` or Task Manager that it runs `codex.exe` directly (not `cmd.exe /c codex`). Send a message and wait for the reply: `tabSessions` gets the thread id. Quit and reopen: the tab runs `codex resume <id>` and remembers the message. A second Codex tab (`codex@qa`) has its own thread.
 - [ ] Codex: `/new` inside the tab, send a message, reopen: it resumes the newer thread. Delete the rollout (`~/.codex/sessions/<y>/<m>/<d>/rollout-*-<id>.jsonl`) and reopen: it opens a new conversation with no error and no loop.
 - [ ] Codex: a tab closed before its first reply has no entry and reopens as a plain `codex` (known limit: the id is only known when the first turn ends).
 
 ## Titlebar, agent usage, and sidebar ★
 
-- [x] Window no longer has Windows titlebar: at top, ☰, panel toggle button (collapses/expands sidebar), "AgentDeck" (no logo), and +; on right, smaller minimize, maximize/restore, and close buttons (close turns red on hover).
+- [x] Window no longer has Windows titlebar: at top, ☰, panel toggle button (collapses/expands sidebar), "Holt" (no logo), and +; on right, smaller minimize, maximize/restore, and close buttons (close turns red on hover).
 - [ ] Dragging titlebar moves window; double-click toggles maximize/restore; dragging to screen edge snaps; Win+arrows work.
 - [ ] Resizing from 4 edges and 4 corners (cursor changes); when maximized, borders are inactive and window does not cover taskbar. On Linux, verify on X11 and Wayland.
 - [ ] Closing via × preserves window size as before.
@@ -310,7 +310,7 @@ Dictation and attachments ★
 - [ ] Usage without open window: with no Antigravity tab (installed and logged in), its usage appears within ~3 min. Restarting app preserves last Claude usage (`data/usage.json`), with "read ago" in panel.
 - [ ] Open Antigravity: usage appears within ~3 min; without login or network, dashed ring and "usage unavailable".
   - Verified: with login, Antigravity usage appears. Remaining: case without login/network.
-- [ ] Demo: `AGENTDECK_DEBUG_UI=usage-demo` (Claude 34%/12%, Antigravity with weekly warning, Codex with exhausted session) and `usage-panel` (same with panel open).
+- [ ] Demo: `HOLT_DEBUG_UI=usage-demo` (Claude 34%/12%, Antigravity with weekly warning, Codex with exhausted session) and `usage-panel` (same with panel open).
 - [ ] Explorer without repeated root row; "Refresh" re-reads tree and "Collapse all" closes folders.
 - [x] **ORGANIZATION** section in sidebar: **Tabs | Split | Focus** control selects window layout (Tabs = single pane).
 - [ ] Usage: once session renewal time passes without new reading, session bar shows faded 0% and panel reads "renewed · awaiting new reading".
@@ -330,7 +330,7 @@ Dictation and attachments ★
 - [ ] Restart app: only active project tabs open; other project tabs open when clicking project (nothing lost).
 - [ ] Right-click → Rename (name changes, folder does not), Open folder, Remove (confirms, closes project tabs; folder remains).
 - [ ] Removing last project: center prompts "Open folder…".
-- [ ] Screenshot: `AGENTDECK_DEBUG_UI=project:<id>` switches to project `<id>` on launch.
+- [ ] Screenshot: `HOLT_DEBUG_UI=project:<id>` switches to project `<id>` on launch.
 - [ ] Collapsible `PROJECTS` section at top of file tree, with indicator dot on active project.
 - [ ] `+` button: folder picker adds new workspace to list and activates it.
 - [ ] `×` button (appears on hover with 2+ projects): visible under cursor, click removes project from list; if active, automatically switches to first in list.
@@ -406,23 +406,27 @@ GitHub:
 
 Windows, with app open and an agent tab:
 
-- [ ] Click × (or Alt+F4): window hides without confirmation and AgentDeck icon sits in system tray; `AgentDeck` process continues in Task Manager and tab CLIs keep running.
+- [ ] Click × (or Alt+F4): window hides without confirmation and Holt icon sits in system tray; `Holt` process continues in Task Manager and tab CLIs keep running.
 - [ ] Before ×, request long turn in a tab (e.g. "count to 200 slowly with sleep"): with window hidden turn completes normally; upon reopening response is present and terminal is correct size (no 0×0 or duplicate lines).
 - [ ] Left-click icon: window restores and focuses. Right-click: menu with **Open** and **Quit**; Open does the same.
 - [ ] Minimize (titlebar button) then **Open** from icon: restores and focuses.
-- [ ] With window hidden (or minimized), launch `agentdeck.exe` again: no second process or error message; original window comes to front (does not just flash on taskbar).
+- [ ] With window hidden (or minimized), launch `holt.exe` again: no second process or error message; original window comes to front (does not just flash on taskbar).
 - [ ] **Quit** with nothing pending: closes everything (icon vanishes, process exits, tab CLIs terminate).
 - [ ] **Quit** with unsaved edited file: window appears prompting "There are unsaved changes".
 - [ ] **Quit** with agent mid-turn: window appears with "Agents are currently working" (Cancel keeps app running).
 - [ ] Linux with tray (KDE, or GNOME with AppIndicator): same test script with `ksni`. Without `StatusNotifierWatcher` (pure GNOME): × **quits** (asking first if an agent is mid-turn or a document is unsaved), and the app is never left invisible without an icon.
 
-## Name migration (CommandDeck → AgentDeck) ★
+## Name migration (AgentDeck → Holt) ★
 
-With data directory and config from CommandDeck users (`%APPDATA%\CommandDeck\config.json`), without `AGENTDECK_HOME`:
+With a copy of a real AgentDeck install (config in `%APPDATA%\AgentDeck\config.json` or `~/.config/AgentDeck/`, the `data/` folder, a project with an open task worktree in `.agentdeck/worktrees/` and an `AGENTS.md` with the `agentdeck:` block), without `HOLT_HOME`:
 
-- [ ] Launch `agentdeck.exe`: window is named AgentDeck, projects and open tabs from legacy version appear, and `%APPDATA%\AgentDeck\config.json` was created (`CommandDeck\config.json` remains intact).
-- [ ] Existing tasks (`data/tasks/`) and history continue on task desk.
-- [ ] In new agent tab, `ask-agent --list` works and `echo %AGENTDECK_PORT%` (or `$env:AGENTDECK_PORT`) has a value.
+- [ ] Launch Holt (while the old AgentDeck is closed): window is named Holt, projects and open tabs from the old install appear, and `Holt/config.json` was created (`AgentDeck/config.json` remains intact).
+- [ ] `data/` now has `.holt.lock`, `holt.log` and `holt-instructions.md` instead of the `agentdeck` ones; existing tasks (`data/tasks/`), chat history and conversations resumed per tab continue.
+- [ ] The project's `AGENTS.md` has a single `holt:` block (the `agentdeck:` one is gone), and a git merge of a task that also touched `AGENTS.md` still works.
+- [ ] The task opened before the rename (worktree under `.agentdeck/worktrees/<id>`) can be validated and merged; a new task goes to `.holt/worktrees` and `.holt/` is in `.git/info/exclude`.
+- [ ] With the old AgentDeck still running on the same `data/`: opening Holt brings the old window to the front and exits (no second instance).
+- [ ] In a tab opened before the update (still has `AGENTDECK_*`), `ask-agent --list` works; in a new tab `echo $HOLT_PORT` has a value.
+- [ ] Linux: the app menu shows "Holt" with its icon and no leftover "AgentDeck" entry (`~/.local/share/applications/agentdeck.desktop` and `agentdeck.png` are gone after `cargo build --release`).
 
 ## Final checklist
 

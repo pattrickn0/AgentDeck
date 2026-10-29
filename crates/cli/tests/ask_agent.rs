@@ -4,8 +4,8 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, StartOptions};
+use holt_core::paths::AppPaths;
+use holt_core::{Config, Core, StartOptions};
 
 fn start_core(root: &std::path::Path) -> Core {
     let paths = AppPaths {
@@ -22,7 +22,7 @@ fn start_core(root: &std::path::Path) -> Core {
     {
         use std::os::unix::fs::PermissionsExt;
         let script = fake_bin.join("claude");
-        std::fs::write(&script, "#!/bin/sh\necho \"claude answered (from $AGENTDECK_AGENT)\"; cat >/dev/null\n").expect("write");
+        std::fs::write(&script, "#!/bin/sh\necho \"claude answered (from $HOLT_AGENT)\"; cat >/dev/null\n").expect("write");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
     let opts = StartOptions {
@@ -38,7 +38,7 @@ fn start_core(root: &std::path::Path) -> Core {
 /// Removes the app's variables from the test's environment (the test may run inside a tab).
 fn scrub_app_env(cmd: &mut Command) {
     for name in ["PORT", "TOKEN", "AGENT", "DEPTH", "ASK_WAIT"] {
-        cmd.env_remove(format!("AGENTDECK_{name}"));
+        cmd.env_remove(format!("HOLT_{name}")).env_remove(format!("AGENTDECK_{name}"));
     }
 }
 
@@ -51,9 +51,7 @@ fn ask_agent_bytes(core: Option<&Core>, args: &[&str], stdin: &[u8]) -> Output {
     cmd.args(args);
     scrub_app_env(&mut cmd);
     if let Some(core) = core {
-        cmd.env("AGENTDECK_PORT", core.bridge_port().to_string())
-            .env("AGENTDECK_TOKEN", core.bridge_token())
-            .env("AGENTDECK_AGENT", "shell");
+        cmd.env("HOLT_PORT", core.bridge_port().to_string()).env("HOLT_TOKEN", core.bridge_token()).env("HOLT_AGENT", "shell");
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
@@ -68,13 +66,13 @@ fn text(b: &[u8]) -> String {
 }
 
 #[test]
-fn outside_agentdeck_exits_2() {
+fn outside_holt_exits_2() {
     let out = ask_agent(None, &["--list"], None);
     assert_eq!(out.status.code(), Some(2));
-    assert_eq!(text(&out.stderr).trim(), "ask-agent: run this command from inside an AgentDeck terminal.");
+    assert_eq!(text(&out.stderr).trim(), "ask-agent: run this command from inside a Holt terminal.");
 }
 
-/// The old name's prefix (`COMMANDDECK_*`) no longer works: without `AGENTDECK_*`, `ask-agent` cannot find the bridge.
+/// The old name's prefix (`COMMANDDECK_*`) no longer works: without `HOLT_*`, `ask-agent` cannot find the bridge.
 #[test]
 fn old_commanddeck_variables_are_ignored() {
     let tmp = tempfile::tempdir().expect("tmp");
@@ -87,7 +85,22 @@ fn old_commanddeck_variables_are_ignored() {
         .env("COMMANDDECK_AGENT", "shell");
     let out = cmd.output().expect("ask-agent");
     assert_eq!(out.status.code(), Some(2), "{}", text(&out.stderr));
-    assert_eq!(text(&out.stderr).trim(), "ask-agent: run this command from inside an AgentDeck terminal.");
+    assert_eq!(text(&out.stderr).trim(), "ask-agent: run this command from inside a Holt terminal.");
+}
+
+/// Tabs opened before the rename from AgentDeck carry `AGENTDECK_*`: `ask-agent` still finds the bridge there.
+#[test]
+fn old_agentdeck_variables_still_work_in_old_tabs() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let core = start_core(tmp.path());
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
+    scrub_app_env(&mut cmd);
+    cmd.arg("--list")
+        .env("AGENTDECK_PORT", core.bridge_port().to_string())
+        .env("AGENTDECK_TOKEN", core.bridge_token())
+        .env("AGENTDECK_AGENT", "shell");
+    let out = cmd.output().expect("ask-agent");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
 }
 
 #[test]
@@ -149,7 +162,7 @@ fn signal_never_fails_and_reply_needs_a_number() {
     // of the turn): `--signal` exits with 0 even when the bridge refuses it (here, master token) or outside it.
     let out = ask_agent(Some(&core), &["--signal", "idle", "{\"type\":\"agent-turn-complete\"}"], None);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    assert_eq!(ask_agent(None, &["--signal", "busy"], None).status.code(), Some(0), "not even outside AgentDeck");
+    assert_eq!(ask_agent(None, &["--signal", "busy"], None).status.code(), Some(0), "not even outside Holt");
 
     let out = ask_agent(Some(&core), &["--reply", "x", "hi"], None);
     assert_eq!(out.status.code(), Some(2));
@@ -166,7 +179,7 @@ fn statusline(core: Option<&Core>, token: Option<&str>, config: &std::path::Path
     scrub_app_env(&mut cmd);
     cmd.arg("--usage").env("CLAUDE_CONFIG_DIR", config).current_dir(config);
     if let (Some(core), Some(token)) = (core, token) {
-        cmd.env("AGENTDECK_PORT", core.bridge_port().to_string()).env("AGENTDECK_TOKEN", token);
+        cmd.env("HOLT_PORT", core.bridge_port().to_string()).env("HOLT_TOKEN", token);
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
@@ -189,7 +202,7 @@ fn usage_statusline_posts_and_prints() {
     })
     .to_string();
 
-    // Without the bridge (outside AgentDeck), it only prints; with an API key (no limits), nothing.
+    // Without the bridge (outside Holt), it only prints; with an API key (no limits), nothing.
     let out = statusline(None, None, &config, &input);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert_eq!(text(&out.stdout), "session 34% · week 12%\n");
@@ -203,8 +216,8 @@ fn usage_statusline_posts_and_prints() {
         std::fs::create_dir_all(&bin).expect("mkdir");
         std::fs::write(bin.join("claude.exe"), b"").expect("write");
     }
-    let ident = agentdeck_core::Ident::parse("claude@dev").expect("id");
-    let token = core.spawn_spec_for(&core.active_project_id(), &ident).expect("spec").env["AGENTDECK_TOKEN"].clone();
+    let ident = holt_core::Ident::parse("claude@dev").expect("id");
+    let token = core.spawn_spec_for(&core.active_project_id(), &ident).expect("spec").env["HOLT_TOKEN"].clone();
     let out = statusline(Some(&core), Some(&token), &config, &input);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let usage = core.usage_snapshot();
@@ -270,7 +283,7 @@ fn session_hook(core: &Core, token: &str, args: &[&str], stdin: &str) -> Output 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
     scrub_app_env(&mut cmd);
     cmd.args(["--signal", "session"]).args(args);
-    cmd.env("AGENTDECK_PORT", core.bridge_port().to_string()).env("AGENTDECK_TOKEN", token);
+    cmd.env("HOLT_PORT", core.bridge_port().to_string()).env("HOLT_TOKEN", token);
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn ask-agent");
     let _ = child.stdin.take().expect("stdin").write_all(stdin.as_bytes());
@@ -287,8 +300,8 @@ fn the_session_hook_saves_the_new_conversation_id_of_the_tab() {
         std::fs::write(bin.join("claude.exe"), b"").expect("write");
     }
     let project = core.active_project_id();
-    let ident = agentdeck_core::Ident::parse("claude@dev").expect("id");
-    let token = core.spawn_spec_for(&project, &ident).expect("spec").env["AGENTDECK_TOKEN"].clone();
+    let ident = holt_core::Ident::parse("claude@dev").expect("id");
+    let token = core.spawn_spec_for(&project, &ident).expect("spec").env["HOLT_TOKEN"].clone();
     let first = core.tab_session(&project, "claude@dev").expect("saved by the first launch");
 
     // `/clear`: Claude calls the hook with the new id in the JSON on stdin.

@@ -108,6 +108,6 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "* Com o terminal focado, vai para o terminal (tmux). Mude em ☰ Configurações.",
     ),
     ("Keyboard Shortcuts", "Atalhos de Teclado"),
-    ("Main AgentDeck shortcuts and actions", "Principais atalhos e ações do AgentDeck"),
+    ("Main Holt shortcuts and actions", "Principais atalhos e ações do Holt"),
     ("Press Esc or click outside to close", "Pressione Esc ou clique fora para fechar"),
 ];

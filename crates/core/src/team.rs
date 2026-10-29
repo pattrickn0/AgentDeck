@@ -71,7 +71,7 @@ pub fn notice(team: &Team) -> String {
     };
     let crew = if team.crew.is_empty() { "no agents".to_owned() } else { team.crew.join(", ") };
     format!(
-        "[AgentDeck] Your place in the team changed: {boss}; your crew: {crew}. Delegate preferably to your crew. \
+        "[Holt] Your place in the team changed: {boss}; your crew: {crew}. Delegate preferably to your crew. \
 Check it at any time with ask-agent --team."
     )
 }

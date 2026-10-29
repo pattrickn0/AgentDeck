@@ -622,14 +622,14 @@ mod tests {
     #[test]
     fn paths_are_taken_from_the_text_only_when_they_exist() {
         let dir = tempfile::tempdir().unwrap();
-        for f in ["crates/core/src/tasks.rs", "memory/AGENTDECK.md", "Cargo.toml"] {
+        for f in ["crates/core/src/tasks.rs", "memory/HOLT.md", "Cargo.toml"] {
             let p = dir.path().join(f);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, "x").unwrap();
         }
-        let text = "Read `memory/AGENTDECK.md` and crates/core/src/tasks.rs (see `start_message`); \
+        let text = "Read `memory/HOLT.md` and crates/core/src/tasks.rs (see `start_message`); \
                     crates\\core\\src\\tasks.rs again, Cargo.toml, ../outside.rs, crates/core/src/does_not_exist.rs and crates/core (folder).";
-        assert_eq!(paths_in_text(text, dir.path()), ["memory/AGENTDECK.md", "crates/core/src/tasks.rs", "Cargo.toml"]);
+        assert_eq!(paths_in_text(text, dir.path()), ["memory/HOLT.md", "crates/core/src/tasks.rs", "Cargo.toml"]);
         assert!(paths_in_text("nothing here, only words. and a period.", dir.path()).is_empty());
         // A folder is not a file; `..` and absolute paths do not escape the repository.
         assert!(paths_in_text("crates/core ../Cargo.toml /etc/passwd", dir.path()).is_empty());
@@ -774,8 +774,8 @@ mod tests {
 
     #[test]
     fn absolute_paths_become_repository_paths() {
-        let roots = [std::path::PathBuf::from("C:/repo/.agentdeck/worktrees/t13"), std::path::PathBuf::from("C:/repo")];
-        assert_eq!(relativize(r"C:\repo\.agentdeck\worktrees\t13\crates\cli\a.rs", &roots), "crates/cli/a.rs");
+        let roots = [std::path::PathBuf::from("C:/repo/.holt/worktrees/t13"), std::path::PathBuf::from("C:/repo")];
+        assert_eq!(relativize(r"C:\repo\.holt\worktrees\t13\crates\cli\a.rs", &roots), "crates/cli/a.rs");
         assert_eq!(relativize("c:/REPO/crates/core/x.rs", &roots), "crates/core/x.rs");
         assert_eq!(relativize(r"./crates\app\y.rs", &roots), "crates/app/y.rs");
         // Outside the roots, and a partial folder-name prefix: only normalized.

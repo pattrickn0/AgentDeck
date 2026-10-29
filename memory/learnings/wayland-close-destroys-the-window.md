@@ -16,6 +16,6 @@ connection; dropped afterwards they crashed every exit with `SIGSEGV` in `wl_pro
 **Why:** found on the first real Wayland run (openSUSE Tumbleweed, GNOME, 2026-10-29); CI never opens a window.
 **How to apply:** no GL call may run while parked (`App::exiting` skips `EguiGlow::destroy` then). Anything that owns
 Wayland objects is dropped in `App::exiting`, not left for `Drop`. `GlWindow` fields drop surface, context, then
-window. Wayland also ignores the window icon and position: the icon comes from `agentdeck.desktop` matched by the app
+window. Wayland also ignores the window icon and position: the icon comes from `holt.desktop` matched by the app
 id, which a release build installs (`crates/app/build.rs`). It backdates the files it writes: written "now", they
 look newer than the run and `rerun-if-changed` would recompile the app on every build.

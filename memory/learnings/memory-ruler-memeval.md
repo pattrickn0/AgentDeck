@@ -1,13 +1,13 @@
 ---
 title: Memory benchmark (memeval): character budget matters more than co-change
-summary: cargo run -p agentdeck-core --example memeval measures recall/precision/size of learning delivery; on 24/10 co-change did not beat the baseline of most-changed files, and the 6000-character ceiling was the bottleneck.
+summary: cargo run -p holt-core --example memeval measures recall/precision/size of learning delivery; on 24/10 co-change did not beat the baseline of most-changed files, and the 6000-character ceiling was the bottleneck.
 touches: [crates/core/examples/memeval.rs, crates/core/src/learnings.rs, crates/core/src/situation.rs]
 ---
 `crates/core/examples/memeval.rs` evaluates across merged tasks (and direct commits to `dev`) what each learning delivery
 strategy would have predicted accurately. Run with the **Windows path** of the tasks file (the binary does not parse
 `/c/Users/...` from Git Bash):
 
-`cargo run --release -p agentdeck-core --example memeval -- . "C:\...\data\tarefas\<project>.json" [--detalhe]`
+`cargo run --release -p holt-core --example memeval -- . "C:\...\data\tarefas\<project>.json" [--detalhe]`
 
 Ground truth = learnings with `touches` matching files modified by the task, evaluated **at the base commit** of the task (the point where the
 branch was created, not the merge's `merge-base`: merging `dev` into the branch would shift the base). Global learnings are excluded from scoring.

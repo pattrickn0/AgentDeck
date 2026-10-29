@@ -231,7 +231,7 @@ fn agent(url: &str, stall: Duration) -> ureq::Agent {
     let read_timeout = stall.saturating_add(Duration::from_millis(250));
     let config = ureq::config::Config::builder()
         .http_status_as_error(false)
-        .user_agent("agentdeck")
+        .user_agent("holt")
         .timeout_connect(Some(Duration::from_secs(30)))
         .timeout_recv_response(Some(Duration::from_secs(30).max(stall)))
         // Global body ceiling; each individual socket read has a timeout close to `stall`
@@ -773,7 +773,7 @@ mod tests {
         assert_eq!(std::fs::read(&dest).expect("read"), data);
     }
 
-    /// Opt-in (`cargo test -p agentdeck-core -- --ignored`): uses actual GitHub and Hugging Face.
+    /// Opt-in (`cargo test -p holt-core -- --ignored`): uses actual GitHub and Hugging Face.
     #[test]
     #[ignore = "uses network"]
     fn real_network_github_resumes_and_huggingface_honors_range() {

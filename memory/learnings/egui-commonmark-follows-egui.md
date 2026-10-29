@@ -11,5 +11,5 @@ custom rendering with `pulldown-cmark` (headings, checklists with `- [ ]`, table
 **Why:** the app zeros `style.spacing.item_spacing` and `button_padding` (`theme::install_style`) because almost everything is painted by hand;
 `egui_commonmark` relies on this spacing to separate paragraphs and list items, and without it text renders glued together. Therefore,
 `ui/docs.rs::markdown_style` restores spacing, fonts, and colors specifically within the document column.
-**How to apply:** when updating egui, update both simultaneously and check results with `AGENTDECK_DEBUG_UI=docs-demo-report`; adjust
+**How to apply:** when updating egui, update both simultaneously and check results with `HOLT_DEBUG_UI=docs-demo-report`; adjust
 markdown styling only in `markdown_style`, never in `install_style`.

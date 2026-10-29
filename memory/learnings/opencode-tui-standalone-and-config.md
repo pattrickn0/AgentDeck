@@ -5,7 +5,7 @@ touches: [crates/core/src/models.rs, crates/core/src/agents.rs]
 ---
 OpenCode's TUI lacks a `--model` flag or command-line option for system instructions (only `opencode run` and `mini`
 support `-m`, and the `model#high` variant only exists under `run -m`). In interactive tabs, the model and
-`data/agentdeck-instructions.md` are passed in `OPENCODE_CONFIG_CONTENT` (`models::opencode_tui`), which overrides
+`data/holt-instructions.md` are passed in `OPENCODE_CONFIG_CONTENT` (`models::opencode_tui`), which overrides
 user configuration and appends instructions to the project's `AGENTS.md`.
 
 **Why:** `OPENCODE_CONFIG_CONTENT` is only read by the process that boots the OpenCode server. Without

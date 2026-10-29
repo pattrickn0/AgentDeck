@@ -8,6 +8,6 @@ became the local names; in `root-cause-tracing.md`, the mention of `find-pollute
 became a sentence, and the script was not brought in. `CREATION-LOG.md` and the `test-*.md` files (the skill's own
 tests) were not brought in either.
 
-Use in AgentDeck: find the cause before fixing. Only four Superpowers skills were brought in; the ones that tell
+Use in Holt: find the cause before fixing. Only four Superpowers skills were brought in; the ones that tell
 the agent to open subagents, create worktrees outside the tasks desk or write plans in `docs/superpowers/` were left
-out, because they go against the AgentDeck rules.
+out, because they go against the Holt rules.

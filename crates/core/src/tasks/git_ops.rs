@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::text::cap_text;
-use super::{Task, MAX_STAT};
+use super::{Task, HOLT_DIR, LEGACY_HOLT_DIR, MAX_STAT};
 use crate::git::{run, GitError, Repo, COMMIT_TIMEOUT, WRITE_TIMEOUT};
 use crate::t;
 use crate::util;
@@ -19,10 +19,14 @@ pub fn dirty_paths(porcelain: &str) -> Vec<String> {
         .collect()
 }
 
-/// The worktree folder is inside `<root>/.agentdeck/worktrees` (and is not the parent folder itself).
-pub(super) fn safe_worktree(worktree: &Path, allowed: &Path) -> bool {
+/// The worktree folder is inside `<root>/.holt/worktrees` (or the `<root>/.agentdeck/worktrees` of tasks opened before the
+/// rename), and is not that parent folder itself.
+pub(super) fn safe_worktree(worktree: &Path, root: &Path) -> bool {
     let wt = util::absolutize(worktree);
-    util::path_within(&wt, allowed) && !util::same_path(&wt, allowed)
+    [HOLT_DIR, LEGACY_HOLT_DIR].into_iter().any(|dir| {
+        let allowed = util::absolutize(&root.join(dir).join("worktrees"));
+        util::path_within(&wt, &allowed) && !util::same_path(&wt, &allowed)
+    })
 }
 
 /// Task branch (`task/…`, or the `tarefa/…` of tasks created before the English rename) with an acceptable name.
@@ -156,12 +160,26 @@ mod tests {
 
     #[test]
     fn only_the_expected_folder_is_ever_touched() {
-        // As in the real code, the allowed folder already comes absolute (on Windows, `/repo` gets the drive).
-        let allowed = &util::absolutize(Path::new("/repo/.agentdeck/worktrees"));
-        assert!(safe_worktree(Path::new("/repo/.agentdeck/worktrees/t1"), allowed));
-        assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees"), allowed));
-        assert!(!safe_worktree(Path::new("/repo/src"), allowed));
-        assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees/../../src"), allowed));
+        let root = Path::new("/repo");
+        assert!(safe_worktree(Path::new("/repo/.holt/worktrees/t1"), root));
+        assert!(!safe_worktree(Path::new("/repo/.holt/worktrees"), root));
+        assert!(!safe_worktree(Path::new("/repo/src"), root));
+        assert!(!safe_worktree(Path::new("/repo/.holt/worktrees/../../src"), root));
+        assert!(!safe_worktree(Path::new("/other/.holt/worktrees/t1"), root));
+    }
+
+    /// Migration: a task opened before the rename keeps its `.agentdeck/worktrees` path, and it is accepted.
+    #[test]
+    fn worktrees_of_tasks_opened_as_agentdeck_are_still_accepted() {
+        let root = Path::new("/repo");
+        assert!(safe_worktree(Path::new("/repo/.agentdeck/worktrees/t1"), root));
+        assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees"), root));
+        assert!(!safe_worktree(Path::new("/repo/.agentdeck/worktrees/../../src"), root));
+        assert!(!safe_worktree(Path::new("/repo/.agentdeck/t1"), root));
+    }
+
+    #[test]
+    fn task_branches_are_validated() {
         assert!(
             valid_task_branch("task/t1-x")
                 && valid_task_branch("tarefa/t1-x")

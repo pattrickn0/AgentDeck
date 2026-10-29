@@ -1,5 +1,5 @@
-//! Verification mode (port of `AGENTDECK_SMOKE`): with `AGENTDECK_SMOKE=<folder>`, after
-//! `AGENTDECK_SMOKE_DELAY` ms (default 4000) reads the framebuffer, saves `<folder>/screen.png` and exits.
+//! Verification mode (port of `HOLT_SMOKE`): with `HOLT_SMOKE=<folder>`, after
+//! `HOLT_SMOKE_DELAY` ms (default 4000) reads the framebuffer, saves `<folder>/screen.png` and exits.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -14,8 +14,8 @@ pub struct Smoke {
 
 impl Smoke {
     pub fn from_env() -> Option<Self> {
-        let dir = agentdeck_core::env_var_os("SMOKE")?;
-        let delay = agentdeck_core::env_var("SMOKE_DELAY").and_then(|v| v.parse::<u64>().ok()).unwrap_or(4000);
+        let dir = holt_core::env_var_os("SMOKE")?;
+        let delay = holt_core::env_var("SMOKE_DELAY").and_then(|v| v.parse::<u64>().ok()).unwrap_or(4000);
         Some(Self { dir: PathBuf::from(dir), at: Instant::now() + Duration::from_millis(delay), armed: false })
     }
 }

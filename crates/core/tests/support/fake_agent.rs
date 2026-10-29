@@ -1,5 +1,5 @@
 //! Fake agent for the bridge tests, in place of the old shell scripts: a real binary that behaves
-//! the same on Windows and Unix (it is the `agentdeck-core` test `[[bin]]`, see `Cargo.toml`).
+//! the same on Windows and Unix (it is the `holt-core` test `[[bin]]`, see `Cargo.toml`).
 //!
 //! The test copies this binary into the search folder under the name the app looks for (`claude.exe`
 //! on Windows, `claude` on Unix) and writes the behaviour next to it, in `<name>.fake.json`; the app
@@ -7,7 +7,7 @@
 //!
 //! - `stdout`: printed text (one line);
 //! - `stderr`: text printed on error; `exit`: exit code (default 0);
-//! - `echo_args`: prints `ARGS: [arg]…`; an argument containing "AgentDeck" (the instructions) becomes `[<sys>]`;
+//! - `echo_args`: prints `ARGS: [arg]…`; an argument containing "Holt" (the instructions) becomes `[<sys>]`;
 //! - `echo_env`: prints `ENV: <values…>` of the listed variables;
 //! - `print_env`: prints only the variable's value;
 //! - `echo_stdin`: copies stdin to stdout (like `cat`);
@@ -35,7 +35,7 @@ fn main() {
     if spec["echo_args"].as_bool().unwrap_or(false) {
         out.extend_from_slice(b"ARGS:");
         for arg in &args {
-            let text = if arg.contains("AgentDeck") { " [<sys>]".to_owned() } else { format!(" [{arg}]") };
+            let text = if arg.contains("Holt") { " [<sys>]".to_owned() } else { format!(" [{arg}]") };
             out.extend_from_slice(text.as_bytes());
         }
         out.push(b'\n');

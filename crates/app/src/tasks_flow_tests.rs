@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, MergeBlock, StartOptions, Task, TaskStatus};
+use holt_core::paths::AppPaths;
+use holt_core::{Config, Core, MergeBlock, StartOptions, Task, TaskStatus};
 
 use crate::deck::Deck;
 use crate::docs::{CenterView, DiffDoc, DocState};
@@ -480,9 +480,9 @@ fn reopening_the_tab_of_a_running_task_registers_the_instance_again() {
     assert!(env.tab_open(&id), "the tab came back");
     assert!(env.deck.tasks.notice.is_none());
     // The terminal opens in the task's worktree (the core resolves it from the instance).
-    let ident = agentdeck_core::Ident::parse(&instance).expect("id");
+    let ident = holt_core::Ident::parse(&instance).expect("id");
     let spec = env.core.spawn_spec_for(&env.project(), &ident).expect("spec");
-    assert!(agentdeck_core::util::same_path(&spec.cwd, &env.task(&id).worktree), "{}", spec.cwd.display());
+    assert!(holt_core::util::same_path(&spec.cwd, &env.task(&id).worktree), "{}", spec.cwd.display());
     // Go to tab only activates it; an already resolved task does not reopen the closed tab.
     env.deck.tasks_act(&id, TaskAct::GoToTab);
     assert_eq!(env.deck.active.map(|i| env.deck.tabs[i].ident.id()), Some(instance.clone()));
@@ -519,8 +519,7 @@ fn a_new_task_gets_the_learnings_and_the_current_situation_and_feedbacks_come_ba
     let project = env.project();
     let tasks_dir = env._tmp.path().join("data").join("tasks");
     fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
-        let spec =
-            agentdeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("user".into()), ..Default::default() };
+        let spec = holt_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("user".into()), ..Default::default() };
         let t = env.core.task_create(project, spec).expect("create");
         env.core.task_start(project, &t.id).expect("start");
         t.id
@@ -585,8 +584,7 @@ fn feedback_brings_the_learnings_of_new_files_and_the_situation_lists_uncommitte
     let project = env.project();
     let tasks_dir = env._tmp.path().join("data").join("tasks");
     fn create(env: &Env, project: &str, title: &str, brief: &str) -> String {
-        let spec =
-            agentdeck_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("user".into()), ..Default::default() };
+        let spec = holt_core::TaskSpec { title: title.into(), brief: brief.into(), creator: Some("user".into()), ..Default::default() };
         let t = env.core.task_create(project, spec).expect("create");
         env.core.task_start(project, &t.id).expect("start");
         t.id
@@ -698,12 +696,12 @@ fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_
     }
 
     std::fs::write(env.ws.join("a.rs"), "fn a() {}\nfn d() {}\n").expect("w");
-    let entry = agentdeck_core::git::GitEntry {
+    let entry = holt_core::git::GitEntry {
         path: "a.rs".into(),
         orig_path: None,
         index: '.',
         worktree: 'M',
-        kind: agentdeck_core::git::EntryKind::Ordinary,
+        kind: holt_core::git::EntryKind::Ordinary,
     };
     env.deck.docs_open_file_diff(&entry, false);
     let file_diff = env.deck.docs.current_uid(&project).expect("file diff");
@@ -859,7 +857,7 @@ fn quitting_asks_while_an_agent_is_in_the_middle_of_a_turn_and_the_second_launch
     assert!(env.deck.quit_requested, "with no turn in progress there is nothing to ask");
 
     assert!(!env.deck.activate_requested);
-    env.deck.on_core_event(agentdeck_core::CoreEvent::Activate);
+    env.deck.on_core_event(holt_core::CoreEvent::Activate);
     assert!(env.deck.activate_requested);
 }
 
@@ -869,7 +867,7 @@ fn the_highlight_follows_the_active_tab_and_the_pty_resizes_once_per_switch() {
         eprintln!("git is not installed: test skipped");
         return;
     }
-    use agentdeck_core::Organization;
+    use holt_core::Organization;
     let mut env = Env::start();
     env.pump("the agents and the git status", |d| d.initialized && d.git.status().is_some());
     crate::theme::install_fonts(&env.ctx);
@@ -937,7 +935,7 @@ fn switching_there_and_back_inside_the_delay_resizes_nothing() {
         eprintln!("git is not installed: test skipped");
         return;
     }
-    use agentdeck_core::Organization;
+    use holt_core::Organization;
     let mut env = Env::start();
     env.pump("the agents and the git status", |d| d.initialized && d.git.status().is_some());
     crate::theme::install_fonts(&env.ctx);
@@ -986,7 +984,7 @@ fn five_quick_switches_resize_each_tab_at_most_once_to_the_final_size() {
         eprintln!("git is not installed: test skipped");
         return;
     }
-    use agentdeck_core::Organization;
+    use holt_core::Organization;
     let mut env = Env::start();
     env.pump("the agents and the git status", |d| d.initialized && d.git.status().is_some());
     crate::theme::install_fonts(&env.ctx);
@@ -1347,7 +1345,7 @@ fn a_hidden_window_still_types_the_queued_messages_and_the_late_answers_and_neve
         eprintln!("git is not installed: test skipped");
         return;
     }
-    use agentdeck_core::Delivery;
+    use holt_core::Delivery;
     let mut env = Env::start();
     env.pump("the agents and the git status", |d| d.initialized && d.git.status().is_some());
     crate::theme::install_fonts(&env.ctx);
@@ -1421,7 +1419,7 @@ fn a_resume_that_fails_right_away_drops_the_id_reopens_from_scratch_and_warns_on
     let notices = |env: &Env| env.deck.feed.iter().filter(|f| f.text.contains("could not resume")).count();
 
     // A launch that continued a saved conversation, and the CLI refuses it two seconds in: back to scratch.
-    let mut spec = env.core.spawn_spec_for(&project, &agentdeck_core::Ident::parse(&instance).expect("id")).expect("spec");
+    let mut spec = env.core.spawn_spec_for(&project, &holt_core::Ident::parse(&instance).expect("id")).expect("spec");
     spec.resumed = true;
     env.deck.tabs[idx].spec = Some(spec);
     env.deck.tabs[idx].spawned_at = Some(Instant::now());
@@ -1437,12 +1435,12 @@ fn a_resume_that_fails_right_away_drops_the_id_reopens_from_scratch_and_warns_on
     assert_eq!(notices(&env), 1);
 
     // A clean exit, or one long after the launch, is not a refusal.
-    let mut spec = env.core.spawn_spec_for(&project, &agentdeck_core::Ident::parse(&instance).expect("id")).expect("spec");
+    let mut spec = env.core.spawn_spec_for(&project, &holt_core::Ident::parse(&instance).expect("id")).expect("spec");
     spec.resumed = true;
     env.deck.tabs[idx].spec = Some(spec);
     env.deck.tabs[idx].spawned_at = Some(Instant::now());
     assert!(!env.deck.reopen_without_resume(idx, 0));
-    env.deck.tabs[idx].spawned_at = Some(Instant::now() - agentdeck_core::resume::FAIL_WINDOW - Duration::from_secs(1));
+    env.deck.tabs[idx].spawned_at = Some(Instant::now() - holt_core::resume::FAIL_WINDOW - Duration::from_secs(1));
     assert!(!env.deck.reopen_without_resume(idx, 1));
     assert_eq!(env.core.tab_session(&project, &instance).as_deref(), Some(new.as_str()));
 
@@ -1479,7 +1477,7 @@ fn a_tab_with_an_antigravity_log_saves_the_conversation_the_log_names() {
     std::fs::write(&log, format!("I1029 10:37:48 server.go:1235] Created conversation {conversation} (backend=X)\n")).expect("log");
     let tab = &mut env.deck.tabs[idx];
     tab.alive = true;
-    let mut spec = env.core.spawn_spec_for(&project, &agentdeck_core::Ident::parse(&instance).expect("id")).expect("spec");
+    let mut spec = env.core.spawn_spec_for(&project, &holt_core::Ident::parse(&instance).expect("id")).expect("spec");
     spec.session_log = Some(log);
     tab.spec = Some(spec);
     tab.session_poll_at = Instant::now();

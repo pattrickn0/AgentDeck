@@ -195,7 +195,7 @@ pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
 /// ESC and other control characters are stripped so the text cannot close the paste
 /// (`ESC[201~`) and turn into keystrokes in the tab's program.
 pub fn submit_paste(text: &str) -> Vec<u8> {
-    let safe = agentdeck_core::util::terminal_text(text);
+    let safe = holt_core::util::terminal_text(text);
     format!("\x1b[200~{safe}\x1b[201~").into_bytes()
 }
 

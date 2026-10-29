@@ -1,11 +1,11 @@
-//! How the AgentDeck instructions reach each CLI, in a user project that does not have an `AGENTS.md` yet:
+//! How the Holt instructions reach each CLI, in a user project that does not have an `AGENTS.md` yet:
 //! each tab gets them through its own CLI's channel, and only what has no other way gets a new `AGENTS.md`.
 
 use std::path::{Path, PathBuf};
 
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, CoreEvent, FeedKind, Ident, StartOptions};
 use crossbeam_channel::Receiver;
+use holt_core::paths::AppPaths;
+use holt_core::{Config, Core, CoreEvent, FeedKind, Ident, StartOptions};
 
 struct Env {
     _tmp: tempfile::TempDir,
@@ -74,7 +74,7 @@ impl Env {
         (self.core.create_project(&dir, Some(name)).id, dir)
     }
 
-    fn spec(&self, project: &str, ident: &str) -> agentdeck_core::SpawnSpec {
+    fn spec(&self, project: &str, ident: &str) -> holt_core::SpawnSpec {
         self.core.spawn_spec_for(project, &Ident::parse(ident).expect("id")).expect("spec")
     }
 
@@ -121,7 +121,7 @@ fn every_cli_gets_the_instructions_without_touching_the_users_repository() {
     let file = PathBuf::from(config["instructions"][0].as_str().expect("file"));
     assert!(file.starts_with(env.root.join("data")), "{}", file.display());
     let from_file = std::fs::read_to_string(&file).expect("read");
-    assert!(from_file.contains("do NOT use your CLI's internal subagents") && from_file.contains("AGENTDECK_AGENT"), "{from_file}");
+    assert!(from_file.contains("do NOT use your CLI's internal subagents") && from_file.contains("HOLT_AGENT"), "{from_file}");
 
     // Aider: the same file, as read-only context.
     let aider = env.spec(&project, "aider");
@@ -154,7 +154,7 @@ fn a_cli_that_only_reads_agents_md_gets_one_with_just_the_app_block() {
 
     env.spec(&project, "goose");
     let text = std::fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md created");
-    assert!(text.starts_with("<!-- agentdeck:start -->") && text.trim_end().ends_with("<!-- agentdeck:end -->"), "{text}");
+    assert!(text.starts_with("<!-- holt:start -->") && text.trim_end().ends_with("<!-- holt:end -->"), "{text}");
     assert!(text.contains("do NOT use your CLI's internal subagents") && text.contains("memory/learnings/"), "{text}");
     // The user is warned in the Conversation, once.
     let notices = env.feed_texts();

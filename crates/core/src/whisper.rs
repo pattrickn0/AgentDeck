@@ -26,7 +26,7 @@ const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/ma
 /// Model SHA-256: matches Hugging Face LFS ETag.
 const MODEL_SHA256: &str = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69";
 /// Vocabulary that guides proper noun recognition.
-pub const WHISPER_PROMPT: &str = "AgentDeck, Claude, Antigravity, agy, Claude Code, Ollama, Codex, OpenCode, Aider, Goose, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.";
+pub const WHISPER_PROMPT: &str = "Holt, Claude, Antigravity, agy, Claude Code, Ollama, Codex, OpenCode, Aider, Goose, terminal, CLI, assistente Claude, Google Antigravity, Vulkan, NVIDIA, AMD.";
 pub const UNAVAILABLE: &str = "unavailable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

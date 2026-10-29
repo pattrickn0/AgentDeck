@@ -4,9 +4,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use agentdeck_core::github::{GithubError, RepoSlug};
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, StartOptions};
+use holt_core::github::{GithubError, RepoSlug};
+use holt_core::paths::AppPaths;
+use holt_core::{Config, Core, StartOptions};
 
 fn git_exe() -> Option<PathBuf> {
     which::which("git").ok()
@@ -86,14 +86,14 @@ fn opening_urls_is_limited_to_github() {
     assert!(core.open_github_url("https://github.com.evil.example/x").is_err());
 }
 
-/// Real network and credential: `cargo test -p agentdeck-core --test github -- --ignored --nocapture`.
+/// Real network and credential: `cargo test -p holt-core --test github -- --ignored --nocapture`.
 /// Reads PRs, issues and runs from the `origin` repository of this project copy and prints a summary
 /// (never the token).
 #[test]
 #[ignore = "uses the network and the user's credential"]
 fn live_overview_of_this_repository() {
-    use agentdeck_core::github::GithubPayload;
-    use agentdeck_core::CoreEvent;
+    use holt_core::github::GithubPayload;
+    use holt_core::CoreEvent;
 
     let tmp = tempfile::tempdir().expect("tmp");
     let root = tmp.path();

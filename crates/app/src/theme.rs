@@ -645,9 +645,9 @@ mod tests {
 
     #[test]
     fn agent_colors_match_the_core() {
-        assert_eq!(Some(CLAUDE), parse_hex_color(agentdeck_core::agents::COLOR_CLAUDE));
-        assert_eq!(Some(ANTIGRAVITY), parse_hex_color(agentdeck_core::agents::COLOR_ANTIGRAVITY));
-        assert_eq!(Some(SHELL), parse_hex_color(agentdeck_core::agents::COLOR_SHELL));
+        assert_eq!(Some(CLAUDE), parse_hex_color(holt_core::agents::COLOR_CLAUDE));
+        assert_eq!(Some(ANTIGRAVITY), parse_hex_color(holt_core::agents::COLOR_ANTIGRAVITY));
+        assert_eq!(Some(SHELL), parse_hex_color(holt_core::agents::COLOR_SHELL));
     }
 
     #[test]

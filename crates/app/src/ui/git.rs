@@ -7,10 +7,10 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Modifiers, Order, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use agentdeck_core::git::{
+use holt_core::git::{
     valid_branch_name, ConflictChoice, DiffKind, EntryKind, GitBranch, GitCommit, GitDiff, GitEntry, GitStash, GitStatus, RepoState,
 };
-use agentdeck_core::t;
+use holt_core::t;
 
 use super::git_views;
 use super::{

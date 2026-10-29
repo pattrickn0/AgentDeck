@@ -5,9 +5,9 @@
 //! (`capability.rs`, `agents.rs`) and stay as those areas have them.
 use std::process::Command;
 
-use agentdeck_core::models::Effort;
-use agentdeck_core::util::same_path;
-use agentdeck_core::{CoreEvent, FeedEntry, FeedKind, Ident, MergeBlock, TaskError, TaskSpec, TaskStatus};
+use holt_core::models::Effort;
+use holt_core::util::same_path;
+use holt_core::{CoreEvent, FeedEntry, FeedKind, Ident, MergeBlock, TaskError, TaskSpec, TaskStatus};
 
 #[path = "support/tasks_env.rs"]
 mod env;
@@ -38,7 +38,7 @@ fn create_validates_and_records_the_task() {
     assert_eq!((t.base.as_str(), t.kind.as_str(), t.model.as_deref()), ("main", "claude", Some("opus")));
     assert_eq!(t.branch, "task/t1-fix-the-button-of-action");
     assert_eq!(t.instance, "claude@t1");
-    assert!(same_path(&t.worktree, &env.ws.join(".agentdeck").join("worktrees").join("t1")), "{}", t.worktree.display());
+    assert!(same_path(&t.worktree, &env.ws.join(".holt").join("worktrees").join("t1")), "{}", t.worktree.display());
     assert!(t.created_ms > 0 && t.started_ms.is_none() && t.events.len() == 1);
     // Draft: nothing was created in git.
     assert!(!t.worktree.exists());
@@ -130,7 +130,7 @@ fn start_makes_the_worktree_the_instance_and_delivers_the_brief() {
     assert_eq!(worktree_count(&env.ws), 2);
     assert_eq!(git(&env.ws, &["status", "--porcelain"]).trim(), "", "the main repository stays clean");
     let exclude = std::fs::read_to_string(env.ws.join(".git").join("info").join("exclude")).expect("exclude");
-    assert_eq!(exclude.lines().filter(|l| l.trim() == "/.agentdeck/").count(), 1, "{exclude}");
+    assert_eq!(exclude.lines().filter(|l| l.trim() == "/.holt/").count(), 1, "{exclude}");
     assert!(!env.ws.join(".gitignore").exists(), "the user's .gitignore is not touched");
 
     // The instance: id, saved model, boss and the terminal in the worktree.
@@ -141,7 +141,7 @@ fn start_makes_the_worktree_the_instance_and_delivers_the_brief() {
     let spec_for = core.spawn_spec_for(&env.project, &ident).expect("spec");
     assert!(same_path(&spec_for.cwd, &t.worktree), "{}", spec_for.cwd.display());
     assert!(spec_for.args.windows(2).any(|w| w == ["--model", "opus"]), "{:?}", spec_for.args);
-    assert_eq!(spec_for.env["AGENTDECK_AGENT"], "claude@t1");
+    assert_eq!(spec_for.env["HOLT_AGENT"], "claude@t1");
     // Other instances of the project stay in the project folder.
     assert!(same_path(&core.spawn_spec_for(&env.project, &boss).expect("spec").cwd, &env.ws));
 
@@ -162,7 +162,7 @@ fn start_makes_the_worktree_the_instance_and_delivers_the_brief() {
     let t2 = core.task_create(&env.project, spec("Second")).expect("create");
     core.task_start(&env.project, &t2.id).expect("start 2");
     let exclude = std::fs::read_to_string(env.ws.join(".git").join("info").join("exclude")).expect("exclude");
-    assert_eq!(exclude.lines().filter(|l| l.trim() == "/.agentdeck/").count(), 1, "{exclude}");
+    assert_eq!(exclude.lines().filter(|l| l.trim() == "/.holt/").count(), 1, "{exclude}");
     assert_eq!(worktree_count(&env.ws), 3);
     core.shutdown();
 }
@@ -229,7 +229,7 @@ fn done_stores_the_report_and_the_diff_stat() {
 
 #[test]
 fn task_diff_shows_only_what_the_branch_brought() {
-    use agentdeck_core::git::DiffKind;
+    use holt_core::git::DiffKind;
     need_git!();
     let env = start();
     let core = &env.core;
@@ -543,6 +543,45 @@ fn a_task_awaiting_validation_survives_a_restart() {
     drop(_tmp);
 }
 
+/// Migration from AgentDeck (remove after 0.4): a task opened before the rename keeps its `.agentdeck/worktrees/<id>`
+/// path in the task JSON, and it can still be merged and validated; new tasks go to `.holt/worktrees`.
+#[test]
+fn a_task_opened_as_agentdeck_can_still_be_merged_and_validated() {
+    need_git!();
+    let env = start();
+    let t = task_in_review(&env, "Old task", "feature.txt");
+    assert!(t.worktree.ends_with(std::path::Path::new(".holt/worktrees/t1")), "{}", t.worktree.display());
+    assert!(std::fs::read_to_string(env.ws.join(".git/info/exclude")).expect("exclude").contains("/.holt/"));
+    // Turns it into a task of the AgentDeck days: the worktree under `.agentdeck/` and that path in the JSON.
+    let old = env.ws.join(".agentdeck").join("worktrees").join("t1");
+    std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
+    let (root, project, config, ws) = (env.root.clone(), env.project.clone(), env.config.clone(), env.ws.clone());
+    let Env { _tmp, core: first, rx, .. } = env;
+    first.shutdown();
+    drop((first, rx));
+    git(&ws, &["worktree", "move", &t.worktree.to_string_lossy(), &old.to_string_lossy()]);
+    let file = root.join("data").join("tasks").join(format!("{project}.json"));
+    let text = std::fs::read_to_string(&file).expect("json");
+    let old_json = old.to_string_lossy().replace('\\', "\\\\");
+    let new_json = t.worktree.to_string_lossy().replace('\\', "\\\\");
+    assert!(text.contains(&new_json), "{text}");
+    std::fs::write(&file, text.replace(&new_json, &old_json)).expect("write");
+
+    let (core, _rx) = start_core(&root, config, true);
+    let back = core.task(&project, "t1").expect("t1");
+    assert!(same_path(&back.worktree, &old), "{}", back.worktree.display());
+    core.task_merge(&project, "t1").expect("merge");
+    assert!(ws.join("feature.txt").is_file());
+    assert_eq!(core.task_validate(&project, "t1").expect("validate").status, TaskStatus::Merged);
+    assert!(!old.exists(), "the old worktree folder is cleaned up");
+    assert_eq!(worktree_count(&ws), 1);
+    // The next task lands in the new folder.
+    let next = core.task_create(&project, spec("New task")).expect("create");
+    assert!(next.worktree.ends_with(std::path::Path::new(".holt/worktrees/t2")), "{}", next.worktree.display());
+    core.shutdown();
+    drop(_tmp);
+}
+
 #[test]
 fn the_timeline_of_a_task_survives_a_restart() {
     need_git!();
@@ -556,7 +595,7 @@ fn the_timeline_of_a_task_survives_a_restart() {
     ask(FeedKind::Ask, "claude", "antigravity", "from another tab");
     // In another project it does not count, even with the same instance id.
     env.core.feed(FeedEntry::new(FeedKind::Ask, Some("claude@t1"), Some("x"), "someone else's").in_project("pOther"));
-    let texts = |task: agentdeck_core::Task| task.messages.into_iter().map(|m| m.text).collect::<Vec<_>>();
+    let texts = |task: holt_core::Task| task.messages.into_iter().map(|m| m.text).collect::<Vec<_>>();
     assert_eq!(texts(env.core.task(&env.project, &t.id).expect("t1")), ["how do I do it?", "like this"]);
     let (root, project, config) = (env.root.clone(), env.project.clone(), env.config.clone());
     let Env { _tmp, core: first, rx, .. } = env;
@@ -627,12 +666,9 @@ fn a_merge_that_fails_for_an_external_reason_leaves_the_task_in_review() {
 /// Inserts a line inside the app's block in AGENTS.md (what the app does when the instructions change).
 fn rewrite_app_block(agents_md: &std::path::Path) -> String {
     let text = std::fs::read_to_string(agents_md).expect("AGENTS.md");
-    assert!(text.contains(agentdeck_core::workspace::MARKER_START), "{text}");
-    let new = text.replacen(
-        agentdeck_core::workspace::MARKER_START,
-        &format!("{}\nnew line from the app", agentdeck_core::workspace::MARKER_START),
-        1,
-    );
+    assert!(text.contains(holt_core::workspace::MARKER_START), "{text}");
+    let new =
+        text.replacen(holt_core::workspace::MARKER_START, &format!("{}\nnew line from the app", holt_core::workspace::MARKER_START), 1);
     std::fs::write(agents_md, &new).expect("w");
     new
 }
@@ -656,7 +692,7 @@ fn merge_works_when_only_the_app_block_of_agents_md_changed_and_the_branch_touch
     let after = std::fs::read_to_string(&agents_md).expect("AGENTS.md");
     assert!(after.starts_with("# Task rule"), "the branch's change came in: {after}");
     assert!(after.contains("new line from the app"), "the app's block remains: {after}");
-    assert_eq!(after.matches(agentdeck_core::workspace::MARKER_START).count(), 1, "{after}");
+    assert_eq!(after.matches(holt_core::workspace::MARKER_START).count(), 1, "{after}");
     core.shutdown();
 }
 
@@ -911,7 +947,7 @@ fn stash_and_merge_keeps_the_changes_in_the_stash_when_they_clash_with_the_task(
     assert_eq!(git(&env.ws, &["status", "--porcelain", "--untracked-files=no"]).trim(), "");
     let list = stash_list(&env.ws);
     assert_eq!(list.len(), 1, "{list:?}");
-    assert!(list[0].contains("agentdeck: stashed before merging task t1"), "{list:?}");
+    assert!(list[0].contains("holt: stashed before merging task t1"), "{list:?}");
     assert!(git(&env.ws, &["stash", "show", "-p", "stash@{0}"]).contains("+from the user"));
     assert!(core.task(&env.project, &t.id).expect("task").events.iter().any(|e| e.text.contains("still in the stash")));
     // Recovering by hand, as the notice teaches, brings the conflict to the user to resolve (the stash was not lost).
@@ -1186,7 +1222,7 @@ fn the_effort_of_a_task_is_validated_stored_and_reaches_the_claude_tab() {
 
     // The bridge's JSON carries the effort; a task saved before it keeps loading.
     assert_eq!(t.summary_json()["effort"], "high");
-    let old: agentdeck_core::Task = serde_json::from_str(r#"{"id":"t9","title":"old"}"#).expect("old task");
+    let old: holt_core::Task = serde_json::from_str(r#"{"id":"t9","title":"old"}"#).expect("old task");
     assert_eq!(old.effort, None);
 
     // Antigravity: the effort swaps the model suffix, which is what gets saved; without a model (or with a
@@ -1259,8 +1295,8 @@ fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
 
 #[test]
 fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
-    use agentdeck_core::tasks::boot_line;
-    let t = agentdeck_core::Task { id: "t3".into(), ..agentdeck_core::Task::default() };
+    use holt_core::tasks::boot_line;
+    let t = holt_core::Task { id: "t3".into(), ..holt_core::Task::default() };
     let ok = boot_line(&t, "the request is in the file", std::path::Path::new("C:/data/tasks/p1-t3-brief.md")).expect("ascii");
     assert!(
         ok.starts_with("Task t3: the request is in the file. Read the file C:/data") && ok.ends_with("without waiting for confirmation."),
@@ -1273,8 +1309,8 @@ fn a_boot_line_is_refused_when_the_path_is_not_plain_ascii() {
 
 // ---------- After the merge: merge_commit, diff, done and validate with no dead ends ----------
 
-fn diff_adds(diff: &agentdeck_core::git::GitDiff) -> Vec<String> {
-    use agentdeck_core::git::DiffKind;
+fn diff_adds(diff: &holt_core::git::GitDiff) -> Vec<String> {
+    use holt_core::git::DiffKind;
     diff.lines.iter().filter(|l| l.kind == DiffKind::Add).map(|l| l.text.clone()).collect()
 }
 
@@ -1306,11 +1342,11 @@ fn merge_stores_the_full_merge_commit_and_a_new_merge_overwrites_it() {
 #[test]
 fn a_task_saved_before_merge_commit_existed_still_loads() {
     let old = r#"{"id":"t4","title":"Old","status":"validating","base":"main","branch":"task/t4-old"}"#;
-    let t: agentdeck_core::Task = serde_json::from_str(old).expect("old task");
+    let t: holt_core::Task = serde_json::from_str(old).expect("old task");
     assert_eq!((t.id.as_str(), t.status, t.merge_commit.as_deref()), ("t4", TaskStatus::Validating, None));
     // And the field goes back and forth through the JSON.
-    let t = agentdeck_core::Task { merge_commit: Some("abc".into()), ..t };
-    let back: agentdeck_core::Task = serde_json::from_str(&serde_json::to_string(&t).expect("json")).expect("back");
+    let t = holt_core::Task { merge_commit: Some("abc".into()), ..t };
+    let back: holt_core::Task = serde_json::from_str(&serde_json::to_string(&t).expect("json")).expect("back");
     assert_eq!(back.merge_commit.as_deref(), Some("abc"));
 }
 
@@ -1440,10 +1476,10 @@ fn validate_completes_with_a_warning_when_the_base_branch_is_gone() {
 
 #[test]
 fn the_task_level_is_recorded_and_the_choice_warns_when_the_model_falls_short() {
-    use agentdeck_core::capability::Level;
+    use holt_core::capability::Level;
     need_git!();
     let env = start();
-    let log = |t: &agentdeck_core::Task| t.events.iter().map(|e| e.text.clone()).collect::<Vec<_>>().join("\n");
+    let log = |t: &holt_core::Task| t.events.iter().map(|e| e.text.clone()).collect::<Vec<_>>().join("\n");
     // Without a level, media holds; the request is saved.
     let plain = env.core.task_create(&env.project, spec("No level")).expect("create");
     assert_eq!(plain.level, Level::Medium);
@@ -1460,12 +1496,7 @@ fn the_task_level_is_recorded_and_the_choice_warns_when_the_model_falls_short() 
         .core
         .task_create(
             &env.project,
-            TaskSpec {
-                level: Level::Complex,
-                model: Some("sonnet".into()),
-                effort: Some(agentdeck_core::models::Effort::Low),
-                ..spec("Quick")
-            },
+            TaskSpec { level: Level::Complex, model: Some("sonnet".into()), effort: Some(holt_core::models::Effort::Low), ..spec("Quick") },
         )
         .expect("create");
     assert!(log(&low).contains("claude sonnet only reaches medium"), "{}", log(&low));
@@ -1488,7 +1519,7 @@ fn the_models_inventory_lists_the_capacity_of_each_model() {
 
 #[test]
 fn what_the_user_reads_follows_the_language_and_what_the_agent_reads_stays_english() {
-    use agentdeck_core::i18n::{with_lang, Lang};
+    use holt_core::i18n::{with_lang, Lang};
     need_git!();
     let env = start();
     let core = &env.core;

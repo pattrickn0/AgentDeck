@@ -3,9 +3,9 @@
 
 use std::collections::HashMap;
 
-use agentdeck_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_SHELL};
-use agentdeck_core::{t, AgentInfo, Ident};
 use egui::Color32;
+use holt_core::agents::{COLOR_ANTIGRAVITY, COLOR_CLAUDE, COLOR_SHELL};
+use holt_core::{t, AgentInfo, Ident};
 
 use crate::theme;
 

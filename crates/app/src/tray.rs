@@ -62,7 +62,7 @@ fn rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
 
 #[cfg(windows)]
 mod imp {
-    use agentdeck_core::t;
+    use holt_core::t;
     use tray_icon::menu::{Menu, MenuEvent, MenuItem};
     use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
@@ -77,7 +77,7 @@ mod imp {
         let icon = tray_icon::Icon::from_rgba(rgba, size, size).map_err(|e| e.to_string())?;
         let tray = TrayIconBuilder::new()
             .with_icon(icon)
-            .with_tooltip("AgentDeck")
+            .with_tooltip("Holt")
             .with_menu(Box::new(menu))
             // Left click opens the window; right click shows the menu.
             .with_menu_on_left_click(false)
@@ -100,7 +100,7 @@ mod imp {
 
 #[cfg(target_os = "linux")]
 mod imp {
-    use agentdeck_core::t;
+    use holt_core::t;
     use ksni::blocking::{Handle, TrayMethods};
     use ksni::menu::StandardItem;
     use ksni::MenuItem;
@@ -115,11 +115,11 @@ mod imp {
 
     impl ksni::Tray for Sni {
         fn id(&self) -> String {
-            "agentdeck".into()
+            "holt".into()
         }
 
         fn title(&self) -> String {
-            "AgentDeck".into()
+            "Holt".into()
         }
 
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {

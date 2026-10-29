@@ -45,82 +45,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agentdeck"
-version = "0.3.0"
-dependencies = [
- "agentdeck-core",
- "alacritty_terminal",
- "anyhow",
- "arboard",
- "chrono",
- "cpal",
- "crossbeam-channel",
- "egui",
- "egui-winit",
- "egui_commonmark",
- "egui_glow",
- "env_logger",
- "glow",
- "glutin",
- "glutin-winit",
- "ksni",
- "log",
- "parking_lot",
- "png",
- "portable-pty",
- "raw-window-handle",
- "rfd",
- "tempfile",
- "tray-icon",
- "windows-sys 0.61.2",
- "winit",
- "winresource",
-]
-
-[[package]]
-name = "agentdeck-cli"
-version = "0.3.0"
-dependencies = [
- "agentdeck-core",
- "serde_json",
- "tempfile",
- "ureq",
- "which",
-]
-
-[[package]]
-name = "agentdeck-core"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "crossbeam-channel",
- "dirs",
- "flate2",
- "getrandom 0.4.3",
- "libc",
- "log",
- "notify",
- "open",
- "parking_lot",
- "png",
- "regex",
- "secret-service",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tar",
- "tempfile",
- "thiserror 2.0.21",
- "tiny_http",
- "unicode-normalization",
- "ureq",
- "uuid",
- "which",
- "windows-sys 0.61.2",
- "zip",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1820,6 +1744,82 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
 dependencies = [
  "digest 0.11.3",
+]
+
+[[package]]
+name = "holt"
+version = "0.3.0"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "arboard",
+ "chrono",
+ "cpal",
+ "crossbeam-channel",
+ "egui",
+ "egui-winit",
+ "egui_commonmark",
+ "egui_glow",
+ "env_logger",
+ "glow",
+ "glutin",
+ "glutin-winit",
+ "holt-core",
+ "ksni",
+ "log",
+ "parking_lot",
+ "png",
+ "portable-pty",
+ "raw-window-handle",
+ "rfd",
+ "tempfile",
+ "tray-icon",
+ "windows-sys 0.61.2",
+ "winit",
+ "winresource",
+]
+
+[[package]]
+name = "holt-cli"
+version = "0.3.0"
+dependencies = [
+ "holt-core",
+ "serde_json",
+ "tempfile",
+ "ureq",
+ "which",
+]
+
+[[package]]
+name = "holt-core"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "crossbeam-channel",
+ "dirs",
+ "flate2",
+ "getrandom 0.4.3",
+ "libc",
+ "log",
+ "notify",
+ "open",
+ "parking_lot",
+ "png",
+ "regex",
+ "secret-service",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tiny_http",
+ "unicode-normalization",
+ "ureq",
+ "uuid",
+ "which",
+ "windows-sys 0.61.2",
+ "zip",
 ]
 
 [[package]]

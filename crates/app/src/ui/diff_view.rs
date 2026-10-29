@@ -10,7 +10,7 @@ use std::sync::Arc;
 use egui::text::{CCursor, LayoutJob};
 use egui::{Align2, Id, Pos2, Rect, TextFormat, Ui, Vec2};
 
-use agentdeck_core::git::{DiffKind, DiffLine, GitDiff};
+use holt_core::git::{DiffKind, DiffLine, GitDiff};
 
 use super::select::{self, Pos, Selected};
 use crate::highlight::{self, Carry, Lang, Mark, Span};

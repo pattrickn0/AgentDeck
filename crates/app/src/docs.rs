@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
-use agentdeck_core::git::{DiffKind, EntryKind, GitDiff, GitEntry, GitError};
-use agentdeck_core::workspace::READ_TEXT_MAX;
-use agentdeck_core::{t, Eol, TextFile};
+use holt_core::git::{DiffKind, EntryKind, GitDiff, GitEntry, GitError};
+use holt_core::workspace::READ_TEXT_MAX;
+use holt_core::{t, Eol, TextFile};
 
 use crate::deck::{Deck, UiMsg};
 use crate::highlight::{self, Lang, Span};
@@ -629,7 +629,7 @@ pub fn size_label(bytes: u64) -> String {
     let b = bytes as f64;
     if b >= KB * KB {
         let text = format!("{:.1} MB", b / (KB * KB));
-        if agentdeck_core::i18n::lang() == agentdeck_core::i18n::Lang::PtBr {
+        if holt_core::i18n::lang() == holt_core::i18n::Lang::PtBr {
             text.replace('.', ",")
         } else {
             text
@@ -649,7 +649,7 @@ pub struct Docs {
     /// The focused document of each project.
     current: HashMap<String, u64>,
     next_uid: u64,
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=docs-demo`): the documents are fake; nothing is read or reread.
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=docs-demo`): the documents are fake; nothing is read or reread.
     pub debug_hold: bool,
     /// DEBUG ONLY (`docs-demo-badge`): the switch badge, instead of the one of the real tabs.
     pub debug_badge: Option<Badge>,
@@ -1286,7 +1286,7 @@ impl Deck {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdeck_core::git::parse_diff;
+    use holt_core::git::parse_diff;
 
     const P: &str = "proj";
 
@@ -1893,7 +1893,7 @@ Binary files a/img.png and b/img.png differ
         assert_eq!(size_label(512), "512 bytes");
         assert_eq!(size_label(2048), "2 KB");
         assert_eq!(size_label(1_572_864), "1.5 MB");
-        let pt = agentdeck_core::i18n::with_lang(agentdeck_core::i18n::Lang::PtBr, || size_label(1_572_864));
+        let pt = holt_core::i18n::with_lang(holt_core::i18n::Lang::PtBr, || size_label(1_572_864));
         assert_eq!(pt, "1,5 MB");
     }
 

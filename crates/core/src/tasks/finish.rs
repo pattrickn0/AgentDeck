@@ -1,7 +1,7 @@
 use super::git_ops::{align_with_base, branch_exists, delete_branch, git_out, safe_worktree, valid_task_branch, worktree_dirty};
 use super::lifecycle::queue_holder;
 use super::text::{cap_text, short_list};
-use super::{git_error, reject_message, Task, TaskError, TaskStatus, AGENTDECK_DIR, MAX_TEXT, REMOVE_TRIES, REMOVE_WAIT};
+use super::{git_error, reject_message, Task, TaskError, TaskStatus, MAX_TEXT, REMOVE_TRIES, REMOVE_WAIT};
 use crate::events::{CoreEvent, FeedEntry};
 use crate::git::{run, Repo, COMMIT_TIMEOUT};
 use crate::t;
@@ -26,8 +26,7 @@ impl Core {
             )));
         }
         let repo = self.task_repo(project)?;
-        let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
-        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &expected) {
+        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &repo.root) {
             return Err(TaskError::Failed(t!("data of task {id} outside what was expected; I removed nothing", id = &task.id)));
         }
         let _git = self.inner.git.op.lock();
@@ -153,10 +152,9 @@ impl Core {
     }
 
     /// Ensures the worktree folder: if it was deleted by hand, recreates it from the task's branch (or from the base,
-    /// if the branch also vanished). Only touches `<root>/.agentdeck/worktrees`.
+    /// if the branch also vanished). Only touches `<root>/.holt/worktrees`.
     fn restore_worktree(&self, repo: &Repo, task: &Task) -> Result<(), TaskError> {
-        let expected = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
-        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &expected) {
+        if !valid_task_branch(&task.branch) || !crate::git::valid_branch_name(&task.base) || !safe_worktree(&task.worktree, &repo.root) {
             return Err(TaskError::Failed(t!("data of task {id} outside what was expected; I touched nothing", id = &task.id)));
         }
         if task.worktree.is_dir() {
@@ -229,12 +227,11 @@ impl Core {
     }
 
     /// Removes the task's worktree and its marks in git. Only touches the folder if it really is in
-    /// `<root>/.agentdeck/worktrees` (the JSON may have been edited). Retries for a few seconds: on Windows the
+    /// `<root>/.holt/worktrees` (the JSON may have been edited). Retries for a few seconds: on Windows the
     /// agent's terminal still holds the folder right after the tab closes. Returns the warnings.
     pub(super) fn remove_task_worktree(&self, repo: &Repo, task: &Task) -> Vec<String> {
         let mut warnings = Vec::new();
-        let allowed = util::absolutize(&repo.root.join(AGENTDECK_DIR).join("worktrees"));
-        if safe_worktree(&task.worktree, &allowed) {
+        if safe_worktree(&task.worktree, &repo.root) {
             let dir = util::absolutize(&task.worktree);
             let path = dir.to_string_lossy().into_owned();
             let mut last = String::new();
@@ -267,7 +264,7 @@ impl Core {
                 crate::trust::forget(&dir, &self.inner.home);
             }
         } else {
-            warnings.push(t!("the folder {folder} is not in .agentdeck/worktrees: I did not touch it", folder = task.worktree.display()));
+            warnings.push(t!("the folder {folder} is not in .holt/worktrees: I did not touch it", folder = task.worktree.display()));
         }
         // Remove from git the worktrees whose folder no longer exists (including the one that just vanished).
         if let Err(e) = repo.write(&["worktree", "prune"], None) {

@@ -1,7 +1,7 @@
-//! AgentDeck — the core (backend) without graphical interface dependencies.
+//! Holt — the core (backend) without graphical interface dependencies.
 //!
 //! This crate is the Rust equivalent of `main.js` of the Electron version.
-//! The interface (crate `agentdeck`) talks to it exclusively through [`Core`]
+//! The interface (crate `holt`) talks to it exclusively through [`Core`]
 //! and the [`CoreEvent`] events — the same role the IPC/preload had in Electron.
 //!
 //! STABLE CONTRACT: the public types and signatures of this file and of `events.rs`,
@@ -197,21 +197,31 @@ fn same_secret(a: &str, b: &str) -> bool {
 }
 
 /// Lock file of the data folder: one instance of the app per folder.
-const LOCK_FILE: &str = ".agentdeck.lock";
+const LOCK_FILE: &str = ".holt.lock";
+/// Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): the lock of an AgentDeck. While one runs on the folder, a
+/// Holt must not start on it as well.
+const LEGACY_LOCK_FILE: &str = ".agentdeck.lock";
 
-/// Locks `data/.agentdeck.lock`. Error if another instance of the app already uses the folder.
+/// Locks `data/.holt.lock`. Error if another instance of the app already uses the folder (an AgentDeck holding
+/// `.agentdeck.lock` counts as one).
 fn lock_data_dir(data_dir: &Path) -> anyhow::Result<std::fs::File> {
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join(LOCK_FILE);
     let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
-    match file.try_lock() {
-        Ok(()) => {}
-        Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(crate::t!(
-            "Another AgentDeck window is already using the data folder {dir}.\n\nClose it, or set AGENTDECK_HOME to another \
+    let busy = match file.try_lock() {
+        Ok(()) => activation::lock_held(data_dir, LEGACY_LOCK_FILE),
+        Err(std::fs::TryLockError::WouldBlock) => true,
+        Err(std::fs::TryLockError::Error(e)) => {
+            log::warn!("could not lock {}: {e}", path.display());
+            false
+        }
+    };
+    if busy {
+        anyhow::bail!(crate::t!(
+            "Another Holt window is already using the data folder {dir}.\n\nClose it, or set HOLT_HOME to another \
              folder to open a separate instance.",
             dir = data_dir.display()
-        )),
-        Err(std::fs::TryLockError::Error(e)) => log::warn!("could not lock {}: {e}", path.display()),
+        ));
     }
     Ok(file)
 }
@@ -398,7 +408,7 @@ impl Core {
     }
 
     /// Like [`Core::spawn_spec`] for an instance (model + role + name): its id goes in
-    /// `AGENTDECK_AGENT` and the role in `AGENTDECK_ROLE`. The tab token belongs to the project + id pair.
+    /// `HOLT_AGENT` and the role in `HOLT_ROLE`. The tab token belongs to the project + id pair.
     pub fn spawn_spec_for(&self, project: &str, ident: &Ident) -> Result<SpawnSpec, String> {
         agents::spawn_spec_for(self, project, ident)
     }
@@ -755,7 +765,7 @@ impl Core {
             Ok(workspace::AgentContext::Created) => {
                 log::info!("AGENTS.md created at {} (the CLI only reads instructions from there)", dir.display());
                 let text = crate::t!(
-                    "AgentDeck created an AGENTS.md with only its own instructions in this folder, because this CLI only reads \
+                    "Holt created an AGENTS.md with only its own instructions in this folder, because this CLI only reads \
                      instructions from there. It shows up as a new file in git: commit it or delete it as \
                      you like."
                 );
@@ -802,7 +812,7 @@ impl Core {
         }
     }
 
-    /// Rewrites the AgentDeck block in the AGENTS.md of the active project (respecting the rules about
+    /// Rewrites the Holt block in the AGENTS.md of the active project (respecting the rules about
     /// where to create it). The other projects are rewritten in the next tab opened in them.
     fn refresh_agent_context(&self) {
         self.inner.context_written.lock().clear();
@@ -1000,8 +1010,21 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let first = lock_data_dir(tmp.path()).expect("first");
         let err = lock_data_dir(tmp.path()).expect_err("the second one refuses").to_string();
-        assert!(err.starts_with("Another AgentDeck window is already using the data folder"), "{err}");
+        assert!(err.starts_with("Another Holt window is already using the data folder"), "{err}");
         drop(first);
+        lock_data_dir(tmp.path()).expect("free again");
+    }
+
+    /// Migration: a Holt does not start on a folder that a running AgentDeck still holds (`.agentdeck.lock`).
+    #[test]
+    fn a_running_agentdeck_blocks_the_data_dir() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let old =
+            std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(tmp.path().join(LEGACY_LOCK_FILE)).expect("open");
+        old.try_lock().expect("lock");
+        let err = lock_data_dir(tmp.path()).expect_err("refuses").to_string();
+        assert!(err.starts_with("Another Holt window is already using the data folder"), "{err}");
+        drop(old);
         lock_data_dir(tmp.path()).expect("free again");
     }
 

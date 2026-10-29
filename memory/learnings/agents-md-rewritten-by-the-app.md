@@ -13,5 +13,5 @@ on top of a modified file that the branch also touches ("commit your changes or 
 **How to apply:** `task_merge` excludes `AGENTS.md` from the "dirty" check. If the task branch also touches the file and the
 difference from HEAD is only the app's block (`workspace::only_marker_blocks_differ`), it saves the content, runs
 `git checkout -- AGENTS.md`, merges, and rewrites the block afterwards, in any outcome (`workspace::restore_marker_block`).
-If the user edited text outside the block, it refuses without discarding anything. Do not edit the AgentDeck block by hand or
+If the user edited text outside the block, it refuses without discarding anything. Do not edit the Holt block by hand or
 include it in a task commit.

@@ -1,9 +1,9 @@
 ---
-name: agentdeck-ui
-description: Visual and code rules for the AgentDeck interface (egui, crates/app/src/ui and theme.rs). Use before creating or changing anything in the app's interface — sidebar, title bar, split view, right bar, menus, modals, icons, colors, spacing, user-facing text — and to check the result with a screenshot.
+name: holt-ui
+description: Visual and code rules for the Holt interface (egui, crates/app/src/ui and theme.rs). Use before creating or changing anything in the app's interface — sidebar, title bar, split view, right bar, menus, modals, icons, colors, spacing, user-facing text — and to check the result with a screenshot.
 ---
 
-# AgentDeck interface
+# Holt interface
 
 The app is plain egui, mostly without ready-made widgets: each component is **painted by hand** with the `Painter`
 and gets interaction through `ui.interact`/`clickable`. Follow what already exists before inventing.
@@ -33,12 +33,12 @@ Decisions the user already made (do not reopen unless they ask):
 
 ## Text and language
 
-- **Every text the user reads goes through `t!`** (`use agentdeck_core::t;`): `t!("Close")` is `&'static str`,
+- **Every text the user reads goes through `t!`** (`use holt_core::t;`): `t!("Close")` is `&'static str`,
   `t!("Model: {model}", model = m)` is `String`. The English text is the key; add the pair `("English", "Português")`
   to the area file in `crates/core/src/i18n/pt_br/` (see `memory/learnings/i18n-english-key-and-area-files.md`).
   The app is English by default; pt-BR is chosen in ☰ > Language and switches at once.
 - Write the English first, short sentences; tooltips say what the click does. The pt-BR entry keeps the same meaning
-  and the same `{placeholders}`. `cargo test -p agentdeck-core i18n` fails on a `t!` without a pt-BR entry.
+  and the same `{placeholders}`. `cargo test -p holt-core i18n` fails on a `t!` without a pt-BR entry.
 - Measure widths from the translated text (`text_w(&painter, t!("..."), ...)`), never from a fixed width that only
   fits one language: Portuguese is usually 20–30% longer. Check both languages in the screenshot when a label is tight.
 - Text only agents read (instructions, briefs, ask-agent output) never goes through `t!`: it is English only.
@@ -87,7 +87,7 @@ to the system font.
   of the split view is a `Well` island. Dividers sit in the gap (`paint_splitter` only shows with the mouse).
 - Common components in `ui/mod.rs`: `segmented`, `button` (`ButtonKind::{Primary, Secondary, Ghost}`), `button_danger`,
   `section_label`, `chip`, `separator`, `galley_spaced`.
-- Logo: `Icon::AgentDeck` (`icons.rs`, `LOGO_CARDS`); the `.ico` comes from `scripts/generate-icon.ps1`.
+- Logo: `Icon::Holt` (`icons.rs`, `LOGO_CARDS`); the `.ico` comes from `scripts/generate-icon.ps1`.
 
 ## Measurements
 
@@ -143,12 +143,12 @@ to the system font.
 Build and run in a separate data folder (the user's is in use), with the fake projects:
 
 ```sh
-cargo build -p agentdeck
-AGENTDECK_HOME=<scratch>/home AGENTDECK_SMOKE=<scratch>/shot AGENTDECK_DEBUG_UI=projects-demo \
-  ./target/debug/agentdeck.exe        # saves <scratch>/shot/screen.png and exits
+cargo build -p holt
+HOLT_HOME=<scratch>/home HOLT_SMOKE=<scratch>/shot HOLT_DEBUG_UI=projects-demo \
+  ./target/debug/holt.exe        # saves <scratch>/shot/screen.png and exits
 ```
 
 For Portuguese, write `{"language": "pt-BR"}` to `<scratch>/home/cfg/config.json` before running. Other states in
-`AGENTDECK_DEBUG_UI` (list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`): `settings`, `newtab`, `usage-demo`,
+`HOLT_DEBUG_UI` (list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`): `settings`, `newtab`, `usage-demo`,
 `git-demo`, `split-drag`... Open the image and check alignment, truncation and contrast before saying you are done;
 interaction (click, drag) does not show in the screenshot — tell the user what is left to test by hand.

@@ -15,8 +15,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("errored", "com erro"),
     // Merge block explanations (the notice on the screen).
     (
-        "You have changes of your own, not yet committed, in the project's main folder ({files}). Git does not merge over them. You can set them aside for a moment: AgentDeck merges the task and puts each change back in place.",
-        "Há alterações suas, ainda sem commit, na pasta principal do projeto ({files}). O git não mescla por cima delas. Você pode guardá-las por um instante: o AgentDeck mescla a tarefa e devolve cada alteração ao lugar.",
+        "You have changes of your own, not yet committed, in the project's main folder ({files}). Git does not merge over them. You can set them aside for a moment: Holt merges the task and puts each change back in place.",
+        "Há alterações suas, ainda sem commit, na pasta principal do projeto ({files}). O git não mescla por cima delas. Você pode guardá-las por um instante: o Holt mescla a tarefa e devolve cada alteração ao lugar.",
     ),
     (
         "The agent left uncommitted work in the task's folder ({files}). Only what was committed enters the merge. Ask it to commit and deliver again.",
@@ -289,8 +289,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Task {id} discarded: {title}", "Tarefa {id} descartada: {title}"),
     ("the folder {folder} remained ({git}{error}); {left}", "a pasta {folder} ficou ({git}{error}); {left}"),
     (
-        "the folder {folder} is not in .agentdeck/worktrees: I did not touch it",
-        "a pasta {folder} não está em .agentdeck/worktrees: não mexi nela",
+        "the folder {folder} is not in .holt/worktrees: I did not touch it",
+        "a pasta {folder} não está em .holt/worktrees: não mexi nela",
     ),
     ("git worktree prune failed: {error}", "git worktree prune falhou: {error}"),
     // Git operations and the stash notices.

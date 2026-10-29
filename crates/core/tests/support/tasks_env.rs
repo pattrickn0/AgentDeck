@@ -10,9 +10,9 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use agentdeck_core::paths::AppPaths;
-use agentdeck_core::{Config, Core, CoreEvent, Ident, StartOptions, Task, TaskSpec};
 use crossbeam_channel::Receiver;
+use holt_core::paths::AppPaths;
+use holt_core::{Config, Core, CoreEvent, Ident, StartOptions, Task, TaskSpec};
 use serde_json::Value;
 
 pub fn isolated_config() {
@@ -103,7 +103,7 @@ pub fn start_with(tab_delivery: bool, repo: bool) -> Env {
     isolated_config();
     let tmp = tempfile::tempdir().expect("tmp");
     // Long name: on the CI's Windows runner TEMP comes short (`RUNNER~1`) and git returns the long one (`runneradmin`).
-    let root = agentdeck_core::util::strip_verbatim(&std::fs::canonicalize(tmp.path()).expect("canonicalize"));
+    let root = holt_core::util::strip_verbatim(&std::fs::canonicalize(tmp.path()).expect("canonicalize"));
     install_fake_agent(&root, "claude");
     install_fake_agent(&root, "aider");
     let config = Config::with_project(root.join("ws"));
@@ -171,7 +171,7 @@ pub fn http(core: &Core, method: &str, path: &str, token: &str, body: &str) -> (
     let mut s = TcpStream::connect(("127.0.0.1", port)).expect("connect");
     s.set_read_timeout(Some(Duration::from_secs(120))).expect("timeout");
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nx-agentdeck-token: {token}\r\ncontent-type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nx-holt-token: {token}\r\ncontent-type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     s.write_all(req.as_bytes()).expect("write");
@@ -185,5 +185,5 @@ pub fn http(core: &Core, method: &str, path: &str, token: &str, body: &str) -> (
 
 pub fn tab_token(env: &Env, id: &str) -> String {
     let ident = Ident::parse(id).expect("id");
-    env.core.spawn_spec_for(&env.project, &ident).expect("spec").env["AGENTDECK_TOKEN"].clone()
+    env.core.spawn_spec_for(&env.project, &ident).expect("spec").env["HOLT_TOKEN"].clone()
 }

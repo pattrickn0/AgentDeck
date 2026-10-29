@@ -30,7 +30,7 @@ pub(super) fn stash_push(repo: &Repo, task: &Task) -> Result<Option<Stash>, Stri
     }
     let before = stash_top(repo);
     // The entry's name is what the user sees in `git stash list`, and the notices quote it: plain English.
-    let message = format!("agentdeck: stashed before merging task {}", task.id);
+    let message = format!("holt: stashed before merging task {}", task.id);
     let args = ["stash", "push", "-m", message.as_str(), "--pathspec-from-file=-", "--pathspec-file-nul"];
     run(repo.cmd(&args), Some(stdin), COMMIT_TIMEOUT).map_err(|e| e.to_string())?;
     let after = stash_top(repo);

@@ -9,7 +9,7 @@ plus a `whisper-cli` (engine); the engine alone is not sufficient because Window
 git** and already exist in a checkout that lacks the model.
 
 **Why:** the app used to download 1.6 GB on its own upon first launch. Users upgrading (model already downloaded, config lacks the field)
-should not be prompted: it silently becomes `yes`. `AGENTDECK_SMOKE` never calls `Deck::dictation_startup`. A future installer can
+should not be prompted: it silently becomes `yes`. `HOLT_SMOKE` never calls `Deck::dictation_startup`. A future installer can
 write `"dictation": "yes"|"no"` to `config.json` before first startup.
 **How to apply:** `Core::remove_dictation` (☰ Settings) removes the model, `.part`, `bin-cuda/`, `.zip` packages, and, outside
 Windows, downloaded engines; it does **not** delete `bin-cpu/` and `bin-vulkan/` on Windows (versioned; deleting them would dirty git).

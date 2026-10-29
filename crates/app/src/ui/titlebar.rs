@@ -8,7 +8,7 @@ use super::{chip, clickable, galley, galley_spaced, place, tip};
 use crate::deck::Deck;
 use crate::icons::Icon;
 use crate::theme;
-use agentdeck_core::t;
+use holt_core::t;
 
 pub struct Anchors {
     pub settings_anchor: Rect,
@@ -87,9 +87,9 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) -> Anchors {
     // ---------- Separator, logo, app name, project and branch ----------
     super::separator(&painter, Pos2::new(x + 0.5, cy - 8.0), Pos2::new(x + 0.5, cy + 8.0));
     x += 1.0 + GAP;
-    deck.icons.paint(&painter, Icon::AgentDeck, Pos2::new(x + 8.0, cy), 16.0, p.text_strong, 0.0);
+    deck.icons.paint(&painter, Icon::Holt, Pos2::new(x + 8.0, cy), 16.0, p.text_strong, 0.0);
     x += 16.0 + GAP;
-    let name = galley_spaced(&painter, "AgentDeck", theme::ui_bold(13.0), p.text, -0.26);
+    let name = galley_spaced(&painter, "Holt", theme::ui_bold(13.0), p.text, -0.26);
     x = place(&painter, Rect::from_min_max(Pos2::new(x, rect.min.y), Pos2::new(rect.max.x, rect.max.y)), Align2::LEFT_CENTER, name, p.text)
         .max
         .x

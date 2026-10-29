@@ -101,7 +101,7 @@ pub fn headless_args(kind: &str, model: &str) -> Vec<String> {
     }
 }
 
-/// How to open the OpenCode TUI with the model and the AgentDeck instructions: `(arguments, environment variable)`.
+/// How to open the OpenCode TUI with the model and the Holt instructions: `(arguments, environment variable)`.
 ///
 /// The TUI has no `--model` (only `run` and `mini` have `-m`) and no instructions option. The configuration in
 /// `OPENCODE_CONFIG_CONTENT` (`{"model": "...", "instructions": ["<file>"]}`) wins over the user's and the
@@ -647,16 +647,16 @@ mod tests {
 
     #[test]
     fn opencode_tui_always_gets_the_instructions_file_even_without_a_model() {
-        let file = std::path::Path::new("/data/agentdeck-instructions.md");
+        let file = std::path::Path::new("/data/holt-instructions.md");
         let (args, (_, value)) = opencode_tui(None, Some(file));
         assert_eq!(args, ["--standalone"]);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&value).expect("json"),
-            serde_json::json!({ "instructions": ["/data/agentdeck-instructions.md"] })
+            serde_json::json!({ "instructions": ["/data/holt-instructions.md"] })
         );
         let (_, (_, both)) = opencode_tui(Some("p/m#high"), Some(file));
         let both: serde_json::Value = serde_json::from_str(&both).expect("json");
-        assert_eq!((both["model"].as_str(), both["instructions"][0].as_str()), (Some("p/m"), Some("/data/agentdeck-instructions.md")));
+        assert_eq!((both["model"].as_str(), both["instructions"][0].as_str()), (Some("p/m"), Some("/data/holt-instructions.md")));
     }
 
     #[test]

@@ -5,17 +5,17 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use agentdeck_core::delivery::{self, Gate, Mailbox, TabState};
-use agentdeck_core::resume;
-use agentdeck_core::t;
-use agentdeck_core::{
-    AgentInfo, Core, CoreEvent, Delivery, DictationChoice, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident,
-    Organization, SpawnSpec,
-};
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::TermMode;
 use crossbeam_channel::{Receiver, Sender};
 use egui::Color32;
+use holt_core::delivery::{self, Gate, Mailbox, TabState};
+use holt_core::resume;
+use holt_core::t;
+use holt_core::{
+    AgentInfo, Core, CoreEvent, Delivery, DictationChoice, DirEntry, DownloadProgress, DownloadState, FeedEntry, FeedKind, Ident,
+    Organization, SpawnSpec,
+};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
@@ -329,18 +329,18 @@ pub struct Deck {
     /// Until when the window size changed due to a tab switch in the Highlight (see `Deck::activate`):
     /// within that period the PTY waits `HIGHLIGHT_RESIZE_DEBOUNCE` instead of `RESIZE_DEBOUNCE`.
     highlight_switch_until: Option<Instant>,
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=split-drag`): fake target window of the drag.
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=split-drag`): fake target window of the drag.
     pub debug_pane_drop: Option<usize>,
     show_seq: u64,
 
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=usage-demo`): fake usage in the title bar.
-    pub debug_usage: Option<HashMap<String, agentdeck_core::AgentUsage>>,
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=usage-demo`): fake usage in the title bar.
+    pub debug_usage: Option<HashMap<String, holt_core::AgentUsage>>,
     /// DEBUG ONLY: the usage panel opened without the mouse, for the given agent or, empty, the first
-    /// (`AGENTDECK_DEBUG_UI=usage-panel` or `usage-panel:<agent>`).
+    /// (`HOLT_DEBUG_UI=usage-panel` or `usage-panel:<agent>`).
     pub debug_usage_panel: Option<String>,
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=projects-demo`): fake projects in the sidebar.
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=projects-demo`): fake projects in the sidebar.
     pub debug_projects: Option<Vec<ProjectView>>,
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=project:<id>`): switches to this project right after restoring the tabs.
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=project:<id>`): switches to this project right after restoring the tabs.
     pub debug_switch_project: Option<String>,
     /// The app must quit (the `App` quits after the frame, or after the frame-less work with the window hidden).
     pub quit_requested: bool,
@@ -376,7 +376,7 @@ pub struct Deck {
     pub unseen: u32,
     /// Download in progress (bar in the header) and, for an error, when it disappears.
     pub download: Option<(DownloadProgress, Option<Instant>)>,
-    /// DEBUG ONLY: keeps the fake state of `AGENTDECK_DEBUG_UI=download*`, ignoring the real download.
+    /// DEBUG ONLY: keeps the fake state of `HOLT_DEBUG_UI=download*`, ignoring the real download.
     pub debug_hold_download: bool,
     pub feed_scroll_to_bottom: bool,
     pub feed_near_bottom: bool,
@@ -421,9 +421,9 @@ pub struct Deck {
     pub toggle_shortcuts: bool,
     pub drop_hover: bool,
     pub last_drop_target: Option<AttachTarget>,
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=drop-pane:<n>`): highlights this panel on drag and drop.
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=drop-pane:<n>`): highlights this panel on drag and drop.
     pub debug_drop_slot: Option<usize>,
-    /// DEBUG ONLY (`AGENTDECK_DEBUG_UI=drop-task`): highlights the "New task" form on drag and drop.
+    /// DEBUG ONLY (`HOLT_DEBUG_UI=drop-task`): highlights the "New task" form on drag and drop.
     pub debug_drop_task_form: bool,
     pub term_focus: bool,
     /// IME composition text (pre-edit), shown over the terminal cursor.
@@ -434,7 +434,7 @@ pub struct Deck {
     pub terminal_rect: Option<egui::Rect>,
     pub window_focused: bool,
     debug_fake_shell: bool,
-    /// `AGENTDECK_DEBUG_PTY=1`: records each tab's raw output under `data/pty/` (see `terminal::record`).
+    /// `HOLT_DEBUG_PTY=1`: records each tab's raw output under `data/pty/` (see `terminal::record`).
     debug_pty: bool,
     /// DEBUG ONLY: closes the restored tabs (empty-state screenshot).
     pub debug_close_all: bool,
@@ -615,14 +615,14 @@ impl Deck {
             terminal_rect: None,
             window_focused: true,
             debug_close_all: false,
-            debug_fake_shell: agentdeck_core::env_var("DEBUG_FAKE_SHELL").is_some_and(|v| v == "1"),
-            debug_pty: agentdeck_core::env_var("DEBUG_PTY").is_some_and(|v| v == "1"),
+            debug_fake_shell: holt_core::env_var("DEBUG_FAKE_SHELL").is_some_and(|v| v == "1"),
+            debug_pty: holt_core::env_var("DEBUG_PTY").is_some_and(|v| v == "1"),
         };
         deck.refresh_agents();
         deck.refresh_engine();
         // The bridge now types the agents' questions into the tabs (instead of running the agent separately).
         deck.core.enable_tab_delivery();
-        if agentdeck_core::env_var("DEBUG_FEED").is_some_and(|v| v == "1") {
+        if holt_core::env_var("DEBUG_FEED").is_some_and(|v| v == "1") {
             deck.debug_feed();
         }
         // The branch chip in the top bar shows right away, and so does the number of tasks under review on the tab icon.
@@ -708,7 +708,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         cwd,
         env: std::env::vars().collect(),
         label: kind.to_owned(),
-        color: agentdeck_core::agents::COLOR_SHELL.into(),
+        color: holt_core::agents::COLOR_SHELL.into(),
         kind: kind.to_owned(),
         double_enter_on_mention: false,
         model: None,

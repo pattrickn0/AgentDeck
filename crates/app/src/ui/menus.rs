@@ -2,8 +2,8 @@
 
 use egui::{Align2, Area, Color32, Id, Key, Order, Pos2, Rect, Sense, Stroke, Vec2};
 
-use agentdeck_core::i18n::{self, Lang};
-use agentdeck_core::{models, t};
+use holt_core::i18n::{self, Lang};
+use holt_core::{models, t};
 
 use super::{button, button_danger, button_width, dot, frame, section_label, separator, shadow, text_in, text_w, ButtonKind};
 use crate::deck::Deck;
@@ -774,8 +774,7 @@ pub fn dictation_modal(deck: &mut Deck, ctx: &egui::Context) {
     let w = 400.0;
     let pad = 20.0;
     let size = crate::dictation::download_size();
-    let intro =
-        t!("Speak instead of typing: AgentDeck transcribes your voice on this computer, without sending the audio over the internet.");
+    let intro = t!("Speak instead of typing: Holt transcribes your voice on this computer, without sending the audio over the internet.");
     let detail = t!(
         "To do that it downloads Whisper (transcription model and engine): {size}, plus about 700 MB of the CUDA engine if there is an NVIDIA card. \
          The download runs in the background and progress appears in the right bar.",

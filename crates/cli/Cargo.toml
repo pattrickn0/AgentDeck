@@ -1,6 +1,6 @@
 [package]
-name = "agentdeck-cli"
-description = "AgentDeck command-line tools: ask-agent."
+name = "holt-cli"
+description = "Holt command-line tools: ask-agent."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ name = "ask-agent"
 path = "src/bin/ask-agent.rs"
 
 [dependencies]
-agentdeck-core.workspace = true
+holt-core.workspace = true
 serde_json.workspace = true
 ureq.workspace = true
 
