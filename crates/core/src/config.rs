@@ -31,6 +31,9 @@ pub struct ProjectCfg {
     /// LLM model of each instance (tab id → model, e.g. `claude@dev` → `sonnet`). The id does not
     /// change with the model; only the instances that chose (or inherited) a model go in here.
     pub tab_models: BTreeMap<String, String>,
+    /// CLI conversation of each tab (tab id → the CLI's own session id), so reopening the app brings the conversation back
+    /// (see `resume.rs`). Saved as soon as the id is known; forgotten when the tab is closed for good.
+    pub tab_sessions: BTreeMap<String, String>,
     /// The project's agent list is collapsed in the sidebar.
     pub collapsed: bool,
 }
@@ -48,6 +51,7 @@ impl Default for ProjectCfg {
             split_cols: Vec::new(),
             tab_parents: BTreeMap::new(),
             tab_models: BTreeMap::new(),
+            tab_sessions: BTreeMap::new(),
             collapsed: false,
         }
     }
@@ -689,19 +693,20 @@ mod tests {
         let p = paths(tmp.path());
         let mut project = ProjectCfg::new(tmp.path().join("proj"), None, &[]);
         project.tab_models.insert("claude@dev".into(), "sonnet".into());
+        project.tab_sessions.insert("claude@dev".into(), "429e5864-ad7e-46ed-9f76-b280602c8ff5".into());
         let mut cfg = Config { active_project: project.id.clone(), project_list: vec![project.clone()], ..Config::default() };
         cfg.role_models.insert("opencode".into(), "opencode/glm-5.3-flash-free".into());
         cfg.usage_pins.insert("antigravity".into(), "Gemini 4 Argon".into());
         cfg.save(&p.config_file).expect("save");
         let text = std::fs::read_to_string(&p.config_file).expect("read");
-        assert!(text.contains("\"tabModels\"") && text.contains("\"roleModels\""), "{text}");
+        assert!(text.contains("\"tabModels\"") && text.contains("\"roleModels\"") && text.contains("\"tabSessions\""), "{text}");
         let back = Config::load_from(std::slice::from_ref(&p.config_file), &p, no_home());
         assert_eq!(back.project_list, vec![project]);
         assert_eq!(back.role_models, cfg.role_models);
         assert_eq!(back.usage_pins, cfg.usage_pins);
         // An old config, without the fields, still applies.
         let old = Config::from_json_over_defaults(r#"{"projectList":[{"id":"p1","name":"x","path":"/x"}]}"#, &p);
-        assert!(old.project_list[0].tab_models.is_empty() && old.role_models.is_empty());
+        assert!(old.project_list[0].tab_models.is_empty() && old.project_list[0].tab_sessions.is_empty() && old.role_models.is_empty());
     }
 
     #[test]

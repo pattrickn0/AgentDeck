@@ -9,6 +9,7 @@
 //!      ask-agent --models [agent]            (installed agents, the models --model accepts and the quota)
 //!      ask-agent --boss "message"            (asks/reports to your boss)
 //!      ask-agent --signal busy|idle           (agent hooks: start/end of turn)
+//!      ask-agent --signal session [<id>]      (agent hook: the CLI's conversation id; without <id>, `session_id` in the JSON on stdin)
 //!      ask-agent --usage                      (Claude Code statusline: plan usage)
 //!      ask-agent --learn [<file>...]   (what the project has already learned, in general or about those files)
 //!      ask-agent --outline <file>...   (each file's signatures with the line, without the bodies)
@@ -88,6 +89,21 @@ fn fail(msg: impl std::fmt::Display, code: u8) -> ExitCode {
     ExitCode::from(code)
 }
 
+/// Body of `POST /signal`. `session` carries the CLI's conversation id: the argument when it is one (`--signal session
+/// <id>`), else the `session_id` of the JSON a hook receives on stdin (`stdin` is only read in that case).
+fn signal_body(state: &str, arg: Option<&str>, stdin: impl FnOnce() -> String) -> Value {
+    if state != "session" {
+        return json!({ "state": state });
+    }
+    let from_json = |text: &str| serde_json::from_str::<Value>(text).ok().and_then(|v| v["session_id"].as_str().map(str::to_owned));
+    let session = match arg.map(str::trim).filter(|a| !a.is_empty()) {
+        Some(a) if !a.starts_with('{') => Some(a.to_owned()),
+        Some(json_arg) => from_json(json_arg),
+        None => from_json(&stdin()),
+    };
+    json!({ "state": state, "session": session.unwrap_or_default() })
+}
+
 fn main() -> ExitCode {
     let env = |k: &str| agentdeck_core::env_var(k);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -108,7 +124,15 @@ fn main() -> ExitCode {
     if args.first().is_some_and(|a| a == "--signal") {
         // Agent hook (Codex still appends some JSON, ignored). Failures are silent.
         let state = args.get(1).map(String::as_str).unwrap_or("");
-        let _ = bridge.request("POST", "/signal", Some(&json!({ "state": state })), Some(std::time::Duration::from_secs(3)));
+        let body = signal_body(state, args.get(2).map(String::as_str), || {
+            // The hook gets its JSON on stdin; in a terminal there is none (reading would block).
+            let mut raw = String::new();
+            if !std::io::stdin().is_terminal() {
+                let _ = std::io::stdin().read_to_string(&mut raw);
+            }
+            raw
+        });
+        let _ = bridge.request("POST", "/signal", Some(&body), Some(std::time::Duration::from_secs(3)));
         return ExitCode::SUCCESS;
     }
     if args.first().is_some_and(|a| a == "--task") {
@@ -1102,6 +1126,21 @@ fn cmd_shell(cmd: &str) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_session_signal_carries_the_conversation_id_from_the_argument_or_the_hook_json() {
+        let no_stdin = || panic!("stdin must not be read");
+        assert_eq!(signal_body("busy", None, no_stdin), json!({"state": "busy"}));
+        assert_eq!(signal_body("idle", Some("{\"type\":\"x\"}"), no_stdin), json!({"state": "idle"}));
+        assert_eq!(signal_body("session", Some("ses_abc"), no_stdin), json!({"state": "session", "session": "ses_abc"}));
+        // Claude's SessionStart hook: the JSON arrives on stdin.
+        let hook =
+            || r#"{"session_id":"429e5864-ad7e-46ed-9f76-b280602c8ff5","hook_event_name":"SessionStart","source":"clear"}"#.to_owned();
+        assert_eq!(signal_body("session", None, hook), json!({"state": "session", "session": "429e5864-ad7e-46ed-9f76-b280602c8ff5"}));
+        assert_eq!(signal_body("session", Some(r#"{"session_id":"x1"}"#), no_stdin)["session"], "x1");
+        // Nothing usable: an empty id (the bridge refuses it).
+        assert_eq!(signal_body("session", None, || "not json".to_owned())["session"], "");
+    }
 
     #[test]
     fn inbox_entries_read_as_a_message_with_age_and_state() {

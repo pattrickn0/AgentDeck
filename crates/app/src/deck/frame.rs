@@ -372,6 +372,9 @@ impl Deck {
             }
         }
         for (i, code) in exits {
+            if self.reopen_without_resume(i, code) {
+                continue;
+            }
             let tab = &mut self.tabs[i];
             tab.alive = false;
             tab.busy = false;

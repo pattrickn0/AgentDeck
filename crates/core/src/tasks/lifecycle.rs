@@ -408,6 +408,26 @@ impl Core {
         self.inner.tasks.boot.lock().insert(format!("{project}/{instance}"), line);
     }
 
+    /// A task's tab has to start again from scratch (its saved conversation could not be resumed): stores the initial prompt
+    /// that sends the agent back to the brief written when the task started. `false` = not a task's tab, a CLI without
+    /// an initial prompt, or no brief file: the tab opens empty.
+    pub fn set_restart_boot_prompt(&self, project: &str, instance: &str) -> bool {
+        let Some(task) = self.task_of_instance(project, instance) else { return false };
+        if models::boot_prompt_flag(&task.kind).is_none() {
+            return false;
+        }
+        let file = util::absolutize(&self.paths().data_dir.join("tasks").join(format!("{project}-{}-brief.md", task.id)));
+        let file = util::strip_verbatim(&file);
+        let intro = "your earlier session could not be resumed, so this is a fresh one; the full request is in the file";
+        match file.is_file().then(|| boot_line(&task, intro, &file)).flatten() {
+            Some(line) => {
+                self.set_boot_prompt(project, instance, line);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Takes (and forgets) the initial prompt stored for `instance`.
     pub fn take_boot_prompt(&self, project: &str, instance: &str) -> Option<String> {
         self.inner.tasks.boot.lock().remove(&format!("{project}/{instance}"))

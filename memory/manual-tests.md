@@ -282,6 +282,17 @@ Dictation and attachments ★
 - [ ] Ctrl+/ with focused terminal toggles shortcuts screen.
 - [ ] Focused shell: Ctrl+L clears screen, Ctrl+B reaches program (tmux), and Ctrl+T opens tab. With "App shortcuts take precedence over terminal" enabled, Ctrl+B collapses sidebar. Setting persists across restarts.
 
+## Resume conversations (t76: Claude and OpenCode)
+
+- [ ] Open a Claude tab and an OpenCode tab (and a second Claude tab with another role). In each, say something easy to recognise ("my favourite number is 7"). Quit the app (tray → Exit) and open it again: every tab comes back to **its own** conversation (ask "what number did I say?").
+- [ ] Same after a crash: kill `agentdeck.exe` from Task Manager, reopen; the conversations are back.
+- [ ] In a Claude tab type `/clear`, say something new, quit and reopen: the tab resumes the conversation that started after `/clear` (not the one before).
+- [ ] Close one of the tabs with its × and open that agent again: it starts a **fresh** conversation (the others are untouched).
+- [ ] Open a Claude tab and quit before sending any message; reopen: the tab opens normally, with no "could not resume" notice.
+- [ ] After sending a message, delete the tab's transcript (`~/.claude/projects/<folder>/<id>.jsonl`, the id is in `config.json` under `tabSessions`) and reopen: the tab opens from scratch with one notice in the Conversation tab and no loop.
+- [ ] A running task (`claude@tN`): quit and reopen; its tab resumes the task's conversation in the worktree.
+- [ ] OpenCode: `/new` inside the tab starts a session we do not track; after reopening it resumes the older one (known limit).
+
 ## Titlebar, agent usage, and sidebar ★
 
 - [x] Window no longer has Windows titlebar: at top, ☰, panel toggle button (collapses/expands sidebar), "AgentDeck" (no logo), and +; on right, smaller minimize, maximize/restore, and close buttons (close turns red on hover).

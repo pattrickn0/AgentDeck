@@ -383,6 +383,24 @@ impl Deck {
         }
     }
 
+    /// The tab's process ended with `code`. If it had been launched to resume its saved conversation and failed right away
+    /// (the CLI does not know the session), forgets the id, starts the tab again from scratch and warns once in the
+    /// chat. The new launch has no stored id, so it cannot repeat. Returns whether it did.
+    pub(crate) fn reopen_without_resume(&mut self, idx: usize, code: i64) -> bool {
+        let tab = &self.tabs[idx];
+        let resumed = tab.spec.as_ref().is_some_and(|s| s.resumed);
+        if !resume::resume_failed(resumed, tab.spawned_at, Instant::now(), code) {
+            return false;
+        }
+        let (project, id, label) = (tab.project.clone(), tab.ident.id(), tab.label.clone());
+        log::warn!("{id}: the saved conversation could not be resumed (exit code {code}); opening it from scratch");
+        self.core.forget_tab_session(&project, &id);
+        self.core.set_restart_boot_prompt(&project, &id);
+        self.start(idx);
+        self.system_in(&project, t!("{label} could not resume its previous conversation. It was opened again from scratch.", label));
+        true
+    }
+
     pub fn activate(&mut self, idx: usize) {
         if idx >= self.tabs.len() {
             return;

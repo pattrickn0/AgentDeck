@@ -71,6 +71,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Task {id} is {status}: no agent is running.", "A tarefa {id} está {status}: não há agente rodando."),
     ("The agent \"{agent}\" for this task is not available.", "O agente \"{agent}\" desta tarefa não está disponível."),
     ("press Enter to try again", "pressione Enter para tentar de novo"),
+    (
+        "{label} could not resume its previous conversation. It was opened again from scratch.",
+        "{label} não conseguiu retomar a conversa anterior. Abri de novo, do zero.",
+    ),
     ("Terminal recording for {id} turned off. The files are in {dir}.", "Gravação do terminal de {id} desligada. Os arquivos ficam em {dir}."),
     (
         "Recording the terminal of {id} from now on to {dir} (three files per recording: .bin, .events.txt and .grid.txt). When the defect shows up, use \"Save grid snapshot now\" in the tab menu (right click) and send those files.",

@@ -285,11 +285,13 @@ fn workspace_agents_md_and_spawn_specs() {
 
     let claude = env.core.spawn_spec(&p, "claude").expect("claude");
     assert_eq!(claude.program, env.root.join("fake-bin").join(exe_name("claude")));
-    assert_eq!(claude.args[0], "--append-system-prompt");
-    assert!(claude.args[1].contains("Your name here is \"claude\"."));
+    // The tab's own conversation first (see `resume.rs`), then the instructions.
+    assert_eq!(claude.args[0], "--session-id");
+    assert_eq!(claude.args[2], "--append-system-prompt");
+    assert!(claude.args[3].contains("Your name here is \"claude\"."));
     let hooks = env.root.join("data").join("hooks").join("claude-settings.json");
     assert_eq!(
-        &claude.args[2..],
+        &claude.args[4..],
         [
             "--allowedTools".to_owned(),
             "Bash(ask-agent:*)".to_owned(),
@@ -1599,7 +1601,7 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
 
     // OpenCode: the TUI has no --model; it gets its own server + configuration in the environment.
     let oc = env.core.spawn_spec_for(&p, &ident("opencode")).expect("opencode");
-    assert_eq!(oc.args, ["--standalone"]);
+    assert_eq!((&oc.args[..2], oc.args.len()), (&["--standalone".to_owned(), "--session".to_owned()][..], 3), "{:?}", oc.args);
     let conf: Value = serde_json::from_str(&oc.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
     let instructions = env.root.join("data").join("agentdeck-instructions.md");
     assert_eq!(conf, json!({"model": "opencode/glm-5.3-flash-free", "instructions": [instructions.to_string_lossy()]}));
@@ -1608,7 +1610,7 @@ fn the_model_resolves_to_request_then_saved_then_role_default_and_reaches_each_c
         c.role_models.remove("opencode");
     });
     let plain = env.core.spawn_spec_for(&p, &ident("opencode@qa")).expect("opencode without a model");
-    assert_eq!(plain.args, ["--standalone"]);
+    assert_eq!((&plain.args[..2], plain.args.len()), (&["--standalone".to_owned(), "--session".to_owned()][..], 3), "{:?}", plain.args);
     let conf: Value = serde_json::from_str(&plain.env["OPENCODE_CONFIG_CONTENT"]).expect("json");
     assert_eq!(conf, json!({"instructions": [instructions.to_string_lossy()]}));
 
@@ -1722,4 +1724,142 @@ fn the_known_models_come_from_the_installed_clis() {
         assert!(again.elapsed() < Duration::from_millis(50), "the second query comes from the cache");
     }
     core.shutdown();
+}
+
+/// Runs the command of `spec` for real (the fake agent) and returns its exit code and output.
+fn run_spec(spec: &agentdeck_core::SpawnSpec) -> (i32, String) {
+    let out = std::process::Command::new(&spec.program)
+        .args(&spec.args)
+        .current_dir(&spec.cwd)
+        .env_clear()
+        .envs(&spec.env)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run the fake agent");
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(-1), text)
+}
+
+/// The value after `flag` in `args`.
+fn arg_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).map(String::as_str)
+}
+
+/// 8-4-4-4-12 hex digits (the format `claude --session-id` demands).
+fn uuid_like(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.iter().map(|p| p.len()).collect::<Vec<_>>() == [8, 4, 4, 4, 12] && s.chars().all(|c| c == '-' || c.is_ascii_hexdigit())
+}
+
+#[test]
+fn a_claude_tab_resumes_its_own_conversation_and_a_refused_resume_starts_over() {
+    let env = start(&[]);
+    // The fake `claude` knows no conversation: `--resume` fails right away, as the real one does.
+    install_fake(
+        &env.root.join("fake-bin"),
+        "claude",
+        &json!({ "echo_args": true, "fail_on_arg": "--resume", "stderr": "No conversation found with session ID", "fail_exit": 1 }),
+    );
+    let p = env.core.active_project_id();
+    let ident = |s: &str| agentdeck_core::Ident::parse(s).expect("id");
+    let stored = |id: &str| env.core.tab_session(&p, id);
+
+    // First launch: an id is generated, saved at once and asked for with --session-id; never --continue.
+    let first = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("first");
+    let id = arg_after(&first.args, "--session-id").expect("--session-id").to_owned();
+    assert!(!first.resumed && uuid_like(&id), "{id}");
+    assert_eq!(stored("claude@dev").as_deref(), Some(id.as_str()));
+    assert!(first.args.iter().all(|a| a != "--resume" && a != "--continue" && a != "-c"), "{:?}", first.args);
+    let (code, out) = run_spec(&first);
+    assert_eq!((code, out.contains(&format!("[--session-id] [{id}]"))), (0, true), "{out}");
+    // Another tab of the same CLI gets its own conversation.
+    let other = env.core.spawn_spec_for(&p, &ident("claude@qa")).expect("other");
+    assert_ne!(arg_after(&other.args, "--session-id"), Some(id.as_str()));
+
+    // Closed before the first message (Claude saved no transcript): the same id is asked for again, not resumed.
+    let again = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("again");
+    assert_eq!((again.resumed, arg_after(&again.args, "--session-id")), (false, Some(id.as_str())));
+
+    // With the conversation on disk the launch resumes it by its own id.
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| env.root.join("home").join(".claude"));
+    let transcripts = config_dir.join("projects").join("some-folder");
+    std::fs::create_dir_all(&transcripts).expect("mkdir");
+    let transcript = transcripts.join(format!("{id}.jsonl"));
+    std::fs::write(&transcript, "{}\n").expect("transcript");
+    let resumed = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("resumed");
+    assert!(resumed.resumed && arg_after(&resumed.args, "--resume") == Some(id.as_str()), "{:?}", resumed.args);
+    assert!(!resumed.args.iter().any(|a| a == "--session-id"));
+
+    // The CLI refuses the id right away: the UI drops it (resume_failed) and the next launch is a fresh one.
+    let (code, _) = run_spec(&resumed);
+    assert_eq!(code, 1);
+    let now = std::time::Instant::now();
+    assert!(agentdeck_core::resume::resume_failed(resumed.resumed, Some(now), now, i64::from(code)));
+    env.core.forget_tab_session(&p, "claude@dev");
+    std::fs::remove_file(&transcript).expect("rm");
+    let fresh = env.core.spawn_spec_for(&p, &ident("claude@dev")).expect("fresh");
+    let new_id = arg_after(&fresh.args, "--session-id").expect("--session-id");
+    assert!(!fresh.resumed && new_id != id, "no resume flag, and no loop");
+    assert_eq!(run_spec(&fresh).0, 0);
+
+    // `/clear`: the SessionStart hook reports the new id through the bridge and it replaces the saved one.
+    let port = env.core.bridge_port();
+    let host = format!("127.0.0.1:{port}");
+    let token = tab_token(&env, "claude@dev");
+    let cleared = "7f0c1a52-1111-4222-8333-944455556666";
+    let body = json!({"state": "session", "session": cleared}).to_string();
+    assert_eq!(http(port, "POST", "/signal", &host, &token, &body).0, 200);
+    assert_eq!(stored("claude@dev").as_deref(), Some(cleared));
+    // Refused: a made-up id, an empty one, none, the master token, and a tab whose CLI does not resume.
+    for bad in [json!({"state": "session", "session": "a b;c"}), json!({"state": "session", "session": ""}), json!({"state": "session"})] {
+        assert_eq!(http(port, "POST", "/signal", &host, &token, &bad.to_string()).0, 400, "{bad}");
+    }
+    assert_eq!(http(port, "POST", "/signal", &host, env.core.bridge_token(), &body).0, 400);
+    let shell_token = tab_token(&env, "shell@dev");
+    assert_eq!(http(port, "POST", "/signal", &host, &shell_token, &body).0, 400);
+    assert_eq!(stored("claude@dev").as_deref(), Some(cleared));
+    assert_eq!(stored("shell@dev"), None);
+
+    // The id follows a rename and is forgotten when the tab is closed for good.
+    env.core.restore_instance(&p, "claude@dev");
+    env.core.rename_instance(&p, "claude@dev", &ident("claude@lead")).expect("rename");
+    assert_eq!((stored("claude@dev"), stored("claude@lead").as_deref()), (None, Some(cleared)));
+    assert!(stored("claude@qa").is_some());
+    env.core.close_instance(&p, "claude@qa");
+    assert_eq!(stored("claude@qa"), None, "closed for good");
+    env.core.shutdown();
+}
+
+#[test]
+fn an_opencode_tab_keeps_one_session_id_next_to_its_own_server_flag() {
+    let env = start(&[]);
+    install_fake(&env.root.join("fake-bin"), "opencode", &json!({ "echo_args": true }));
+    let p = env.core.active_project_id();
+    let ident = agentdeck_core::Ident::parse("opencode").expect("id");
+    let first = env.core.spawn_spec_for(&p, &ident).expect("first");
+    let id = arg_after(&first.args, "--session").expect("--session").to_owned();
+    // OpenCode demands the `ses` prefix; `--session` creates the session when it does not exist yet.
+    assert!(id.starts_with("ses_") && !first.resumed, "{id}");
+    assert_eq!(&first.args[..2], ["--standalone", "--session"], "the TUI keeps its own server: {:?}", first.args);
+    assert!(first.args.iter().all(|a| a != "--continue" && a != "-c"));
+    let second = env.core.spawn_spec_for(&p, &ident).expect("second");
+    assert_eq!(arg_after(&second.args, "--session"), Some(id.as_str()));
+    assert!(second.resumed, "a stored id is a resume");
+    let (code, out) = run_spec(&second);
+    assert_eq!((code, out.contains(&format!("[--session] [{id}]"))), (0, true), "{out}");
+    // A tab of the same CLI has its own session.
+    let other = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("opencode@qa").expect("id")).expect("other");
+    assert_ne!(arg_after(&other.args, "--session"), Some(id.as_str()));
+    // A session reported later (hook channel) replaces the saved one.
+    assert!(env.core.set_tab_session(&p, "opencode", "ses_newone"));
+    assert_eq!(arg_after(&env.core.spawn_spec_for(&p, &ident).expect("third").args, "--session"), Some("ses_newone"));
+    // Agents that cannot resume get nothing.
+    fake_cli(&env, "codex");
+    let codex = env.core.spawn_spec_for(&p, &agentdeck_core::Ident::parse("codex").expect("id")).expect("codex");
+    assert!(!codex.resumed && !codex.args.iter().any(|a| a.contains("session") || a == "resume"), "{:?}", codex.args);
+    assert_eq!(env.core.tab_session(&p, "codex"), None);
+    env.core.shutdown();
 }

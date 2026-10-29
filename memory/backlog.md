@@ -24,11 +24,13 @@ test that fails becomes an item here. Product direction and decision-makers are 
    system tray"). Remaining to verify in use: the walkthrough is in manual-tests.md ("Tray and second instance"), especially a long turn
    ending with the window hidden and the icon on Linux (vanilla GNOME tray lacks `StatusNotifierWatcher`; requires
    AppIndicator extension), which was only compiled, not run.
-3. [ ] **Resume each tab's conversation** after closing the app or a crash (T4). Id per tab in `ProjectCfg`, saved
-   as soon as known, never `--continue`. Claude: `--session-id`/`--resume` with our id (hook updates after
-   `/clear`); OpenCode: `--session <id>` (creates if missing); Antigravity: `--conversation <id>`, with the id read from
-   the tab's `--log-file`; Codex: `codex resume <id>`, with the id from `notify`, and on Windows resolve the npm shim to the
-   executable so Codex gets hooks. Resumption that fails immediately reopens from scratch and warns once.
+3. [ ] **Resume each tab's conversation, part B: Antigravity and Codex** (T4). Part A (t76) is done: `ProjectCfg.tab_sessions`,
+   `resume.rs` (plan per CLI: first / resume / fallback), `ask-agent --signal session` + `POST /signal` for a CLI to report its id,
+   the fallback in `Deck::reopen_without_resume`, Claude and OpenCode (see `learnings/resume-session-flags-per-cli.md`). Left:
+   Antigravity `--conversation <id>`, with the id read from the tab's `--log-file`; Codex `codex resume <id>`, with the id
+   from `notify` (its JSON argument; `ask-agent --signal session <json>` already accepts a JSON argument with `session_id`, extend
+   `signal_body` for Codex's key), and on Windows resolve the npm shim to the executable so Codex gets hooks. Add each CLI to
+   `resume::supports`/`launch_args`/`new_session_id`.
 4. [ ] **Measured memory, then the graph** (T3, then T7). Automatic measurement over completed tasks: ground truth is
    learnings from files the task actually changed; prediction is what each method would deliver reading only the brief (today;
    today + one-line index of all; graph); score = hits and delivered size, with learnings as they were at the

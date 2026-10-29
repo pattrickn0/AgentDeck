@@ -1231,7 +1231,8 @@ fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
     // Claude: positional, BEFORE the options (`--add-dir` and `--allowedTools` accept several values and would swallow it).
     let claude = spec_of("claude@t7", true);
     assert_eq!(claude.args[0], line, "{:?}", claude.args);
-    assert_eq!(claude.args[1], "--append-system-prompt");
+    assert_eq!(claude.args[1], "--session-id", "the tab's own conversation comes next");
+    assert_eq!(claude.args[3], "--append-system-prompt");
     assert!(claude.args.iter().filter(|a| a.as_str() == line).count() == 1);
     // Antigravity: `-i "<prompt>"` (--prompt-interactive), at the end.
     let agy = spec_of("antigravity@t7", true);
@@ -1251,7 +1252,7 @@ fn the_spawn_spec_carries_the_boot_prompt_once_per_cli() {
         assert!(!again.args.iter().any(|a| a == line || a == "-i" || a == "--prompt"), "{id}: {:?}", again.args);
     }
     // Without a stored prompt, Claude's spec starts as always.
-    assert_eq!(spec_of("claude@t8", false).args[0], "--append-system-prompt");
+    assert_eq!(spec_of("claude@t8", false).args[0], "--session-id");
     assert_eq!(core.take_boot_prompt(&env.project, "claude@t7"), None);
     core.shutdown();
 }

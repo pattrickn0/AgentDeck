@@ -1404,3 +1404,57 @@ fn a_hidden_window_still_types_the_queued_messages_and_the_late_answers_and_neve
         std::thread::sleep(Duration::from_millis(50));
     }
 }
+
+#[test]
+fn a_resume_that_fails_right_away_drops_the_id_reopens_from_scratch_and_warns_once() {
+    if !git_available() {
+        eprintln!("git is not installed: test skipped");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes", |d| d.initialized);
+    let id = env.create_from_form("Resume me", true);
+    env.pump("the tab", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+    let (project, instance) = (env.project(), env.task(&id).instance);
+    let idx = env.deck.tabs.iter().position(|t| t.ident.id() == instance).expect("tab");
+    let old = env.core.tab_session(&project, &instance).expect("the first launch saved the tab's id");
+    let notices = |env: &Env| env.deck.feed.iter().filter(|f| f.text.contains("could not resume")).count();
+
+    // A launch that continued a saved conversation, and the CLI refuses it two seconds in: back to scratch.
+    let mut spec = env.core.spawn_spec_for(&project, &agentdeck_core::Ident::parse(&instance).expect("id")).expect("spec");
+    spec.resumed = true;
+    env.deck.tabs[idx].spec = Some(spec);
+    env.deck.tabs[idx].spawned_at = Some(Instant::now());
+    assert!(env.deck.reopen_without_resume(idx, 1));
+    let new = env.core.tab_session(&project, &instance).expect("a new id for the fresh conversation");
+    assert_ne!(new, old, "the refused id was dropped");
+    assert_eq!(notices(&env), 1, "one notice in the chat");
+
+    // The new launch asked for no resume: the same failure again is just an ended process (no loop, no second notice).
+    assert!(!env.deck.tabs[idx].spec.as_ref().is_some_and(|s| s.resumed));
+    assert!(!env.deck.reopen_without_resume(idx, 1));
+    assert_eq!(env.core.tab_session(&project, &instance).as_deref(), Some(new.as_str()));
+    assert_eq!(notices(&env), 1);
+
+    // A clean exit, or one long after the launch, is not a refusal.
+    let mut spec = env.core.spawn_spec_for(&project, &agentdeck_core::Ident::parse(&instance).expect("id")).expect("spec");
+    spec.resumed = true;
+    env.deck.tabs[idx].spec = Some(spec);
+    env.deck.tabs[idx].spawned_at = Some(Instant::now());
+    assert!(!env.deck.reopen_without_resume(idx, 0));
+    env.deck.tabs[idx].spawned_at = Some(Instant::now() - agentdeck_core::resume::FAIL_WINDOW - Duration::from_secs(1));
+    assert!(!env.deck.reopen_without_resume(idx, 1));
+    assert_eq!(env.core.tab_session(&project, &instance).as_deref(), Some(new.as_str()));
+
+    // A task's tab that starts over goes back to the brief written when the task began.
+    assert!(env.core.set_restart_boot_prompt(&project, &instance));
+    let line = env.core.take_boot_prompt(&project, &instance).expect("boot line");
+    assert!(
+        line.starts_with("Task t1:") && line.contains("-t1-brief.md") && line.contains("could not be resumed") && line.is_ascii(),
+        "{line}"
+    );
+
+    // Closing the tab for good forgets the conversation.
+    env.deck.close_tab(idx);
+    assert_eq!(env.core.tab_session(&project, &instance), None);
+}

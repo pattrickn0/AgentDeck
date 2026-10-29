@@ -45,6 +45,9 @@ pub struct SpawnSpec {
     pub double_enter_on_mention: bool,
     /// LLM model of the instance (already resolved and saved in `tab_models`); `None` = the CLI default.
     pub model: Option<String>,
+    /// The launch continues a conversation saved for the tab (`--resume <id>` and the like). If the process ends right
+    /// away with a failure, the UI forgets the id and opens the tab again from scratch (see `resume::resume_failed`).
+    pub resumed: bool,
 }
 
 /// Official colors (also used by the UI as a fallback).
@@ -577,7 +580,8 @@ fn write_claude_hooks_with(data_dir: &Path, project_dir: &Path, config_dir: &Pat
     let hook = |state: &str| serde_json::json!([{ "hooks": [{ "type": "command", "command": format!("ask-agent --signal {state}") }] }]);
     let padding = user_statusline_padding(project_dir, config_dir);
     let settings = serde_json::json!({
-        "hooks": { "UserPromptSubmit": hook("busy"), "Stop": hook("idle") },
+        // `SessionStart` also fires after `/clear` (new session id): `ask-agent --signal session` reads the id from stdin.
+        "hooks": { "UserPromptSubmit": hook("busy"), "Stop": hook("idle"), "SessionStart": hook("session") },
         "statusLine": { "type": "command", "command": "ask-agent --usage", "padding": padding },
     });
     let text = serde_json::to_string_pretty(&settings).unwrap_or_default();
@@ -708,7 +712,11 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     if let Some((None, prompt)) = &boot {
         args.push(prompt.clone());
     }
+    // The tab's own conversation (never "the last one": see `resume.rs`). OpenCode's goes next to `--standalone` below.
+    let launch = core.plan_launch(project, ident);
+    let resumed = launch.as_ref().is_some_and(|l| l.resumed);
     if kind == "claude" {
+        args.extend(launch.iter().flat_map(|l| l.args.iter().cloned()));
         args.push("--append-system-prompt".into());
         args.push(instructions.clone());
         // Answering another agent means running `ask-agent`: allow only that command, without asking.
@@ -750,6 +758,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         // (see `models::opencode_tui`).
         let (extra, (key, value)) = models::opencode_tui(model.as_deref(), generic_file.as_deref());
         args.extend(extra);
+        args.extend(launch.iter().flat_map(|l| l.args.iter().cloned()));
         env.insert(key, value);
     } else if let Some(m) = &model {
         args.extend(models::cli_args(kind, m));
@@ -782,6 +791,7 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         kind: kind.to_owned(),
         double_enter_on_mention: kind == "claude" || kind == "antigravity",
         model,
+        resumed,
     })
 }
 
@@ -989,6 +999,8 @@ ok"
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("ler")).expect("json");
         assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "ask-agent --signal idle");
         assert_eq!(v["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"], "ask-agent --signal busy");
+        // `/clear` starts a new conversation: the hook reports its id (the JSON arrives on stdin).
+        assert_eq!(v["hooks"]["SessionStart"][0]["hooks"][0]["command"], "ask-agent --signal session");
         assert_eq!(v["statusLine"], serde_json::json!({ "type": "command", "command": "ask-agent --usage", "padding": 0 }));
         assert_eq!(
             write_claude_hooks_with(&tmp.path().join("data"), &tmp.path().join("project"), &tmp.path().join("claude")).expect("again"),

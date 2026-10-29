@@ -34,6 +34,7 @@ pub mod models;
 pub mod outline;
 pub mod paths;
 pub(crate) mod process;
+pub mod resume;
 pub mod scope;
 pub mod sessions;
 pub mod situation;
@@ -463,6 +464,8 @@ impl Core {
         self.update_project(project, |p| {
             touched = team::remove(&mut p.tab_parents, id);
             p.tab_models.remove(id);
+            // Closed for good (the tab's ×, a finished task): reopening it later starts a new conversation.
+            p.tab_sessions.remove(id);
         });
         self.mark_team_changed(project, &touched);
     }
@@ -535,6 +538,7 @@ impl Core {
         self.update_project(project, |p| {
             team::rename(&mut p.tab_parents, old_id, &new_id);
             models::rename(&mut p.tab_models, old_id, &new_id);
+            models::rename(&mut p.tab_sessions, old_id, &new_id);
         });
         let mut changed = self.inner.team_changed.lock();
         if changed.remove(&instances::scoped(project, old_id)) {
