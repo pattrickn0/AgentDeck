@@ -663,8 +663,11 @@ impl Core {
         if !supports(&ident.kind) {
             return false;
         }
-        let choice = self.inner.config.read().project(project).and_then(|p| p.tab_views.get(&ident.id()).cloned());
-        choice.is_none_or(|v| v != "terminal")
+        let cfg = self.inner.config.read();
+        match cfg.project(project).and_then(|p| p.tab_views.get(&ident.id())) {
+            Some(choice) => choice != "terminal",
+            None => cfg.chat_by_default,
+        }
     }
 
     /// Saves the user's choice of view for the tab.

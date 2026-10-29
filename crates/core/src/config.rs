@@ -219,6 +219,8 @@ pub struct Config {
     pub window_maximized: bool,
     /// Opens the tab of a closed agent by itself when another agent calls it through `ask-agent`.
     pub auto_open_agent_tabs: bool,
+    /// Claude tabs open in the chat view unless the user chose the terminal for that tab (`ProjectCfg::tab_views`).
+    pub chat_by_default: bool,
     /// With the terminal focused, Ctrl+B belongs to the app (sidebar) instead of going to the terminal (the tmux
     /// prefix); off, it goes to the terminal. Ctrl+T always belongs to the app.
     pub app_shortcuts_first: bool,
@@ -268,6 +270,7 @@ impl Default for Config {
             window_height: 860.0,
             window_maximized: false,
             auto_open_agent_tabs: true,
+            chat_by_default: true,
             app_shortcuts_first: false,
             language: crate::i18n::Lang::En,
             role_models: BTreeMap::new(),

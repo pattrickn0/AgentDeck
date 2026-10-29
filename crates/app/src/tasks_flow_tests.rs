@@ -33,7 +33,7 @@ fn git_dir() -> PathBuf {
 }
 
 /// A fake `claude` agent installed (the core only checks that the executable exists).
-fn install_fake_claude(root: &Path) {
+pub(crate) fn install_fake_claude(root: &Path) {
     let bin = if cfg!(windows) { root.join("home").join(".local").join("bin") } else { root.join("fake-bin") };
     std::fs::create_dir_all(&bin).expect("mkdir");
     let exe = bin.join(if cfg!(windows) { "claude.exe" } else { "claude" });
@@ -46,16 +46,22 @@ fn install_fake_claude(root: &Path) {
     }
 }
 
-struct Env {
+pub(crate) struct Env {
     _tmp: tempfile::TempDir,
-    ws: PathBuf,
-    core: Core,
-    deck: Deck,
-    ctx: egui::Context,
+    pub(crate) ws: PathBuf,
+    pub(crate) core: Core,
+    pub(crate) deck: Deck,
+    pub(crate) ctx: egui::Context,
 }
 
 impl Env {
+    /// The terminal is what these tests exercise: a Claude tab opens in the terminal view.
     fn start() -> Env {
+        Env::start_with(false)
+    }
+
+    /// `chat`: Claude tabs open in the chat view (the default of the app).
+    pub(crate) fn start_with(chat: bool) -> Env {
         let tmp = tempfile::tempdir().expect("tmp");
         let root = tmp.path().to_path_buf();
         install_fake_claude(&root);
@@ -80,7 +86,7 @@ impl Env {
             search_path: Some(std::env::join_paths([root.join("fake-bin"), git_dir()]).expect("PATH")),
             home_dir: Some(root.join("home")),
             watch_workspace: false,
-            config: Some(Config::with_project(ws.clone())),
+            config: Some(Config { chat_by_default: chat, ..Config::with_project(ws.clone()) }),
             system_dirs: false,
         };
         let (core, rx) = Core::start_with(paths, opts).expect("start");
@@ -93,7 +99,7 @@ impl Env {
     }
 
     /// Runs frames until `done` becomes true (or 30 s).
-    fn pump(&mut self, what: &str, done: impl Fn(&Deck) -> bool) {
+    pub(crate) fn pump(&mut self, what: &str, done: impl Fn(&Deck) -> bool) {
         let limit = Instant::now() + Duration::from_secs(30);
         while !done(&self.deck) {
             assert!(Instant::now() < limit, "timed out waiting for: {what}");
@@ -106,7 +112,7 @@ impl Env {
         self.deck.tasks.task(id).cloned().unwrap_or_else(|| panic!("task {id} is not in the list"))
     }
 
-    fn project(&self) -> String {
+    pub(crate) fn project(&self) -> String {
         self.deck.active_project.clone()
     }
 

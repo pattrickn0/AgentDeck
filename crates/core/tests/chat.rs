@@ -139,7 +139,15 @@ fn a_message_goes_in_the_events_come_back_and_the_permission_answer_reaches_the_
     let spec = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
     let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let w = woken.clone();
-    let proc = env.core.spawn_chat(&spec, Arc::new(move || { w.fetch_add(1, std::sync::atomic::Ordering::SeqCst); })).expect("spawn");
+    let proc = env
+        .core
+        .spawn_chat(
+            &spec,
+            Arc::new(move || {
+                w.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("spawn");
 
     proc.send_user("hi");
     let seen = wait_for(&proc, "the first turn", |m| matches!(m, ChatMsg::Event(ChatEvent::Result(_))));

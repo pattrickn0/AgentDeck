@@ -9,6 +9,8 @@
 mod agents;
 mod app;
 mod audio;
+#[cfg(all(test, unix))]
+mod chat_flow_tests;
 mod crash;
 mod debug_ui;
 mod deck;
