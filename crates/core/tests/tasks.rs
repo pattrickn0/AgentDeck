@@ -543,6 +543,45 @@ fn a_task_awaiting_validation_survives_a_restart() {
     drop(_tmp);
 }
 
+/// Migration from AgentDeck (remove after 0.4): a task opened before the rename keeps its `.agentdeck/worktrees/<id>`
+/// path in the task JSON, and it can still be merged and validated; new tasks go to `.holt/worktrees`.
+#[test]
+fn a_task_opened_as_agentdeck_can_still_be_merged_and_validated() {
+    need_git!();
+    let env = start();
+    let t = task_in_review(&env, "Old task", "feature.txt");
+    assert!(t.worktree.ends_with(std::path::Path::new(".holt/worktrees/t1")), "{}", t.worktree.display());
+    assert!(std::fs::read_to_string(env.ws.join(".git/info/exclude")).expect("exclude").contains("/.holt/"));
+    // Turns it into a task of the AgentDeck days: the worktree under `.agentdeck/` and that path in the JSON.
+    let old = env.ws.join(".agentdeck").join("worktrees").join("t1");
+    std::fs::create_dir_all(old.parent().expect("parent")).expect("mkdir");
+    let (root, project, config, ws) = (env.root.clone(), env.project.clone(), env.config.clone(), env.ws.clone());
+    let Env { _tmp, core: first, rx, .. } = env;
+    first.shutdown();
+    drop((first, rx));
+    git(&ws, &["worktree", "move", &t.worktree.to_string_lossy(), &old.to_string_lossy()]);
+    let file = root.join("data").join("tasks").join(format!("{project}.json"));
+    let text = std::fs::read_to_string(&file).expect("json");
+    let old_json = old.to_string_lossy().replace('\\', "\\\\");
+    let new_json = t.worktree.to_string_lossy().replace('\\', "\\\\");
+    assert!(text.contains(&new_json), "{text}");
+    std::fs::write(&file, text.replace(&new_json, &old_json)).expect("write");
+
+    let (core, _rx) = start_core(&root, config, true);
+    let back = core.task(&project, "t1").expect("t1");
+    assert!(same_path(&back.worktree, &old), "{}", back.worktree.display());
+    core.task_merge(&project, "t1").expect("merge");
+    assert!(ws.join("feature.txt").is_file());
+    assert_eq!(core.task_validate(&project, "t1").expect("validate").status, TaskStatus::Merged);
+    assert!(!old.exists(), "the old worktree folder is cleaned up");
+    assert_eq!(worktree_count(&ws), 1);
+    // The next task lands in the new folder.
+    let next = core.task_create(&project, spec("New task")).expect("create");
+    assert!(next.worktree.ends_with(std::path::Path::new(".holt/worktrees/t2")), "{}", next.worktree.display());
+    core.shutdown();
+    drop(_tmp);
+}
+
 #[test]
 fn the_timeline_of_a_task_survives_a_restart() {
     need_git!();
