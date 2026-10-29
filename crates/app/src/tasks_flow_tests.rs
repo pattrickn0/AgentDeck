@@ -657,7 +657,7 @@ fn files_markdown_and_commits_open_in_the_center_and_the_files_reload_when_they_
     env.deck.tree_file_double_click("bin.dat");
     let bin = env.deck.docs.current_uid(&project).expect("bin.dat");
     wait(&mut env, bin);
-    assert!(matches!(env.doc_state(bin), DocState::Unreadable(m) if m.contains("binário")));
+    assert!(matches!(env.doc_state(bin), DocState::Unreadable(m) if m.contains("binary")));
     env.deck.tree_file_double_click("sumiu.txt");
     let gone = env.deck.docs.current_uid(&project).expect("sumiu.txt");
     wait(&mut env, gone);

@@ -212,7 +212,7 @@ pub fn text_body(ui: &mut Ui, body: Rect, uid: u64, doc: &TextDoc, find: &mut Fi
     let font = theme::mono(TEXT_FONT);
     let cell = ui.fonts_mut(|f| f.glyph_width(&font, 'M')).max(1.0);
     if doc.lines.is_empty() {
-        super::docs::note(&ui.painter_at(body), body, &agentdeck_core::t!("The file is empty."), p.text_2);
+        super::docs::note(&ui.painter_at(body), body, agentdeck_core::t!("The file is empty."), p.text_2);
         return;
     }
     let gutter = gutter_width(cell, doc.lines.len());
