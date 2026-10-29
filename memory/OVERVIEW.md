@@ -38,7 +38,7 @@ The "backend" is the `core` crate, with no UI. The UI only talks to it via `Core
 | `workspace/` | the legacy workspace, from the time when there was a global folder. Today each **project** has its own folder (the `cwd` of its tabs); `workspace/` only serves as a migration target from an old config |
 | `data/` | runtime data: attachments (`attachments/`), prompts (`prompts/`), hooks (`hooks/`), instructions (`holt-instructions.md`, `agy/<instance>/AGENTS.md`), tasks (`tasks/<project>.json` and `*-brief.md`/`-feedback.md`), sessions, `usage.json`, `crash.log`, `holt.log` (rotates above 2 MB), lock `.holt.lock` and `.holt.bridge` |
 | `whisper/` | engine and models for voice dictation (whisper.cpp) |
-| `%APPDATA%\Holt\config.json` | configuration (on first run, copied from `%APPDATA%\AgentDeck\config.json` if it exists). With `HOLT_HOME`, everything stays inside that folder |
+| `%APPDATA%\Holt\config.json` | configuration. With `HOLT_HOME`, everything stays inside that folder |
 
 **One window per data folder:** opening the app again with the same `data/` brings the live instance back (`POST /activate`)
 and exits silently; the window × hides to the system tray (or quits, without a tray) and exit is handled by the icon menu. For another

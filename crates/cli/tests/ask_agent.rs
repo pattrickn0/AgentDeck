@@ -38,7 +38,7 @@ fn start_core(root: &std::path::Path) -> Core {
 /// Removes the app's variables from the test's environment (the test may run inside a tab).
 fn scrub_app_env(cmd: &mut Command) {
     for name in ["PORT", "TOKEN", "AGENT", "DEPTH", "ASK_WAIT"] {
-        cmd.env_remove(format!("HOLT_{name}")).env_remove(format!("AGENTDECK_{name}"));
+        cmd.env_remove(format!("HOLT_{name}"));
     }
 }
 
@@ -70,37 +70,6 @@ fn outside_holt_exits_2() {
     let out = ask_agent(None, &["--list"], None);
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(text(&out.stderr).trim(), "ask-agent: run this command from inside a Holt terminal.");
-}
-
-/// The old name's prefix (`COMMANDDECK_*`) no longer works: without `HOLT_*`, `ask-agent` cannot find the bridge.
-#[test]
-fn old_commanddeck_variables_are_ignored() {
-    let tmp = tempfile::tempdir().expect("tmp");
-    let core = start_core(tmp.path());
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    scrub_app_env(&mut cmd);
-    cmd.arg("--list")
-        .env("COMMANDDECK_PORT", core.bridge_port().to_string())
-        .env("COMMANDDECK_TOKEN", core.bridge_token())
-        .env("COMMANDDECK_AGENT", "shell");
-    let out = cmd.output().expect("ask-agent");
-    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stderr));
-    assert_eq!(text(&out.stderr).trim(), "ask-agent: run this command from inside a Holt terminal.");
-}
-
-/// Tabs opened before the rename from AgentDeck carry `AGENTDECK_*`: `ask-agent` still finds the bridge there.
-#[test]
-fn old_agentdeck_variables_still_work_in_old_tabs() {
-    let tmp = tempfile::tempdir().expect("tmp");
-    let core = start_core(tmp.path());
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ask-agent"));
-    scrub_app_env(&mut cmd);
-    cmd.arg("--list")
-        .env("AGENTDECK_PORT", core.bridge_port().to_string())
-        .env("AGENTDECK_TOKEN", core.bridge_token())
-        .env("AGENTDECK_AGENT", "shell");
-    let out = cmd.output().expect("ask-agent");
-    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
 }
 
 #[test]

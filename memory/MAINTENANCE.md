@@ -222,31 +222,12 @@ To invoke the bridge as a tab, obtain its token with `spawn_spec_for(&ident).env
 
 The list is in [ideas.md](ideas.md), section "Known limitations"; what has not yet run on Windows is in [manual-tests.md](manual-tests.md).
 
-## 6. Name migration (AgentDeck → Holt)
+## 6. Name history
 
-The app was named CommandDeck, then AgentDeck, and is now **Holt** (task `t1`, 2026-10-29; the CommandDeck leftovers were
-dropped in the same task). An existing install keeps its projects, tabs, tasks and history without manual steps. Everything
-below exists **only for that**, is marked `Migration (remove after 0.4)` in the code, and is covered by `*_agentdeck_*` tests.
-Remove all of it in 0.4 (or later, once nobody runs an AgentDeck any more):
+The app was CommandDeck, then AgentDeck, and is now **Holt** (task `t1`, 2026-10-29). There is no compatibility left with
+the old names since 2026-10-29 (task `t3`): no config copy, no `data/` entry renames, no old env prefix, header, lock,
+`AGENTS.md` marker or worktree root. An install from before the rename must be migrated by hand.
+`memory/history.md` keeps describing the past under the old names. With `HOLT_HOME` the app is isolated and reads no user config.
 
-| What | Where | Remove |
-| :-- | :-- | :-- |
-| Config copy `<config dir>/AgentDeck/config.json` → `Holt/config.json` (tabs kept, old file left) | `config::legacy_config_files`, `is_agentdeck_config`, the copy in `Config::load_from`; tests `the_agentdeck_config_*`, `the_new_config_wins_over_the_agentdeck_one`, `candidates_start_with_the_new_file_then_agentdeck` | the `AgentDeck` candidate and the copy |
-| Rename of `.agentdeck.lock`, `.agentdeck.bridge`, `agentdeck.log`, `agentdeck-instructions.md` in `data/` (nothing moves while the old lock is held) | `paths::LEGACY_DATA_ENTRIES` (last four), `AppPaths::adopt_legacy_names`; tests `the_agentdeck_names_*`, `a_running_agentdeck_keeps_its_file_names` | the four entries and the lock check in `adopt_legacy_names` |
-| `~/.local/share/AgentDeck` → `Holt` (Linux fallback data folder) | `paths::adopt_legacy_home`; test `the_agentdeck_user_data_folder_moves_to_holt` | the function and its call in `AppPaths::detect` |
-| Second launch / lock: find a running old AgentDeck (`.agentdeck.lock`, `.agentdeck.bridge`, header `x-agentdeck-token`) and refuse to start beside it | `activation` (`LEGACY_BRIDGE_FILE`, `LEGACY_TOKEN_HEADER`), `LEGACY_LOCK_FILE` and `lock_data_dir` in `lib.rs`; tests `the_bridge_file_of_an_old_agentdeck_is_found`, `a_running_old_agentdeck_*`, `a_running_agentdeck_blocks_the_data_dir` | the legacy constants and checks |
-| `AGENTS.md` block `<!-- agentdeck:start/end -->` replaced by the `holt:` block; merge helpers treat both as the app's block | `workspace::marker_re` (`agentdeck` in the alternation); test `an_agentdeck_block_is_replaced_by_the_holt_one` | `agentdeck` from the regex |
-| Task worktrees opened under `.agentdeck/worktrees/<id>` (path stored in the task JSON) | `tasks::LEGACY_HOLT_DIR`, `tasks::safe_worktree` (accepts both roots); `workspace::IGNORED`/`WATCH_IGNORED` list `.agentdeck`; `is_app_data_dir` accepts `.agentdeck.lock`; test `worktrees_of_tasks_opened_as_agentdeck_are_still_accepted` | the legacy root and entries |
-| Env vars `AGENTDECK_*` in tabs opened before the update | `env::LEGACY_PREFIX` (`env_var_os`, `is_app_var`, `is_app_var_named`); tests in `env.rs` and `old_agentdeck_variables_still_work_in_old_tabs` (cli) | the prefix |
-| Bridge header `x-agentdeck-token` | `bridge::token_header`; test `the_old_agentdeck_token_header_still_authenticates` | the `or_else` |
-| `ask-agent` also sends `x-agentdeck-token`: agents of an AgentDeck app still running find the new `ask-agent` in `PATH` (it said "invalid token") | `Client::request` in `crates/cli/src/bin/ask-agent.rs` | the second `.header(...)` |
-| Linux menu: delete `agentdeck.desktop` and `agentdeck.png` when installing Holt's | `crates/app/build.rs` (`legacy`), `scripts/install-desktop.sh` | the `legacy` lines |
-
-Not migrated on purpose: `data/` keeps its name (so `target/release/data/` keeps working); `ask-agent` keeps its name;
-`memory/history.md` keeps describing the past under the old name. `COMMANDDECK_*`, `x-commanddeck-token` and the
-`commanddeck:` marker are gone for good. With `HOLT_HOME` the app is isolated and reads no user config.
-Context: [learnings/agentdeck-to-holt-migration.md](learnings/agentdeck-to-holt-migration.md).
-
-**After updating (user steps):** rename the GitHub repository `pattrickn0/AgentDeck` → `pattrickn0/Holt` (GitHub redirects the
-old URL) and update `origin`; optionally rename the local folder `~/AgentDeck` → `~/Holt` and rebuild so the menu entry points
-at the new path.
+**After updating (user steps):** rename the GitHub repository to `pattrickn0/Holt` (GitHub redirects the old URL) and update
+`origin`; optionally rename the local folder to `~/Holt` and rebuild so the menu entry points at the new path.

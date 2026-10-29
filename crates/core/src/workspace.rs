@@ -18,15 +18,14 @@ pub struct DirEntry {
 }
 
 /// Names ignored in the tree (`.gemini` is Antigravity's config folder, `~/.gemini/antigravity`;
-/// `.holt` keeps the task worktrees, and `.agentdeck` the ones opened before the rename). Holt's own data folder is recognized by its lock file
+/// `.holt` keeps the task worktrees). Holt's own data folder is recognized by its lock file
 /// ([`is_app_data_dir`]), not by name, so a project's own `data/` folder stays visible.
-pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".holt", ".agentdeck", "$RECYCLE.BIN", "target"];
+pub const IGNORED: &[&str] = &["node_modules", ".git", ".gemini", ".holt", "$RECYCLE.BIN", "target"];
 
 /// Is `dir` the data folder of a Holt (it holds the instance lock file)? It is the app's own folder when the
-/// project is the Holt repository (`data/`, or the legacy `dados/`). Migration (remove after 0.4,
-/// `memory/MAINTENANCE.md` §6): the lock of an AgentDeck counts too.
+/// project is the Holt repository (`data/`).
 pub fn is_app_data_dir(dir: &Path) -> bool {
-    dir.join(".holt.lock").is_file() || dir.join(".agentdeck.lock").is_file()
+    dir.join(".holt.lock").is_file()
 }
 
 fn is_ignored_entry(name: &str) -> bool {
@@ -212,10 +211,9 @@ pub const MARKER_END: &str = "<!-- holt:end -->";
 fn marker_re() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        // Also recognizes the markers of older names (`jwic`, `orquestra`, `agentdeck`) and swaps them for the current
-        // one. Migration (remove `agentdeck` after 0.4, `memory/MAINTENANCE.md` §6).
-        regex::Regex::new(r"<!-- (?:orquestra|jwic|agentdeck|holt):start -->[\s\S]*?<!-- (?:orquestra|jwic|agentdeck|holt):end -->")
-            .expect("valid regex")
+        // Also recognizes the markers of older names (`jwic`, `orquestra`) and swaps them for the current
+        // one.
+        regex::Regex::new(r"<!-- (?:orquestra|jwic|holt):start -->[\s\S]*?<!-- (?:orquestra|jwic|holt):end -->").expect("valid regex")
     })
 }
 
@@ -348,7 +346,7 @@ fn write_atomic(file: &Path, data: &[u8]) -> std::io::Result<()> {
 // ---------- Watcher ----------
 
 /// Changes in these folders do not reload the tree (`.gemini`: Antigravity's configuration).
-const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".holt", ".agentdeck", "target"];
+const WATCH_IGNORED: &[&str] = &[".git", "node_modules", ".gemini", ".holt", "target"];
 
 /// `path` relative to `base`, comparing by components (no case difference and no verbatim prefix
 /// `\\?\` on Windows: `c:\x`, `C:\x` and `\\?\C:\x` are the same folder). `None` if it is outside.
@@ -857,37 +855,6 @@ X
             assert!(!text.contains("jwic"), "{text:?}");
             // With the new block, nothing else changes.
             assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Unchanged);
-        }
-    }
-
-    /// Migration from AgentDeck: its block is replaced by the Holt one (not left beside it), the merge check ignores
-    /// both, and a block saved before the merge is put back over an `agentdeck:` one.
-    #[test]
-    fn an_agentdeck_block_is_replaced_by_the_holt_one() {
-        let tmp = tempfile::tempdir().expect("tmp");
-        let (app, home, ws) = (tmp.path().join("app"), tmp.path().join("home"), tmp.path().join("outside"));
-        std::fs::create_dir_all(&ws).expect("mkdir");
-        let file = ws.join("AGENTS.md");
-        for eol in ["\n", "\r\n"] {
-            let old_block = format!("<!-- agentdeck:start -->{eol}old text{eol}<!-- agentdeck:end -->");
-            let new_block = format!("{MARKER_START}{eol}new{eol}{MARKER_END}");
-            std::fs::write(&file, format!("# Rules{eol}{eol}{old_block}{eol}")).expect("write");
-            assert_eq!(ensure_agent_context(&ws, &app, &home, "new", false).expect("ok"), AgentContext::Written);
-            let text = std::fs::read_to_string(&file).expect("read");
-            assert_eq!(text, format!("# Rules{eol}{eol}{new_block}{eol}"));
-            assert!(!text.to_lowercase().contains("agentdeck"), "{text:?}");
-
-            // The merge check: HEAD still has the old block, the file the new one (or vice versa): only blocks differ.
-            let committed = format!("# Rules\n\n{}\n", old_block.replace("\r\n", "\n"));
-            assert!(only_marker_blocks_differ(&committed, &text));
-            assert!(!only_marker_blocks_differ(&committed, &text.replace("# Rules", "# My rules")));
-
-            // The saved block (an old one) goes back over the file the merge left with the other name.
-            std::fs::write(&file, format!("# Rules{eol}{eol}{old_block}{eol}")).expect("write");
-            restore_marker_block(&file, &format!("{new_block}{eol}")).expect("restore");
-            assert_eq!(std::fs::read_to_string(&file).expect("read"), format!("# Rules{eol}{eol}{new_block}{eol}"));
-            restore_marker_block(&file, &format!("x{old_block}")).expect("restore");
-            assert!(std::fs::read_to_string(&file).expect("read").contains("old text"), "a saved agentdeck block is recognized too");
         }
     }
 

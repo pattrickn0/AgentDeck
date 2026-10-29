@@ -189,13 +189,9 @@ fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
     req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
 }
 
-/// The token header (`x-holt-token`); empty if missing. Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): an
-/// `ask-agent` of the AgentDeck days still sends `x-agentdeck-token`.
+/// The token header (`x-holt-token`); empty if missing.
 fn token_header(req: &Request) -> &str {
-    header(req, "x-holt-token")
-        .filter(|v| !v.is_empty())
-        .or_else(|| header(req, "x-agentdeck-token").filter(|v| !v.is_empty()))
-        .unwrap_or("")
+    header(req, "x-holt-token").filter(|v| !v.is_empty()).unwrap_or("")
 }
 
 /// Serves a request. `port` is the bridge port (known before the first request: the `Host` is

@@ -71,17 +71,10 @@ impl Bridge {
         let agent: ureq::Agent =
             ureq::Agent::config_builder().proxy(None).http_status_as_error(false).timeout_global(timeout).build().into();
         let url = format!("http://127.0.0.1:{}{route}", self.port);
-        // Migration (remove after 0.4, `memory/MAINTENANCE.md` §6): the AgentDeck app still running while Holt is
-        // built reads only `x-agentdeck-token`, and its agents find this new `ask-agent` in `PATH`.
         let resp = match (method, body) {
-            ("GET", _) => agent
-                .get(&url)
-                .header("x-holt-token", &self.token)
-                .header("x-agentdeck-token", &self.token)
-                .header("content-type", "application/json")
-                .call(),
-            (_, Some(b)) => agent.post(&url).header("x-holt-token", &self.token).header("x-agentdeck-token", &self.token).send_json(b),
-            (_, None) => agent.post(&url).header("x-holt-token", &self.token).header("x-agentdeck-token", &self.token).send_empty(),
+            ("GET", _) => agent.get(&url).header("x-holt-token", &self.token).header("content-type", "application/json").call(),
+            (_, Some(b)) => agent.post(&url).header("x-holt-token", &self.token).send_json(b),
+            (_, None) => agent.post(&url).header("x-holt-token", &self.token).send_empty(),
         };
         let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
