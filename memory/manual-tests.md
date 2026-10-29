@@ -282,7 +282,7 @@ Dictation and attachments ★
 - [ ] Ctrl+/ with focused terminal toggles shortcuts screen.
 - [ ] Focused shell: Ctrl+L clears screen, Ctrl+B reaches program (tmux), and Ctrl+T opens tab. With "App shortcuts take precedence over terminal" enabled, Ctrl+B collapses sidebar. Setting persists across restarts.
 
-## Resume conversations (t76: Claude and OpenCode)
+## Resume conversations (t76: Claude and OpenCode; t77: Antigravity and Codex)
 
 - [ ] Open a Claude tab and an OpenCode tab (and a second Claude tab with another role). In each, say something easy to recognise ("my favourite number is 7"). Quit the app (tray → Exit) and open it again: every tab comes back to **its own** conversation (ask "what number did I say?").
 - [ ] Same after a crash: kill `agentdeck.exe` from Task Manager, reopen; the conversations are back.
@@ -292,6 +292,12 @@ Dictation and attachments ★
 - [ ] After sending a message, delete the tab's transcript (`~/.claude/projects/<folder>/<id>.jsonl`, the id is in `config.json` under `tabSessions`) and reopen: the tab opens from scratch with one notice in the Conversation tab and no loop.
 - [ ] A running task (`claude@tN`): quit and reopen; its tab resumes the task's conversation in the worktree.
 - [ ] OpenCode: `/new` inside the tab starts a session we do not track; after reopening it resumes the older one (known limit).
+- [ ] Antigravity: open a tab, send a message ("my favourite number is 7"), and check that `config.json` gets the tab's `tabSessions` entry (a UUID) and `data/agy-logs/antigravity.log` exists. Quit and reopen: the tab opens with `--conversation <that id>` and remembers the number. Before the first message the tab has no entry and reopens empty without a notice.
+- [ ] Antigravity: inside the tab type `/new`, say something, quit and reopen: it resumes the conversation that started after `/new` (the saved id follows the log).
+- [ ] Antigravity: two tabs of it (`antigravity` and `antigravity@qa`) keep separate conversations after a restart; delete `~/.gemini/antigravity-cli/conversations/<id>.db` of one and reopen: it opens empty and the entry is replaced after the first message.
+- [ ] Codex (npm install on Windows): open a tab and check in `data/agentdeck.log` or Task Manager that it runs `codex.exe` directly (not `cmd.exe /c codex`). Send a message and wait for the reply: `tabSessions` gets the thread id. Quit and reopen: the tab runs `codex resume <id>` and remembers the message. A second Codex tab (`codex@qa`) has its own thread.
+- [ ] Codex: `/new` inside the tab, send a message, reopen: it resumes the newer thread. Delete the rollout (`~/.codex/sessions/<y>/<m>/<d>/rollout-*-<id>.jsonl`) and reopen: it opens a new conversation with no error and no loop.
+- [ ] Codex: a tab closed before its first reply has no entry and reopens as a plain `codex` (known limit: the id is only known when the first turn ends).
 
 ## Titlebar, agent usage, and sidebar ★
 

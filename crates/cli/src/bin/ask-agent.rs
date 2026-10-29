@@ -8,7 +8,7 @@
 //!      ask-agent --team                       (your boss and your crew)
 //!      ask-agent --models [agent]            (installed agents, the models --model accepts and the quota)
 //!      ask-agent --boss "message"            (asks/reports to your boss)
-//!      ask-agent --signal busy|idle           (agent hooks: start/end of turn)
+//!      ask-agent --signal busy|idle [<json>]  (agent hooks: start/end of turn; Codex's notify JSON carries its thread id)
 //!      ask-agent --signal session [<id>]      (agent hook: the CLI's conversation id; without <id>, `session_id` in the JSON on stdin)
 //!      ask-agent --usage                      (Claude Code statusline: plan usage)
 //!      ask-agent --learn [<file>...]   (what the project has already learned, in general or about those files)
@@ -92,6 +92,11 @@ fn fail(msg: impl std::fmt::Display, code: u8) -> ExitCode {
 /// Body of `POST /signal`. `session` carries the CLI's conversation id: the argument when it is one (`--signal session
 /// <id>`), else the `session_id` of the JSON a hook receives on stdin (`stdin` is only read in that case).
 fn signal_body(state: &str, arg: Option<&str>, stdin: impl FnOnce() -> String) -> Value {
+    if state == "idle" {
+        // Codex's `notify` appends its JSON to the command: the thread id in it is the conversation `codex resume` takes.
+        let thread = arg.and_then(agentdeck_core::resume::notify_thread_id);
+        return thread.map_or_else(|| json!({ "state": state }), |t| json!({ "state": state, "session": t }));
+    }
     if state != "session" {
         return json!({ "state": state });
     }
@@ -1132,6 +1137,14 @@ mod tests {
         let no_stdin = || panic!("stdin must not be read");
         assert_eq!(signal_body("busy", None, no_stdin), json!({"state": "busy"}));
         assert_eq!(signal_body("idle", Some("{\"type\":\"x\"}"), no_stdin), json!({"state": "idle"}));
+        // Codex's `notify`: the JSON it appends carries the thread id `codex resume` takes (stdin is never read for it).
+        let notify = r#"{"type":"agent-turn-complete","thread-id":"01a187e4-5d25-7c61-9416-9143d2b8a5e5","turn-id":"t","cwd":"C:\\p","client":"codex-tui"}"#;
+        assert_eq!(
+            signal_body("idle", Some(notify), no_stdin),
+            json!({"state": "idle", "session": "01a187e4-5d25-7c61-9416-9143d2b8a5e5"})
+        );
+        assert_eq!(signal_body("idle", Some(r#"{"thread-id":"a b;c"}"#), no_stdin), json!({"state": "idle"}));
+        assert_eq!(signal_body("idle", None, no_stdin), json!({"state": "idle"}));
         assert_eq!(signal_body("session", Some("ses_abc"), no_stdin), json!({"state": "session", "session": "ses_abc"}));
         // Claude's SessionStart hook: the JSON arrives on stdin.
         let hook =

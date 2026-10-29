@@ -11,6 +11,7 @@ use parking_lot::Mutex;
 
 use crate::instances::Ident;
 use crate::models;
+use crate::resume;
 use crate::t;
 use crate::Core;
 
@@ -48,6 +49,8 @@ pub struct SpawnSpec {
     /// The launch continues a conversation saved for the tab (`--resume <id>` and the like). If the process ends right
     /// away with a failure, the UI forgets the id and opens the tab again from scratch (see `resume::resume_failed`).
     pub resumed: bool,
+    /// Antigravity's `--log-file` for this process: where its conversation id shows up (see `resume::agy_session_in_log`).
+    pub session_log: Option<PathBuf>,
 }
 
 /// Official colors (also used by the UI as a fallback).
@@ -215,6 +218,34 @@ impl Resolved {
     }
 }
 
+/// The native `codex.exe` behind the npm shim `shim` (`<npm>\codex.cmd`). The shim runs `node bin/codex.js`, which spawns
+/// the executable of the platform package (`node_modules/@openai/codex-win32-x64/vendor/<triple>/bin/codex.exe`, or
+/// `vendor/<triple>/bin` inside `@openai/codex` itself): the same places, in the same order, as `codex.js`.
+pub(crate) fn codex_native_exe(shim: &Path) -> Option<PathBuf> {
+    let package = shim.parent()?.join("node_modules").join("@openai").join("codex");
+    let (platform, triple) = match std::env::consts::ARCH {
+        "aarch64" => ("codex-win32-arm64", "aarch64-pc-windows-msvc"),
+        _ => ("codex-win32-x64", "x86_64-pc-windows-msvc"),
+    };
+    [
+        package.join("node_modules").join("@openai").join(platform).join("vendor"),
+        shim.parent()?.join("node_modules").join("@openai").join(platform).join("vendor"),
+        package.join("vendor"),
+    ]
+    .into_iter()
+    .map(|vendor| vendor.join(triple).join("bin").join("codex.exe"))
+    .find(|exe| exe.is_file())
+}
+
+/// The `notify` setting of Codex: its program is `ask-agent` by its full path when the app's folder has it. A bare name was
+/// not found by Codex on Windows (checked with 0.164: the same command with the full path ran).
+fn codex_notify_arg(bin_dir: &Path) -> String {
+    let exe = bin_dir.join(if cfg!(windows) { "ask-agent.exe" } else { "ask-agent" });
+    let program = if exe.is_file() { exe.to_string_lossy().into_owned() } else { "ask-agent".to_owned() };
+    // A JSON array of strings is also a TOML array.
+    format!("notify={}", serde_json::json!([program, "--signal", "idle"]))
+}
+
 /// `cmd.exe` options that open a `.cmd` shim in a tab (before the shim name).
 const CMD_FLAGS: [&str; 4] = ["/d", "/e:on", "/v:off", "/c"];
 
@@ -357,6 +388,9 @@ impl Registry {
             shim.map(|p| {
                 if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
                     Resolved::direct(p)
+                } else if let Some(exe) = (id == "codex").then(|| codex_native_exe(&p)).flatten() {
+                    // The real executable, not the shim: only then does Codex get the `notify` hook (and with it resume).
+                    Resolved::direct(exe)
                 } else {
                     Resolved::via_cmd(p, name, &[])
                 }
@@ -715,8 +749,14 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
     // The tab's own conversation (never "the last one": see `resume.rs`). OpenCode's goes next to `--standalone` below.
     let launch = core.plan_launch(project, ident);
     let resumed = launch.as_ref().is_some_and(|l| l.resumed);
+    let launch_args = || launch.iter().flat_map(|l| l.args.iter().cloned());
+    let mut session_log = None;
+    if kind == "codex" {
+        // `resume <id>` is a subcommand: before every other option (Codex has no initial-prompt flag, so nothing precedes it).
+        args.extend(launch_args());
+    }
     if kind == "claude" {
-        args.extend(launch.iter().flat_map(|l| l.args.iter().cloned()));
+        args.extend(launch_args());
         args.push("--append-system-prompt".into());
         args.push(instructions.clone());
         // Answering another agent means running `ask-agent`: allow only that command, without asking.
@@ -732,14 +772,33 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         }
     }
     if kind == "codex" && resolved.shim.is_none() {
-        // Codex end of turn → `ask-agent --signal idle <json>`. Through cmd.exe the TOML value
-        // (with quotes) does not survive, so only with the direct executable.
+        // Codex end of turn → `ask-agent --signal idle <json>`; the JSON carries the thread id that `codex resume` takes.
+        // Through cmd.exe the TOML value (with quotes) does not survive, so only with the direct executable.
         args.push("-c".into());
-        args.push(r#"notify=["ask-agent","--signal","idle"]"#.into());
+        args.push(codex_notify_arg(&core.paths().bin_dir));
     }
     args.extend(instruction_args(kind, &instructions, generic_file.as_deref(), resolved.shim.is_some()));
     // Without the "Do you trust this folder?" question, which left the tab opened in the background stuck.
     args.extend(crate::trust::prepare(kind, &cwd, &project_dir, &core.inner.home));
+    if kind == "antigravity" {
+        // The conversation id is not ours to choose: `agy` names it in its log (see `resume::agy_session_in_log`). A new
+        // process truncates the file, but a stale one is removed anyway so no old id is ever read.
+        let log = resume::agy_log_path(&core.paths().data_dir, &id);
+        if std::fs::create_dir_all(log.parent().unwrap_or(&core.paths().data_dir))
+            .and_then(|()| match std::fs::remove_file(&log) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            })
+            .is_ok()
+        {
+            args.extend(launch_args());
+            args.push("--log-file".into());
+            args.push(log.to_string_lossy().into_owned());
+            session_log = Some(log);
+        } else {
+            log::warn!("could not prepare the Antigravity log {}: this tab will not resume", log.display());
+        }
+    }
     if kind == "claude" || kind == "antigravity" {
         args.push("--add-dir".into());
         args.push(data_dir);
@@ -791,7 +850,8 @@ pub(crate) fn spawn_spec_for(core: &Core, project: &str, ident: &Ident) -> Resul
         kind: kind.to_owned(),
         double_enter_on_mention: kind == "claude" || kind == "antigravity",
         model,
-        resumed,
+        resumed: resumed && (kind != "antigravity" || session_log.is_some()),
+        session_log,
     })
 }
 
@@ -1042,6 +1102,68 @@ ok"
             &serde_json::json!({ "statusLine": { "type": "command", "command": "ask-agent --usage", "padding": 7 } }),
         );
         assert_eq!(statusline_padding(), serde_json::json!(2));
+    }
+
+    /// An npm global install of Codex: `<npm>/codex.cmd` and the platform package under `node_modules`.
+    fn fake_codex_install(npm: &Path, nested: bool) -> PathBuf {
+        let triple = if cfg!(target_arch = "aarch64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" };
+        let platform = if cfg!(target_arch = "aarch64") { "codex-win32-arm64" } else { "codex-win32-x64" };
+        let package = npm.join("node_modules").join("@openai").join("codex");
+        let vendor = if nested {
+            package.join("node_modules").join("@openai").join(platform).join("vendor")
+        } else {
+            npm.join("node_modules").join("@openai").join(platform).join("vendor")
+        };
+        let bin = vendor.join(triple).join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        std::fs::write(npm.join("codex.cmd"), "@echo off\r\n").expect("shim");
+        std::fs::write(bin.join("codex.exe"), "").expect("exe");
+        bin.join("codex.exe")
+    }
+
+    #[test]
+    fn the_codex_npm_shim_resolves_to_the_native_executable() {
+        // Where npm puts the platform package (nested under `@openai/codex`, as `codex.js` looks first)...
+        let tmp = tempfile::tempdir().expect("tmp");
+        let exe = fake_codex_install(tmp.path(), true);
+        assert_eq!(codex_native_exe(&tmp.path().join("codex.cmd")), Some(exe));
+        // ...or hoisted next to it.
+        let tmp = tempfile::tempdir().expect("tmp");
+        let exe = fake_codex_install(tmp.path(), false);
+        assert_eq!(codex_native_exe(&tmp.path().join("codex.cmd")), Some(exe));
+        // Nothing there (a different layout): the shim stays, with no `notify`.
+        let tmp = tempfile::tempdir().expect("tmp");
+        std::fs::write(tmp.path().join("codex.cmd"), "").expect("shim");
+        assert_eq!(codex_native_exe(&tmp.path().join("codex.cmd")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_codex_shim_is_launched_as_the_executable_so_it_gets_the_hook() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let npm = tmp.path().join("npm");
+        let exe = fake_codex_install(&npm, true);
+        let reg =
+            Registry::new(Discovery { search_path: Some(npm.clone().into_os_string()), home: tmp.path().join("h"), system_dirs: false });
+        let r = reg.resolve("codex").expect("codex");
+        assert!(r.shim.is_none() && r.program == exe && r.pre.is_empty(), "{r:?}");
+        // Without the platform package it is still the shim, through cmd.exe.
+        std::fs::remove_dir_all(npm.join("node_modules")).expect("rm");
+        let r = reg.resolve("codex").expect("codex");
+        assert_eq!(r.shim, Some(npm.join("codex.cmd")));
+    }
+
+    #[test]
+    fn the_codex_notify_hook_is_ask_agent_by_its_path_when_the_app_has_it() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let toml = |bin: &Path| codex_notify_arg(bin).trim_start_matches("notify=").to_owned();
+        // No `ask-agent` next to the app (tests, a partial install): the bare name, resolved through the tab's PATH.
+        let value: serde_json::Value = serde_json::from_str(&toml(tmp.path())).expect("array");
+        assert_eq!(value, serde_json::json!(["ask-agent", "--signal", "idle"]));
+        let exe = tmp.path().join(if cfg!(windows) { "ask-agent.exe" } else { "ask-agent" });
+        std::fs::write(&exe, "").expect("exe");
+        let value: serde_json::Value = serde_json::from_str(&toml(tmp.path())).expect("array");
+        assert_eq!(value, serde_json::json!([exe.to_string_lossy(), "--signal", "idle"]));
     }
 
     #[cfg(windows)]

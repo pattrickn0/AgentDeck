@@ -1,6 +1,6 @@
 ---
 title: Resuming a tab's conversation: the session id is the tab's own, flags checked per CLI
-summary: Claude --session-id/--resume (+ SessionStart hook), OpenCode --session ses_...; never --continue; a conversation with no message yet cannot be resumed.
+summary: Claude --session-id/--resume (+ SessionStart hook), OpenCode --session ses_...; never --continue; a conversation with no message yet cannot be resumed (Antigravity and Codex: see resume-antigravity-and-codex.md).
 touches: [crates/core/src/resume.rs, crates/core/src/agents.rs, crates/core/src/bridge.rs, crates/cli/src/bin/ask-agent.rs, crates/app/src/deck/tabs.rs, crates/core/src/config.rs]
 ---
 Each tab keeps the CLI's session id in `ProjectCfg.tab_sessions` (tab id → id), saved as soon as it is known and dropped
@@ -31,6 +31,7 @@ Checked on this machine (2026-10-29, Claude Code 2.1.312, OpenCode 2.0.32):
 
 **Why:** backlog item 3 (T4): every tab used to open an empty conversation after closing or crashing the app.
 **How to apply:** a new CLI joins by adding its flag to `resume::launch_args`, `supports` and `new_session_id` and, if the id
-is not known up front, a way to report it (Antigravity: from its `--log-file`; Codex: from `notify`; both are part B). Test the
+is not known up front, a way to report it (Antigravity from its `--log-file`, Codex from `notify`: see
+`resume-antigravity-and-codex.md`). Test the
 arguments in `resume.rs` and the flow with the fake agent in `tests/bridge.rs`
 (`a_claude_tab_resumes_its_own_conversation_and_a_refused_resume_starts_over`). Never add `--continue`.

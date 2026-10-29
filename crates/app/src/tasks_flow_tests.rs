@@ -1458,3 +1458,31 @@ fn a_resume_that_fails_right_away_drops_the_id_reopens_from_scratch_and_warns_on
     env.deck.close_tab(idx);
     assert_eq!(env.core.tab_session(&project, &instance), None);
 }
+
+#[test]
+fn a_tab_with_an_antigravity_log_saves_the_conversation_the_log_names() {
+    if !git_available() {
+        eprintln!("git is not installed: test skipped");
+        return;
+    }
+    let mut env = Env::start();
+    env.pump("os agentes", |d| d.initialized);
+    let id = env.create_from_form("Log me", true);
+    env.pump("the tab", |d| d.tasks.task("t1").is_some_and(|t| d.tasks_tab_open(t)));
+    let (project, instance) = (env.project(), env.task(&id).instance);
+    let idx = env.deck.tabs.iter().position(|t| t.ident.id() == instance).expect("tab");
+
+    // The launch asked for `--log-file`; `agy` writes the conversation it created there with the first message.
+    let log = env.core.paths().data_dir.join("agy-logs").join("probe.log");
+    std::fs::create_dir_all(log.parent().expect("dir")).expect("mkdir");
+    let conversation = "36ee4ddf-9114-4939-ba85-72a3cf8bda98";
+    std::fs::write(&log, format!("I1029 10:37:48 server.go:1235] Created conversation {conversation} (backend=X)\n")).expect("log");
+    let tab = &mut env.deck.tabs[idx];
+    tab.alive = true;
+    let mut spec = env.core.spawn_spec_for(&project, &agentdeck_core::Ident::parse(&instance).expect("id")).expect("spec");
+    spec.session_log = Some(log);
+    tab.spec = Some(spec);
+    tab.session_poll_at = Instant::now();
+    let _ = env.deck.background();
+    assert_eq!(env.core.tab_session(&project, &instance).as_deref(), Some(conversation));
+}

@@ -6,6 +6,7 @@ current state in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Completed
 
+- [x] **Each tab resumes its own conversation after the app closes or crashes** (2026-10-29, `t76` and `t77`): a session id per tab in `ProjectCfg.tab_sessions`, saved as soon as it is known; the CLI is relaunched with that id, never with a "most recent session" flag, and a resume that fails right away reopens from scratch with one notice. Claude (`--session-id`/`--resume`, `SessionStart` hook) and OpenCode (`--session`) in `t76`; Antigravity (`--conversation`, id read from the tab's `--log-file`) and Codex (`codex resume`, thread id from the `notify` JSON; the npm shim resolved to `codex.exe` on Windows so it gets the hook) in `t77`.
 - [x] **Flaky Fedora test: data folder lock released on `shutdown`** (2026-10-25): a live `Core` copy in a thread held `data/.agentdeck.lock` and reopening was refused; `Core::shutdown` now releases the lock.
 - [x] **`crates/app/src/deck.rs` split into modules** (2026-10-25, `t54`): the ~2,900-line file became `crates/app/src/deck/` (`mod`, `frame`, `tabs`, `keyboard`, `sidebar`, `projects`, `feed`, `attachments`, `dictation`), without changing behavior.
 - [x] **Codex on Windows: pasted message no longer stalls in input field** (2026-10-25): Enter waits 1 ms longer per pasted character (10 s ceiling), preventing it from becoming a newline before Codex reads the entire paste.
