@@ -236,7 +236,7 @@ pub fn quota_line(u: &AgentUsage, now_ms: u64) -> Option<String> {
         let name = name.map(|n| format!("{n} ")).unwrap_or_default();
         let renews = q.resets_at_ms.filter(|&r| r > now_ms).map(|r| format!(" (renews in {})", duration_text(r - now_ms)));
         Some(if q.exhausted() {
-            format!("{name}ESGOTADA{}", renews.unwrap_or_default())
+            format!("{name}EXHAUSTED{}", renews.unwrap_or_default())
         } else {
             format!("{name}{:.0}% used{}", q.used * 100.0, renews.unwrap_or_default())
         })
@@ -752,7 +752,7 @@ mod tests {
         assert_eq!(
             quota_line(&agy, NOW).as_deref(),
             Some(
-                "Gemini Models 0% used (renews in 34 h), Gemini 4 Argon ESGOTADA (renews in 9 h), Claude and GPT models 95% used (renews in 5 days)"
+                "Gemini Models 0% used (renews in 34 h), Gemini 4 Argon EXHAUSTED (renews in 9 h), Claude and GPT models 95% used (renews in 5 days)"
             )
         );
         // Below 80% also shows how much was used and when it renews.

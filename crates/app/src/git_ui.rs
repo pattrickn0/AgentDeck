@@ -595,7 +595,7 @@ impl Deck {
         let Some(action) = self.git.confirm.take() else { return };
         match action {
             ConfirmAction::DiscardFile(entry) => {
-                self.git_run(t!("Discarded"), t!("Discarding…"), move |core| core.git_discard(&entry).map(|_| String::new()));
+                self.git_run(t!("Changes discarded"), t!("Discarding…"), move |core| core.git_discard(&entry).map(|_| String::new()));
             }
             ConfirmAction::DiscardHunk { patch, .. } => {
                 self.git_run(t!("Hunk discarded"), t!("Discarding hunk…"), move |core| {

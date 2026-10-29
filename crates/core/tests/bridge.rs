@@ -1505,9 +1505,9 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let (st, body) = get("/models");
     assert_eq!(st, 200, "{body}");
     let text = body["text"].as_str().expect("text");
-    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: no reading\n"), "{text}");
+    assert!(text.starts_with("claude --model: opus, sonnet, haiku, fable\n  quota: no reading\n"), "{text}");
     assert!(text.contains("opencode: could not list the models"), "{text}");
-    assert!(text.contains("\n  cota: no reading\n\ncapability ("), "the capability comes after the agents: {text}");
+    assert!(text.contains("\n  quota: no reading\n\ncapability ("), "the capability comes after the agents: {text}");
     assert!(text.contains("Claude Sonnet 5.5 (claude sonnet): complexa, Coding Agent Index 59.3 (2026-10)"), "{text}");
     assert!(!text.contains("antigravity"), "what is not installed does not show up: {text}");
 
@@ -1517,7 +1517,7 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     assert!(
         body["text"]
             .as_str()
-            .is_some_and(|t| t.starts_with("claude --model: opus, sonnet, haiku, fable\n  cota: no reading\n\ncapability (")),
+            .is_some_and(|t| t.starts_with("claude --model: opus, sonnet, haiku, fable\n  quota: no reading\n\ncapability (")),
         "{body}"
     );
     let (st, body) = get("/models?agent=agy");
@@ -1544,8 +1544,8 @@ fn the_models_inventory_lists_installed_agents_only_and_survives_a_failed_listin
     let agy_pos = text.find("antigravity").expect("agy");
     let claude_pos = text.find("claude --model").expect("claude");
     assert!(agy_pos < claude_pos, "the one with the most room comes first:\n{text}");
-    assert!(text.contains("  cota: Gemini 4 Argon 4% used (renews in 6 days)"), "{text}");
-    assert!(text.contains("  cota: 60% used (renews in 4 days)"), "{text}");
+    assert!(text.contains("  quota: Gemini 4 Argon 4% used (renews in 6 days)"), "{text}");
+    assert!(text.contains("  quota: 60% used (renews in 4 days)"), "{text}");
     env.core.shutdown();
 }
 

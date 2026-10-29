@@ -19,7 +19,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("could not read {path}: {error}", "não consegui ler {path}: {error}"),
     ("{path} is not a file", "{path} não é um arquivo"),
     ("the folder of {path} does not open: {error}", "a pasta de {path} não abre: {error}"),
-    ("could not write {path}: {error}", "não consegui gravar {path}: {error}"),
+    ("could not write {path}: {error}", "não foi possível gravar {path}: {error}"),
     // app (docs, ui::docs)
     ("This file mixes line endings (CRLF and LF): writing it back would change lines you did not touch. Read-only.", "Este arquivo mistura fins de linha (CRLF e LF): gravar de volta mudaria linhas que você não tocou. Só leitura."),
     ("This file is not UTF-8 (some bytes do not become text): writing it back would damage it. Read-only.", "Este arquivo não é UTF-8 (há bytes que não viram texto): gravar de volta o estragaria. Só leitura."),

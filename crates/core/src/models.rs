@@ -337,7 +337,7 @@ fn join_marked(models: &[String], strip: impl Fn(&str) -> &str) -> String {
 ///
 /// This text is agent-facing: it is always English, without `t!`. Its shape is also parsed:
 /// `crates/cli/src/bin/ask-agent.rs` (`quota_usage_from_inventory`) goes by the ` --model` heading and by
-/// the `  cota:` prefix (which therefore stays Portuguese) to choose a better agent by quota.
+/// the `  quota:` prefix to choose a better agent by quota.
 pub fn format_inventory(items: &[AgentModels], quotas: &std::collections::HashMap<String, String>) -> String {
     if items.is_empty() {
         return "No agent installed on this computer.".to_owned();
@@ -366,9 +366,9 @@ pub fn format_inventory(items: &[AgentModels], quotas: &std::collections::HashMa
             }
         }
         if let Some(q) = quotas.get(agent) {
-            lines.push(format!("  cota: {q}"));
+            lines.push(format!("  quota: {q}"));
         } else if accepts_model(agent) {
-            lines.push("  cota: no reading".to_owned());
+            lines.push("  quota: no reading".to_owned());
         }
     }
     lines.join("\n")
@@ -780,15 +780,15 @@ mod tests {
         ];
         let expected = [
             "claude --model: opus, sonnet",
-            "  cota: last reading 10 min ago",
+            "  quota: last reading 10 min ago",
             "antigravity --model: gemini-4-argon-free (free), gemini-4-argon-low",
-            "  cota: Gemini 4 Argon EXHAUSTED",
+            "  quota: Gemini 4 Argon EXHAUSTED",
             "codex --model <name> (this computer does not list the models)",
-            "  cota: no reading",
+            "  quota: no reading",
             "opencode --model <provider>/<model>:",
             "  opencode/: glm-5.3-flash-free (free), beam-free#high (free), paid",
             "  opencode-go/: deepseek-v4.1-flash",
-            "  cota: no reading",
+            "  quota: no reading",
             "aider: no model choice (uses the CLI default)",
         ];
         let quotas = std::collections::HashMap::from([
@@ -823,7 +823,7 @@ mod tests {
         let text = format_inventory(&items, &Default::default());
         assert_eq!(text.lines().count(), 4, "{text}");
         assert!(text.starts_with("opencode: could not list the models"), "{text}");
-        assert!(text.ends_with("claude --model: opus\n  cota: no reading"), "{text}");
+        assert!(text.ends_with("claude --model: opus\n  quota: no reading"), "{text}");
         // No agent installed.
         assert_eq!(format_inventory(&[], &Default::default()), "No agent installed on this computer.");
     }
