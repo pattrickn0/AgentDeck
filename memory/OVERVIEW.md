@@ -87,19 +87,19 @@ tab. Details in [ARCHITECTURE.md](ARCHITECTURE.md).
    with a notice (HTTP 202) and the response is **typed later** into the caller's terminal (and remains in `ask-agent --inbox`).
    In a `shell` tab or in headless mode, `ask-agent` waits until completion.
 
-Everything appears in the **integrated Conversation**, and the user can intervene in any tab.
+Inside a task, every exchange appears in the task's **timeline**; system notices (errors, downloads, tasks ready) become **notifications**; and the user can intervene in any tab.
 
 ### The window
 
 | Area | What it has |
 | :-- | :-- |
-| Title bar | custom (no system title bar): ☰ (settings), collapse sidebar, brand and "Holt", `/ <project>` and branch chip (with the sidebar collapsed, the compact **Agents \| Documents toggle** appears right after); on the right, **usage for each agent with quota** (logo + 5h session and weekly bars; amber starting at 80%, red at 100%; hovering opens the **usage panel** with groups and renewal times) and minimize/maximize/close |
+| Title bar | custom (no system title bar): ☰ (settings), collapse sidebar, brand and "Holt", `/ <project>` and branch chip (with the sidebar collapsed, the compact **Agents \| Documents toggle** appears right after); on the right, **usage for each agent with quota** (logo + 5h session and weekly bars; amber starting at 80%, red at 100%; hovering opens the **usage panel** with groups and renewal times) the **notifications bell** (count of unread warnings and errors; opens the history of the last 100 notices, and task notices open their task), and minimize/maximize/close. Notices also show as **toasts** in the bottom-right corner (info and success leave after 6 s, warnings after 10 s, errors stay until closed; hover holds them) |
 | Left sidebar | the **Agents \| Documents toggle** at the top, **PROJECTS** (each project with its agents in a tree and model on the right; the active one has "+ New agent"; "+" in the header opens a folder as a project; right-click renames, opens folder, or removes), **ORGANIZATION** (`Tabs \| Split \| Highlight`), and **FILES**, the explorer (with Git status letter, refresh, and collapse all); collapses with `Ctrl+B` |
 | Center | two views (`Ctrl+Shift+D`): **Agents** (terminals organized in Tabs, Split, or Highlight; in each pane header are tabs, `⋮⋮` handle, microphone, attachment, and "+") and **Documents** (diff, editable files, and markdown occupying the entire center) |
-| Right sidebar | **fixed, does not collapse**; width adjustable via border. Four tabs at the top: **Tasks** (the first; badge counts review + validation), **Conversation** (read-only: the feed of inter-agent messages, with unread counter), **Git**, and **GitHub** (with open PR count) |
+| Right sidebar | **fixed, does not collapse**; width adjustable via border. Three tabs at the top: **Tasks** (the first; badge counts review + validation), **Git**, and **GitHub** (with open PR count) |
 
 - **Projects:** each project is a folder with its agents. Switching projects hides tabs of the previous one, which
-  **keep running**. The tree, Tasks, Git, GitHub, and Conversation belong to the active project; usage in the title bar is global.
+  **keep running**. The tree, Tasks, Git, and GitHub belong to the active project (notifications are global and name the project they came from); usage in the title bar is global.
   Removing and re-adding the same folder reuses the project id and recovers its tasks.
 - **Organization (`Tabs | Split | Highlight`):** in **Split**, tabs of the same CLI type share the same pane in an
   automatic grid (2 side-by-side, 2+1, 2×2, 3+2, 3×2), with draggable dividers and a `⋮⋮` handle to rearrange panes;
@@ -118,10 +118,17 @@ Everything appears in the **integrated Conversation**, and the user can interven
   *Running* → (`--task done`) *In review* → (merge) *Waiting for validation* (tab, worktree, and branch remain alive
   to test the app) → (validate) *Completed*; *Reject* returns it to the same agent. The **+ New** form takes title,
   brief, **level** (*Simple*, *Medium*, *Complex*), agent/model (recommended by capability + quota headroom), effort,
-  base, **scope** (if it overlaps another active task, it enters **the queue** and starts automatically when cleared), and attachments. The
-  detail view displays brief, report, diff (**View full diff** / **View merged diff**), **MESSAGES** section, and
-  history, and offers buttons to resolve merge rejections right there (stash changes and merge, ask
-  agent to commit or resolve conflict).
+  base, **scope** (if it overlaps another active task, it enters **the queue** and starts automatically when cleared), and attachments
+  (base and scope fold under "Branch and scope"). The list is a **queue grouped by who moves next**: *Needs you* (review,
+  test it, a merge that stopped, a failure; each row carries its two actions and the next one to handle gets the accent
+  frame), *Agents working* (working, resolving a conflict with "Cancel automatic merge", queued), *Drafts*, and *Finished*
+  (with a filter). Each row has one state glyph, the state word, the agent's logo and model, the id and the diff size; a row
+  that needs you carries its main move (Merge, Validate, Ask agent to resolve, Try again) and, at most, the diff. The
+  detail opens on a **lifecycle track** (Created → Worked → Review → Merged → Validated, with real times), the explanation
+  of the state (queue, files outside the scope, conflict being resolved, merge refusal with its way out), three panes
+  (**Report** with the changed files and each file's +/− split under it, **Timeline** with events and agent messages in
+  one stream, and **Request**), the actions pinned at the bottom (Return/Reject open their field there) and a "⋯" menu (tab, open in
+  Documents, Discard).
 - **Git tab and GitHub tab:** the **Git** tab operates the local repository (Changes with stage/discard per file or per
   chunk/hunk, commit, paginated History, Stash, branches with merge/rebase, and Conflict resolution), updating automatically
   when `.git/` changes. The **GitHub** tab lists PRs (with checks), Issues, and Actions (with tail of failed job logs) from the

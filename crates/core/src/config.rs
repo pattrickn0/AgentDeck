@@ -201,7 +201,7 @@ pub struct Config {
     // --- Layout (new in the Rust version; the Electron version kept it only in CSS) ---
     pub sidebar_width: f32,
     pub sidebar_collapsed: bool,
-    /// Width of the right bar (integrated conversation); 0 = default. It does not
+    /// Width of the right bar (tasks, git, GitHub); 0 = default. It does not
     /// collapse. (Replaces `bottomHeight`/`feedCollapsed` of the old bottom panel, ignored when reading.)
     pub right_panel_width: f32,
     /// How the agent windows are arranged. Absent in old files: `splitEnabled` applies

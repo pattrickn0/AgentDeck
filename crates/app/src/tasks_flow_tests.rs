@@ -333,7 +333,7 @@ fn a_task_whose_scope_overlaps_waits_in_the_queue_and_starts_by_itself_when_the_
     assert_eq!(env.deck.tasks.view, TasksView::Detail("t2".into()));
     assert!(!env.tab_open("t2") && !queued.worktree.exists());
     assert_eq!(actions_for(&queued, false), [TaskAct::Discard]);
-    assert_eq!(crate::tasks_ui::Group::of(queued.status), crate::tasks_ui::Group::Queued);
+    assert_eq!(crate::tasks_ui::Lane::of(queued.status), crate::tasks_ui::Lane::Working);
     // The list and the detail of the queued task draw without trouble.
     draw_frame(&mut env, vec![]);
     env.deck.tasks_back();
@@ -1423,7 +1423,7 @@ fn a_resume_that_fails_right_away_drops_the_id_reopens_from_scratch_and_warns_on
     let (project, instance) = (env.project(), env.task(&id).instance);
     let idx = env.deck.tabs.iter().position(|t| t.ident.id() == instance).expect("tab");
     let old = env.core.tab_session(&project, &instance).expect("the first launch saved the tab's id");
-    let notices = |env: &Env| env.deck.feed.iter().filter(|f| f.text.contains("could not resume")).count();
+    let notices = |env: &Env| env.deck.notices.list.iter().filter(|n| n.text.contains("could not resume")).count();
 
     // A launch that continued a saved conversation, and the CLI refuses it two seconds in: back to scratch.
     let mut spec = env.core.spawn_spec_for(&project, &holt_core::Ident::parse(&instance).expect("id")).expect("spec");
@@ -1433,7 +1433,7 @@ fn a_resume_that_fails_right_away_drops_the_id_reopens_from_scratch_and_warns_on
     assert!(env.deck.reopen_without_resume(idx, 1));
     let new = env.core.tab_session(&project, &instance).expect("a new id for the fresh conversation");
     assert_ne!(new, old, "the refused id was dropped");
-    assert_eq!(notices(&env), 1, "one notice in the chat");
+    assert_eq!(notices(&env), 1, "one notification");
 
     // The new launch asked for no resume: the same failure again is just an ended process (no loop, no second notice).
     assert!(!env.deck.tabs[idx].spec.as_ref().is_some_and(|s| s.resumed));

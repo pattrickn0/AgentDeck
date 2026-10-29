@@ -271,7 +271,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             Act::Save(uid) => deck.docs_save(uid, After::Nothing),
             Act::OpenExternal(rel) => {
                 if let Err(e) = deck.core.open_path(&rel) {
-                    deck.system(t!("Could not open {rel} in the default program: {error}", rel, error = e));
+                    deck.notify(holt_core::Tone::Error, t!("Could not open {rel} in the default program: {error}", rel, error = e));
                 }
             }
             Act::SelectFile(uid, n) => {

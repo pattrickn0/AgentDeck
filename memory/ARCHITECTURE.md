@@ -52,7 +52,7 @@ Bridge instructions (use of `ask-agent`, prohibition of CLI-internal subagents w
 | Aider | `--read data/holt-instructions.md` |
 | Open Interpreter | `--custom_instructions <text>` |
 | Antigravity | `--add-dir data/agy/<instance>` (where the app writes an `AGENTS.md` with instance name and role, combined with project's by `agy`) |
-| Goose, Copilot | read only the folder's `AGENTS.md`: if missing, the app creates one with only the `<!-- holt:start/end -->` block and notifies in Conversation; if already present, updates only the block |
+| Goose, Copilot | read only the folder's `AGENTS.md`: if missing, the app creates one with only the `<!-- holt:start/end -->` block and shows a notification; if already present, updates only the block |
 | Amazon Q, Terminal | no instruction channel |
 
 The text in a shared file (`data/holt-instructions.md` and `AGENTS.md` block) does not list agents installed on the machine, so as not to dirty `git status` across computers.
@@ -115,7 +115,7 @@ Every request requires `x-holt-token` (constant-time comparison) and `Host: 127.
 1. **Resolution and queue:** `POST /ask` resolves destination in caller's project (or creates instance and opens tab in background, up to 8 automatic tabs). Calls for same `from->to` pair follow a FIFO queue; in headless, sessions for the pair are resumed in Claude (`--session-id`/`--resume`) and Antigravity (`--conversation`).
 2. **Cycles and depth:** if target already waits directly or indirectly for caller, `/ask` rejects with **409**. Pending question chain between tabs is rejected starting at depth 2.
 3. **Synchronous or delayed reply (HTTP 202):** `ask-agent` waits up to `HOLT_ASK_WAIT` (default 90 s). If `ask-agent --reply <n>` arrives in time, it outputs to stdout with HTTP 200 and the client confirms receipt in `POST /inbox/delivered` (since `tiny_http` does not detect if client died before reading 200). If exceeding 90 s, `/ask` returns **202** freeing `ask-agent` (question stops blocking cycles, but continues counting toward depth) and, when destination replies (within 10 min), the reply is typed into caller's terminal. `shell` tabs and headless executions always wait up to 10 min.
-4. **Inbox (`inbox.rs`):** each reply (up to 20 per instance) stays as "undelivered" until `/inbox/delivered` or typing in tab. If caller tab closed or died, app notifies in Conversation and reply remains available in `ask-agent --inbox`.
+4. **Inbox (`inbox.rs`):** each reply (up to 20 per instance) stays as "undelivered" until `/inbox/delivered` or typing in tab. If caller tab closed or died, app shows an error notification and reply remains available in `ask-agent --inbox`.
 
 ### Durable mail (`mail.rs`)
 

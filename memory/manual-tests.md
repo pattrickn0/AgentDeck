@@ -76,6 +76,18 @@ Via the **Tasks** tab on the right panel:
 - [ ] **Attachments in "New task" form** (t11): "Attach files" opens picker; files become removable chips (× removes chip) and, on creation, paths (copies in `data/attachments`) are appended to end of request.
 - [ ] **Drag files over open "New task" form** (t11): right panel highlights "Drop to attach to new task" and dropping adds chips; with form closed, highlight targets agent window under cursor.
 
+The queue (t8, the redesigned panel; check in English and in Portuguese):
+
+- [ ] **Lanes:** the list groups tasks by who moves next: NEEDS YOU (review, then test it, then a merge that stopped, then a failure; oldest first inside each), AGENTS WORKING (resolving a conflict first, then working, the queue last), DRAFTS, FINISHED (with its filter on the right; an empty filter keeps the lane with "No tasks in this filter."). Lanes without tasks do not show. Each count matches its rows.
+- [ ] **Rows:** each row has one glyph (filled ring review, ring with check test it, amber "!" not merged, red "!" failed, pulsing dot in the agent's colour working, amber pulse resolving a conflict, dashed ring queued, hollow ring draft), the title (two lines at most), how long it waits, the state word, the agent's logo with model and effort, the id and `+N −M` on the right. Only the first NEEDS YOU row has the accent frame.
+- [ ] **Row actions:** review → "Merge into <base>" (asks to confirm) and "Diff" (opens the diff in the center); test it → "Validate" and "What changed"; not merged with a conflict → "Ask agent to resolve"; failed → "Try again". Return, Reject and Discard are only in the detail. Clicking the row elsewhere opens the detail. While an operation runs, every row's buttons are dimmed and do nothing.
+- [ ] **Working rows:** a working task shows "Last: asked antigravity · 2 min" after its agent asks something; resolving a conflict shows "Merges into <base> by itself when the agent delivers." and **Cancel automatic merge** works from the row; a queued one says "after tN".
+- [ ] **Detail:** header with ←, the id and the title, and ⋯ (Go to tab / Reopen tab, Open the request / report in Documents, Discard… in red). The lifecycle track marks the current stop (accent; amber for a conflict or a stopped merge; red for a failure or a discard) with real times, and "Worked" shows how long the agent took. The panes Report / Timeline N / Request switch without losing the scroll of the list; a task opens on Report when it has one, Timeline while the agent works, Request before it starts.
+- [ ] **Changes (in the Report pane, under the report):** one row per file with the path cut from the start, a green/red bar with the +/− split and the changed lines; hover shows the full path; "View full diff" (or "View what was merged") below.
+- [ ] **Timeline pane:** events and messages between agents in one stream, newest first, along a guide line; a message shows `from → to`, its kind and the text in a bubble; a long one shows "see all" and opens in place; errors are red.
+- [ ] **Pinned actions:** the state's actions stay at the bottom while the pane scrolls (review: Merge, Return…, View full diff; test it: Validate, Reject…, View what was merged; working: Go to tab, View full diff; draft: Start). "Return…"/"Reject…" open the field in the footer, focused, with the hint of what the agent gets; Ctrl+Enter sends, Cancel closes.
+- [ ] **New task form:** "Size of the work", "Who does it" (agent and model side by side, menus open under the pair), the quiet line under them (recommendation and quota; amber for a quota or capacity warning), Effort, and "▸ Branch and scope · from dev, no scope" that unfolds Base and Scope. Create, Cancel and "Ctrl+Enter" stay pinned at the bottom.
+
 ## Models ★
 
 - [ ] `ask-agent --model sonnet claude@dev "say hello"` from inside a tab: opens "Claude · Dev" with `sonnet` suffix in header and sidebar; Claude reports Sonnet (`/status`).
@@ -106,9 +118,9 @@ Via the **Tasks** tab on the right panel:
   - Claude (`--append-system-prompt`), OpenCode (`instructions` in `OPENCODE_CONFIG_CONTENT`; verified with `opencode run --standalone`, TUI remaining);
   - **Codex** (`-c developer_instructions=...`; not installed on dev machine): verify value enters and, with npm installation on Windows (shim `.cmd`, raw text without quotes), `codex` does not reject option;
   - **Aider** (`--read`) and **Open Interpreter** (`--custom_instructions`): verify flags exist in installed version;
-  - **Antigravity** (quota exhausted at development time): folder receives `AGENTS.md` containing only app block, Conversation warns once, and agent knows `ask-agent` and subagent rules; reopening does not modify file or warn.
+  - **Antigravity** (quota exhausted at development time): folder receives `AGENTS.md` containing only app block, a notification warns once, and agent knows `ask-agent` and subagent rules; reopening does not modify file or warn.
 - [ ] `git status` of new project: with Claude, Codex, OpenCode, and Aider, clean; with Antigravity/Goose/Copilot, only `AGENTS.md` (once, without changing on each launch).
-- [ ] Project that already has its own `AGENTS.md`: user text remains untouched, only gains app block (standard case), and Conversation does not announce creation.
+- [ ] Project that already has its own `AGENTS.md`: user text remains untouched, only gains app block (standard case), and no notification announces creation.
 - [ ] `ask-agent --learn` in project without `memory/learnings/` shows "project does not yet have learnings" and file format (`title`, `summary`, `touches`).
 
 ## Bridge and instances
@@ -179,29 +191,27 @@ Security, environment, and new agents
 - [ ] In vim/htop with mouse enabled, Ctrl+wheel and Alt+wheel arrive with modifier. Shift+wheel scrolls terminal history, with or without mouse-aware program.
 - [ ] Slowly dragging right panel border or splitter with Claude open: tab does not repaint during drag; on release, Claude repaints once at new width (history retains at most one old copy per drag).
 - [ ] With Claude working, open third agent type (screen becomes 2+1) and drag splitters: Claude tab repaints promptly, without going black or freezing.
-- [ ] **Blank lines after resize (t37)**: in PowerShell tab, run `1..3000 | % { "line $_ " * 12 }`, then resize window repeatedly (Focus, splitter, maximize), smaller and larger; scroll history to top: lines stay in order without holes, and nothing disappears when window grows (bottom may have trailing blank space: matches Windows Terminal behavior). Tab right-click: "Record terminal (diagnostics)" enables recording (menu item toggles to "Stop recording terminal" and Conversation indicates files location, `data/pty/`); "Save grid snapshot now" dumps screen and history text and opens folder. Without enabling, nothing is written to `data/pty/`.
+- [ ] **Blank lines after resize (t37)**: in PowerShell tab, run `1..3000 | % { "line $_ " * 12 }`, then resize window repeatedly (Focus, splitter, maximize), smaller and larger; scroll history to top: lines stay in order without holes, and nothing disappears when window grows (bottom may have trailing blank space: matches Windows Terminal behavior). Tab right-click: "Record terminal (diagnostics)" enables recording (menu item toggles to "Stop recording terminal" and a notification indicates files location, `data/pty/`); "Save grid snapshot now" dumps screen and history text and opens folder. Without enabling, nothing is written to `data/pty/`.
 
 ## Interface
 
 Right panel ★
 
-- [x] Integrated Conversation appears on the **right**, occupying full height; terminal windows occupy full height in center.
+- [x] The right panel occupies full height; terminal windows occupy full height in center.
+- [ ] **No Chat tab** (t8): the panel has only Tasks, Git and GitHub; nothing points to a "Conversation" or "Integrated chat" any more.
 - [x] Dragging left border resizes panel (between ~280 px and ~half window width; default is now 330 px, slightly narrower); **cannot** be collapsed.
 - [x] Close and reopen app: chosen width persists.
 - [x] Shrink window to minimum (~820 px width): nothing overlaps; terminal remains usable.
 - [x] "+" menu (new tab) near right window edge: opens within bounds and selection works.
 - [x] Whisper download progress (if active): progress banner sits directly below panel top.
-- [x] Icons: **speech bubbles** (Conversation) and **branch** (Git). Hover shows name of each.
-- [x] Icons render crisp (no strange jagged edges) and branch icon shows **open circles**.
-- [x] Staying on Git while messages arrive: **counter badge** appears over Conversation icon; switching to Conversation clears it.
-- [x] "Clear" only appears on Conversation.
-- [ ] **Read-only Conversation** (t11): right panel has no input box or "Send to"; feed only. To write to an agent, use its tab terminal.
 
-Conversation
+Notifications (t8)
 
-- [ ] Messages sent to an agent via "Send to agent" (GitHub tab) enter feed with vertical green indicator (`theme::USER = #10b981`), readily distinguished from AI messages.
-- [ ] Long and multi-line messages: auto-wrap in card without overflowing panel width and dynamic height on color bar.
-- [ ] Renaming tab (claude → claude@dev) while "thinking" in Conversation: older messages show new name, and "thinking" indicator clears with its next message.
+- [ ] A system notice (e.g. dictation with no audio, "Could not transcribe…") shows a toast in the bottom-right corner, above "+ New task": errors have a red border and stay until ✕; info and success leave after 6 s and warnings after 10 s, with a thin line showing the time left; hovering holds the toast. At most three toasts at once (the oldest leaves the corner, not the history).
+- [ ] The bell in the title bar (left of the window buttons) counts unread warnings and errors (red with an error, amber with only warnings). Clicking opens the history (newest first, at most 100): the mark of each tone, the text, how long ago and, for a notice from another project, its name. Opening it marks everything read and clears the corner; Esc or a click outside closes it; "Clear" empties it.
+- [ ] A task notice ("Task t4 ready for review…") has "Open t4": from the toast or the history it switches to the task's project if needed and opens its detail in the Tasks tab.
+- [ ] An agent error (e.g. a question that ended without an answer) becomes an error notification "from → to: text"; questions and answers between agents do not become notifications (they are in the task's timeline).
+- [ ] Closing a project removes its notices from the history.
 
 Documents in center ★ (t19)
 
@@ -261,12 +271,12 @@ Dictation and attachments ★
 
 - [ ] **Optional dictation: clean initial launch** (t34): in data folder without `whisper/models/` and without `config.json` (use fresh `HOLT_HOME`; executable's sibling `whisper/` must not have model), app launches normally and shows modal "Voice dictation (optional)" with download size (~1.6 GB). Nothing downloaded before user answers (right panel shows no progress).
 - [ ] **Optional dictation: "Not now"** (t34): modal closes (Esc also closes), nothing downloads, `config.json` receives `"dictation": "no"`, and on restart prompt does not reappear. Window microphone (and `Ctrl+Shift+M`) opens same modal instead of recording; microphone tooltip reads "Voice dictation not installed: click to download".
-- [ ] **Optional dictation: download** (t34): "Download" in modal (or later via ☰ Settings → "Download (~1.6 GB)") saves `"dictation": "yes"`, displays progress banner on right panel, and when finished status in Settings becomes "installed"; microphone records and transcribes as before. During download microphone informs in Conversation that download is in progress (and button tooltip says same).
+- [ ] **Optional dictation: download** (t34): "Download" in modal (or later via ☰ Settings → "Download (~1.6 GB)") saves `"dictation": "yes"`, displays progress banner on right panel, and when finished status in Settings becomes "installed"; microphone records and transcribes as before. During download microphone informs with a notification that download is in progress (and button tooltip says same).
 - [ ] **Optional dictation: remove** (t34): ☰ Settings → "Remove from disk" asks confirmation ("Confirm: delete from disk"; closing menu cancels confirmation); confirming deletes `whisper/models/ggml-large-v3-turbo.bin` (and `bin-cuda/`), status becomes "not installed", config saves `"no"`, and microphone offers download again. While dictation is actively recording, removal is rejected with warning.
 - [ ] **Optional dictation: existing Whisper installations** (t34): with model already downloaded and config lacking `dictation` field (upgrading users), app prompts nothing and dictation functions as before; `config.json` acquires `"dictation": "yes"`.
 - [ ] **Optional dictation: screenshot mode** (t34): `HOLT_SMOKE` continues without downloading or prompting; `HOLT_DEBUG_UI=dictation-ask` displays modal to inspect UI.
 - [ ] **Dictation settings: language and translation** (t5): ☰ Settings shows a DICTATION section (Auto-detect, English, Português, Español, Français, Deutsch, Italiano, Japanese, Chinese), a "Translate to English" switch and a hint with the engine and model. A fresh `HOLT_HOME` starts with English selected (`whisperLang: "en"`); switching the UI to Português moves it to Português unless another one was chosen. Dictate in each setting without restarting: the chosen language is transcribed; with translate on, speaking Portuguese gives English text; changes are saved in `config.json` (`whisperLang`, `whisperTranslate`).
-- [ ] **Tab-scoped dictation (`Ctrl+Shift+M` or microphone icon on tab)**: clicking tab microphone records (blinks red), clicking again transcribes ("Transcribing…" on tab) and types text into PTY of that tab **without Enter**; switching tabs during recording/transcription keeps target on starting tab; closing tab before completion discards text with notice in Conversation.
+- [ ] **Tab-scoped dictation (`Ctrl+Shift+M` or microphone icon on tab)**: clicking tab microphone records (blinks red), clicking again transcribes ("Transcribing…" on tab) and types text into PTY of that tab **without Enter**; switching tabs during recording/transcription keeps target on starting tab; closing tab before completion discards text with a notification.
 - [ ] **Microphone and attachment in pane header** (t11): each pane has microphone and file attachment buttons next to "+"; both operate on the **visible tab of that pane** (not focused pane or first pane): with two panes, recording in second types into visible tab of second; changing visible tab updates target. Button is disabled when visible tab is dead (or while transcribing) and tab shows only indicator (pulsing red dot, "Opening…" or "Transcribing…").
 - [ ] **Attach via header** (t11): attachment button copies file to `data/attachments` and types `@path` in Claude (raw path in other CLIs) into visible tab **without Enter**; duplicate filename does not overwrite existing file.
 - [ ] **Drag file over window** (t11): dragging file from Explorer darkens pane under cursor with "Drop to attach to <tab>" and highlight tracks cursor across panes; dropping types path into visible tab of **that** pane (without Enter). Pasting image (Ctrl+V) attaches to active tab.
@@ -282,7 +292,7 @@ Dictation and attachments ★
 - [ ] Empty name: restores original model name without breaking.
 - [ ] Duplicate name: modal rejects with red warning.
 - [ ] Name with accents (e.g. non-ASCII) or special characters (`!`, spaces): rejected friendly with expected format message (`model@role@name`).
-- [ ] Persistence: new name persists across restarts (`config.custom_names`) and propagates in feed and `ask-agent`.
+- [ ] Persistence: new name persists across restarts (`config.custom_names`) and propagates in `ask-agent`.
 - [ ] With open modal (rename tab or project, Ctrl+/), clicking tabs, sidebar, or terminal does nothing, and typed keys do not leak to terminal. Esc closes and restores focus.
 - [ ] Ctrl+/ with focused terminal toggles shortcuts screen.
 - [ ] Focused shell: Ctrl+L clears screen, Ctrl+B reaches program (tmux), and Ctrl+T opens tab. With "App shortcuts take precedence over terminal" enabled, Ctrl+B collapses sidebar. Setting persists across restarts.
@@ -294,7 +304,7 @@ Dictation and attachments ★
 - [ ] In a Claude tab type `/clear`, say something new, quit and reopen: the tab resumes the conversation that started after `/clear` (not the one before).
 - [ ] Close one of the tabs with its × and open that agent again: it starts a **fresh** conversation (the others are untouched).
 - [ ] Open a Claude tab and quit before sending any message; reopen: the tab opens normally, with no "could not resume" notice.
-- [ ] After sending a message, delete the tab's transcript (`~/.claude/projects/<folder>/<id>.jsonl`, the id is in `config.json` under `tabSessions`) and reopen: the tab opens from scratch with one notice in the Conversation tab and no loop.
+- [ ] After sending a message, delete the tab's transcript (`~/.claude/projects/<folder>/<id>.jsonl`, the id is in `config.json` under `tabSessions`) and reopen: the tab opens from scratch with one notification and no loop.
 - [ ] A running task (`claude@tN`): quit and reopen; its tab resumes the task's conversation in the worktree.
 - [ ] OpenCode: `/new` inside the tab starts a session we do not track; after reopening it resumes the older one (known limit).
 - [ ] Antigravity: open a tab, send a message ("my favourite number is 7"), and check that `config.json` gets the tab's `tabSessions` entry (a UUID) and `data/agy-logs/antigravity.log` exists. Quit and reopen: the tab opens with `--conversation <that id>` and remembers the number. Before the first message the tab has no entry and reopens empty without a notice.
@@ -329,7 +339,7 @@ Dictation and attachments ★
 - [ ] Open Claude in new project and click previous project: its terminals restore; Claude in new project **keeps running** (project displays logo and count).
 - [x] Active project lists its tabs; clicking activates tab. Other projects display agent logos and count.
 - [ ] Each terminal runs in its project folder (`pwd`/`Get-Location`), and tree and Git tab update with project.
-- [ ] Conversation displays active project only; conversation between agents in another project appears when brought back to screen.
+- [ ] Notifications from a project that is not on screen name that project in the history and in the toast.
 - [ ] `ask-agent claude@dev "hi"` in a project opens `claude@dev` in **that** project (hidden if not current); other project does not see instance.
 - [ ] Two projects with a `claude` each: each responds only to its project.
 - [ ] Restart app: only active project tabs open; other project tabs open when clicking project (nothing lost).
@@ -403,7 +413,7 @@ GitHub:
 - [ ] "Refresh" (or reopening tab after 60 s) re-reads data. Without network, previous list remains and red dismissible error banner appears.
 - [ ] Without login: banner "Not logged in (60 per hour)". In private repository, 404 message explaining how to log in. Job log prompts login.
 - [ ] "Open in browser" (PR, issue, run, job, repository) opens correct URL.
-- [ ] "Send to agent ▾" on PR, issue, or failing job: choosing open tab types prepared message when agent becomes free (not mid-typing); choosing model + role (e.g. claude@review) opens tab if absent and delivers; message appears in Integrated Conversation.
+- [ ] "Send to agent ▾" on PR, issue, or failing job: choosing open tab types prepared message when agent becomes free (not mid-typing); choosing model + role (e.g. claude@review) opens tab if absent and delivers; the message is typed in the agent's tab (it is not repeated anywhere else).
 - [ ] Switching projects with tab open clears list and reads new project repository.
 - [ ] Right panel at minimum (280 px): nothing clips beyond ellipsis; low window height does not crash app.
 

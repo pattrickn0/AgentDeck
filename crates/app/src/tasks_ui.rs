@@ -18,55 +18,6 @@ use crate::deck::{AttachTarget, Deck, UiMsg};
 // Pure functions
 // ---------------------------------------------------------------------------
 
-/// Groups of the list, in the order they appear (what needs the human comes first).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Group {
-    Review,
-    /// Merged, waiting for the user to test them.
-    Validating,
-    Running,
-    /// Started, but waiting for the scope to free up (see `holt_core::scope`).
-    Queued,
-    Draft,
-    Failed,
-    /// Validated (completed).
-    Done,
-    /// Discarded (cancelled): kept apart from the completed ones.
-    Cancelled,
-}
-
-impl Group {
-    pub const ORDER: [Group; 8] =
-        [Group::Review, Group::Validating, Group::Running, Group::Queued, Group::Draft, Group::Failed, Group::Done, Group::Cancelled];
-
-    #[cfg(test)]
-    pub fn title(self) -> &'static str {
-        match self {
-            Group::Review => t!("In review"),
-            Group::Validating => t!("Awaiting validation"),
-            Group::Running => t!("In progress"),
-            Group::Queued => t!("Queued"),
-            Group::Draft => t!("Draft"),
-            Group::Failed => t!("Failed"),
-            Group::Done => t!("Finished"),
-            Group::Cancelled => t!("Cancelled"),
-        }
-    }
-
-    pub fn of(status: TaskStatus) -> Group {
-        match status {
-            TaskStatus::Review => Group::Review,
-            TaskStatus::Validating => Group::Validating,
-            TaskStatus::Running => Group::Running,
-            TaskStatus::Queued => Group::Queued,
-            TaskStatus::Draft => Group::Draft,
-            TaskStatus::Failed => Group::Failed,
-            TaskStatus::Merged => Group::Done,
-            TaskStatus::Discarded => Group::Cancelled,
-        }
-    }
-}
-
 /// Status name for the chip (capitalized, unlike `TaskStatus::label`).
 pub fn status_name(status: TaskStatus) -> &'static str {
     match status {
@@ -81,50 +32,7 @@ pub fn status_name(status: TaskStatus) -> &'static str {
     }
 }
 
-/// Short status name for the card and the history (`in review`, `awaiting validation`, `completed`…).
-pub fn card_state_label(status: TaskStatus) -> &'static str {
-    match status {
-        TaskStatus::Draft => t!("draft"),
-        TaskStatus::Queued => t!("queued"),
-        TaskStatus::Running => t!("in progress"),
-        TaskStatus::Review => t!("in review"),
-        TaskStatus::Validating => t!("awaits validation"),
-        TaskStatus::Merged => t!("completed"),
-        TaskStatus::Discarded => t!("discarded"),
-        TaskStatus::Failed => t!("failed"),
-    }
-}
-
-/// The state shown on the card: the status name, except where the status hides what is going on. A task in review is
-/// finished work waiting for the reviewer (the agent is idle), and a task whose merge conflicted is the agent
-/// resolving it with the merge already approved.
-pub fn card_state_text(task: &Task) -> String {
-    match (task.status, task.waiting_for.as_deref()) {
-        (TaskStatus::Queued, Some(holder)) => t!("{state} · waits for {holder}", state = card_state_label(task.status), holder),
-        (TaskStatus::Review, _) => t!("waiting for your review").to_owned(),
-        (TaskStatus::Running, _) if task.merge_approved => t!("resolving a conflict").to_owned(),
-        _ => card_state_label(task.status).to_owned(),
-    }
-}
-
-/// The card asks for the user's immediate action (`Review` or `Validating`) and gets a visual highlight.
-pub fn is_focused_card(status: TaskStatus) -> bool {
-    matches!(status, TaskStatus::Review | TaskStatus::Validating)
-}
-
-/// Current step of the 5-segment progress bar (`1..=5`; `0` for discarded).
-pub fn task_step(status: TaskStatus) -> usize {
-    match status {
-        TaskStatus::Draft | TaskStatus::Queued => 1,
-        TaskStatus::Running | TaskStatus::Failed => 2,
-        TaskStatus::Review => 3,
-        TaskStatus::Validating => 4,
-        TaskStatus::Merged => 5,
-        TaskStatus::Discarded => 0,
-    }
-}
-
-/// Filter of the "HISTORY" section (finished tasks).
+/// Filter of the "Finished" lane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HistoryFilter {
     #[default]
@@ -153,24 +61,6 @@ impl HistoryFilter {
     }
 }
 
-/// Tasks in progress (not finished: `Draft`, `Running`, `Review`, `Validating`, `Failed`),
-/// sorted by group priority (what asks for the human's action comes first) and recent activity.
-pub fn active_tasks(tasks: &[Task]) -> Vec<&Task> {
-    group_tasks(tasks).into_iter().filter(|(g, _)| !matches!(g, Group::Done | Group::Cancelled)).flat_map(|(_, list)| list).collect()
-}
-
-/// Finished tasks (`Merged`, `Discarded`) filtered by `filter`, from the newest to the oldest.
-pub fn history_tasks(tasks: &[Task], filter: HistoryFilter) -> Vec<&Task> {
-    let mut list: Vec<&Task> = tasks.iter().filter(|t| filter.matches(t.status)).collect();
-    list.sort_by(|a, b| last_activity(b).cmp(&last_activity(a)).then_with(|| task_number(&b.id).cmp(&task_number(&a.id))));
-    list
-}
-
-/// Relative time of the task's last activity (`now`, `6 min ago`, `2 h ago`).
-pub fn task_age(task: &Task, now_ms: u64) -> String {
-    age_text(now_ms, last_activity(task))
-}
-
 /// Short `dd/mm` date of the end (or last activity) for the history row.
 pub fn task_date_ddmm(task: &Task) -> String {
     use chrono::TimeZone;
@@ -184,18 +74,6 @@ pub fn task_date_ddmm(task: &Task) -> String {
 /// The last thing that happened to the task (ms): the last history event, or the creation.
 pub fn last_activity(task: &Task) -> u64 {
     task.events.iter().map(|e| e.at_ms).max().unwrap_or(0).max(task.created_ms)
-}
-
-/// Tasks per group (only the groups that have any), each from the most recent activity to the oldest.
-pub fn group_tasks(tasks: &[Task]) -> Vec<(Group, Vec<&Task>)> {
-    Group::ORDER
-        .iter()
-        .filter_map(|&g| {
-            let mut list: Vec<&Task> = tasks.iter().filter(|t| Group::of(t.status) == g).collect();
-            list.sort_by(|a, b| last_activity(b).cmp(&last_activity(a)).then_with(|| task_number(&b.id).cmp(&task_number(&a.id))));
-            (!list.is_empty()).then_some((g, list))
-        })
-        .collect()
 }
 
 /// `t12` → 12 (0 if it is not a task id).
@@ -219,28 +97,6 @@ pub struct DiffSummary {
     pub files: u32,
     pub insertions: u32,
     pub deletions: u32,
-}
-
-impl DiffSummary {
-    /// `3 files` (singular with 1; "no changes" with 0).
-    pub fn files_text(&self) -> String {
-        match self.files {
-            0 => t!("no changes").to_owned(),
-            1 => t!("1 file").to_owned(),
-            n => t!("{n} files", n),
-        }
-    }
-
-    /// `3 files, +120 −8` (without the side that is zero).
-    pub fn text(&self) -> String {
-        let mut out = self.files_text();
-        let lines: Vec<String> =
-            [(self.insertions, "+"), (self.deletions, "−")].iter().filter(|(n, _)| *n > 0).map(|(n, sign)| format!("{sign}{n}")).collect();
-        if !lines.is_empty() {
-            out.push_str(&format!(", {}", lines.join(" ")));
-        }
-        out
-    }
 }
 
 /// Reads the last line of `git diff --stat` ("3 files changed, 120 insertions(+), 8 deletions(-)").
@@ -269,11 +125,13 @@ pub fn parse_diff_stat(stat: &str) -> Option<DiffSummary> {
 }
 
 /// One line per file of `git diff --stat`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StatLine {
     pub path: String,
     /// Changed lines (`412`), or `Bin 0 -> 1234 bytes` for a binary file.
     pub changes: String,
+    /// The share of insertions among the changed lines (see [`stat_plus_share`]).
+    pub plus: Option<f32>,
 }
 
 /// The files of `git diff --stat` (` path | 12 ++++--`); the total line is not included.
@@ -287,9 +145,378 @@ pub fn parse_stat_lines(stat: &str) -> Vec<StatLine> {
                 Some(n) if n.chars().all(|c| c.is_ascii_digit()) => n,
                 _ => rest,
             };
-            (!path.is_empty() && !changes.is_empty()).then(|| StatLine { path: path.to_owned(), changes: changes.to_owned() })
+            (!path.is_empty() && !changes.is_empty()).then(|| StatLine {
+                path: path.to_owned(),
+                changes: changes.to_owned(),
+                plus: stat_plus_share(rest),
+            })
         })
         .collect()
+}
+
+/// The +/− split of a file's line in `git diff --stat` (the `++++--` graph): the share of insertions, `None` for a binary
+/// file or a line without a graph.
+pub fn stat_plus_share(stat_line_rest: &str) -> Option<f32> {
+    let graph = stat_line_rest.split_whitespace().nth(1)?;
+    let plus = graph.chars().filter(|c| *c == '+').count();
+    let minus = graph.chars().filter(|c| *c == '-').count();
+    (plus + minus > 0 && plus + minus == graph.chars().count()).then(|| plus as f32 / (plus + minus) as f32)
+}
+
+// ---------------------------------------------------------------------------
+// The queue: lanes, marks, the lifecycle track and the timeline
+// ---------------------------------------------------------------------------
+
+/// The list's sections, by who has the next move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lane {
+    /// The person: review, test, a merge that stopped, a failure.
+    NeedsYou,
+    /// An agent: working, resolving a conflict, or queued behind another task.
+    Working,
+    /// Nobody yet.
+    Drafts,
+    /// Completed or discarded.
+    Finished,
+}
+
+impl Lane {
+    pub const ORDER: [Lane; 4] = [Lane::NeedsYou, Lane::Working, Lane::Drafts, Lane::Finished];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Lane::NeedsYou => t!("Needs you"),
+            Lane::Working => t!("Agents working"),
+            Lane::Drafts => t!("Drafts"),
+            Lane::Finished => t!("Finished"),
+        }
+    }
+
+    pub fn of(status: TaskStatus) -> Lane {
+        match status {
+            TaskStatus::Review | TaskStatus::Validating | TaskStatus::Failed => Lane::NeedsYou,
+            TaskStatus::Running | TaskStatus::Queued => Lane::Working,
+            TaskStatus::Draft => Lane::Drafts,
+            TaskStatus::Merged | TaskStatus::Discarded => Lane::Finished,
+        }
+    }
+}
+
+/// Since when the task waits for its next move (ms): what orders a lane.
+pub fn waiting_since(task: &Task) -> u64 {
+    match task.status {
+        TaskStatus::Review | TaskStatus::Validating | TaskStatus::Failed => task.finished_ms.unwrap_or_else(|| last_activity(task)),
+        TaskStatus::Running => task.started_ms.unwrap_or(task.created_ms),
+        TaskStatus::Queued => task.queued_ms.unwrap_or(task.created_ms),
+        TaskStatus::Draft => task.created_ms,
+        TaskStatus::Merged | TaskStatus::Discarded => task.finished_ms.unwrap_or_else(|| last_activity(task)),
+    }
+}
+
+/// The order of what needs you: decisions first (review, then test), then what went wrong (a merge that stopped, a
+/// failure).
+fn needs_rank(task: &Task) -> u8 {
+    match mark_of(task) {
+        Mark::Review => 0,
+        Mark::Validate => 1,
+        Mark::Stopped => 2,
+        _ => 3,
+    }
+}
+
+/// The open lanes (only those with tasks; `Finished` filtered by `filter`), in [`Lane::ORDER`]. What needs you goes by
+/// [`needs_rank`] and then from the oldest wait (the first is the next to handle); what works, from the oldest (a
+/// conflict being resolved first, the queue last); drafts and finished go from the newest.
+pub fn lanes(tasks: &[Task], filter: HistoryFilter) -> Vec<(Lane, Vec<&Task>)> {
+    Lane::ORDER
+        .iter()
+        .filter_map(|&lane| {
+            let mut list: Vec<&Task> =
+                tasks.iter().filter(|t| Lane::of(t.status) == lane && (lane != Lane::Finished || filter.matches(t.status))).collect();
+            match lane {
+                Lane::NeedsYou => list.sort_by_key(|t| (needs_rank(t), waiting_since(t), task_number(&t.id))),
+                Lane::Working => {
+                    list.sort_by_key(|t| (t.status == TaskStatus::Queued, !t.merge_approved, waiting_since(t), task_number(&t.id)))
+                }
+                Lane::Drafts | Lane::Finished => {
+                    list.sort_by_key(|t| (std::cmp::Reverse(waiting_since(t)), std::cmp::Reverse(task_number(&t.id))))
+                }
+            }
+            (!list.is_empty() || lane == Lane::Finished && tasks.iter().any(|t| Lane::of(t.status) == Lane::Finished))
+                .then_some((lane, list))
+        })
+        .collect()
+}
+
+/// The 16 px state glyph of a row (one per state, see `ui/tasks.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mark {
+    /// Filled ring: your turn to review.
+    Review,
+    /// Ring with a check: merged, test it.
+    Validate,
+    /// Amber "!": the automatic merge stopped.
+    Stopped,
+    /// Red "!".
+    Failed,
+    /// Pulsing dot in the agent's colour.
+    Running,
+    /// Amber pulse: resolving a conflict, merges by itself.
+    Conflict,
+    /// Dashed ring.
+    Queued,
+    /// Hollow ring.
+    Draft,
+    /// Green check.
+    Done,
+    /// Faint ring.
+    Discarded,
+}
+
+pub fn mark_of(task: &Task) -> Mark {
+    match task.status {
+        TaskStatus::Review if task.merge_stopped.is_some() => Mark::Stopped,
+        TaskStatus::Review => Mark::Review,
+        TaskStatus::Validating => Mark::Validate,
+        TaskStatus::Failed => Mark::Failed,
+        TaskStatus::Running if task.merge_approved => Mark::Conflict,
+        TaskStatus::Running => Mark::Running,
+        TaskStatus::Queued => Mark::Queued,
+        TaskStatus::Draft => Mark::Draft,
+        TaskStatus::Merged => Mark::Done,
+        TaskStatus::Discarded => Mark::Discarded,
+    }
+}
+
+/// The state word on a row (short: the row also carries the agent, the model and the diff).
+pub fn state_word(task: &Task) -> &'static str {
+    match mark_of(task) {
+        Mark::Review => t!("Review"),
+        Mark::Validate => t!("Test it"),
+        Mark::Stopped => t!("Not merged"),
+        Mark::Failed => t!("Failed"),
+        Mark::Running => t!("Working"),
+        Mark::Conflict => t!("Resolving a conflict"),
+        Mark::Queued => t!("Queued"),
+        Mark::Draft => t!("Draft"),
+        Mark::Done => t!("Completed"),
+        Mark::Discarded => t!("Discarded"),
+    }
+}
+
+/// The state sentence at the top of the detail.
+pub fn state_sentence(task: &Task) -> &'static str {
+    match mark_of(task) {
+        Mark::Review => t!("Waiting for your review"),
+        Mark::Validate => t!("Merged · test it"),
+        Mark::Stopped => t!("Not merged by itself"),
+        Mark::Failed => t!("Failed"),
+        Mark::Running => t!("Agent working"),
+        Mark::Conflict => t!("Resolving a conflict"),
+        Mark::Queued => t!("Queued"),
+        Mark::Draft => t!("Draft"),
+        Mark::Done => t!("Completed"),
+        Mark::Discarded => t!("Discarded"),
+    }
+}
+
+/// `1 h 24`, `12 min`, `<1 min`: how long a stage took.
+pub fn duration_text(ms: u64) -> String {
+    let min = ms / 60_000;
+    match min {
+        0 => t!("<1 min").to_owned(),
+        1..=59 => t!("{n} min", n = min),
+        _ => format!("{} h {:02}", min / 60, min % 60),
+    }
+}
+
+/// Local `HH:MM` of a moment, or `dd/mm` when it was not today.
+pub fn clock_text(at_ms: u64, now_ms: u64) -> String {
+    use chrono::TimeZone;
+    let (Some(at), Some(now)) =
+        (chrono::Local.timestamp_millis_opt(at_ms as i64).single(), chrono::Local.timestamp_millis_opt(now_ms as i64).single())
+    else {
+        return String::new();
+    };
+    if at.date_naive() == now.date_naive() {
+        at.format("%H:%M").to_string()
+    } else {
+        at.format("%d/%m").to_string()
+    }
+}
+
+/// How a stop of the lifecycle track is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopState {
+    Done,
+    /// Where the task is; `Warn` / `Fail` colour it amber / red.
+    Now,
+    Warn,
+    Fail,
+    Later,
+}
+
+/// One of the five stops of the track: Created, Worked, Review, Merged, Validated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stop {
+    pub label: &'static str,
+    pub state: StopState,
+    /// The time under it (`12:31`, `1 h 24` for the work, empty when it has not happened).
+    pub when: String,
+}
+
+/// The lifecycle track of the detail: where the task is, with real times. A conflict being resolved, a queue, a failure
+/// or a discard rename the stop where they happened.
+pub fn lifecycle(task: &Task, now_ms: u64) -> [Stop; 5] {
+    use StopState::*;
+    let at = |ms: Option<u64>| ms.map(|m| clock_text(m, now_ms)).unwrap_or_default();
+    let worked = task.started_ms.map(|s| duration_text(task.finished_ms.unwrap_or(now_ms).saturating_sub(s))).unwrap_or_default();
+    let stop = |label, state, when: String| Stop { label, state, when };
+    let created = stop(t!("Created"), Done, at(Some(task.created_ms)));
+    let later = |label| stop(label, Later, String::new());
+    match task.status {
+        TaskStatus::Draft => [
+            stop(t!("Created"), Now, at(Some(task.created_ms))),
+            later(t!("Worked")),
+            later(t!("Review")),
+            later(t!("Merged")),
+            later(t!("Validated")),
+        ],
+        TaskStatus::Queued => {
+            [created, stop(t!("Queued"), Now, at(task.queued_ms)), later(t!("Review")), later(t!("Merged")), later(t!("Validated"))]
+        }
+        TaskStatus::Running if task.merge_approved => [
+            created,
+            stop(t!("Worked"), Done, at(task.started_ms)),
+            stop(t!("Conflict"), Warn, at(Some(last_activity(task)))),
+            later(t!("Merged")),
+            later(t!("Validated")),
+        ],
+        TaskStatus::Running => {
+            [created, stop(t!("Working"), Now, worked), later(t!("Review")), later(t!("Merged")), later(t!("Validated"))]
+        }
+        TaskStatus::Failed if task.report.is_some() => [
+            created,
+            stop(t!("Worked"), Done, worked),
+            stop(t!("Failed"), Fail, at(Some(last_activity(task)))),
+            later(t!("Merged")),
+            later(t!("Validated")),
+        ],
+        TaskStatus::Failed => [
+            created,
+            stop(t!("Failed"), Fail, at(Some(last_activity(task)))),
+            later(t!("Review")),
+            later(t!("Merged")),
+            later(t!("Validated")),
+        ],
+        TaskStatus::Review => [
+            created,
+            stop(t!("Worked"), Done, worked),
+            stop(t!("Review"), if task.merge_stopped.is_some() { Warn } else { Now }, at(task.finished_ms)),
+            later(t!("Merged")),
+            later(t!("Validated")),
+        ],
+        TaskStatus::Validating => [
+            created,
+            stop(t!("Worked"), Done, String::new()),
+            stop(t!("Review"), Done, String::new()),
+            stop(t!("Merged"), Now, at(task.finished_ms)),
+            later(t!("Validated")),
+        ],
+        TaskStatus::Merged => [
+            created,
+            stop(t!("Worked"), Done, String::new()),
+            stop(t!("Review"), Done, String::new()),
+            stop(t!("Merged"), Done, String::new()),
+            stop(t!("Validated"), Done, at(task.finished_ms)),
+        ],
+        TaskStatus::Discarded => {
+            // The stops it reached stay done; the discard takes the next one.
+            let reached = if task.report.is_some() {
+                3
+            } else if task.started_ms.is_some() {
+                2
+            } else {
+                1
+            };
+            let mut stops = [created, later(t!("Worked")), later(t!("Review")), later(t!("Merged")), later(t!("Validated"))];
+            for s in stops.iter_mut().take(reached).skip(1) {
+                s.state = Done;
+            }
+            if let Some(s) = stops.get_mut(reached) {
+                *s = Stop { label: t!("Discarded"), state: Fail, when: at(task.finished_ms) };
+            }
+            stops
+        }
+    }
+}
+
+/// An item of the detail's timeline: an event of the task or a message between agents.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Moment<'a> {
+    Event(&'a TaskEvent),
+    Message(&'a TaskMessage),
+}
+
+impl Moment<'_> {
+    pub fn at_ms(&self) -> u64 {
+        match self {
+            Moment::Event(e) => e.at_ms,
+            Moment::Message(m) => m.at_ms,
+        }
+    }
+}
+
+/// Events and messages in one stream, newest first (at equal times, the message after the event it caused).
+pub fn timeline(task: &Task) -> Vec<Moment<'_>> {
+    let mut list: Vec<Moment> = task.events.iter().map(Moment::Event).chain(task.messages.iter().map(Moment::Message)).collect();
+    list.sort_by_key(|m| (std::cmp::Reverse(m.at_ms()), matches!(m, Moment::Event(_))));
+    list
+}
+
+/// The agent's last move for a working row: "asked antigravity" / "antigravity answered", with when.
+pub fn last_move(task: &Task) -> Option<(String, u64)> {
+    let m = task.messages.iter().max_by_key(|m| m.at_ms)?;
+    let me = |who: Option<&str>| who == Some(task.instance.as_str());
+    let text = match m.kind {
+        FeedKind::Ask if me(m.from.as_deref()) => t!("asked {who}", who = m.to.as_deref().unwrap_or("…")),
+        FeedKind::Answer if me(m.to.as_deref()) => t!("{who} answered", who = m.from.as_deref().unwrap_or("…")),
+        FeedKind::Error => t!("{who} failed", who = m.from.as_deref().unwrap_or("…")),
+        _ => t!("{from} → {to}", from = m.from.as_deref().unwrap_or("…"), to = m.to.as_deref().unwrap_or("…")),
+    };
+    Some((text, m.at_ms))
+}
+
+/// Which pane of the detail shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailTab {
+    /// The report and, under it, the changed files: what a review reads in one go.
+    Report,
+    Timeline,
+    Request,
+}
+
+impl DetailTab {
+    pub const ALL: [DetailTab; 3] = [DetailTab::Report, DetailTab::Timeline, DetailTab::Request];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DetailTab::Report => t!("Report"),
+            DetailTab::Timeline => t!("Timeline"),
+            DetailTab::Request => t!("Request"),
+        }
+    }
+
+    /// The pane a task opens on: the report once there is one, the timeline while an agent works, the request before.
+    pub fn default_for(task: &Task) -> DetailTab {
+        if task.report.as_deref().is_some_and(|r| !r.trim().is_empty()) {
+            DetailTab::Report
+        } else if task.started_ms.is_some() {
+            DetailTab::Timeline
+        } else {
+            DetailTab::Request
+        }
+    }
 }
 
 /// `now`, `5 min ago`, `3 h ago`, `2 d ago` (a `then` in the future counts as now).
@@ -300,6 +527,17 @@ pub fn age_text(now_ms: u64, then_ms: u64) -> String {
         60..=3599 => t!("{n} min ago", n = secs / 60),
         3600..=86_399 => t!("{n} h ago", n = secs / 3600),
         _ => t!("{n} d ago", n = secs / 86_400),
+    }
+}
+
+/// `now`, `5 min`, `3 h`, `2 d`: the age on a row, where the room is short.
+pub fn age_short(now_ms: u64, then_ms: u64) -> String {
+    let secs = now_ms.saturating_sub(then_ms) / 1000;
+    match secs {
+        0..=59 => t!("now").to_owned(),
+        60..=3599 => t!("{n} min", n = secs / 60),
+        3600..=86_399 => t!("{n} h", n = secs / 3600),
+        _ => t!("{n} d", n = secs / 86_400),
     }
 }
 
@@ -394,11 +632,6 @@ impl TaskAct {
             TaskAct::ReopenTab => t!("Opens the agent's tab again, in the terminal of the task's worktree"),
             TaskAct::Discard => t!("Discards the task: deletes the worktree and the branch (without merging)"),
         }
-    }
-
-    /// Main action (filled button).
-    pub fn is_primary(self) -> bool {
-        matches!(self, TaskAct::Start | TaskAct::Retry | TaskAct::Merge | TaskAct::Validate)
     }
 
     /// Asks for confirmation inside the panel before running.
@@ -510,25 +743,8 @@ pub fn clip_text(text: &str, max: usize) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// The task's history, from the newest to the oldest.
-pub fn events_newest_first(task: &Task) -> Vec<&TaskEvent> {
-    let mut list: Vec<&TaskEvent> = task.events.iter().collect();
-    list.sort_by_key(|e| std::cmp::Reverse(e.at_ms));
-    list
-}
-
-/// Timeline messages shown at once (the newest ones); the earlier ones become a notice line.
-pub const MESSAGES_SHOWN: usize = 40;
 /// A collapsed message shows at most this much (in characters); a click opens it whole.
 pub const MESSAGE_PREVIEW_CHARS: usize = 280;
-
-/// The task's timeline, from the oldest to the newest (the order of arrival is already that; the stable `sort` only
-/// protects against a file edited by hand).
-pub fn messages_in_order(task: &Task) -> Vec<&TaskMessage> {
-    let mut list: Vec<&TaskMessage> = task.messages.iter().collect();
-    list.sort_by_key(|m| m.at_ms);
-    list
-}
 
 /// Label of the message kind in the timeline.
 pub fn message_kind_label(kind: FeedKind) -> &'static str {
@@ -540,11 +756,6 @@ pub fn message_kind_label(kind: FeedKind) -> &'static str {
         FeedKind::System => t!("notice"),
         FeedKind::Thinking => t!("progress"),
     }
-}
-
-/// `from → to` of a message (a missing side becomes `…`).
-pub fn message_route(m: &TaskMessage) -> String {
-    format!("{} → {}", m.from.as_deref().unwrap_or("…"), m.to.as_deref().unwrap_or("…"))
 }
 
 /// The collapsed text of the message: the first lines, up to [`MESSAGE_PREVIEW_CHARS`], with an ellipsis. The second value
@@ -574,16 +785,6 @@ pub enum TasksView {
     Detail(String),
     /// New task form.
     New,
-}
-
-/// Collapsible sections of the detail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Section {
-    Brief,
-    Report,
-    Changes,
-    Messages,
-    History,
 }
 
 /// Dangerous action waiting for the "yes" in the panel.
@@ -638,6 +839,8 @@ pub struct NewForm {
     /// Creating (the button is off).
     pub busy: bool,
     pub menu: Option<FormMenu>,
+    /// "Branch and scope" is unfolded.
+    pub more_open: bool,
     /// The title asks for keyboard focus on the next frame (the form just opened).
     pub focus_title: bool,
 }
@@ -661,6 +864,7 @@ impl Default for NewForm {
             error: None,
             busy: false,
             menu: None,
+            more_open: false,
             focus_title: false,
         }
     }
@@ -675,10 +879,10 @@ pub struct TasksUi {
     pub refreshing: bool,
     /// Another read was requested while one was in progress.
     dirty: bool,
-    pub collapsed: HashSet<Group>,
     pub history_filter: HistoryFilter,
     pub history_menu: bool,
-    pub closed_sections: HashSet<Section>,
+    /// The pane the person picked in the detail (`None` = [`DetailTab::default_for`] the task).
+    pub detail_tab: Option<DetailTab>,
     /// Timeline messages opened whole (`task id`, message time).
     pub open_messages: HashSet<(String, u64)>,
     pub confirm: Option<Confirm>,
@@ -711,11 +915,9 @@ impl Default for TasksUi {
             loaded: false,
             refreshing: false,
             dirty: false,
-            // The completed and cancelled ones are already resolved: they start collapsed.
-            collapsed: HashSet::from([Group::Done, Group::Cancelled]),
             history_filter: HistoryFilter::All,
             history_menu: false,
-            closed_sections: HashSet::new(),
+            detail_tab: None,
             open_messages: HashSet::new(),
             confirm: None,
             return_open: false,
@@ -812,11 +1014,11 @@ pub enum TaskReply {
 
 impl Deck {
     /// The project on screen changed: forgets the previous one's list, detail and form and ignores the
-    /// answers that still come from it. The collapsed groups stay.
+    /// answers that still come from it. The "Finished" filter stays.
     pub fn tasks_reset_for_project(&mut self) {
         let generation = self.tasks.generation + 1;
-        let collapsed = std::mem::take(&mut self.tasks.collapsed);
-        self.tasks = TasksUi { generation, collapsed, ..TasksUi::default() };
+        let history_filter = self.tasks.history_filter;
+        self.tasks = TasksUi { generation, history_filter, ..TasksUi::default() };
     }
 
     /// Re-reads the list (one at a time; a request in the middle repeats the read when it finishes).
@@ -862,6 +1064,7 @@ impl Deck {
     }
 
     fn tasks_clear_detail_state(&mut self) {
+        self.tasks.detail_tab = None;
         self.tasks.confirm = None;
         self.tasks.return_open = false;
         self.tasks.feedback.clear();
@@ -1260,14 +1463,25 @@ pub fn demo_tasks() -> Vec<Task> {
         finished_ms: Some(now - 2 * 60 * min),
         report: Some("Fixed the handle leak in the PTY.".into()),
         diff_stat: Some(" crates/app/src/terminal/mod.rs | 6 +++---\n 1 file changed, 3 insertions(+), 3 deletions(-)\n".into()),
-        events: vec![ev(150, "report received; in review")],
+        events: vec![ev(150, "report received; in review"), ev(120, "merge refused: conflict in crates/app/src/terminal/mod.rs")],
         effort: Some(Effort::High),
+        merge_stopped: Some(holt_core::tasks::MergeStop {
+            reason: "conflict with dev in crates/app/src/terminal/mod.rs".into(),
+            conflict_files: Some(vec!["crates/app/src/terminal/mod.rs".into()]),
+        }),
         ..base("t5", "Fix handle leak when closing the tab", TaskStatus::Review, "antigravity", Some("gemini-4-argon-high"))
     };
     let running = Task {
         created_ms: now - 25 * min,
         started_ms: Some(now - 24 * min),
         events: vec![ev(25, "created"), ev(24, "started: worktree … on branch task/t6")],
+        messages: vec![msg(
+            2,
+            FeedKind::Ask,
+            "claude@t6",
+            "antigravity",
+            "Which status codes does the bridge return for a task action from another agent?",
+        )],
         effort: Some(Effort::Medium),
         scope: vec!["crates/core".into(), "memory/ARCHITECTURE.md".into()],
         ..base("t6", "Document the bridge /tasks routes", TaskStatus::Running, "claude", Some("claude-sonnet-5-5"))
@@ -1327,7 +1541,28 @@ pub fn demo_tasks() -> Vec<Task> {
         events: vec![ev(48 * 60, "discarded; worktree and branch removed")],
         ..base("t1", "Galley cache experiment", TaskStatus::Discarded, "claude", None)
     };
-    vec![discarded, merged, failed, review, running, queued, draft, review2, validating]
+    let conflict = Task {
+        brief: "Long messages between agents are saved to a file and only a notice is typed.".into(),
+        created_ms: now - 150 * min,
+        started_ms: Some(now - 148 * min),
+        finished_ms: Some(now - 20 * min),
+        report: Some("Mail is saved under data/mail and the tab gets a one-line notice.".into()),
+        diff_stat: Some(" crates/core/src/mail.rs   | 210 ++++++++++++++++++++\n crates/core/src/bridge.rs |  34 +++---\n 2 files changed, 230 insertions(+), 14 deletions(-)\n".into()),
+        merge_approved: true,
+        conflict_asks: 1,
+        events: vec![
+            ev(150, "created"),
+            ev(148, "started: worktree … on branch task/t10"),
+            ev(20, "report received; in review"),
+            ev(3, "merge conflict with dev in crates/core/src/mail.rs; the agent was asked to resolve it (1 of 3)"),
+        ],
+        messages: vec![
+            msg(60, FeedKind::Ask, "claude@t10", "antigravity", "Is a rename atomic on Windows if the target exists?"),
+            msg(58, FeedKind::Answer, "antigravity", "claude@t10", "Use the inbox file per instance; renames are atomic on NTFS when both paths are on the same volume."),
+        ],
+        ..base("t10", "Durable mail between agents", TaskStatus::Running, "claude", Some("claude-opus-5-5"))
+    };
+    vec![discarded, merged, failed, review, running, queued, draft, review2, validating, conflict]
 }
 
 #[cfg(test)]
@@ -1340,127 +1575,18 @@ mod tests {
     }
 
     #[test]
-    fn tasks_are_grouped_in_order_and_sorted_by_recent_activity() {
-        let tasks = vec![
-            task("t1", TaskStatus::Merged, 100),
-            task("t2", TaskStatus::Running, 300),
-            task("t3", TaskStatus::Review, 200),
-            task("t4", TaskStatus::Review, 900),
-            task("t5", TaskStatus::Discarded, 500),
-            task("t6", TaskStatus::Failed, 50),
-            task("t7", TaskStatus::Draft, 10),
-        ];
-        let groups = group_tasks(&tasks);
-        let shape: Vec<(Group, Vec<&str>)> = groups.iter().map(|(g, l)| (*g, l.iter().map(|t| t.id.as_str()).collect())).collect();
-        assert_eq!(
-            shape,
-            vec![
-                (Group::Review, vec!["t4", "t3"]),
-                (Group::Running, vec!["t2"]),
-                (Group::Draft, vec!["t7"]),
-                (Group::Failed, vec!["t6"]),
-                (Group::Done, vec!["t1"]),
-                (Group::Cancelled, vec!["t5"]),
-            ]
-        );
-        // Empty groups do not show up.
-        assert_eq!(group_tasks(&tasks[..1]).len(), 1);
-        assert!(group_tasks(&[]).is_empty());
-        assert_eq!(review_count(&tasks), 2);
-        assert_eq!(validating_count(&tasks), 0);
-    }
-
-    #[test]
-    fn awaiting_validation_sits_between_review_and_the_rest() {
-        let tasks = vec![
-            task("t1", TaskStatus::Merged, 100),
-            task("t2", TaskStatus::Validating, 300),
-            task("t3", TaskStatus::Review, 200),
-            task("t4", TaskStatus::Running, 400),
-            task("t5", TaskStatus::Validating, 500),
-        ];
-        let shape: Vec<(Group, Vec<&str>)> =
-            group_tasks(&tasks).iter().map(|(g, l)| (*g, l.iter().map(|t| t.id.as_str()).collect())).collect();
-        assert_eq!(
-            shape,
-            vec![
-                (Group::Review, vec!["t3"]),
-                (Group::Validating, vec!["t5", "t2"]),
-                (Group::Running, vec!["t4"]),
-                (Group::Done, vec!["t1"]),
-            ]
-        );
-        assert_eq!(Group::Validating.title(), "Awaiting validation");
-        assert_eq!(Group::of(TaskStatus::Validating), Group::Validating);
-        assert_eq!(status_name(TaskStatus::Validating), "Awaiting validation");
-        // "Completed" is the name of the validated task (the stored status is still `Merged`).
-        assert_eq!(status_name(TaskStatus::Merged), "Completed");
-        // The groups that wait for the human count on the badge; the validated ones do not.
-        let ui = TasksUi { tasks, ..TasksUi::default() };
-        assert_eq!((ui.review_count(), ui.validating_count(), ui.attention_count()), (1, 2, 3));
-        // The "Awaiting validation" group starts open: it is work for you.
-        assert!(!ui.collapsed.contains(&Group::Validating));
-    }
-
-    #[test]
-    fn cancelled_tasks_are_apart_from_the_merged_ones() {
-        assert_eq!(Group::of(TaskStatus::Merged), Group::Done);
-        assert_eq!(Group::of(TaskStatus::Discarded), Group::Cancelled);
-        assert_eq!(Group::Done.title(), "Finished");
-        assert_eq!(Group::Cancelled.title(), "Cancelled");
-        // Both at the end, in that order.
-        let n = Group::ORDER.len();
-        assert_eq!(Group::ORDER[n - 2..], [Group::Done, Group::Cancelled]);
-        // The resolved groups start collapsed.
-        let ui = TasksUi::default();
-        assert!(ui.collapsed.contains(&Group::Done));
-        assert!(ui.collapsed.contains(&Group::Cancelled));
-        assert!(!ui.collapsed.contains(&Group::Review));
-    }
-
-    #[test]
-    fn the_real_list_with_two_discarded_keeps_them_out_of_the_merged_group() {
-        // The case that showed up in the review: t8 and t4 discarded living alongside t1 and t2 merged.
-        let tasks = vec![
-            task("t1", TaskStatus::Merged, 100),
-            task("t2", TaskStatus::Merged, 200),
-            task("t3", TaskStatus::Review, 300),
-            task("t4", TaskStatus::Discarded, 400),
-            task("t5", TaskStatus::Running, 500),
-            task("t6", TaskStatus::Review, 600),
-            task("t7", TaskStatus::Running, 700),
-            task("t8", TaskStatus::Discarded, 800),
-        ];
-        let groups = group_tasks(&tasks);
-        let ids = |g: Group| -> Vec<&str> {
-            groups.iter().find(|(group, _)| *group == g).map(|(_, l)| l.iter().map(|t| t.id.as_str()).collect()).unwrap_or_default()
-        };
-        assert_eq!(ids(Group::Done), ["t2", "t1"]);
-        assert_eq!(ids(Group::Cancelled), ["t8", "t4"]);
-        // No discarded task can be left in "Finished".
-        let done = groups.iter().find(|(g, _)| *g == Group::Done).expect("finished group");
-        assert!(done.1.iter().all(|t| t.status == TaskStatus::Merged));
-    }
-
-    #[test]
-    fn ties_in_activity_put_the_newest_number_first() {
-        let tasks = vec![task("t2", TaskStatus::Draft, 5), task("t10", TaskStatus::Draft, 5), task("t9", TaskStatus::Draft, 5)];
-        let ids: Vec<&str> = group_tasks(&tasks)[0].1.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, ["t10", "t9", "t2"]);
-    }
-
-    #[test]
     fn the_diff_stat_becomes_a_one_line_summary() {
         let stat = " a.rs | 10 +++++++---\n b.rs | 2 +-\n 3 files changed, 120 insertions(+), 8 deletions(-)\n";
         let s = parse_diff_stat(stat).expect("summary");
         assert_eq!(s, DiffSummary { files: 3, insertions: 120, deletions: 8 });
-        assert_eq!(s.text(), "3 files, +120 −8");
         // Singular and only one of the sides.
-        assert_eq!(parse_diff_stat(" a.rs | 1 +\n 1 file changed, 1 insertion(+)\n").map(|s| s.text()).as_deref(), Some("1 file, +1"));
-        assert_eq!(parse_diff_stat(" 2 files changed, 4 deletions(-)").map(|s| s.text()).as_deref(), Some("2 files, −4"));
+        let one = DiffSummary { files: 1, insertions: 1, deletions: 0 };
+        assert_eq!(parse_diff_stat(" a.rs | 1 +\n 1 file changed, 1 insertion(+)\n"), Some(one));
+        assert_eq!(parse_diff_stat(" 2 files changed, 4 deletions(-)"), Some(DiffSummary { files: 2, insertions: 0, deletions: 4 }));
         // No differences (the core's text, in both languages) and garbage.
-        assert_eq!(parse_diff_stat("(no changes against the base)").map(|s| s.text()).as_deref(), Some("no changes"));
-        assert_eq!(parse_diff_stat("(nenhuma alteração em relação à base)").map(|s| s.text()).as_deref(), Some("no changes"));
+        let none = DiffSummary { files: 0, insertions: 0, deletions: 0 };
+        assert_eq!(parse_diff_stat("(no changes against the base)"), Some(none));
+        assert_eq!(parse_diff_stat("(nenhuma alteração em relação à base)"), Some(none));
         assert_eq!(parse_diff_stat(""), None);
         assert_eq!(parse_diff_stat("something else"), None);
     }
@@ -1471,6 +1597,9 @@ mod tests {
         let lines = parse_stat_lines(stat);
         let shape: Vec<(&str, &str)> = lines.iter().map(|l| (l.path.as_str(), l.changes.as_str())).collect();
         assert_eq!(shape, [("crates/app/src/tasks_ui.rs", "412"), ("a b/c.rs => d.rs", "3"), ("logo.png", "Bin 0 -> 1234 bytes")]);
+        // The +/− split comes from the graph; a binary file has none.
+        let shares: Vec<Option<f32>> = lines.iter().map(|l| l.plus).collect();
+        assert_eq!(shares, [Some(1.0), Some(0.5), None]);
         assert!(parse_stat_lines("(no changes against the base)").is_empty());
         assert!(parse_stat_lines("").is_empty());
     }
@@ -1547,7 +1676,7 @@ mod tests {
     }
 
     #[test]
-    fn a_queued_task_is_its_own_group_with_only_the_discard_button() {
+    fn a_queued_task_works_in_the_agents_lane_with_only_the_discard_button() {
         let q = Task {
             status: TaskStatus::Queued,
             waiting_for: Some("t2".into()),
@@ -1556,20 +1685,12 @@ mod tests {
             ..Task::default()
         };
         assert_eq!(actions_for(&q, false), [TaskAct::Discard]);
-        assert_eq!((Group::of(TaskStatus::Queued), Group::Queued.title()), (Group::Queued, "Queued"));
-        // Between "In progress" and "Draft": it already asked to start, but still waits.
-        let order: Vec<Group> = Group::ORDER.to_vec();
-        let at = |g| order.iter().position(|x| *x == g).expect("group");
-        assert!(at(Group::Running) < at(Group::Queued) && at(Group::Queued) < at(Group::Draft));
-        assert_eq!(
-            (status_name(TaskStatus::Queued), card_state_label(TaskStatus::Queued), task_step(TaskStatus::Queued)),
-            ("Queued", "queued", 1)
-        );
-        assert!(!is_focused_card(TaskStatus::Queued));
+        assert_eq!((Lane::of(TaskStatus::Queued), mark_of(&q), state_word(&q)), (Lane::Working, Mark::Queued, "Queued"));
+        assert_eq!(status_name(TaskStatus::Queued), "Queued");
         // How long it has been in the queue counts from entering it, not from the creation.
         assert_eq!(status_age(&q, 65_000), "queued 1 min ago");
+        assert_eq!(waiting_since(&q), 5_000);
     }
-
     #[test]
     fn the_scope_field_takes_one_path_per_line_or_commas() {
         assert!(parse_scope("").is_empty() && parse_scope(" \n , \n").is_empty());
@@ -1599,9 +1720,7 @@ mod tests {
         assert_eq!(actions_for(&t(TaskStatus::Failed, true), true), [TaskAct::Retry, TaskAct::Return, TaskAct::GoToTab, TaskAct::Discard]);
         assert!(actions_for(&t(TaskStatus::Merged, true), false).is_empty());
         assert!(actions_for(&t(TaskStatus::Discarded, false), false).is_empty());
-        // Only the main action comes filled; merge shows the base.
-        assert!(TaskAct::Merge.is_primary() && !TaskAct::Discard.is_primary() && !TaskAct::Return.is_primary());
-        assert!(TaskAct::Validate.is_primary() && !TaskAct::Reject.is_primary());
+        // Merge shows the base.
         assert_eq!(
             (TaskAct::Validate.label(&t(TaskStatus::Validating, true)), TaskAct::Reject.label(&t(TaskStatus::Validating, true))),
             ("Validate".to_owned(), "Reject".to_owned())
@@ -1693,19 +1812,6 @@ mod tests {
     }
 
     #[test]
-    fn history_lists_the_newest_first() {
-        let t = Task {
-            events: vec![
-                TaskEvent { at_ms: 1, text: "a".into() },
-                TaskEvent { at_ms: 3, text: "c".into() },
-                TaskEvent { at_ms: 2, text: "b".into() },
-            ],
-            ..Task::default()
-        };
-        assert_eq!(events_newest_first(&t).iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["c", "b", "a"]);
-    }
-
-    #[test]
     fn the_demo_has_one_task_per_status() {
         let tasks = demo_tasks();
         for status in [
@@ -1723,40 +1829,53 @@ mod tests {
     }
 
     #[test]
-    fn active_tasks_and_history_split_and_filter_demo_tasks() {
+    fn the_demo_falls_into_lanes_by_who_moves_next() {
         let tasks = demo_tasks();
-        let active = active_tasks(&tasks);
-        let active_ids: Vec<&str> = active.iter().map(|t| t.id.as_str()).collect();
-        // Only the unfinished ones (Review, Validating, Running, Queued, Draft, Failed), in order of priority and recency.
-        assert_eq!(active_ids, ["t4", "t5", "t8", "t6", "t9", "t7", "t3"]);
-        assert!(active.iter().all(|t| !matches!(t.status, TaskStatus::Merged | TaskStatus::Discarded)));
+        let shape = |filter| -> Vec<(Lane, Vec<String>)> {
+            lanes(&tasks, filter).into_iter().map(|(l, list)| (l, list.iter().map(|t| t.id.clone()).collect())).collect()
+        };
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Needs you: the review first, then the test, the merge that stopped and the failure. Working: the conflict
+        // being resolved, the plain work, the queue last.
+        assert_eq!(
+            shape(HistoryFilter::All),
+            vec![
+                (Lane::NeedsYou, ids(&["t4", "t8", "t5", "t3"])),
+                (Lane::Working, ids(&["t10", "t6", "t9"])),
+                (Lane::Drafts, ids(&["t7"])),
+                (Lane::Finished, ids(&["t2", "t1"])),
+            ]
+        );
+        // The filter only touches "Finished"; an empty filter keeps the lane (with its sentence).
+        assert_eq!(shape(HistoryFilter::Done).last(), Some(&(Lane::Finished, ids(&["t2"]))));
+        assert_eq!(shape(HistoryFilter::Discarded).last(), Some(&(Lane::Finished, ids(&["t1"]))));
+        let open: Vec<Task> = tasks.iter().filter(|t| Lane::of(t.status) != Lane::Finished).cloned().collect();
+        assert!(lanes(&open, HistoryFilter::All).iter().all(|(l, _)| *l != Lane::Finished));
+        assert!(lanes(&[], HistoryFilter::All).is_empty());
 
-        // History: all of them (Merged + Discarded), from the most recent (t2, 24h ago) to the oldest (t1, 48h ago).
-        let all_hist = history_tasks(&tasks, HistoryFilter::All);
-        assert_eq!(all_hist.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t2", "t1"]);
-
-        // Filter completed only / discarded only.
-        let done_only = history_tasks(&tasks, HistoryFilter::Done);
-        assert_eq!(done_only.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t2"]);
-        let discarded_only = history_tasks(&tasks, HistoryFilter::Discarded);
-        assert_eq!(discarded_only.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t1"]);
-
-        // 5-segment steps and the highlight of the cards that ask for the human's action.
-        assert_eq!(task_step(TaskStatus::Draft), 1);
-        assert_eq!(task_step(TaskStatus::Running), 2);
-        assert_eq!(task_step(TaskStatus::Failed), 2);
-        assert_eq!(task_step(TaskStatus::Review), 3);
-        assert_eq!(task_step(TaskStatus::Validating), 4);
-        assert_eq!(task_step(TaskStatus::Merged), 5);
-        assert_eq!(task_step(TaskStatus::Discarded), 0);
-        assert!(is_focused_card(TaskStatus::Review) && is_focused_card(TaskStatus::Validating));
-        assert!(!is_focused_card(TaskStatus::Running) && !is_focused_card(TaskStatus::Draft));
-        assert_eq!(card_state_label(TaskStatus::Review), "in review");
-        assert_eq!(card_state_label(TaskStatus::Validating), "awaits validation");
-        assert_eq!(card_state_label(TaskStatus::Merged), "completed");
-        assert_eq!(card_state_label(TaskStatus::Discarded), "discarded");
+        // The marks and words of each state.
+        let by_id = |id: &str| tasks.iter().find(|t| t.id == id).expect("task");
+        let marks: Vec<(Mark, &str)> = ["t4", "t8", "t5", "t3", "t10", "t6", "t9", "t7", "t2", "t1"]
+            .iter()
+            .map(|id| (mark_of(by_id(id)), state_word(by_id(id))))
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                (Mark::Review, "Review"),
+                (Mark::Validate, "Test it"),
+                (Mark::Stopped, "Not merged"),
+                (Mark::Failed, "Failed"),
+                (Mark::Conflict, "Resolving a conflict"),
+                (Mark::Running, "Working"),
+                (Mark::Queued, "Queued"),
+                (Mark::Draft, "Draft"),
+                (Mark::Done, "Completed"),
+                (Mark::Discarded, "Discarded"),
+            ]
+        );
         with_lang(Lang::PtBr, || {
-            assert_eq!(card_state_label(TaskStatus::Validating), "aguarda validação");
+            assert_eq!(state_word(by_id("t8")), "Teste");
             assert_eq!(status_name(TaskStatus::Merged), "Concluída");
         });
 
@@ -1765,21 +1884,74 @@ mod tests {
         assert_eq!((ddmm.len(), ddmm.as_bytes()[2]), (5, b'/'), "{ddmm}");
     }
 
+    #[test]
+    fn the_track_shows_where_each_task_is() {
+        let tasks = demo_tasks();
+        let now = holt_core::util::now_ms();
+        let track = |id: &str| -> Vec<(&'static str, StopState)> {
+            lifecycle(tasks.iter().find(|t| t.id == id).expect("task"), now).into_iter().map(|s| (s.label, s.state)).collect()
+        };
+        use StopState::*;
+        assert_eq!(track("t7"), [("Created", Now), ("Worked", Later), ("Review", Later), ("Merged", Later), ("Validated", Later)]);
+        assert_eq!(track("t9")[1], ("Queued", Now));
+        assert_eq!(track("t6")[1], ("Working", Now));
+        assert_eq!(track("t4")[2], ("Review", Now));
+        assert_eq!(track("t5")[2], ("Review", Warn));
+        assert_eq!(track("t10")[2], ("Conflict", Warn));
+        assert_eq!(track("t3")[1], ("Failed", Fail));
+        assert_eq!(track("t8")[3], ("Merged", Now));
+        assert!(track("t2").iter().all(|(_, s)| *s == Done));
+        // A discard takes the stop after the last one reached.
+        assert_eq!(track("t1")[1], ("Discarded", Fail));
+        // The work's stop carries how long it took.
+        let t4 = tasks.iter().find(|t| t.id == "t4").expect("t4");
+        assert_eq!(lifecycle(t4, now)[1].when, "1 h 24");
+        assert_eq!(
+            (duration_text(30_000), duration_text(12 * 60_000), duration_text(125 * 60_000)),
+            ("<1 min".into(), "12 min".into(), "2 h 05".into())
+        );
+    }
+
     fn message(at_ms: u64, text: &str) -> TaskMessage {
         TaskMessage { at_ms, kind: FeedKind::Ask, from: Some("claude@t1".into()), to: None, text: text.into() }
     }
 
     #[test]
-    fn the_timeline_goes_oldest_first_and_names_both_sides() {
-        let t = Task { messages: vec![message(30, "c"), message(10, "a"), message(20, "b")], ..Task::default() };
-        assert_eq!(messages_in_order(&t).iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
-        assert_eq!(message_route(&t.messages[0]), "claude@t1 → …");
+    fn the_timeline_mixes_events_and_messages_newest_first() {
+        let t = Task {
+            instance: "claude@t1".into(),
+            messages: vec![message(30, "c"), message(10, "a")],
+            events: vec![TaskEvent { at_ms: 20, text: "b".into() }, TaskEvent { at_ms: 30, text: "c-event".into() }],
+            ..Task::default()
+        };
+        let texts: Vec<&str> = timeline(&t)
+            .iter()
+            .map(|m| match m {
+                Moment::Event(e) => e.text.as_str(),
+                Moment::Message(m) => m.text.as_str(),
+            })
+            .collect();
+        // At the same time, the message goes after the event that caused it (newest first: above it).
+        assert_eq!(texts, ["c", "c-event", "b", "a"]);
+        assert_eq!(last_move(&t), Some(("asked …".to_owned(), 30)));
+        let answer = TaskMessage {
+            at_ms: 40,
+            kind: FeedKind::Answer,
+            from: Some("antigravity".into()),
+            to: Some("claude@t1".into()),
+            text: "x".into(),
+        };
+        let t = Task { messages: vec![answer], ..t };
+        assert_eq!(last_move(&t), Some(("antigravity answered".to_owned(), 40)));
         assert_eq!(
             (message_kind_label(FeedKind::Ask), message_kind_label(FeedKind::Answer), message_kind_label(FeedKind::Error)),
             ("question", "answer", "error")
         );
+        // The pane a task opens on.
+        assert_eq!(DetailTab::default_for(&Task::default()), DetailTab::Request);
+        assert_eq!(DetailTab::default_for(&Task { started_ms: Some(1), ..Task::default() }), DetailTab::Timeline);
+        assert_eq!(DetailTab::default_for(&Task { report: Some("done".into()), ..Task::default() }), DetailTab::Report);
     }
-
     #[test]
     fn a_long_message_is_collapsed_by_size_or_by_lines() {
         assert_eq!(message_preview("  short \n"), ("short".into(), false));

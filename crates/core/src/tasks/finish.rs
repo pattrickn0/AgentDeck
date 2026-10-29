@@ -2,7 +2,7 @@ use super::git_ops::{align_with_base, branch_exists, delete_branch, git_out, saf
 use super::lifecycle::queue_holder;
 use super::text::{cap_text, short_list};
 use super::{git_error, reject_message, Task, TaskError, TaskStatus, MAX_TEXT, REMOVE_TRIES, REMOVE_WAIT};
-use crate::events::{CoreEvent, FeedEntry};
+use crate::events::{CoreEvent, FeedEntry, Tone};
 use crate::git::{run, Repo, COMMIT_TIMEOUT};
 use crate::t;
 use crate::util::{self, now_ms};
@@ -86,7 +86,12 @@ impl Core {
         });
         let task = done.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;
         self.emit(CoreEvent::GitChanged);
-        self.feed(FeedEntry::system(t!("Task {id} completed: {title}", id = &task.id, title = &task.title)).in_project(project));
+        self.feed(
+            FeedEntry::system(t!("Task {id} completed: {title}", id = &task.id, title = &task.title))
+                .tone(Tone::Success)
+                .about_task(&task.id)
+                .in_project(project),
+        );
         Ok(task)
     }
 
@@ -215,7 +220,11 @@ impl Core {
         });
         let task = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;
         self.emit(CoreEvent::GitChanged);
-        self.feed(FeedEntry::system(t!("Task {id} discarded: {title}", id = &task.id, title = &task.title)).in_project(project));
+        self.feed(
+            FeedEntry::system(t!("Task {id} discarded: {title}", id = &task.id, title = &task.title))
+                .about_task(&task.id)
+                .in_project(project),
+        );
         self.advance_queue_locked(project);
         Ok(task)
     }

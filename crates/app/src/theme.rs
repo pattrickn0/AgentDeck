@@ -65,8 +65,6 @@ pub struct Palette {
     pub scrim: Color32,
     /// Bottom-right background glow (white, 3.5%).
     pub glow: Color32,
-    /// Color of user messages in Chat ("you"): identity, not state.
-    pub user: Color32,
     /// Island shadows.
     pub shadow: Color32,
     /// Syntax highlighting (Documents mode files and diff; see `highlight.rs`).
@@ -124,7 +122,6 @@ pub const DARK: Palette = Palette {
     info: rgb(0x7cc4fa),
     scrim: rgba8(0, 0, 0, 128),
     glow: white(9),
-    user: rgb(0x10b981),
     shadow: rgba8(0, 0, 0, 71),
     syn_keyword: rgb(0xff7b72),
     syn_type: rgb(0xffa657),

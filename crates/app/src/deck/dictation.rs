@@ -35,15 +35,18 @@ impl Deck {
     pub fn dictation_remove(&mut self) {
         self.dictation_confirm_remove = false;
         if self.mic_phase != MicPhase::Idle {
-            self.system(t!("Finish the dictation recording before removing Whisper."));
+            self.notify(holt_core::Tone::Warning, t!("Finish the dictation recording before removing Whisper."));
             return;
         }
         match self.core.remove_dictation() {
             Ok(_) => {
                 self.dictation_installed = self.core.dictation_installed();
-                self.system(t!("Voice dictation removed from disk. You can download it again from the settings."));
+                self.notify(
+                    holt_core::Tone::Success,
+                    t!("Voice dictation removed from disk. You can download it again from the settings."),
+                );
             }
-            Err(e) => self.system(t!("Could not remove voice dictation: {error}.", error = e)),
+            Err(e) => self.notify(holt_core::Tone::Error, t!("Could not remove voice dictation: {error}.", error = e)),
         }
     }
 
@@ -51,7 +54,7 @@ impl Deck {
     fn mic_ready(&mut self) -> bool {
         // Built without audio (`--no-default-features`): offering the download would be 1.6 GB for nothing to record.
         if !crate::audio::AVAILABLE {
-            self.system(t!("Voice dictation is unavailable: Holt was built without the audio feature."));
+            self.notify(holt_core::Tone::Warning, t!("Voice dictation is unavailable: Holt was built without the audio feature."));
             return false;
         }
         match self.dictation_setup() {
@@ -97,7 +100,7 @@ impl Deck {
             Err(e) => {
                 crate::dictation::on_opened(&mut self.mic_phase, false);
                 if was_opening {
-                    self.system(t!("Microphone unavailable: {error}", error = e));
+                    self.notify(holt_core::Tone::Error, t!("Microphone unavailable: {error}", error = e));
                 }
             }
         }

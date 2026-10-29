@@ -14,7 +14,7 @@ pub enum FeedKind {
     /// Transient indicator ("⚙️ [read_file] x"). It is replaced
     /// by the next message from the same `from`.
     Thinking,
-    /// System message (grey, without a frame).
+    /// System notice (the UI shows it as a notification, see [`Tone`]).
     System,
     /// Error (red border).
     Error,
@@ -32,11 +32,41 @@ pub struct FeedEntry {
     pub text: String,
     /// Project of the conversation (`None` = global, like the Whisper notices).
     pub project: Option<String>,
+    /// How a system notice reads (the icon and whether its toast stays). Agent errors are always `Error`.
+    #[serde(default)]
+    pub tone: Tone,
+    /// The task the notice is about: the notification opens it.
+    #[serde(default)]
+    pub task: Option<String>,
+}
+
+/// The tone of a notice ([`FeedEntry::tone`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tone {
+    #[default]
+    Info,
+    /// Something finished well (a download, a merge, a task completed).
+    Success,
+    /// Worked around, or needs the person's attention.
+    Warning,
+    /// Something failed.
+    Error,
 }
 
 impl FeedEntry {
     pub fn new(kind: FeedKind, from: Option<&str>, to: Option<&str>, text: impl Into<String>) -> Self {
-        Self { ts: crate::util::now_ms(), kind, from: from.map(str::to_owned), to: to.map(str::to_owned), text: text.into(), project: None }
+        let tone = if kind == FeedKind::Error { Tone::Error } else { Tone::Info };
+        Self {
+            ts: crate::util::now_ms(),
+            kind,
+            from: from.map(str::to_owned),
+            to: to.map(str::to_owned),
+            text: text.into(),
+            project: None,
+            tone,
+            task: None,
+        }
     }
 
     /// The same entry, in the project `project`.
@@ -47,6 +77,18 @@ impl FeedEntry {
 
     pub fn system(text: impl Into<String>) -> Self {
         Self::new(FeedKind::System, None, None, text)
+    }
+
+    /// The same entry, with the tone `tone`.
+    pub fn tone(mut self, tone: Tone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    /// The same entry, about task `id`.
+    pub fn about_task(mut self, id: &str) -> Self {
+        self.task = Some(id.to_owned());
+        self
     }
 }
 

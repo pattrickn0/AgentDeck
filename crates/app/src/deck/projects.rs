@@ -72,7 +72,7 @@ impl Deck {
     /// refuses cycles; the team notice goes with the next message of the affected agents.
     pub fn set_agent_boss(&mut self, project: &str, id: &str, boss: Option<&str>) {
         if let Err(e) = self.core.set_boss(project, id, boss) {
-            self.system(t!("Could not change the team: {error}.", error = e));
+            self.notify(holt_core::Tone::Error, t!("Could not change the team: {error}.", error = e));
         }
     }
 
@@ -107,6 +107,7 @@ impl Deck {
         }
         self.projects.remove(id);
         self.docs.drop_project(id);
+        self.notices.forget_project(id);
         let was_active = id == self.active_project;
         self.core.remove_project(id);
         if was_active {
@@ -114,7 +115,6 @@ impl Deck {
             self.active = None;
             self.group_order.clear();
             self.split_ratios = split::Ratios::default();
-            self.feed.clear();
             let next = self.core.active_project_id();
             if next.is_empty() {
                 self.after_project_change();

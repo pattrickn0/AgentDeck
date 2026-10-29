@@ -113,7 +113,7 @@ impl Deck {
             CoreEvent::Download(p) => {
                 self.download = match p.state {
                     DownloadState::Done => None,
-                    // The error stays visible for a few seconds (the detail also goes to the Integrated conversation).
+                    // The error stays visible for a few seconds (the detail also goes to a notification).
                     DownloadState::Error => Some((p, Some(Instant::now() + Duration::from_secs(8)))),
                     _ => Some((p, None)),
                 };
@@ -167,10 +167,10 @@ impl Deck {
                                 }
                             }
                             TabDelivery::TabDead => {
-                                self.system(t!("The tab's process ended before receiving the attachment."));
+                                self.notify(holt_core::Tone::Warning, t!("The tab's process ended before receiving the attachment."));
                             }
                             TabDelivery::TabClosed => {
-                                self.system(t!("The attachment's tab was closed before the copy finished."));
+                                self.notify(holt_core::Tone::Warning, t!("The attachment's tab was closed before the copy finished."));
                             }
                         }
                     }
@@ -189,7 +189,7 @@ impl Deck {
                 let text = match res {
                     Ok(t) => t.trim().to_owned(),
                     Err(e) => {
-                        self.system(t!("Could not transcribe: {error}.", error = e));
+                        self.notify(holt_core::Tone::Error, t!("Could not transcribe: {error}.", error = e));
                         return;
                     }
                 };
@@ -205,10 +205,16 @@ impl Deck {
                         self.user_input(idx, &input::paste_bytes(&safe, bracketed), true);
                     }
                     TabDelivery::TabDead => {
-                        self.system(t!("The tab's process ended during the transcription: the text was discarded."));
+                        self.notify(
+                            holt_core::Tone::Warning,
+                            t!("The tab's process ended during the transcription: the text was discarded."),
+                        );
                     }
                     TabDelivery::TabClosed => {
-                        self.system(t!("The dictation's tab was closed before the transcription finished: the text was discarded."));
+                        self.notify(
+                            holt_core::Tone::Warning,
+                            t!("The dictation's tab was closed before the transcription finished: the text was discarded."),
+                        );
                     }
                 }
             }

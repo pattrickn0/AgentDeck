@@ -110,9 +110,31 @@ to the system font.
   not have it). `StripKind::colored` picks between agent and document.
 - Icon buttons: in the title bar 26×24, corners 5; in headers 20×20, corners 4; hover `hover`.
 - Row of a diff's file list: 20 px, selected `selected_soft`; letters and `+`/`−` in `meta(10)`.
-- Right bar: 32 px header (`TOPBAR_H`) with 4 named pill tabs (Tasks, Conversation, Git, GitHub; 22 px tall, corners 5,
-  10 px pill badge); active task cards with a 5-step bar (3 px) and inline buttons, followed by the HISTORY section
-  (filter and compact 24 px rows) and the fixed `+ New task` footer.
+- Right bar: 32 px header (`TOPBAR_H`) with 3 named pill tabs (Tasks, Git, GitHub; 22 px tall, corners 5, 10 px pill
+  badge). There is no Chat tab: agent messages live in each task's Timeline and system notices are notifications.
+- Tasks panel (`ui/tasks.rs`, pure rules in `tasks_ui.rs`) is a **queue grouped by who moves next** (`Lane`: NEEDS YOU,
+  AGENTS WORKING, DRAFTS, FINISHED, each a `section_label` with its count in `meta(10)` `text_faint`). A row (8 px inset,
+  corners 7): the **state glyph** in an 18 px column (`paint_mark`, one per `Mark`: filled ring review, ring + check test it,
+  amber "!" merge stopped, red "!" failed, pulsing dot in the agent's colour working, amber pulse resolving a conflict,
+  dashed ring queued, hollow ring draft, green check completed, faint struck ring discarded), the title (12.5 px 600, two
+  lines) with the wait on the right (`age_short`, 10.5 px `text_3`), then the state word (11 px 600 in `mark_color`: accent
+  for what needs you, `warning`, `danger_text`, `text_2`), the agent's 12 px logo + model tag · effort, the id (`meta`) and
+  `+N −M` right-aligned (`paint_diff_counts`, `success`/`danger_text`). NEEDS YOU rows have a 3.5 % white fill and their
+  24 px actions: the main move (primary) and at most one ghost (the diff); what needs typing stays in the detail; only the first one gets `accent_wash` + `accent_edge`. FINISHED rows are 24 px.
+  The fixed `+ New task` footer stays.
+- Task detail: header (← · id in `meta` · title · ⋯ menu), title 15 px 600, the state sentence with its glyph, agent and
+  branch lines, the **lifecycle track** (five 12 px stops on a 2 px line: done `text_2`, current accent/amber/red with a
+  9 px halo, label 10.5 px and time `meta(10)` under each), callouts (`notice_box`), the **pane switch** (26 px `recess`
+  track, three segments sized to their text + count, selected `selected`; Report carries the changed files under a
+  CHANGES label), the pane, and the **actions pinned at the bottom**
+  (Return/Reject open their field there). Changes rows: path cut from the start, a 44×4 green/red bar, the count.
+  Timeline: a 1 px guide (reserved with `painter.add(Shape::Noop)` and filled at the end so it sits behind the dots),
+  hollow dots for events, filled dots in the speaker's colour for messages, messages in a 7 px-corner bubble.
+- Notifications (`ui/notices.rs`, state in `notices.rs`): the **bell** (26×24, `Icon::Bell`) left of the window buttons
+  with a 13 px count pill (red with an unread error, amber with only warnings); its **history popover** (340 px, `popup`,
+  corners 10) and the **toasts** (320 px, corners 9, `popup`, red border for errors, a 1.5 px line for the time left)
+  stacked from the right bar's bottom-right corner, above its footer (`TOAST_BOTTOM`). The tone marks (`tone_mark`, 14 px):
+  outlined "i" info, green check success, amber triangle warning, red cross error, accent ring + dot for a task notice.
 - Text fields: `recess` background, corners 6, `separator` border (or `accent` when focused).
 - Menus, tooltips and modals: `frame(p, r, 6–10, popup, glass_border)` + `shadow(...)`; 26 px menu items with `hover`;
   modal titles `13 px 600`; menu position with `menus::keep_on_screen` (do not use `Area::constrain`, it closes the menu
@@ -150,5 +172,9 @@ HOLT_HOME=<scratch>/home HOLT_SMOKE=<scratch>/shot HOLT_DEBUG_UI=projects-demo \
 
 For Portuguese, write `{"language": "pt-BR"}` to `<scratch>/home/cfg/config.json` before running. Other states in
 `HOLT_DEBUG_UI` (list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`): `settings`, `newtab`, `usage-demo`,
-`git-demo`, `split-drag`... Open the image and check alignment, truncation and contrast before saying you are done;
+`git-demo`, `split-drag`, `tasks-demo`, `tasks-detail`, `tasks-conflict`, `tasks-stopped`, `tasks-messages`,
+`tasks-validating`, `tasks-new`, `notices`, `notices-open`, `branch:<name>`... For the README screenshot
+(`docs/screenshots/main.png`, 1920×998) a scratch `HOLT_HOME` whose config opens this repository maximized with two
+Claude tabs, plus `projects-demo,tasks-demo,usage-demo,branch:dev` and `HOLT_SMOKE_DELAY=12000` (Claude needs the time to
+draw); the app rewrites the managed block of the project's `AGENTS.md`, so `git checkout AGENTS.md` afterwards. Open the image and check alignment, truncation and contrast before saying you are done;
 interaction (click, drag) does not show in the screenshot — tell the user what is left to test by hand.

@@ -2,7 +2,7 @@
 //!
 //! Port of `renderer/` + `preload.js` from the Electron version. The backend lives in
 //! `holt_core::Core`; this crate takes care of the window, the terminals (PTY + VT emulation),
-//! the file tree, the "Integrated conversation" and the audio.
+//! the file tree, the notifications and the audio.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -22,6 +22,7 @@ mod github_ui;
 mod highlight;
 mod icons;
 mod logfile;
+mod notices;
 mod smoke;
 mod split;
 #[cfg(test)]

@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use crate::config::DictationChoice;
 use crate::download::{download_file, DownloadOpts};
-use crate::events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry};
+use crate::events::{CoreEvent, DownloadProgress, DownloadState, FeedEntry, Tone};
 use crate::process::{run_captured, Exit};
 use crate::t;
 use crate::{Core, Transcription};
@@ -470,7 +470,7 @@ fn unique_wav_name() -> String {
 pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<Transcription> {
     let list = engines(core);
     if list.is_empty() {
-        anyhow::bail!(t!("local transcription is not ready yet (see the integrated chat)"));
+        anyhow::bail!(t!("local transcription is not ready yet (see the notifications)"));
     }
     if is_silence(samples) {
         anyhow::bail!(t!("the microphone recorded only silence: check the input device in the system's sound settings"));
@@ -489,14 +489,17 @@ pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<
                 {
                     anyhow::bail!(e)
                 }
-                Err(e) => core.feed(FeedEntry::system(t!(
-                    "Whisper on {engine} failed ({error}); trying the next option.",
-                    engine = engine.label(),
-                    error = e,
-                ))),
+                Err(e) => core.feed(
+                    FeedEntry::system(t!(
+                        "Whisper on {engine} failed ({error}); trying the next option.",
+                        engine = engine.label(),
+                        error = e,
+                    ))
+                    .tone(Tone::Warning),
+                ),
             }
         }
-        anyhow::bail!(t!("local transcription is not ready yet (see the integrated chat)"))
+        anyhow::bail!(t!("local transcription is not ready yet (see the notifications)"))
     })();
     // No use keeping the audio.
     let _ = std::fs::remove_file(&wav);
@@ -621,7 +624,7 @@ fn fetch(core: &Core, url: &str, dest: &Path, label: &str, sha256: &str) -> Resu
     .map_err(|e| e.message)
 }
 
-/// Downloads what is missing (model and engines) on a thread, with progress in integrated chat.
+/// Downloads what is missing (model and engines) on a thread, with progress in the right bar and notices in the notifications.
 pub(crate) fn ensure_whisper_async(core: &Core) {
     if core.inner.whisper.ensuring.swap(true, Ordering::SeqCst) {
         return;
@@ -657,7 +660,8 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
                     "Local transcription: no precompiled whisper.cpp binary for {os}/{arch}. Compile whisper.cpp with Vulkan/CUDA and put whisper-cli on PATH, or use the CPU engine.",
                     os = std::env::consts::OS,
                     arch = std::env::consts::ARCH,
-                ))),
+                ))
+                .tone(Tone::Warning)),
             }
         }
         if core.inner.whisper.has_nvidia() && local_cli(&dir, Engine::Cuda).is_none() {
@@ -676,7 +680,7 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
             match run() {
                 Ok(()) => {
                     core.emit(CoreEvent::Download(progress(label, DownloadState::Done)));
-                    core.feed(FeedEntry::system(t!("Local transcription: {what} ready.", what)));
+                    core.feed(FeedEntry::system(t!("Local transcription: {what} ready.", what)).tone(Tone::Success));
                 }
                 Err(e) => {
                     let mut p = progress(label, DownloadState::Error);
@@ -692,7 +696,8 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
                         what,
                         error = e,
                         resumable,
-                    )));
+                    ))
+                    .tone(Tone::Error));
                 }
             }
         }

@@ -41,6 +41,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Allow for this session", "Permitir nesta sessão"),
     ("Deny", "Negar"),
     ("Interrupted.", "Interrompido."),
+    ("Chat", "Conversa"),
     ("Terminal", "Terminal"),
     ("{pct}% context", "{pct}% do contexto"),
     ("Send", "Enviar"),

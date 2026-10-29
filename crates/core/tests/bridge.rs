@@ -323,7 +323,7 @@ fn ask_runs_headless_with_sessions() {
     assert!(answer.contains("[--append-system-prompt] [<sys>] [--add-dir]"), "{answer}");
     assert!(answer.contains("ENV: claude 1"), "{answer}");
     assert!(answer.contains(
-        "[Message from the agent \"shell\" received by Holt]\n\nWhat is the capital?\n\nAnswer the agent \"shell\" directly. The user follows the conversation in the Conversation tab in real time."
+        "[Message from the agent \"shell\" received by Holt]\n\nWhat is the capital?\n\nAnswer the agent \"shell\" directly. Holt keeps the history of the conversation."
     ));
     let sid = answer.split("[--session-id] [").nth(1).and_then(|s| s.split(']').next()).expect("sid").to_owned();
 
@@ -1260,7 +1260,7 @@ fn a_late_answer_stays_in_the_inbox_until_it_is_typed_or_read() {
     assert!(inbox(&env, &claude, false).is_empty());
     assert_eq!(inbox(&env, &claude, true).len(), 1);
 
-    // The interface types a second answer: delivered, out of the default list. If it could not type it, it warns in the Conversation tab.
+    // The interface types a second answer: delivered, out of the default list. If it could not type it, it warns with a notification.
     let asking = ask_in_thread(&env, claude.clone(), json!({"to": "claude@dev", "message": "another", "wait": 1}));
     let q2 = next_delivery(&env);
     assert_eq!(asking.join().expect("thread").0, 202);
@@ -1270,7 +1270,7 @@ fn a_late_answer_stays_in_the_inbox_until_it_is_typed_or_read() {
     assert!(inbox(&env, &claude, false).is_empty(), "the typed one was already delivered");
     env.core.answer_lost(&p, q2.request, "the tab was not open");
     let warning = loop {
-        match env.rx.recv_timeout(Duration::from_secs(5)).expect("warning in the Conversation tab") {
+        match env.rx.recv_timeout(Duration::from_secs(5)).expect("warning notification") {
             CoreEvent::Feed(e) if e.kind == FeedKind::Error && e.text.contains("--inbox") => break e,
             _ => continue,
         }

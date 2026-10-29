@@ -4,7 +4,7 @@ use super::git_ops::{
 use super::stash::{stash_pop, stash_push, Stash};
 use super::text::short_list;
 use super::{dirty_paths, git_error, MergeBlock, MergeOutcome, MergeRefusal, Task, TaskError, TaskStatus, MAX_CONFLICT_ASKS};
-use crate::events::{CoreEvent, FeedEntry};
+use crate::events::{CoreEvent, FeedEntry, Tone};
 use crate::git::{run, RepoState, COMMIT_TIMEOUT};
 use crate::t;
 use crate::util::now_ms;
@@ -154,6 +154,7 @@ impl Core {
                         id = &task.id,
                         title = &task.title
                     ))
+                    .about_task(&task.id)
                     .in_project(project),
                 );
                 return Ok(MergeOutcome { task, note: None, resolving: false });
@@ -362,6 +363,8 @@ impl Core {
                 base = &task.base,
                 title = &task.title
             ))
+            .tone(Tone::Success)
+            .about_task(&task.id)
             .in_project(project),
         );
         // The task no longer holds the scope: whoever waited for it departs from the base already with this merge.

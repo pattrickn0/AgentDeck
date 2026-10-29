@@ -83,22 +83,23 @@ crates/
 │   ├── terminal/     terminal emulator: mod.rs (pty + alacritty_terminal), view.rs (drawing and mouse), input.rs (keyboard), colors.rs (palette), record.rs (PTY recording for debugging: tab menu or `HOLT_DEBUG_PTY=1`), resize.rs (resizing as ConPTY expects)
 │   ├── git_ui.rs     state and actions for Git tab (sections, topbar chip, reloads)
 │   ├── github_ui.rs  state and actions for GitHub tab (core events, selection, "Send to agent" menu, demo data)
-│   ├── tasks_ui.rs   state and actions for Tasks tab (list, detail, form, thread calls to core) and pure functions (groups, diff summary, texts, buttons per state), with tests; demo data
+│   ├── tasks_ui.rs   state and actions for Tasks tab (list, detail, form, thread calls to core) and pure functions (lanes, state marks, lifecycle track, timeline, diff summary, texts, buttons per state), with tests; demo data
+│   ├── notices.rs    system notices: the history (100), the toasts' clock and which feed entries become notices, with tests
 │   ├── tasks_flow_tests.rs   desk Deck end-to-end with real core and git (create, start, review, return, merge, validate, discard, reopen tab)
 │   ├── docs.rs       center Documents mode: `CenterView`, `DocKind`/`DocTab`/`DocState` (including `Source`, editable file, and `Find`, search), `Docs` (open, focus, close, duplicate, per project), file list of a diff (`diff_files`), toggle badge (`Badge`), and in `impl Deck`, open each document type and read off UI thread (`UiMsg::Doc`); pure tests
 │   ├── docs_demo.rs  fictional documents for `HOLT_DEBUG_UI=docs-demo*`
 │   ├── dictation.rs  voice dictation: microphone states and fixed target in tab where recording started (pure functions, with tests)
 │   ├── split.rs      split screen: groups, grid, dividers, neighbors (pure functions, with tests)
-│   ├── deck/         tab state and UI logic: mod.rs (types, `Deck`, constants), frame.rs (frame, `work`/`background`, deliveries, events), tabs.rs, keyboard.rs, sidebar.rs, projects.rs, feed.rs, attachments.rs (attachments and dropped files), and dictation.rs
+│   ├── deck/         tab state and UI logic: mod.rs (types, `Deck`, constants), frame.rs (frame, `work`/`background`, deliveries, events), tabs.rs, keyboard.rs, sidebar.rs, projects.rs, notify.rs (core feed → notifications, right bar view), attachments.rs (attachments and dropped files), and dictation.rs
 │   ├── audio.rs      notification sound and microphone (cpal)
 │   ├── crash.rs      crash logging in data/crash.log; logfile.rs, app log in data/holt.log; smoke.rs, screenshot capture (HOLT_SMOKE)
 │   └── ui/           mod.rs (rendering, modals) + background.rs (background with radial glows)
-│       ├── titlebar.rs (title bar) + usage.rs (agent usage in the bar)
+│       ├── titlebar.rs (title bar) + usage.rs (agent usage in the bar) + notices.rs (notifications bell, history popover and toasts)
 │       ├── panes.rs (split panes: header with handle, mic, attachment, and "+") + tabs.rs (tab strip: gradient, ‹ › arrows, ▾ menu; renders list of `Item`, serves agent tabs and document tabs)
 │       ├── docs.rs (Documents mode: Agents | Documents toggle (`switch`, drawn by sidebar or, when collapsed, by title bar), document strip, diff with file list, text file, edit notice, search and save prompt, and markdown)
 │       ├── code.rs (file as code: editor on `TextEdit` and large file rendered line by line), diff_view.rs (diff rendering with line wrapping, highlighting, and search), select.rs (text selection for custom-rendered screens)
 │       ├── sidebar.rs (toggle, ORGANIZATION, and FILES) + projects.rs (projects and agents tree; `model_tag` shortens model name)
-│       ├── right_panel.rs (right sidebar: Tasks/Conversation/Git/GitHub; Conversation is read-only)
+│       ├── right_panel.rs (right sidebar: Tasks/Git/GitHub and the download strip)
 │       ├── tasks.rs (Tasks tab), git.rs + git_views.rs (Git tab), github.rs (GitHub tab)
 │       └── menus.rs (new tab, settings), shortcuts.rs (shortcuts), overlay.rs (drag-and-drop overlay), empty_state.rs (no open agent)
 └── cli/    (holt-cli)    ask-agent
@@ -182,12 +183,20 @@ comes from test's `GIT_CONFIG_GLOBAL`). Changed what the agent receives at start
 Every core task call runs git, so goes to `Deck::spawn_bg` and returns as `UiMsg::Tasks(generation, TaskReply)`
 (generation increments on each project switch and drops replies from previous one); list reloads when opening tab, on every
 `CoreEvent::TasksChanged`, and after each action. `tasks_flow_tests.rs` exercises this flow with real core and git. The badge number on the tab icon is `TasksUi::review_count`. Which buttons each
-state has is `actions_for` (pure function, with tests); list grouping, diff summary (`parse_diff_stat`), and
+state has is `actions_for` (pure function, with tests); the list's lanes (`lanes`, `Lane`), the state glyph (`mark_of`, `Mark`),
+the lifecycle track (`lifecycle`), the detail's timeline (`timeline`), diff summary (`parse_diff_stat`, `stat_plus_share`), and
 timestamp strings as well. Full diff comes from `Core::task_diff` and opens in the center (`Deck::docs_open_task_diff`, see "Working on
 Documents mode"), rendered by `ui::git::diff_lines_at` (`ui/diff_view.rs`), the same renderer as Git tab (without per-hunk buttons). Reopening a task tab is `Deck::open_task_tab` (registers instance
 again; terminal opens in worktree automatically). To view without git or agents: `HOLT_DEBUG_UI=tasks-demo` (or
-`tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-failed`, `tasks-confirm`, `tasks-discard`,
-`tasks-return`, `tasks-error`, `tasks-busy`, `tasks-new`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` in `debug_ui.rs`).
+`tasks-empty`, `tasks-detail`, `tasks-running`, `tasks-conflict`, `tasks-stopped`, `tasks-failed`, `tasks-validating`,
+`tasks-changes`, `tasks-messages`, `tasks-confirm`, `tasks-discard`, `tasks-return`, `tasks-reject`, `tasks-error`, `tasks-busy`,
+`tasks-new`, `tasks-new-more`, `tasks-new-agent`, `tasks-new-model`; `debug_tasks` in `debug_ui.rs`).
+
+**Notifications.** System notices (`Deck::system`/`notify` and the core's `FeedEntry::system`, which carries a `Tone` and
+an optional task id) and agent errors become notifications (`deck/notify.rs` → `notices.rs`); questions and answers between
+agents are not shown outside the task timeline. Give a new notice its tone (`Tone::Warning` for what was refused or
+worked around, `Tone::Error` for what failed) and, about a task, `.about_task(id)` so the notification opens it. To view:
+`HOLT_DEBUG_UI=notices` (toasts) or `notices-open` (history).
 For minimum sidebar width, set `{"rightPanelWidth": 280}` in `cfg/config.json` inside `HOLT_HOME` folder.
 
 **Working on Documents mode.** State and pure logic live in `crates/app/src/docs.rs` (`Docs`: open/focus/close per project, deduplicated;
@@ -216,7 +225,7 @@ To invoke the bridge as a tab, obtain its token with `spawn_spec_for(&ident).env
 - Always ask agents to run `cargo fmt`, `cargo clippy ... -D warnings`, and `cargo test --workspace` before concluding. That is the same as what CI runs.
 - Changes to `Core` (lib.rs) affect the UI. Ask for small changes and one area at a time (core **or** app).
 - **CI** (Continuous Integration) is GitHub's workflow (`.github/workflows/ci.yml`). On each push it compiles and tests on Windows, Ubuntu, and Fedora (Fedora in container, build and tests only), marking the commit/PR with ✅ or ❌. If ❌, open the run log to view the error. What has been verified on Linux is in [LINUX.md](LINUX.md).
-- To debug visually without opening the window: `HOLT_SMOKE=<folder>` saves a `screen.png` capture and exits the app (without downloading Whisper, to avoid initiating 1.6 GB in every temp folder). There are also `HOLT_DEBUG_FEED=1`, `HOLT_DEBUG_FAKE_SHELL=1`, `HOLT_DEBUG_PTY=1` (records raw PTY output of each tab in `data/pty/`, see `terminal/record.rs`; tab right-click menu toggles same recording without env var), and `HOLT_DEBUG_UI=…` (`tasks-demo`, `tasks-detail`, `tasks-new`, `newtab`, `newtab-models:<agent>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`). On Linux, run under `xvfb-run`.
+- To debug visually without opening the window: `HOLT_SMOKE=<folder>` saves a `screen.png` capture and exits the app (without downloading Whisper, to avoid initiating 1.6 GB in every temp folder). There are also `HOLT_DEBUG_FAKE_SHELL=1`, `HOLT_DEBUG_PTY=1` (records raw PTY output of each tab in `data/pty/`, see `terminal/record.rs`; tab right-click menu toggles same recording without env var), and `HOLT_DEBUG_UI=…` (`notices`, `notices-open`, `tasks-demo`, `tasks-detail`, `tasks-conflict`, `tasks-stopped`, `tasks-changes`, `tasks-messages`, `tasks-validating`, `tasks-new`, `tasks-new-more`, `branch:<name>`, `newtab`, `newtab-models:<agent>`, `usage-demo`, `usage-panel`, `git`, `git-demo`, `git-diff`, `github-demo`, `split-drag`, `docs-demo`, `docs-demo-file`, `docs-demo-md`, `docs-demo-report`, `docs-demo-unreadable`, `docs-demo-many`, `docs-demo-badge`, `drop`, `drop-pane:<n>`, `drop-task`, `mic-recording`, `target`, `attach`, `text`, `download`…; list in `debug_ui::apply`, `crates/app/src/debug_ui.rs`). On Linux, run under `xvfb-run`.
 - Logs: run with `RUST_LOG=debug` to view detailed messages in console (in debug builds).
 
 ## 5. Known limitations
