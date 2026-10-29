@@ -506,7 +506,7 @@ impl Caller {
         scoped(&self.project, id)
     }
 
-    /// Integrated conversation entry in the caller's project.
+    /// Feed entry in the caller's project (the task timeline records it; an error becomes a notification).
     fn feed(&self, core: &Core, kind: FeedKind, from: &str, to: &str, text: String) {
         core.feed(FeedEntry::new(kind, Some(from), Some(to), text).in_project(&self.project));
     }

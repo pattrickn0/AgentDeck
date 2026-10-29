@@ -237,7 +237,7 @@ Run in a separate data folder to avoid affecting real configuration:
 
 - [ ] The “+ New agent” menu lists installed CLIs, and each agent's card opens the correct tab.
 - [ ] `ask-agent --list`, `--team`, `--models` work in a terminal outside the app.
-- [ ] `ask-agent claude "..."` in a tab and the typed response arrive; Integrated Conversation shows the pair.
+- [ ] `ask-agent claude "..."` in a tab and the typed response arrive; inside a task, its Timeline shows the pair.
 - [ ] Create a task (`--task new ... --start`), inspect the worktree, submit with `--task done`, and read the report.
 - [ ] `ask-agent --learn` displays learnings; project `AGENTS.md` is updated only where it already existed.
 - [ ] Antigravity quota appears in the titlebar when `agy` is logged in; `secret-tool lookup service gemini

@@ -4,6 +4,7 @@
 //! the conventions and the coverage test.
 
 pub const ENTRIES: &[(&str, &str)] = &[
+    ("{kind} has no chat view.", "{kind} não tem visão de chat."),
     // Effort (models.rs)
     ("low", "baixo"),
     ("medium", "médio"),

@@ -34,6 +34,9 @@ pub struct ProjectCfg {
     /// CLI conversation of each tab (tab id → the CLI's own session id), so reopening the app brings the conversation back
     /// (see `resume.rs`). Saved as soon as the id is known; forgotten when the tab is closed for good.
     pub tab_sessions: BTreeMap<String, String>,
+    /// The view the user chose for a tab (tab id → `chat` or `terminal`); a tab without an entry gets the default of its
+    /// CLI (chat for Claude, see `chat.rs`).
+    pub tab_views: BTreeMap<String, String>,
     /// The project's agent list is collapsed in the sidebar.
     pub collapsed: bool,
 }
@@ -52,6 +55,7 @@ impl Default for ProjectCfg {
             tab_parents: BTreeMap::new(),
             tab_models: BTreeMap::new(),
             tab_sessions: BTreeMap::new(),
+            tab_views: BTreeMap::new(),
             collapsed: false,
         }
     }
@@ -215,6 +219,8 @@ pub struct Config {
     pub window_maximized: bool,
     /// Opens the tab of a closed agent by itself when another agent calls it through `ask-agent`.
     pub auto_open_agent_tabs: bool,
+    /// Claude tabs open in the chat view unless the user chose the terminal for that tab (`ProjectCfg::tab_views`).
+    pub chat_by_default: bool,
     /// With the terminal focused, Ctrl+B belongs to the app (sidebar) instead of going to the terminal (the tmux
     /// prefix); off, it goes to the terminal. Ctrl+T always belongs to the app.
     pub app_shortcuts_first: bool,
@@ -264,6 +270,7 @@ impl Default for Config {
             window_height: 860.0,
             window_maximized: false,
             auto_open_agent_tabs: true,
+            chat_by_default: true,
             app_shortcuts_first: false,
             language: crate::i18n::Lang::En,
             role_models: BTreeMap::new(),

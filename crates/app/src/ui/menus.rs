@@ -659,21 +659,31 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
     // would require restarting the agent).
     let model = deck.tabs[idx].model.clone();
     let recording = deck.tabs[idx].session.recording();
+    let in_chat = deck.tabs[idx].chat.is_some();
+    let has_chat = holt_core::chat::supports(&deck.tabs[idx].kind);
     // (action, text, hint): "Record" and "Snapshot" are the terminal diagnostics (see `terminal/record.rs`).
-    let items: [(TabAction, &str, Option<&str>); 4] = [
-        (TabAction::Rename, t!("Rename"), None),
-        (
+    let mut items: Vec<(TabAction, &str, Option<&str>)> = Vec::new();
+    if has_chat {
+        items.push((
+            TabAction::ToggleView,
+            if in_chat { t!("Show the terminal view") } else { t!("Show the chat view") },
+            Some(t!("The same conversation, as a terminal or as a chat. The agent restarts and resumes it.")),
+        ));
+    }
+    items.push((TabAction::Rename, t!("Rename"), None));
+    if !in_chat {
+        items.push((
             TabAction::Record,
             if recording { t!("Stop recording the terminal") } else { t!("Record the terminal (diagnostics)") },
             Some(t!("Keeps what this tab's program writes to the terminal, to track down display bugs. Uses disk space while on.")),
-        ),
-        (
+        ));
+        items.push((
             TabAction::Snapshot,
             t!("Save a snapshot of the grid now"),
             Some(t!("Saves the text the terminal holds now (screen and history) and opens the folder. Use it when the screen goes wrong.")),
-        ),
-        (TabAction::Close, t!("Close"), None),
-    ];
+        ));
+    }
+    items.push((TabAction::Close, t!("Close"), None));
     let w = 250.0;
     let item_h = 26.0;
     let h = item_h * (items.len() as f32 + if model.is_some() { 1.0 } else { 0.0 }) + 8.0;
@@ -718,6 +728,10 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
         Some(what) => {
             deck.tab_context_menu = None;
             match what {
+                TabAction::ToggleView => {
+                    let to_chat = deck.tabs[idx].chat.is_none();
+                    deck.set_tab_view(idx, to_chat);
+                }
                 TabAction::Rename => deck.start_rename_tab(idx),
                 TabAction::Record => deck.toggle_terminal_recording(idx),
                 TabAction::Snapshot => deck.save_terminal_snapshot(idx),
@@ -734,6 +748,7 @@ pub fn tab_context_menu(deck: &mut Deck, ctx: &egui::Context) {
 
 #[derive(Clone, Copy, PartialEq)]
 enum TabAction {
+    ToggleView,
     Rename,
     Record,
     Snapshot,

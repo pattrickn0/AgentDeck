@@ -106,6 +106,8 @@ struct Queued {
     answer: bool,
     /// `prompt` is the notice of this mail (see `holt_core::mail`).
     mail: Option<u64>,
+    /// Who sent it (id without the project; empty for the interface itself).
+    from: String,
 }
 
 /// What the right bar shows.
@@ -118,6 +120,8 @@ pub enum RightView {
     /// GitHub PRs, issues and Actions (see `github_ui.rs`).
     GitHub,
 }
+
+pub use chat::ChatTab;
 
 pub struct Tab {
     pub uid: u64,
@@ -161,6 +165,8 @@ pub struct Tab {
     /// There has been output since the tab became busy (only then the end of the turn rings and marks "done").
     busy_output: bool,
     pub(crate) spec: Option<SpawnSpec>,
+    /// The chat view of the tab (see [`chat`]); `None` = the terminal view.
+    pub chat: Option<Box<chat::ChatTab>>,
     pending_resize: Option<(GridSize, Instant)>,
     /// When this tab's PTY was last resized: the next one only goes out after the CLI
     /// finishes reprinting the conversation (see [`Tab::resize_blocked_until`]).
@@ -422,6 +428,8 @@ pub struct Deck {
     debug_pty: bool,
     /// DEBUG ONLY: closes the restored tabs (empty-state screenshot).
     pub debug_close_all: bool,
+    /// `HOLT_DEBUG_UI=chat-demo`: fill the first chat tab with a made-up conversation (see `Deck::debug_chat_demo`).
+    pub debug_chat_demo: bool,
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(120);
@@ -584,6 +592,7 @@ impl Deck {
             terminal_rect: None,
             window_focused: true,
             debug_close_all: false,
+            debug_chat_demo: false,
             debug_fake_shell: holt_core::env_var("DEBUG_FAKE_SHELL").is_some_and(|v| v == "1"),
             debug_pty: holt_core::env_var("DEBUG_PTY").is_some_and(|v| v == "1"),
         };
@@ -644,6 +653,7 @@ impl Deck {
 
 // Each section in a file (children of this module: they see `Deck`'s private fields).
 mod attachments;
+mod chat;
 mod dictation;
 mod frame;
 mod keyboard;
@@ -680,6 +690,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         model: None,
         resumed: false,
         session_log: None,
+        first_message: None,
     }
 }
 
