@@ -327,7 +327,7 @@ fn a_task_whose_scope_overlaps_waits_in_the_queue_and_starts_by_itself_when_the_
     assert_eq!(env.deck.tasks.view, TasksView::Detail("t2".into()));
     assert!(!env.tab_open("t2") && !queued.worktree.exists());
     assert_eq!(actions_for(&queued, false), [TaskAct::Discard]);
-    assert_eq!(crate::tasks_ui::Group::of(queued.status), crate::tasks_ui::Group::Queued);
+    assert_eq!(crate::tasks_ui::Lane::of(queued.status), crate::tasks_ui::Lane::Working);
     // The list and the detail of the queued task draw without trouble.
     draw_frame(&mut env, vec![]);
     env.deck.tasks_back();

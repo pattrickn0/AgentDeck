@@ -42,6 +42,16 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Tasks · {count} awaiting validation", "Tarefas · {count} aguardando validação"),
     ("Tasks · {review} in review, {validating} awaiting validation", "Tarefas · {review} em revisão, {validating} aguardando validação"),
     ("Drag to resize the panel", "Arraste para redimensionar o painel"),
+    // Notifications (title bar bell, history and toasts)
+    ("Notifications", "Notificações"),
+    ("Notifications · {count} to see", "Notificações · {count} para ver"),
+    ("Open {id}", "Abrir {id}"),
+    ("Opens the task in the Tasks tab", "Abre a tarefa na aba Tarefas"),
+    ("Removes every notification", "Remove todas as notificações"),
+    (
+        "No notifications. Errors, finished downloads and tasks that need you show up here.",
+        "Nenhuma notificação. Erros, downloads concluídos e tarefas que precisam de você aparecem aqui.",
+    ),
     ("verifying integrity (SHA-256) · {pct}", "verificando integridade (SHA-256) · {pct}"),
     ("verifying integrity (SHA-256)…", "verificando integridade (SHA-256)…"),
     ("unstable connection, retrying {attempt}/{max} in {seconds}s", "conexão instável, nova tentativa {attempt}/{max} em {seconds}s"),

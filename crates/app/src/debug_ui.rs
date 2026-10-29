@@ -82,7 +82,7 @@ fn debug_usage() -> std::collections::HashMap<String, holt_core::AgentUsage> {
     ])
 }
 
-/// DEBUG ONLY: `HOLT_DEBUG_UI=notices,notices-open,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-level,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agent>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agent>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` opens menus/states
+/// DEBUG ONLY: `HOLT_DEBUG_UI=notices,notices-open,tasks-demo,tasks-empty,tasks-detail,tasks-messages,tasks-messages-open,tasks-running,tasks-conflict,tasks-stopped,tasks-changes,tasks-request,tasks-draft,tasks-done,tasks-new-more,tasks-failed,tasks-confirm,tasks-discard,tasks-return,tasks-error,tasks-refused-main,tasks-refused-main-files,tasks-refused-commit,tasks-refused-conflict,tasks-stash-kept,tasks-busy,tasks-new,tasks-new-attach,tasks-new-effort,tasks-new-level,tasks-new-opencode,tasks-new-agent,tasks-new-model,tasks-new-provider,tasks-new-provider-models,settings,newtab,newtab-models:<agent>,drop,drop-pane:<n>,drop-task,usage-demo,usage-panel,usage-panel:<agent>,projects-demo,project:<id>,git,git-demo,git-diff,git-hunks,git-branches,git-branches-merge,git-merging,git-rebase,git-conflicts,git-conflict-file,git-history,git-commit,git-stash,git-stash-diff,git-norepo,git-nogit,split-drag,docs-demo,docs-demo-file,docs-demo-md,docs-demo-report,docs-demo-unreadable,docs-demo-many,docs-demo-badge,docs-demo-edit,docs-demo-find,docs-demo-diff-find,docs-demo-external,docs-demo-confirm,docs-demo-large,docs-demo-md-code,download,download-retry,download-error,mic-recording,mic-transcribing,mic-opening,dictation-ask` opens menus/states
 /// for screenshots in smoke mode.
 pub(crate) fn apply(deck: &mut Deck) {
     let Some(v) = holt_core::env_var("DEBUG_UI") else { return };
@@ -251,6 +251,13 @@ pub(crate) fn apply(deck: &mut Deck) {
             | "tasks-messages"
             | "tasks-messages-open"
             | "tasks-running"
+            | "tasks-conflict"
+            | "tasks-stopped"
+            | "tasks-changes"
+            | "tasks-request"
+            | "tasks-draft"
+            | "tasks-done"
+            | "tasks-new-more"
             | "tasks-failed"
             | "tasks-confirm"
             | "tasks-discard"
@@ -334,8 +341,6 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
     deck.tasks.debug_hold = true;
     deck.tasks.loaded = true;
     deck.tasks.tasks = if item == "tasks-empty" { Vec::new() } else { t::demo_tasks() };
-    // The screenshot list shows every task: collapsed groups stay open.
-    deck.tasks.collapsed.clear();
     let detail = |id: &str| TasksView::Detail(id.to_owned());
     match item {
         "tasks-validating" | "tasks-reject" | "tasks-discard-validating" => {
@@ -350,10 +355,8 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             }
         }
         "tasks-messages" | "tasks-messages-open" => {
-            use crate::tasks_ui::Section;
             deck.tasks.view = detail("t4");
-            // Only the timeline in view: the other sections are collapsed.
-            deck.tasks.closed_sections.extend([Section::Brief, Section::Report, Section::Changes, Section::History]);
+            deck.tasks.detail_tab = Some(t::DetailTab::Timeline);
             if item == "tasks-messages-open" {
                 if let Some(m) = deck.tasks.task("t4").and_then(|t| t.messages.get(1).map(|m| m.at_ms)) {
                     deck.tasks.open_messages.insert(("t4".into(), m));
@@ -411,6 +414,17 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
             deck.tasks.confirm = Some(Confirm::Discard("t6".into()));
         }
         "tasks-running" => deck.tasks.view = detail("t6"),
+        "tasks-conflict" => deck.tasks.view = detail("t10"),
+        "tasks-stopped" => deck.tasks.view = detail("t5"),
+        "tasks-changes" => {
+            deck.tasks.view = detail("t4");
+            deck.tasks.detail_tab = Some(t::DetailTab::Changes);
+        }
+        "tasks-request" => {
+            deck.tasks.view = detail("t9");
+        }
+        "tasks-draft" => deck.tasks.view = detail("t7"),
+        "tasks-done" => deck.tasks.view = detail("t2"),
         "tasks-failed" => deck.tasks.view = detail("t3"),
         "tasks-new"
         | "tasks-new-attach"
@@ -420,7 +434,8 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
         | "tasks-new-agent"
         | "tasks-new-model"
         | "tasks-new-provider"
-        | "tasks-new-provider-models" => {
+        | "tasks-new-provider-models"
+        | "tasks-new-more" => {
             deck.tasks_open_new();
             let f = &mut deck.tasks.form;
             f.kind =
@@ -444,6 +459,7 @@ fn debug_tasks(deck: &mut Deck, item: &str) {
                 ];
             }
             f.focus_title = false;
+            f.more_open = item == "tasks-new-more";
             f.menu = match item {
                 "tasks-new-agent" => Some(FormMenu::Agent),
                 "tasks-new-model" | "tasks-new-provider" | "tasks-new-provider-models" => Some(FormMenu::Model),
