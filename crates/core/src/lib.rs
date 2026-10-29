@@ -13,6 +13,7 @@ pub mod activity;
 pub mod agents;
 pub mod attachments;
 pub mod bridge;
+pub mod chat;
 pub mod capability;
 pub mod config;
 pub mod context;
