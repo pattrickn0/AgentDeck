@@ -777,43 +777,228 @@ fn merge_needs_new_commits() {
     core.shutdown();
 }
 
+/// The task conflicts with a base that moved after the delivery: the agent merges the base into its branch.
+fn agent_resolves_conflict(t: &holt_core::Task) {
+    let out = Command::new(git_exe().expect("git")).current_dir(&t.worktree).args(["merge", "main"]).output().expect("git");
+    assert!(!out.status.success(), "the conflict happens on the task's branch");
+    commit_file(&t.worktree, "a.txt", "resolved\ntwo\n", "merge: resolve");
+}
+
+/// A task in review whose `a.txt` conflicts with the base, which changed it after the delivery.
+fn task_in_review_with_a_moved_base(env: &Env, title: &str) -> holt_core::Task {
+    let t = env.core.task_create(&env.project, spec(title)).expect("create");
+    let t = env.core.task_start(&env.project, &t.id).expect("start");
+    commit_file(&t.worktree, "a.txt", "task version\ntwo\n", "feat: change a.txt in the task");
+    env.core.task_done(&env.project, &t.id, "I changed a.txt.").expect("done");
+    commit_file(&env.ws, "a.txt", "base version\ntwo\n", "fix: change a.txt in the base");
+    t
+}
+
+/// Restarts the app with a hand-edit of one task in the JSON (states that only a race would reach).
+fn restart_editing(env: Env, id: &str, edit: impl FnOnce(&mut serde_json::Value)) -> Env {
+    let Env { _tmp, core, rx, root, ws, project, config } = env;
+    core.shutdown();
+    drop((core, rx));
+    let file = root.join("data").join("tasks").join(format!("{project}.json"));
+    let mut json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).expect("json")).expect("parse");
+    let task = json["tasks"].as_array_mut().expect("tasks").iter_mut().find(|t| t["id"] == id).expect("task");
+    edit(task);
+    std::fs::write(&file, serde_json::to_string_pretty(&json).expect("json")).expect("write");
+    let (core, rx) = start_core(&root, config.clone(), true);
+    Env { _tmp, core, rx, root, ws, project, config }
+}
+
 #[test]
-fn a_conflicting_merge_is_aborted_and_the_task_stays_in_review() {
+fn done_is_refused_on_a_conflicting_branch_until_the_agent_merges_the_base() {
     need_git!();
     let env = start();
     let core = &env.core;
-    let t = core.task_create(&env.project, spec("Conflict")).expect("create");
+    let t = core.task_create(&env.project, spec("Late")).expect("create");
     let t = core.task_start(&env.project, &t.id).expect("start");
     commit_file(&t.worktree, "a.txt", "task version\ntwo\n", "feat: change a.txt in the task");
-    core.task_done(&env.project, &t.id, "I changed a.txt.").expect("done");
     // Meanwhile the base changed the same line.
     commit_file(&env.ws, "a.txt", "base version\ntwo\n", "fix: change a.txt in the base");
-    let head = git(&env.ws, &["rev-parse", "HEAD"]);
 
-    match core.task_merge(&env.project, &t.id) {
-        Err(TaskError::Conflict(m)) => assert!(m.contains("conflict") && m.contains("a.txt") && m.contains("undone"), "{m}"),
+    let m = match core.task_done(&env.project, &t.id, "I changed a.txt.") {
+        Err(TaskError::Conflict(m)) => m,
         other => panic!("{other:?}"),
-    }
-    // The merge was undone: no MERGE_HEAD, no changes, same HEAD, the base's file.
+    };
+    // The refusal tells the agent exactly what to do, with the wording of the merge request.
+    assert!(m.contains("would conflict") && m.contains("- a.txt") && m.contains("git merge main"), "{m}");
+    assert!(m.contains(&t.worktree.display().to_string()) && m.contains("commit the merge") && m.contains("--task done t1"), "{m}");
+    let now = core.task(&env.project, &t.id).expect("task");
+    assert_eq!((now.status, now.report), (TaskStatus::Running, None), "nothing was accepted");
+    assert!(now.events.iter().any(|e| e.text.contains("delivery refused")), "{:?}", now.events);
+
+    // The agent merges the base, resolves, commits: now the delivery is accepted.
+    agent_resolves_conflict(&t);
+    let done = core.task_done(&env.project, &t.id, "Resolved.").expect("done");
+    assert_eq!(done.status, TaskStatus::Review);
+    assert!(done.merge_stopped.is_none() && !done.merge_approved);
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "resolved\ntwo\n");
+    core.shutdown();
+}
+
+#[test]
+fn a_conflict_at_merge_time_goes_to_the_agent_and_the_delivery_merges_by_itself() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review_with_a_moved_base(&env, "Conflict");
+    let head = git(&env.ws, &["rev-parse", "HEAD"]);
+    events(&env);
+
+    // The reviewer clicks "Merge": the answer is not a refusal but "the agent was asked".
+    let outcome = core.task_merge_assisted(&env.project, &t.id, false).expect("handed to the agent");
+    assert!(outcome.resolving);
+    let note = outcome.note.expect("notice");
+    assert!(note.contains("a.txt") && note.contains("merges by itself"), "{note}");
+    // The merge was undone: nothing changed in the main repository.
     assert!(!env.ws.join(".git").join("MERGE_HEAD").exists());
     assert_eq!(git(&env.ws, &["status", "--porcelain", "--untracked-files=no"]).trim(), "");
     assert_eq!(git(&env.ws, &["rev-parse", "HEAD"]), head);
-    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "base version\ntwo\n");
+    // The task went back to the agent with the approved merge remembered, and the request reached its tab.
     let now = core.task(&env.project, &t.id).expect("task");
-    assert_eq!(now.status, TaskStatus::Review);
-    assert!(now.worktree.is_dir() && branches(&env.ws).contains(&now.branch));
-    assert!(now.events.iter().any(|e| e.text.contains("conflict in the merge")), "{:?}", now.events);
+    assert_eq!((now.status, now.merge_approved, now.conflict_asks), (TaskStatus::Running, true, 1));
+    let (to, prompt) = deliveries(&events(&env)).pop().expect("delivery");
+    assert_eq!(to, "claude@t1");
+    assert!(prompt.contains("- a.txt") && prompt.contains("git merge main") && prompt.contains("deliver again"), "{prompt}");
+    assert!(now.events.iter().any(|e| e.text.contains("asked the agent to resolve it")), "{:?}", now.events);
 
-    // Returned, the task brings the base into the branch (resolved by hand here) and now it merges.
-    core.task_return(&env.project, &t.id, "Update with main and resolve the conflict.").expect("return");
-    let out = Command::new(git_exe().expect("git")).current_dir(&t.worktree).args(["merge", "main"]).output().expect("git");
-    assert!(!out.status.success(), "the conflict happens on the task's branch");
-    std::fs::write(t.worktree.join("a.txt"), "resolved\ntwo\n").expect("w");
-    git(&t.worktree, &["add", "-A"]);
-    git(&t.worktree, &["commit", "-q", "-m", "merge: resolve"]);
-    core.task_done(&env.project, &t.id, "Resolved.").expect("done 2");
-    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
+    // The agent delivers again: merged, with no call from the reviewer.
+    agent_resolves_conflict(&t);
+    let done = core.task_done(&env.project, &t.id, "Resolved.").expect("done");
+    assert_eq!(done.status, TaskStatus::Validating, "{:?}", done.events);
+    assert!(!done.merge_approved && done.conflict_asks == 0 && done.merge_stopped.is_none());
+    assert!(done.merge_commit.is_some());
     assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "resolved\ntwo\n");
+    assert!(done.events.iter().any(|e| e.text.contains("merge already approved")), "{:?}", done.events);
+    core.shutdown();
+}
+
+#[test]
+fn the_command_line_merge_on_a_conflict_says_the_agent_was_asked_and_stash_comes_back() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review_with_a_moved_base(&env, "Conflict");
+    // The user's change in another file: the "stash" comes back even when the merge is undone.
+    commit_file(&env.ws, "b.txt", "b\n", "docs: b");
+    std::fs::write(env.ws.join("b.txt"), "user's b\n").expect("w");
+
+    let outcome = core.task_merge_assisted(&env.project, &t.id, true).expect("handed to the agent");
+    assert!(outcome.resolving && outcome.note.as_deref().is_some_and(|n| n.contains("already back")), "{outcome:?}");
+    assert_eq!(std::fs::read_to_string(env.ws.join("b.txt")).expect("b.txt"), "user's b\n");
+    assert!(stash_list(&env.ws).is_empty());
+    agent_resolves_conflict(&t);
+    // The automatic merge never stashes the user's work: it stops in review, with the reason on the card.
+    let done = core.task_done(&env.project, &t.id, "Resolved.").expect("done");
+    assert_eq!(done.status, TaskStatus::Review);
+    assert!(done.merge_stopped.is_some_and(|s| s.reason.contains("b.txt")));
+    assert_eq!(core.task_merge_assisted(&env.project, &t.id, true).expect("merge").task.status, TaskStatus::Validating);
+    assert_eq!(std::fs::read_to_string(env.ws.join("b.txt")).expect("b.txt"), "user's b\n");
+
+    // `--task merge` (the command line / the orchestrator) gets the same treatment, answering 409 with the news.
+    let t2 = core.task_create(&env.project, spec("Second")).expect("create");
+    let t2 = core.task_start(&env.project, &t2.id).expect("start");
+    commit_file(&t2.worktree, "c.txt", "task\n", "feat: c");
+    core.task_done(&env.project, &t2.id, "c.").expect("done");
+    commit_file(&env.ws, "c.txt", "base\n", "fix: c in the base");
+    git(&env.ws, &["checkout", "-q", "--", "b.txt"]);
+    match core.task_merge(&env.project, &t2.id) {
+        Err(TaskError::Conflict(m)) => assert!(m.contains("c.txt") && m.contains("asked the agent"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    let now = core.task(&env.project, &t2.id).expect("task");
+    assert_eq!((now.status, now.merge_approved), (TaskStatus::Running, true));
+    core.shutdown();
+}
+
+#[test]
+fn the_automatic_merge_can_be_cancelled() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review_with_a_moved_base(&env, "Cancel");
+    assert!(matches!(core.task_cancel_auto_merge(&env.project, &t.id), Err(TaskError::Conflict(_))), "nothing waits yet");
+    core.task_merge(&env.project, &t.id).expect_err("handed to the agent");
+    assert!(core.task(&env.project, &t.id).expect("task").merge_approved);
+
+    let cancelled = core.task_cancel_auto_merge(&env.project, &t.id).expect("cancel");
+    assert_eq!((cancelled.status, cancelled.merge_approved, cancelled.conflict_asks), (TaskStatus::Running, false, 0));
+    assert!(matches!(core.task_cancel_auto_merge(&env.project, &t.id), Err(TaskError::Conflict(_))), "only once");
+    // The agent still delivers, but the task waits for the review like any other.
+    agent_resolves_conflict(&t);
+    let done = core.task_done(&env.project, &t.id, "Resolved.").expect("done");
+    assert_eq!(done.status, TaskStatus::Review);
+    assert!(done.merge_commit.is_none());
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "base version\ntwo\n");
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
+    core.shutdown();
+}
+
+#[test]
+fn the_app_asks_the_agent_at_most_three_times_then_a_person_looks() {
+    need_git!();
+    let env = start();
+    let t = task_in_review_with_a_moved_base(&env, "Never settles");
+    // The base keeps moving under the agent: the state after two requests, approved, delivered and conflicting.
+    let env = restart_editing(env, &t.id, |t| {
+        t["merge_approved"] = true.into();
+        t["conflict_asks"] = 2.into();
+    });
+    let core = &env.core;
+    let third = core.task_merge_assisted(&env.project, &t.id, false).expect("third request");
+    assert!(third.resolving);
+    assert_eq!(core.task(&env.project, &t.id).expect("task").conflict_asks, 3);
+
+    // Back in review after the third request, conflicting once more: no fourth request.
+    let env = restart_editing(env, &t.id, |t| {
+        t["status"] = "review".into();
+        t["conflict_asks"] = 3.into();
+    });
+    let core = &env.core;
+    let refusal = core.task_merge_assisted(&env.project, &t.id, false).expect_err("a person looks");
+    let block = refusal.block.clone().expect("reason");
+    assert_eq!(block, MergeBlock::Conflict(vec!["a.txt".into()]));
+    let msg = refusal.error.message().to_owned();
+    assert!(msg.contains("conflict") && msg.contains("already asked 3 times"), "{msg}");
+    let now = core.task(&env.project, &t.id).expect("task");
+    assert_eq!((now.status, now.merge_approved, now.conflict_asks), (TaskStatus::Review, false, 0));
+    assert!(!env.ws.join(".git").join("MERGE_HEAD").exists());
+
+    // The red box has its button: the old manual request still works, and a person's merge starts the count over.
+    let ask = block.return_feedback(&now).expect("request");
+    assert!(ask.contains("- a.txt") && ask.contains("git merge main") && ask.contains(&t.worktree.display().to_string()), "{ask}");
+    assert!(block.explain(&now).contains("\"main\"") && block.explain(&now).contains("a.txt"));
+    core.task_return(&env.project, &t.id, &ask).expect("return");
+    agent_resolves_conflict(&t);
+    assert_eq!(core.task_done(&env.project, &t.id, "Resolved.").expect("done").status, TaskStatus::Review);
+    assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
+    core.shutdown();
+}
+
+#[test]
+fn an_automatic_merge_that_is_refused_stays_in_review_with_the_reason() {
+    need_git!();
+    let env = start();
+    let core = &env.core;
+    let t = task_in_review_with_a_moved_base(&env, "Dirty main");
+    core.task_merge(&env.project, &t.id).expect_err("handed to the agent");
+    agent_resolves_conflict(&t);
+    // The user starts editing the main repository before the agent delivers.
+    std::fs::write(env.ws.join("a.txt"), "user is editing\n").expect("w");
+
+    let done = core.task_done(&env.project, &t.id, "Resolved.").expect("the delivery itself is accepted");
+    assert_eq!((done.status, done.merge_approved), (TaskStatus::Review, false));
+    let stop = done.merge_stopped.expect("reason");
+    assert!(stop.reason.contains("uncommitted changes") && stop.conflict_files.is_none(), "{stop:?}");
+    assert_eq!(std::fs::read_to_string(env.ws.join("a.txt")).expect("a.txt"), "user is editing\n", "nothing touched");
+    // A person's merge afterwards clears the reason.
+    git(&env.ws, &["checkout", "-q", "--", "a.txt"]);
+    let merged = core.task_merge(&env.project, &t.id).expect("merge");
+    assert_eq!((merged.status, merged.merge_stopped), (TaskStatus::Validating, None));
     core.shutdown();
 }
 
@@ -852,44 +1037,6 @@ fn a_refused_merge_names_the_way_out_and_the_command_line_never_stashes() {
     git(&t.worktree, &["commit", "-q", "-m", "feat: forgot.txt"]);
     core.task_done(&env.project, &t.id, "Committed.").expect("done");
     assert_eq!(core.task_merge(&env.project, &t.id).expect("merge").status, TaskStatus::Validating);
-    core.shutdown();
-}
-
-#[test]
-fn a_conflict_refusal_lists_the_files_and_asks_the_agent_to_merge_the_base() {
-    need_git!();
-    let env = start();
-    let core = &env.core;
-    let t = core.task_create(&env.project, spec("Conflict")).expect("create");
-    let t = core.task_start(&env.project, &t.id).expect("start");
-    commit_file(&t.worktree, "a.txt", "task version\ntwo\n", "feat: change a.txt in the task");
-    core.task_done(&env.project, &t.id, "I changed a.txt.").expect("done");
-    commit_file(&env.ws, "a.txt", "base version\ntwo\n", "fix: change a.txt in the base");
-    // The user's change in another file: the "stash" comes back even when the merge is undone.
-    commit_file(&env.ws, "b.txt", "b\n", "docs: b");
-    std::fs::write(env.ws.join("b.txt"), "user's b\n").expect("w");
-
-    let refusal = core.task_merge_assisted(&env.project, &t.id, true).expect_err("conflict");
-    let block = refusal.block.clone().expect("reason");
-    assert_eq!(block, MergeBlock::Conflict(vec!["a.txt".into()]), "{refusal:?}");
-    assert!(matches!(&refusal.error, TaskError::Conflict(m) if m.contains("conflict") && m.contains("already back")), "{refusal:?}");
-    let ask = block.return_feedback(&t).expect("request");
-    assert!(ask.contains("- a.txt") && ask.contains("git merge main") && ask.contains(&t.worktree.display().to_string()), "{ask}");
-    assert!(block.explain(&t).contains("\"main\"") && block.explain(&t).contains("a.txt"));
-    // Nothing was left on the way: no merge in progress, no stash, the user's change in place.
-    assert!(!env.ws.join(".git").join("MERGE_HEAD").exists() && stash_list(&env.ws).is_empty());
-    assert_eq!(std::fs::read_to_string(env.ws.join("b.txt")).expect("b.txt"), "user's b\n");
-    assert_eq!(core.task(&env.project, &t.id).expect("task").status, TaskStatus::Review);
-
-    // Returned with that request, the agent merges the base into its branch and the merge goes through.
-    core.task_return(&env.project, &t.id, &ask).expect("return");
-    let out = Command::new(git_exe().expect("git")).current_dir(&t.worktree).args(["merge", "main"]).output().expect("git");
-    assert!(!out.status.success(), "the conflict happens on the task's branch");
-    commit_file(&t.worktree, "a.txt", "resolved\ntwo\n", "merge: resolve");
-    core.task_done(&env.project, &t.id, "Resolved.").expect("done 2");
-    let merged = core.task_merge_assisted(&env.project, &t.id, true).expect("merge");
-    assert_eq!(merged.task.status, TaskStatus::Validating);
-    assert_eq!(std::fs::read_to_string(env.ws.join("b.txt")).expect("b.txt"), "user's b\n");
     core.shutdown();
 }
 

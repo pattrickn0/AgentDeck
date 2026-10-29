@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
 use super::git_ops::{
-    branch_exists, delete_branch, diff_stat, git_out, safe_worktree, short_hash, union_files, valid_task_branch, worktree_dirty,
+    branch_exists, delete_branch, diff_stat, git_out, merge_check, safe_worktree, short_hash, union_files, valid_task_branch,
+    worktree_dirty, MergeCheck,
 };
 use super::text::{cap_text, short_list};
 use super::{
-    boot_line, branch_name, changed_files, clean_title, git_error, memory_block, return_message, start_message, Task, TaskError, TaskSpec,
-    TaskStatus, HOLT_DIR, MAX_OUTSIDE, MAX_TEXT,
+    boot_line, branch_name, changed_files, clean_title, conflict_fix, git_error, memory_block, return_message, start_message, MergeStop,
+    Task, TaskError, TaskSpec, TaskStatus, HOLT_DIR, MAX_OUTSIDE, MAX_TEXT,
 };
 use crate::capability;
 use crate::events::{CoreEvent, Delivery, FeedEntry};
@@ -455,7 +456,10 @@ impl Core {
     /// The agent finished: stores the report and the `git diff --stat base...branch` and puts the task in
     /// review. Requires `Running`, or `Validating` with new commits on the branch (the user fixed something in the
     /// tab while waiting for validation and the agent delivers what is missing; without new commits, it refuses).
-    /// The bridge only lets the task's own agent call it.
+    /// It also refuses when the branch would not merge cleanly into the base (`git merge-tree`; skipped on a git without
+    /// it): the message tells the agent to merge the base into its branch, resolve, check and deliver again. If the
+    /// merge was already approved ([`Task::merge_approved`], a conflict found at merge time), the app merges by itself
+    /// right after accepting the report. The bridge only lets the task's own agent call it.
     pub fn task_done(&self, project: &str, id: &str, report: &str) -> Result<Task, TaskError> {
         let _op = self.inner.tasks.op.lock();
         let task = self.task_or_404(project, id)?;
@@ -487,6 +491,22 @@ impl Core {
             return Err(TaskError::Invalid(t!("the report is empty: say what was done, the files, the tests and what is missing").into()));
         }
         let report = cap_text(report, MAX_TEXT);
+        if let Ok(repo) = self.task_repo(project) {
+            if valid_task_branch(&task.branch) && branch_exists(&repo, &task.branch) {
+                if let MergeCheck::Conflicts(files) = merge_check(&repo, &task.base, &task.branch) {
+                    self.update_task(project, &task.id, |t| {
+                        t.log(t!("delivery refused: the branch conflicts with {base}", base = &t.base))
+                    });
+                    return Err(TaskError::Conflict(format!(
+                        "task {id} was not delivered: merging your branch ({branch}) into {base} would conflict, because {base} changed while you worked. {fix}",
+                        id = task.id,
+                        branch = task.branch,
+                        base = task.base,
+                        fix = conflict_fix(&task, &files),
+                    )));
+                }
+            }
+        }
         let (stat, warning, outside) = match self.task_repo(project) {
             Ok(repo) => {
                 let dirty = worktree_dirty(&repo, &task.worktree).filter(|d| !d.is_empty());
@@ -521,6 +541,7 @@ impl Core {
             t.outside_scope = outside.into_iter().take(MAX_OUTSIDE).collect();
             t.status = TaskStatus::Review;
             t.finished_ms = Some(now_ms());
+            t.merge_stopped = None;
             t.log(if after_merge {
                 t!("the agent delivered more work after the merge; in review")
             } else {
@@ -530,7 +551,61 @@ impl Core {
         });
         let task = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;
         self.feed(FeedEntry::system(t!("Task {id} ready for review: {title}", id = &task.id, title = &task.title)).in_project(project));
+        if task.merge_approved {
+            return Ok(self.auto_merge_locked(project, task));
+        }
         Ok(task)
+    }
+
+    /// The agent delivered again after a conflict found at merge time and the merge was already approved: merges now,
+    /// with no call from the reviewer. A refusal leaves the task in review with the reason in [`Task::merge_stopped`]
+    /// (the card shows it); a new conflict asks the agent again, up to [`super::MAX_CONFLICT_ASKS`] times. Returns the
+    /// task as it stands afterwards. Holds the operations lock (called by `task_done`).
+    fn auto_merge_locked(&self, project: &str, task: Task) -> Task {
+        self.update_task(project, &task.id, |t| t.log(t!("merge already approved: merging the new delivery")));
+        match self.merge_locked(project, &task.id, false) {
+            Ok(outcome) => outcome.task,
+            Err(refusal) => {
+                let stop = MergeStop {
+                    reason: refusal.error.message().to_owned(),
+                    conflict_files: match &refusal.block {
+                        Some(super::MergeBlock::Conflict(files)) => Some(files.clone()),
+                        _ => None,
+                    },
+                };
+                self.feed(
+                    FeedEntry::system(t!(
+                        "Task {id} was not merged automatically, a person has to look: {reason}",
+                        id = &task.id,
+                        reason = &stop.reason
+                    ))
+                    .in_project(project),
+                );
+                self.update_task(project, &task.id, |t| {
+                    t.merge_approved = false;
+                    t.merge_stopped = Some(stop);
+                    t.clone()
+                })
+                .unwrap_or(task)
+            }
+        }
+    }
+
+    /// Cancels the automatic merge of a task whose conflict was handed to the agent: the task stays with the agent
+    /// (`Running`) and, when it delivers, waits in review like any other. `Conflict` if there is nothing to cancel.
+    pub fn task_cancel_auto_merge(&self, project: &str, id: &str) -> Result<Task, TaskError> {
+        let _op = self.inner.tasks.op.lock();
+        let task = self.task_or_404(project, id)?;
+        if !task.merge_approved {
+            return Err(TaskError::Conflict(t!("task {id} has no automatic merge waiting", id = &task.id).into()));
+        }
+        let updated = self.update_task(project, &task.id, |t| {
+            t.merge_approved = false;
+            t.conflict_asks = 0;
+            t.log(t!("automatic merge cancelled; it will wait for the review"));
+            t.clone()
+        });
+        updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id = &task.id)))
     }
 
     // ---------- Diff ----------
@@ -598,18 +673,32 @@ impl Core {
         if !self.tab_delivery() {
             return Err(TaskError::Conflict(t!("tasks run in the agents' tabs: turn on \"Open agent tabs\" in Settings").into()));
         }
+        self.return_locked(project, &task, feedback, None)
+    }
+
+    /// Returns the task to its agent with `feedback` (the operations lock is held). `auto` = `Some(asks)` is the
+    /// app's own request to resolve a conflict found at merge time: the merge stays approved and `asks` counts the
+    /// requests so far. `None` is a review decision: any earlier approval is dropped.
+    pub(super) fn return_locked(&self, project: &str, task: &Task, feedback: &str, auto: Option<u32>) -> Result<Task, TaskError> {
         let feedback = cap_text(feedback, MAX_TEXT);
         let updated = self.update_task(project, &task.id, |t| {
             t.status = TaskStatus::Running;
             t.finished_ms = None;
             t.error = None;
-            t.log(t!("returned to the agent with feedback"));
+            t.merge_approved = auto.is_some();
+            t.conflict_asks = auto.unwrap_or(0);
+            t.merge_stopped = None;
+            t.log(if auto.is_some() {
+                t!("conflict with {base}; asked the agent to resolve it (the merge is already approved)", base = &t.base)
+            } else {
+                t!("returned to the agent with feedback").to_owned()
+            });
             // `before` does not have the new feedback: the message shows only the earlier ones.
             let before = t.clone();
             t.add_feedback("review", &feedback);
             (before, t.clone())
         });
-        let (before, task) = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id)))?;
+        let (before, task) = updated.ok_or_else(|| TaskError::NotFound(t!("task {id} vanished", id = &task.id)))?;
         let ident = self.open_task_instance(project, &task);
         let prompt = return_message(&before, &feedback, &self.feedback_learnings(&before, &feedback));
         let boot = self.task_boot_prompt(project, &task, "feedback", "was returned in review with changes, described in the file", &prompt);

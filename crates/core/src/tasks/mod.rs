@@ -72,6 +72,9 @@ pub const MAX_TITLE: usize = 120;
 pub const MAX_SLUG: usize = 40;
 /// A report or brief larger than this is cut (in characters).
 pub const MAX_TEXT: usize = 200_000;
+/// Times the app asks the agent, by itself, to resolve a conflict found at merge time (the first request and two
+/// repeats); after that a human looks ([`Task::merge_stopped`]).
+pub const MAX_CONFLICT_ASKS: u32 = 3;
 /// Files outside the scope kept per task.
 const MAX_OUTSIDE: usize = 100;
 /// Size of the kept `git diff --stat` text (in characters).
@@ -257,6 +260,23 @@ pub struct Task {
     /// The files of the delivered diff that are outside the scope (without `memory/**` and `Cargo.lock`); the review
     /// shows them as a warning, never as a block. Empty without a scope.
     pub outside_scope: Vec<String>,
+    /// The merge was already approved (the reviewer clicked "Merge" or ran `--task merge`) but hit a conflict with the
+    /// base: the agent was asked to resolve it and the app merges by itself when the agent delivers again. Cleared by
+    /// the merge, by [`Core::task_cancel_auto_merge`] and by any return with feedback.
+    pub merge_approved: bool,
+    /// How many times the app asked the agent, by itself, to resolve a conflict ([`MAX_CONFLICT_ASKS`]).
+    pub conflict_asks: u32,
+    /// Why the automatic merge of a delivery stopped and a human has to look; the card shows it. `None` otherwise.
+    pub merge_stopped: Option<MergeStop>,
+}
+
+/// An automatic merge that did not happen ([`Task::merge_stopped`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeStop {
+    /// The refusal, as the reviewer reads it.
+    pub reason: String,
+    /// The conflicting files, when the stop was a conflict (the card then offers "ask the agent to resolve").
+    pub conflict_files: Option<Vec<String>>,
 }
 
 impl Task {
@@ -328,6 +348,7 @@ impl Task {
             "error": self.error,
             "scope": self.scope,
             "waiting_for": self.waiting_for,
+            "merge_approved": self.merge_approved,
         })
     }
 }
@@ -450,16 +471,32 @@ impl MergeBlock {
                 files = list(f),
             )),
             MergeBlock::Conflict(f) => Some(format!(
-                "Merging your branch ({branch}) into {base} conflicted and was undone. Conflicting files:\n\n{files}\n\n\
-                 In your folder ({wt}), run git merge {base}, resolve the conflicts keeping what both versions brought that is useful, \
-                 run the tests, commit the merge and deliver again.",
+                "Merging your branch ({branch}) into {base} conflicted and was undone. {fix}",
                 branch = task.branch,
                 base = task.base,
-                wt = task.worktree.display(),
-                files = if f.is_empty() { "- (git did not report them; check with git merge)".to_owned() } else { list(f) },
+                fix = conflict_fix(task, f),
             )),
         }
     }
+}
+
+/// What the agent has to do about a conflict with the base: the files and the steps (`git merge <base>` in its folder,
+/// resolve keeping what both sides brought, run the checks, commit, deliver again). Shared by the merge request, the
+/// refused delivery ([`Core::task_done`]) and the automatic request. Agent-facing text: plain English.
+pub(super) fn conflict_fix(task: &Task, files: &[String]) -> String {
+    let list = if files.is_empty() {
+        "- (git did not report them; check with git merge)".to_owned()
+    } else {
+        files.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n")
+    };
+    format!(
+        "Conflicting files:\n\n{list}\n\n\
+         In your folder ({wt}), run git merge {base}, resolve the conflicts keeping what both versions brought that is useful, \
+         run the tests and checks, commit the merge and deliver again (ask-agent --task done {id} --file <file>).",
+        wt = task.worktree.display(),
+        base = task.base,
+        id = task.id,
+    )
 }
 
 /// The refused merge: the usual error and, when there is a way out for the user, the structured reason.
@@ -484,6 +521,9 @@ impl From<TaskError> for MergeRefusal {
 pub struct MergeOutcome {
     pub task: Task,
     pub note: Option<String>,
+    /// The merge did not happen: it conflicted with the base and the agent was asked to resolve it (the task is
+    /// `Running`, with [`Task::merge_approved`]); the merge is retried when the agent delivers. `note` says so.
+    pub resolving: bool,
 }
 
 fn git_error(e: GitError) -> TaskError {
