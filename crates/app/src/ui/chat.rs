@@ -33,6 +33,8 @@ const TOOL_HEAD_H: f32 = 28.0;
 const BODY_ROWS: usize = 40;
 const COMPOSER_MAX_ROWS: usize = 8;
 const SLASH_ROWS: usize = 6;
+/// Slash commands offered before the CLI has told its own.
+const USUAL_COMMANDS: &[&str] = &["clear", "compact", "context", "cost", "help", "init", "memory", "model", "review", "status"];
 
 /// What the painted view asks the deck to do (applied after painting).
 enum Act {
@@ -168,7 +170,10 @@ fn draw(
     painter.rect_filled(dock, 0.0, theme::with_alpha(p.well, 0.0));
     let id = Id::new(("chat-composer", uid));
     let focused = ctx.memory(|m| m.has_focus(id));
-    let slash = slash_matches(&chat.composer, &chat.transcript.commands);
+    // The CLI lists its commands in the first `init`, which only comes with the first turn: until then, the usual ones.
+    let usual: Vec<String> = USUAL_COMMANDS.iter().map(|c| (*c).to_owned()).collect();
+    let known = if chat.transcript.commands.is_empty() { &usual } else { &chat.transcript.commands };
+    let slash = slash_matches(&chat.composer, known);
     // Keys the text field would otherwise take.
     let mut submit = false;
     if focused {

@@ -227,7 +227,12 @@ fn the_real_claude_answers_in_the_chat_mode_and_resumes_the_conversation() {
                 None => std::thread::sleep(Duration::from_millis(20)),
             }
         }
-        transcript.items.iter().filter_map(|i| if let Item::Assistant { text, .. } = i { Some(text.clone()) } else { None }).collect::<Vec<_>>().join("\n")
+        transcript
+            .items
+            .iter()
+            .filter_map(|i| if let Item::Assistant { text, .. } = i { Some(text.clone()) } else { None })
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     let first = run("Remember the word BANANA7. Reply with just: ok");
     assert!(!first.is_empty());
