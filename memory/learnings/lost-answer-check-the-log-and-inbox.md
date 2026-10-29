@@ -1,6 +1,6 @@
 ---
 title: Missing ask-agent --reply response - where to look
-summary: The app writes data/holt.log; missing responses remain in ask-agent --inbox and Integrated Chat displays a warning.
+summary: The app writes data/holt.log; missing responses remain in ask-agent --inbox and an error notification warns.
 touches: [crates/core/src/bridge.rs, crates/core/src/inbox.rs, crates/app/src/deck/**, crates/app/src/logfile.rs]
 ---
 A delayed response (received after a 202 status) only reaches the caller if the UI types it into their tab; it is lost without

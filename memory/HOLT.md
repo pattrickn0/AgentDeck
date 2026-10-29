@@ -56,7 +56,7 @@ what goes into `main` (`main` is the stable version; day-to-day work happens on 
 
 1. ~~LLM model per instance~~ (done on 2026-10-17).
 2. ~~**Tasks desk**~~ (phases A and B done on 2026-10-17; "waiting for validation" stage arrived in `t10`; remaining items in
-   [ideas.md](ideas.md); per-task timeline is in [backlog.md](backlog.md)) in place of integrated Conversation: create, start (worktree + branch + agent tab with model),
+   [ideas.md](ideas.md); per-task timeline is in [backlog.md](backlog.md)) in place of the old integrated Conversation (retired in t8): create, start (worktree + branch + agent tab with model),
    monitor, receive report, review diff, merge, validate (or reject), or discard with a button. It is the workflow the
    orchestrator used to do by hand.
 3. **Two-layer memory, our own.** **Phase 1 done** (tasks `t13`, `t15`, and `t16`): `memory/learnings/*.md` with `touches`, delivered

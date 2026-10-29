@@ -39,9 +39,10 @@ test that fails becomes an item here. Product direction and decision-makers are 
    every `remove_task_worktree` failure, `holt.log` and the task warning report which files remained and which process holds
    them open (Restart Manager), or if only empty directories remained (a process with its current directory inside it). Awaiting
    the next real occurrence: read the notice (search for "worktree" in log) and fix the cause.
-7. [ ] **Retire integrated Conversation.** The per-task timeline already exists (t43, MESSAGES section in detail view, stored in
-   `Task::messages`); needs validation in use and then removal of Conversation. What the timeline lacks: user messages to the
-   tab (`FeedKind::User`) and system notices.
+7. [x] **Retire integrated Conversation** (t8, 2026-10-29). The Chat tab is gone: agent messages live in the task's
+   Timeline pane and system notices became notifications (toasts and the title bar's bell). Still open: messages between
+   agents outside any task are only in each pair's history (`ask-agent --inbox`), and the user's own messages to a tab
+   (`FeedKind::User`) are not recorded anywhere.
 
 ## Later (on the list, not yet)
 

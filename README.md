@@ -36,7 +36,7 @@ each other, and a task board where big work happens on its own branch and comes 
 
 |  |  |
 | :-- | :-- |
-| 🗣️ **Agents talk to each other** | Inside any tab, an agent runs `ask-agent codex "review this function"`. The question is typed into Codex's terminal and the answer comes back to whoever asked. Every exchange shows up in the Integrated Chat. |
+| 🗣️ **Agents talk to each other** | Inside any tab, an agent runs `ask-agent codex "review this function"`. The question is typed into Codex's terminal and the answer comes back to whoever asked. Inside a task, every exchange shows up in the task's timeline. |
 | 🌿 **Every task on its own branch** | A task gets a git worktree and a branch. The agent works there, delivers a report, and you review the diff and the timeline. Discarding a bad attempt costs nothing. |
 | 🔀 **Conflicts don't land on you** | A delivery that conflicts with its base is refused until the agent merges the base in. If the base moves after that, Merge sends the conflict back to the agent and finishes on its own when the agent delivers again. |
 | ⚖️ **The right model for the job** | Say how big the work is (simple, medium, complex). Holt picks among the models that can handle it — public benchmarks plus your own task history — and, among those, the one with the most quota left. |
