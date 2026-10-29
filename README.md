@@ -1,114 +1,124 @@
-# ⚡ Holt
+<p align="center">
+  <img src="crates/app/assets/holt.png" width="112" alt="Holt logo">
+</p>
 
-**A desktop terminal where your AI agents work as a team.** Claude Code, Codex, Antigravity, and OpenCode
-run side by side, talk to each other, and receive isolated tasks that you review and merge, without losing track of anything.
+<h1 align="center">Holt</h1>
 
-![Holt with Claude, Codex, and OpenCode in Highlight mode and the tasks desk on the right](docs/screenshots/main.png)
+<p align="center">
+  <b>A den for your coding agents.</b><br>
+  Claude Code, Codex, Antigravity and OpenCode in one native window — talking to each other,<br>
+  working on isolated branches, and handing you diffs instead of chaos.
+</p>
 
-100% Rust, native for **Windows** and **Linux**. MIT License.
+<p align="center">
+  <a href="https://github.com/pattrickn0/Holt/actions/workflows/ci.yml"><img src="https://github.com/pattrickn0/Holt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust" alt="Rust 1.89+">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational" alt="Windows | Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/main.png" alt="Holt: agents and their team in the sidebar, Claude Code in the center, the task board with work waiting for review on the right, plan quotas in the title bar">
+</p>
 
 ---
 
-## Why it exists
+## The problem
 
-Each agent CLI is good on its own, but working with several at the same time turns into a pile of loose terminals: you
-copy text from one to another, lose track of what each one is doing, and hope two agents don't touch the same
-file.
+Every agent CLI is good on its own. Use three at once and you get a pile of terminals: you copy text from one to
+another, lose track of who is doing what, and pray two of them don't edit the same file. Your quota runs out on the
+one you always reach for while the others sit idle.
 
-Holt brings everything together in one window and gives agents what they need to collaborate:
+**Holt is the den where they work together.** One window, every agent in a real terminal tab, a way for them to call
+each other, and a task board where big work happens on its own branch and comes back to you as a reviewable diff.
 
-- **A way to communicate.** Inside any tab, the agent runs `ask-agent codex "review this"`. The message is
-  typed into the other agent's terminal, and the reply returns to whoever asked. You see everything happening and can
-  intervene in any tab.
-- **Isolated, reviewable work.** A task gets its own branch and folder (git worktree). The agent works there,
-  delivers a report, and you inspect the diff and decide whether to merge, return with adjustments, or discard.
-- **Project memory.** What the project has learned (pitfalls, decisions, conventions) lives in versioned files,
-  and the agent receives the relevant slice for the files it will touch.
+## What makes it different
 
-No invisible work: every agent has a real terminal tab, and none launches hidden subagents.
+|  |  |
+| :-- | :-- |
+| 🗣️ **Agents talk to each other** | Inside any tab, an agent runs `ask-agent codex "review this function"`. The question is typed into Codex's terminal and the answer comes back to whoever asked. Every exchange shows up in the Integrated Chat. |
+| 🌿 **Every task on its own branch** | A task gets a git worktree and a branch. The agent works there, delivers a report, and you review the diff and the timeline. Discarding a bad attempt costs nothing. |
+| 🔀 **Conflicts don't land on you** | A delivery that conflicts with its base is refused until the agent merges the base in. If the base moves after that, Merge sends the conflict back to the agent and finishes on its own when the agent delivers again. |
+| ⚖️ **The right model for the job** | Say how big the work is (simple, medium, complex). Holt picks among the models that can handle it — public benchmarks plus your own task history — and, among those, the one with the most quota left. |
+| 🧠 **Memory that lives in the repo** | Pitfalls, decisions and conventions are markdown files versioned with the code. Each agent gets the slice that matters for the files it is about to touch. |
+| 👀 **Nothing invisible** | Every agent has a real terminal you can type into. No hidden subagents, no background magic you can't inspect. |
 
-## What you can do
+## How it works
 
-### Agents
-
-- **Real terminal tabs** (ConPTY on Windows) for each agent, restored when the app reopens.
-- **Multiple instances per agent**, with role and name: `claude`, `claude@dev`, `claude@dev@ana`. Each has its own
-  **model** (`opus`, `sonnet`, `gpt-6-luna`, `opencode/deepseek-v4.1-flash-free`…), displayed next to the name.
-- **Team**: drag one agent onto another in the sidebar to define boss and subordinates.
-- **Plan usage** in the title bar: each agent's 5-hour session and weekly limits, with warnings starting at 80%. An exhausted
-  model receives no requests.
-- **Holt instructions in every tab**, delivered via each CLI's native channel, without depending on your project's `AGENTS.md`.
-- **No blocking prompts**: folders opened as projects are automatically registered as trusted in Claude, Codex, and
-  Antigravity, so tabs opened in the background won't stall on "Do you trust this folder?".
-
-### Tasks desk
-
-The **Tasks** tab in the right sidebar is where major work happens:
-
-```
-draft ─→ in progress ─→ in review ─→ awaiting validation ─→ completed
-  │           ↑              │               │
-  └→ queued ──┘              └ return ↺      └ reject ↺ (returns to the same agent)
+```mermaid
+flowchart LR
+    you([You]) -->|open tabs, create tasks, review| holt
+    subgraph holt [Holt]
+        bridge[Local bridge<br/>127.0.0.1, token per tab]
+        board[Task board]
+    end
+    holt --- c[Claude Code tab]
+    holt --- x[Codex tab]
+    holt --- o[OpenCode tab]
+    c -->|ask-agent codex ...| bridge
+    bridge -->|typed into the terminal| x
+    board -->|worktree + branch| t[task agent]
+    t -->|report + diff| board
+    board -->|merge| dev[(your branch)]
 ```
 
-At any stage before completion, the task can be discarded, and the branch and folder are removed along with it.
+1. **Open a project** (any folder with code). Each project has its own agents; switching projects keeps the others running.
+2. **Open agents as tabs.** Several instances of the same CLI can coexist with roles and models: `claude`, `claude@dev` on Sonnet, `claude@review` on Opus.
+3. **Let them collaborate.** Every tab receives Holt's instructions through the CLI's own channel, so agents already know how to call each other, report to a boss and open tasks.
+4. **Send big work to the board.** Draft → queued → in progress → in review → awaiting validation → done. Return it with feedback, reject it, or discard it at any point.
 
-- **Agent selection by capability and quota.** State the size of the work (`simple`, `medium`, or `complex`). The
-  desk filters models capable of handling it, based on public benchmarks and historical task outcomes, and among them
-  chooses the one with the most remaining quota headroom.
-- **Scoped queuing.** A task can declare the paths it will touch. Another task needing the same paths waits
-  **in the queue** and starts automatically when the first one finishes.
-- **Real review**: report, syntax-highlighted diff, and timeline of messages the agent exchanged.
-- **Assisted merge**: if the merge is rejected (uncommitted changes, conflicts), the window itself explains the
-  cause and provides the way forward.
+## Features
 
-### Interface
+<details open>
+<summary><b>Agents</b></summary>
 
-- **Projects**: each project is a folder with its own agents. Switching projects hides the tabs of the previous one, which
-  continue running.
-- **Three layouts** for the center: **Tabs** (a single window), **Split** (one window per agent type, in a grid), and
-  **Highlight** (the active tab's window large, the others stacked alongside).
-- **Integrated conversation**: agent-to-agent messages in real time, read-only.
-- **Documents**: the center toggles to read and **edit** files with syntax highlighting and search, and to view full-width
-  diffs and reports (`Ctrl+Shift+D`).
-- **Git** (changes, hunk staging, commit, branches, merge and rebase, conflicts, stash) and **GitHub** (PRs with
-  checks, issues, Actions, and the log of the failed job; one click sends the failure to an agent).
-- **Attachments** via button, drag and drop, or `Ctrl+V` with images, and **optional voice dictation** with local whisper.cpp
-  (CUDA, Vulkan, or CPU). Audio is deleted immediately after transcription.
-- **System tray**: × hides the window while agents keep working; opening the app again brings back the same window.
+- Real terminal tabs for each agent (ConPTY on Windows, a PTY on Linux), restored — conversation included — when the app reopens.
+- Multiple instances per agent with role and name (`claude@dev@ana`), each with its own model shown next to the name.
+- Teams: drag one agent onto another in the sidebar to make it the boss; subordinates report with `ask-agent --boss`.
+- Plan usage in the title bar: each agent's 5-hour and weekly limits, with a warning from 80%. An exhausted model gets no requests.
+- No blocking prompts: project folders are registered as trusted in Claude Code, Codex and Antigravity, so a tab opened in the background never stalls on "Do you trust this folder?".
+- Headless mode: with agent tabs turned off, `ask-agent` runs `claude -p`, `codex exec`, `opencode run`… instead.
+</details>
 
-## Supported CLIs
+<details open>
+<summary><b>Task board</b></summary>
 
-Install whichever you want to use. Holt uses whatever it finds installed.
+- Isolated worktree and branch per task, report, syntax-highlighted diff and the timeline of messages the agent exchanged.
+- Scoped queue: a task that declares the paths it touches waits for any running task on the same paths and starts by itself.
+- Mergeable on delivery; conflicts at merge time go back to the agent and merge automatically on redelivery (up to three tries before it asks you).
+- "Waiting for your review" on the board and in the tray tooltip, so finished work never sits forgotten.
+</details>
 
-| CLI | Installation |
+<details>
+<summary><b>Workspace</b></summary>
+
+- Three layouts: **Tabs**, **Split** (a window per agent type, in a grid) and **Highlight** (the active one large, the rest stacked).
+- **Documents** mode: read and edit files with syntax highlighting and search, full-width diffs and reports (`Ctrl+Shift+D`).
+- **Git**: changes, hunk staging, commit, branches, merge and rebase, conflicts, stash.
+- **GitHub**: PRs with checks, issues, Actions and the log of the failed job — one click sends the failure to an agent.
+- Attachments by button, drag and drop or `Ctrl+V` (images too).
+- Optional **voice dictation** with local whisper.cpp (CUDA, Vulkan or CPU). Silent recordings are refused instead of being typed as made-up text.
+- System tray: × keeps the agents working in the background; launching the app again brings the same window back.
+- English by default, Portuguese (pt-BR) in Settings.
+</details>
+
+## Quick start
+
+**1. Install at least one agent CLI.** Holt uses whatever it finds.
+
+| CLI | Install |
 | :-- | :-- |
 | Claude Code | `npm install -g @anthropic-ai/claude-code` |
 | Codex | `npm install -g @openai/codex` |
 | Antigravity | Windows: `irm https://antigravity.google/cli/install.ps1 \| iex` · Linux: installer at https://antigravity.google |
-| OpenCode | `npm install -g opencode-ai` (includes free models; also runs local models) |
+| OpenCode | `npm install -g opencode-ai` (free models included; runs local models too) |
 
-Also open as tabs, with less integration: Aider, Goose, GitHub Copilot CLI, Amazon Q, Open Interpreter, and the system's
-standard terminal.
+Aider, Goose, GitHub Copilot CLI, Amazon Q, Open Interpreter and a plain shell also open as tabs, with less integration.
 
-## Installation and running
+**2. Build Holt** (Rust 1.89+ from [rustup.rs](https://rustup.rs)).
 
-There is no installer yet: the app runs from the folder where it was built.
-
-### Windows
-
-Prerequisite: [Rust](https://rustup.rs) 1.89 or newer.
-
-```powershell
-git clone https://github.com/pattrickn0/Holt.git
-cd Holt
-cargo build --workspace --release
-.\target\release\holt.exe
-```
-
-### Linux
-
-Prerequisites: [Rust](https://rustup.rs) 1.89 or newer and sound and keyboard libraries.
+<details open>
+<summary><b>Linux</b></summary>
 
 ```bash
 # Ubuntu / Debian
@@ -118,115 +128,116 @@ sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel libxkbcommon
 # openSUSE
 sudo zypper install gcc gcc-c++ make pkgconf-pkg-config alsa-devel libxkbcommon-devel
 
-git clone https://github.com/pattrickn0/Holt.git
-cd Holt
+git clone https://github.com/pattrickn0/Holt.git && cd Holt
 cargo build --workspace --release
 ```
 
-The release build also adds Holt, with its icon, to the app menu (`~/.local/share/applications`); open it from
-there or run `./target/release/holt`. To skip that, build with `HOLT_NO_DESKTOP_ENTRY=1`; to remove it,
-`scripts/install-desktop.sh --uninstall`.
+The release build adds **Holt** to your app menu, icon included. Open it from there, or run `./target/release/holt`.
 
-- To open folders and links and choose files: `xdg-utils` and `xdg-desktop-portal` with a backend
-  (`xdg-desktop-portal-gtk` in GNOME/XFCE, `xdg-desktop-portal-kde` in KDE).
-- Without sound or microphone (drops the ALSA requirement): `cargo build -p holt --no-default-features --release`.
-- Tested on X11 (Ubuntu) and on GNOME/Wayland (openSUSE Tumbleweed); Fedora is checked in CI, and in WSLg the app opens
-  via X11 automatically. If the window misbehaves on Wayland, try `WINIT_UNIX_BACKEND=x11`. Details and limitations in
-  [memory/LINUX.md](memory/LINUX.md).
+- Opening folders, links and file dialogs needs `xdg-utils` and `xdg-desktop-portal` with a backend (`-gtk` on GNOME/XFCE, `-kde` on KDE).
+- No sound or microphone (drops ALSA): `cargo build -p holt --no-default-features --release`.
+- Skip the menu entry with `HOLT_NO_DESKTOP_ENTRY=1`; remove it with `scripts/install-desktop.sh --uninstall`.
+- Runs on X11 and Wayland (tested on Ubuntu and on GNOME/openSUSE Tumbleweed; Fedora in CI). Details in [memory/LINUX.md](memory/LINUX.md).
+</details>
 
-### The two executables
+<details>
+<summary><b>Windows</b></summary>
 
-The build produces `holt` (the app) and `ask-agent` (the command that agents use). They need to stay **in the same
-folder**. Inside tabs, the app automatically adds `ask-agent` to `PATH`.
+```powershell
+git clone https://github.com/pattrickn0/Holt.git
+cd Holt
+cargo build --workspace --release
+.\target\release\holt.exe
+```
+</details>
 
-## Getting started
+The build produces two executables that must stay in the same folder: `holt` (the app) and `ask-agent` (the command
+agents use; Holt puts it on every tab's `PATH`). There is no installer yet: the app runs from where it was built.
 
-1. Open the app and click **Open folder…** to create the first project (your code folder).
-2. Under **+ New agent** in the sidebar, open Claude, Codex, or another installed CLI. In Claude, Antigravity, and
-   OpenCode, the `›` arrow selects the model.
-3. Chat with the agent in the tab's terminal. To have it call another agent, just ask: it knows how to use `ask-agent`.
-4. For larger work, use **+ New task** in the Tasks tab: describe the request, choose the level, and let the desk
-   select the agent. Once it delivers, review the diff and merge.
+**3. Go.** Click **Open folder…** to add a project, open an agent under **+ New agent**, and talk to it. Ask it to
+bring in another agent — it knows how. For anything bigger, use **+ New task** on the board.
 
-## `ask-agent`: the agents' command line
+## `ask-agent` in 30 seconds
 
-Agents use these commands on their own (instructions are delivered to each tab). You can also run them in a standard
-terminal tab.
+Agents use it on their own. You can too, from a plain terminal tab.
 
 ```bash
-# Conversation
-ask-agent codex "Review the parse_config function in src/config.rs"
-ask-agent --model sonnet claude@dev "Implement item 3"      # opens claude@dev with the sonnet model
-ask-agent --reply 7 "Done: the src/ folder was split"       # replies to question #7
-ask-agent --boss "Finished the review"                      # reports to boss
-ask-agent --inbox                                           # replies that arrived later
+# Talk
+ask-agent codex "Review parse_config in src/config.rs"
+ask-agent --model sonnet claude@dev "Implement item 3"   # opens claude@dev on Sonnet if needed
+ask-agent --reply 7 "Done: src/ is split"                # answer question #7
+ask-agent --boss "Review finished"                       # report up
 
-# Who is there
-ask-agent --list                                            # open agents and instances
-ask-agent --team                                            # your boss and team
-ask-agent --models                                          # models for each agent, quota, and capability
+# Look around
+ask-agent --list        # open agents and instances
+ask-agent --team        # your boss and your crew
+ask-agent --models      # models per agent, quota and capability
 
-# Tasks
+# Delegate
 ask-agent --task new "Login screen" --level complex --scope src/ui --start --file brief.md
 ask-agent --task list
-ask-agent --task merge t3                                   # merges and leaves awaiting validation
-ask-agent --task validate t3                                # completes and cleans up the worktree
+ask-agent --task merge t3      # merge into the base; awaits validation
+ask-agent --task validate t3   # done; worktree and branch cleaned up
 
-# Project memory
-ask-agent --learn src/config.rs                             # what the project has learned about this file
-ask-agent --outline src/config.rs                           # signatures with line numbers, to read just the right slice
+# Remember
+ask-agent --learn src/config.rs    # what the project learned about this file
+ask-agent --outline src/config.rs  # signatures with line numbers
 ```
 
-Accented text works better via file (`--file`): on Windows, PowerShell standard input replaces accents with `?`.
-The complete reference is in [memory/OVERVIEW.md](memory/OVERVIEW.md#2-what-you-can-do).
+Full reference: [memory/OVERVIEW.md](memory/OVERVIEW.md#2-what-you-can-do).
 
 ## Shortcuts
 
 | Shortcut | Action |
 | :-- | :-- |
-| `Ctrl+T` | new tab of focused type |
+| `Ctrl+T` | new tab of the focused agent type |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | next / previous tab in the window |
-| `Ctrl+Alt+arrows` | focus neighboring window |
-| `Ctrl+B` | show or hide sidebar |
-| `Ctrl+Shift+D` | toggle center between Agents and Documents |
-| `Ctrl+Shift+M` | dictation in visible tab |
-| `Ctrl+S` / `Ctrl+F` | save / find in open document |
-| `Ctrl+/` | list shortcuts |
+| `Ctrl+Alt+arrows` | focus the neighboring window |
+| `Ctrl+B` | show or hide the sidebar |
+| `Ctrl+Shift+D` | switch the center between Agents and Documents |
+| `Ctrl+Shift+M` | dictate into the visible tab |
+| `Ctrl+S` / `Ctrl+F` | save / find in the open document |
+| `Ctrl+/` | all shortcuts |
 
-With the terminal focused, `Ctrl+B` goes to the tab's program (useful in tmux). The "App shortcuts above the terminal" option
-in the ☰ menu reverses this.
+With a terminal focused, `Ctrl+B` goes to the program in it (handy in tmux); "App shortcuts above the terminal" in the
+☰ menu flips that.
 
-## Data and privacy
+## Privacy and safety
 
-- **Nothing passes through a Holt server**, because it does not have one. The CLIs themselves communicate with
-  the cloud; quota reading uses credentials they already store on your machine.
-- Inter-agent communication is a local HTTP bridge, strictly on `127.0.0.1`, with a token per tab: an agent cannot
-  impersonate another.
-- Dictation audio is deleted immediately after transcription. Attachments and long prompts are retained only from the
-  last 5 sessions.
-- Opening a folder as a project counts as trusting it: the app registers it as trusted in Claude Code
-  (`~/.claude.json`) and in Antigravity (`~/.gemini/antigravity-cli/settings.json`). Your home folder and drive roots
-  are never registered.
-- Runtime data lives in `data/`, next to the executable (or in `HOLT_HOME`). Configuration is stored in
-  `%APPDATA%\Holt\config.json` on Windows and in `~/.config/Holt/config.json` on Linux.
+- **No Holt server.** There isn't one. The CLIs talk to their own providers; quota is read from credentials they already keep on your machine.
+- **Local bridge only.** Agent-to-agent traffic is HTTP on `127.0.0.1` with a token per tab, so one agent cannot pose as another. Text from another agent never reaches a terminal with control characters.
+- **Guard rails.** Delegation depth is capped at 2, wait cycles are refused, and at most 8 tabs open on their own.
+- **Audio is deleted** right after transcription. Attachments and long prompts are kept for the last 5 sessions only.
+- **Trust is explicit.** Opening a folder as a project registers it as trusted in Claude Code (`~/.claude.json`) and Antigravity; your home folder and drive roots never are.
+- **Where things live:** runtime data in `data/` next to the executable (or `HOLT_HOME`); settings in `~/.config/Holt/config.json` (Linux) or `%APPDATA%\Holt\config.json` (Windows).
 
-## Documentation
+## Under the hood
 
-Project documentation lives in [`memory/`](memory/OVERVIEW.md), versioned alongside the code:
+100% Rust: [winit](https://github.com/rust-windowing/winit) + [egui](https://github.com/emilk/egui) on OpenGL,
+alacritty's terminal emulator, a backend crate (`holt-core`) with no UI, and the `ask-agent` CLI (`holt-cli`). The UI
+never blocks: processes, network and transcription run on their own threads.
 
-- [OVERVIEW.md](memory/OVERVIEW.md): the starting point, covering how the app works, what you can do, and the documentation map.
-- [ARCHITECTURE.md](memory/ARCHITECTURE.md): crates, workflows, and the inter-agent bridge contract.
-- [MAINTENANCE.md](memory/MAINTENANCE.md): how to build, test, and maintain, with a hands-on introduction to Rust.
-- [HOLT.md](memory/HOLT.md): product vision and direction.
-- [backlog.md](memory/backlog.md) and [history.md](memory/history.md): what comes next and what has already been done.
-- [learnings/](memory/learnings/README.md): pitfalls and decisions that the code does not show.
+The project documents itself in [`memory/`](memory/OVERVIEW.md), versioned with the code — the same files the agents
+read:
+
+- [OVERVIEW.md](memory/OVERVIEW.md) — start here: how the app works and the map of the docs
+- [ARCHITECTURE.md](memory/ARCHITECTURE.md) — crates, flows and the bridge's HTTP contract
+- [MAINTENANCE.md](memory/MAINTENANCE.md) — build, test, recipes, and a hands-on intro to Rust
+- [HOLT.md](memory/HOLT.md) — vision and direction
+- [backlog.md](memory/backlog.md) · [history.md](memory/history.md) — what's next, what's done
+- [learnings/](memory/learnings/README.md) — the traps and decisions the code doesn't show
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Before submitting, run `cargo fmt --all`,
-`cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`; CI verifies all three on Windows,
-Ubuntu, and Fedora.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Before a PR: `cargo fmt --all`,
+`cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` — CI runs all three on Windows,
+Ubuntu and Fedora.
+
+## Why "Holt"?
+
+A *holt* is an otter's den: the place where the family lives, rests and works together. Otters are also among the few
+animals that use tools. That's the idea — a den where agents with tools work as a team.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE)
