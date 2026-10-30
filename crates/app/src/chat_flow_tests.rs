@@ -131,3 +131,96 @@ fn the_tab_goes_to_the_terminal_and_back_on_the_same_conversation() {
     assert!(matches!(&items[0], Item::User { text, .. } if text == "first question"));
     assert_eq!(env.core.tab_session(&env.project(), &id).as_deref(), Some(session.as_str()), "same conversation");
 }
+
+const FAKE_ANTIGRAVITY: &str = r#"#!/bin/sh
+echo '{"event":"init","conversation_id":"01234567-89ab-cdef-0123-456789abcdef","init":{"permission_mode":"always-proceed"}}'
+while IFS= read -r line; do
+  echo '{"event":"step_update","step_update":{"conversation_id":"01234567-89ab-cdef-0123-456789abcdef","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"hello from agy"}}'
+  echo '{"event":"step_update","step_update":{"conversation_id":"01234567-89ab-cdef-0123-456789abcdef","step_index":1,"state":"DONE","step_type":"agent_response"}}'
+  echo '{"event":"result","result":{"conversation_id":"01234567-89ab-cdef-0123-456789abcdef","status":"SUCCESS","response":"hello from agy"}}'
+done
+"#;
+
+fn env_with_antigravity_chat_agent() -> Env {
+    let mut env = Env::start_with(true);
+    let script = env.ws.parent().expect("root").join("fake-bin").join("agy");
+    std::fs::write(&script, FAKE_ANTIGRAVITY).expect("write");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    env.pump("the agent list", |d| d.agents.knows("antigravity"));
+    env.deck.open_tab("antigravity", false);
+    env.pump("the chat tab to be running", |d| d.tabs.first().is_some_and(|t| t.alive));
+    env
+}
+
+#[test]
+fn an_antigravity_tab_opens_in_the_chat_view_with_its_own_conversation() {
+    let env = env_with_antigravity_chat_agent();
+    let tab = &env.deck.tabs[0];
+    assert!(tab.chat.is_some(), "chat is the default view of an Antigravity tab");
+    let spec = tab.spec.as_ref().expect("spec");
+    assert!(spec.args.iter().any(|a| a == "stream-json"), "{:?}", spec.args);
+    assert!(spec.args.iter().any(|a| a == "auto"), "{:?}", spec.args);
+    assert!(!spec.args.iter().any(|a| a == "--log-file"), "chat mode does not use log file: {:?}", spec.args);
+}
+
+#[test]
+fn an_antigravity_question_from_another_agent_becomes_a_message_of_the_conversation_and_ends_with_the_turn() {
+    let mut env = env_with_antigravity_chat_agent();
+    let prompt = "[Message from the agent \"claude@dev\" received by Holt]\n\nCan you help?\n\nAnswer by running in the shell: ask-agent --reply 9 \"your answer\"";
+    env.deck.send_to_instance(&Ident::main("antigravity"), false, prompt.to_owned()).expect("queued");
+    env.pump("the answer", |d| {
+        d.tabs[0]
+            .chat
+            .as_ref()
+            .is_some_and(|c| c.transcript.items.iter().any(|i| matches!(i, Item::Assistant { text, .. } if text == "hello from agy")))
+    });
+    let items = items(&env);
+    assert!(matches!(&items[0], Item::User { text, from: Some(who) } if text == "Can you help?" && who == "claude@dev"), "{items:?}");
+    env.pump("the turn to end", |d| !d.tabs[0].chat.as_ref().is_some_and(|c| c.transcript.busy()) && !d.tabs[0].busy);
+}
+
+#[test]
+fn an_antigravity_tab_goes_to_the_terminal_and_back_on_the_same_conversation() {
+    let mut env = env_with_antigravity_chat_agent();
+    let id = env.deck.tabs[0].ident.id();
+    let session = "01234567-89ab-cdef-0123-456789abcdef";
+    assert!(env.core.set_tab_session(&env.project(), &id, session));
+
+    // What Antigravity saved of the conversation so far in brain:
+    let dir = env
+        .ws
+        .parent()
+        .expect("root")
+        .join("home")
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("brain")
+        .join(session)
+        .join(".system_generated")
+        .join("logs");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let lines = [
+        json!({ "step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-10-30T01:00:00Z", "content": "<USER_REQUEST>\nfirst question\n</USER_REQUEST>" }),
+        json!({ "step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-10-30T01:00:01Z", "content": "first answer" }),
+    ];
+    std::fs::write(dir.join("transcript.jsonl"), lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).expect("transcript");
+
+    // Also need the conversation .db file for agy_has_conversation:
+    let conv_dir = env.ws.parent().expect("root").join("home").join(".gemini").join("antigravity-cli").join("conversations");
+    std::fs::create_dir_all(&conv_dir).expect("mkdir");
+    std::fs::write(conv_dir.join(format!("{session}.db")), "").expect("db");
+
+    env.deck.set_tab_view(0, false);
+    assert!(env.deck.tabs[0].chat.is_none() && env.deck.tabs[0].alive);
+    let spec = env.deck.tabs[0].spec.as_ref().expect("spec");
+    assert!(spec.resumed && spec.args.contains(&session.to_owned()) && !spec.args.iter().any(|a| a == "stream-json"), "{:?}", spec.args);
+    assert!(!env.core.tab_is_chat(&env.project(), &env.deck.tabs[0].ident), "the choice is remembered");
+
+    env.deck.set_tab_view(0, true);
+    let spec = env.deck.tabs[0].spec.as_ref().expect("spec");
+    assert!(spec.resumed && spec.args.iter().any(|a| a == "stream-json"));
+    let items = items(&env);
+    assert_eq!(items.len(), 2, "the conversation comes back from the CLI's own transcript: {items:?}");
+    assert!(matches!(&items[0], Item::User { text, .. } if text == "first question"));
+    assert_eq!(env.core.tab_session(&env.project(), &id).as_deref(), Some(session), "same conversation");
+}

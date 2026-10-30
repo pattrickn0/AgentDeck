@@ -75,17 +75,67 @@ fn a_task_prompt_becomes_the_first_message_instead_of_an_argument() {
 }
 
 #[test]
-fn only_claude_has_a_chat_view_and_the_choice_is_remembered_per_tab() {
+fn claude_and_antigravity_have_a_chat_view_and_the_choice_is_remembered_per_tab() {
     let env = start_with(false, false);
     let claude = Ident::parse("claude@dev").expect("ident");
+    let agy = Ident::parse("antigravity@dev").expect("ident");
     assert!(env.core.tab_is_chat(&env.project, &claude), "chat is the default for Claude");
+    assert!(env.core.tab_is_chat(&env.project, &agy), "chat is the default for Antigravity");
     assert!(!env.core.tab_is_chat(&env.project, &Ident::main("aider")));
     assert!(env.core.spawn_spec_chat(&env.project, &Ident::main("aider")).is_err());
+
     env.core.set_tab_chat(&env.project, &claude.id(), false);
     assert!(!env.core.tab_is_chat(&env.project, &claude));
     assert!(env.core.tab_is_chat(&env.project, &Ident::parse("claude@other").expect("ident")));
     env.core.set_tab_chat(&env.project, &claude.id(), true);
     assert!(env.core.tab_is_chat(&env.project, &claude));
+
+    env.core.set_tab_chat(&env.project, &agy.id(), false);
+    assert!(!env.core.tab_is_chat(&env.project, &agy));
+    assert!(env.core.tab_is_chat(&env.project, &Ident::parse("antigravity@other").expect("ident")));
+    env.core.set_tab_chat(&env.project, &agy.id(), true);
+    assert!(env.core.tab_is_chat(&env.project, &agy));
+    env.core.shutdown();
+}
+
+#[test]
+fn the_antigravity_chat_launch_uses_the_structured_mode_and_the_tabs_own_conversation() {
+    let env = start_with(false, false);
+    install_fake_agent(&env.root, "agy");
+    let ident = Ident::parse("antigravity@dev").expect("ident");
+    let id = ident.id();
+
+    let first = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    assert_eq!(arg_after(&first.args, "--input-format").as_deref(), Some("stream-json"));
+    assert_eq!(arg_after(&first.args, "--output-format").as_deref(), Some("stream-json"));
+    assert_eq!(arg_after(&first.args, "--mode").as_deref(), Some("auto"));
+    assert!(!first.args.iter().any(|a| a == "--log-file"), "chat mode does not use log file: {:?}", first.args);
+    assert!(!first.resumed);
+
+    // Simulate session saved in config and on disk:
+    let session = "3ee16dad-e26c-4460-8dd5-99d773098a00";
+    assert!(env.core.set_tab_session(&env.project, &id, session));
+    let conv_dir = env.root.join("home").join(".gemini").join("antigravity-cli").join("conversations");
+    std::fs::create_dir_all(&conv_dir).expect("mkdir");
+    std::fs::write(conv_dir.join(format!("{session}.db")), "").expect("db");
+
+    let brain_dir =
+        env.root.join("home").join(".gemini").join("antigravity-cli").join("brain").join(session).join(".system_generated").join("logs");
+    std::fs::create_dir_all(&brain_dir).expect("mkdir");
+    let transcript = r#"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-30T01:00:00Z","content":"<USER_REQUEST>\nHello Antigravity\n</USER_REQUEST>"}
+{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-30T01:00:01Z","content":"Hello from Antigravity!"}"#;
+    std::fs::write(brain_dir.join("transcript.jsonl"), transcript).expect("transcript");
+
+    let again = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    assert_eq!(arg_after(&again.args, "--conversation").as_deref(), Some(session));
+    assert!(again.resumed);
+
+    let history = env.core.chat_history(&env.project, &id);
+    assert_eq!(history.items.len(), 2, "{:?}", history.items);
+    assert!(matches!(&history.items[0], Item::User { text, .. } if text == "Hello Antigravity"));
+    assert!(matches!(&history.items[1], Item::Assistant { text, .. } if text == "Hello from Antigravity!"));
+    assert_eq!(history.session.as_deref(), Some(session));
+
     env.core.shutdown();
 }
 

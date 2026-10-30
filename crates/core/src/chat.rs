@@ -36,29 +36,33 @@ const INTERRUPTED: &str = "[Request interrupted by user";
 
 /// CLIs that have a chat view.
 pub fn supports(kind: &str) -> bool {
-    kind == "claude"
+    matches!(kind, "claude" | "antigravity")
 }
 
 /// Slash commands that open a screen of the terminal UI and do nothing useful in the structured mode.
 pub const TERMINAL_ONLY_COMMANDS: &[&str] =
     &["config", "login", "logout", "theme", "terminal-setup", "vim", "ide", "resume", "statusline", "output-style", "keybindings"];
 
-/// Flags that switch Claude Code to the structured mode.
-pub fn chat_args() -> Vec<String> {
-    [
-        "-p",
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--include-partial-messages",
-        "--verbose",
-        "--permission-prompt-tool",
-        "stdio",
-    ]
-    .iter()
-    .map(|s| (*s).to_owned())
-    .collect()
+/// Flags that switch the CLI to the structured mode.
+pub fn chat_args(kind: &str) -> Vec<String> {
+    if kind == "antigravity" {
+        ["--input-format", "stream-json", "--output-format", "stream-json", "--mode", "auto"].iter().map(|s| (*s).to_owned()).collect()
+    } else {
+        [
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--verbose",
+            "--permission-prompt-tool",
+            "stdio",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+    }
 }
 
 // ---------- Events ----------
@@ -248,6 +252,9 @@ fn blocks_of(content: &Value) -> Vec<Block> {
 /// Turns one line of the CLI's stdout into events. A line that is not JSON (a stray warning) yields nothing.
 pub fn parse_line(line: &str) -> Vec<ChatEvent> {
     let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { return Vec::new() };
+    if v.get("type").is_none() && v.get("event").is_some() {
+        return parse_agy_line(&v);
+    }
     let event = match str_of(&v, "type") {
         "system" => match str_of(&v, "subtype") {
             "init" => ChatEvent::Init {
@@ -338,6 +345,141 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
     }
 }
 
+fn parse_agy_line(v: &Value) -> Vec<ChatEvent> {
+    match str_of(v, "event") {
+        "init" => {
+            let session = str_of(v, "conversation_id").to_owned();
+            vec![ChatEvent::Init { session, model: "antigravity".to_owned(), commands: Vec::new(), terminal_commands: Vec::new() }]
+        }
+        "step_update" => {
+            let Some(step) = v.get("step_update") else { return Vec::new() };
+            let step_index = step.get("step_index").and_then(Value::as_u64).unwrap_or(0);
+            let step_type = str_of(step, "step_type");
+            let state = str_of(step, "state");
+            match step_type {
+                "agent_response" => {
+                    let text_delta = str_of(step, "text_delta");
+                    let mut evs = Vec::new();
+                    if !text_delta.is_empty() {
+                        evs.push(ChatEvent::TextDelta { message: "agy_resp".to_owned(), text: text_delta.to_owned() });
+                    }
+                    if state == "DONE" {
+                        let usage = step.get("usage");
+                        let context_tokens = usage.map_or(0, |u| {
+                            u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0)
+                                + u.get("cache_read_tokens").and_then(Value::as_u64).unwrap_or(0)
+                        });
+                        evs.push(ChatEvent::Assistant { message: "agy_resp".to_owned(), blocks: Vec::new(), context_tokens });
+                    }
+                    evs
+                }
+                "tool" => {
+                    let tool_name = str_of(step, "tool_name");
+                    let tool_info = step.get("tool_info").unwrap_or(&Value::Null);
+                    let tool_id = format!("step_{step_index}");
+                    if state == "ACTIVE" {
+                        let params = tool_info.get("parameters").cloned().unwrap_or(Value::Null);
+                        vec![ChatEvent::Assistant {
+                            message: format!("call_{step_index}"),
+                            blocks: vec![Block::ToolUse { id: tool_id, name: tool_name.to_owned(), input: params }],
+                            context_tokens: 0,
+                        }]
+                    } else if state == "DONE" {
+                        let output = tool_info.get("output").and_then(Value::as_str).unwrap_or("");
+                        let params = tool_info.get("parameters");
+                        let patch = agy_patch_of(params);
+                        vec![ChatEvent::ToolResults(vec![ToolOutcome {
+                            tool_use_id: tool_id,
+                            text: output.to_owned(),
+                            is_error: false,
+                            patch,
+                        }])]
+                    } else if state == "ERROR" {
+                        let err_msg = tool_info.get("error").and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("tool error");
+                        vec![ChatEvent::ToolResults(vec![ToolOutcome {
+                            tool_use_id: tool_id,
+                            text: err_msg.to_owned(),
+                            is_error: true,
+                            patch: Vec::new(),
+                        }])]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => Vec::new(),
+            }
+        }
+        "result" => {
+            let Some(res) = v.get("result") else { return Vec::new() };
+            let status = str_of(res, "status");
+            let is_error = status != "SUCCESS";
+            let error = if is_error { str_of(res, "error").to_owned() } else { String::new() };
+            let session = str_of(res, "conversation_id").to_owned();
+            let duration_ms = (res.get("duration_seconds").and_then(Value::as_f64).unwrap_or(0.0) * 1000.0) as u64;
+            let response = str_of(res, "response");
+            let usage = res.get("usage");
+            let context_tokens = usage.map_or(0, |u| {
+                u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) + u.get("cache_read_tokens").and_then(Value::as_u64).unwrap_or(0)
+            });
+            if is_error && error == "interrupted" {
+                return vec![
+                    ChatEvent::Interrupted,
+                    ChatEvent::Result(TurnResult {
+                        is_error: false,
+                        error: String::new(),
+                        cost_usd: 0.0,
+                        duration_ms,
+                        session,
+                        context_window: 0,
+                    }),
+                ];
+            }
+            let mut evs = Vec::new();
+            if !response.is_empty() {
+                evs.push(ChatEvent::Assistant {
+                    message: "agy_resp".to_owned(),
+                    blocks: vec![Block::Text(response.to_owned())],
+                    context_tokens,
+                });
+            }
+            evs.push(ChatEvent::Result(TurnResult { is_error, error, cost_usd: 0.0, duration_ms, session, context_window: 0 }));
+            evs
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn agy_unquote_str(s: &str) -> String {
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        if let Ok(v) = serde_json::from_str::<String>(s) {
+            return v;
+        }
+        return s[1..s.len() - 1].to_owned();
+    }
+    s.to_owned()
+}
+
+fn agy_patch_of(params: Option<&Value>) -> Vec<PatchHunk> {
+    let Some(params) = params else { return Vec::new() };
+    let target = params.get("Target").or_else(|| params.get("target")).and_then(Value::as_str);
+    let replacement = params.get("Replacement").or_else(|| params.get("replacement")).and_then(Value::as_str);
+    match (target, replacement) {
+        (Some(t), Some(r)) => {
+            let t = agy_unquote_str(t);
+            let r = agy_unquote_str(r);
+            let mut lines = Vec::new();
+            for l in t.lines() {
+                lines.push(format!("-{l}"));
+            }
+            for l in r.lines() {
+                lines.push(format!("+{l}"));
+            }
+            vec![PatchHunk { old_start: 1, new_start: 1, lines }]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// The text of a user message's content (a string, or the text blocks of a list).
 fn user_text(content: &Value) -> String {
     match content {
@@ -351,9 +493,23 @@ fn user_text(content: &Value) -> String {
 
 // ---------- What goes to stdin ----------
 
-/// A user message.
+/// A Claude Code user message.
 pub fn user_message_json(text: &str) -> String {
     json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
+}
+
+/// An Antigravity user message.
+pub fn agy_user_message_json(text: &str) -> String {
+    json!({ "event": "user", "message": { "content": text } }).to_string()
+}
+
+/// Formats a user message for `kind` CLI.
+pub fn user_message_json_for(kind: &str, text: &str) -> String {
+    if kind == "antigravity" {
+        agy_user_message_json(text)
+    } else {
+        user_message_json(text)
+    }
 }
 
 /// The answer to a [`PermissionRequest`]: `input` is sent back unchanged when allowing, with `rules` (the request's
@@ -711,6 +867,85 @@ pub fn history_file(config_dir: &Path, session: &str) -> Option<std::path::PathB
     std::fs::read_dir(config_dir.join("projects")).ok()?.flatten().map(|d| d.path().join(format!("{session}.jsonl"))).find(|p| p.is_file())
 }
 
+/// The path of Antigravity's transcript for `session`, if saved.
+pub fn agy_history_file(home: &Path, session: &str) -> Option<std::path::PathBuf> {
+    if !crate::resume::valid_session_id(session) {
+        return None;
+    }
+    let p = home
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("brain")
+        .join(session)
+        .join(".system_generated")
+        .join("logs")
+        .join("transcript.jsonl");
+    p.is_file().then_some(p)
+}
+
+/// Rebuilds the conversation from Antigravity's transcript file
+/// (`<home>/.gemini/antigravity-cli/brain/<session>/.system_generated/logs/transcript.jsonl`), so a resumed tab shows what was said before.
+pub fn from_agy_history(jsonl: &str, max_items: usize) -> Transcript {
+    let mut t = Transcript::default();
+    for line in jsonl.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        match str_of(&v, "type") {
+            "USER_INPUT" => {
+                let content = str_of(&v, "content");
+                let text = history_agy_user_text(content);
+                if !text.is_empty() {
+                    t.push(Item::User { text, from: None });
+                }
+            }
+            "PLANNER_RESPONSE" => {
+                let thinking = str_of(&v, "thinking").trim();
+                if !thinking.is_empty() {
+                    t.push(Item::Thinking(thinking.to_owned()));
+                }
+                if let Some(tool_calls) = v.get("tool_calls").and_then(Value::as_array) {
+                    let step_idx = v.get("step_index").and_then(Value::as_u64).unwrap_or(0);
+                    for (i, call) in tool_calls.iter().enumerate() {
+                        let name = str_of(call, "name").to_owned();
+                        let input = call.get("args").cloned().unwrap_or(Value::Null);
+                        let id = format!("step_{step_idx}_{i}");
+                        t.push(Item::Tool(ToolCall { id, name, input, outcome: None }));
+                    }
+                }
+                let content = str_of(&v, "content").trim();
+                if !content.is_empty() {
+                    let step_idx = v.get("step_index").and_then(Value::as_u64).unwrap_or(0);
+                    t.push(Item::Assistant { message: format!("step_{step_idx}"), text: content.to_owned(), streaming: false });
+                }
+            }
+            "GENERIC" => {
+                let content = str_of(&v, "content");
+                if let Some(last_tool) = t.items.iter_mut().rev().find_map(|item| match item {
+                    Item::Tool(c) if c.outcome.is_none() => Some(c),
+                    _ => None,
+                }) {
+                    let patch = if last_tool.name == "edit_file" { agy_patch_of(Some(&last_tool.input)) } else { Vec::new() };
+                    last_tool.outcome =
+                        Some(ToolOutcome { tool_use_id: last_tool.id.clone(), text: content.to_owned(), is_error: false, patch });
+                }
+            }
+            _ => {}
+        }
+    }
+    let keep_from = t.items.len().saturating_sub(max_items);
+    t.items.drain(..keep_from);
+    t.pending_turns = 0;
+    t
+}
+
+fn history_agy_user_text(raw: &str) -> String {
+    if let Some((_, rest)) = raw.split_once("<USER_REQUEST>") {
+        if let Some((req, _)) = rest.split_once("</USER_REQUEST>") {
+            return req.trim().to_owned();
+        }
+    }
+    raw.trim().to_owned()
+}
+
 // ---------- Slash commands ----------
 
 /// What the composer does with a line that starts with `/`: the name of the command, if it is a terminal-only one.
@@ -744,6 +979,17 @@ impl Core {
     /// Reads the saved conversation of a tab from the CLI's own transcript, for a resumed chat to show it.
     pub fn chat_history(&self, project: &str, id: &str) -> Transcript {
         let Some(session) = self.tab_session(project, id) else { return Transcript::default() };
+        let kind = crate::Ident::parse(id).map(|i| i.kind).unwrap_or_default();
+        if kind == "antigravity" {
+            if let Some(path) = agy_history_file(&self.inner.home, &session) {
+                if let Ok(text) = std::fs::read_to_string(path) {
+                    let mut t = from_agy_history(&text, ITEMS_MAX);
+                    t.session = Some(session);
+                    return t;
+                }
+            }
+            return Transcript::default();
+        }
         let config_dir = crate::resume::claude_config_dir(&self.inner.home);
         let Some(text) = history_file(&config_dir, &session).and_then(|p| std::fs::read_to_string(p).ok()) else {
             return Transcript::default();
@@ -771,12 +1017,13 @@ pub struct ChatProcess {
     child: Arc<Mutex<Child>>,
     registry_id: u64,
     core: Core,
+    kind: String,
     stdin: Sender<String>,
     rx: Receiver<ChatMsg>,
 }
 
 impl Core {
-    /// Starts `spec` (a Claude launch from [`Core::spawn_spec_chat`]) with its pipes. `wake` is called whenever
+    /// Starts `spec` (a launch from [`Core::spawn_spec_chat`]) with its pipes. `wake` is called whenever
     /// something arrives, to make the interface look at [`ChatProcess::try_recv`].
     pub fn spawn_chat(&self, spec: &SpawnSpec, wake: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<ChatProcess> {
         let mut cmd = Command::new(&spec.program);
@@ -832,7 +1079,7 @@ impl Core {
             let _ = tx.send(ChatMsg::Exited(code));
             wake();
         })?;
-        Ok(ChatProcess { child, registry_id, core: self.clone(), stdin, rx })
+        Ok(ChatProcess { child, registry_id, core: self.clone(), kind: spec.kind.clone(), stdin, rx })
     }
 }
 
@@ -846,7 +1093,7 @@ impl ChatProcess {
     }
 
     pub fn send_user(&self, text: &str) {
-        self.send_line(user_message_json(text));
+        self.send_line(user_message_json_for(&self.kind, text));
     }
 
     pub fn answer_permission(&self, request_id: &str, allow: bool, input: &Value, deny_message: &str, rules: &[Value]) {
@@ -854,7 +1101,11 @@ impl ChatProcess {
     }
 
     pub fn interrupt(&self) {
-        self.send_line(interrupt_json());
+        if self.kind == "antigravity" {
+            process::interrupt_process(&self.child.lock());
+        } else {
+            self.send_line(interrupt_json());
+        }
     }
 
     pub fn kill(&self) {
@@ -880,6 +1131,11 @@ mod tests {
     const TOOLS: &str = include_str!("../tests/data/claude-stream-tools.jsonl");
     const TEXT: &str = include_str!("../tests/data/claude-stream-text.jsonl");
     const INTERRUPT: &str = include_str!("../tests/data/claude-stream-interrupt.jsonl");
+
+    const AGY_TEXT: &str = include_str!("../tests/data/antigravity-stream-text.jsonl");
+    const AGY_TOOLS: &str = include_str!("../tests/data/antigravity-stream-tools.jsonl");
+    const AGY_ERROR: &str = include_str!("../tests/data/antigravity-stream-error.jsonl");
+    const AGY_INTERRUPT: &str = include_str!("../tests/data/antigravity-stream-interrupt.jsonl");
 
     fn replay(sample: &str) -> Transcript {
         let mut t = Transcript::default();
@@ -1116,6 +1372,120 @@ mod tests {
         assert!(history_file(&dir, id).is_some());
         assert!(history_file(&dir, "22222222-2222-4333-8444-555555555555").is_none());
         assert!(history_file(&dir, "../x").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn antigravity_init_names_the_session() {
+        let evs = events(AGY_TEXT);
+        let Some(ChatEvent::Init { session, model, .. }) = evs.first() else { panic!("{:?}", evs.first()) };
+        assert_eq!(session, "fc83064b-5e28-4d0b-8e95-4a21f9bbb02f");
+        assert_eq!(model, "antigravity");
+    }
+
+    #[test]
+    fn antigravity_text_deltas_stream_into_assistant_message() {
+        let evs = events(AGY_TEXT);
+        let deltas = evs.iter().filter(|e| matches!(e, ChatEvent::TextDelta { .. })).count();
+        assert!(deltas > 0, "{deltas}");
+        let t = replay(AGY_TEXT);
+        assert_eq!(t.pending_turns, 0);
+        let texts: Vec<&Item> = t.items.iter().filter(|i| matches!(i, Item::Assistant { .. })).collect();
+        assert_eq!(texts.len(), 1, "{:?}", t.items);
+        let Item::Assistant { text, streaming, .. } = texts[0] else { unreachable!() };
+        assert!(!streaming);
+        assert!(text.contains("Google Antigravity"), "{text}");
+    }
+
+    #[test]
+    fn antigravity_tools_with_edits_and_patches() {
+        let t = replay(AGY_TOOLS);
+        assert_eq!(t.pending_turns, 0);
+        let names: Vec<&str> = t.items.iter().filter_map(|i| if let Item::Tool(c) = i { Some(c.name.as_str()) } else { None }).collect();
+        assert_eq!(names, ["read_file", "write_file", "edit_file"]);
+        for item in &t.items {
+            if let Item::Tool(c) = item {
+                assert!(c.outcome.as_ref().is_some_and(|o| !o.is_error), "{}", c.name);
+            }
+        }
+        let Some(Item::Assistant { text, .. }) = t.items.last() else { panic!("{:?}", t.items.last()) };
+        assert!(text.contains("Done:"), "{text}");
+    }
+
+    #[test]
+    fn antigravity_tool_error_is_recorded() {
+        let t = replay(AGY_ERROR);
+        assert_eq!(t.pending_turns, 0);
+        let tool = t
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Tool(c) => Some(c),
+                _ => None,
+            })
+            .expect("tool call");
+        assert_eq!(tool.name, "read_file");
+        let outcome = tool.outcome.as_ref().expect("outcome");
+        assert!(outcome.is_error, "expected error outcome");
+        assert!(
+            outcome.text.contains("No such file or directory")
+                || outcome.text.contains("File not found")
+                || outcome.text.contains("does not exist"),
+            "{}",
+            outcome.text
+        );
+    }
+
+    #[test]
+    fn antigravity_interrupt_is_noticed() {
+        let evs = events(AGY_INTERRUPT);
+        assert!(evs.contains(&ChatEvent::Interrupted));
+        let t = replay(AGY_INTERRUPT);
+        assert!(t.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == "Interrupted.")));
+    }
+
+    #[test]
+    fn antigravity_stdin_message_format() {
+        let claude_msg: Value = serde_json::from_str(&user_message_json_for("claude", "test")).unwrap();
+        assert_eq!(claude_msg["type"], "user");
+        assert_eq!(claude_msg["message"]["content"], "test");
+
+        let agy_msg: Value = serde_json::from_str(&user_message_json_for("antigravity", "test")).unwrap();
+        assert_eq!(agy_msg["event"], "user");
+        assert_eq!(agy_msg["message"]["content"], "test");
+    }
+
+    #[test]
+    fn antigravity_history_parses_transcript_and_extracts_patches() {
+        let sample = r#"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-30T01:00:00Z","content":"<USER_REQUEST>\nFix the bug\n</USER_REQUEST>"}
+{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-30T01:00:01Z","thinking":"I should edit the file.","tool_calls":[{"name":"edit_file","args":{"Path":"\"main.rs\"","Replacement":"\"fn main() { println!(\\\"fixed\\\"); }\"","Target":"\"fn main() {}\""}}]}
+{"step_index":2,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-10-30T01:00:02Z","content":"Made 1 replacement."}
+{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-30T01:00:03Z","content":"Bug is fixed."}"#;
+
+        let t = from_agy_history(sample, 50);
+        assert_eq!(t.items.len(), 4);
+        assert!(matches!(&t.items[0], Item::User { text, .. } if text == "Fix the bug"));
+        assert!(matches!(&t.items[1], Item::Thinking(text) if text == "I should edit the file."));
+        let Item::Tool(tool) = &t.items[2] else { panic!() };
+        assert_eq!(tool.name, "edit_file");
+        let outcome = tool.outcome.as_ref().unwrap();
+        assert_eq!(outcome.patch.len(), 1);
+        assert_eq!(outcome.patch[0].lines, ["-fn main() {}", "+fn main() { println!(\"fixed\"); }"]);
+        assert!(matches!(&t.items[3], Item::Assistant { text, .. } if text == "Bug is fixed."));
+    }
+
+    #[test]
+    fn antigravity_history_file_lookup() {
+        let dir = std::env::temp_dir().join(format!("holt-agy-hist-{}", std::process::id()));
+        let session = "12345678-1234-1234-1234-123456789abc";
+        let logs_dir = dir.join(".gemini").join("antigravity-cli").join("brain").join(session).join(".system_generated").join("logs");
+        std::fs::create_dir_all(&logs_dir).unwrap();
+        std::fs::write(logs_dir.join("transcript.jsonl"), "{}").unwrap();
+
+        assert!(agy_history_file(&dir, session).is_some());
+        assert!(agy_history_file(&dir, "00000000-0000-0000-0000-000000000000").is_none());
+        assert!(agy_history_file(&dir, "../escape").is_none());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
