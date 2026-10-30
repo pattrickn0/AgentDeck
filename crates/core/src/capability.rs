@@ -566,7 +566,7 @@ impl Core {
     /// The candidates of the automatic choice: the official CLIs available in `choices`, each with the model it
     /// would open (`role_models` or the one assumed by the table), the quota and what it reaches.
     pub fn capability_candidates(&self, choices: &[String], effort: Option<crate::models::Effort>) -> Vec<Candidate> {
-        let (table, used) = (self.capability_table(), self.quota_used());
+        let table = self.capability_table();
         let records = self.capability_records(&table);
         let role_models = self.config().role_models;
         ["claude", "antigravity", "codex"]
@@ -576,12 +576,10 @@ impl Core {
                 let model = crate::models::resolve_model(&crate::instances::Ident::main(kind), None, None, &role_models);
                 let low = effort == Some(crate::models::Effort::Low) && crate::models::effort_unavailable(kind, model.as_deref()).is_none();
                 let capacity = self.model_capacity(&table, &records, kind, model.as_deref(), low);
-                Candidate {
-                    kind: (*kind).to_owned(),
-                    model: table.assumed_model(kind, model.as_deref()),
-                    used: used.get(*kind).copied(),
-                    capacity: capacity.level,
-                }
+                let model = table.assumed_model(kind, model.as_deref());
+                // The quota of the model's group (Antigravity), not the agent's summary.
+                let used = self.model_usage(kind, model.as_deref()).map(|u| u.used);
+                Candidate { kind: (*kind).to_owned(), model, used, capacity: capacity.level }
             })
             .collect()
     }

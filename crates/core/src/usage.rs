@@ -229,6 +229,28 @@ pub fn model_quota(u: &AgentUsage, model: Option<&str>, now_ms: u64) -> Option<M
     Some(ModelQuota { group, used, resets_at_ms })
 }
 
+/// The fraction used that applies to a model, and where it came from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelUsage {
+    pub used: f32,
+    /// The model's group ("Gemini 4 Argon"); `None` = the agent's plan.
+    pub group: Option<String>,
+    /// The source separates groups but this model (or none) maps to none: `used` is the agent number, not the model's.
+    pub fallback: bool,
+}
+
+/// Usage that applies to `model`: its group's when the source has groups, else the plan's. A model with no group
+/// (unknown, or the CLI default) falls back to the agent number, flagged by `fallback`.
+pub fn model_usage(u: &AgentUsage, model: Option<&str>, now_ms: u64) -> Option<ModelUsage> {
+    if let Some(q) = model_quota(u, model, now_ms) {
+        return Some(ModelUsage { used: q.used, group: q.group, fallback: false });
+    }
+    if u.groups.is_empty() || model.is_some_and(|m| group_of(&u.groups, m).is_some()) {
+        return None;
+    }
+    Some(ModelUsage { used: agent_used(u, now_ms)?, group: None, fallback: true })
+}
+
 /// Quotas of `u` in a line for `--models`: "Gemini Models 0% used (renews in 5 h), Gemini 4 Argon 4% used (renews in 6 days)…".
 pub fn quota_line(u: &AgentUsage, now_ms: u64) -> Option<String> {
     let one = |name: Option<&str>, windows: [Option<UsageWindow>; 2]| {
@@ -334,6 +356,12 @@ impl Core {
     pub fn model_quota(&self, kind: &str, model: Option<&str>) -> Option<ModelQuota> {
         let usage = self.inner.usage.snapshot();
         model_quota(usage.get(kind)?, model, util::now_ms())
+    }
+
+    /// Usage that applies to `model` of agent `kind` (its group's, or the agent number flagged as fallback).
+    pub fn model_usage(&self, kind: &str, model: Option<&str>) -> Option<ModelUsage> {
+        let usage = self.inner.usage.snapshot();
+        model_usage(usage.get(kind)?, model, util::now_ms())
     }
 
     /// Quota of each `models` instance (id -> text), for `--team` and `--list`: percentage and renewal
@@ -780,6 +808,15 @@ mod tests {
         assert_eq!((q.group.clone(), q.used, q.resets_at_ms), (None, 0.5, Some(NOW + 30 * 3_600_000)));
         assert_eq!(q.note(NOW), "quota 50% used, renews in 30 h");
         assert_eq!(agent_used(&claude, NOW), Some(0.5));
+        // The model's group decides; an unmapped or default model falls back to the agent number and says so.
+        let used = |m| model_usage(&agy_renewed, m, NOW).map(|u| (u.used, u.group, u.fallback));
+        assert_eq!(used(Some("gemini-4-argon-high")), Some((0.04, Some("Gemini 4 Argon".into()), false)));
+        assert_eq!(used(Some("claude-sonnet-5-5-high")), Some((0.95, Some("Claude and GPT models".into()), false)));
+        assert_eq!(used(Some("gemini-3.8-flash-high")), Some((0.004, Some("Gemini Models".into()), false)));
+        assert_eq!(used(None), Some((0.04, None, true)));
+        let no_claude = AgentUsage { groups: vec![group("Gemini 4 Argon", None, w(0.04, 6 * 24))], updated_ms: NOW, ..Default::default() };
+        assert_eq!(model_usage(&no_claude, Some("claude-sonnet-5-5-high"), NOW).map(|u| (u.used, u.fallback)), Some((0.04, true)));
+        assert_eq!(model_usage(&claude, Some("sonnet"), NOW).map(|u| (u.used, u.fallback)), Some((0.5, false)));
         assert_eq!(duration_text(45 * 60_000), "45 min");
         assert_eq!(duration_text(125 * 60_000), "2 h 5 min");
     }

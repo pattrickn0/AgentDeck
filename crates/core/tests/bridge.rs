@@ -1982,3 +1982,22 @@ fn a_codex_tab_learns_its_thread_from_notify_and_resumes_it() {
     assert_eq!(env.core.tab_session(&p, "codex@dev"), None);
     env.core.shutdown();
 }
+
+#[test]
+fn the_automatic_pick_reads_the_quota_of_the_models_group() {
+    use holt_core::{AgentUsage, UsageGroup, UsageWindow};
+    let env = start_cfg(&[], |c| {
+        c.role_models.insert("antigravity".into(), "claude-sonnet-5-5-high".into());
+    });
+    fake_cli(&env, "agy");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_millis() as u64;
+    let w = |used| Some(UsageWindow { used, resets_at_ms: Some(now + 30 * 3_600_000) });
+    let group = |name: &str, used| UsageGroup { name: name.into(), session: None, weekly: w(used) };
+    // Gemini is free but the Claude and GPT group (the model Antigravity would open here) is nearly gone.
+    let groups = vec![group("Gemini Models", 0.0), group("Gemini 4 Argon", 0.1), group("Claude and GPT models", 0.97)];
+    env.core.set_usage("antigravity", AgentUsage { updated_ms: now, groups, ..Default::default() });
+    let agy = env.core.capability_candidates(&["antigravity".to_owned()], None).remove(0);
+    assert_eq!(agy.model.as_deref(), Some("claude-sonnet-5-5-high"));
+    assert_eq!(agy.used, Some(0.97));
+    env.core.shutdown();
+}
