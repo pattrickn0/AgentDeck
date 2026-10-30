@@ -54,6 +54,7 @@ enum Act {
 
 /// What the view needs to know about its tab besides the conversation.
 struct Who<'a> {
+    kind: &'a str,
     alive: bool,
     color: egui::Color32,
     label: &'a str,
@@ -67,9 +68,9 @@ struct Who<'a> {
 /// Draws the chat of tab `idx` in `body`. Returns whether the pane should take the focus (a click on it).
 pub fn show(deck: &mut Deck, ui: &mut Ui, body: Rect, idx: usize) -> bool {
     let Some(mut chat) = deck.tabs[idx].chat.take() else { return false };
-    let (uid, alive, color, label, model) = {
+    let (uid, kind, alive, color, label, model) = {
         let t = &deck.tabs[idx];
-        (t.uid, t.alive, t.color, t.label.clone(), t.model.clone())
+        (t.uid, t.kind.clone(), t.alive, t.color, t.label.clone(), t.model.clone())
     };
     let mic = dictation::button_visual(deck.mic_phase, MicTarget::Tab(uid));
     let mic_tip = if alive {
@@ -78,6 +79,7 @@ pub fn show(deck: &mut Deck, ui: &mut Ui, body: Rect, idx: usize) -> bool {
         t!("Dictation unavailable (process ended)").to_owned()
     };
     let who = Who {
+        kind: &kind,
         alive,
         color,
         label: &label,
@@ -133,6 +135,11 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
         chat.heights.clear();
         chat.heights_width = col_w;
     }
+    let icon = match who.kind {
+        "antigravity" => Icon::AntigravityLogo,
+        "codex" => Icon::CodexLogo,
+        _ => Icon::ClaudeLogo,
+    };
     let empty = chat.transcript.items.is_empty();
     if empty {
         empty_state(&painter, view, label, alive);
@@ -162,6 +169,7 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
                         opened: &mut *opened,
                         acts: &mut *acts,
                         icons: &mut *icons,
+                        icon,
                         color,
                         waiting,
                         first_in_run,
@@ -503,6 +511,7 @@ struct ItemCx<'a> {
     opened: &'a mut HashMap<String, bool>,
     acts: &'a mut Vec<Act>,
     icons: &'a mut IconCache,
+    icon: Icon,
     /// The tab's agent color.
     color: egui::Color32,
     /// A permission card is waiting (the tool calls before it are not "running", they are waiting for the answer).
@@ -571,7 +580,7 @@ fn agent_row(ui: &mut Ui, col_w: f32, cx: &mut ItemCx, body: impl FnOnce(&mut Ui
         let (mark, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
         if cx.first_in_run {
             ui.painter().rect_filled(mark, 6.0, theme::accent_soft(cx.color));
-            cx.icons.paint(ui.painter(), Icon::ClaudeLogo, mark.center(), 12.0, cx.color, 0.0);
+            cx.icons.paint(ui.painter(), cx.icon, mark.center(), 12.0, cx.color, 0.0);
         }
         ui.add_space(AVATAR_COL - 22.0);
         let w = col_w - AVATAR_COL;
