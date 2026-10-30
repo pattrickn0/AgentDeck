@@ -3,8 +3,9 @@
 //! Engines in order of preference: CUDA (NVIDIA GPU), Vulkan (any GPU) and CPU. On
 //! Windows binaries are in `whisper/bin-*/[Release/]whisper-cli.exe`; on Linux, in
 //! `whisper/bin-*-linux/whisper-cli` (or `whisper-cli` on PATH). The model and CPU engine
-//! (Windows and Linux) and CUDA (Windows) are downloaded on demand, with SHA-256 pinned in this
-//! file; for CUDA/Vulkan on Linux, a `whisper-cli` compiled with them on PATH.
+//! (Windows and Linux), CUDA (Windows) and Vulkan (Linux x86_64, built by
+//! `.github/workflows/whisper-engines.yml`) are downloaded on demand, with SHA-256 pinned in this
+//! file; for CUDA on Linux, a `whisper-cli` compiled with it on PATH.
 //! The temporary WAV is ALWAYS deleted after transcription.
 
 use std::fs::File;
@@ -22,6 +23,9 @@ use crate::{Core, Transcription};
 
 pub const MODEL_FILE: &str = "ggml-large-v3-turbo.bin";
 const RELEASE: &str = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454";
+/// Engines that upstream does not ship (Vulkan on Linux), built by this repository's
+/// `whisper-engines` workflow and attached to a release of its own.
+const ENGINES_RELEASE: &str = "https://github.com/pattrickn0/Holt/releases/download/whisper-engines-v1.9.5";
 const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
 /// Model SHA-256: matches Hugging Face LFS ETag.
 const MODEL_SHA256: &str = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69";
@@ -60,9 +64,11 @@ pub enum Engine {
     Cpu,
 }
 
-/// Precompiled package of an engine (whisper.cpp release b5454), with pinned SHA-256.
+/// Precompiled package of an engine (whisper.cpp release b5454 or [`ENGINES_RELEASE`]), with pinned SHA-256.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Archive {
+    /// Release the file is downloaded from.
+    base: &'static str,
     file: &'static str,
     tar_gz: bool,
     /// Leading path components removed during extraction (Linux .tar.gz packages include a root directory).
@@ -70,11 +76,16 @@ struct Archive {
     sha256: &'static str,
 }
 
+// TODO(t13): all zeros until the `whisper-engines` workflow has built the zip; then paste the hash from its "Package" step
+// (or the release's `.sha256` asset). While it is zeros the download fails its checksum and dictation stays on the CPU.
+const VULKAN_LINUX_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
 /// Hashes from the GitHub release "digest" field; CPU ones (Windows and Linux) were verified
-/// by downloading files, CUDA package (685 MB) comes from digest only.
+/// by downloading files, CUDA package (685 MB) comes from digest only. The Linux Vulkan one is
+/// the `.sha256` the workflow prints and attaches next to the zip.
 fn engine_archive(engine: Engine, os: &str, arch: &str) -> Option<Archive> {
-    let zip = |file, sha256| Some(Archive { file, tar_gz: false, strip: 0, sha256 });
-    let tgz = |file, sha256| Some(Archive { file, tar_gz: true, strip: 1, sha256 });
+    let zip = |file, sha256| Some(Archive { base: RELEASE, file, tar_gz: false, strip: 0, sha256 });
+    let tgz = |file, sha256| Some(Archive { base: RELEASE, file, tar_gz: true, strip: 1, sha256 });
     match (os, arch, engine) {
         ("windows", "x86_64", Engine::Cpu) => {
             zip("whisper-bin-x64.zip", "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb")
@@ -88,6 +99,13 @@ fn engine_archive(engine: Engine, os: &str, arch: &str) -> Option<Archive> {
         ("linux", "aarch64", Engine::Cpu) => {
             tgz("whisper-bin-ubuntu-arm64.tar.gz", "6b95ebfc60447df48e70ef00a73bdc3f41679ed2d01ef465827206a2ff325149")
         }
+        ("linux", "x86_64", Engine::Vulkan) => Some(Archive {
+            base: ENGINES_RELEASE,
+            file: "whisper-bin-vulkan-linux-x64.zip",
+            tar_gz: false,
+            strip: 0,
+            sha256: VULKAN_LINUX_SHA256,
+        }),
         _ => None,
     }
 }
@@ -129,6 +147,7 @@ impl Engine {
 #[derive(Default)]
 pub(crate) struct WhisperState {
     gpus: OnceLock<Vec<String>>,
+    vulkan_icd: OnceLock<bool>,
     ensuring: AtomicBool,
 }
 
@@ -142,6 +161,64 @@ impl WhisperState {
     fn has_nvidia(&self) -> bool {
         self.gpus().iter().any(|n| n.to_lowercase().contains("nvidia"))
     }
+
+    /// Whether the Vulkan engine is worth having: a GPU was detected and, on Linux, the system has a Vulkan driver (ICD).
+    fn vulkan_usable(&self) -> bool {
+        let icd = || *self.vulkan_icd.get_or_init(|| has_vulkan_icd(&icd_dirs()));
+        vulkan_usable(&Hardware { gpus: !self.gpus().is_empty(), icd: &icd })
+    }
+}
+
+/// What `vulkan_usable` needs to know about the machine (the driver lookup is lazy: Windows never does it).
+struct Hardware<'a> {
+    gpus: bool,
+    icd: &'a dyn Fn() -> bool,
+}
+
+fn vulkan_usable(hw: &Hardware) -> bool {
+    if cfg!(windows) {
+        hw.gpus
+    } else if cfg!(target_os = "linux") {
+        // lspci also lists GPUs with no Vulkan driver installed; running the engine then only fails and falls back.
+        hw.gpus && (hw.icd)()
+    } else {
+        // Other systems are not detected: we try if a binary exists.
+        true
+    }
+}
+
+/// Directories where the Vulkan loader looks for driver manifests (`icd.d`), most specific first.
+fn icd_dirs() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for var in ["VK_DRIVER_FILES", "VK_ICD_FILENAMES"] {
+        if let Some(v) = std::env::var_os(var) {
+            // Lists of manifest files (or folders) separated by ':'.
+            out.extend(std::env::split_paths(&v));
+        }
+    }
+    if let Some(home) = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| dirs::home_dir().map(|h| h.join(".local/share"))) {
+        out.push(home.join("vulkan/icd.d"));
+    }
+    for dir in ["/etc/vulkan/icd.d", "/usr/local/etc/vulkan/icd.d", "/usr/local/share/vulkan/icd.d", "/usr/share/vulkan/icd.d"] {
+        out.push(PathBuf::from(dir));
+    }
+    out
+}
+
+/// A driver manifest exists in one of `places` (folders, or manifest files from `VK_DRIVER_FILES`). The software
+/// rasteriser (`lvp_icd`, llvmpipe) does not count: on a machine with a GPU it would run Whisper slower than the CPU engine.
+fn has_vulkan_icd(places: &[PathBuf]) -> bool {
+    let is_driver = |p: &Path| {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+        name.ends_with(".json") && !name.starts_with("lvp_icd") && p.is_file()
+    };
+    places.iter().any(|place| {
+        if place.is_dir() {
+            std::fs::read_dir(place).map(|d| d.flatten().any(|e| is_driver(&e.path()))).unwrap_or(false)
+        } else {
+            is_driver(place)
+        }
+    })
 }
 
 fn detect_gpus() -> Vec<String> {
@@ -318,16 +395,20 @@ fn engines(core: &Core) -> Vec<Engine> {
         return Vec::new();
     }
     let st = &core.inner.whisper;
+    engine_order(st.has_nvidia(), st.vulkan_usable(), |e| whisper_cli(dir, e).is_some())
+}
+
+/// CUDA (NVIDIA), then Vulkan, then CPU, keeping those that are installed.
+fn engine_order(nvidia: bool, vulkan: bool, installed: impl Fn(Engine) -> bool) -> Vec<Engine> {
     let mut order = Vec::new();
-    if st.has_nvidia() {
+    if nvidia {
         order.push(Engine::Cuda);
     }
-    // Outside Windows we do not detect Vulkan GPUs: we try if binary exists.
-    if !st.gpus().is_empty() || !cfg!(windows) {
+    if vulkan {
         order.push(Engine::Vulkan);
     }
     order.push(Engine::Cpu);
-    order.retain(|e| whisper_cli(dir, *e).is_some());
+    order.retain(|e| installed(*e));
     order
 }
 
@@ -480,10 +561,14 @@ pub(crate) fn transcribe_pcm16k(core: &Core, samples: &[f32]) -> anyhow::Result<
     std::fs::write(&wav, wav_bytes(samples))?;
     let result = (|| {
         for (i, engine) in list.iter().enumerate() {
+            let started = std::time::Instant::now();
             let res =
                 run_whisper(core, *engine, &wav).and_then(|t| if t.is_empty() { Err(t!("no speech detected").to_owned()) } else { Ok(t) });
             match res {
-                Ok(text) => return Ok(Transcription { text, engine: engine.label().to_owned() }),
+                Ok(text) => {
+                    log::info!("whisper: transcribed on {} in {} ms", engine.label(), started.elapsed().as_millis());
+                    return Ok(Transcription { text, engine: engine.label().to_owned() });
+                }
                 Err(e)
                     if e == t!("no speech detected") || e == t!("transcription interrupted: the app is closing") || i + 1 == list.len() =>
                 {
@@ -552,7 +637,7 @@ fn download_engine(core: &Core, engine: Engine, label: &str) -> Result<(), Strin
     let archive = engine.archive().ok_or_else(|| t!("no precompiled package for this system").to_owned())?;
     let dir = core.paths().whisper_dir.clone();
     let file = dir.join(archive.file);
-    let url = format!("{RELEASE}/{}", archive.file);
+    let url = format!("{}/{}", archive.base, archive.file);
     fetch(core, &url, &file, label, archive.sha256)?;
     let target = dir.join(engine.dir());
     core.emit(CoreEvent::Download(progress(label, DownloadState::Extracting)));
@@ -662,6 +747,18 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
                     arch = std::env::consts::ARCH,
                 ))
                 .tone(Tone::Warning)),
+            }
+        }
+        // Vulkan where upstream ships none (Linux): only with a GPU and a driver; if it fails, dictation stays on the CPU.
+        if core.inner.whisper.vulkan_usable() && local_cli(&dir, Engine::Vulkan).is_none() {
+            if let Some(a) = Engine::Vulkan.archive() {
+                let c = core.clone();
+                steps.push((
+                    t!("whisper.cpp with Vulkan"),
+                    t!("whisper.cpp (Vulkan)"),
+                    dir.join(a.file),
+                    Box::new(move || download_engine(&c, Engine::Vulkan, t!("whisper.cpp (Vulkan)"))),
+                ));
             }
         }
         if core.inner.whisper.has_nvidia() && local_cli(&dir, Engine::Cuda).is_none() {
@@ -792,16 +889,64 @@ mod tests {
         assert!(engine_archive(Engine::Cpu, "linux", "aarch64").is_some());
         assert!(engine_archive(Engine::Cuda, "linux", "x86_64").is_none());
         assert!(engine_archive(Engine::Vulkan, "windows", "x86_64").is_none());
+        let v = engine_archive(Engine::Vulkan, "linux", "x86_64").expect("linux vulkan");
+        assert!(!v.tar_gz && v.strip == 0 && v.base.contains("pattrickn0/Holt/releases/download/whisper-engines-"));
+        assert!(engine_archive(Engine::Vulkan, "linux", "aarch64").is_none());
         assert!(engine_archive(Engine::Cpu, "macos", "aarch64").is_none());
         let all = [
             engine_archive(Engine::Cpu, "windows", "x86_64"),
             engine_archive(Engine::Cuda, "windows", "x86_64"),
             engine_archive(Engine::Cpu, "linux", "x86_64"),
             engine_archive(Engine::Cpu, "linux", "aarch64"),
+            engine_archive(Engine::Vulkan, "linux", "x86_64"),
         ];
         for h in all.iter().flatten().map(|a| a.sha256).chain([MODEL_SHA256]) {
             assert!(h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{h}");
         }
+    }
+
+    #[test]
+    fn engine_order_prefers_cuda_then_vulkan_then_cpu() {
+        let all = |_| true;
+        assert_eq!(engine_order(true, true, all), [Engine::Cuda, Engine::Vulkan, Engine::Cpu]);
+        assert_eq!(engine_order(false, true, all), [Engine::Vulkan, Engine::Cpu]);
+        assert_eq!(engine_order(false, false, all), [Engine::Cpu]);
+        // Only what is installed: a GPU whose engine has not been downloaded (yet) falls to the CPU.
+        assert_eq!(engine_order(true, true, |e| e == Engine::Cpu), [Engine::Cpu]);
+        assert_eq!(engine_order(false, true, |e| e != Engine::Vulkan), [Engine::Cpu]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_vulkan_needs_a_gpu_and_a_driver() {
+        let with_icd = || true;
+        let no_icd = || false;
+        assert!(vulkan_usable(&Hardware { gpus: true, icd: &with_icd }), "GPU + ICD -> Vulkan");
+        assert!(!vulkan_usable(&Hardware { gpus: true, icd: &no_icd }), "GPU without ICD -> CPU only");
+        assert!(!vulkan_usable(&Hardware { gpus: false, icd: &with_icd }), "ICD without GPU (llvmpipe, VM) -> CPU only");
+        // End to end: the order the app uses with those answers, all engines on disk.
+        let order = |hw: Hardware| engine_order(false, vulkan_usable(&hw), |_| true);
+        assert_eq!(order(Hardware { gpus: true, icd: &with_icd }), [Engine::Vulkan, Engine::Cpu]);
+        assert_eq!(order(Hardware { gpus: true, icd: &no_icd }), [Engine::Cpu]);
+    }
+
+    #[test]
+    fn vulkan_driver_manifests() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let (empty, only_llvmpipe, radv) = (tmp.path().join("empty"), tmp.path().join("lvp"), tmp.path().join("radv"));
+        for d in [&empty, &only_llvmpipe, &radv] {
+            std::fs::create_dir_all(d).expect("mkdir");
+        }
+        std::fs::write(only_llvmpipe.join("lvp_icd.x86_64.json"), "{}").expect("write");
+        std::fs::write(radv.join("radeon_icd.x86_64.json"), "{}").expect("write");
+        std::fs::write(radv.join("notes.txt"), "x").expect("write");
+        let missing = tmp.path().join("missing");
+        assert!(!has_vulkan_icd(&[]));
+        assert!(!has_vulkan_icd(&[empty.clone(), missing.clone(), only_llvmpipe]), "software rasteriser is not a GPU driver");
+        assert!(has_vulkan_icd(&[missing, empty, radv.clone()]));
+        // `VK_DRIVER_FILES` names the manifest itself.
+        assert!(has_vulkan_icd(&[radv.join("radeon_icd.x86_64.json")]));
+        assert!(!has_vulkan_icd(&[radv.join("notes.txt")]));
     }
 
     #[test]

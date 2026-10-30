@@ -97,7 +97,7 @@ flowchart LR
 - **Git**: changes, hunk staging, commit, branches, merge and rebase, conflicts, stash.
 - **GitHub**: PRs with checks, issues, Actions and the log of the failed job — one click sends the failure to an agent.
 - Attachments by button, drag and drop or `Ctrl+V` (images too).
-- Optional **voice dictation** with local whisper.cpp (CUDA, Vulkan or CPU). Silent recordings are refused instead of being typed as made-up text.
+- Optional **voice dictation** with local whisper.cpp (CUDA, Vulkan or CPU; on Linux, Vulkan needs `libvulkan1` and a Mesa (RADV/ANV) or NVIDIA driver, otherwise it uses the CPU). Silent recordings are refused instead of being typed as made-up text.
 - System tray: × keeps the agents working in the background; launching the app again brings the same window back.
 - English by default, Portuguese (pt-BR) in Settings.
 </details>
