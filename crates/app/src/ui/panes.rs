@@ -155,21 +155,27 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
 
     // ---------- Action buttons to the right of the header (20×20, corners 4) ----------
     let cy = head.min.y + (HEAD_H - 1.0) / 2.0;
+    // In the Chat view the composer has its own microphone and attachment: the header keeps only "+".
+    let in_chat = deck.tabs[plan.shown].chat.is_some();
     let plus = Rect::from_min_size(Pos2::new(head.max.x - 6.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
     let attach = Rect::from_min_size(Pos2::new(plus.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
     let mic = Rect::from_min_size(Pos2::new(attach.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
+    let tools_left = if in_chat { plus } else { mic };
     // Small window of the Highlight: "Bring to highlight" to the left of the other buttons.
     let bring = (highlight && slot > 0)
-        .then(|| Rect::from_min_size(Pos2::new(mic.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN)));
+        .then(|| Rect::from_min_size(Pos2::new(tools_left.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN)));
 
     // ---------- Tabs ----------
     // Claude's tabs switch between the chat and the terminal view of the same conversation.
     let toggle = holt_core::chat::supports(&deck.tabs[plan.shown].kind)
         .then(|| {
-            Rect::from_min_size(Pos2::new(bring.unwrap_or(mic).min.x - 8.0 - VIEW_TOGGLE_W, cy - 11.0), Vec2::new(VIEW_TOGGLE_W, 22.0))
+            Rect::from_min_size(
+                Pos2::new(bring.unwrap_or(tools_left).min.x - 8.0 - VIEW_TOGGLE_W, cy - 11.0),
+                Vec2::new(VIEW_TOGGLE_W, 22.0),
+            )
         })
         .filter(|r| r.min.x - x0 > 120.0);
-    let strip_end = toggle.unwrap_or(bring.unwrap_or(mic)).min.x - 4.0;
+    let strip_end = toggle.unwrap_or(bring.unwrap_or(tools_left)).min.x - 4.0;
     let strip_rect = Rect::from_min_max(Pos2::new(x0, head.min.y), Pos2::new(strip_end.max(x0), head.max.y - 1.0));
     // A click on the empty space of the tab strip focuses the window (the tabs, on top, have their own action).
     if ui.interact(strip_rect, Id::new(("pane-head", &group)), Sense::click()).clicked() {
@@ -184,9 +190,9 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     }
 
     if let Some(r) = toggle {
-        let in_chat = deck.tabs[plan.shown].chat.is_some();
-        if let Some(i) = super::segmented(ui, r, Id::new(("pane-view", &group)), &[t!("Chat"), t!("Terminal")], usize::from(!in_chat), true)
-        {
+        let tint = deck.tabs[plan.shown].color;
+        let id = Id::new(("pane-view", &group));
+        if let Some(i) = super::segmented_tinted(ui, r, id, &[t!("Chat"), t!("Terminal")], usize::from(!in_chat), Some(tint)) {
             clicks.push(Click::View(plan.shown, i == 0));
         }
     }
@@ -209,62 +215,64 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     let shown_label = deck.tabs[plan.shown].label.clone();
     let kind = deck.tabs[plan.shown].kind.clone();
 
-    let visual = dictation::button_visual(deck.mic_phase, MicTarget::Tab(shown_uid));
-    let mic_busy = visual.is_busy() || !shown_alive;
-    let mic_resp = ui.interact(mic, Id::new(("pane-mic", &group)), if mic_busy { Sense::hover() } else { Sense::click() });
-    let mic_hot = mic_resp.hovered() && !mic_busy;
-    if mic_hot {
-        ctx.set_cursor_icon(CursorIcon::PointingHand);
-    }
-    let mut mic_opacity = 1.0;
-    if visual == ButtonVisual::Recording {
-        mic_opacity = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
-        ctx.request_repaint_after(Duration::from_millis(50));
-        painter.rect_filled(mic, 4.0, theme::with_opacity(theme::pal().danger, mic_opacity));
-    } else if mic_hot {
-        painter.rect_filled(mic, 4.0, theme::pal().hover);
-    }
-    if mic_busy || !audio::AVAILABLE || visual == ButtonVisual::Opening {
-        mic_opacity = 0.45;
-    }
-    let mic_fg = if visual == ButtonVisual::Recording {
-        theme::pal().text_strong
-    } else if mic_hot {
-        theme::pal().text
-    } else {
-        theme::pal().text_2
-    };
-    deck.icons.paint(&painter, Icon::Mic, mic.center(), 14.0, theme::with_opacity(mic_fg, mic_opacity), 0.0);
-    let mic_tip = if !shown_alive {
-        t!("Dictation unavailable (process ended)").to_owned()
-    } else {
-        dictation::mic_tooltip(visual, audio::AVAILABLE, deck.dictation_setup(), &deck.engine_label, Some("Ctrl+Shift+M"))
-    };
-    if tip(mic_resp, mic_tip).clicked() && !mic_busy {
-        clicks.push(Click::Mic(shown_uid));
-    }
+    if !in_chat {
+        let visual = dictation::button_visual(deck.mic_phase, MicTarget::Tab(shown_uid));
+        let mic_busy = visual.is_busy() || !shown_alive;
+        let mic_resp = ui.interact(mic, Id::new(("pane-mic", &group)), if mic_busy { Sense::hover() } else { Sense::click() });
+        let mic_hot = mic_resp.hovered() && !mic_busy;
+        if mic_hot {
+            ctx.set_cursor_icon(CursorIcon::PointingHand);
+        }
+        let mut mic_opacity = 1.0;
+        if visual == ButtonVisual::Recording {
+            mic_opacity = super::right_panel::blink_alpha(ctx.input(|inp| inp.time), 1.2);
+            ctx.request_repaint_after(Duration::from_millis(50));
+            painter.rect_filled(mic, 4.0, theme::with_opacity(theme::pal().danger, mic_opacity));
+        } else if mic_hot {
+            painter.rect_filled(mic, 4.0, theme::pal().hover);
+        }
+        if mic_busy || !audio::AVAILABLE || visual == ButtonVisual::Opening {
+            mic_opacity = 0.45;
+        }
+        let mic_fg = if visual == ButtonVisual::Recording {
+            theme::pal().text_strong
+        } else if mic_hot {
+            theme::pal().text
+        } else {
+            theme::pal().text_2
+        };
+        deck.icons.paint(&painter, Icon::Mic, mic.center(), 14.0, theme::with_opacity(mic_fg, mic_opacity), 0.0);
+        let mic_tip = if !shown_alive {
+            t!("Dictation unavailable (process ended)").to_owned()
+        } else {
+            dictation::mic_tooltip(visual, audio::AVAILABLE, deck.dictation_setup(), &deck.engine_label, Some("Ctrl+Shift+M"))
+        };
+        if tip(mic_resp, mic_tip).clicked() && !mic_busy {
+            clicks.push(Click::Mic(shown_uid));
+        }
 
-    let att_resp = ui.interact(attach, Id::new(("pane-attach", &group)), if shown_alive { Sense::click() } else { Sense::hover() });
-    let att_hot = att_resp.hovered() && shown_alive;
-    if att_hot {
-        ctx.set_cursor_icon(CursorIcon::PointingHand);
-        painter.rect_filled(attach, 4.0, theme::pal().hover);
-    }
-    let att_fg = if att_hot {
-        theme::pal().text
-    } else if shown_alive {
-        theme::pal().text_2
-    } else {
-        theme::with_opacity(theme::pal().text_2, 0.45)
-    };
-    deck.icons.paint(&painter, Icon::Attach, attach.center(), 14.0, att_fg, 0.0);
-    let att_tip = if shown_alive {
-        t!("Attach files to {label}", label = shown_label)
-    } else {
-        t!("Attachments unavailable (process ended)").to_owned()
-    };
-    if tip(att_resp, att_tip).clicked() && shown_alive {
-        clicks.push(Click::Attach(shown_uid));
+        let att_resp = ui.interact(attach, Id::new(("pane-attach", &group)), if shown_alive { Sense::click() } else { Sense::hover() });
+        let att_hot = att_resp.hovered() && shown_alive;
+        if att_hot {
+            ctx.set_cursor_icon(CursorIcon::PointingHand);
+            painter.rect_filled(attach, 4.0, theme::pal().hover);
+        }
+        let att_fg = if att_hot {
+            theme::pal().text
+        } else if shown_alive {
+            theme::pal().text_2
+        } else {
+            theme::with_opacity(theme::pal().text_2, 0.45)
+        };
+        deck.icons.paint(&painter, Icon::Attach, attach.center(), 14.0, att_fg, 0.0);
+        let att_tip = if shown_alive {
+            t!("Attach files to {label}", label = shown_label)
+        } else {
+            t!("Attachments unavailable (process ended)").to_owned()
+        };
+        if tip(att_resp, att_tip).clicked() && shown_alive {
+            clicks.push(Click::Attach(shown_uid));
+        }
     }
 
     let r = clickable(ui, plus, Id::new(("pane-plus", &group)));

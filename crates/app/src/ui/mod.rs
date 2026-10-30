@@ -396,6 +396,11 @@ pub fn section_label(painter: &Painter, rect: Rect, text: &str) -> Rect {
 /// 5 px corners. The active one takes the accent color with `on_accent` text (`accent = true`) or the
 /// `selected` background with `text_strong` text (`accent = false`). Returns the clicked index, if any.
 pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, accent: bool) -> Option<usize> {
+    segmented_tinted(ui, rect, id, items, selected, accent.then(theme::accent))
+}
+
+/// [`segmented`] whose selected segment takes `tint` (an agent's colour) instead of the app accent; `None` = neutral.
+pub fn segmented_tinted(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, tint: Option<Color32>) -> Option<usize> {
     let painter = ui.painter();
     let p = theme::pal();
     painter.rect_filled(rect, 7.0, p.recess);
@@ -406,8 +411,8 @@ pub fn segmented(ui: &Ui, rect: Rect, id: Id, items: &[&str], selected: usize, a
         let seg = Rect::from_min_size(Pos2::new(inner.min.x + w * i as f32, inner.min.y), Vec2::new(w, inner.height()));
         let r = clickable(ui, seg, id.with(i));
         let on = i == selected;
-        let (fill, fg, font) = if on && accent {
-            (Some(theme::accent()), p.on_accent, theme::ui_semibold(11.5))
+        let (fill, fg, font) = if let Some(tint) = tint.filter(|_| on) {
+            (Some(tint), p.on_accent, theme::ui_semibold(11.5))
         } else if on {
             (Some(p.selected), p.text_strong, theme::ui_semibold(11.5))
         } else {

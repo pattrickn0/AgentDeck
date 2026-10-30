@@ -45,6 +45,13 @@ fn install_desktop_entry() {
     };
     // OUT_DIR is `<target>/[<triple>/]release/build/holt-<hash>/out`: the binary lands in `.../release/`.
     let Some(bin) = var("OUT_DIR").and_then(|o| Path::new(&o).ancestors().nth(3).map(|d| d.join("holt"))) else { return };
+    // The menu has one entry: only the main checkout's `target/release` owns it. A build into another target folder
+    // (a review build, `CARGO_TARGET_DIR`) or inside a task worktree pointed the menu at a binary that was deleted
+    // afterwards, and the desktop hid the entry.
+    let Some(repo) = var("CARGO_MANIFEST_DIR").and_then(|m| Path::new(&m).ancestors().nth(2).map(Path::to_path_buf)) else { return };
+    if bin != repo.join("target/release/holt") || repo.components().any(|c| c.as_os_str() == ".holt") {
+        return;
+    }
     let desktop = data.join("applications/holt.desktop");
     let icon = data.join("icons/hicolor/256x256/apps/holt.png");
     // Deleted by hand (or uninstalled): the next build writes them again.
