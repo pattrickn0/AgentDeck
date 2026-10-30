@@ -802,21 +802,26 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
     args.extend(crate::trust::prepare(kind, &cwd, &project_dir, &core.inner.home));
     if kind == "antigravity" {
         // The conversation id is not ours to choose: `agy` names it in its log (see `resume::agy_session_in_log`). A new
-        // process truncates the file, but a stale one is removed anyway so no old id is ever read.
-        let log = resume::agy_log_path(&core.paths().data_dir, &id);
-        if std::fs::create_dir_all(log.parent().unwrap_or(&core.paths().data_dir))
-            .and_then(|()| match std::fs::remove_file(&log) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-                _ => Ok(()),
-            })
-            .is_ok()
-        {
-            args.extend(launch_args());
-            args.push("--log-file".into());
-            args.push(log.to_string_lossy().into_owned());
-            session_log = Some(log);
+        // process truncates the file, but a stale one is removed anyway so no old id is ever read. In chat mode, the
+        // stream's init event reports the conversation id directly.
+        if !chat {
+            let log = resume::agy_log_path(&core.paths().data_dir, &id);
+            if std::fs::create_dir_all(log.parent().unwrap_or(&core.paths().data_dir))
+                .and_then(|()| match std::fs::remove_file(&log) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                    _ => Ok(()),
+                })
+                .is_ok()
+            {
+                args.extend(launch_args());
+                args.push("--log-file".into());
+                args.push(log.to_string_lossy().into_owned());
+                session_log = Some(log);
+            } else {
+                log::warn!("could not prepare the Antigravity log {}: this tab will not resume", log.display());
+            }
         } else {
-            log::warn!("could not prepare the Antigravity log {}: this tab will not resume", log.display());
+            args.extend(launch_args());
         }
     }
     if kind == "claude" || kind == "antigravity" {
@@ -851,7 +856,7 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
         args.push(prompt);
     }
     if chat {
-        args.extend(crate::chat::chat_args());
+        args.extend(crate::chat::chat_args(kind));
     }
     if resolved.shim.is_some() {
         args = args.iter().map(|a| cmd_safe_arg(a)).collect();
@@ -873,7 +878,7 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
         kind: kind.to_owned(),
         double_enter_on_mention: kind == "claude" || kind == "antigravity",
         model,
-        resumed: resumed && (kind != "antigravity" || session_log.is_some()),
+        resumed: resumed && (kind != "antigravity" || session_log.is_some() || chat),
         session_log,
         first_message,
     })

@@ -162,6 +162,23 @@ pub(crate) fn kill_tree(child: &mut Child) {
     let _ = child.kill();
 }
 
+/// Interrupts the process group (best effort SIGINT).
+pub(crate) fn interrupt_process(child: &Child) {
+    #[cfg(unix)]
+    {
+        if let Ok(pid) = i32::try_from(child.id()) {
+            // SAFETY: `kill` sends SIGINT to the process group created by `process_group(0)`.
+            unsafe {
+                libc::kill(-pid, libc::SIGINT);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = child;
+    }
+}
+
 /// Reads `r` to the end keeping at most `max` bytes (the rest is read and discarded, so the
 /// process does not hang on a full pipe).
 fn spawn_reader<R: Read + Send + 'static>(mut r: R, buf: Arc<Mutex<Vec<u8>>>, max: usize) -> JoinHandle<()> {
