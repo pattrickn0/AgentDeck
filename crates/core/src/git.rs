@@ -655,6 +655,53 @@ pub fn untracked_diff(bytes: &[u8], max_lines: usize) -> GitDiff {
     diff
 }
 
+/// `true` if the (lowercased) stderr of git or `gh` says the HTTPS credential is missing, expired or refused.
+fn is_auth_stderr(low: &str) -> bool {
+    low.contains("authentication failed")
+        || low.contains("could not read username")
+        || low.contains("could not read password")
+        || low.contains("terminal prompts disabled")
+        || low.contains("user interactivity has been disabled")
+        || low.contains("invalid username or token")
+        || low.contains("invalid username or password")
+        || low.contains("bad credentials")
+        || low.contains("requested url returned error: 401")
+        || low.contains("requested url returned error: 403")
+        || low.contains("http 401")
+        || (low.contains("token") && low.contains("is invalid"))
+        || low.contains("gh auth login")
+}
+
+/// How the user can sign in to GitHub from inside Holt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SigninPlan {
+    /// Command to type in a new terminal tab; the tab closes itself (`exit`) only if it succeeded.
+    Command(String),
+    /// Nothing that can sign in is installed: explanation of how to get it.
+    Install(String),
+}
+
+/// Chooses the sign-in route. Windows prefers Git Credential Manager, then `gh`; elsewhere `gh`.
+pub fn signin_plan(windows: bool, gh: bool, gcm: bool) -> SigninPlan {
+    const GH: &str = "gh auth login -h github.com --git-protocol https --web -s workflow && gh auth setup-git";
+    if windows && gcm {
+        SigninPlan::Command("git credential-manager github login".to_owned())
+    } else if gh {
+        // PowerShell 5.1 has no `&&`.
+        SigninPlan::Command(if windows { GH.replace(" && ", "; ") } else { GH.to_owned() })
+    } else if windows {
+        SigninPlan::Install(
+            t!("Install the GitHub CLI (winget install GitHub.cli) or Git Credential Manager, then try again. Or set a credential helper: git config --global credential.helper manager")
+                .to_owned(),
+        )
+    } else {
+        SigninPlan::Install(
+            t!("Install the GitHub CLI (sudo zypper/dnf/apt install gh) and try again. Or set a credential helper: git config --global credential.helper store")
+                .to_owned(),
+        )
+    }
+}
+
 /// Turns the stderr of a command that failed into a meaningful error (the messages come in
 /// English because of `LC_ALL=C`).
 pub fn classify_error(stderr: &str) -> GitError {
@@ -678,13 +725,10 @@ pub fn classify_error(stderr: &str) -> GitError {
             output = short
         ));
     }
-    if low.contains("authentication failed")
-        || low.contains("could not read username")
-        || low.contains("could not read password")
-        || low.contains("terminal prompts disabled")
-        || low.contains("user interactivity has been disabled")
-        || low.contains("host key verification failed")
-    {
+    if is_auth_stderr(&low) {
+        return GitError::Auth(short);
+    }
+    if low.contains("host key verification failed") {
         return GitError::Auth(short);
     }
     // `commit.gpgsign` with a locked key or with no agent/pinentry that can ask for the passphrase.
@@ -1781,6 +1825,30 @@ mod tests {
             [(DiffKind::Add, Some(1), "a"), (DiffKind::Add, Some(2), "b")]
         );
         assert!(untracked_diff(b"PK\0\x03", 100).binary);
+    }
+
+    #[test]
+    fn auth_failures_from_git_and_gh_are_recognized() {
+        for s in [
+            "fatal: could not read Username for 'https://github.com': No such device or address",
+            "remote: Invalid username or token. Password authentication is not supported for Git operations.\nfatal: Authentication failed for 'https://github.com/o/r.git/'",
+            "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403",
+            "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 401",
+            "The token in default is invalid.\nTo re-authenticate, run: gh auth login -h github.com",
+            "gh: HTTP 401: Bad credentials (https://api.github.com/graphql)",
+        ] {
+            assert!(matches!(classify_error(s), GitError::Auth(_)), "{s}");
+        }
+        assert!(matches!(classify_error("error: pathspec 'x' did not match"), GitError::Failed(_)));
+    }
+
+    #[test]
+    fn signin_plan_by_platform() {
+        let SigninPlan::Command(c) = signin_plan(false, true, false) else { panic!() };
+        assert!(c.starts_with("gh auth login") && c.contains("-s workflow") && c.ends_with("gh auth setup-git"));
+        assert_eq!(signin_plan(true, true, true), SigninPlan::Command("git credential-manager github login".into()));
+        assert!(matches!(signin_plan(true, true, false), SigninPlan::Command(c) if c.starts_with("gh auth login")));
+        assert!(matches!(signin_plan(false, false, true), SigninPlan::Install(_)));
     }
 
     #[test]

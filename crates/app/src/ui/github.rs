@@ -15,7 +15,7 @@ use holt_core::github::{
 };
 use holt_core::t;
 
-use super::{clickable, dot, frame, galley_trunc, place, section_label, shadow, text_in, text_w, tip};
+use super::{button, button_width, clickable, dot, frame, galley_trunc, place, section_label, shadow, text_in, text_w, tip, ButtonKind};
 use crate::deck::Deck;
 use crate::github_ui::{instance_spec, normalize_role, GithubTab, GithubView};
 use crate::icons::Icon;
@@ -35,7 +35,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
         GithubView::Loading => draw_loading(ui, rect),
         GithubView::NoProject => {
             let msg = t!("Open a folder with a GitHub repository to see pull requests, issues and Actions.");
-            draw_empty_state(deck, ui, rect, "GitHub", msg, false);
+            draw_empty_state(deck, ui, rect, "GitHub", msg, false, false);
         }
         GithubView::Error(error) => {
             let (title, mut detail) = match &error {
@@ -47,7 +47,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             if matches!(error, GithubError::NoRemote | GithubError::NotARepo) {
                 detail.push_str(t!("\nWhen the folder has a GitHub \"origin\" remote, pull requests, issues and runs show up here."));
             }
-            draw_empty_state(deck, ui, rect, &title, &detail, true);
+            draw_empty_state(deck, ui, rect, &title, &detail, true, error.is_auth());
         }
         GithubView::Ready(overview) => draw_ready(deck, ui, rect, &overview),
     }
@@ -61,7 +61,7 @@ fn draw_loading(ui: &Ui, rect: Rect) {
 }
 
 /// Fixed title bar + centered message (no project, no remote, error without old data).
-fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detail: &str, can_retry: bool) {
+fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detail: &str, can_retry: bool, signin: bool) {
     let p = ui.painter_at(rect);
     let top = Rect::from_min_size(rect.min, Vec2::new(rect.width(), REPO_BAR_H));
     p.rect_filled(top, 0.0, theme::pal().chip);
@@ -84,7 +84,16 @@ fn draw_empty_state(deck: &mut Deck, ui: &mut Ui, rect: Rect, title: &str, detai
     job.halign = egui::Align::Center;
     let g = p.layout_job(job);
     // With `halign` centered, the anchor is the middle of the line.
+    let text_h = g.size().y;
     p.galley(Pos2::new(body.center().x, body.min.y), g, theme::pal().text_2);
+    if signin {
+        let label = t!("Sign in to GitHub");
+        let w = button_width(&p, label, ButtonKind::Primary);
+        let r = Rect::from_min_size(Pos2::new(body.center().x - w / 2.0, body.min.y + text_h + 14.0), Vec2::new(w, 28.0));
+        if button(ui, r, Id::new("gh-signin"), label, ButtonKind::Primary).clicked() {
+            deck.github_signin();
+        }
+    }
 }
 
 fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
@@ -101,20 +110,27 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         p.rect_filled(strip, 0.0, theme::pal().hover);
         p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
         let txt = match ov.rate_limit {
-            Some(rl) if rl.remaining.is_some() && rl.limit.is_some() => t!(
-                "Not signed in ({remaining} of {limit} per hour) · push from the Git tab",
-                remaining = rl.remaining.unwrap_or(0),
-                limit = rl.limit.unwrap_or(0)
-            ),
-            _ => t!("Not signed in (60 per hour) · push from the Git tab").to_owned(),
+            Some(rl) if rl.remaining.is_some() && rl.limit.is_some() => {
+                t!("Not signed in ({remaining} of {limit} per hour)", remaining = rl.remaining.unwrap_or(0), limit = rl.limit.unwrap_or(0))
+            }
+            _ => t!("Not signed in (60 per hour)").to_owned(),
         };
-        let inner = strip.shrink2(Vec2::new(PAD, 0.0));
+        let label = t!("Sign in to GitHub");
+        let bw = text_w(&p, label, theme::ui_semibold(10.5)) + 8.0;
+        let b = Rect::from_min_size(Pos2::new(strip.max.x - PAD - bw, strip.min.y + 1.0), Vec2::new(bw, strip.height() - 3.0));
+        let br = clickable(ui, b, Id::new("gh-anon-signin"));
+        let c = if br.hovered() { theme::accent() } else { theme::with_alpha(theme::accent(), 0.85) };
+        text_in(&p, b, Align2::CENTER_CENTER, label, theme::ui_semibold(10.5), c);
+        if br.clicked() {
+            deck.github_signin();
+        }
+        let inner = Rect::from_min_max(strip.min + Vec2::new(PAD, 0.0), Pos2::new(b.min.x - 6.0, strip.max.y));
         let g = galley_trunc(&p, &txt, theme::ui(10.5), theme::pal().text_2, inner.width());
         place(&p, inner, Align2::LEFT_CENTER, g, theme::pal().text_2);
         let r = ui.interact(strip, Id::new("gh-anon-strip"), Sense::hover());
         tip(
             r,
-            t!("Public repository read without a token (limit of 60 requests per hour; the job log requires signing in).\nTo sign in without storing a token in the app: push from the Git tab (opens the Git Credential Manager login) or run \"gh auth login\"."),
+            t!("Public repository read without a token (limit of 60 requests per hour; the job log requires signing in).\nTo sign in without storing a token in the app, click Sign in."),
         );
         y = strip.max.y;
     }
@@ -131,7 +147,20 @@ fn draw_ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, ov: &GithubOverview) {
         p.rect_filled(strip, 0.0, bg);
         p.rect_filled(Rect::from_min_max(Pos2::new(strip.min.x, strip.max.y - 1.0), strip.max), 0.0, theme::pal().separator);
         let close_r = Rect::from_min_size(Pos2::new(strip.max.x - 22.0, strip.min.y + 2.0), Vec2::splat(20.0));
-        let txt_r = Rect::from_min_max(Pos2::new(strip.min.x + PAD, strip.min.y), Pos2::new(close_r.min.x - 4.0, strip.max.y));
+        let mut right = close_r.min.x - 4.0;
+        if is_err && deck.github.notice_auth {
+            let label = t!("Sign in to GitHub");
+            let bw = text_w(&p, label, theme::ui_semibold(11.0)) + 8.0;
+            let b = Rect::from_min_max(Pos2::new(right - bw, strip.min.y + 2.0), Pos2::new(right, strip.max.y - 2.0));
+            let br = clickable(ui, b, Id::new("gh-notice-signin"));
+            let c = if br.hovered() { theme::accent() } else { theme::with_alpha(theme::accent(), 0.85) };
+            text_in(&p, b, Align2::CENTER_CENTER, label, theme::ui_semibold(11.0), c);
+            if br.clicked() {
+                deck.github_signin();
+            }
+            right = b.min.x - 6.0;
+        }
+        let txt_r = Rect::from_min_max(Pos2::new(strip.min.x + PAD, strip.min.y), Pos2::new(right, strip.max.y));
         let g = galley_trunc(&p, &msg, theme::ui(11.0), fg, txt_r.width());
         place(&p, txt_r, Align2::LEFT_CENTER, g, fg);
         let cr = clickable(ui, close_r, Id::new("gh-notice-close"));

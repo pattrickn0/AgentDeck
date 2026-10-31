@@ -63,6 +63,8 @@ pub struct GithubUi {
     pub forced: bool,
     /// Recent notice or error at the top of the tab `(text, is_error)`.
     pub notice: Option<(String, bool)>,
+    /// The `notice` error is a refused credential (offers "Sign in to GitHub").
+    pub notice_auth: bool,
     /// When the last read finished.
     pub last_refresh: Option<Instant>,
 
@@ -301,6 +303,7 @@ impl Deck {
                 if matches!(self.github.view, GithubView::Ready(_)) {
                     // Keeps what was already on screen and warns in the top strip.
                     self.github.notice = Some((error.to_string(), true));
+                    self.github.notice_auth = error.is_auth();
                 } else {
                     self.github.view = GithubView::Error(error);
                 }
@@ -327,7 +330,10 @@ impl Deck {
                             self.auto_open_failed_job_log(Some(pr_number), &jobs);
                         }
                     }
-                    Err(e) => self.github.notice = Some((t!("PR #{number}: {error}", number = pr_number, error = e), true)),
+                    Err(e) => {
+                        self.github.notice_auth = e.is_auth();
+                        self.github.notice = Some((t!("PR #{number}: {error}", number = pr_number, error = e), true));
+                    }
                 }
             }
             GithubPayload::RunJobs { run_id, result, failed_log } => {
@@ -342,7 +348,10 @@ impl Deck {
                             self.auto_open_failed_job_log(None, &jobs);
                         }
                     }
-                    Err(e) => self.github.notice = Some((t!("Run #{id}: {error}", id = run_id, error = e), true)),
+                    Err(e) => {
+                        self.github.notice_auth = e.is_auth();
+                        self.github.notice = Some((t!("Run #{id}: {error}", id = run_id, error = e), true));
+                    }
                 }
             }
             GithubPayload::JobLog { job_id, result } => {

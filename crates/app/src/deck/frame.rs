@@ -402,6 +402,8 @@ impl Deck {
             if self.reopen_without_resume(i, code) {
                 continue;
             }
+            let uid = self.tabs[i].uid;
+            self.signin_finished(uid, code);
             self.chat_ended(i, code);
             let tab = &mut self.tabs[i];
             tab.alive = false;

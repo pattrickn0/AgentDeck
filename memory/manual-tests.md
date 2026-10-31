@@ -451,6 +451,15 @@ With Claude Code installed and signed in (Linux or Windows; the Windows launch t
 - [ ] Effort: Claude and Codex offer Default/low/medium/high; Antigravity offers low/medium/high only once its model has effort variants (otherwise the button is hidden or dimmed with the reason). Check the process with `ps` (`--model`, `--effort`; Codex `-c model_reasoning_effort=…`) and, for Antigravity, that the model name suffix changed.
 - [ ] Close and reopen Holt: the tab comes back with the same model and effort (the buttons show them and the CLI is launched with them). Switch the tab to the Terminal view: the CLI is launched with the same model and effort.
 
+## GitHub sign-in from the Git and GitHub panels (t14)
+
+With `gh` installed (and, on Windows, also try with only Git Credential Manager):
+
+- [ ] `gh auth logout -h github.com`, then Push in the Git panel: the red strip says "Authentication failed…" with **Sign in to GitHub** beside the ×. Same with the GitHub panel (button under the message, or in the "Not signed in" strip).
+- [ ] The button opens a Terminal tab in the project that runs `gh auth login … --web -s workflow && gh auth setup-git`; the one-time code and URL show there. After finishing in the browser the shell closes by itself, the Git panel says "Signed in to GitHub. Try again.", and Push now works.
+- [ ] Cancel the login (Ctrl+C in the tab): the shell stays open and nothing reloads.
+- [ ] Without `gh` in PATH (Linux): the button shows how to install it (`zypper/dnf/apt install gh`) or set `credential.helper`.
+
 ## Final checklist
 
 - [ ] Take a screenshot of main screen (with right panel) to replace `docs/screenshots/main.png`.
