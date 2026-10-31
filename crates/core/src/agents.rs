@@ -54,11 +54,16 @@ pub struct SpawnSpec {
     /// Chat launch only: the task's initial prompt, which is sent as the first message instead of being a command-line
     /// argument (see `chat.rs`).
     pub first_message: Option<String>,
+    /// The conversation this launch continues (the session id saved for the tab), when `resumed`. The command line
+    /// already carries it for the CLIs that resume by argument; a chat backend that resumes through its protocol
+    /// (Codex's `thread/resume`) reads it here.
+    pub session: Option<String>,
 }
 
 /// Official colors (also used by the UI as a fallback).
 pub const COLOR_CLAUDE: &str = "#d97757";
 pub const COLOR_ANTIGRAVITY: &str = "#4f8cf7";
+pub const COLOR_CODEX: &str = "#10a37f";
 pub const COLOR_SHELL: &str = "#9aa0a6";
 
 /// Static definition of an agent (equivalent to an `AGENTS` entry).
@@ -92,7 +97,7 @@ pub const AGENTS: &[AgentDef] = &[
     AgentDef {
         id: "codex",
         label: "Codex",
-        color: "#10a37f",
+        color: COLOR_CODEX,
         peer: true,
         missing: "Codex CLI not found. Install with:\r\n  npm install -g @openai/codex",
     },
@@ -769,7 +774,13 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
     let resumed = launch.as_ref().is_some_and(|l| l.resumed);
     let launch_args = || launch.iter().flat_map(|l| l.args.iter().cloned());
     let mut session_log = None;
-    if kind == "codex" {
+    // The chat backend decides whether the conversation to resume goes in the arguments (Codex's protocol resumes by itself).
+    let backend = if chat { crate::chat::for_kind(kind) } else { None };
+    let resume_by_args = backend.is_none_or(|b| b.resumes_by_args());
+    if chat {
+        args.extend(backend.map(|b| b.leading_args()).unwrap_or_default());
+    }
+    if kind == "codex" && resume_by_args {
         // `resume <id>` is a subcommand: before every other option (Codex has no initial-prompt flag, so nothing precedes it).
         args.extend(launch_args());
     }
@@ -791,7 +802,7 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
             }
         }
     }
-    if kind == "codex" && resolved.shim.is_none() {
+    if kind == "codex" && resolved.shim.is_none() && !chat {
         // Codex end of turn → `ask-agent --signal idle <json>`; the JSON carries the thread id that `codex resume` takes.
         // Through cmd.exe the TOML value (with quotes) does not survive, so only with the direct executable.
         args.push("-c".into());
@@ -837,6 +848,7 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
             Err(e) => log::warn!("could not write the Antigravity instructions: {e}"),
         }
     }
+    let effort = core.task_of_instance(project, &id).and_then(|t| t.effort);
     if kind == "opencode" {
         // The TUI has no --model or --system: its own server + model and instructions in the configuration
         // (see `models::opencode_tui`).
@@ -844,19 +856,19 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
         args.extend(extra);
         args.extend(launch.iter().flat_map(|l| l.args.iter().cloned()));
         env.insert(key, value);
+    } else if let Some(backend) = backend {
+        // The chat view: the backend says how its CLI takes the model and the effort.
+        args.extend(backend.spawn_args(&crate::chat::Launch { model: model.as_deref(), effort }));
     } else if let Some(m) = &model {
         args.extend(models::cli_args(kind, m));
     }
     // Task effort (Antigravity's is already in the model name; see `Task::effort`).
-    if let Some(effort) = core.task_of_instance(project, &id).and_then(|t| t.effort) {
+    if let Some(effort) = effort.filter(|_| backend.is_none()) {
         args.extend(models::effort_args(kind, effort));
     }
     if let Some((Some(flag), prompt)) = boot {
         args.push(flag.into());
         args.push(prompt);
-    }
-    if chat {
-        args.extend(crate::chat::chat_args(kind));
     }
     if resolved.shim.is_some() {
         args = args.iter().map(|a| cmd_safe_arg(a)).collect();
@@ -881,6 +893,7 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
         resumed: resumed && (kind != "antigravity" || session_log.is_some() || chat),
         session_log,
         first_message,
+        session: launch.as_ref().filter(|l| l.resumed).and_then(|l| l.id.clone()),
     })
 }
 

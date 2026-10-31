@@ -140,62 +140,56 @@ The policy in `delivery.rs` avoids overriding the user or TUI:
 
 ## Chat view of an agent tab (`crates/core/src/chat.rs`, `app/src/deck/chat.rs`, `app/src/ui/chat.rs`)
 
-A Claude or Antigravity tab shows a friendly chat (messages, tool calls with diffs, permission cards, a composer) instead of the CLI's
+A Claude, Antigravity, or Codex tab shows a friendly chat (messages, tool calls with diffs, permission cards, a composer) instead of the CLI's
 terminal UI, with the CLI still running underneath. Holt never reads the terminal screen: the CLI runs in its **structured mode**
-(`claude -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose --permission-prompt-tool stdio`,
-or `agy --input-format stream-json --output-format stream-json --mode auto`, `chat::chat_args`) and the events are rendered. Chat is the default view
+via a generic backend layer (`crates/core/src/chat/backend.rs`), rendering common chat events. Chat is the default view
 (`Config.chat_by_default`); the tab menu switches a tab to Terminal and back (`ProjectCfg.tab_views`, `Deck::set_tab_view`): the process is
-replaced, the conversation continues (same session id, `--resume` for Claude, `--conversation` for Antigravity). Other CLIs keep the terminal (`chat::supports`).
+replaced and the conversation continues (same session id, `--resume` for Claude, `--conversation` for Antigravity, `thread/resume` in Codex). Other CLIs keep the terminal (`chat::supports`).
 
-- **Core (`chat.rs`, no interface):** `parse_line` turns one stdout line into `ChatEvent`s. For Claude, events have top-level `type` (init,
-  text deltas, assistant message, tool results, permission request, interrupt, result; sub-agent traffic is dropped). For Antigravity, events have
-  top-level `event` (`init` with `conversation_id`, `step_update` with `step_type` for `agent_response` / `tool`, and terminal `result` with status and error; in headless stream-json mode `agy` runs with `permission_mode: "always-proceed"`).
-  `Transcript` is the conversation (`Item`: user / assistant text / tool call / permission card / notice):
-  `apply(event)` builds it, `push_user` starts a turn (`busy` = turns sent and not yet ended), `from_history` (Claude) and `from_agy_history` (Antigravity) rebuild it from the CLI's
-  own transcript file (`<claude>/projects/<folder>/<session>.jsonl` or `<home>/.gemini/antigravity-cli/brain/<session>/.system_generated/logs/transcript.jsonl`) so a resumed tab shows what was said (`Core::chat_history`).
-  `Core::spawn_chat` starts the child (same `SpawnSpec` env as a PTY tab: `HOLT_*`, `ask-agent` on `PATH`; registered in the process
-  registry and, on Windows, in the app's Job Object) with a reader, a stderr and a writer thread, and wakes the interface; `ChatProcess`
-  kills it on drop. `Core::spawn_spec_chat` is `spawn_spec_for` for the chat: same conversation plan (`--session-id` or `--conversation`),
-  instructions, model and allowed tools, but no turn hooks (the end of a turn is an event) and the task's first prompt travels as
-  `SpawnSpec::first_message`, sent as the first user message.
-- **What goes in:** `user_message_json_for(kind, text)` (`{"type":"user","message":...}` for Claude; `{"event":"user","message":{"content":...}}` for Antigravity),
-  `permission_response_json` (Claude: allow with `updatedInput`, optionally `updatedPermissions`; deny with message),
-  `interrupt` (Claude: `interrupt_json`; Antigravity: `SIGINT` to the child's process group, which cuts the turn and produces `status: "ERROR", error: "interrupted"` while keeping the process alive).
-- **App (`deck/chat.rs`):** `Tab.chat: Option<Box<ChatTab>>` (`Some` = chat view). `Deck::pump_chat` (in `tick`, so also with the window hidden)
-  drains each process; `on_chat_event` saves a new session id after `/clear`, auto-denies `AskUserQuestion` with "ask in plain text", marks
-  the tab "done" and rings when a permission card needs the user, and at the end of a turn calls `on_agent_signal(false)` and
-  `Core::mail_turn_ended` (the reminder of unread mail, which the terminal gets from the `Stop` hook). `chat_submit` sends the composer
-  (a terminal-only slash command such as `/config`, `/login`, `/theme`, or one the CLI lists in `terminal_slash_commands`, is not sent: a
-  notice points to the Terminal view; every other slash command is sent as text and works in this mode). Dictation, attached files and
-  files clicked in the tree are inserted in the composer instead of being typed into a terminal (`chat_insert`).
-- **Delivery (`ask-agent`, durable mail, GitHub tab messages):** the same queue and rule as a terminal tab (`delivery::gate`), with a chat
-  `TabState`: `hooked`, `busy` = the transcript's, `last_output` = the last event, never `typing`. When ready, `chat_deliver` sends the text
-  as a user message (no paste, no Enter timing) and the conversation shows only the message and who sent it (`agent_message_display` strips
-  the "how to answer" instructions Holt adds for the model). A question for a busy tab, or one waiting for a permission answer, waits.
-- **View (`ui/chat.rs`):** a scroll area of items in a centered column; each item's height is remembered (`ChatTab::heights`), so only the
-  items near the viewport are laid out (markdown is the cost; a resumed conversation can have a thousand items). Assistant text is
-  `egui_commonmark` like Documents; a tool call is a collapsible row (Edit/Write open by default, with the diff of `old_string`/`new_string`);
-  a pending permission is a card in the agent's color (Allow ⏎ / Allow for this session / Deny ⎋, with the keys printed on the buttons; Enter and Esc work while the
-  composer is empty); under an assistant avatar (Claude Spark or Antigravity Logo, according to `tab.kind`) the run of text, calls and cards sits in one indented column (the avatar is drawn once per run); a message from another agent is
-  a recessed card with a dashed edge ("claude@dev asks"); an edit's diff uses the line numbers and context of the result's patch (`ToolOutcome::patch`).
-  The composer box holds the text and a row with attach, mic, `model · N% context` (`Transcript::context_percent`), the cost and
-  Send (Stop while a turn runs, Restart when the process ended); under it the keys and `working 00:14 · Esc interrupts`. The Chat | Terminal switch is in the tab header (`ui/panes.rs`). The composer grows to 8 lines, Enter sends, Shift+Enter newline, ↑/↓ history, `/` suggestions, Esc interrupts. Keys: with a chat tab active
-  `term_focus` is off, so the terminal key path and IME are not used.
-- **Resume across restarts:** the session id is in `tab_sessions` as for terminal tabs; the chat reloads the transcript file and restarts the CLI
-  with `--resume` or `--conversation`. `reopen_without_resume` also applies (a resume that fails within 10 s starts from scratch).
-- **Checks:** `crates/core/tests/data/claude-stream-*.jsonl` and `antigravity-stream-*.jsonl` are recordings of Claude Code and Antigravity
-  (tools + slash command / edits, text streaming, interrupt, error) that `chat.rs` tests parse; `crates/core/tests/chat.rs` (launch, history, fake CLIs speaking the protocols, and an `#[ignore]`d test
-  against the real `claude`); `app/src/chat_flow_tests.rs` (delivery into a chat tab, permission round trip, terminal-only command, switching
-  views for both Claude and Antigravity). `HOLT_DEBUG_UI=chat-demo` fills the first chat tab with a made-up conversation for screenshots.
-- **Not done / follow-ups for other CLIs** (each needs its own structured transport and a parser like `parse_line` feeding the same
-  `Transcript`): **Codex**: `codex exec --json` (one JSON event per line, but one turn per process: resume with `codex exec resume <id>`) or
-  the `codex app-server` JSON-RPC (long-lived, approvals and streaming deltas; the better base for a chat). **OpenCode**: `opencode serve`
-  (HTTP + SSE events: sessions, messages, permission requests) or `opencode run --format json` per turn. **ACP**: Agent Client Protocol
-  (JSON-RPC over stdio: `session/prompt`, `session/update` notifications, `session/request_permission`) would cover
-  every CLI that speaks it with one client. Until then other CLIs keep the terminal. Also not done: `AskUserQuestion` (denied with a
-  "ask as text" hint), images in the composer, a setting in Settings for the default view (`chat_by_default` is only in `config.json`),
-  Windows with a `.cmd` shim (the arguments are escaped for the
-  PTY path; the chat path was not run on Windows).
+- **Backend layer (`chat/backend.rs`):** `ChatBackend` defines CLI capabilities, spawn arguments (leading args, mode flags, model, effort, resume id), session persistence rules, and history loader. `Protocol` manages per-process bidirectional stdio communication (`open` handshake, `parse` lines into `Parsed { events, reply }`, `user_message`, `answer_permission`, `interrupt`).
+  - **Claude Code (`ClaudeBackend`):** launches with `-p --input-format stream-json --output-format stream-json --include-partial-messages --verbose --permission-prompt-tool stdio`. Parses top-level `type` objects; tool approvals arrive via `control_request` (`can_use_tool`) and are answered on stdin via `control_response`. Interrupts send `control_request` `interrupt`.
+  - **Antigravity (`AntigravityBackend`):** launches with `--input-format stream-json --output-format stream-json --mode auto`. Parses top-level `event` objects (`init`, `step_update`, `result`). Headless mode runs with `always-proceed` (no stdio approval prompts). Interrupts send `SIGINT` to the child's process group (`libc::kill(-pid, SIGINT)`), yielding an error result with `error: "interrupted"`.
+  - **Codex (`CodexBackend`):** launches with `app-server` (JSON-RPC over stdio). Performs `initialize` handshake, opens or rejoins sessions with `thread/start` or `thread/resume`, and runs turns with `turn/start`. Assistant text streams via `item/agentMessage/delta`. Approvals arrive as server requests (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/permissions/requestApproval`) and Holt replies with `{"id": <req_id>, "result": {"decision": ...}}`. Interrupts send `turn/interrupt`. Turn messages sent while active are queued so every turn produces its own result.
+- **Core (`chat.rs`, no interface):** `Transcript` is the conversation (`Item`: user / assistant text / thinking / tool call / permission card / notice).
+  `apply(event)` builds it, `push_user` starts a turn (`busy` = turns sent and not yet ended). `from_history` (Claude), `from_agy_history` (Antigravity), or `Replay` events (Codex) rebuild the conversation for resumed tabs (`Core::chat_history`).
+  `Core::spawn_chat` starts the child with reader, stderr, and writer threads, wiring `Protocol` methods under a mutex lock.
+  `Core::spawn_spec_chat` uses `backend.spawn_args(&Launch { model, effort })`, omits terminal turn hooks, and passes initial task prompts via `SpawnSpec::first_message`.
+- **App (`deck/chat.rs`):** `Tab.chat: Option<Box<ChatTab>>` (`Some` = chat view). `Deck::pump_chat` drains processes; `on_chat_event` tracks session IDs, auto-denies unsupported tool questions, rings and marks tab "done" on permission requests, and ends turns.
+- **View (`ui/chat.rs`):** scroll area with item height cache. Renders avatars for Claude, Antigravity, and Codex (`Icon::CodexLogo`, tab color `#10a37f`). Tool calls show command, file diffs, and patch line numbers (`PatchHunk`). Pending permission cards allow 1-click approvals, allow-for-session, or denials with keyboard shortcuts.
+
+### How to add a chat backend (Checklist)
+
+1. Implement `ChatBackend` in `crates/core/src/chat/`:
+   - `kind(&self) -> &'static str`: CLI identifier.
+   - `leading_args`, `mode_args`, `model_args`, `effort_args`: command-line flags.
+   - `resumes_by_args(&self) -> bool`: whether `--resume <id>` is CLI argument or protocol-driven.
+   - `protocol(&self, spec: &SpawnSpec) -> Box<dyn Protocol>`: returns process protocol state machine.
+   - `history(&self, home: &Path, session: &str) -> Option<Transcript>`: disk transcript or `history_pending` flag.
+2. Implement `Protocol`:
+   - `open(&mut self) -> Vec<String>`: initial handshake lines to stdin.
+   - `parse(&mut self, line: &str) -> Parsed`: transforms stdout line into `ChatEvent`s and optional immediate JSON-RPC replies.
+   - `user_message(&mut self, text: &str) -> Vec<String>`: serializes user turn input.
+   - `answer_permission(...) -> Vec<String>`: serializes approval decisions.
+   - `interrupt(&mut self) -> Interrupt`: returns stdin lines or process group signal.
+3. Wire into `chat/backend.rs`: register in `for_kind()`.
+4. Register visual assets: color in `agents.rs` / `app/src/agents.rs` and icon in `ui/chat.rs`.
+5. Add recorded test samples under `crates/core/tests/data/` and unit tests in `chat/` and `tests/chat.rs`.
+
+### OpenCode and ACP requirements
+
+- **OpenCode (`opencode serve`):**
+  OpenCode does not expose a bidirectional JSON stdio mode on `opencode run`. It provides `opencode serve` which hosts an HTTP/REST + SSE server (by default localhost:4096).
+  To integrate OpenCode as a chat backend:
+  - Transport: spawn `opencode serve` as a daemon child process with an assigned ephemeral port.
+  - Protocol: HTTP client for session creation (`POST /session`), turn submission (`POST /session/{id}/prompt`), and tool permission responses (`POST /session/{id}/permission`); SSE stream subscriber (`GET /session/{id}/events`) for assistant text deltas, tool calls, and turn completions.
+  - Resume: sessions persist in SQLite database; pass session ID to existing session endpoint.
+- **ACP (Agent Client Protocol):**
+  ACP is a standardized JSON-RPC protocol over stdio for AI coding assistants.
+  To support ACP:
+  - Transport: generic stdio JSON-RPC, identical to Codex's transport pattern.
+  - Handshake: `initialize` / `initialized` lifecycle.
+  - Protocol: `session/prompt` for sending user messages, `session/update` notifications for streaming deltas and tool calls, `session/request_permission` for approval cards, and `session/cancel` for interrupts.
+  - A single generic `AcpBackend` can back any CLI declaring ACP capability.
 
 ## Tasks desk (`crates/core/src/tasks/`, `scope.rs`, `crates/app/src/tasks_ui.rs`)
 

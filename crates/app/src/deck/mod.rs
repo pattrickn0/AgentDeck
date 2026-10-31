@@ -691,6 +691,7 @@ fn debug_fake_spec(kind: &str, cwd: &std::path::Path) -> SpawnSpec {
         resumed: false,
         session_log: None,
         first_message: None,
+        session: None,
     }
 }
 
