@@ -11,8 +11,9 @@
 //!    the CLI's own transcript file when a saved conversation is resumed, [`Transcript::from_history`]).
 //! 3. [`ChatProcess`]: the child process, its reader/writer threads and the registry/shutdown handling of every tab.
 //!
-//! Only Claude is supported for now (`supports`); the notes about Codex, OpenCode and ACP are in
-//! `memory/ARCHITECTURE.md`.
+//! What differs between CLIs lives in the backend layer ([`backend`]: a [`ChatBackend`] per CLI and a [`Protocol`] per
+//! running process; Claude Code, Antigravity and Codex today). [`supports`] reads the capability of the backend. How to
+//! add one, and what OpenCode and ACP would need, is in `memory/ARCHITECTURE.md`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -27,6 +28,12 @@ use crate::agents::SpawnSpec;
 use crate::t;
 use crate::{process, Core};
 
+mod backend;
+mod codex;
+
+pub use backend::{capability, for_kind, Capability, ChatBackend, Interrupt, Launch, Parsed, Protocol};
+pub use codex::patch_from_diff;
+
 /// Tool results longer than this are cut when stored (the interface shows a few lines anyway).
 const RESULT_MAX_CHARS: usize = 8_000;
 /// Items kept in a transcript; the oldest are dropped (a resumed conversation loads the tail only).
@@ -34,36 +41,14 @@ const ITEMS_MAX: usize = 1_500;
 /// The text the CLI echoes when a turn is interrupted.
 const INTERRUPTED: &str = "[Request interrupted by user";
 
-/// CLIs that have a chat view.
+/// CLIs that have a chat view: the ones whose backend says so.
 pub fn supports(kind: &str) -> bool {
-    matches!(kind, "claude" | "antigravity")
+    capability(kind) == Capability::Chat
 }
 
 /// Slash commands that open a screen of the terminal UI and do nothing useful in the structured mode.
 pub const TERMINAL_ONLY_COMMANDS: &[&str] =
     &["config", "login", "logout", "theme", "terminal-setup", "vim", "ide", "resume", "statusline", "output-style", "keybindings"];
-
-/// Flags that switch the CLI to the structured mode.
-pub fn chat_args(kind: &str) -> Vec<String> {
-    if kind == "antigravity" {
-        ["--input-format", "stream-json", "--output-format", "stream-json", "--mode", "auto"].iter().map(|s| (*s).to_owned()).collect()
-    } else {
-        [
-            "-p",
-            "--input-format",
-            "stream-json",
-            "--output-format",
-            "stream-json",
-            "--include-partial-messages",
-            "--verbose",
-            "--permission-prompt-tool",
-            "stdio",
-        ]
-        .iter()
-        .map(|s| (*s).to_owned())
-        .collect()
-    }
-}
 
 // ---------- Events ----------
 
@@ -187,6 +172,14 @@ pub enum ChatEvent {
     UnknownRequest {
         request_id: String,
     },
+    /// Something the backend says in the conversation (a resume that fell back to a new conversation, a warning).
+    Notice {
+        text: String,
+        error: bool,
+    },
+    /// What the CLI saved of the conversation it just resumed (a backend that reads it from the process itself, not
+    /// from a file: Codex's `thread/resume`). Applied only where the chat asked for it ([`Transcript::history_pending`]).
+    Replay(Vec<Item>),
     /// A line with nothing to show (rate limits, hooks, partial tool input...).
     Ignored,
 }
@@ -249,21 +242,28 @@ fn blocks_of(content: &Value) -> Vec<Block> {
         .collect()
 }
 
-/// Turns one line of the CLI's stdout into events. A line that is not JSON (a stray warning) yields nothing.
+/// Turns one line of the stdout of Claude Code or Antigravity into events (the shape tells which: Antigravity's has a
+/// top-level `event` and no `type`). A line that is not JSON (a stray warning) yields nothing. Each backend's
+/// [`Protocol::parse`] is the general entry point; this one is kept for the recordings of the tests.
 pub fn parse_line(line: &str) -> Vec<ChatEvent> {
     let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { return Vec::new() };
     if v.get("type").is_none() && v.get("event").is_some() {
         return parse_agy_line(&v);
     }
-    let event = match str_of(&v, "type") {
-        "system" => match str_of(&v, "subtype") {
+    parse_claude_line(&v)
+}
+
+/// One line of Claude Code's stream.
+fn parse_claude_line(v: &Value) -> Vec<ChatEvent> {
+    let event = match str_of(v, "type") {
+        "system" => match str_of(v, "subtype") {
             "init" => ChatEvent::Init {
-                session: str_of(&v, "session_id").to_owned(),
-                model: str_of(&v, "model").to_owned(),
+                session: str_of(v, "session_id").to_owned(),
+                model: str_of(v, "model").to_owned(),
                 commands: strings(v.get("slash_commands")),
                 terminal_commands: strings(v.get("terminal_slash_commands")),
             },
-            "status" if str_of(&v, "status") == "requesting" => ChatEvent::Requesting,
+            "status" if str_of(v, "status") == "requesting" => ChatEvent::Requesting,
             _ => ChatEvent::Ignored,
         },
         "stream_event" => {
@@ -274,7 +274,7 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                 return Vec::new();
             }
             if str_of(ev, "type") == "content_block_delta" && str_of(delta, "type") == "text_delta" {
-                ChatEvent::TextDelta { message: str_of(&v, "api_message_id").to_owned(), text: str_of(delta, "text").to_owned() }
+                ChatEvent::TextDelta { message: str_of(v, "api_message_id").to_owned(), text: str_of(delta, "text").to_owned() }
             } else {
                 ChatEvent::Ignored
             }
@@ -306,7 +306,7 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
         }
         "control_request" => {
             let req = v.get("request").unwrap_or(&Value::Null);
-            let request_id = str_of(&v, "request_id").to_owned();
+            let request_id = str_of(v, "request_id").to_owned();
             if str_of(req, "subtype") == "can_use_tool" {
                 ChatEvent::Permission(PermissionRequest {
                     request_id,
@@ -320,15 +320,15 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                 ChatEvent::UnknownRequest { request_id }
             }
         }
-        "control_cancel_request" => ChatEvent::PermissionCancelled(str_of(&v, "request_id").to_owned()),
+        "control_cancel_request" => ChatEvent::PermissionCancelled(str_of(v, "request_id").to_owned()),
         "result" => {
             let is_error = v.get("is_error").and_then(Value::as_bool).unwrap_or(false);
             ChatEvent::Result(TurnResult {
                 is_error,
-                error: if is_error { str_of(&v, "result").to_owned() } else { String::new() },
+                error: if is_error { str_of(v, "result").to_owned() } else { String::new() },
                 cost_usd: v.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
                 duration_ms: v.get("duration_ms").and_then(Value::as_u64).unwrap_or(0),
-                session: str_of(&v, "session_id").to_owned(),
+                session: str_of(v, "session_id").to_owned(),
                 context_window: v
                     .get("modelUsage")
                     .and_then(Value::as_object)
@@ -503,15 +503,6 @@ pub fn agy_user_message_json(text: &str) -> String {
     json!({ "event": "user", "message": { "content": text } }).to_string()
 }
 
-/// Formats a user message for `kind` CLI.
-pub fn user_message_json_for(kind: &str, text: &str) -> String {
-    if kind == "antigravity" {
-        agy_user_message_json(text)
-    } else {
-        user_message_json(text)
-    }
-}
-
 /// The answer to a [`PermissionRequest`]: `input` is sent back unchanged when allowing, with `rules` (the request's
 /// suggestions) when the user allowed it for the rest of the session.
 pub fn permission_response_json(request_id: &str, allow: bool, input: &Value, deny_message: &str, rules: &[Value]) -> String {
@@ -606,6 +597,8 @@ pub struct Transcript {
     pub context_window: u64,
     /// Bumped on every change, for the interface to know when to lay the text out again.
     pub version: u64,
+    /// The conversation was resumed and its history is not read yet: the process sends it ([`ChatEvent::Replay`]).
+    pub history_pending: bool,
 }
 
 impl Transcript {
@@ -704,6 +697,17 @@ impl Transcript {
                 self.terminal_commands = terminal_commands.clone();
             }
             ChatEvent::Requesting | ChatEvent::UnknownRequest { .. } | ChatEvent::Ignored => {}
+            ChatEvent::Notice { text, error } => self.push(Item::Notice { text: text.clone(), error: *error }),
+            ChatEvent::Replay(items) => {
+                // What the user already typed while the process was starting stays after the history.
+                if std::mem::take(&mut self.history_pending) {
+                    let later = std::mem::take(&mut self.items);
+                    self.items = items.clone();
+                    self.items.extend(later);
+                    let drop = self.items.len().saturating_sub(ITEMS_MAX);
+                    self.items.drain(..drop);
+                }
+            }
             ChatEvent::TextDelta { message, text } => match self.items.last_mut() {
                 Some(Item::Assistant { message: m, text: t, streaming: true }) if m == message => t.push_str(text),
                 _ => self.push(Item::Assistant { message: message.clone(), text: text.clone(), streaming: true }),
@@ -980,21 +984,7 @@ impl Core {
     pub fn chat_history(&self, project: &str, id: &str) -> Transcript {
         let Some(session) = self.tab_session(project, id) else { return Transcript::default() };
         let kind = crate::Ident::parse(id).map(|i| i.kind).unwrap_or_default();
-        if kind == "antigravity" {
-            if let Some(path) = agy_history_file(&self.inner.home, &session) {
-                if let Ok(text) = std::fs::read_to_string(path) {
-                    let mut t = from_agy_history(&text, ITEMS_MAX);
-                    t.session = Some(session);
-                    return t;
-                }
-            }
-            return Transcript::default();
-        }
-        let config_dir = crate::resume::claude_config_dir(&self.inner.home);
-        let Some(text) = history_file(&config_dir, &session).and_then(|p| std::fs::read_to_string(p).ok()) else {
-            return Transcript::default();
-        };
-        let mut t = Transcript::from_history(&text, ITEMS_MAX);
+        let Some(mut t) = for_kind(&kind).and_then(|b| b.history(&self.inner.home, &session)) else { return Transcript::default() };
         t.session = Some(session);
         t
     }
@@ -1017,15 +1007,18 @@ pub struct ChatProcess {
     child: Arc<Mutex<Child>>,
     registry_id: u64,
     core: Core,
-    kind: String,
     stdin: Sender<String>,
     rx: Receiver<ChatMsg>,
+    /// The state of the conversation with this process. Whoever writes to `stdin` while holding it keeps the order the
+    /// protocol decided.
+    proto: Arc<Mutex<Box<dyn Protocol>>>,
 }
 
 impl Core {
     /// Starts `spec` (a launch from [`Core::spawn_spec_chat`]) with its pipes. `wake` is called whenever
     /// something arrives, to make the interface look at [`ChatProcess::try_recv`].
     pub fn spawn_chat(&self, spec: &SpawnSpec, wake: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<ChatProcess> {
+        let backend = for_kind(&spec.kind).ok_or_else(|| std::io::Error::other(format!("{} has no chat view", spec.kind)))?;
         let mut cmd = Command::new(&spec.program);
         cmd.args(&spec.args).current_dir(&spec.cwd).env_clear().envs(&spec.env);
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -1040,6 +1033,10 @@ impl Core {
 
         let (tx, rx) = channel();
         let (stdin, lines) = channel::<String>();
+        let proto: Arc<Mutex<Box<dyn Protocol>>> = Arc::new(Mutex::new(backend.protocol(spec)));
+        for line in proto.lock().open() {
+            let _ = stdin.send(line);
+        }
         // Writer: a stalled process must never block the interface.
         std::thread::Builder::new().name("chat-write".into()).spawn(move || {
             for line in lines {
@@ -1059,17 +1056,21 @@ impl Core {
                 }
             })?;
         }
-        let (reply, child_for_reader) = (stdin.clone(), child.clone());
+        let (reply, proto_for_reader, child_for_reader) = (stdin.clone(), proto.clone(), child.clone());
         std::thread::Builder::new().name("chat-read".into()).spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
                 let mut any = false;
-                for ev in parse_line(&line) {
-                    if let ChatEvent::UnknownRequest { request_id } = &ev {
-                        let _ = reply.send(error_response_json(request_id));
+                {
+                    let mut proto = proto_for_reader.lock();
+                    let parsed = proto.parse(&line);
+                    for l in parsed.reply {
+                        let _ = reply.send(l);
                     }
-                    any = true;
-                    let _ = tx.send(ChatMsg::Event(ev));
+                    for ev in parsed.events {
+                        any = true;
+                        let _ = tx.send(ChatMsg::Event(ev));
+                    }
                 }
                 if any {
                     wake();
@@ -1079,7 +1080,7 @@ impl Core {
             let _ = tx.send(ChatMsg::Exited(code));
             wake();
         })?;
-        Ok(ChatProcess { child, registry_id, core: self.clone(), kind: spec.kind.clone(), stdin, rx })
+        Ok(ChatProcess { child, registry_id, core: self.clone(), stdin, rx, proto })
     }
 }
 
@@ -1088,23 +1089,27 @@ impl ChatProcess {
         self.rx.try_recv().ok()
     }
 
-    fn send_line(&self, line: String) {
-        let _ = self.stdin.send(line);
+    fn send_lines(&self, lines: Vec<String>) {
+        for line in lines {
+            let _ = self.stdin.send(line);
+        }
     }
 
     pub fn send_user(&self, text: &str) {
-        self.send_line(user_message_json_for(&self.kind, text));
+        let mut proto = self.proto.lock();
+        self.send_lines(proto.user_message(text));
     }
 
     pub fn answer_permission(&self, request_id: &str, allow: bool, input: &Value, deny_message: &str, rules: &[Value]) {
-        self.send_line(permission_response_json(request_id, allow, input, deny_message, rules));
+        let mut proto = self.proto.lock();
+        self.send_lines(proto.answer_permission(request_id, allow, input, deny_message, rules));
     }
 
     pub fn interrupt(&self) {
-        if self.kind == "antigravity" {
-            process::interrupt_process(&self.child.lock());
-        } else {
-            self.send_line(interrupt_json());
+        let mut proto = self.proto.lock();
+        match proto.interrupt() {
+            Interrupt::Lines(lines) => self.send_lines(lines),
+            Interrupt::Signal => process::interrupt_process(&self.child.lock()),
         }
     }
 
@@ -1446,11 +1451,11 @@ mod tests {
 
     #[test]
     fn antigravity_stdin_message_format() {
-        let claude_msg: Value = serde_json::from_str(&user_message_json_for("claude", "test")).unwrap();
+        let claude_msg: Value = serde_json::from_str(&user_message_json("test")).unwrap();
         assert_eq!(claude_msg["type"], "user");
         assert_eq!(claude_msg["message"]["content"], "test");
 
-        let agy_msg: Value = serde_json::from_str(&user_message_json_for("antigravity", "test")).unwrap();
+        let agy_msg: Value = serde_json::from_str(&agy_user_message_json("test")).unwrap();
         assert_eq!(agy_msg["event"], "user");
         assert_eq!(agy_msg["message"]["content"], "test");
     }
