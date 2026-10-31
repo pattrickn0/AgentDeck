@@ -50,6 +50,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "Local transcription: no precompiled whisper.cpp binary for {os}/{arch}. Compile whisper.cpp with Vulkan/CUDA and put whisper-cli on PATH, or use the CPU engine.",
         "Transcrição local: não há binário pré-compilado do whisper.cpp para {os}/{arch}. Compile o whisper.cpp com Vulkan/CUDA e ponha o whisper-cli no PATH, ou use o motor de CPU.",
     ),
+    ("whisper.cpp with Vulkan", "whisper.cpp com Vulkan"),
+    ("whisper.cpp (Vulkan)", "whisper.cpp (Vulkan)"),
     ("whisper.cpp with CUDA (~700 MB)", "whisper.cpp com CUDA (~700 MB)"),
     ("whisper.cpp (CUDA)", "whisper.cpp (CUDA)"),
     ("Local transcription: downloading {what}…", "Transcrição local: baixando {what}…"),
