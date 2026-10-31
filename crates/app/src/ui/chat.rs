@@ -271,7 +271,10 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
             chat.composer = format!("/{} ", slash[0]);
             set_cursor_end(&ctx, id, &chat.composer);
         }
-        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
+        // Ctrl+Enter and Shift+Enter add a line. egui matches plain Enter ignoring Shift, so they are taken first.
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter) || i.consume_key(Modifiers::SHIFT, Key::Enter)) {
+            new_line(&ctx, id, &mut chat.composer);
+        } else if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
             match (&pending, chat.composer.trim().is_empty()) {
                 (Some(request_id), true) => acts.push(Act::Answer { request_id: request_id.clone(), allow: true, for_session: false }),
                 _ => submit = true,
@@ -315,7 +318,13 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
         .desired_width(box_r.width() - 4.0)
         .desired_rows(rows)
         .interactive(alive);
-    let resp = te.show(&mut field);
+    // Past the last row the box stops growing and scrolls, and the text field keeps the cursor in sight.
+    let resp = egui::ScrollArea::vertical()
+        .id_salt(("chat-composer-scroll", uid))
+        .max_height(text_r.height() - 2.0)
+        .auto_shrink([false, true])
+        .show(&mut field, |ui| te.show(ui))
+        .inner;
     if chat.focus_composer && alive {
         resp.response.request_focus();
         chat.focus_composer = false;
@@ -654,6 +663,27 @@ fn set_cursor_end(ctx: &egui::Context, id: Id, text: &str) {
         state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
         state.store(ctx, id);
     }
+}
+
+/// A line break where the cursor is, over the selection, as the text field does with its own Enter.
+fn new_line(ctx: &egui::Context, id: Id, text: &mut String) {
+    let state = egui::TextEdit::load_state(ctx, id);
+    let end = egui::text::CCursor::new(text.chars().count());
+    let [a, b] =
+        state.as_ref().and_then(|s| s.cursor.char_range()).map_or([end, end], |r| r.sorted_cursors()).map(|c| usize::from(c.index));
+    let at = insert_line(text, a, b);
+    if let Some(mut state) = state {
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+        state.store(ctx, id);
+    }
+}
+
+/// Replaces the characters `a..b` with a line break; returns the character index after it.
+fn insert_line(text: &mut String, a: usize, b: usize) -> usize {
+    let byte = |n: usize| text.char_indices().nth(n).map_or(text.len(), |(i, _)| i);
+    let (start, stop) = (byte(a), byte(b));
+    text.replace_range(start..stop, "\n");
+    a + 1
 }
 
 /// ↑/↓ in the composer: browses what was sent before; the unsent text comes back at the bottom.
@@ -1252,6 +1282,18 @@ mod tests {
             input,
             outcome: out.map(|(text, is_error)| ToolOutcome { tool_use_id: "t1".into(), text: text.into(), is_error, patch: vec![] }),
         }
+    }
+
+    #[test]
+    fn a_new_line_goes_at_the_cursor_and_over_the_selection() {
+        let mut t = String::from("olá mundo");
+        assert_eq!(insert_line(&mut t, 3, 3), 4);
+        assert_eq!(t, "olá\n mundo");
+        assert_eq!(insert_line(&mut t, 4, 10), 5);
+        assert_eq!(t, "olá\n\n");
+        let mut empty = String::new();
+        assert_eq!(insert_line(&mut empty, 0, 0), 1);
+        assert_eq!(empty, "\n");
     }
 
     #[test]
