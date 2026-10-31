@@ -76,9 +76,9 @@ struct Archive {
     sha256: &'static str,
 }
 
-// TODO(t13): all zeros until the `whisper-engines` workflow has built the zip; then paste the hash from its "Package" step
-// (or the release's `.sha256` asset). While it is zeros the download fails its checksum and dictation stays on the CPU.
-const VULKAN_LINUX_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+// From the `whisper-engines-v1.9.5` release's `.sha256` asset (checked against the downloaded zip). A new build of
+// the workflow means a new tag and a new hash here.
+const VULKAN_LINUX_SHA256: &str = "33a1de4ab9ddd420f330d4d353036a6d599cf913eb7ac6680174384b25a6a616";
 
 /// A checksum not filled in yet (all zeros): the package is not offered.
 fn is_placeholder(sha256: &str) -> bool {
