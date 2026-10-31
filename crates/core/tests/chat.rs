@@ -75,12 +75,14 @@ fn a_task_prompt_becomes_the_first_message_instead_of_an_argument() {
 }
 
 #[test]
-fn claude_and_antigravity_have_a_chat_view_and_the_choice_is_remembered_per_tab() {
+fn claude_antigravity_and_codex_have_a_chat_view_and_the_choice_is_remembered_per_tab() {
     let env = start_with(false, false);
     let claude = Ident::parse("claude@dev").expect("ident");
     let agy = Ident::parse("antigravity@dev").expect("ident");
+    let codex = Ident::parse("codex@dev").expect("ident");
     assert!(env.core.tab_is_chat(&env.project, &claude), "chat is the default for Claude");
     assert!(env.core.tab_is_chat(&env.project, &agy), "chat is the default for Antigravity");
+    assert!(env.core.tab_is_chat(&env.project, &codex), "chat is the default for Codex");
     assert!(!env.core.tab_is_chat(&env.project, &Ident::main("aider")));
     assert!(env.core.spawn_spec_chat(&env.project, &Ident::main("aider")).is_err());
 
@@ -95,6 +97,42 @@ fn claude_and_antigravity_have_a_chat_view_and_the_choice_is_remembered_per_tab(
     assert!(env.core.tab_is_chat(&env.project, &Ident::parse("antigravity@other").expect("ident")));
     env.core.set_tab_chat(&env.project, &agy.id(), true);
     assert!(env.core.tab_is_chat(&env.project, &agy));
+
+    env.core.set_tab_chat(&env.project, &codex.id(), false);
+    assert!(!env.core.tab_is_chat(&env.project, &codex));
+    assert!(env.core.tab_is_chat(&env.project, &Ident::parse("codex@other").expect("ident")));
+    env.core.set_tab_chat(&env.project, &codex.id(), true);
+    assert!(env.core.tab_is_chat(&env.project, &codex));
+    env.core.shutdown();
+}
+
+#[test]
+fn the_codex_chat_launch_uses_the_structured_mode_and_the_tabs_own_conversation() {
+    let env = start_with(false, false);
+    install_fake_agent(&env.root, "codex");
+    let ident = Ident::parse("codex@dev").expect("ident");
+    let id = ident.id();
+
+    let first = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    assert_eq!(first.args.first().map(String::as_str), Some("app-server"), "{:?}", first.args);
+    assert!(!first.resumed);
+
+    let session = "01a18f37-5976-7bc1-9616-3ab2e181dab3";
+    let codex_dir = env.root.join("home").join(".codex").join("sessions").join("2026").join("10").join("30");
+    std::fs::create_dir_all(&codex_dir).expect("mkdir");
+    std::fs::write(codex_dir.join(format!("rollout-2026-10-30T12-00-00-{session}.jsonl")), "").expect("rollout");
+    assert!(env.core.set_tab_session(&env.project, &id, session));
+
+    let again = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    assert!(again.resumed);
+    assert_eq!(again.session.as_deref(), Some(session));
+    assert_eq!(again.args.first().map(String::as_str), Some("app-server"));
+    assert!(!again.args.contains(&"resume".to_owned()));
+
+    let history = env.core.chat_history(&env.project, &id);
+    assert!(history.history_pending);
+    assert_eq!(history.session.as_deref(), Some(session));
+
     env.core.shutdown();
 }
 

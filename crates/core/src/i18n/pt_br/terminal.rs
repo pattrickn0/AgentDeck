@@ -41,6 +41,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Allow for this session", "Permitir nesta sessão"),
     ("Deny", "Negar"),
     ("Interrupted.", "Interrompido."),
+    ("Declined.", "Recusado."),
+    ("The turn failed.", "O turno falhou."),
+    ("Network access: {host}", "Acesso à rede: {host}"),
+    (
+        "Could not resume the Codex conversation ({reason}). A new one was started.",
+        "Não foi possível retomar a conversa do Codex ({reason}). Uma nova foi iniciada.",
+    ),
     ("Chat", "Conversa"),
     ("Terminal", "Terminal"),
     ("{pct}% context", "{pct}% do contexto"),
