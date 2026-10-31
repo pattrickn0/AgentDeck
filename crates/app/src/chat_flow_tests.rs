@@ -111,7 +111,8 @@ fn picking_a_model_and_an_effort_restarts_the_process_on_the_same_conversation()
     // The CLI saved the conversation once a turn happened: the restart resumes it.
     let dir = env.ws.parent().expect("root").join("home").join(".claude").join("projects").join("-ws");
     std::fs::create_dir_all(&dir).expect("mkdir");
-    std::fs::write(dir.join(format!("{session}.jsonl")), json!({ "type": "user", "message": { "content": "hi" } }).to_string()).expect("file");
+    std::fs::write(dir.join(format!("{session}.jsonl")), json!({ "type": "user", "message": { "content": "hi" } }).to_string())
+        .expect("file");
 
     env.deck.chat_set_model(0, Some("opus"));
     env.deck.chat_set_effort(0, Some(holt_core::models::Effort::High));
