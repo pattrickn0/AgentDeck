@@ -224,3 +224,110 @@ fn an_antigravity_tab_goes_to_the_terminal_and_back_on_the_same_conversation() {
     assert!(matches!(&items[0], Item::User { text, .. } if text == "first question"));
     assert_eq!(env.core.tab_session(&env.project(), &id).as_deref(), Some(session), "same conversation");
 }
+
+const FAKE_CODEX: &str = r#"#!/bin/sh
+if [ "$1" = "app-server" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      *\"method\":\"initialize\"*)
+        id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"id\":$id,\"result\":{\"userAgent\":\"fake\"}}"
+        ;;
+      *\"method\":\"thread/resume\"*)
+        id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"id\":$id,\"result\":{\"thread\":{\"id\":\"th-123\",\"turns\":[{\"items\":[{\"type\":\"userMessage\",\"content\":[{\"type\":\"text\",\"text\":\"prior question\"}]},{\"type\":\"agentMessage\",\"id\":\"m1\",\"text\":\"prior answer\"}]}]}}}"
+        ;;
+      *\"method\":\"thread/start\"*)
+        id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"id\":$id,\"result\":{\"thread\":{\"id\":\"th-123\"}}}"
+        ;;
+      *\"method\":\"turn/start\"*)
+        id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"id\":$id,\"result\":{\"turn\":{\"id\":\"turn-1\"}}}"
+        echo '{"method":"turn/started","params":{"turn":{"id":"turn-1"}}}'
+        echo '{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"hello from codex"}}}'
+        echo '{"method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}'
+        ;;
+    esac
+  done
+else
+  while IFS= read -r line; do
+    :
+  done
+fi
+"#;
+
+fn env_with_codex_chat_agent() -> Env {
+    let mut env = Env::start_with(true);
+    let script = env.ws.parent().expect("root").join("fake-bin").join("codex");
+    std::fs::write(&script, FAKE_CODEX).expect("write");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    env.pump("the agent list", |d| d.agents.knows("codex"));
+    env.deck.open_tab("codex", false);
+    env.pump("the chat tab to be running", |d| d.tabs.first().is_some_and(|t| t.alive));
+    env
+}
+
+#[test]
+fn a_codex_tab_opens_in_the_chat_view_with_its_own_conversation() {
+    let env = env_with_codex_chat_agent();
+    let tab = &env.deck.tabs[0];
+    assert!(tab.chat.is_some(), "chat is the default view of a Codex tab");
+    let spec = tab.spec.as_ref().expect("spec");
+    assert!(spec.args.iter().any(|a| a == "app-server"), "{:?}", spec.args);
+}
+
+#[test]
+fn a_codex_question_from_another_agent_becomes_a_message_of_the_conversation_and_ends_with_the_turn() {
+    let mut env = env_with_codex_chat_agent();
+    let prompt = "[Message from the agent \"claude@dev\" received by Holt]\n\nCan you help with Codex?\n\nAnswer by running in the shell: ask-agent --reply 10 \"your answer\"";
+    env.deck.send_to_instance(&Ident::main("codex"), false, prompt.to_owned()).expect("queued");
+    env.pump("the answer", |d| {
+        d.tabs[0]
+            .chat
+            .as_ref()
+            .is_some_and(|c| c.transcript.items.iter().any(|i| matches!(i, Item::Assistant { text, .. } if text == "hello from codex")))
+    });
+    let items = items(&env);
+    assert!(
+        matches!(&items[0], Item::User { text, from: Some(who) } if text == "Can you help with Codex?" && who == "claude@dev"),
+        "{items:?}"
+    );
+    env.pump("the turn to end", |d| !d.tabs[0].chat.as_ref().is_some_and(|c| c.transcript.busy()) && !d.tabs[0].busy);
+}
+
+#[test]
+fn a_codex_tab_goes_to_the_terminal_and_back_on_the_same_conversation() {
+    let mut env = env_with_codex_chat_agent();
+    let id = env.deck.tabs[0].ident.id();
+    let session = "th-123";
+
+    // A rollout file under ~/.codex/sessions ensures codex_has_session finds it:
+    let codex_dir = env.ws.parent().expect("root").join("home").join(".codex").join("sessions").join("2026").join("10").join("30");
+    std::fs::create_dir_all(&codex_dir).expect("mkdir");
+    std::fs::write(codex_dir.join(format!("rollout-2026-10-30T12-00-00-{session}.jsonl")), "").expect("rollout");
+
+    assert!(env.core.set_tab_session(&env.project(), &id, session));
+
+    env.deck.set_tab_view(0, false);
+    assert!(env.deck.tabs[0].chat.is_none() && env.deck.tabs[0].alive);
+    let spec = env.deck.tabs[0].spec.as_ref().expect("spec");
+    assert!(
+        spec.resumed
+            && spec.args.contains(&session.to_owned())
+            && spec.args.contains(&"resume".to_owned())
+            && !spec.args.iter().any(|a| a == "app-server"),
+        "{:?}",
+        spec.args
+    );
+    assert!(!env.core.tab_is_chat(&env.project(), &env.deck.tabs[0].ident), "the choice is remembered");
+
+    env.deck.set_tab_view(0, true);
+    let spec = env.deck.tabs[0].spec.as_ref().expect("spec");
+    assert!(spec.resumed && spec.args.iter().any(|a| a == "app-server"));
+    env.pump("the replay items to load", |d| d.tabs[0].chat.as_ref().is_some_and(|c| c.transcript.items.len() >= 2));
+    let items = items(&env);
+    assert_eq!(items.len(), 2, "the conversation comes back from thread/resume: {items:?}");
+    assert!(matches!(&items[0], Item::User { text, .. } if text == "prior question"));
+    assert_eq!(env.core.tab_session(&env.project(), &id).as_deref(), Some(session), "same conversation");
+}
