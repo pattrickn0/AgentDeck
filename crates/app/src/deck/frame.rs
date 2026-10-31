@@ -428,6 +428,8 @@ impl Deck {
                     .print(&format!("\r\n\x1b[90m[{}]\x1b[0m\r\n", t!("process ended (code {code}) — press Enter to restart", code)));
             }
         }
+        // A view switch asked for during a turn goes through once the turn is over, before the queued messages go out.
+        self.apply_waiting_views();
         // Messages from other agents: typed into the terminal when the tab becomes free (one at a time;
         // rule in `holt_core::delivery`).
         for i in 0..self.tabs.len() {

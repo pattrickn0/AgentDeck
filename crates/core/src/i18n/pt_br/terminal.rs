@@ -49,6 +49,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "Não foi possível retomar a conversa do Codex ({reason}). Uma nova foi iniciada.",
     ),
     ("Chat view", "Visão de conversa"),
+    ("{agent} switches to the chat view when this turn ends.", "{agent} muda para a visão de conversa quando este turno terminar."),
+    ("{agent} switches to the terminal view when this turn ends.", "{agent} muda para a visão de terminal quando este turno terminar."),
     ("Terminal view", "Visão de terminal"),
     ("Wait for the answer to finish to change this", "Espere a resposta terminar para mudar isto"),
     ("The model of the next answer. The conversation continues", "O modelo da próxima resposta. A conversa continua"),

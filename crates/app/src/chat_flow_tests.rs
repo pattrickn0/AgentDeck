@@ -169,6 +169,33 @@ fn the_tab_goes_to_the_terminal_and_back_on_the_same_conversation() {
     assert_eq!(env.core.tab_session(&env.project(), &id).as_deref(), Some(session.as_str()), "same conversation");
 }
 
+#[test]
+fn a_view_switch_during_a_turn_waits_for_its_end_instead_of_killing_it() {
+    let mut env = env_with_chat_agent();
+    env.deck.tabs[0].chat.as_mut().expect("chat").composer = "need-permission please".into();
+    env.deck.chat_submit(0);
+    env.pump("the permission card", |d| d.tabs[0].chat.as_ref().is_some_and(|c| c.transcript.waiting_for_permission()));
+    let spawned = env.deck.tabs[0].spawned_at;
+    let session = env.core.tab_session(&env.project(), &env.deck.tabs[0].ident.id()).expect("session");
+
+    env.deck.set_tab_view(0, false);
+    assert!(env.deck.tabs[0].chat.is_some(), "the turn keeps running in the chat view");
+    assert_eq!(env.deck.tabs[0].spawned_at, spawned, "the process was not restarted");
+    assert_eq!(env.deck.tabs[0].view_after_turn, Some(false));
+    // Clicking the current view again cancels it; asking again brings it back.
+    env.deck.set_tab_view(0, true);
+    assert_eq!(env.deck.tabs[0].view_after_turn, None);
+    env.deck.set_tab_view(0, false);
+
+    env.deck.chat_answer(0, "r1", true, false);
+    env.pump("the switch at the end of the turn", |d| d.tabs[0].chat.is_none() && d.tabs[0].alive);
+    assert!(env.deck.tabs[0].view_after_turn.is_none());
+    assert!(env.ws.join("answer.txt").exists(), "the answer reached the CLI before the switch");
+    let spec = env.deck.tabs[0].spec.as_ref().expect("spec");
+    assert!(!spec.args.iter().any(|a| a == "stream-json"), "{:?}", spec.args);
+    assert!(spec.args.contains(&session), "same conversation: {:?}", spec.args);
+}
+
 const FAKE_ANTIGRAVITY: &str = r#"#!/bin/sh
 echo '{"event":"init","conversation_id":"01234567-89ab-cdef-0123-456789abcdef","init":{"permission_mode":"always-proceed"}}'
 while IFS= read -r line; do

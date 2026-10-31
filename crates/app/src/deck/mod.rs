@@ -167,6 +167,8 @@ pub struct Tab {
     pub(crate) spec: Option<SpawnSpec>,
     /// The chat view of the tab (see [`chat`]); `None` = the terminal view.
     pub chat: Option<Box<chat::ChatTab>>,
+    /// A view switch asked for during a turn (`true` = chat): switching restarts the process, so it waits for the end.
+    pub(crate) view_after_turn: Option<bool>,
     pending_resize: Option<(GridSize, Instant)>,
     /// When this tab's PTY was last resized: the next one only goes out after the CLI
     /// finishes reprinting the conversation (see [`Tab::resize_blocked_until`]).

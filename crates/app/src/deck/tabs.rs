@@ -342,6 +342,7 @@ impl Deck {
             busy_output: false,
             spec: None,
             chat,
+            view_after_turn: None,
             pending_resize: None,
             last_resize: None,
             spawned_at: None,

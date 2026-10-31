@@ -318,11 +318,50 @@ impl Deck {
     }
 
     /// Switches the tab between the chat and the terminal view; the conversation continues in the other (same session).
+    /// The switch restarts the process: during a turn it waits for the end (`view_after_turn`), clicking the current
+    /// view again cancels it.
     pub fn set_tab_view(&mut self, idx: usize, chat: bool) {
-        let tab = &self.tabs[idx];
-        if tab.chat.is_some() == chat || !chat::supports(&tab.kind) {
+        if !chat::supports(&self.tabs[idx].kind) {
             return;
         }
+        if self.tabs[idx].chat.is_some() == chat {
+            self.tabs[idx].view_after_turn = None;
+            return;
+        }
+        let state = self.tab_state(idx);
+        if state.alive && state.busy {
+            let tab = &mut self.tabs[idx];
+            if tab.view_after_turn.replace(chat).is_none() {
+                let agent = tab.ident.id();
+                let text = if chat {
+                    t!("{agent} switches to the chat view when this turn ends.", agent)
+                } else {
+                    t!("{agent} switches to the terminal view when this turn ends.", agent)
+                };
+                self.system(text);
+            }
+            return;
+        }
+        self.apply_tab_view(idx, chat);
+    }
+
+    /// Switches waiting for the end of a turn (see [`Self::set_tab_view`]): the ones whose tab is free now go through.
+    pub(super) fn apply_waiting_views(&mut self) {
+        for idx in 0..self.tabs.len() {
+            if let Some(chat) = self.tabs[idx].view_after_turn {
+                let state = self.tab_state(idx);
+                if !(state.alive && state.busy) {
+                    self.tabs[idx].view_after_turn = None;
+                    if self.tabs[idx].chat.is_some() != chat {
+                        self.apply_tab_view(idx, chat);
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_tab_view(&mut self, idx: usize, chat: bool) {
+        let tab = &self.tabs[idx];
         let (project, ident) = (tab.project.clone(), tab.ident.clone());
         self.core.set_tab_chat(&project, &ident.id(), chat);
         let tab = &mut self.tabs[idx];
