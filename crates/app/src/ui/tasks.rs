@@ -8,6 +8,7 @@ use egui::{Align2, Area, Color32, Id, Key, Margin, Modifiers, Order, Pos2, Rect,
 
 use holt_core::capability::Level;
 use holt_core::models::{self, Effort};
+use holt_core::usage::ModelUsage;
 use holt_core::{t, FeedKind, MergeBlock, Task, TaskStatus};
 
 use super::{
@@ -2144,6 +2145,7 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     let kind = deck.tasks.form.kind.clone();
     let choices = deck.tasks_agent_choices();
     let quota_used = deck.core.quota_used();
+    let form_model = deck.tasks.form.model.clone();
     let agent_label = deck.agents.name(&kind);
     let agent_dot = deck.agents.tab_color(&kind);
     let picks_model = super::menus::picks_model(&kind);
@@ -2159,7 +2161,10 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
             selected: *k == kind,
             enabled: true,
             detail: if ["claude", "antigravity", "codex", "opencode"].contains(&k.as_str()) {
-                Some(Detail::Quota(quota_used.get(k).map(|used| (used * 100.0).round().clamp(0.0, 100.0) as u8)))
+                // The selected agent shows the quota of the chosen model's group; the others, the agent's.
+                let used =
+                    if *k == kind { deck.core.model_usage(k, form_model.as_deref()).map(|m| m.used) } else { quota_used.get(k).copied() };
+                Some(Detail::Quota(used.map(|used| (used * 100.0).round().clamp(0.0, 100.0) as u8)))
             } else {
                 None
             },
@@ -2284,13 +2289,20 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     // The quiet line under the agent: a quota or capacity warning (amber), or how much of the quota is used.
     let advisory = deck.core.quota_advisory(&kind, &choices).map(|note| t!("Quota warning: {note}. The choice is still available.", note));
     let capacity = deck.tasks.form.capacity_note.clone().map(|note| t!("Capacity warning: {note}. The choice is still available.", note));
-    let used = quota_used.get(&kind).map(|u| (u * 100.0).round().clamp(0.0, 100.0) as u8);
+    // The quota of the selected model's group; an unknown model falls back to the agent number and the hint says so.
+    let model_usage = deck.core.model_usage(&kind, deck.tasks.form.model.as_deref());
+    let used = model_usage.as_ref().map(|m| (m.used * 100.0).round().clamp(0.0, 100.0) as u8);
+    let used_text = |u: u8| match &model_usage {
+        Some(m) if m.fallback => t!("{used}% of the agent's quota used (no quota group known for this model)", used = u),
+        Some(ModelUsage { group: Some(group), .. }) => t!("{used}% of the {group} quota used", used = u, group = group),
+        _ => t!("{used}% of the quota used", used = u),
+    };
     let agent_hint: Option<(String, Color32)> = match (advisory.or(capacity), used) {
         (Some(w), _) => Some((w, theme::pal().warning)),
         (None, Some(u)) if deck.tasks.form.kind_is_auto => {
-            Some((t!("Recommended for this size · {used}% of the quota used", used = u), theme::pal().text_3))
+            Some((t!("Recommended for this size · {hint}", hint = used_text(u)), theme::pal().text_3))
         }
-        (None, Some(u)) => Some((t!("{used}% of the quota used", used = u), theme::pal().text_3)),
+        (None, Some(u)) => Some((used_text(u), theme::pal().text_3)),
         (None, None) if deck.tasks.form.kind_is_auto => Some((t!("Recommended for this size").to_owned(), theme::pal().text_3)),
         (None, None) => None,
     };

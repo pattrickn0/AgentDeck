@@ -62,7 +62,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("The agent gets this as a request for changes. Ctrl+Enter sends.", "O agente recebe isto como um pedido de ajustes. Ctrl+Enter envia."),
     ("What did not work in the test?", "O que não funcionou no teste?"),
     ("What does the agent need to change?", "O que o agente precisa mudar?"),
-    ("Recommended for this size · {used}% of the quota used", "Recomendado para este tamanho · {used}% da cota usada"),
+    ("Recommended for this size · {hint}", "Recomendado para este tamanho · {hint}"),
+    ("{used}% of the {group} quota used", "{used}% da cota {group} usada"),
+    (
+        "{used}% of the agent's quota used (no quota group known for this model)",
+        "{used}% da cota do agente usada (grupo de cota deste modelo desconhecido)",
+    ),
     ("{used}% of the quota used", "{used}% da cota usada"),
     ("Recommended for this size", "Recomendado para este tamanho"),
     ("Size of the work", "Tamanho do trabalho"),
