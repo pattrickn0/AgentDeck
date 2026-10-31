@@ -19,6 +19,8 @@ whisper/models/*.bin
 # Temporary files and heavy GPU binaries downloaded by the app
 whisper/*.zip
 whisper/bin-cuda/
+# Engines downloaded on Linux (bin-cpu-linux, bin-vulkan-linux); only the Windows ones are versioned.
+whisper/bin-*-linux/
 
 # Of the precompiled whisper.cpp binaries the app only uses whisper-cli and its DLLs: the examples,
 # tests and tools that come in the package (and the DLLs only they use) stay out of the repository.

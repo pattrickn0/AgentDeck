@@ -2293,6 +2293,8 @@ fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {
     let model_usage = deck.core.model_usage(&kind, deck.tasks.form.model.as_deref());
     let used = model_usage.as_ref().map(|m| (m.used * 100.0).round().clamp(0.0, 100.0) as u8);
     let used_text = |u: u8| match &model_usage {
+        // No model chosen: the CLI default, whose group the quota reading does not name.
+        Some(m) if m.fallback && deck.tasks.form.model.is_none() => t!("{used}% of the agent's quota used", used = u),
         Some(m) if m.fallback => t!("{used}% of the agent's quota used (no quota group known for this model)", used = u),
         Some(ModelUsage { group: Some(group), .. }) => t!("{used}% of the {group} quota used", used = u, group = group),
         _ => t!("{used}% of the quota used", used = u),

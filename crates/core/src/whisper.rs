@@ -80,6 +80,11 @@ struct Archive {
 // (or the release's `.sha256` asset). While it is zeros the download fails its checksum and dictation stays on the CPU.
 const VULKAN_LINUX_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
+/// A checksum not filled in yet (all zeros): the package is not offered.
+fn is_placeholder(sha256: &str) -> bool {
+    sha256.bytes().all(|b| b == b'0')
+}
+
 /// Hashes from the GitHub release "digest" field; CPU ones (Windows and Linux) were verified
 /// by downloading files, CUDA package (685 MB) comes from digest only. The Linux Vulkan one is
 /// the `.sha256` the workflow prints and attaches next to the zip.
@@ -751,7 +756,8 @@ pub(crate) fn ensure_whisper_async(core: &Core) {
         }
         // Vulkan where upstream ships none (Linux): only with a GPU and a driver; if it fails, dictation stays on the CPU.
         if core.inner.whisper.vulkan_usable() && local_cli(&dir, Engine::Vulkan).is_none() {
-            if let Some(a) = Engine::Vulkan.archive() {
+            // While the checksum is the placeholder (no build published yet) the download could only fail, at every start.
+            if let Some(a) = Engine::Vulkan.archive().filter(|a| !is_placeholder(a.sha256)) {
                 let c = core.clone();
                 steps.push((
                     t!("whisper.cpp with Vulkan"),
@@ -928,6 +934,12 @@ mod tests {
         let order = |hw: Hardware| engine_order(false, vulkan_usable(&hw), |_| true);
         assert_eq!(order(Hardware { gpus: true, icd: &with_icd }), [Engine::Vulkan, Engine::Cpu]);
         assert_eq!(order(Hardware { gpus: true, icd: &no_icd }), [Engine::Cpu]);
+    }
+
+    #[test]
+    fn a_placeholder_checksum_is_not_offered() {
+        assert!(is_placeholder(&"0".repeat(64)));
+        assert!(!is_placeholder("a2f0b6e1c3d4"));
     }
 
     #[test]
