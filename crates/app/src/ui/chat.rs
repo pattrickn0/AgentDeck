@@ -10,9 +10,11 @@ use std::collections::HashMap;
 
 use egui::{Align, Align2, CornerRadius, Id, Key, Margin, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use holt_core::chat::{Item, PatchHunk, PermState, PermissionCard, ToolCall};
+use holt_core::models::{self, Effort};
 use holt_core::t;
 use serde_json::Value;
 
+use super::tasks::{dropdown_popup, Detail, MenuItem};
 use super::{button, button_width, clickable, frame, galley_trunc, text_in, tip, ButtonKind};
 use crate::audio;
 use crate::deck::{ChatTab, Deck};
@@ -45,11 +47,41 @@ const USUAL_COMMANDS: &[&str] = &["clear", "compact", "context", "cost", "help",
 /// What the painted view asks the deck to do (applied after painting).
 enum Act {
     Submit,
-    Answer { request_id: String, allow: bool, for_session: bool },
+    Answer {
+        request_id: String,
+        allow: bool,
+        for_session: bool,
+    },
     Interrupt,
     Restart,
     Attach,
     Mic,
+    /// The user picked a model (`None` = the default) or an effort in the composer: applies to the next turn.
+    SetModel(Option<String>),
+    SetEffort(Option<Effort>),
+}
+
+/// The picker of the composer that is open.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Picker {
+    Model,
+    Effort,
+}
+
+/// What the composer's model and effort pickers show and offer (see [`model_rows`], [`effort_rows`]).
+struct Choice {
+    /// The agent lets the user choose its model and has a list to choose from.
+    picks_model: bool,
+    /// The models the CLI lists, and whether the list is still being fetched.
+    models: Vec<String>,
+    loading: bool,
+    /// The model saved for the tab (`None` = the CLI default).
+    model: Option<String>,
+    /// The effort in force, and why it cannot be chosen (`None` = it can).
+    effort: Option<Effort>,
+    effort_off: Option<&'static str>,
+    /// The agent is Antigravity: its effort is a suffix of the model name.
+    agy: bool,
 }
 
 /// What the view needs to know about its tab besides the conversation.
@@ -60,6 +92,7 @@ struct Who<'a> {
     label: &'a str,
     /// Short model name (`sonnet`) for the line under the text.
     model: String,
+    choice: Choice,
     mic: ButtonVisual,
     mic_tip: String,
     attach_tip: String,
@@ -71,6 +104,30 @@ pub fn show(deck: &mut Deck, ui: &mut Ui, body: Rect, idx: usize) -> bool {
     let (uid, kind, alive, color, label, model) = {
         let t = &deck.tabs[idx];
         (t.uid, t.kind.clone(), t.alive, t.color, t.label.clone(), t.model.clone())
+    };
+    if deck.active == Some(idx) {
+        if let Some(open) = deck.debug_chat_picker.take() {
+            ui.ctx().data_mut(|d| d.insert_temp(picker_id(uid), Some(open)));
+        }
+    }
+    let picker_open = ui.ctx().data(|d| d.get_temp::<Option<Picker>>(picker_id(uid))).flatten().is_some();
+    let choice = {
+        let t = &deck.tabs[idx];
+        let (model, effort) = (deck.core.instance_model(&t.project, &t.ident), deck.core.instance_effort(&t.project, &t.ident));
+        let picks_model = models::has_model_list(&kind);
+        if picks_model && picker_open {
+            deck.request_models(&kind);
+        }
+        let (known, loading) = deck.models_of(&kind);
+        Choice {
+            picks_model,
+            models: known.to_vec(),
+            loading,
+            effort_off: models::effort_unavailable(&kind, model.as_deref()),
+            model,
+            effort,
+            agy: kind == "antigravity",
+        }
     };
     let mic = dictation::button_visual(deck.mic_phase, MicTarget::Tab(uid));
     let mic_tip = if alive {
@@ -84,6 +141,7 @@ pub fn show(deck: &mut Deck, ui: &mut Ui, body: Rect, idx: usize) -> bool {
         color,
         label: &label,
         model: model.unwrap_or_else(|| chat.transcript.model.clone()),
+        choice,
         mic,
         mic_tip,
         attach_tip: t!("Attach files to {label}", label = label),
@@ -99,6 +157,8 @@ pub fn show(deck: &mut Deck, ui: &mut Ui, body: Rect, idx: usize) -> bool {
             Act::Restart => deck.start(idx),
             Act::Attach => deck.pick_tab_attachments(uid),
             Act::Mic => deck.toggle_tab_mic(uid),
+            Act::SetModel(model) => deck.chat_set_model(idx, model.as_deref()),
+            Act::SetEffort(effort) => deck.chat_set_effort(idx, effort),
         }
     }
     clicked
@@ -314,13 +374,6 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
         acts.push(Act::Mic);
     }
     x += 30.0;
-    let mut meta = who.model.clone();
-    if let Some(pct) = chat.transcript.context_percent() {
-        if !meta.is_empty() {
-            meta.push_str("  ·  ");
-        }
-        meta.push_str(&t!("{pct}% context", pct = pct));
-    }
     let right_end = row_r.max.x;
     // The send button (or Stop, or Restart) and the cost sit at the right.
     let action: (&str, ButtonKind, bool) = if !alive {
@@ -365,8 +418,98 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
         );
         cost_x -= w + 10.0;
     }
-    let g = galley_trunc(&rp, &meta, theme::meta(10.5), p.text_3, (cost_x - x).max(0.0));
-    super::place(&rp, Rect::from_min_max(Pos2::new(x, row_r.min.y), Pos2::new(cost_x, row_r.max.y)), Align2::LEFT_CENTER, g, p.text_3);
+    // The model and the effort are pickers (changing one restarts the process on the same conversation, so they wait for
+    // the turn to end); the context use sits after them.
+    let pid = picker_id(uid);
+    let open: Option<Picker> = ctx.data(|d| d.get_temp::<Option<Picker>>(pid)).flatten();
+    let mut next = open;
+    let choice = &who.choice;
+    let cy = row_r.center().y;
+    let wait = busy.then(|| t!("Wait for the answer to finish to change this").to_owned());
+    let model_text = if who.model.is_empty() { t!("Default").to_owned() } else { who.model.clone() };
+    let mut cx = x;
+    let mut anchors: [Option<Rect>; 2] = [None, None];
+    if choice.picks_model {
+        let tooltip = wait.clone().unwrap_or_else(|| t!("The model of the next answer. The conversation continues").to_owned());
+        let (r, clicked) = picker_chip(
+            ui,
+            Pos2::new(cx, cy),
+            Id::new(("chat-model", uid)),
+            &model_text,
+            !busy,
+            open == Some(Picker::Model),
+            (cost_x - cx).max(0.0),
+            tooltip,
+        );
+        anchors[0] = Some(r);
+        if clicked {
+            next = if open == Some(Picker::Model) { None } else { Some(Picker::Model) };
+        }
+        cx = r.max.x + 2.0;
+    } else if !model_text.is_empty() {
+        let g = galley_trunc(&rp, &model_text, theme::meta(10.5), p.text_3, (cost_x - cx).max(0.0));
+        let w = g.size().x;
+        super::place(&rp, Rect::from_min_max(Pos2::new(cx, row_r.min.y), Pos2::new(cx + w, row_r.max.y)), Align2::LEFT_CENTER, g, p.text_3);
+        cx += w + 8.0;
+    }
+    if choice.effort_off.is_none() || choice.effort.is_some() {
+        let text = choice.effort.map_or(t!("effort"), Effort::label).to_owned();
+        let tooltip = match (&wait, choice.effort_off) {
+            (Some(wait), _) => wait.clone(),
+            (None, Some(why)) => why.to_owned(),
+            (None, None) => t!("The reasoning effort of the next answer. The conversation continues").to_owned(),
+        };
+        let enabled = !busy && choice.effort_off.is_none();
+        let (r, clicked) = picker_chip(
+            ui,
+            Pos2::new(cx, cy),
+            Id::new(("chat-effort", uid)),
+            &text,
+            enabled,
+            open == Some(Picker::Effort),
+            (cost_x - cx).max(0.0),
+            tooltip,
+        );
+        anchors[1] = Some(r);
+        if clicked {
+            next = if open == Some(Picker::Effort) { None } else { Some(Picker::Effort) };
+        }
+        cx = r.max.x + 2.0;
+    }
+    if let Some(pct) = chat.transcript.context_percent() {
+        let g = galley_trunc(&rp, &t!("{pct}% context", pct = pct), theme::meta(10.5), p.text_3, (cost_x - cx - 6.0).max(0.0));
+        let w = g.size().x;
+        super::place(
+            &rp,
+            Rect::from_min_max(Pos2::new(cx + 6.0, row_r.min.y), Pos2::new(cx + 6.0 + w, row_r.max.y)),
+            Align2::LEFT_CENTER,
+            g,
+            p.text_3,
+        );
+    }
+    if busy {
+        next = None;
+    }
+    let (rows, anchor, name, min_w) = match (open, anchors) {
+        (Some(Picker::Model), [Some(a), _]) => (model_rows(choice), a, "chat-menu-model", 230.0),
+        (Some(Picker::Effort), [_, Some(a)]) => (effort_rows(choice), a, "chat-menu-effort", 150.0),
+        _ => (Vec::new(), Rect::NOTHING, "", 0.0),
+    };
+    if !rows.is_empty() {
+        let items: Vec<MenuItem> = rows.iter().map(|(item, _)| item.clone()).collect();
+        let (chosen, closed) = dropdown_popup(&ctx, name, anchor, &items, min_w, true);
+        if let Some(i) = chosen {
+            if let Some((_, act)) = rows.into_iter().nth(i) {
+                acts.push(act);
+            }
+            next = None;
+        } else if closed && next == open {
+            next = None;
+        }
+    }
+    if next != open {
+        ctx.data_mut(|d| d.insert_temp(pid, next));
+    }
 
     // ---------- Under the box: the keys on the left, what is going on on the right ----------
     let np = ui.painter_at(note_r);
@@ -387,6 +530,84 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
     }
     // A press anywhere in the pane focuses it (a widget over the whole pane would swallow the clicks of the ones below).
     ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| body.contains(p)))
+}
+
+fn picker_id(uid: u64) -> Id {
+    Id::new(("chat-picker", uid))
+}
+
+/// A quiet picker button of the composer row: the text and a "▾", with the `hover` fill; `open` keeps it lit. `at` is its
+/// left edge and vertical center. Returns its rectangle and whether it was clicked.
+#[allow(clippy::too_many_arguments)]
+fn picker_chip(ui: &Ui, at: Pos2, id: Id, text: &str, enabled: bool, open: bool, max_w: f32, tooltip: String) -> (Rect, bool) {
+    const PAD: f32 = 6.0;
+    const ARROW_W: f32 = 12.0;
+    let p = theme::pal();
+    let painter = ui.painter();
+    let color = if !enabled {
+        theme::with_opacity(p.text_3, 0.6)
+    } else if open {
+        p.text
+    } else {
+        p.text_3
+    };
+    let g = galley_trunc(painter, text, theme::meta(10.5), color, (max_w - 2.0 * PAD - ARROW_W).max(24.0));
+    let w = g.size().x;
+    let r = Rect::from_min_size(Pos2::new(at.x, at.y - 11.0), Vec2::new(PAD + w + ARROW_W + PAD, 22.0));
+    let resp = if enabled { clickable(ui, r, id) } else { ui.interact(r, id, Sense::hover()) };
+    let hot = enabled && (resp.hovered() || open);
+    if hot {
+        painter.rect_filled(r, 5.0, p.hover);
+    }
+    let color = if hot { p.text } else { color };
+    super::place(painter, Rect::from_min_size(Pos2::new(r.min.x + PAD, r.min.y), Vec2::new(w, r.height())), Align2::LEFT_CENTER, g, color);
+    text_in(
+        painter,
+        Rect::from_min_size(Pos2::new(r.max.x - PAD - ARROW_W, r.min.y), Vec2::new(ARROW_W, r.height())),
+        Align2::CENTER_CENTER,
+        "▾",
+        theme::ui(10.0),
+        color,
+    );
+    let clicked = tip(resp, tooltip).clicked() && enabled;
+    (r, clicked)
+}
+
+fn menu_row(label: impl Into<String>, selected: bool, enabled: bool, detail: Option<Detail>) -> MenuItem {
+    MenuItem { label: label.into(), dot: None, selected, enabled, detail, submenu: false }
+}
+
+/// The model menu: "Default" and the models the CLI lists. Antigravity's variants by effort are one entry (the effort has
+/// its own picker), run at the effort in force.
+fn model_rows(choice: &Choice) -> Vec<(MenuItem, Act)> {
+    let mut rows = vec![(menu_row(t!("Default"), choice.model.is_none(), true, None), Act::SetModel(None))];
+    if choice.agy {
+        let current = choice.model.as_deref().and_then(|m| models::agy_bases(&[m.to_owned()]).into_iter().next());
+        for base in models::agy_bases(&choice.models) {
+            let target = models::agy_variant(&choice.models, &base, choice.effort);
+            rows.push((menu_row(base.clone(), current.as_deref() == Some(base.as_str()), true, None), Act::SetModel(Some(target))));
+        }
+    } else {
+        for m in models::free_first(&choice.models) {
+            let detail = models::is_free(&m).then_some(Detail::Free);
+            rows.push((menu_row(m.clone(), choice.model.as_deref() == Some(m.as_str()), true, detail), Act::SetModel(Some(m))));
+        }
+    }
+    if choice.models.is_empty() {
+        let note = if choice.loading { t!("Loading models…") } else { t!("No model list: default only") };
+        rows.push((menu_row(note, false, false, None), Act::SetModel(choice.model.clone())));
+    }
+    rows
+}
+
+/// The effort menu: "Default" (not in Antigravity, whose model always carries one) and the three levels.
+fn effort_rows(choice: &Choice) -> Vec<(MenuItem, Act)> {
+    let mut rows = Vec::new();
+    if !choice.agy {
+        rows.push((menu_row(t!("Default"), choice.effort.is_none(), true, None), Act::SetEffort(None)));
+    }
+    rows.extend(Effort::ALL.map(|e| (menu_row(e.label(), choice.effort == Some(e), true, None), Act::SetEffort(Some(e)))));
+    rows
 }
 
 fn working_text(chat: &ChatTab) -> String {

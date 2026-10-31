@@ -3,6 +3,7 @@
 
 mod background;
 mod chat;
+pub use chat::Picker as ChatPicker;
 mod code;
 mod diff_view;
 mod docs;

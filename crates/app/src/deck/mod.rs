@@ -430,6 +430,8 @@ pub struct Deck {
     pub debug_close_all: bool,
     /// `HOLT_DEBUG_UI=chat-demo`: fill the first chat tab with a made-up conversation (see `Deck::debug_chat_demo`).
     pub debug_chat_demo: bool,
+    /// `HOLT_DEBUG_UI=chat-demo-model|chat-demo-effort`: opens that picker of the composer in the active chat tab.
+    pub debug_chat_picker: Option<crate::ui::ChatPicker>,
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(120);
@@ -593,6 +595,7 @@ impl Deck {
             window_focused: true,
             debug_close_all: false,
             debug_chat_demo: false,
+            debug_chat_picker: None,
             debug_fake_shell: holt_core::env_var("DEBUG_FAKE_SHELL").is_some_and(|v| v == "1"),
             debug_pty: holt_core::env_var("DEBUG_PTY").is_some_and(|v| v == "1"),
         };
