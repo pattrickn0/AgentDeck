@@ -586,6 +586,9 @@ fn agent_row(ui: &mut Ui, col_w: f32, cx: &mut ItemCx, body: impl FnOnce(&mut Ui
         let w = col_w - AVATAR_COL;
         ui.allocate_ui_with_layout(Vec2::new(w, 0.0), egui::Layout::top_down(Align::Min), |ui| {
             ui.set_max_width(w);
+            // What still cannot wrap (a wide table, a long word) is cut at the column instead of drawn over the edge.
+            let clip = ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, Vec2::new(w, f32::INFINITY)));
+            ui.set_clip_rect(clip);
             body(ui, w, cx);
         });
     });
@@ -605,6 +608,9 @@ fn markdown_style(ui: &mut Ui) {
     style.visuals.faint_bg_color = p.chip;
     style.visuals.extreme_bg_color = p.recess;
     style.visuals.hyperlink_color = p.info;
+    // `egui_commonmark` lays bullets and table rows out in horizontal sub-layouts, where egui does not wrap text by
+    // default: long lines ran past the column. Wrap everywhere inside the message.
+    style.wrap_mode = Some(egui::TextWrapMode::Wrap);
 }
 
 // ---------- Tool calls ----------
