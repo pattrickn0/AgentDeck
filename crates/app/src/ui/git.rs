@@ -13,6 +13,7 @@ use holt_core::git::{
 use holt_core::t;
 
 use super::git_views;
+use super::text_w;
 use super::{
     button, button_danger, button_width, clickable, frame, galley, galley_spaced, galley_trunc, place, section_label, segmented, separator,
     shadow, text_in, tip, ButtonKind,
@@ -34,6 +35,7 @@ pub const COMMIT_ID: &str = "git-commit-msg";
 /// What was clicked in this frame.
 pub(super) enum Act {
     Refresh,
+    Signin,
     Init,
     Copy(String),
     Fetch,
@@ -131,7 +133,12 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, rect: Rect) {
             );
         }
         GitView::Error(e) => {
-            message(ui, rect, t!("Could not read the repository."), Some(e), &[(t!("Try again"), Act::Refresh)], &mut acts)
+            let buttons: Vec<(&str, Act)> = if deck.git.error_auth {
+                vec![(t!("Sign in to GitHub"), Act::Signin), (t!("Try again"), Act::Refresh)]
+            } else {
+                vec![(t!("Try again"), Act::Refresh)]
+            };
+            message(ui, rect, t!("Could not read the repository."), Some(e), &buttons, &mut acts)
         }
         GitView::Ready(st) => ready(deck, ui, rect, st, &mut acts),
     }
@@ -149,6 +156,7 @@ fn apply(deck: &mut Deck, ctx: &egui::Context, act: Act) {
             deck.git_refresh();
         }
         Act::Init => deck.git_init(),
+        Act::Signin => deck.github_signin(),
         Act::Copy(text) => ctx.copy_text(text),
         Act::Fetch => deck.git_fetch(),
         Act::Pull => deck.git_pull(),
@@ -216,6 +224,7 @@ fn message(ui: &mut Ui, rect: Rect, title: &str, detail: Option<&str>, buttons: 
             acts.push(match act {
                 Act::Refresh => Act::Refresh,
                 Act::Init => Act::Init,
+                Act::Signin => Act::Signin,
                 Act::Copy(t) => Act::Copy(t.clone()),
                 _ => Act::Refresh,
             });
@@ -347,7 +356,7 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
     // ---------- Banners ----------
     let mut y = head.max.y;
     if let Some(label) = deck.git.busy {
-        banner(ui, rect, &mut y, label, theme::pal().text, false, acts);
+        banner(ui, rect, &mut y, label, theme::pal().text, BannerEnd::Nothing, acts);
         busy_bar(ui, Rect::from_min_max(Pos2::new(rect.min.x, y - 2.0), Pos2::new(rect.max.x, y)));
     }
     y += git_views::op_banner(ui, rect, y, st, busy, acts);
@@ -357,13 +366,22 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
             root = st.root.display(),
             prefix = st.prefix.trim_end_matches('/')
         );
-        banner(ui, rect, &mut y, &text, theme::pal().text_2, false, acts);
+        banner(ui, rect, &mut y, &text, theme::pal().text_2, BannerEnd::Nothing, acts);
     }
     if st.truncated {
-        banner(ui, rect, &mut y, t!("Too many changes: showing the first 5000."), theme::pal().warning, false, acts);
+        banner(ui, rect, &mut y, t!("Too many changes: showing the first 5000."), theme::pal().warning, BannerEnd::Nothing, acts);
     }
     if let Some((text, error)) = deck.git.notice.clone() {
-        banner(ui, rect, &mut y, &text, if error { theme::pal().danger_text } else { theme::pal().text_2 }, true, acts);
+        let signin = error && deck.git.notice_auth;
+        banner(
+            ui,
+            rect,
+            &mut y,
+            &text,
+            if error { theme::pal().danger_text } else { theme::pal().text_2 },
+            if signin { BannerEnd::DismissSignin } else { BannerEnd::Dismiss },
+            acts,
+        );
     }
 
     y += git_views::tab_strip(deck, ui, rect, y, st, acts);
@@ -400,12 +418,35 @@ fn ready(deck: &mut Deck, ui: &mut Ui, rect: Rect, st: &GitStatus, acts: &mut Ve
 }
 
 /// One-line strip under the top (notice, repository state, error with ×). Advances `y`.
-fn banner(ui: &mut Ui, rect: Rect, y: &mut f32, text: &str, color: Color32, dismiss: bool, acts: &mut Vec<Act>) {
+/// What a banner offers at its right end.
+#[derive(Clone, Copy, PartialEq)]
+enum BannerEnd {
+    Nothing,
+    Dismiss,
+    /// × and "Sign in to GitHub".
+    DismissSignin,
+}
+
+fn banner(ui: &mut Ui, rect: Rect, y: &mut f32, text: &str, color: Color32, end: BannerEnd, acts: &mut Vec<Act>) {
     let r = Rect::from_min_size(Pos2::new(rect.min.x, *y), Vec2::new(rect.width(), BANNER_H));
     *y = r.max.y;
     let p = ui.painter_at(r);
     p.rect_filled(r, 0.0, theme::pal().chip);
-    let text_r = Rect::from_min_max(Pos2::new(r.min.x + 12.0, r.min.y), Pos2::new(r.max.x - if dismiss { 30.0 } else { 12.0 }, r.max.y));
+    let dismiss = end != BannerEnd::Nothing;
+    let mut right = r.max.x - if dismiss { 30.0 } else { 12.0 };
+    if end == BannerEnd::DismissSignin {
+        let label = t!("Sign in to GitHub");
+        let w = text_w(&p, label, theme::ui_semibold(11.5)) + 8.0;
+        let b = Rect::from_min_max(Pos2::new(right - w, r.min.y + 2.0), Pos2::new(right, r.max.y - 2.0));
+        let br = clickable(ui, b, Id::new("git-banner-signin"));
+        let c = if br.hovered() { theme::accent() } else { theme::with_alpha(theme::accent(), 0.85) };
+        text_in(&p, b, Align2::CENTER_CENTER, label, theme::ui_semibold(11.5), c);
+        if br.clicked() {
+            acts.push(Act::Signin);
+        }
+        right = b.min.x - 8.0;
+    }
+    let text_r = Rect::from_min_max(Pos2::new(r.min.x + 12.0, r.min.y), Pos2::new(right, r.max.y));
     let g = galley_trunc(&p, text, theme::ui(11.5), color, text_r.width());
     place(&p, text_r, Align2::LEFT_CENTER, g, color);
     let hover = ui.interact(text_r, Id::new(("git-banner", r.min.y as i32)), Sense::hover());

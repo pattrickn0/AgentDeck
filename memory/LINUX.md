@@ -211,8 +211,12 @@ test was `read_dir` (fixed here); the rest ran green on Ubuntu through `run 46`.
    as the CPU engine. Detection uses `lspci`/`nvidia-smi`.
 5. **File dialog without portal**: in minimal environments (i3, container, SSH) without `xdg-desktop-portal`, the dialog does
    not open. There is no UI warning; consider adding a message.
-6. **Texts referencing “Git Credential Manager”**: Git/GitHub error messages were written on Windows and mention GCM and
-   “push to log in”. On Linux the standard route is `gh auth login` or `credential.helper=store`; the text should mention both.
+6. **GitHub sign-in (done in t14)**: auth failures (`could not read Username`, `Authentication failed`, HTTP 401/403, gh's
+   "token … is invalid") become `GitError::Auth`; the Git and GitHub panels then show **Sign in to GitHub**, which opens a shell
+   tab in the project running `gh auth login -h github.com --git-protocol https --web -s workflow && gh auth setup-git`
+   (`git::signin_plan`; Windows prefers `git credential-manager github login`). The tab types `&& exit`, so a successful login
+   closes the shell and the panels reload (`Deck::signin_finished`); the user repeats the operation. Without `gh`, the error says
+   how to install it or set `credential.helper`. Still to try by hand on Windows (GCM path).
 7. **“Open folder” ignores failure**: `Command::new("xdg-open").spawn()` without error handling; without `xdg-utils` the
    click does nothing and does not warn.
 8. **Runner version**: the `ubuntu-latest` label migrates to Ubuntu 26 starting 2026-10-19; the job base may change without

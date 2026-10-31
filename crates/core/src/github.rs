@@ -241,6 +241,13 @@ fn redact_remote_url(url: &str) -> String {
     }
 }
 
+impl GithubError {
+    /// The credential is missing, expired or refused: signing in again may fix it.
+    pub fn is_auth(&self) -> bool {
+        matches!(self, GithubError::Unauthorized)
+    }
+}
+
 impl fmt::Display for GithubError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -256,7 +263,7 @@ impl fmt::Display for GithubError {
             GithubError::Unauthorized => write!(
                 f,
                 "{}",
-                t!("GitHub credential refused (HTTP 401). Push from the Git tab to refresh the Git Credential Manager login, or run \"gh auth login\".")
+                t!("GitHub credential refused (HTTP 401). Sign in to GitHub again (button below) or run \"gh auth login\" in a terminal.")
             ),
             GithubError::RateLimited { reset_in_secs, authenticated } => {
                 let wait = match reset_in_secs {
@@ -270,10 +277,7 @@ impl fmt::Display for GithubError {
                     write!(
                         f,
                         "{}",
-                        t!(
-                            "Anonymous rate limit reached (60/h){wait}. Push from the Git tab to sign in with the Git Credential Manager, or install gh (5,000/h).",
-                            wait = wait
-                        )
+                        t!("Anonymous rate limit reached (60/h){wait}. Sign in to GitHub to raise the limit (5,000/h).", wait = wait)
                     )
                 }
             }
@@ -283,17 +287,14 @@ impl fmt::Display for GithubError {
                     write!(
                         f,
                         "{}",
-                        t!(
-                            "Not found on GitHub (HTTP 404): check that {repo} exists and that your account has permission.",
-                            repo = repo
-                        )
+                        t!("Not found on GitHub (HTTP 404): check that {repo} exists and that your account has permission.", repo = repo)
                     )
                 } else {
                     write!(
                         f,
                         "{}",
                         t!(
-                            "Repository {repo} not found or private (HTTP 404). To access a private repository, push from the Git tab (opens the Git Credential Manager login) or install gh.",
+                            "Repository {repo} not found or private (HTTP 404). To access a private repository, sign in to GitHub.",
                             repo = repo
                         )
                     )
@@ -819,6 +820,13 @@ impl Core {
         exe
     }
 
+    /// How to sign in to GitHub on this machine (see [`crate::git::signin_plan`]).
+    pub fn github_signin_plan(&self) -> crate::git::SigninPlan {
+        let gh = self.github_gh_exe().is_some();
+        let gcm = self.inner.agents.which(if cfg!(windows) { "git-credential-manager.exe" } else { "git-credential-manager" }).is_some();
+        crate::git::signin_plan(cfg!(windows), gh, gcm)
+    }
+
     fn github_gh_exe(&self) -> Option<PathBuf> {
         let mut cache = self.inner.github.gh_exe.lock();
         if let Some((at, exe)) = cache.as_ref() {
@@ -993,9 +1001,9 @@ impl Core {
     /// Downloads only the end of a job log (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`).
     fn github_fetch_job_log(&self, repo: &RepoSlug, job_id: u64, token: Option<&SecretToken>) -> Result<JobLog, GithubError> {
         let Some(tok) = token else {
-            return Err(GithubError::Failed(t!(
-                "Downloading the full log requires signing in to GitHub. Push from the Git tab (opens the Git Credential Manager) or install gh."
-            ).to_owned()));
+            return Err(GithubError::Failed(
+                t!("Downloading the full log requires signing in to GitHub. Sign in to GitHub from the GitHub or Git tab.").to_owned(),
+            ));
         };
         self.check_rate_limit(true)?;
         let url = format!("https://api.github.com/repos/{}/{}/actions/jobs/{job_id}/logs", repo.owner, repo.repo);

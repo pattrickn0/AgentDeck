@@ -240,6 +240,27 @@ pub(crate) fn apply(deck: &mut Deck) {
                     }
                 }
             }
+            "git-auth" | "git-auth-banner" | "github-auth" => {
+                let auth = holt_core::git::GitError::Auth(
+                    "fatal: could not read Username for 'https://github.com': terminal prompts disabled".into(),
+                );
+                if item == "github-auth" {
+                    deck.github.debug_hold = true;
+                    deck.set_right_view(crate::deck::RightView::GitHub);
+                    deck.github.view = crate::github_ui::GithubView::Error(holt_core::github::GithubError::Unauthorized);
+                } else {
+                    deck.set_right_view(crate::deck::RightView::Git);
+                    deck.git.debug_hold = true;
+                    if item == "git-auth" {
+                        deck.git.error_auth = true;
+                        deck.git.view = crate::git_ui::GitView::Error(auth.to_string());
+                    } else {
+                        deck.git.view = crate::git_ui::GitView::Ready(crate::git_ui::demo_status());
+                        deck.git.notice = Some((auth.to_string(), true));
+                        deck.git.notice_auth = true;
+                    }
+                }
+            }
             "github-norepo" => {
                 deck.github.debug_hold = true;
                 deck.set_right_view(crate::deck::RightView::GitHub);

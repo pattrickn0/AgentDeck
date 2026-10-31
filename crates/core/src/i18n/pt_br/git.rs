@@ -22,6 +22,14 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("The remote refused: {message}", "O remoto recusou: {message}"),
     ("Authentication failed: {message}", "Falha de autenticação: {message}"),
     (
+        "Install the GitHub CLI (winget install GitHub.cli) or Git Credential Manager, then try again. Or set a credential helper: git config --global credential.helper manager",
+        "Instale o GitHub CLI (winget install GitHub.cli) ou o Git Credential Manager e tente de novo. Ou configure um credential helper: git config --global credential.helper manager",
+    ),
+    (
+        "Install the GitHub CLI (sudo zypper/dnf/apt install gh) and try again. Or set a credential helper: git config --global credential.helper store",
+        "Instale o GitHub CLI (sudo zypper/dnf/apt install gh) e tente de novo. Ou configure um credential helper: git config --global credential.helper store",
+    ),
+    (
         "{output}\nIf your SSH key has a passphrase, Holt cannot ask for it: load the key into ssh-agent and try again.\n• Windows (PowerShell; the first time as administrator): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
         "{output}\nSe a sua chave SSH tem senha, o Holt não consegue perguntá-la: carregue a chave no ssh-agent e tente de novo.\n• Windows (PowerShell; na primeira vez como administrador): Set-Service ssh-agent -StartupType Manual; Start-Service ssh-agent; ssh-add\n• Linux/macOS: eval \"$(ssh-agent -s)\" && ssh-add",
     ),

@@ -370,6 +370,8 @@ pub struct Deck {
     pub download: Option<(DownloadProgress, Option<Instant>)>,
     /// DEBUG ONLY: keeps the fake state of `HOLT_DEBUG_UI=download*`, ignoring the real download.
     pub debug_hold_download: bool,
+    /// `uid` of the terminal tab running the GitHub sign-in; when it ends well, the Git and GitHub panels reload.
+    pub signin_tab: Option<u64>,
 
     // Voice dictation (pinned to the `uid` of the tab where it started)
     recorder: Option<audio::Recorder>,
@@ -562,6 +564,7 @@ impl Deck {
             notices: crate::notices::Notices::default(),
             download: None,
             debug_hold_download: false,
+            signin_tab: None,
             recorder: None,
             recording_since: None,
             mic_phase: MicPhase::Idle,

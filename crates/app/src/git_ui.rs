@@ -231,6 +231,10 @@ pub struct GitUi {
     pub confirm: Option<ConfirmAction>,
     /// Message of the last operation (text, is it an error?).
     pub notice: Option<(String, bool)>,
+    /// The `notice` error is an authentication failure (offers "Sign in to GitHub").
+    pub notice_auth: bool,
+    /// Same for the `GitView::Error` on screen.
+    pub error_auth: bool,
     pub collapsed: HashSet<Section>,
     /// State of the Stash view.
     pub stashes: Vec<GitStash>,
@@ -273,6 +277,8 @@ impl Default for GitUi {
             branch_filter: String::new(),
             confirm: None,
             notice: None,
+            notice_auth: false,
+            error_auth: false,
             collapsed: HashSet::new(),
             stashes: Vec::new(),
             stash_loading: false,
@@ -304,7 +310,51 @@ fn err_text(e: &GitError) -> String {
     e.to_string()
 }
 
+impl GitUi {
+    fn set_error(&mut self, e: &GitError) {
+        self.notice = Some((err_text(e), true));
+        self.notice_auth = matches!(e, GitError::Auth(_));
+    }
+}
+
 impl Deck {
+    /// "Sign in to GitHub": opens a terminal tab in the project that runs the sign-in (`gh auth login`, or Git Credential
+    /// Manager on Windows). The tab closes the shell only if it worked; then [`Deck::signin_finished`] reloads the panels.
+    /// Without any tool to sign in with, shows how to get one.
+    pub fn github_signin(&mut self) {
+        match self.core.github_signin_plan() {
+            holt_core::git::SigninPlan::Install(help) => self.git.notice = Some((help, true)),
+            holt_core::git::SigninPlan::Command(cmd) => {
+                let before = self.tabs.len();
+                self.open_tab("shell", false);
+                if self.tabs.len() == before {
+                    return;
+                }
+                let Some(tab) = self.tabs.last() else { return };
+                let exit = if cfg!(windows) { "; if ($LASTEXITCODE -eq 0) { exit }" } else { " && exit" };
+                tab.session.write(format!("{cmd}{exit}\r").as_bytes());
+                self.signin_tab = Some(tab.uid);
+            }
+        }
+    }
+
+    /// The sign-in tab ended with `code`: on success, reloads Git and GitHub so the failed operation can be retried.
+    pub fn signin_finished(&mut self, uid: u64, code: i64) {
+        if self.signin_tab != Some(uid) {
+            return;
+        }
+        self.signin_tab = None;
+        if code != 0 {
+            return;
+        }
+        self.git.notice = Some((t!("Signed in to GitHub. Try again.").to_owned(), false));
+        self.git.notice_auth = false;
+        self.git.error_auth = false;
+        self.github.notice = None;
+        self.git_refresh();
+        self.github_refresh_now();
+    }
+
     /// The project on screen changed: forget everything from the previous one (discard confirmation, branches,
     /// message, operation in progress) and ignore answers that still come from it.
     pub fn git_reset_for_project(&mut self) {
@@ -370,7 +420,10 @@ impl Deck {
                     Err(GitError::NotInstalled) => GitView::NoGit,
                     Err(GitError::NotARepo) => GitView::NotRepo,
                     Err(GitError::Unsafe { path }) => GitView::Unsafe(path),
-                    Err(e) => GitView::Error(err_text(&e)),
+                    Err(e) => {
+                        self.git.error_auth = matches!(e, GitError::Auth(_));
+                        GitView::Error(err_text(&e))
+                    }
                 };
                 // If it was in the Conflicts tab and all conflicts are gone, go back to Changes.
                 if let Some(st) = self.git.status() {
@@ -434,7 +487,7 @@ impl Deck {
             }
             GitReply::Branches(res) => match res {
                 Ok(list) => self.git.branches = list,
-                Err(e) => self.git.notice = Some((err_text(&e), true)),
+                Err(e) => self.git.set_error(&e),
             },
             GitReply::LastMessage(msg) => {
                 if self.git.message.trim().is_empty() {
@@ -445,7 +498,7 @@ impl Deck {
                 self.git.stash_loading = false;
                 match res {
                     Ok(list) => self.git.stashes = list,
-                    Err(e) => self.git.notice = Some((err_text(&e), true)),
+                    Err(e) => self.git.set_error(&e),
                 }
             }
             GitReply::StashDiff { index, result } => {
@@ -469,7 +522,7 @@ impl Deck {
                         }
                         self.git.log_has_more = has_more;
                     }
-                    Err(e) => self.git.notice = Some((err_text(&e), true)),
+                    Err(e) => self.git.set_error(&e),
                 }
             }
             GitReply::CommitDetail { hash, result } => {
@@ -505,7 +558,7 @@ impl Deck {
                         };
                         self.git.notice = Some((text, false));
                     }
-                    Err(e) => self.git.notice = Some((err_text(&e), true)),
+                    Err(e) => self.git.set_error(&e),
                 }
                 self.git_refresh();
                 self.refresh_tree();
@@ -539,6 +592,7 @@ impl Deck {
         }
         self.git.busy = Some(busy);
         self.git.notice = None;
+        self.git.notice_auth = false;
         let generation = self.git.generation;
         self.spawn_bg("git-op", move |core| Some(UiMsg::Git(generation, GitReply::Done { label, result: op(core) })));
     }
@@ -807,6 +861,7 @@ impl Deck {
         let full = root.join(rel);
         if let Err(e) = self.core.open_path(&full.to_string_lossy()) {
             self.git.notice = Some((e.to_string(), true));
+            self.git.notice_auth = false;
         }
     }
 }
