@@ -2,10 +2,14 @@
 //! conversation), the saved conversation read back, and a process that gets a message, asks for a permission, gets the
 //! answer and ends.
 
+#[cfg(unix)]
 use std::sync::Arc;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
-use holt_core::chat::{self, ChatEvent, ChatMsg, Item};
+use holt_core::chat::Item;
+#[cfg(unix)]
+use holt_core::chat::{self, ChatEvent, ChatMsg};
 use holt_core::models::Effort;
 use holt_core::Ident;
 use serde_json::{json, Value};
