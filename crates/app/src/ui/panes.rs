@@ -64,7 +64,7 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
     let Some(metrics) = deck.metrics.clone() else { return };
     let (shape, plans) = deck.plan_panes(area);
     let multi = plans.len() > 1;
-    // In Highlight, window 0 is the big one; the others are the small ones, with the bring button.
+    // In Highlight, window 0 is the big one; the others are the small ones.
     let highlight = multi && deck.organization == Organization::Highlight;
     let focused_pane = deck.active.and_then(|a| plans.iter().position(|p| p.tabs.contains(&a)));
 
@@ -111,7 +111,7 @@ fn focus(deck: &mut Deck, ui: &Ui, idx: usize) {
 struct Mode {
     /// There is more than one window (the highlight and the grip only exist then).
     multi: bool,
-    /// Highlight: window 0 is the big one and the others have the "Bring to highlight" button.
+    /// Highlight: window 0 is the big one (swapping via grip is disabled).
     highlight: bool,
 }
 
@@ -161,21 +161,13 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     let attach = Rect::from_min_size(Pos2::new(plus.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
     let mic = Rect::from_min_size(Pos2::new(attach.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN));
     let tools_left = if in_chat { plus } else { mic };
-    // Small window of the Highlight: "Bring to highlight" to the left of the other buttons.
-    let bring = (highlight && slot > 0)
-        .then(|| Rect::from_min_size(Pos2::new(tools_left.min.x - 4.0 - ICON_BTN, cy - ICON_BTN / 2.0), Vec2::splat(ICON_BTN)));
 
     // ---------- Tabs ----------
     // Claude's tabs switch between the chat and the terminal view of the same conversation.
     let toggle = holt_core::chat::supports(&deck.tabs[plan.shown].kind)
-        .then(|| {
-            Rect::from_min_size(
-                Pos2::new(bring.unwrap_or(tools_left).min.x - 8.0 - VIEW_TOGGLE_W, cy - 11.0),
-                Vec2::new(VIEW_TOGGLE_W, 22.0),
-            )
-        })
+        .then(|| Rect::from_min_size(Pos2::new(tools_left.min.x - 8.0 - VIEW_TOGGLE_W, cy - 11.0), Vec2::new(VIEW_TOGGLE_W, 22.0)))
         .filter(|r| r.min.x - x0 > 120.0);
-    let strip_end = toggle.unwrap_or(bring.unwrap_or(tools_left)).min.x - 4.0;
+    let strip_end = toggle.unwrap_or(tools_left).min.x - 4.0;
     let strip_rect = Rect::from_min_max(Pos2::new(x0, head.min.y), Pos2::new(strip_end.max(x0), head.max.y - 1.0));
     // A click on the empty space of the tab strip focuses the window (the tabs, on top, have their own action).
     if ui.interact(strip_rect, Id::new(("pane-head", &group)), Sense::click()).clicked() {
@@ -194,18 +186,6 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
         let id = Id::new(("pane-view", &group));
         if let Some(i) = super::segmented_tinted(ui, r, id, &[t!("Chat"), t!("Terminal")], usize::from(!in_chat), Some(tint)) {
             clicks.push(Click::View(plan.shown, i == 0));
-        }
-    }
-
-    if let Some(bring) = bring {
-        let r = clickable(ui, bring, Id::new(("pane-bring", &group)));
-        if r.hovered() {
-            painter.rect_filled(bring, 4.0, theme::pal().hover);
-        }
-        let fg = if r.hovered() { theme::pal().text } else { theme::pal().text_2 };
-        deck.icons.paint(&painter, Icon::Expand, bring.center(), 12.0, fg, 0.0);
-        if tip(r, t!("Bring to highlight")).clicked() {
-            clicks.push(Click::Focus(plan.shown));
         }
     }
 

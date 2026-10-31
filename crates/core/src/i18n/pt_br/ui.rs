@@ -27,7 +27,6 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("{label}\nDouble click or right click to rename", "{label}\nDuplo clique ou botão direito para renomear"),
     // Panes
     ("Drag over another window to swap places", "Arraste sobre outra janela para trocar de lugar"),
-    ("Bring to highlight", "Trazer para o destaque"),
     ("Dictation unavailable (process ended)", "Ditado indisponível (processo encerrado)"),
     ("Attach files to {label}", "Anexar arquivos em {label}"),
     ("Attachments unavailable (process ended)", "Anexo indisponível (processo encerrado)"),
