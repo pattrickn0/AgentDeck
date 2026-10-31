@@ -168,6 +168,7 @@ keyboard uses on Wayland.
 | Keyring (Antigravity quota) | Secret Service (`gnome-keyring`/`kwallet`) | same | Antigravity quota shows no data |
 | Git / GitHub | `git` (and optional `gh`) | `git` (optional `gh`) | Git/GitHub tabs non-functional |
 | Dictation (CPU) | `libgomp`, `libstdc++` | `libgomp`, `libstdc++` | downloaded `whisper-cli` will not run |
+| Dictation (GPU, Vulkan) | `libvulkan1` + `mesa-vulkan-drivers` (RADV/ANV) or the NVIDIA driver | `vulkan-loader` + `mesa-vulkan-drivers` or NVIDIA | no Vulkan engine is downloaded (or it fails to start): CPU engine |
 | Detect GPU | `pciutils` (`lspci`), `nvidia-smi` | same | falls back to CPU engine |
 
 Agent CLIs: `npm install -g` of the same packages as Windows; Antigravity has its own installer. The app looks in
@@ -186,6 +187,7 @@ Agent CLIs: `npm install -g` of the same packages as Windows; Antigravity has it
 | GitHub | token via `git credential fill` and, if available, `gh auth token`; no disk persistence |
 | Agents | resolved via `which`/user directories; no `cmd.exe` |
 | Documents/workspace | `workspace::read_dir` normalizes `/` and `\`; `read_text` rejects links outside project |
+| Whisper (Vulkan) | with a GPU (`lspci`) and a Vulkan driver manifest (`icd.d/*.json`, not llvmpipe), downloads `whisper-bin-vulkan-linux-x64.zip` from the `whisper-engines-*` release of this repository into `bin-vulkan-linux/`; Vulkan goes first, CPU is the fallback (`engine_order`, tests in `whisper.rs`) |
 | Whisper (CPU) | downloads `whisper-bin-ubuntu-x64.tar.gz` (or arm64), `chmod 0o755`, `LD_LIBRARY_PATH` with engine directory |
 | Usage/quotas | Antigravity reads Secret Service (`service=gemini`, `username=antigravity`) and, without it, `~/.gemini/oauth_creds.json` and `~/.gemini/antigravity-cli/antigravity-oauth-token`; Codex reads `~/.codex/sessions` |
 | Interface | embedded fonts; `xdg-open` for folders; `open` (crate) for URLs |
@@ -203,8 +205,10 @@ test was `read_dir` (fixed here); the rest ran green on Ubuntu through `run 46`.
    Workstation (GNOME/Wayland) and repeating the manual script at the end of this document.
 3. **Packaging**: no `.deb`, `.rpm`, Flatpak or AppImage. The app runs from the compiled folder; a
    release build adds it to the app menu (section 2.9).
-4. **Dictation with GPU**: the app does not download CUDA/Vulkan engines for Linux (only CPU). Users with a GPU need to compile
-   whisper.cpp and keep `whisper-cli` in `PATH`; detection uses `lspci`/`nvidia-smi`.
+4. **Dictation with GPU**: Vulkan is downloaded for x86_64 (t13; built by `.github/workflows/whisper-engines.yml`, see
+   [learnings/linux-vulkan-engine-build.md](learnings/linux-vulkan-engine-build.md)). There is still no CUDA engine for Linux
+   (NVIDIA cards use Vulkan too) and no Vulkan one for aarch64: those need a self-compiled `whisper-cli` in `PATH`, which counts
+   as the CPU engine. Detection uses `lspci`/`nvidia-smi`.
 5. **File dialog without portal**: in minimal environments (i3, container, SSH) without `xdg-desktop-portal`, the dialog does
    not open. There is no UI warning; consider adding a message.
 6. **Texts referencing “Git Credential Manager”**: Git/GitHub error messages were written on Windows and mention GCM and

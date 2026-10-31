@@ -68,6 +68,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "{used}% of the agent's quota used (no quota group known for this model)",
         "{used}% da cota do agente usada (grupo de cota deste modelo desconhecido)",
     ),
+    ("{used}% of the agent's quota used", "{used}% da cota do agente usada"),
     ("{used}% of the quota used", "{used}% da cota usada"),
     ("Recommended for this size", "Recomendado para este tamanho"),
     ("Size of the work", "Tamanho do trabalho"),

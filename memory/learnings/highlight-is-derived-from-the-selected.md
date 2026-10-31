@@ -6,7 +6,7 @@ touches: [crates/app/src/split.rs, crates/app/src/deck/**, crates/app/src/ui/pan
 The **Highlight** mode (`Organization::Highlight`) has no state of its own other than ratio (`Config::highlight_ratio`, global,
 not per-project): `Deck::plan_panes` places the **active tab's** group first (`split::highlight_order`), and `assign` +
 `highlight_layout` handle the rest. Other groups remain in `group_order`, which does not change. Therefore, clicking a
-small pane, activating a tab via the sidebar or shortcut, and the "Bring to highlight" button are all the same `Deck::activate`;
+small pane or activating a tab via the sidebar or shortcut are all the same `Deck::activate`;
 and the handle for swapping panes does not exist in Highlight (small pane ordering follows `group_order`; highlight is not a fixed slot).
 
 **Why:** storing "the highlight" separately from the active tab introduces two conflicting states (activating a tab via shortcut,
