@@ -848,7 +848,7 @@ fn spawn_spec_with(core: &Core, project: &str, ident: &Ident, chat: bool) -> Res
             Err(e) => log::warn!("could not write the Antigravity instructions: {e}"),
         }
     }
-    let effort = core.task_of_instance(project, &id).and_then(|t| t.effort);
+    let effort = core.instance_effort(project, ident);
     if kind == "opencode" {
         // The TUI has no --model or --system: its own server + model and instructions in the configuration
         // (see `models::opencode_tui`).

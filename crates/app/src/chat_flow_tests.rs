@@ -103,6 +103,42 @@ fn a_terminal_only_command_is_not_sent() {
 }
 
 #[test]
+fn picking_a_model_and_an_effort_restarts_the_process_on_the_same_conversation() {
+    let mut env = env_with_chat_agent();
+    let id = env.deck.tabs[0].ident.id();
+    let session = env.core.tab_session(&env.project(), &id).expect("the conversation id");
+    let before = env.deck.tabs[0].spawned_at;
+    // The CLI saved the conversation once a turn happened: the restart resumes it.
+    let dir = env.ws.parent().expect("root").join("home").join(".claude").join("projects").join("-ws");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(dir.join(format!("{session}.jsonl")), json!({ "type": "user", "message": { "content": "hi" } }).to_string()).expect("file");
+
+    env.deck.chat_set_model(0, Some("opus"));
+    env.deck.chat_set_effort(0, Some(holt_core::models::Effort::High));
+    env.pump("the process to be running again", |d| d.tabs[0].alive && d.tabs[0].chat.as_ref().is_some_and(|c| c.proc.is_some()));
+    let tab = &env.deck.tabs[0];
+    assert!(tab.spawned_at > before, "a new process was started");
+    let args = &tab.spec.as_ref().expect("spec").args;
+    let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    assert_eq!(after("--model").as_deref(), Some("opus"), "{args:?}");
+    assert_eq!(after("--effort").as_deref(), Some("high"), "{args:?}");
+    assert_eq!(after("--resume").as_deref(), Some(session.as_str()), "{args:?}");
+    assert_eq!(tab.model.as_deref(), Some("opus"));
+    assert_eq!(env.core.tab_session(&env.project(), &id).as_deref(), Some(session.as_str()));
+    // The conversation says what changed and goes on; the choice is saved for the tab.
+    assert!(items(&env).iter().any(|i| matches!(i, Item::Notice { error: false, .. })), "{:?}", items(&env));
+    let cfg = env.core.config();
+    let project = cfg.project(&env.project()).expect("project");
+    assert_eq!(project.tab_models.get(&id).map(String::as_str), Some("opus"));
+    assert_eq!(project.tab_efforts.get(&id).map(String::as_str), Some("high"));
+    // An invalid name is refused with a notice, nothing is restarted or saved.
+    let spawned = env.deck.tabs[0].spawned_at;
+    env.deck.chat_set_model(0, Some("two words"));
+    assert_eq!(env.deck.tabs[0].spawned_at, spawned);
+    assert!(items(&env).iter().any(|i| matches!(i, Item::Notice { error: true, .. })));
+}
+
+#[test]
 fn the_tab_goes_to_the_terminal_and_back_on_the_same_conversation() {
     let mut env = env_with_chat_agent();
     let id = env.deck.tabs[0].ident.id();

@@ -446,6 +446,11 @@ With Claude Code installed and signed in (Linux or Windows; the Windows launch t
 - [ ] Open a task for Claude from the tasks desk: its tab is a chat and its first message is the task prompt.
 - [ ] A permission card left unanswered keeps the tab marked as waiting (ring in the sidebar, chime) when another tab is in view.
 
+- [ ] **View switch** (t11): the pane header of every Claude, Antigravity and Codex tab has two small icons (a chat bubble and a terminal prompt) in a dark track; the active one is filled in the tab's colour. Tooltips say "Chat view" / "Terminal view" (and the Portuguese ones with the language switched). Clicking the other one switches the view and keeps the conversation.
+- [ ] **Model and effort pickers** (t11): the composer row shows the model as a button ("opus ▾") and the effort next to it ("high ▾"). Opening the model button lists Default and the models of the CLI (Claude: opus, sonnet, haiku, fable; Antigravity: its list, one entry per model with the effort as the separate picker; Codex: no list, so the model stays plain text). Pick another one: a notice says the next answer uses it and the conversation continues (ask "what did I say before?" to check). Both buttons are dimmed with a tooltip while an answer is running.
+- [ ] Effort: Claude and Codex offer Default/low/medium/high; Antigravity offers low/medium/high only once its model has effort variants (otherwise the button is hidden or dimmed with the reason). Check the process with `ps` (`--model`, `--effort`; Codex `-c model_reasoning_effort=…`) and, for Antigravity, that the model name suffix changed.
+- [ ] Close and reopen Holt: the tab comes back with the same model and effort (the buttons show them and the CLI is launched with them). Switch the tab to the Terminal view: the CLI is launched with the same model and effort.
+
 ## Final checklist
 
 - [ ] Take a screenshot of main screen (with right panel) to replace `docs/screenshots/main.png`.

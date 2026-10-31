@@ -2029,7 +2029,7 @@ fn dropdown_button(
 
 /// Quiet mark on the right of a form menu row.
 #[derive(Clone, Copy)]
-enum Detail {
+pub(super) enum Detail {
     /// "free": a model with no per-token cost.
     Free,
     /// "N models": how many the provider has.
@@ -2040,19 +2040,18 @@ enum Detail {
 
 /// Items of a form or filter menu.
 #[derive(Clone)]
-struct MenuItem {
-    label: String,
-    dot: Option<Color32>,
-    selected: bool,
-    enabled: bool,
+pub(super) struct MenuItem {
+    pub label: String,
+    pub dot: Option<Color32>,
+    pub selected: bool,
+    pub enabled: bool,
     /// Quiet text on the right: "12 models" on the provider step, "free" on the no-cost models.
-    detail: Option<Detail>,
+    pub detail: Option<Detail>,
     /// Opens another step: draws the "›" arrow on the right.
-    submenu: bool,
+    pub submenu: bool,
 }
 
-/// Menu under `anchor` (opaque `popup` background, `glass_border`, corners 8, 26 px items with `hover`).
-/// Returns the chosen index; closes on a click outside or Esc.
+/// [`dropdown_popup`] under `anchor`, closing through the tasks' own acts.
 fn dropdown_menu(
     ctx: &egui::Context,
     id: &str,
@@ -2061,10 +2060,29 @@ fn dropdown_menu(
     acts: &mut Vec<Act>,
     is_history_menu: bool,
 ) -> Option<usize> {
+    let (chosen, closed) = dropdown_popup(ctx, id, anchor, items, 0.0, false);
+    if closed {
+        acts.push(if is_history_menu { Act::CloseHistoryMenu } else { Act::CloseMenu });
+    }
+    chosen
+}
+
+/// Menu next to `anchor` (opaque `popup` background, `glass_border`, corners 8, 26 px items with `hover`), at least
+/// `min_w` wide, under the anchor or above it. Returns the chosen index and whether it asks to close (a click outside
+/// or Esc, with nothing chosen).
+pub(super) fn dropdown_popup(
+    ctx: &egui::Context,
+    id: &str,
+    anchor: Rect,
+    items: &[MenuItem],
+    min_w: f32,
+    above: bool,
+) -> (Option<usize>, bool) {
     let row = 26.0;
     let h = (items.len() as f32 * row).min(260.0) + 8.0;
-    let w = anchor.width();
-    let pos = super::menus::keep_on_screen(ctx, Pos2::new(anchor.min.x, anchor.max.y + 2.0), Vec2::new(w, h));
+    let w = anchor.width().max(min_w);
+    let y = if above { anchor.min.y - 2.0 - h } else { anchor.max.y + 2.0 };
+    let pos = super::menus::keep_on_screen(ctx, Pos2::new(anchor.min.x, y), Vec2::new(w, h));
     let menu_rect = Rect::from_min_size(pos, Vec2::new(w, h));
     let mut chosen = None;
     let p = theme::pal();
@@ -2129,10 +2147,8 @@ fn dropdown_menu(
             }
         });
     });
-    if chosen.is_none() && (ctx.input(|i| i.key_pressed(Key::Escape)) || super::menus::closes_on_outside(ctx, menu_rect, anchor)) {
-        acts.push(if is_history_menu { Act::CloseHistoryMenu } else { Act::CloseMenu });
-    }
-    chosen
+    let closed = chosen.is_none() && (ctx.input(|i| i.key_pressed(Key::Escape)) || super::menus::closes_on_outside(ctx, menu_rect, anchor));
+    (chosen, closed)
 }
 
 fn form_view(deck: &mut Deck, ui: &mut Ui, rect: Rect, acts: &mut Vec<Act>) {

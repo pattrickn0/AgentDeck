@@ -2,6 +2,7 @@
 //! The data model and the parsing are in `holt_core::chat`; painting is in [`crate::ui::chat`].
 
 use holt_core::chat::{self, ChatEvent, ChatMsg, ChatProcess, Item, Transcript};
+use holt_core::models;
 
 use super::*;
 
@@ -183,6 +184,45 @@ impl Deck {
         chat.composer.push_str(text);
         chat.focus_composer = true;
         true
+    }
+
+    /// The user picked another model for the chat tab (`None` = the default): saved for the tab, then applied to the
+    /// next turn.
+    pub(crate) fn chat_set_model(&mut self, idx: usize, model: Option<&str>) {
+        let (project, ident) = (self.tabs[idx].project.clone(), self.tabs[idx].ident.clone());
+        match self.core.set_tab_model(&project, &ident, model) {
+            Ok(()) => self.chat_apply_choice(idx, t!("Model: {model}", model = model.unwrap_or(t!("Default")))),
+            Err(e) => self.chat_choice_refused(idx, e),
+        }
+    }
+
+    /// The user picked another reasoning effort for the chat tab (`None` = the default).
+    pub(crate) fn chat_set_effort(&mut self, idx: usize, effort: Option<models::Effort>) {
+        let (project, ident) = (self.tabs[idx].project.clone(), self.tabs[idx].ident.clone());
+        match self.core.set_tab_effort(&project, &ident, effort) {
+            Ok(()) => self.chat_apply_choice(idx, t!("Effort: {level}", level = effort.map_or(t!("Default"), models::Effort::label))),
+            Err(e) => self.chat_choice_refused(idx, e),
+        }
+    }
+
+    fn chat_choice_refused(&mut self, idx: usize, why: String) {
+        if let Some(chat) = self.tabs[idx].chat.as_mut() {
+            chat.transcript.push_notice(why, true);
+        }
+    }
+
+    /// A new model or effort is saved: a running process is replaced by one that resumes the same conversation with it
+    /// (`start_chat` asks the core for the launch, which resumes the tab's session); one that ended only needs the Restart
+    /// button, which does the same. A notice in the conversation says what changed.
+    fn chat_apply_choice(&mut self, idx: usize, what: String) {
+        let Some(chat) = self.tabs[idx].chat.as_mut() else { return };
+        // Whatever the old process reported about its model is stale now; the next `init` brings the new one.
+        chat.transcript.model.clear();
+        let running = chat.proc.take().is_some();
+        chat.transcript.push_notice(t!("{what}. The next answer uses it; the conversation continues.", what), false);
+        if running {
+            self.start_chat(idx);
+        }
     }
 
     /// Delivers a message from another agent (or from the interface) to a chat tab: it becomes a message of the

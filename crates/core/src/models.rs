@@ -170,11 +170,11 @@ fn agy_effort_split(model: &str) -> Option<(&str, Effort)> {
 }
 
 /// Why the effort does not apply to `kind` with `model` (the interface hint and the request error); `None` = it applies.
-/// Claude: `--effort`. Antigravity: it swaps the model name suffix, so it needs a model with a suffix.
+/// Claude: `--effort`. Codex: `-c model_reasoning_effort`. Antigravity: it swaps the model name suffix, so it needs a model with a suffix.
 /// OpenCode: the variant (`model#variant`) only exists in `run -m`; the interactive tab does not get it.
 pub fn effort_unavailable(kind: &str, model: Option<&str>) -> Option<&'static str> {
     match kind {
-        "claude" => None,
+        "claude" | "codex" => None,
         "antigravity" => match model {
             None => Some(t!("Pick a model: in Antigravity the effort is part of its name")),
             Some(m) if agy_effort_split(m).is_none() => Some(t!("This Antigravity model has no effort variants")),
@@ -185,11 +185,12 @@ pub fn effort_unavailable(kind: &str, model: Option<&str>) -> Option<&'static st
     }
 }
 
-/// Arguments that pass the effort to the CLI on the command line (only Claude has the option; Antigravity uses
+/// Arguments that pass the effort to the CLI on the command line (Claude and Codex have the option; Antigravity uses
 /// [`effort_model`]).
 pub fn effort_args(kind: &str, effort: Effort) -> Vec<String> {
     match kind {
         "claude" => vec!["--effort".into(), effort.as_str().into()],
+        "codex" => vec!["-c".into(), format!("model_reasoning_effort={}", effort.as_str())],
         _ => Vec::new(),
     }
 }
@@ -201,6 +202,37 @@ pub fn effort_model(kind: &str, model: &str, effort: Effort) -> String {
         ("antigravity", Some((base, _))) => format!("{base}-{}", effort.as_str()),
         _ => model.to_owned(),
     }
+}
+
+/// The effort an Antigravity model name carries (`gemini-4-argon-high` → high); `None` for any other agent or model.
+pub fn model_effort(kind: &str, model: &str) -> Option<Effort> {
+    if kind != "antigravity" {
+        return None;
+    }
+    agy_effort_split(model).map(|(_, e)| e)
+}
+
+/// The Antigravity list without the effort variants: `…-argon-low|medium|high` are one entry (`…-argon`), in the order
+/// they first appear. A model without a suffix stays as it is.
+pub fn agy_bases(models: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for m in models {
+        let base = agy_effort_split(m).map_or(m.as_str(), |(base, _)| base);
+        if !out.iter().any(|b| b == base) {
+            out.push(base.to_owned());
+        }
+    }
+    out
+}
+
+/// The entry of `models` to run `base` (from [`agy_bases`]) at `effort`: the same effort when the model has it, else its
+/// first variant; a model without variants is `base` itself.
+pub fn agy_variant(models: &[String], base: &str, effort: Option<Effort>) -> String {
+    let variants: Vec<&String> = models.iter().filter(|m| agy_effort_split(m).is_some_and(|(b, _)| b == base)).collect();
+    effort
+        .and_then(|e| variants.iter().find(|m| agy_effort_split(m).is_some_and(|(_, v)| v == e)))
+        .or(variants.first())
+        .map_or_else(|| base.to_owned(), |m| (*m).clone())
 }
 
 /// Short form for labels: without the provider (`opencode/glm-5.3` → `glm-5.3`).
@@ -445,11 +477,80 @@ impl Core {
 
     /// Forgets the instance's saved model (it closed or never got to open).
     pub(crate) fn forget_model(&self, project: &str, id: &str) {
-        if self.inner.config.read().project(project).is_some_and(|p| p.tab_models.contains_key(id)) {
+        if self.inner.config.read().project(project).is_some_and(|p| p.tab_models.contains_key(id) || p.tab_efforts.contains_key(id)) {
             self.update_project(project, |p| {
                 p.tab_models.remove(id);
+                p.tab_efforts.remove(id);
             });
         }
+    }
+
+    /// The user picked another model for the tab (the chat composer): saved, so the next launch of the tab (chat or
+    /// terminal, also after reopening the app) uses it. `None` = the default. Antigravity keeps the effort it had
+    /// (it is a suffix of the name); an effort the new model cannot carry is dropped. Error = invalid name or an agent
+    /// that does not choose a model.
+    pub fn set_tab_model(&self, project: &str, ident: &Ident, model: Option<&str>) -> Result<(), String> {
+        if !accepts_model(&ident.kind) {
+            return Err(t!("the {kind} agent does not accept choosing a model", kind = &ident.kind));
+        }
+        if let Some(m) = model.filter(|m| !valid_model(m)) {
+            return Err(t!("invalid model: \"{model}\"", model = m));
+        }
+        let id = ident.id();
+        let model = model.map(str::to_owned);
+        self.update_project(project, |p| {
+            match &model {
+                Some(m) => p.tab_models.insert(id.clone(), m.clone()),
+                None => p.tab_models.remove(&id),
+            };
+            // A model that is no longer the one the effort was chosen for: the kind decides whether it still applies.
+            if effort_unavailable(&ident.kind, model.as_deref()).is_some() {
+                p.tab_efforts.remove(&id);
+            }
+        });
+        Ok(())
+    }
+
+    /// The effort the tab launches with: the user's choice for the tab, else the task's, else none (the CLI default).
+    /// Antigravity's is read from the model name.
+    pub fn instance_effort(&self, project: &str, ident: &Ident) -> Option<Effort> {
+        let model = self.instance_model(project, ident);
+        if let Some(e) = model.as_deref().and_then(|m| model_effort(&ident.kind, m)) {
+            return Some(e);
+        }
+        if effort_unavailable(&ident.kind, model.as_deref()).is_some() {
+            return None;
+        }
+        let id = ident.id();
+        let chosen = self.inner.config.read().project(project).and_then(|p| p.tab_efforts.get(&id).and_then(|e| Effort::parse(e)));
+        chosen.or_else(|| self.task_of_instance(project, &id).and_then(|t| t.effort))
+    }
+
+    /// The user picked another effort for the tab. `None` = the default (Antigravity has none: its model name always
+    /// carries one, so the model is left alone). Error = the agent or the model has no effort.
+    pub fn set_tab_effort(&self, project: &str, ident: &Ident, effort: Option<Effort>) -> Result<(), String> {
+        let model = self.instance_model(project, ident);
+        if let Some(why) = effort_unavailable(&ident.kind, model.as_deref()) {
+            return Err(why.to_owned());
+        }
+        let id = ident.id();
+        if ident.kind == "antigravity" {
+            let (Some(model), Some(e)) = (model, effort) else { return Ok(()) };
+            let swapped = effort_model(&ident.kind, &model, e);
+            self.update_project(project, |p| {
+                p.tab_models.insert(id, swapped);
+            });
+            return Ok(());
+        }
+        self.update_project(project, |p| match effort {
+            Some(e) => {
+                p.tab_efforts.insert(id, e.as_str().to_owned());
+            }
+            None => {
+                p.tab_efforts.remove(&id);
+            }
+        });
+        Ok(())
     }
 
     /// Model of each instance open in the project that has one (id → model), for lists and `--team`.
@@ -683,8 +784,10 @@ mod tests {
         assert_eq!(effort_model("antigravity", "claude-sonnet-5-5-medium", Effort::Low), "claude-sonnet-5-5-low");
         assert_eq!(effort_model("antigravity", "gemini-4-flash", Effort::High), "gemini-4-flash");
         assert_eq!(effort_model("claude", "sonnet", Effort::High), "sonnet");
+        // Codex: a config override.
+        assert_eq!(effort_args("codex", Effort::Medium), ["-c", "model_reasoning_effort=medium"]);
         // The others get nothing on the command line.
-        for k in ["antigravity", "opencode", "codex", "shell"] {
+        for k in ["antigravity", "opencode", "shell"] {
             assert!(effort_args(k, Effort::High).is_empty(), "{k}");
         }
     }
@@ -697,9 +800,22 @@ mod tests {
         assert!(effort_unavailable("antigravity", None).is_some_and(|d| d.contains("model")));
         assert!(effort_unavailable("antigravity", Some("gemini-4-flash")).is_some());
         assert!(effort_unavailable("opencode", Some("opencode/big-pickle")).is_some_and(|d| d.contains("headless")));
-        for k in ["codex", "shell"] {
-            assert!(effort_unavailable(k, None).is_some(), "{k}");
-        }
+        assert_eq!(effort_unavailable("codex", None), None);
+        assert!(effort_unavailable("shell", None).is_some());
+    }
+
+    #[test]
+    fn antigravity_variants_collapse_into_one_entry_and_come_back_at_the_chosen_effort() {
+        let list = ["gemini-4-argon-low", "gemini-4-argon-high", "gemini-4-flash", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-high"]
+            .map(str::to_owned)
+            .to_vec();
+        assert_eq!(agy_bases(&list), ["gemini-4-argon", "gemini-4-flash", "claude-sonnet-5-5"]);
+        assert_eq!(agy_variant(&list, "gemini-4-argon", Some(Effort::High)), "gemini-4-argon-high");
+        assert_eq!(agy_variant(&list, "gemini-4-argon", Some(Effort::Medium)), "gemini-4-argon-low", "no such variant: the first one");
+        assert_eq!(agy_variant(&list, "claude-sonnet-5-5", None), "claude-sonnet-5-5-medium");
+        assert_eq!(agy_variant(&list, "gemini-4-flash", Some(Effort::High)), "gemini-4-flash");
+        assert_eq!(model_effort("antigravity", "gemini-4-argon-high"), Some(Effort::High));
+        assert_eq!(model_effort("claude", "gemini-4-argon-high"), None);
     }
 
     #[test]

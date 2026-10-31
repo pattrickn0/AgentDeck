@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use holt_core::chat::{self, ChatEvent, ChatMsg, Item};
+use holt_core::models::Effort;
 use holt_core::Ident;
 use serde_json::{json, Value};
 
@@ -174,6 +175,111 @@ fn the_antigravity_chat_launch_uses_the_structured_mode_and_the_tabs_own_convers
     assert!(matches!(&history.items[1], Item::Assistant { text, .. } if text == "Hello from Antigravity!"));
     assert_eq!(history.session.as_deref(), Some(session));
 
+    env.core.shutdown();
+}
+
+/// The arguments of `spec` as `(flag, value)` pairs for a flag that can repeat (`-c k=v`).
+fn all_after(args: &[String], flag: &str) -> Vec<String> {
+    args.windows(2).filter(|w| w[0] == flag).map(|w| w[1].clone()).collect()
+}
+
+#[test]
+fn a_model_and_effort_picked_in_the_chat_restart_the_claude_launch_on_the_same_conversation() {
+    let env = start_with(false, false);
+    let ident = Ident::parse("claude@dev").expect("ident");
+    let id = ident.id();
+    let first = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    let session = arg_after(&first.args, "--session-id").expect("a new conversation gets an id");
+    assert_eq!(arg_after(&first.args, "--model"), None);
+    assert_eq!(arg_after(&first.args, "--effort"), None);
+    // The CLI saved the conversation (a turn happened), so the next launch resumes it.
+    let dir = env.root.join("home").join(".claude").join("projects").join("-ws");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(dir.join(format!("{session}.jsonl")), json!({ "type": "user", "message": { "content": "hi" } }).to_string())
+        .expect("transcript");
+
+    env.core.set_tab_model(&env.project, &ident, Some("opus")).expect("model");
+    env.core.set_tab_effort(&env.project, &ident, Some(Effort::High)).expect("effort");
+    let again = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    assert_eq!(arg_after(&again.args, "--resume").as_deref(), Some(session.as_str()), "{:?}", again.args);
+    assert_eq!(arg_after(&again.args, "--model").as_deref(), Some("opus"));
+    assert_eq!(arg_after(&again.args, "--effort").as_deref(), Some("high"));
+    assert_eq!(again.model.as_deref(), Some("opus"));
+    assert_eq!(env.core.tab_session(&env.project, &id).as_deref(), Some(session.as_str()), "the conversation is kept");
+
+    // The Terminal view of the tab uses the same choice and the same conversation.
+    let term = env.core.spawn_spec_for(&env.project, &ident).expect("spec");
+    assert_eq!(arg_after(&term.args, "--model").as_deref(), Some("opus"));
+    assert_eq!(arg_after(&term.args, "--effort").as_deref(), Some("high"));
+    assert_eq!(arg_after(&term.args, "--resume").as_deref(), Some(session.as_str()));
+
+    // It is in the config (survives a restart of Holt) and goes away with the tab.
+    let saved = env.core.config();
+    let cfg = saved.project(&env.project).expect("project");
+    assert_eq!(cfg.tab_models.get(&id).map(String::as_str), Some("opus"));
+    assert_eq!(cfg.tab_efforts.get(&id).map(String::as_str), Some("high"));
+    assert_eq!(env.core.instance_effort(&env.project, &ident), Some(Effort::High));
+
+    // "Default" again drops the arguments.
+    env.core.set_tab_model(&env.project, &ident, None).expect("model");
+    env.core.set_tab_effort(&env.project, &ident, None).expect("effort");
+    let plain = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    assert_eq!((arg_after(&plain.args, "--model"), arg_after(&plain.args, "--effort")), (None, None));
+    assert_eq!(arg_after(&plain.args, "--resume").as_deref(), Some(session.as_str()));
+    assert!(env.core.set_tab_model(&env.project, &ident, Some("bad name")).is_err());
+    env.core.shutdown();
+}
+
+#[test]
+fn the_antigravity_effort_is_a_suffix_of_the_model_and_the_conversation_is_resumed() {
+    let env = start_with(false, false);
+    install_fake_agent(&env.root, "agy");
+    let ident = Ident::parse("antigravity@dev").expect("ident");
+    let id = ident.id();
+    let session = "3ee16dad-e26c-4460-8dd5-99d773098a00";
+    assert!(env.core.set_tab_session(&env.project, &id, session));
+    let conv_dir = env.root.join("home").join(".gemini").join("antigravity-cli").join("conversations");
+    std::fs::create_dir_all(&conv_dir).expect("mkdir");
+    std::fs::write(conv_dir.join(format!("{session}.db")), "").expect("db");
+
+    env.core.set_tab_model(&env.project, &ident, Some("gemini-4-argon-low")).expect("model");
+    assert_eq!(env.core.instance_effort(&env.project, &ident), Some(Effort::Low));
+    env.core.set_tab_effort(&env.project, &ident, Some(Effort::High)).expect("effort");
+    let spec = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    assert_eq!(arg_after(&spec.args, "--model").as_deref(), Some("gemini-4-argon-high"), "{:?}", spec.args);
+    assert_eq!(arg_after(&spec.args, "--conversation").as_deref(), Some(session));
+    assert!(!spec.args.iter().any(|a| a == "--effort"), "{:?}", spec.args);
+
+    // Another model: the caller picks the variant with the effort it wants.
+    env.core.set_tab_model(&env.project, &ident, Some("claude-sonnet-5-5-medium")).expect("model");
+    assert_eq!(env.core.instance_effort(&env.project, &ident), Some(Effort::Medium));
+    // A model without effort variants has no effort to set.
+    env.core.set_tab_model(&env.project, &ident, Some("gemini-4-flash")).expect("model");
+    assert!(env.core.set_tab_effort(&env.project, &ident, Some(Effort::Low)).is_err());
+    env.core.shutdown();
+}
+
+#[test]
+fn the_codex_effort_goes_as_a_config_override_and_the_session_is_resumed_by_the_protocol() {
+    let env = start_with(false, false);
+    install_fake_agent(&env.root, "codex");
+    let ident = Ident::parse("codex@dev").expect("ident");
+    let id = ident.id();
+    let session = "01a18f37-5976-7bc1-9616-3ab2e181dab3";
+    let dir = env.root.join("home").join(".codex").join("sessions").join("2026").join("10").join("30");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(dir.join(format!("rollout-2026-10-30T12-00-00-{session}.jsonl")), "").expect("rollout");
+    assert!(env.core.set_tab_session(&env.project, &id, session));
+
+    env.core.set_tab_model(&env.project, &ident, Some("gpt-5.5")).expect("model");
+    env.core.set_tab_effort(&env.project, &ident, Some(Effort::Medium)).expect("effort");
+    let spec = env.core.spawn_spec_chat(&env.project, &ident).expect("spec");
+    let overrides = all_after(&spec.args, "-c");
+    assert!(overrides.contains(&"model=gpt-5.5".to_owned()), "{overrides:?}");
+    assert!(overrides.contains(&"model_reasoning_effort=medium".to_owned()), "{overrides:?}");
+    assert_eq!(spec.args.first().map(String::as_str), Some("app-server"));
+    assert!(spec.resumed);
+    assert_eq!(spec.session.as_deref(), Some(session), "the protocol resumes it with thread/resume");
     env.core.shutdown();
 }
 

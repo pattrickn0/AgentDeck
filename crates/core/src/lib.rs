@@ -488,6 +488,7 @@ impl Core {
         self.update_project(project, |p| {
             touched = team::remove(&mut p.tab_parents, id);
             p.tab_models.remove(id);
+            p.tab_efforts.remove(id);
             // Closed for good (the tab's ×, a finished task): reopening it later starts a new conversation.
             p.tab_sessions.remove(id);
             p.tab_views.remove(id);
@@ -564,6 +565,7 @@ impl Core {
         self.update_project(project, |p| {
             team::rename(&mut p.tab_parents, old_id, &new_id);
             models::rename(&mut p.tab_models, old_id, &new_id);
+            models::rename(&mut p.tab_efforts, old_id, &new_id);
             models::rename(&mut p.tab_sessions, old_id, &new_id);
             models::rename(&mut p.tab_views, old_id, &new_id);
         });

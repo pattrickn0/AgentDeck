@@ -3,14 +3,14 @@
 
 use std::time::Duration;
 
-use egui::{Align2, CursorIcon, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use super::tabs::{self, StripClick};
 use super::{clickable, empty_state, paint_splitter, text_in, tip};
 use crate::audio;
 use crate::deck::{Deck, PanePlan};
 use crate::dictation::{self, ButtonVisual, MicTarget};
-use crate::icons::Icon;
+use crate::icons::{Icon, IconCache};
 use crate::split;
 use crate::terminal::view::{self, Metrics};
 use crate::theme;
@@ -21,7 +21,7 @@ use holt_core::Organization;
 pub const HEAD_H: f32 = 30.0;
 const GRIP_W: f32 = 18.0;
 const ICON_BTN: f32 = 20.0;
-const VIEW_TOGGLE_W: f32 = 122.0;
+const VIEW_TOGGLE_W: f32 = 48.0;
 
 /// Terminal area inside a window (below the header).
 pub fn pane_body(rect: Rect) -> Rect {
@@ -89,6 +89,47 @@ pub fn draw(deck: &mut Deck, ui: &mut Ui, area: Rect) {
             Click::View(i, chat) => deck.set_tab_view(i, chat),
         }
     }
+}
+
+/// The Chat | Terminal switch of a pane header: one icon per view in a `recess` track, the active one in the tab agent's
+/// colour. Returns the view the user clicked.
+fn view_switch(
+    ui: &Ui,
+    icons: &mut IconCache,
+    rect: Rect,
+    id: Id,
+    views: &[(Icon, &str)],
+    selected: usize,
+    tint: Color32,
+) -> Option<usize> {
+    let p = theme::pal();
+    let painter = ui.painter();
+    painter.rect_filled(rect, 6.0, p.recess);
+    let inner = rect.shrink(2.0);
+    let w = inner.width() / views.len().max(1) as f32;
+    let mut clicked = None;
+    for (i, (icon, tooltip)) in views.iter().enumerate() {
+        let seg = Rect::from_min_size(Pos2::new(inner.min.x + w * i as f32, inner.min.y), Vec2::new(w, inner.height()));
+        let r = clickable(ui, seg, id.with(i));
+        let on = i == selected;
+        if on {
+            painter.rect_filled(seg, 4.0, tint);
+        } else if r.hovered() {
+            painter.rect_filled(seg, 4.0, p.hover);
+        }
+        let fg = if on {
+            p.on_accent
+        } else if r.hovered() {
+            p.text
+        } else {
+            p.text_2
+        };
+        icons.paint(painter, *icon, seg.center(), 13.0, fg, 0.0);
+        if tip(r, *tooltip).clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 /// Focus on the terminal of a tab (click on the terminal, on the header or on a tab).
@@ -192,7 +233,8 @@ fn draw_pane(deck: &mut Deck, ui: &mut Ui, plan: &PanePlan, slot: usize, focused
     if let Some(r) = toggle {
         let tint = deck.tabs[plan.shown].color;
         let id = Id::new(("pane-view", &group));
-        if let Some(i) = super::segmented_tinted(ui, r, id, &[t!("Chat"), t!("Terminal")], usize::from(!in_chat), Some(tint)) {
+        let views = [(Icon::ChatBubble, t!("Chat view")), (Icon::Terminal, t!("Terminal view"))];
+        if let Some(i) = view_switch(ui, &mut deck.icons, r, id, &views, usize::from(!in_chat), tint) {
             clicks.push(Click::View(plan.shown, i == 0));
         }
     }
