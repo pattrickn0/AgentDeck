@@ -209,6 +209,8 @@ fn draw(ui: &mut Ui, body: Rect, uid: u64, chat: &mut ChatTab, icons: &mut IconC
         heights.resize(transcript.items.len(), GUESS_H);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(view).layout(egui::Layout::top_down(Align::Min)));
         child.set_clip_rect(view);
+        // The conversation is long and scrolled a lot: its bar is 25% wider than the app's 5 px.
+        child.style_mut().spacing.scroll.bar_width *= 1.25;
         let waiting = transcript.waiting_for_permission();
         egui::ScrollArea::vertical().id_salt(("chat-scroll", uid)).auto_shrink([false, false]).stick_to_bottom(true).show_viewport(
             &mut child,
